@@ -6598,7 +6598,13 @@
       "research.addKey": "0f8cf82dc1d52d52b86035db3cf428f727d3ed3e4899067d764c2cd89a032b35",
       "research.openKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
       "research.connecting": "07774cf0dc586ce14d51f5e24148a92fafe0143a6c852f83f94c65a280e1c8c5",
-      "research.switch": "2e90c4b9548b4abaf693f599a77331208e59f2de226e2943e43e6421cb9306a9"
+      "research.switch": "2e90c4b9548b4abaf693f599a77331208e59f2de226e2943e43e6421cb9306a9",
+      "automations.preview.finished": "679f7db4a8e624faa8fe51a5d93c03b4e6735120e86dd5e8562f58215c6ba95a",
+      "automations.preview.failed": "5ce27668cd127c867aa3f2d53d837bdc4c1ad12a8715b21bf80abc72b3b89111",
+      "automations.preview.needsYou": "40dbf04af1f8b0c265162193e3a8f41090e13a66dea44649dd5d1aca9430154b",
+      "automations.preview.stopped": "c950f55e893a783d05be5b275d472ce1c5fc4e92ee89b3987a0208a809bf200b",
+      "automations.preview.missed": "ef276c0daed4c191933dfc4e5cc7227c650c1e627b785024ecf029ee65aaddc7",
+      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -19457,7 +19463,13 @@
       "research.addKey": "0f8cf82dc1d52d52b86035db3cf428f727d3ed3e4899067d764c2cd89a032b35",
       "research.openKeys": "3bde85282febbce927de815dbea17b921ecdff743bf2460b9f892b692078dbe7",
       "research.connecting": "07774cf0dc586ce14d51f5e24148a92fafe0143a6c852f83f94c65a280e1c8c5",
-      "research.switch": "2e90c4b9548b4abaf693f599a77331208e59f2de226e2943e43e6421cb9306a9"
+      "research.switch": "2e90c4b9548b4abaf693f599a77331208e59f2de226e2943e43e6421cb9306a9",
+      "automations.preview.finished": "679f7db4a8e624faa8fe51a5d93c03b4e6735120e86dd5e8562f58215c6ba95a",
+      "automations.preview.failed": "5ce27668cd127c867aa3f2d53d837bdc4c1ad12a8715b21bf80abc72b3b89111",
+      "automations.preview.needsYou": "40dbf04af1f8b0c265162193e3a8f41090e13a66dea44649dd5d1aca9430154b",
+      "automations.preview.stopped": "c950f55e893a783d05be5b275d472ce1c5fc4e92ee89b3987a0208a809bf200b",
+      "automations.preview.missed": "ef276c0daed4c191933dfc4e5cc7227c650c1e627b785024ecf029ee65aaddc7",
+      "automations.preview.running": "f839f179c335c3cd3382fdee286e7024b856bed95f27d00df9cb46def1b9cc94"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

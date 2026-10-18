@@ -280,6 +280,8 @@ describe("routine editor", () => {
     }
     expect(html).toContain('aria-expanded="false"');
     for (const text of hidden) expect(html, text).not.toContain(text);
+    expect(html).toMatch(/>Save<\/button>/);
+    expect(html).not.toMatch(/routine<\/button>/i);
   });
 
   it("marks the routine's repeat choice", () => {
