@@ -90,6 +90,26 @@ type Receipts = { calls: Array<{ method: string; path: string }>; shots: Record<
     expect(await press("Show computers")).toBe(true);
     await expect.poll(async () => (await screens()).length, { timeout: 20_000 }).toBe(14);
 
+    // The map's composer: nothing goes out without a tag; each tagged bot gets one normal message in its own chat.
+    const api = fixtureApi(fixture.url);
+    const said = async (text: string) => Object.fromEntries(((await api("GET", "/api/bots?messages=20")).bots as Array<{ name: string; messages: Array<{ role: string; text?: string }> }>)
+      .map((bot) => [bot.name, bot.messages.filter((message) => message.role === "user" && message.text === text).length]));
+    const sendButton = () => evaluate("document.querySelector('button[aria-label=\"Send to tagged bots\"]')?.disabled");
+    await ui("type", "--name", "Message bots on the map", "--text", "status check");
+    expect(await sendButton()).toBe(true);
+    expect(await snapshot()).toContain("Tag a bot with @ to send");
+    await ui("press", "--keys", "Enter");
+    expect(Object.values(await said("status check")).every((count) => count === 0)).toBe(true);
+    await evaluate("(() => { const box = document.querySelector('textarea[aria-label=\"Message bots on the map\"]'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(box, ''); box.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
+    await ui("type", "--name", "Message bots on the map", "--text", "@Jonah and @Pepper please report in");
+    await expect.poll(sendButton).toBe(false);
+    expect(await snapshot()).toContain("Goes to 2 tagged bots");
+    await ui("press", "--keys", "Enter");
+    await expect.poll(async () => (await said("@Jonah and @Pepper please report in"))).toMatchObject({ Jonah: 1, Pepper: 1 });
+    const counts = await said("@Jonah and @Pepper please report in");
+    expect(Object.entries(counts).filter(([, count]) => count > 0).map(([name]) => name).sort()).toEqual(["Jonah", "Pepper"]);
+    await expect.poll(snapshot).toContain("Sent to");
+
     // Clicking a computer opens that bot's computer view beside the map.
     expect(await press("Open Theo's computer (Working)")).toBe(true);
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Theo's screen");

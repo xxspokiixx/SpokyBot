@@ -22,6 +22,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { t } from "@/lib/i18n";
 import { CanvasComputers } from "./CanvasComputers";
 import { useMapComputers, useShowComputers } from "@/lib/map-computers";
+import { MapComposer } from "./MapComposer";
 import { openBotSettings } from "./bot-panel/panel-link";
 import type { TeamComputer } from "../../shared/team-computer";
 
@@ -289,6 +290,9 @@ export function TeamMapPage() {
   const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
   const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
+  const stage = useRef<HTMLDivElement>(null);
+  const [taggedBotIds, setTaggedBotIds] = useState<string[]>([]);
+  const composerTeams = useMemo(() => sections.map((section) => ({ key: section.key, name: section.name, count: section.chiefs.length + section.members.length })), [sections]);
 
   const refresh = useCallback(async () => {
     try {
@@ -369,7 +373,8 @@ export function TeamMapPage() {
         <button aria-label={t("common.close")} className="rounded p-1 hover:bg-danger/10" onClick={() => { setError(null); setRefreshError(null); }}><X size={14} /></button>
       </div>}
       <div className="relative flex min-h-0 flex-1">
-      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove}
+      <div ref={stage} className="relative flex min-h-0 min-w-0 flex-1">
+      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove} taggedBotIds={taggedBotIds} bottomInset={bots.length ? 96 : 0}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
         computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}
@@ -382,6 +387,8 @@ export function TeamMapPage() {
         onEditTeam={(section, rename) => setTeamEditor({ section, rename })}
         onDeleteTeam={setDeletingTeam}
         isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />
+      {bots.length > 0 && <MapComposer stage={stage} bots={bots} teams={composerTeams} onTagged={setTaggedBotIds} />}
+      </div>
       {!remoteClient && <CanvasComputers open={computersOpen} createRequest={createComputerRequest} drop={computerDrop} sections={sections}
         onClose={() => setComputersOpen(false)} onDropHandled={clearComputerDrop} onChange={setComputers} />}
       </div>
