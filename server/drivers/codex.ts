@@ -97,6 +97,38 @@ export function codexUpdateCommand(cli: string, platform: NodeJS.Platform = proc
   return platform === "win32" ? `& ${command} update` : `${command} update`;
 }
 
+/**
+ * Codex drops root-level `-c` once the subcommand has its own (openai/codex#39012), and the driver
+ * always passes its own after `app-server`. So `-c key=value` / `--config key=value` typed into the
+ * CLI setting are pulled out here to go after the subcommand too. The rest stays as the launcher.
+ */
+export function codexCliOverrides(cli: string): { cli: string; overrides: string[] } {
+  const unchanged = { cli, overrides: [] };
+  const trimmed = cli.trim();
+  if (trimmed.includes(" ") && existsSync(trimmed)) return unchanged;
+  const [head, ...rest] = splitCliString(trimmed);
+  if (!head || rest.length === 0) return unchanged;
+  const kept = [head];
+  const overrides: string[] = [];
+  for (let index = 0; index < rest.length; index++) {
+    const token = rest[index]!;
+    const next = rest[index + 1];
+    if ((token === "-c" || token === "--config") && next?.includes("=")) {
+      overrides.push("-c", next);
+      index++;
+    } else if (token.startsWith("--config=") && token.slice("--config=".length).includes("=")) {
+      overrides.push("-c", token.slice("--config=".length));
+    } else {
+      kept.push(token);
+    }
+  }
+  if (overrides.length === 0) return unchanged;
+  // splitCliString has no escapes, so a word holding both quote kinds can't be written back.
+  const quoted = kept.map((token) => !/[\s"']/.test(token) ? token : !token.includes('"') ? `"${token}"` : !token.includes("'") ? `'${token}'` : null);
+  if (quoted.includes(null)) return unchanged;
+  return { cli: quoted.join(" "), overrides };
+}
+
 async function codexReleaseUpdate(version: string, cli: string): Promise<ProviderSnapshot["update"] | undefined> {
   const latest = await readLatestCodexRelease();
   if (!latest || !codexVersionBehind(version, latest)) return undefined;
@@ -836,7 +868,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const commandCwd = permissionLaunchCwd(turn.cwd ?? homedir());
         const releaseSlot = tryCodexLaunchSlot() ?? await waitForLaunchSlot(attempt);
         if (!releaseSlot) return;
-        const child = spawnHoldingSlot(releaseSlot, () => spawnCli(config.cli, appServerArgs, {
+        // The user's overrides go first, so the driver's own (guest confinement, tool surface) keep the last word.
+        const launch = codexCliOverrides(config.cli);
+        const [subcommand, ...driverArgs] = appServerArgs;
+        const child = spawnHoldingSlot(releaseSlot, () => spawnCli(launch.cli, [subcommand!, ...launch.overrides, ...driverArgs], {
           cwd: turn.cwd ?? homedir(),
           env,
           stdio: ["pipe", "pipe", "pipe"],
