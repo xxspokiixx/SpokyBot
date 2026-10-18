@@ -23,6 +23,7 @@ type TtsPrepareBody = { ready?: boolean; utterances?: string[]; error?: string }
 type TtsErrorBody = { error?: string };
 
 const IDLE: SpeechSnapshot = { status: "idle" };
+const PREFETCH_WINDOW = 3;
 
 export class Speaker {
   private snapshot: SpeechSnapshot = IDLE;
@@ -139,10 +140,13 @@ export class Speaker {
         (error: unknown) => ({ error }),
       );
     };
-    let next: Promise<Rendered> | null = render(utterances[0], 0);
+    const inFlight: Promise<Rendered>[] = [];
     for (let i = 0; i < utterances.length; i += 1) {
-      const current = next;
-      next = i + 1 < utterances.length ? render(utterances[i + 1], i + 1) : null;
+      while (inFlight.length < PREFETCH_WINDOW && i + inFlight.length < utterances.length) {
+        const block = i + inFlight.length;
+        inFlight.push(render(utterances[block], block));
+      }
+      const current = inFlight.shift();
       if (!current) break;
       const rendered = await current;
       if ("error" in rendered) {
