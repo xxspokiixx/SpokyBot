@@ -783,6 +783,8 @@
   "files.failed": "That didn't work. Try again.",
   "files.failedWith": "That didn't work: {reason}",
   "cloudHome.title": "My Cloud",
+  "cloudPower.asleep": "My Cloud is asleep. It wakes in about a second when you use it.",
+  "cloudPower.wake": "Wake it now",
   "cloudHome.provisioning": "Setting up My Cloud. This takes a few minutes; you can keep using this computer meanwhile.",
   "cloudHome.ready": "My Cloud is ready. Your always-on bots live there, separate from the bots on this computer. Open it, then sign in there with your own Claude or ChatGPT account, or an API key.",
   "cloudHome.stopped": "My Cloud is stopped. Subscribe again on your Plan page to start it; its files are kept for a while.",
