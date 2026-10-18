@@ -20,7 +20,7 @@ const LINES: Record<string, number> = {
   "electron/main.mjs": 3470,
   "server/store.ts": 2475,
   "src/components/Sidebar.tsx": 2340,
-  "server/drivers/claude.ts": 2168,
+  "server/drivers/claude.ts": 2166,
   "server/drivers/acp/core.ts": 2009,
   "server/drivers/codex.ts": 1872,
   "server/routines.ts": 1869,
