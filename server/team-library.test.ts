@@ -7,6 +7,7 @@ import {
   TEAM_LIBRARY_RAW_ROOT,
   fetchGithubTeam,
   fetchGrokTemplateCard,
+  grokShareIdFromMarketplace,
   fetchLibraryTeam,
   grokCardFromHtml,
   githubManifestUrls,
@@ -152,6 +153,19 @@ describe("Grok Bot share cards", () => {
     expect(card).toMatchObject({ shareId: "NIEguoGUjA648fUPle8F5", name: "Overheard", url: "https://x.ai/bot/NIEguoGUjA648fUPle8F5" });
     expect(card.creator).toBeUndefined();
     expect(card.description).toMatch(/never posts on your behalf\.$/);
+  });
+
+  it("follows a marketplace page to the share link its Add button points at", async () => {
+    const market = `<script>self.__next_f.push([1,"{\\"id\\":\\"dr-eggbot-v2\\",\\"addHref\\":\\"/bot/aaaaaaaaaaaaaaaaaaaaa\\"},{\\"id\\":\\"overheard\\",\\"name\\":\\"Overheard\\",\\"addHref\\":\\"/bot/NIEguoGUjA648fUPle8F5\\"}"])</script>`;
+    const fetcher = vi.fn(async (url: string) => html(url.includes("/marketplace/") ? market : grokPage("grok-share-page-anonymous.html"))) as unknown as typeof fetch;
+    const card = await fetchGrokTemplateCard("https://x.ai/bot/marketplace/bots/overheard", fetcher);
+    expect(card).toMatchObject({ shareId: "NIEguoGUjA648fUPle8F5", name: "Overheard", url: "https://x.ai/bot/NIEguoGUjA648fUPle8F5" });
+    const urls = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([url]) => url);
+    expect(urls).toEqual(["https://x.ai/bot/marketplace/bots/overheard", "https://x.ai/bot/NIEguoGUjA648fUPle8F5"]);
+    expect(grokShareIdFromMarketplace(market, "dr-eggbot-v2")).toBe("aaaaaaaaaaaaaaaaaaaaa");
+    expect(grokShareIdFromMarketplace(market, "missing")).toBeNull();
+    const none = vi.fn(async () => html("<html>nothing</html>")) as unknown as typeof fetch;
+    await expect(fetchGrokTemplateCard("https://x.ai/bot/marketplace/bots/overheard", none)).rejects.toMatchObject({ status: 404 });
   });
 
   it("falls back to the og tags when the embedded record is missing", () => {

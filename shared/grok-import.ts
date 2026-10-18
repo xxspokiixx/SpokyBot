@@ -82,6 +82,27 @@ export function grokShareIdFrom(text: string): string | null {
 
 export const grokShareUrl = (shareId: string) => `https://x.ai/bot/${shareId}`;
 
+const MARKETPLACE_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
+
+/** The slug of a Grok Bot marketplace page, https://x.ai/bot/marketplace/bots/<slug>; its share link is on that page. */
+export function grokMarketplaceSlugFrom(text: string): string | null {
+  const raw = String(text ?? "").trim();
+  let url: URL;
+  try {
+    url = new URL(/^(?:www\.)?x\.ai\//i.test(raw) ? `https://${raw}` : raw);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password || url.port || url.protocol !== "https:" || (url.hostname !== "x.ai" && url.hostname !== "www.x.ai")) return null;
+  const match = url.pathname.match(/^\/bot\/marketplace\/bots\/([^/]+)\/?$/);
+  return match && MARKETPLACE_SLUG.test(match[1]!) ? match[1]! : null;
+}
+
+export const grokMarketplaceUrl = (slug: string) => `https://x.ai/bot/marketplace/bots/${slug}`;
+
+/** A Grok Bot share link, its grokbot:// button link, or a marketplace page. */
+export const isGrokLink = (text: string) => Boolean(grokShareIdFrom(text) ?? grokMarketplaceSlugFrom(text));
+
 export const GROK_EXPORT_PROMPT = `Please export your setup so I can run you in OpenMausBot.
 
 Reply with ONE JSON code block and nothing else, in exactly this shape:

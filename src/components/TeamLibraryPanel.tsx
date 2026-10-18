@@ -19,7 +19,7 @@ import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
 import { MAX_TEAM_BACKUP_BYTES } from "../../shared/team-backup";
 import { takeImportName } from "../../shared/import-name";
-import { grokShareIdFrom } from "../../shared/grok-import";
+import { isGrokLink } from "../../shared/grok-import";
 const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
 
 export { TeamImportDetails };
@@ -249,7 +249,7 @@ export function TeamLibraryPanel({
 
   const loadGithubUrl = async (requestedUrl: string) => {
     if (!requestedUrl.trim()) return;
-    if (grokShareIdFrom(requestedUrl)) return setGrokLink(requestedUrl.trim());
+    if (isGrokLink(requestedUrl)) return setGrokLink(requestedUrl.trim());
     setGithubLoading(true);
     setError("");
     try {

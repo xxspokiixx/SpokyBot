@@ -1,7 +1,7 @@
 import { parseJson, type JsonValue } from "./schema.ts";
 import { isBotPackage, parseBotPackage, parsePackageDocument, type PackageDocument, type ParsedBotPackage } from "./bot-package.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
-import { grokShareIdFrom, grokShareUrl, type GrokTemplateCard } from "../shared/grok-import.ts";
+import { grokMarketplaceSlugFrom, grokMarketplaceUrl, grokShareIdFrom, grokShareUrl, type GrokTemplateCard } from "../shared/grok-import.ts";
 
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
 export const TEAM_LIBRARY_RAW_ROOT = "https://raw.githubusercontent.com/milind-soni/openmausbot-teams/main";
@@ -362,30 +362,48 @@ export function grokCardFromHtml(html: string, shareId: string): GrokTemplateCar
   return { shareId, name, ...(creator ? { creator } : {}), description, url: grokShareUrl(shareId), ...(color ? { color } : {}) };
 }
 
-/** The public card for a Grok Bot share link. Fetches only https://x.ai/bot/<id> and redirects that stay on x.ai. */
-export async function fetchGrokTemplateCard(input: string, fetcher: Fetcher = fetch): Promise<GrokTemplateCard> {
-  const shareId = grokShareIdFrom(input);
-  if (!shareId) throw statusError("Paste a Grok Bot share link, like https://x.ai/bot/…", 400);
-  const signal = AbortSignal.timeout(GROK_TIMEOUT_MS);
-  let target = new URL(grokShareUrl(shareId));
-  try {
-    for (let hop = 0; ; hop += 1) {
-      if (!onGrokHost(target)) throw statusError("That Grok Bot link tried to leave x.ai", 502);
-      const response = await fetcher(target.toString(), {
-        headers: { accept: "text/html" },
-        redirect: "manual",
-        signal,
-      });
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        if (!location || hop >= MAX_GROK_REDIRECTS) throw statusError("x.ai did not show the Grok Bot page", 502);
-        target = new URL(location, target);
-        continue;
-      }
-      if (response.status === 404) throw statusError("That Grok Bot link was not found. It may be private, team-only or removed.", 404);
-      if (!response.ok) throw statusError(`x.ai returned HTTP ${response.status}`, 502);
-      return grokCardFromHtml(await readCapped(response, MAX_GROK_PAGE_BYTES), shareId);
+/** An x.ai page's HTML: only https://x.ai (or www) and redirects that stay there, within the time and size caps. */
+async function fetchGrokPage(target: URL, fetcher: Fetcher, signal: AbortSignal, notFound: string): Promise<string> {
+  for (let hop = 0; ; hop += 1) {
+    if (!onGrokHost(target)) throw statusError("That Grok Bot link tried to leave x.ai", 502);
+    const response = await fetcher(target.toString(), { headers: { accept: "text/html" }, redirect: "manual", signal });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || hop >= MAX_GROK_REDIRECTS) throw statusError("x.ai did not show the Grok Bot page", 502);
+      target = new URL(location, target);
+      continue;
     }
+    if (response.status === 404) throw statusError(notFound, 404);
+    if (!response.ok) throw statusError(`x.ai returned HTTP ${response.status}`, 502);
+    return readCapped(response, MAX_GROK_PAGE_BYTES);
+  }
+}
+
+/** The share id a marketplace page's Add button points at: its own entry's addHref, or the page's only one. */
+export function grokShareIdFromMarketplace(html: string, slug: string): string | null {
+  const text = html.replace(/\\"/g, '"');
+  const entry = text.indexOf(`"id":"${slug}"`);
+  const next = entry >= 0 ? text.indexOf('"id":"', entry + 6) : -1;
+  const own = entry >= 0 ? text.slice(entry, next > entry ? next : entry + 4_000).match(/"addHref":"\/bot\/([A-Za-z0-9_-]{21})"/) : null;
+  if (own) return own[1]!;
+  const all = [...new Set([...text.matchAll(/"addHref":"\/bot\/([A-Za-z0-9_-]{21})"/g)].map((match) => match[1]!))];
+  return all.length === 1 ? all[0]! : null;
+}
+
+/** The public card for a Grok Bot share link or marketplace page. Fetches only x.ai pages and redirects that stay on x.ai. */
+export async function fetchGrokTemplateCard(input: string, fetcher: Fetcher = fetch): Promise<GrokTemplateCard> {
+  const signal = AbortSignal.timeout(GROK_TIMEOUT_MS);
+  try {
+    let shareId = grokShareIdFrom(input);
+    const slug = shareId ? null : grokMarketplaceSlugFrom(input);
+    if (!shareId && !slug) throw statusError("Paste a Grok Bot link, like https://x.ai/bot/… or a Grok Bot marketplace page", 400);
+    if (slug) {
+      const market = await fetchGrokPage(new URL(grokMarketplaceUrl(slug)), fetcher, signal, "That Grok Bot marketplace page was not found.");
+      shareId = grokShareIdFromMarketplace(market, slug);
+      if (!shareId) throw statusError("That marketplace page did not link to a Grok Bot to add.", 404);
+    }
+    const html = await fetchGrokPage(new URL(grokShareUrl(shareId!)), fetcher, signal, "That Grok Bot link was not found. It may be private, team-only or removed.");
+    return grokCardFromHtml(html, shareId!);
   } catch (error) {
     if ((error as { name?: string }).name === "TimeoutError") throw statusError("x.ai did not answer within 20 seconds. Try again.", 502);
     throw error;

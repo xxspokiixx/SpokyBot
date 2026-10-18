@@ -9,6 +9,8 @@ import {
   isGrokExport,
   nearestBotColor,
   parseGrokExport,
+  grokMarketplaceSlugFrom,
+  isGrokLink,
 } from "./grok-import.ts";
 import { parsePackageDocument } from "./package-format.ts";
 
@@ -281,5 +283,20 @@ describe("nearestBotColor", () => {
     expect(nearestBotColor("#000000")).toBe("blue");
     expect(nearestBotColor("oops")).toBe("blue");
     expect(nearestBotColor(undefined)).toBe("blue");
+  });
+});
+
+describe("Grok Bot marketplace links", () => {
+  it("reads the slug of an x.ai marketplace page, and nothing else", () => {
+    expect(grokMarketplaceSlugFrom("https://x.ai/bot/marketplace/bots/overheard")).toBe("overheard");
+    expect(grokMarketplaceSlugFrom("x.ai/bot/marketplace/bots/tradbot-2/")).toBe("tradbot-2");
+    expect(grokMarketplaceSlugFrom("https://www.x.ai/bot/marketplace/bots/dr-eggbot-v2?ref=x")).toBe("dr-eggbot-v2");
+    for (const bad of ["https://x.ai/bot/marketplace", "https://evil.test/bot/marketplace/bots/overheard", "http://x.ai/bot/marketplace/bots/overheard",
+      "https://x.ai.evil.test/bot/marketplace/bots/overheard", "https://x.ai/bot/marketplace/bots/Over_Heard", "https://x.ai/bot/marketplace/bots/a/b"]) {
+      expect(grokMarketplaceSlugFrom(bad), bad).toBeNull();
+    }
+    expect(isGrokLink("https://x.ai/bot/marketplace/bots/overheard")).toBe(true);
+    expect(isGrokLink("https://x.ai/bot/NIEguoGUjA648fUPle8F5")).toBe(true);
+    expect(isGrokLink("https://github.com/a/b/team.md")).toBe(false);
   });
 });
