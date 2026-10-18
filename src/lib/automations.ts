@@ -106,6 +106,9 @@ export function plainWhen(schedule: RoutineSchedule): string {
     return t("automations.when.once", { date: new Date(schedule.at).toLocaleDateString(locale(), { weekday: "long", month: "long", day: "numeric" }), time: clock(schedule.at, true) });
   }
   if (schedule.type === "cron") {
+    // "Every 2 minutes" is a cron step: an interval runs at most every 5 minutes, so a bot asked for less writes this.
+    const minutes = /^\*\/([1-5]?\d) \* \* \* \*$/.exec(schedule.expression.trim())?.[1];
+    if (minutes && Number(minutes) >= 2) return t("automations.when.everyMinutes", { count: Number(minutes) });
     const label = cronScheduleLabel(schedule);
     return label.startsWith("Cron ") ? t("automations.when.custom") : label;
   }
@@ -139,6 +142,10 @@ function thirdPerson(verb: string): string {
   return `${lower}s`;
 }
 
+/** "SMS the team", "CRM: …", "HubSpot deals…": a capital after a word's first letter makes it a name, never a verb, and
+ * it keeps its case ("e2E-…" and "smses the team" otherwise). */
+const keepsCase = (word: string) => /\p{Lu}/u.test(word.slice(1));
+
 /** What the bot does, as a short phrase: the first clause of its instructions, addressed to the person. */
 export function doesPhrase(instructions: string, english = activeLocale().startsWith("en")): string {
   let clause = instructions.replace(/^\s*please\s+/i, "").split(/[.:;!?\n]|\s[—–-]\s/)[0]?.trim() ?? "";
@@ -146,11 +153,11 @@ export function doesPhrase(instructions: string, english = activeLocale().starts
   if (english) {
     clause = clause.replace(/\bme\b/gi, "you").replace(/\bmy\b/gi, "your").replace(/\bmine\b/gi, "yours").replace(/\bI\b/g, "you");
     const [first = "", ...rest] = clause.split(/\s+/);
-    clause = /^[A-Za-z]+$/.test(first) && !NOT_A_VERB.has(first.toLowerCase())
+    clause = keepsCase(first) ? clause : /^[A-Za-z]+$/.test(first) && !NOT_A_VERB.has(first.toLowerCase())
       // "Summarize the inbox and post the top three" → "summarizes the inbox and posts the top three".
       ? [thirdPerson(first), ...rest].join(" ").replace(new RegExp(`\\b(and|then) (${COMMON_VERBS})\\b`, "g"), (_match, joiner: string, verb: string) => `${joiner} ${thirdPerson(verb)}`)
       : clause.charAt(0).toLowerCase() + clause.slice(1);
-  } else {
+  } else if (!keepsCase(clause.split(/\s/)[0] ?? "")) {
     clause = clause.charAt(0).toLocaleLowerCase(locale()) + clause.slice(1);
   }
   if (clause.length <= PHRASE_CHARS) return clause;
