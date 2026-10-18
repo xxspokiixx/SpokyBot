@@ -8,8 +8,9 @@ import { grokImportPreview } from "@/lib/team-import";
 
 const text = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 const view = (overrides: Partial<GrokImportViewProps> = {}) => renderToStaticMarkup(createElement(GrokImportView, {
-  url: "", card: null, loading: false, reply: "", error: "", copyState: "idle",
+  url: "", card: null, loading: false, reply: "", error: "", copyState: "idle", cursor: null,
   onUrl: vi.fn(), onLoad: vi.fn(), onCopy: vi.fn(), onReply: vi.fn(), onPreviewReply: vi.fn(), onStarter: vi.fn(),
+  onCursorSignIn: vi.fn(), onCursorSignOut: vi.fn(),
   ...overrides,
 }));
 
@@ -31,6 +32,19 @@ describe("From Grok Bot", () => {
     expect(text(view())).not.toContain("Start from description");
     expect(text(view({ copyState: "copied" }))).toContain("Copied");
     expect(text(view({ error: "That Grok Bot link was not found." }))).toContain("That Grok Bot link was not found.");
+  });
+
+  it("offers the Cursor sign-in on the card, says while it waits, and shows who is signed in", () => {
+    const card = { shareId: "d8OshqLZvtcKDcNluPuyo", name: "DOGE", description: "", url: "https://x.ai/bot/d8OshqLZvtcKDcNluPuyo" };
+    expect(text(view({ card, cursor: { signedIn: false, waiting: false } }))).toContain("Sign in with Cursor to import everything");
+    expect(text(view({ card, cursor: { signedIn: false, waiting: true } }))).toContain("Waiting for you to approve in the browser…");
+    const signedIn = text(view({ card: { ...card, exportNote: "Your Cursor sign-in has expired. Sign in again." }, cursor: { signedIn: true, waiting: false } }));
+    expect(signedIn).toContain("Signed in to Cursor · Sign out");
+    expect(signedIn).toContain("Your Cursor sign-in has expired. Sign in again.");
+    // The copy-paste path is always there, signed in or not.
+    expect(signedIn).toContain("Copy export prompt");
+    // No status yet (a remote client, or the request failed): no Cursor line at all.
+    expect(text(view({ card }))).not.toContain("Cursor");
   });
 
   it("titles what an export could not carry as Left out in the preview", () => {

@@ -132,10 +132,32 @@ servers never come over; the bot uses your own engine and apps.
 Without Grok Bot, **Start from description** makes a bot from the public name
 and description alone, credited "Based on x.ai/bot/<id>".
 
-Maus only reads `https://x.ai/bot/<id>` (redirects must stay on x.ai, 20 s,
-2 MB) through `POST /api/team-library/grok` (admin scope). It never signs in
-anywhere and never opens `grokbot://` links. The mapping lives in
-`shared/grok-import.ts`.
+**Sign in with Cursor to import everything** (optional) skips the copy and
+paste. Grok Bot templates live on Cursor's servers, and their full setup needs
+a signed-in Cursor account; a free one is enough. The button opens Cursor's
+own sign-in page in your browser (the PKCE flow Cursor's CLI uses). Once you
+approve it there, the card loads the whole bot and the preview opens. Maus
+keeps the sign-in in `cursor-session.json` in the data folder (mode 0600),
+sends it only to `api2.cursor.sh`, uses it only to read the template you
+pasted, and never reads another app's files or stored logins. **Sign out** on
+the card deletes it. If anything goes wrong (signed out, an expired sign-in,
+an answer Maus does not understand, no network), the card stays with the copy
+and paste steps and one line saying why. The request shapes follow
+[pi-grokbot-import](https://github.com/Shixuuu/pi-grokbot-import) (MIT).
+
+After **Add**, when the bot has apps to connect or something was left out,
+the panel offers **Have your Chief of Staff finish the setup** (or the
+imported bot itself, without a Chief). It opens that chat with a message
+ready, never sent: which bot came from which link, the apps to connect (with
+their Composio names), Grok Bot tools with no match, and the left-out
+routines with their original text.
+
+Maus reads `https://x.ai/bot/<id>` (redirects must stay on x.ai, 20 s,
+2 MB) through `POST /api/team-library/grok`; the Cursor routes are
+`GET /api/team-library/cursor`, `POST /api/team-library/cursor/sign-in` and
+`POST /api/team-library/cursor/sign-out`. All are admin scope. Maus never
+opens `grokbot://` links. The mapping lives in `shared/grok-import.ts`, the
+Cursor session in `server/cursor-session.ts`.
 
 ## The file format
 

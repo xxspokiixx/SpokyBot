@@ -46,6 +46,7 @@ export interface GrokExport {
 
 /** Something the package could not carry, with what the person needs to redo it by hand. */
 export interface GrokLeftOut {
+  kind: "instructions" | "skill" | "routine" | "app" | "memories" | "secrets";
   name: string;
   reason: string;
   original?: string;
@@ -166,7 +167,7 @@ export function parseGrokExport(input: unknown): GrokExport {
   const title = oneLine(first(root.title, persona.title));
   const creator = oneLine(first(root.creator, root.author, source.sharerName));
   const color = first(root.color, persona.avatarColor, source.color);
-  const shareId = grokShareIdFrom(first(typeof root.source === "string" ? root.source : "", source.url, root.url));
+  const shareId = grokShareIdFrom(first(typeof root.source === "string" ? root.source : "", source.url, root.url, root.sourceUrl));
   const skills = list(root.skills).flatMap((skill) => {
     if (typeof skill === "string") return [{ name: skill, description: "", body: "" }];
     if (!isRecord(skill)) return [];
@@ -267,6 +268,9 @@ const COMPOSIO_SLUGS: Record<string, string> = {
   youtube: "youtube", linkedin: "linkedin", shopify: "shopify", calendly: "calendly", zoom: "zoom",
 };
 
+/** The Composio toolkit for an app a Grok Bot names, when Maus knows one. */
+export const composioSlugFor = (label: string): string | undefined => COMPOSIO_SLUGS[label.trim().toLowerCase().replace(/\s+/g, " ")];
+
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const EVENT_WORDS = /\b(?:when|whenever|each time|every time|on (?:new|each|every)|webhook|mention(?:ed|s)?|incoming|arrives?|opens?|merged?|pushed?)\b/i;
 
@@ -350,7 +354,7 @@ export function grokExportToPackage(
   let soul = x.instructions.trim();
   if (utf8Bytes(soul) > BOT_PROFILE_LIMITS.soul) {
     soul = fitBytes(soul, BOT_PROFILE_LIMITS.soul);
-    skip({ name: "Standing instructions", reason: `they were longer than ${BOT_PROFILE_LIMITS.soul.toLocaleString("en-US")} bytes, so the end was cut. Check them after adding the bot` });
+    skip({ kind: "instructions", name: "Standing instructions", reason: `they were longer than ${BOT_PROFILE_LIMITS.soul.toLocaleString("en-US")} bytes, so the end was cut. Check them after adding the bot` });
   }
 
   const skillNames = new Set<string>();
@@ -358,18 +362,19 @@ export function grokExportToPackage(
   for (const [index, skill] of x.skills.entries()) {
     const label = `Skill “${oneLine(skill.name) || index + 1}”`;
     if (skills.length >= AGENT_MAX_SKILLS) {
-      skip({ name: label, reason: `a bot holds at most ${AGENT_MAX_SKILLS} skills`, ...(skill.body ? { original: skill.body } : {}) });
+      skip({ kind: "skill", name: label, reason: `a bot holds at most ${AGENT_MAX_SKILLS} skills`, ...(skill.body ? { original: skill.body } : {}) });
       continue;
     }
     const entry = skillEntry(skill, uniqueSlug(skill.name, `skill-${index + 1}`, skillNames));
     if (entry) skills.push(entry);
-    else skip({ name: label, reason: skill.body ? "its text could not be read as a skill" : "the export had no text for it" });
+    else skip({ kind: "skill", name: label, reason: skill.body ? "its text could not be read as a skill" : "the export had no text for it" });
   }
 
   const routineKeys = new Set<string>();
   const routines = x.routines.flatMap((routine, index) => {
     const label = clip(oneLine(routine.name) || `Routine ${index + 1}`, 80);
     const item = {
+      kind: "routine" as const,
       name: `Routine “${label}”`,
       original: [routine.schedule && `When: ${routine.schedule}`, routine.cron && `Cron: ${routine.cron}`, routine.prompt].filter(Boolean).join("\n"),
     };
@@ -392,9 +397,9 @@ export function grokExportToPackage(
   const appSlugs = new Set<string>();
   const apps = x.plugins.flatMap((plugin) => {
     const label = clip(plugin.name, 100);
-    const appSlug = COMPOSIO_SLUGS[label.toLowerCase().replace(/\s+/g, " ")] ?? slug(label, 60);
+    const appSlug = composioSlugFor(label) ?? slug(label, 60);
     if (!appSlug || appSlugs.has(appSlug)) return [];
-    if (appSlugs.size >= MAX_APPS) return skip({ name: `App “${label}”`, reason: `a package lists at most ${MAX_APPS} apps` });
+    if (appSlugs.size >= MAX_APPS) return skip({ kind: "app", name: `App “${label}”`, reason: `a package lists at most ${MAX_APPS} apps` });
     appSlugs.add(appSlug);
     return [{ slug: appSlug, label, reason: clip(oneLine(plugin.note) || `${name} used ${label} in Grok Bot.`, 240) }];
   });
@@ -403,7 +408,7 @@ export function grokExportToPackage(
   if (x.memories.length) {
     const notes = `# Notes from Grok Bot\n\n${x.memories.map((memory) => `- ${memory.replace(/\s*\n\s*/g, " ")}`).join("\n")}\n`;
     if (utf8Bytes(notes) <= SEED_FILE_MAX_BYTES) seed = { memory: { "MEMORY.md": notes } };
-    else skip({ name: "Memories", reason: "they were larger than 256 KB" });
+    else skip({ kind: "memories", name: "Memories", reason: "they were larger than 256 KB" });
   }
 
   const summary = clip(description || `${name}, brought over from Grok Bot.`, 2_000);
@@ -438,12 +443,58 @@ export function grokExportToPackage(
     },
   };
   const { document, redacted } = redactPackageSecrets(draft);
-  if (redacted.length) skip({ name: "Keys and passwords", reason: `text that looked like a key or password was replaced in ${redacted.join(", ")}` });
+  if (redacted.length) skip({ kind: "secrets", name: "Keys and passwords", reason: `text that looked like a key or password was replaced in ${redacted.join(", ")}` });
   try {
     return { document: parsePackageDocument(document, { trust: "file" }), leftOut };
   } catch (error) {
     throw new GrokImportError(`This Grok Bot export could not be turned into a bot: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/** The recipe Cursor's GetGrokBotTemplateImportDetails points at, as an export. The field names follow
+ * pi-grokbot-import (MIT, github.com/Shixuuu/pi-grokbot-import); a grokbot-bundle/v1 or openmaus.grok/1 is read as is. */
+export function grokExportFromRecipe(recipe: unknown, card?: GrokTemplateCard): GrokExport {
+  if (!isRecord(recipe)) throw new GrokImportError("Cursor's answer is not a Grok Bot recipe.");
+  const fromCard = card ? { creator: card.creator, sourceUrl: card.url, description: card.description } : {};
+  if (recipe.format === GROK_BUNDLE_FORMAT || recipe.format === GROK_EXPORT_FORMAT) {
+    const x = parseGrokExport(recipe);
+    return { ...x, ...(x.creator || !fromCard.creator ? {} : { creator: fromCard.creator }), ...(x.sourceUrl || !card ? {} : { sourceUrl: card.url }) };
+  }
+  const profile = isRecord(recipe.persona) ? recipe.persona : isRecord(recipe.profile) ? recipe.profile : {};
+  const memory = recipe.memories ?? recipe.memory;
+  const memories = typeof memory === "string" ? [memory] : isRecord(memory) ? [first(memory.text, memory.content, memory.profile, memory.md)] : list(memory);
+  const started = recipe.gettingStarted;
+  const starter = typeof started === "string" ? { body: started } : isRecord(started) ? { name: first(started.name), description: first(started.description), body: first(started.content, started.body, started.text) } : null;
+  const skills = [
+    ...(starter?.body ? [{ name: starter.name || "getting-started", description: starter.description || "Getting started with this bot.", body: starter.body }] : []),
+    ...list(recipe.skills).map((skill) => isRecord(skill) ? { name: first(skill.name, skill.slug), description: first(skill.description), body: first(skill.body, skill.content, skill.text, skill.instructions) } : skill),
+  ];
+  const routines = list(recipe.routines).map((routine) => {
+    if (!isRecord(routine)) return routine;
+    const when = isRecord(routine.schedule) ? routine.schedule : {};
+    return {
+      name: first(routine.name, routine.slug),
+      schedule: first(typeof routine.schedule === "string" ? routine.schedule : "", routine.triggerSummary, routine.trigger, routine.description),
+      cron: first(routine.cron, when.cron, when.expression),
+      timeZone: first(routine.timeZone, routine.timezone, when.timeZone, when.timezone),
+      prompt: first(routine.prompt, routine.content, routine.body, routine.instructions),
+    };
+  });
+  const plugins = list(recipe.plugins ?? recipe.integrations).map((plugin) =>
+    isRecord(plugin) ? { name: first(plugin.name, plugin.pluginId, plugin.id, plugin.slug), note: first(plugin.note, plugin.description) } : plugin);
+  const x = parseGrokExport({
+    format: GROK_EXPORT_FORMAT,
+    name: first(profile.name, recipe.botName, recipe.name, card?.name),
+    title: first(profile.title),
+    description: first(fromCard.description, recipe.description),
+    instructions: first(recipe.instructions, profile.instructions, profile.systemPrompt, profile.description),
+    creator: first(fromCard.creator),
+    sourceUrl: first(fromCard.sourceUrl),
+    color: first(profile.avatarColor, profile.color, recipe.avatarColor, recipe.color, card?.color),
+    skills, routines, plugins, memories,
+  });
+  if (!x.instructions && !x.skills.length && !x.routines.length) throw new GrokImportError("Cursor's answer did not include the bot's setup.");
+  return x;
 }
 
 /** A bot started from the public card alone: the name and description, credited to the share link. */

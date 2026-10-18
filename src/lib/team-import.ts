@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { parseTeamBackup, TEAM_BACKUP_CONTENTS } from "../../shared/team-backup";
 import { NEWER_PACKAGE_MESSAGE, PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
-import { grokExportToPackage, isGrokExport, parseGrokExport, type GrokLeftOut } from "../../shared/grok-import";
+import { composioSlugFor, grokExportToPackage, isGrokExport, parseGrokExport, type GrokLeftOut } from "../../shared/grok-import";
 
 export interface PendingTeamImport {
   manifest: unknown;
@@ -29,6 +29,17 @@ export interface PendingTeamImport {
   library?: boolean;
   /** The warnings list what a Grok Bot export could not carry. */
   leftOut?: boolean;
+  /** What is left to do after a Grok Bot import, for the Chief of Staff's prepared message. */
+  grokSetup?: GrokSetupNotes;
+}
+
+export interface GrokSetupNotes {
+  sourceUrl?: string;
+  /** Apps with a Composio toolkit, to connect. */
+  apps: Array<{ label: string; slug: string }>;
+  /** Grok Bot plugins Maus has no match for. */
+  unmatched: string[];
+  leftOut: GrokLeftOut[];
 }
 
 export interface GrokPreviewOptions {
@@ -44,8 +55,16 @@ const leftOutLine = (item: GrokLeftOut) =>
 /** A Grok Bot export (pasted reply or file) as the package preview, with what was left out as warnings. */
 export function grokImportPreview(input: unknown, options: GrokPreviewOptions = {}): PendingTeamImport {
   const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const { document, leftOut } = grokExportToPackage(parseGrokExport(input), { ...options, timeZone });
-  const preview = sharedTeamPreview(document, document);
+  const x = parseGrokExport(input);
+  const { document, leftOut } = grokExportToPackage(x, { ...options, timeZone });
+  const sourceUrl = document.package.author.url;
+  const grokSetup: GrokSetupNotes = {
+    ...(sourceUrl ? { sourceUrl } : {}),
+    apps: document.package.requirements.apps.flatMap((app) => (composioSlugFor(app.label) === app.slug ? [{ label: app.label, slug: app.slug }] : [])),
+    unmatched: document.package.requirements.apps.flatMap((app) => (composioSlugFor(app.label) === app.slug ? [] : [app.label])),
+    leftOut,
+  };
+  const preview = { ...sharedTeamPreview(document, document), grokSetup };
   return leftOut.length ? { ...preview, warnings: leftOut.map(leftOutLine), leftOut: true } : preview;
 }
 

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
 
+import { GrokFinishSetup, grokSetupLeft } from "./GrokFinishSetup";
 import { GrokImportBox } from "./GrokImportBox";
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
@@ -215,6 +216,7 @@ export function TeamLibraryPanel({
   const [githubUrl, setGithubUrl] = useState("");
   const [githubLoading, setGithubLoading] = useState(false);
   const [grokLink, setGrokLink] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState<{ notes: NonNullable<PendingTeamImport["grokSetup"]>; bot: Bot; result: TeamImportResult } | null>(null);
   const [importing, setImporting] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [search, setSearch] = useState("");
@@ -400,12 +402,15 @@ export function TeamLibraryPanel({
       const first = response.bots.find((bot) => !bot.hidden);
       if (first) dispatch({ type: "select", id: first.id });
       track("team_imported", { members: response.bots.length, source, mode: "add", format: pending.kind });
-      onImported({
+      const result = {
         name: pending.name,
         members: response.bots.length,
         ...(response.connections?.length ? { connections: response.connections.length } : {}),
         ...(response.presets?.length ? { presets: response.presets.length } : {}),
-      });
+      };
+      // A Grok Bot with apps to connect or routines left out: offer the Chief of Staff's help before closing.
+      if (grokSetupLeft(pending.grokSetup) && first) setFinishing({ notes: pending.grokSetup, bot: first, result });
+      else onImported(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -575,7 +580,7 @@ export function TeamLibraryPanel({
         <header className="flex items-start justify-between gap-4 px-6 pb-3 pt-6 sm:px-8 sm:pt-7">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              {pending && (
+              {pending && !finishing && (
                 <button
                   onClick={() => {
                     setPending(null);
@@ -630,7 +635,7 @@ export function TeamLibraryPanel({
           </div>
         </header>
 
-        {pending ? (
+        {finishing ? <GrokFinishSetup notes={finishing.notes} imported={finishing.bot} onDone={() => onImported(finishing.result)} /> : pending ? (
           <>
             <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6 sm:px-8">
               <TeamImportDetails pending={pending} importedNames={importedNames} org={pendingOrg !== null} />
@@ -901,7 +906,7 @@ export function TeamLibraryPanel({
                       </div>
                     </div>
                   </div>
-                  <GrokImportBox link={grokLink} onPreview={(preview) => previewManifest(preview, "grok")} />
+                  <GrokImportBox link={grokLink} onPreview={(preview) => { setGrokLink(null); previewManifest(preview, "grok"); }} />
                   {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
                 </div>
               )}

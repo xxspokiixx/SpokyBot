@@ -160,7 +160,7 @@ describe("grokExportToPackage", () => {
     // A body's own frontmatter is replaced; its description is kept when the export gave none.
     expect(entries[1]).toMatchObject({ description: "Find slow steps", instructions: "---\nname: bottlenecks\ndescription: Find slow steps\n---\n\nLook for waits.\n" });
     expect(document.package.agents[0]!.skills).toEqual(["audit-routines", "bottlenecks"]);
-    expect(leftOut).toContainEqual({ name: "Skill “empty”", reason: "the export had no text for it" });
+    expect(leftOut).toContainEqual({ kind: "skill", name: "Skill “empty”", reason: "the export had no text for it" });
   });
 
   it("keeps clock routines paused, and lists event and unreadable ones with their original text", () => {
@@ -171,12 +171,13 @@ describe("grokExportToPackage", () => {
       ["Morning check", { type: "daily", time: "08:30", weekdays: [1, 2, 3, 4, 5] }, false, "maus", "doge-department-of-grok-efficiency"],
     ]);
     expect(leftOut).toContainEqual({
+      kind: "routine",
       name: "Routine “On new PR”",
       reason: "it starts on an event, not a clock",
       original: "When: When a GitHub pull request opens\nReview the PR.",
     });
-    expect(leftOut).toContainEqual({ name: "Routine “Sometimes”", reason: "it starts on an event, not a clock", original: "When: now and then, when it feels right\nThink." });
-    expect(leftOut).toContainEqual({ name: "Routine “Bad cron”", reason: "its schedule could not be read", original: "Cron: 99 99 * * *\nNever runs." });
+    expect(leftOut).toContainEqual({ kind: "routine", name: "Routine “Sometimes”", reason: "it starts on an event, not a clock", original: "When: now and then, when it feels right\nThink." });
+    expect(leftOut).toContainEqual({ kind: "routine", name: "Routine “Bad cron”", reason: "its schedule could not be read", original: "Cron: 99 99 * * *\nNever runs." });
   });
 
   it("reads plain times and falls back to the person's zone", () => {
