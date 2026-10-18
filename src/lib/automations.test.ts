@@ -47,6 +47,21 @@ describe("the plain sentence", () => {
     expect(doesPhrase("Summarize the inbox and post the three priorities")).toBe("summarizes the inbox and posts the three priorities");
   });
 
+  it("keeps a first word that is a name or an acronym as it is: no lowercase letter put in, no verb made of it", () => {
+    expect(doesPhrase("SMS the team when a deal closes")).toBe("SMS the team when a deal closes");
+    expect(doesPhrase("HubSpot deals over $10k go to Ana")).toBe("HubSpot deals over $10k go to Ana");
+    expect(doesPhrase("E2E-WEBHOOK-RUN check")).toBe("E2E-WEBHOOK-RUN check");
+    expect(doesPhrase("PDF des factures à envoyer", false)).toBe("PDF des factures à envoyer");
+    expect(doesPhrase("Envoyer le résumé", false)).toBe("envoyer le résumé");
+    expect(doesPhrase("If it is urgent, call me")).toBe("if it is urgent, call you");
+  });
+
+  it("says how often a step cron runs, as the bot writes one for every 2 minutes", () => {
+    expect(plainWhen({ type: "cron", expression: "*/2 * * * *", timeZone: "UTC" })).toBe("Every 2 minutes");
+    expect(plainWhen({ type: "cron", expression: "*/15 * * * *", timeZone: "Asia/Kolkata" })).toBe("Every 15 minutes");
+    expect(plainWhen({ type: "cron", expression: "*/2 9-17 * * 1-5", timeZone: "UTC" })).not.toBe("Every 2 minutes");
+  });
+
   it("puts schedules in everyday words", () => {
     expect(plainWhen({ type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] })).toBe("Every day at 9 AM");
     expect(plainWhen({ type: "daily", time: "17:30", weekdays: [5] })).toBe("Every Friday at 5:30 PM");
