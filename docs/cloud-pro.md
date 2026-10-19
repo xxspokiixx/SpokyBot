@@ -929,6 +929,44 @@ is on the volume. Only the `/data` volume is `maus`'s.
 `HOME=/data`, so `~/.claude`, `~/.codex`, `~/.grok` and OpenMausBot's own
 data (`/data/.openmausbot`) persist on the volume.
 
+### Memory
+
+A home is one machine, without swap on Pro and Max, and every engine process
+(OpenCode, Claude Code, Codex and the other agent CLIs) starts its own copy of
+each MCP server: one OpenCode thread measured 361 MB on its own and 623 MB
+with six MCP servers before its first prompt. Several at once can fill the
+machine, and then the kernel thrashes for a long time before its OOM killer
+acts: the health check stops answering and the stalled turns read like a
+provider outage. So on a Cloud home (`server/engine-memory.ts`):
+
+- **A turn that needs a new engine process waits for memory.** It starts
+  once the machine's available memory (plus half of any free swap), less a
+  tenth kept for the server, Chrome and the page cache, and less what engines
+  admitted in the last 90 s have yet to take, fits one more engine (the
+  average the engines here measure, 700 MB until one is measured). The chat
+  says "Waiting for memory: N tasks are running on this Cloud …", again every
+  ten minutes (which keeps both stall checks quiet), and the turn starts by
+  itself. Stop ends the wait. A thread whose engine is still running never
+  waits, and the only task is never held back.
+- **An engine nobody is using gives way first.** Engines stay up between
+  turns; one that is idle is stopped to make room before anything waits.
+- **About to run out, the home stops its newest engine** rather than freeze:
+  every 2 s while engines run, when free memory falls under 4% (160 MB at
+  least), or the memory stall reaches 40% below the tenth, it stops an idle
+  engine, else the newest of two or more busy ones, at most every 15 s, and
+  not in the tick right after the kernel's own OOM killer acted.
+- **The kernel's order** (`server/oom-score.ts`): engines, and everything they
+  start, are born with `oom_score_adj` 1000; Chrome scores its tabs 200 and
+  up; the server is -800 and Caddy -900, so the health check is the last to
+  go.
+- **The reason is said.** A turn whose engine was stopped for memory, by the
+  home or by the kernel (a SIGKILL while `/proc/vmstat`'s `oom_kill` rose),
+  fails with "This Cloud ran out of memory while N tasks ran at once, so this
+  one was stopped. It was not a problem with the AI provider. New tasks now
+  wait until there is memory for them.", and a turn that stalled while memory
+  was short says so after "no activity for 20 minutes". The health report
+  counts both as `out_of_memory`.
+
 ### Why the server stays on loopback
 
 `server/request-auth.ts` treats an unproxied loopback request on a Cloud
