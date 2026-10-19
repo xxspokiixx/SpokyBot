@@ -1430,7 +1430,6 @@
   "sidebar.preview.waiting": "Esperando por você…",
   "sidebar.preview.waitingOnTeammate": "Esperando um colega…",
   "sidebar.preview.working": "Trabalhando…",
-  "sidebar.preview.screenFrame": "Quadro de tela",
   "sidebar.preview.botWorking": "{name} está trabalhando…",
   "sidebar.preview.botWorkingQueued": "{name} está trabalhando… · {count} na fila",
   "sidebar.preview.aBot": "Um bot",

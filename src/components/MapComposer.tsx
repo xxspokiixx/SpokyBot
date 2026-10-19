@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, X } from "lucide-react";
 import { openBot, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -11,42 +11,24 @@ import { MentionMenu, type MentionChoice } from "./MentionMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { useMenuMotion } from "./MenuMotion";
 
-type Beam = { id: string; d: string };
-const BEAM_MS = 1_400;
-
-/** From the composer's top edge to each card, in the stage's coordinates: a gentle curve that rises to the bot. */
-function beamsTo(stage: HTMLElement, from: DOMRect, botIds: readonly string[], key: number): Beam[] {
-  const bounds = stage.getBoundingClientRect();
-  const x1 = from.left + from.width / 2 - bounds.left, y1 = from.top - bounds.top;
-  return botIds.flatMap((botId) => {
-    const card = [...stage.querySelectorAll<HTMLElement>("[data-bot-id]")].find((node) => node.dataset.botId === botId)?.closest("article");
-    if (!card) return [];
-    const rect = card.getBoundingClientRect();
-    const x2 = rect.left + rect.width / 2 - bounds.left, y2 = rect.top + rect.height / 2 - bounds.top;
-    return [{ id: `${key}:${botId}`, d: `M${x1} ${y1} C${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2 + 60} ${x2} ${y2}` }];
-  });
-}
-
 /** Message bots from the Team map: tag bots, a team or @everyone; each tagged bot gets it as a normal message in its own chat. */
-export function MapComposer({ stage, bots, teams, onTagged }: {
-  stage: RefObject<HTMLElement | null>;
+export function MapComposer({ bots, teams, onTagged, onSent }: {
   bots: Bot[];
   teams: Array<{ key: string; name: string; count: number }>;
   onTagged: (botIds: string[]) => void;
+  /** The bots a message just went to, so their cards can acknowledge it. */
+  onSent: (botIds: string[]) => void;
 }) {
   const { dispatch } = useStore();
   const showThreads = useShowThreads();
   const sendKey = useSendKey();
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [sent, setSent] = useState<{ botIds: string[]; expanded: boolean } | null>(null);
-  const [beams, setBeams] = useState<Beam[]>([]);
-  const beamKey = useRef(0);
 
   const visible = useMemo(() => bots.filter((bot) => !bot.hidden), [bots]);
   const targets = useMemo(() => mapMessageTargets(text, visible, teams), [text, visible, teams]);
@@ -89,12 +71,7 @@ export function MapComposer({ stage, bots, teams, onTagged }: {
     if (!canSend) return;
     const message = text.trim();
     for (const botId of targets.botIds) dispatch({ type: "send", botId, text: message, sendId: crypto.randomUUID() });
-    const from = boxRef.current?.getBoundingClientRect();
-    if (stage.current && from) {
-      const next = beamsTo(stage.current, from, targets.botIds, ++beamKey.current);
-      setBeams((current) => [...current, ...next]);
-      window.setTimeout(() => setBeams((current) => current.filter((beam) => !next.includes(beam))), BEAM_MS);
-    }
+    onSent(targets.botIds);
     setSent({ botIds: targets.botIds, expanded: false });
     setText("");
     setCaret(0);
@@ -107,9 +84,6 @@ export function MapComposer({ stage, bots, teams, onTagged }: {
   const hint = text.trim() && !targets.botIds.length ? t("mapComposer.tagHint") : null;
 
   return <>
-    {beams.length > 0 && <svg aria-hidden className="pointer-events-none absolute inset-0 z-30 size-full overflow-visible">
-      {beams.map((beam) => <path key={beam.id} d={beam.d} pathLength={1} fill="none" strokeWidth={2.5} strokeLinecap="round" className="animate-beam stroke-accent" />)}
-    </svg>}
     <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
       <div className="pointer-events-auto w-full max-w-[620px]">
         {sent && names.length > 0 && <p role="status" className="mb-2 flex flex-wrap items-center gap-x-1 gap-y-0.5 rounded-xl bg-panel/95 px-3 py-1.5 text-[12px] text-ink-secondary shadow-sm ring-1 ring-hairline/50">
@@ -121,7 +95,7 @@ export function MapComposer({ stage, bots, teams, onTagged }: {
           {!sent.expanded && summary.more > 0 && <button className="text-ink underline-offset-2 hover:underline" onClick={() => setSent({ ...sent, expanded: true })}>{t("mapComposer.andMore", { count: summary.more })}</button>}
           <button aria-label={t("common.close")} className="ml-auto rounded p-0.5 hover:bg-control" onClick={() => setSent(null)}><X size={12} /></button>
         </p>}
-        <div ref={boxRef} className="relative flex items-end gap-2 rounded-3xl bg-composer px-3 py-2 shadow-lg ring-1 ring-composer-ring">
+        <div className="relative flex items-end gap-2 rounded-3xl bg-composer px-3 py-2 shadow-lg ring-1 ring-composer-ring">
           <MentionMenu listRef={listRef} motion={motion} choices={choices} highlight={highlight} everyoneCount={visible.length}
             onPick={pick} onHighlight={setHighlight} />
           <MentionTextarea inputRef={inputRef} peers={[...visible, ...teams.map((team) => ({ name: team.name }))]} everyone

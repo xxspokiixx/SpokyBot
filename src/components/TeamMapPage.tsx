@@ -260,6 +260,9 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   );
 }
 
+/** How long a card acknowledges a message sent from the map; its border fades within this. */
+const SENT_HIGHLIGHT_MS = 1_400;
+
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
@@ -290,8 +293,15 @@ export function TeamMapPage() {
   const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
   const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
-  const stage = useRef<HTMLDivElement>(null);
   const [taggedBotIds, setTaggedBotIds] = useState<string[]>([]);
+  const [sent, setSent] = useState<{ botIds: string[]; key: number } | null>(null);
+  const sentTimer = useRef<number | undefined>(undefined);
+  const acknowledgeSent = useCallback((botIds: string[]) => {
+    window.clearTimeout(sentTimer.current);
+    setSent((previous) => ({ botIds, key: (previous?.key ?? 0) + 1 }));
+    sentTimer.current = window.setTimeout(() => setSent(null), SENT_HIGHLIGHT_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(sentTimer.current), []);
   const composerTeams = useMemo(() => sections.map((section) => ({ key: section.key, name: section.name, count: section.chiefs.length + section.members.length })), [sections]);
 
   const refresh = useCallback(async () => {
@@ -373,8 +383,8 @@ export function TeamMapPage() {
         <button aria-label={t("common.close")} className="rounded p-1 hover:bg-danger/10" onClick={() => { setError(null); setRefreshError(null); }}><X size={14} /></button>
       </div>}
       <div className="relative flex min-h-0 flex-1">
-      <div ref={stage} className="relative flex min-h-0 min-w-0 flex-1">
-      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove} taggedBotIds={taggedBotIds} bottomInset={bots.length ? 96 : 0}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
         computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}
@@ -387,7 +397,7 @@ export function TeamMapPage() {
         onEditTeam={(section, rename) => setTeamEditor({ section, rename })}
         onDeleteTeam={setDeletingTeam}
         isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />
-      {bots.length > 0 && <MapComposer stage={stage} bots={bots} teams={composerTeams} onTagged={setTaggedBotIds} />}
+      {bots.length > 0 && <MapComposer bots={bots} teams={composerTeams} onTagged={setTaggedBotIds} onSent={acknowledgeSent} />}
       </div>
       {!remoteClient && <CanvasComputers open={computersOpen} createRequest={createComputerRequest} drop={computerDrop} sections={sections}
         onClose={() => setComputersOpen(false)} onDropHandled={clearComputerDrop} onChange={setComputers} />}

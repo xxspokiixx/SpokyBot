@@ -14,7 +14,7 @@ const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.e
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(binary);
 if (!enabled) console.info("skipping Team map computers UI e2e: set OMB_UI_E2E=1 to install the pinned browser");
 
-type Info = { ui: string; url: string; dataDir: string; logPath: string; boatFixtureApi: string; botIds: string[] };
+type Info = { ui: string; url: string; dataDir: string; logPath: string; boatFixtureApi: string; botId: string; botIds: string[] };
 type Receipts = { calls: Array<{ method: string; path: string }>; shots: Record<string, number>; boats: Array<{ id: string; state: string }> };
 
 (enabled ? it : it.skip)("shows every bot's computer live on the Team map within the frame budget, and never wakes one", async () => {
@@ -104,7 +104,11 @@ type Receipts = { calls: Array<{ method: string; path: string }>; shots: Record<
     await ui("type", "--name", "Message bots on the map", "--text", "@Jonah and @Pepper please report in");
     await expect.poll(sendButton).toBe(false);
     expect(await snapshot()).toContain("Goes to 2 tagged bots");
+    // On Send only the tagged cards acknowledge it, with a border that fades.
+    const acknowledged = () => evaluate("[...document.querySelectorAll('[data-sent-highlight]')].map(node => node.closest('article')?.querySelector('[data-bot-id]')?.dataset.botId).sort()");
     await ui("press", "--keys", "Enter");
+    await expect.poll(acknowledged, { timeout: 1_300, interval: 50 }).toEqual([fixture.botIds[3], fixture.botId].sort());
+    await expect.poll(acknowledged, { timeout: 5_000 }).toEqual([]);
     await expect.poll(async () => (await said("@Jonah and @Pepper please report in"))).toMatchObject({ Jonah: 1, Pepper: 1 });
     const counts = await said("@Jonah and @Pepper please report in");
     expect(Object.entries(counts).filter(([, count]) => count > 0).map(([name]) => name).sort()).toEqual(["Jonah", "Pepper"]);

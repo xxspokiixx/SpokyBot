@@ -1436,7 +1436,6 @@
   "sidebar.preview.waiting": "Waiting for you…",
   "sidebar.preview.waitingOnTeammate": "Waiting on a teammate…",
   "sidebar.preview.working": "Working…",
-  "sidebar.preview.screenFrame": "Screen frame",
   "sidebar.preview.botWorking": "{name} is working…",
   "sidebar.preview.botWorkingQueued": "{name} is working… · {count} queued",
   "sidebar.preview.aBot": "A bot",

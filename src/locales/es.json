@@ -1379,7 +1379,6 @@
   "sidebar.preview.waiting": "Esperándote…",
   "sidebar.preview.waitingOnTeammate": "Esperando a un compañero…",
   "sidebar.preview.working": "Trabajando…",
-  "sidebar.preview.screenFrame": "Captura de pantalla",
   "sidebar.preview.botWorking": "{name} está trabajando…",
   "sidebar.preview.botWorkingQueued": "{name} está trabajando… · {count} en cola",
   "sidebar.preview.aBot": "Un bot",
