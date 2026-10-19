@@ -2819,6 +2819,7 @@
   "keys.configured": "Configured",
   "keys.includedWithCloudPro": "Included with your Cloud plan",
   "keys.testAuthenticated": "API key authenticated. Chat not tested.",
+  "keys.testFreeTier": "Free account: bots will use free models (marked \"free\" in the model picker).",
   "keys.testCatalog": "Model catalog reachable: {models}. Authentication and chat not verified.",
   "keys.testCatalogNoModels": "Model catalog reachable. Authentication and chat not verified.",
   "keys.testDraft": "Unsaved key — save it to use it.",
