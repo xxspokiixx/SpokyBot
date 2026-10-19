@@ -24,12 +24,12 @@ export interface CloudSendSummary { v: 1; appVersion: string; items: CloudSendIt
 export interface CloudSendSources {
   appVersion: string;
   bots(): readonly BotRecord[];
-  /** Someone has written in this conversation, or it is longer than a greeting. */
-  chatted(threadId: string): boolean;
+  /** The conversation holds only the greeting a new bot starts with, still under this name. */
+  greetingOnly(threadId: string, name: string): boolean;
   skills(bot: BotRecord): ReadonlyArray<{ name: string; description?: string; sha256: string; enabled: boolean }>;
   /** The stored picture's bytes, or null when it is gone. */
   picture(avatarUrl: string): Uint8Array | null;
-  logins(): ReadonlyArray<{ id: string; site: string; hosts: readonly string[]; username: string; updatedAt: number }>;
+  logins(): ReadonlyArray<{ id: string; site: string; hosts: readonly string[]; exactHost: boolean; username: string; updatedAt: number }>;
   onePassword(): { connectedAt: number; grants: Record<string, LoginBots> } | null;
   settings(): { profile?: { name?: string; email?: string; aboutMe?: string }; language?: string };
 }
@@ -74,16 +74,17 @@ export function botParts(bot: BotRecord, picture: (avatarUrl: string) => Uint8Ar
   return parts;
 }
 
-/** A bot nobody has used yet (a fresh install's starter): left out, so it never lands beside My Cloud's own starter. */
-export function unused(bot: BotRecord, skills: number, chatted: (threadId: string) => boolean): boolean {
-  return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && !chatted(bot.threadId);
+/** A bot nobody has touched since it was made (a fresh install's starter): left out, so it never lands beside My Cloud's
+ * own starter. A bot sent from another computer arrives without a greeting, so it never reads as unused. */
+export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: string, name: string) => boolean): boolean {
+  return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && greetingOnly(bot.threadId, bot.name);
 }
 
 export function cloudSendSummary(sources: CloudSendSources): CloudSendSummary {
   const items: CloudSendItem[] = [];
   for (const bot of sources.bots()) {
     const skills = sources.skills(bot);
-    if (unused(bot, skills.length, sources.chatted)) continue;
+    if (unused(bot, skills.length, sources.greetingOnly)) continue;
     items.push({ key: itemKey.bot(bot.id), kind: "bot", label: bot.name, id: bot.id, parts: botParts(bot, sources.picture) });
     for (const skill of skills) {
       items.push({ key: itemKey.skill(bot.id, skill.name), kind: "skill", label: skill.name, id: skill.name, bot: bot.id,
@@ -91,7 +92,7 @@ export function cloudSendSummary(sources: CloudSendSources): CloudSendSummary {
     }
   }
   for (const login of sources.logins()) {
-    items.push({ key: itemKey.login(login.site, login.username), kind: "login", label: login.hosts[0] ?? login.site, detail: login.username, id: login.id,
+    items.push({ key: itemKey.login(login.site, login.username, login.exactHost ? login.hosts[0] : undefined), kind: "login", label: login.hosts[0] ?? login.site, detail: login.username, id: login.id,
       parts: { saved: partHash(login.updatedAt) } });
   }
   const onePassword = sources.onePassword();

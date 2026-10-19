@@ -40,7 +40,7 @@ export declare const EMPTY: "-";
 export declare const itemKey: Readonly<{
   bot(id: string): string;
   skill(botId: string, name: string): string;
-  login(site: string, username: string): string;
+  login(site: string, username: string, exactHost?: string): string;
   onePassword(): string;
   setting(name: string): string;
 }>;

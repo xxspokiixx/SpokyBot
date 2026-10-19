@@ -178,8 +178,9 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     return publish();
   }
 
+  /** One send at a time; one asked while another runs waits for it, then runs as it was asked. */
   async function send({ keys = null, force = [], reason = "button" } = {}) {
-    if (running) return running.promise;
+    while (running) await running.promise.catch(() => {});
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
     const job = { reason, promise: null };
@@ -347,13 +348,25 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (!skill) throw new CloudSendError("gone", "This skill is no longer on this computer.");
     const text = await localJson(`/api/bots/${botId}/skills/${name}`);
     if (typeof text?.text !== "string") throw new CloudSendError("local", "The skill could not be read on this computer.");
-    if (replace) await ctx.session.call("DELETE", `/api/bots/${botId}/skills/${name}`);
-    const added = await ctx.session.call("POST", `/api/bots/${botId}/skill-template`, {
-      name, description: typeof skill.description === "string" ? skill.description.slice(0, 1024) : "", warnings: [],
-      source: typeof skill.source === "string" && skill.source.trim() ? skill.source.slice(0, 2000) : "this computer",
-      text: text.text, enabled: skill.enabled === true,
+    const install = (from, body) => ctx.session.call("POST", `/api/bots/${botId}/skill-template`, {
+      name, description: typeof from.description === "string" ? from.description.slice(0, 1024) : "", warnings: [],
+      source: typeof from.source === "string" && from.source.trim() ? from.source.slice(0, 2000) : "this computer",
+      text: body, enabled: from.enabled === true,
     });
-    if (!added.ok) throw new CloudSendError("refused", refusal(added, "My Cloud could not add this skill."));
+    let previous = null;
+    if (replace) {
+      const listed = await ctx.session.call("GET", `/api/bots/${botId}/skills`);
+      const own = await ctx.session.call("GET", `/api/bots/${botId}/skills/${name}`);
+      const entry = Array.isArray(listed.body?.skills) ? listed.body.skills.find((candidate) => candidate?.name === name) : null;
+      if (!own.ok || typeof own.body?.text !== "string" || !entry) throw new CloudSendError("refused", refusal(own, "My Cloud's copy of this skill could not be read, so it was left as it is."));
+      previous = { entry, text: own.body.text };
+      const removed = await ctx.session.call("DELETE", `/api/bots/${botId}/skills/${name}`);
+      if (!removed.ok) throw new CloudSendError("refused", refusal(removed, "My Cloud could not replace this skill."));
+    }
+    const added = await install(skill, text.text);
+    if (added.ok) return;
+    if (previous) await install(previous.entry, previous.text).catch(() => null);
+    throw new CloudSendError("refused", refusal(added, "My Cloud could not add this skill."));
   }
 
   async function sendSkill(ctx, row) {

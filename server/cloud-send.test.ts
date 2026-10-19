@@ -13,10 +13,10 @@ const bot = (extra: Partial<BotRecord> = {}): BotRecord => ({
 const sources = (extra: Partial<CloudSendSources> = {}): CloudSendSources => ({
   appVersion: "0.1.117",
   bots: () => [bot()],
-  chatted: () => true,
+  greetingOnly: () => false,
   skills: () => [{ name: "weekly-summary", sha256: "a".repeat(64), enabled: true }],
   picture: () => new Uint8Array([1, 2, 3]),
-  logins: () => [{ id: "l1", site: "example.test", hosts: ["accounts.example.test"], username: "Alice", updatedAt: 5 }],
+  logins: () => [{ id: "l1", site: "example.test", hosts: ["accounts.example.test"], exactHost: false, username: "Alice", updatedAt: 5 }],
   onePassword: () => ({ connectedAt: 7, grants: { v1: ["ember-0001"] } }),
   settings: () => ({ profile: { name: "Amit", aboutMe: "Solo developer." }, language: undefined }),
   ...extra,
@@ -50,13 +50,22 @@ describe("what a server reports for Send to My Cloud", () => {
     for (const secret of ["Be brief.", "Solo developer.", "Amit", "AQID"]) expect(text).not.toContain(secret);
   });
 
-  it("leaves out a bot nobody has used yet, so a fresh install's starter never lands beside My Cloud's own", () => {
+  it("leaves out a bot nobody has touched since it was made, so a fresh install's starter never lands beside My Cloud's own", () => {
     const starter = bot({ soul: "" });
-    expect(unused(starter, 0, () => false)).toBe(true);
-    expect(unused(starter, 0, () => true)).toBe(false);
-    expect(unused(starter, 1, () => false)).toBe(false);
-    expect(unused(bot({ soul: "", title: "Research" }), 0, () => false)).toBe(false);
-    expect(cloudSendSummary(sources({ bots: () => [starter], chatted: () => false, skills: () => [] })).items.some((item) => item.kind === "bot")).toBe(false);
+    expect(unused(starter, 0, () => true)).toBe(true);
+    expect(unused(starter, 0, () => false)).toBe(false);
+    expect(unused(starter, 1, () => true)).toBe(false);
+    expect(unused(bot({ soul: "", title: "Research" }), 0, () => true)).toBe(false);
+    expect(cloudSendSummary(sources({ bots: () => [starter], greetingOnly: () => true, skills: () => [] })).items.some((item) => item.kind === "bot")).toBe(false);
+  });
+
+  it("keys a login kept to one exact host apart from another account on the same site", () => {
+    const summary = cloudSendSummary(sources({ logins: () => [
+      { id: "l1", site: "example.test", hosts: ["a.example.test"], exactHost: true, username: "ops", updatedAt: 1 },
+      { id: "l2", site: "example.test", hosts: ["b.example.test"], exactHost: true, username: "ops", updatedAt: 1 },
+    ] }));
+    expect(summary.items.filter((item) => item.kind === "login").map((item) => item.key))
+      .toEqual(["login:example.test|ops|a.example.test", "login:example.test|ops|b.example.test"]);
   });
 });
 

@@ -54,7 +54,7 @@ export function loginsView(snapshot) {
   if (snapshot.cloud !== "ready") return { cloud: { reachable: false } };
   const onCloud = new Set(["on-both", "to-update", "differs"]);
   const there = [...snapshot.rows.filter((row) => row.kind === "login" && onCloud.has(row.state)), ...snapshot.cloudOnly.filter((row) => row.kind === "login")];
-  const logins = there.map((row) => /^login:([^|]+)\|(.*)$/u.exec(row.key)).filter(Boolean).map((match) => ({ site: match[1], username: match[2] }));
+  const logins = there.map((row) => ({ site: /^login:([^|]+)\|/u.exec(row.key)?.[1], username: row.detail ?? "" })).filter((login) => login.site);
   const onePassword = snapshot.rows.some((row) => row.kind === "1password" && onCloud.has(row.state)) || snapshot.cloudOnly.some((row) => row.kind === "1password");
   return { cloud: { reachable: true, logins, onePassword: { connected: onePassword, vaults: [] } } };
 }

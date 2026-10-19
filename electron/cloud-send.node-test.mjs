@@ -133,7 +133,7 @@ test("a send adds a bot with its own id over one session, says what My Cloud ref
 test("My Cloud's page is told names of bots and counts, with an opaque signature; Logins reads My Cloud's logins from the same comparison", async () => {
   const sides = fakeSides({
     localItems: [bot("ember", { soul: "s" }), { key: itemKey.login("bank.example", "amit"), kind: "login", label: "bank.example", id: "l1", parts: { saved: "1" } }],
-    cloudItems: [{ key: itemKey.login("crm.example", "ops"), kind: "login", label: "crm.example", parts: { saved: "2" } }, { key: "1password", kind: "1password", label: "1Password", parts: { token: "x" } }],
+    cloudItems: [{ key: itemKey.login("crm.example", "ops"), kind: "login", label: "crm.example", detail: "ops", parts: { saved: "2" } }, { key: "1password", kind: "1password", label: "1Password", parts: { token: "x" } }],
   });
   const snapshot = await createCloudSend(sides.deps).compare();
   const notice = sendNotice(snapshot);
@@ -247,4 +247,54 @@ test("Also use on My Cloud says plainly when My Cloud is too old to receive a lo
   });
   assert.deepEqual(await handlers.get("cloud-logins:state")({}), { cloud: { reachable: false } });
   await assert.rejects(handlers.get("cloud-logins:send")({}, { kind: "1password" }), /My Cloud needs an update/);
+});
+
+test("replacing a skill whose text changed here puts My Cloud's copy back when the new one is refused", async () => {
+  const skill = { key: itemKey.skill("ember", "notes"), kind: "skill", label: "notes", id: "notes", bot: "ember", parts: { text: "new", on: "on" } };
+  const calls = [];
+  const reply = (status, body) => ({ status, ok: status < 400, body });
+  let installs = 0;
+  const session = {
+    call: async (method, route, body) => {
+      calls.push(`${method} ${route}${body?.text ? ` ${body.text}` : ""}`);
+      if (route === "/api/cloud-send") return reply(200, summary([bot("ember", { soul: "s" }), { ...skill, parts: { text: "old", on: "on" } }]));
+      if (method === "GET" && route === "/api/bots/ember/skills") return reply(200, { skills: [{ name: "notes", description: "Notes", source: "cloud", enabled: true }] });
+      if (method === "GET" && route === "/api/bots/ember/skills/notes") return reply(200, { text: "OLD" });
+      if (method === "POST" && route.endsWith("/skill-template")) return ++installs === 1 ? reply(422, { error: "SKILL.md is invalid" }) : reply(201, {});
+      return reply(200, {});
+    },
+    upload: async () => reply(201, {}), close: async () => {},
+  };
+  const localJson = (value) => new Response(JSON.stringify(value), { status: 200 });
+  const send = createCloudSend({
+    local: async (route) => route === "/api/cloud-send" ? localJson(summary([bot("ember", { soul: "s" }), skill]))
+      : route === "/api/bots/ember/skills" ? localJson({ skills: [{ name: "notes", description: "Notes", source: "here", enabled: true }] })
+        : localJson({ text: "NEW" }),
+    cloud: { origin: () => CLOUD, asleep: () => false, read: async () => localJson(summary([])), open: async () => session },
+    handoff: async () => ({}), store: { read: () => ({ clouds: { [CLOUD]: { sent: { [skill.key]: { text: ["old", "old"], on: ["on", "on"] } } } } }), write() {} },
+    setTimer: () => 0, clearTimer() {},
+  });
+  const outcome = await send.send();
+  assert.equal(outcome.result.failed[0]?.error, "My Cloud said: SKILL.md is invalid");
+  assert.deepEqual(calls.filter((call) => /skill/.test(call)), [
+    "GET /api/bots/ember/skills", "GET /api/bots/ember/skills/notes", "DELETE /api/bots/ember/skills/notes",
+    "POST /api/bots/ember/skill-template NEW", "POST /api/bots/ember/skill-template OLD",
+  ]);
+});
+
+test("a send asked while another runs waits for it, then runs as it was asked", async () => {
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" }), { key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }] });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const open = sides.deps.cloud.open;
+  let opened = 0;
+  sides.deps.cloud.open = async () => { if (opened++ === 0) await gate; return open(); };
+  const send = createCloudSend(sides.deps);
+  const first = send.send({ keys: ["bot:ember"] });
+  const second = send.send({ keys: ["1password"], force: ["1password"] });
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(opened, 2);
+  assert.deepEqual([a.result.bots, b.result.bots], [["Ember"], []]);
+  assert.deepEqual(b.result.failed.map((entry) => entry.key), ["1password"], "the second send carried its own keys");
 });

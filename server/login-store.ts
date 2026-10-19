@@ -160,8 +160,8 @@ export class LoginStore {
   }
 
   /** When each login last changed, for Send to My Cloud's comparison: never a secret. */
-  changes(): Array<{ id: string; site: string; hosts: string[]; username: string; updatedAt: number }> {
-    return this.read().logins.map(({ id, site, hosts, username, updatedAt }) => ({ id, site, hosts, username, updatedAt }));
+  changes(): Array<{ id: string; site: string; hosts: string[]; exactHost: boolean; username: string; updatedAt: number }> {
+    return this.read().logins.map(({ id, site, hosts, exactHost, username, updatedAt }) => ({ id, site, hosts, exactHost, username, updatedAt }));
   }
 
   onePasswordConnectedAt(): number | null {

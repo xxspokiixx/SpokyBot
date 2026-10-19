@@ -29,7 +29,8 @@ const CONTENT_COMPARED = new Set(["bot", "skill", "setting"]);
 export const itemKey = Object.freeze({
   bot: (id) => `bot:${id}`,
   skill: (botId, name) => `skill:${botId}:${name}`,
-  login: (site, username) => `login:${site}|${String(username).toLowerCase()}`,
+  /** A login kept to one exact host is its own account there, so the host is part of its key. */
+  login: (site, username, exactHost) => `login:${site}|${String(username).toLowerCase()}${exactHost ? `|${exactHost}` : ""}`,
   onePassword: () => "1password",
   setting: (name) => `setting:${name}`,
 });

@@ -8,7 +8,7 @@ import type { LoginStore } from "../login-store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" | "bots" | "skills"> {
-  messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string }>; hasMore: boolean };
+  messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
   logins: Pick<LoginStore, "changes" | "onePasswordConnectedAt" | "onePasswordGrants">;
   config(): Pick<AppConfig, "profile" | "language">;
 }
@@ -17,7 +17,10 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
   const sources: CloudSendSources = {
     appVersion: deps.appVersion,
     bots: deps.bots,
-    chatted: (threadId) => { const tail = deps.messagesTail(threadId, 20); return tail.hasMore || tail.messages.some((message) => message.role === "user"); },
+    greetingOnly: (threadId, name) => {
+      const tail = deps.messagesTail(threadId, 2);
+      return !tail.hasMore && tail.messages.length === 1 && tail.messages[0]!.role === "bot" && Boolean(tail.messages[0]!.text?.includes(name));
+    },
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),

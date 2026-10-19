@@ -126,8 +126,8 @@ it("sends this computer's bot, its skill, picture and notes, a login, 1Password 
 
 it("a bot sent to My Cloud keeps its conversation's id, so Bring newer chats adds its chats there", async () => {
   const { local, onCloud } = fx;
+  // Kai has nothing but its chats: My Cloud must still count it as there once it arrives without them.
   const kai = (await local("POST", "/api/bots", { name: "Kai", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-  await local("PATCH", `/api/bots/${kai.id}`, { soul: "You are Kai." });
   expect((await local("POST", `/api/bots/${kai.id}/messages`, { text: "The Acme deadline is Friday.", threadId: kai.threadId })).status).toBe(202);
   const answered = async () => ((await local("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body?.messages ?? [])
     .some((message: { role: string; kind: string }) => message.role === "bot" && message.kind === "text");
@@ -135,6 +135,7 @@ it("a bot sent to My Cloud keeps its conversation's id, so Bring newer chats add
   for (let tries = 0; !(await answered() && await idle()) && tries < 300; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
   expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(kai.id)] })).result.bots).toEqual(["Kai"]);
   expect((await onCloud("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body?.messages ?? []).toEqual([]);
+  expect(row(await fx.call<CloudSendSnapshot>("cloud-send:refresh", "local"), itemKey.bot(kai.id))?.state).toBe("on-both");
 
   const move = createCloudMove({
     localRequest: (route, init) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": fx.ownerCapability } }),

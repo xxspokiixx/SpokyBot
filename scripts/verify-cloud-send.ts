@@ -4,6 +4,7 @@
 // Run: node --experimental-strip-types scripts/verify-cloud-send.ts
 import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { WELCOME_VERSION } from "../electron/onboarding-record.mjs";
 import { SPOTLIGHTS } from "../src/lib/first-conversation.ts";
@@ -72,7 +73,7 @@ export async function mountCloudSendPages(fx: CloudSendFixture): Promise<{ local
   return { local, cloud };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const token = `ops_fake-verify-${randomBytes(12).toString("hex")}`;
   const fx = await launchCloudSendFixture({ onePasswordToken: token });
   let pages: Awaited<ReturnType<typeof mountCloudSendPages>> | undefined;
