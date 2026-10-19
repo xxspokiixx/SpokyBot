@@ -813,17 +813,12 @@ export async function listManagedVpsComputers(
   if (scanning.length === 0) {
     return { configured: false, available: false, vpsAliases: [], problem: null, instances: [] };
   }
-  const instances: ManagedVpsInventoryInstance[] = [];
-  let available = true;
-  let problem: string | null = null;
-  for (const alias of scanning) {
-    const scan = await scanManagedVpsAlias(alias, owners, runner);
-    if (!scan.available) {
-      available = false;
-      problem = problem ?? scan.problem;
-    }
-    instances.push(...scan.instances);
-  }
+  // Concurrently: one dead host must not delay the others behind its timeouts. Promise.all keeps
+  // alias order, so the aggregate below matches the old serial loop exactly.
+  const scans = await Promise.all(scanning.map((alias) => scanManagedVpsAlias(alias, owners, runner)));
+  const available = scans.every((scan) => scan.available);
+  const problem = scans.find((scan) => !scan.available)?.problem ?? null;
+  const instances = scans.flatMap((scan) => scan.instances);
   instances.sort((left, right) =>
     Number(left.orphaned) - Number(right.orphaned) ||
     (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name) ||

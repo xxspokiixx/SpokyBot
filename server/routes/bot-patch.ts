@@ -11,7 +11,7 @@ import { parseVisibility } from "../bot-visibility.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { CacheKeepWarm } from "../cache-keepwarm.ts";
-import { cloudBackendChangeError, vpsBotAliasChangeError, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
+import { cloudBackendChangeError, vpsBotAliasChangeError, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import { isValidSshAlias, vpsSshAliasForBot, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -365,25 +365,46 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (backendError) return json(res, 409, { error: backendError });
       }
       // Moving a bot to another server is refused while its own computer still lives on the old one.
-      if (body.vpsAlias !== undefined && existingBot && patch.vpsAlias !== existingBot.vpsAlias) {
-        const aliasError = vpsBotAliasChangeError(Boolean(existingBot.busy), activeVpsThreads.has(m[1]));
-        if (aliasError) return json(res, 409, { error: aliasError });
-        const currentAlias = vpsSshAliasForBot(cfg, existingBot);
-        if (currentAlias) {
+      // Resolved hosts, not raw text: pinning a bot to the server it already uses moves nothing.
+      if (body.vpsAlias !== undefined && existingBot &&
+          vpsSshAliasForBot(cfg, { ...existingBot, vpsAlias: patch.vpsAlias as string | undefined }) !== vpsSshAliasForBot(cfg, existingBot)) {
+        // The scan awaits on SSH; a turn can start or another PATCH can land mid-scan, so every attempt
+        // re-reads the bot first and the scan only counts when the re-read after it is unchanged.
+        const VPS_ALIAS_MOVE_ATTEMPTS = 3;
+        for (let attempt = 1; attempt <= VPS_ALIAS_MOVE_ATTEMPTS; attempt++) {
+          const current = store.bot(m[1]);
+          if (!current) return json(res, 404, { error: "no such bot" });
+          // A concurrent PATCH may have already made this move; persisting the same host moves nothing.
+          if (vpsSshAliasForBot(cfg, { ...current, vpsAlias: patch.vpsAlias as string | undefined }) === vpsSshAliasForBot(cfg, current)) break;
+          const aliasError = vpsBotAliasChangeError(Boolean(current.busy), activeVpsThreads.has(m[1]));
+          if (aliasError) return json(res, 409, { error: aliasError });
+          // Primitives, not the record: the store hands out its live object and patchBot mutates it in place.
+          const scannedVpsAlias = current.vpsAlias;
+          const scannedBusy = current.busy;
+          const scannedName = current.name;
+          const currentAlias = vpsSshAliasForBot(cfg, current);
           // Scanned with this bot as the only owner: the guard only ever cares about its own container,
           // and naming the owner keeps a legacy unlabeled container visible to the check.
-          const inventory = await vps.listManagedVpsComputers(
+          const inventory = currentAlias ? await vps.listManagedVpsComputers(
             { vps: { sshAlias: currentAlias } },
-            [{ botId: existingBot.id, name: existingBot.name, inUse: false }],
-          );
+            [{ botId: current.id, name: scannedName, inUse: false }],
+          ) : null;
+          const settled = store.bot(m[1]);
+          if (!settled) return json(res, 404, { error: "no such bot" });
+          if (settled.vpsAlias !== scannedVpsAlias || settled.busy !== scannedBusy || activeVpsThreads.has(m[1])) {
+            if (attempt === VPS_ALIAS_MOVE_ATTEMPTS) return json(res, 409, { error: VPS_BOT_ALIAS_CHANGE_ERROR });
+            continue;
+          }
+          if (!inventory) break;
           if (!inventory.available) {
             return json(res, 503, {
               error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
             });
           }
-          if (inventory.instances.some((instance) => instance.name === vps.vpsContainerName(existingBot.id))) {
+          if (inventory.instances.some((instance) => instance.name === vps.vpsContainerName(current.id))) {
             return json(res, 409, { error: VPS_BOT_ALIAS_RESOURCES_ERROR });
           }
+          break;
         }
       }
       if (body.cwd !== undefined) {

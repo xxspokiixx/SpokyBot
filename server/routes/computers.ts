@@ -246,6 +246,11 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       if (alias !== undefined && !isValidSshAlias(alias)) {
         return json(res, 400, { error: "alias must be a simple SSH config alias" });
       }
+      // An explicit alias may only name a server the inventory scans: anything else would open
+      // docker-over-SSH to an arbitrary host from the user's SSH config.
+      if (alias !== undefined && !vpsAliasesInPlay(cfg, store.bots).includes(alias)) {
+        return json(res, 400, { error: "alias must be the default server or a bot's own SSH alias" });
+      }
       const releaseComputerLifecycle = claimManagedVpsMutation(m[1]);
       try {
         return json(res, 200, await vps.removeManagedVpsComputer(

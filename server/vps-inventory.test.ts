@@ -225,6 +225,30 @@ describe("managed VPS inventory", () => {
     expect(filtered.instances).toEqual([]);
   });
 
+  it("scans aliases concurrently so one slow host cannot stall the others", async () => {
+    // Alpha's first call waits until beta's scan has begun: a serial loop would deadlock here.
+    let betaStarted!: () => void;
+    const betaGate = new Promise<void>((resolve) => {
+      betaStarted = resolve;
+    });
+    const runner: VpsCommandRunner = async (args) => {
+      const alias = String(args[1]).replace("ssh://", "");
+      if (alias === "beta-vps") betaStarted();
+      else await betaGate;
+      return { stdout: "", stderr: "" };
+    };
+
+    const inventory = await Promise.race([
+      listManagedVpsComputers(CONFIG, [OWNER], runner, ["alpha-vps", "beta-vps"]),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("aliases were scanned serially: alpha never overlapped beta")), 5_000).unref?.();
+      }),
+    ]);
+    expect(inventory.available).toBe(true);
+    expect(inventory.vpsAliases).toEqual(["alpha-vps", "beta-vps"]);
+    expect(inventory.instances).toEqual([]);
+  });
+
   it("fails closed for transport errors or unverifiable managed identities", async () => {
     const transport: VpsCommandRunner = async () => {
       throw new Error("ssh connection timed out");

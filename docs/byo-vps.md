@@ -34,7 +34,7 @@ not one that also holds things you would not hand to the agent.
 ## The required SSH config alias
 
 OpenMausBot connects only through a named alias in your `~/.ssh/config` — you type the alias into
-App Settings → Connections, nothing else. Every bot action becomes a `docker exec` over SSH, so the app
+Settings → API keys, nothing else. Every bot action becomes a `docker exec` over SSH, so the app
 supplies connection sharing and fail-fast timeouts itself: it runs each VPS command through its own
 `ssh_config` (under `~/.openmausbot/ssh/`) that includes your file first and fills in `ControlMaster`,
 `ControlPersist`, keepalives and a connect timeout wherever your alias leaves them unset. Anything your
