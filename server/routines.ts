@@ -7,6 +7,7 @@ import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { activeRunsOf, nextDueOf, wakeHoldOf } from "./routine-due.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence, MAX_DATE_MS } from "./routine-intervals.ts";
@@ -245,6 +246,8 @@ export interface RoutineManagerOptions {
   /** Work this thread handed to another bot is still open, so its wait is not only on the person. */
   handedOffWorkLive?: (threadId: string) => boolean;
   launchId?: string;
+  /** A Cloud home woken from a sleep it was stopped for (server/cloud-power.ts): not a startup, so no "run on startup". */
+  skipStartupRuns?: boolean;
 }
 
 const CATCH_UP_MS = 12 * 60 * 60_000;
@@ -582,15 +585,10 @@ export class RoutineManager {
     return true;
   }
 
-  wakeHold(horizonMs = WAKE_HORIZON_MS): { hold: boolean; reason?: "running" | "due"; at?: number } {
-    const now = this.now();
-    const startsLater = (run: RoutineRun) => run.status === "queued" && (run.retryAt ?? 0) > now;
-    if (this.runs.some((run) => ["queued", "running", "waiting"].includes(run.status) && !startsLater(run))) return { hold: true, reason: "running" };
-    const due = [...this.routines.filter((routine) => routine.enabled).map((routine) => routine.nextRunAt), ...this.runs.filter(startsLater).map((run) => run.retryAt)]
-      .filter((at): at is number => at != null && at <= now + horizonMs)
-      .sort((a, b) => a - b)[0];
-    return due === undefined ? { hold: false } : { hold: true, reason: "due", at: due };
-  }
+  wakeHold(horizonMs = WAKE_HORIZON_MS) { return wakeHoldOf(this.routines, this.runs, this.now(), horizonMs); }
+  /** A Cloud home's sleep check (server/routine-due.ts). */
+  hasActiveRuns(): boolean { return activeRunsOf(this.runs, this.now()); }
+  nextDueAt(): number | null { return nextDueOf(this.routines, this.runs, this.now()); }
 
   listRuns(from?: number, to?: number): RoutineRun[] {
     return this.runs
@@ -1096,6 +1094,7 @@ export class RoutineManager {
   }
 
   private queueStartupRuns(): boolean {
+    if (this.options.skipStartupRuns) return true;
     const launchId = this.options.launchId;
     if (launchId !== undefined && launchId === this.startupLaunchId) return true;
     const now = this.now();

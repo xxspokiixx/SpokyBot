@@ -1,7 +1,8 @@
 # OMB Cloud: the home machine
 
 OMB Cloud (the Personal, Pro and Max plans) gives one person an always-on
-OpenMausBot server of their own. The plans differ in machine size, disk and
+OpenMausBot server of their own (a plan may instead sleep when idle: see
+[Sleeping homes](#sleeping-homes-the-power-read-and-the-sleep-handshake)). The plans differ in machine size, disk and
 included allowances; everything on this page applies to all of them. Each
 customer gets one Fly app with one `home` machine that is always on, a volume
 at `/data`, and TLS at `https://<app>.fly.dev`. The desktop app, the phone and
@@ -1297,6 +1298,70 @@ updates; a cloud computer that fails a turn arrives as its place's code
 
 A home from before this answers `404`; the Admin then reads `/api/health`
 and shows its health as Unknown.
+
+## Sleeping homes: the power read and the sleep handshake
+
+A plan may let its home **sleep when idle**: the Admin suspends the machine
+(Fly keeps its memory, and the first request wakes it in under a second;
+measured 0.72 s) or, when Fly can't suspend it, stops it (about 20 s to wake).
+The home never stops itself. On every plan that doesn't sleep the Admin never
+calls these routes, and nothing below changes how a home behaves.
+
+**What idle means (`server/cloud-power.ts`).** All of:
+
+- no turn running (bots, rooms, delegated work), no routine run queued to start
+  now or running (one waiting on a person doesn't count: their answer wakes
+  the home), no Live call, no cloud computer on or starting (its idle timer
+  lives in this process), no maintenance (backup or restore, Move to Cloud, an
+  engine or browser install, a provider sign-in) and no request in progress;
+- nobody used the home for 10 minutes (the Admin may ask for another window).
+  A use is an authenticated request, except the event stream, `/api/health`,
+  `/api/sync/…`, `/api/shared-computers/…` and requests the page marks
+  `x-omb-background: 1` (its own polls). A request with no mark counts, so an
+  older client can only keep a home awake, never let it sleep under someone;
+- work ended 2 minutes ago, the home has been awake 2 minutes, and the next
+  scheduled run is at least 5 minutes away.
+
+**`GET /api/cloud/power[?idleMinutes=N]`**, signed like the health read
+(`v1\n<timestamp>\n<nonce>\nGET\n<path and query>\n<hash of the empty body>`),
+its own nonces. `200`:
+
+```json
+{ "v": 1, "at": 1792355000000, "bootedAt": 1792350000000, "wokeAt": 1792354000000,
+  "idle": false, "busy": ["recent-activity"], "lastActivityAt": 1792354900000, "lastWorkAt": null,
+  "nextDueAt": 1792358600000, "sleeping": false }
+```
+
+`busy` holds fixed codes only: `turn`, `run`, `live-call`, `computer`,
+`maintenance`, `recent-activity`, `recent-work`, `just-woke`, `due-soon`.
+`nextDueAt` is the earliest enabled routine's next run or queued run's retry:
+the Admin starts a sleeping home a minute before it. `wokeAt` is the boot, or
+the last resume (noticed as a jump of the clock).
+
+**`POST /api/cloud/power/sleep`**, signed over its JSON body
+`{"v":1,"idleMinutes":10}`. `409 {"ok":false,"busy":[…]}` while not idle;
+`200 {"ok":true,"nextDueAt":…}` once the home agreed. From then on, until a
+resume, someone's use, or 120 s (a sleep the Admin never carried out):
+
+- the event stream gets `{"kind":"power","state":"sleeping"}`. The page closes
+  its stream, stops its polls, shows "My Cloud is asleep" and stays quiet until
+  the person clicks, types or focuses it, which wakes the home
+  (`src/lib/cloud-power.ts`): Fly wakes a machine for **any** inbound request,
+  so a page that kept polling would keep it awake;
+- held `GET /api/sync/changes` and `POST /api/shared-computers/<id>/poll`
+  answer `503 {"error":"asleep"}` with `x-omb-cloud-power: asleep`, and new
+  ones get the same, so the desktop's Files sync and lending pause instead of
+  waking it;
+- `cloud-sleep.json` in the data folder marks the sleep. A boot that finds it
+  (the machine was stopped, not suspended) is a wake, not a startup: "run on
+  startup" routines don't fire. Any other boot removes nothing and runs them as
+  before.
+
+**The edge on a cold wake.** `OMB_CLOUD_EDGE_HOLD` (whole seconds, at most
+120, such as `30s`; unset: `0s`, today's edge) makes Caddy hold a request while
+the server starts instead of answering 502, so a webhook or the app's first
+request after a stop is answered late rather than refused. The Admin sets it
+only for a plan that sleeps.
 
 ## What the desktop reads from the Admin
 

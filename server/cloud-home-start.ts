@@ -38,6 +38,12 @@ export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
 }
 
+/** Caddy duration for OMB_CLOUD_EDGE_HOLD: whole seconds, at most 120; anything else is no hold (0s). */
+export function edgeHold(raw: string | undefined): string {
+  const match = /^(\d{1,3})s$/.exec(raw?.trim() ?? "");
+  return match && Number(match[1]) <= 120 ? `${Number(match[1])}s` : "0s";
+}
+
 export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.ProcessEnv, home: string) {
   const offered = withoutCloudSecrets(withoutIgnoredCloudKeys(env));
   const allowed = Object.fromEntries(Object.entries(offered).filter(([name, value]) => value !== undefined && serverEnvironmentAllowed(name)));
@@ -52,6 +58,8 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
     PATH: env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: "/tmp/omb-edge",
     XDG_DATA_HOME: "/tmp/omb-edge/data", XDG_CONFIG_HOME: "/tmp/omb-edge/config",
     OMB_CLOUD_PUBLIC_HOST: cloudHomeHost(config),
+    // A plan whose home sleeps: requests wait this long for the server while it starts (deploy/fly/Caddyfile). Unset: 0s.
+    OMB_CLOUD_EDGE_HOLD: edgeHold(env.OMB_CLOUD_EDGE_HOLD),
   };
   return { server, edge, secrets: cloudHomeSecrets(env), dropped };
 }

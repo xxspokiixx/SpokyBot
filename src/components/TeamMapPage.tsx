@@ -304,9 +304,10 @@ export function TeamMapPage() {
   useEffect(() => () => window.clearTimeout(sentTimer.current), []);
   const composerTeams = useMemo(() => sections.map((section) => ({ key: section.key, name: section.name, count: section.chiefs.length + section.members.length })), [sections]);
 
-  const refresh = useCallback(async () => {
+  // `background`: the 3-second poll, which never wakes a Cloud home that went to sleep.
+  const refresh = useCallback(async (background = false) => {
     try {
-      setSnapshot(await api("/api/team-map"));
+      setSnapshot(await api("/api/team-map", background ? { background } : undefined));
       setRefreshError(null);
     } catch (requestError) {
       setRefreshError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -316,7 +317,7 @@ export function TeamMapPage() {
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") void refresh(true);
     }, 3_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
