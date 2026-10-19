@@ -948,8 +948,24 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   ten minutes (which keeps both stall checks quiet), and the turn starts by
   itself. Stop ends the wait. A thread whose engine is still running never
   waits, and the only task is never held back.
+- **OpenCode threads share a process.** Threads whose OpenCode would start
+  the same way (same login, approval level and settings) run as sessions of one
+  `opencode acp` process, up to six at a time and twelve over its life
+  (`server/drivers/acp/host.ts`). Five sessions measured 811 MB in one process
+  against 2,381 MB in five. A session joining a running process waits only for
+  a session's worth of memory (200 MB). OpenCode 1.19.3 keeps a closed
+  session's memory and MCP servers until its process exits, so a process
+  holding closed sessions ends once none of its sessions has run a turn for a
+  minute, and each thread's next turn loads its session in a new process.
 - **An engine nobody is using gives way first.** Engines stay up between
   turns; one that is idle is stopped to make room before anything waits.
+- **Idle engines stay up only for the conversation in front of a person**
+  (`engineIdleMs` in `server/drivers/session-idle.ts`). A thread a person
+  wrote in from any channel, or opened or read in the app, in the last 30
+  minutes keeps its engine the configured 10 minutes after a turn, scaled by
+  the memory left: all of it with half the machine free above the tenth, down
+  to a tenth of it as memory runs out. Any other thread (a teammate's
+  delegated work, a routine) keeps its engine 30 seconds.
 - **About to run out, the home stops its newest engine** rather than freeze:
   every 2 s while engines run, when free memory falls under 4% (160 MB at
   least), or the memory stall reaches 40% below the tenth, it stops an idle
@@ -959,6 +975,13 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   start, are born with `oom_score_adj` 1000; Chrome scores its tabs 200 and
   up; the server is -800 and Caddy -900, so the health check is the last to
   go.
+- **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
+  browser, computer, Data and HighLevel servers are endpoints of this server
+  (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
+  turn's capability in the Authorization header, instead of a Node proxy
+  process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
+  behind a tool selection keeps its stdio gate; the person's own servers are
+  unchanged.
 - **The reason is said.** A turn whose engine was stopped for memory, by the
   home or by the kernel (a SIGKILL while `/proc/vmstat`'s `oom_kill` rose),
   fails with "This Cloud ran out of memory while N tasks ran at once, so this

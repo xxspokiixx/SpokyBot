@@ -11,6 +11,9 @@ const PAGE_BYTES = 4096;
  * Cloud home before its first prompt and 623 MB with six stdio MCP servers, and about 466 MB while working. */
 export const ENGINE_DEFAULT_BYTES = 700 * MB;
 const ENGINE_MIN_BYTES = 300 * MB, ENGINE_MAX_BYTES = 1500 * MB;
+/** One more session in a running shared process: OpenCode 1.19.3 grew about 110 MB a session with three stdio MCP
+ * servers after a prompt; more MCP servers cost more. */
+export const SESSION_BYTES = 200 * MB;
 /** A new engine's share is held back this long while it starts and grows; it is measured once it has run this long. */
 const RESERVE_MS = 90_000, SETTLED_MS = 30_000;
 const TICK_MS = 2_000, RELIEF_COOLDOWN_MS = 15_000, NOTICE_REPEAT_MS = 10 * 60_000, STOP_GRACE_MS = 5_000;
@@ -61,7 +64,8 @@ export const memoryWaitText = (count: number) => `Waiting for memory: ${running(
 export const memoryStillWaitingText = (count: number) => `Still waiting for memory: ${running(count)}.`;
 export const memoryStallText = (cause: string, count: number) => `${cause}. This Cloud ran out of memory while ${tasks(count)} ran at once (not a problem with the AI provider)`;
 
-interface Engine { child: ChildProcess; threadId: string; startedAt: number; stopping: boolean }
+/** An engine process and the threads whose sessions it runs: one, or several when the driver shares processes. */
+interface Engine { child: ChildProcess; threads: Set<string>; startedAt: number; stopping: boolean }
 interface Waiter { wake: () => void }
 
 export interface EngineMemoryOptions {
@@ -85,8 +89,8 @@ export class EngineMemory {
   private readonly context = new AsyncLocalStorage<string>();
   private readonly engines = new Map<number, Engine>();
   private readonly active = new Set<string>();
-  /** Threads admitted in the last RESERVE_MS, by when. */
-  private readonly reserved = new Map<string, number>();
+  /** Threads admitted in the last RESERVE_MS: when, and what they were let in for. */
+  private readonly reserved = new Map<string, { at: number; start: "process" | "session" }>();
   private readonly queue: Waiter[] = [];
   /** Threads whose engine was stopped for memory: how many tasks ran then. */
   private readonly stops = new Map<string, number>();
@@ -115,18 +119,27 @@ export class EngineMemory {
   track(child: ChildProcess): void {
     const threadId = this.context.getStore();
     if (!this.enabled || !child.pid || threadId === undefined) return;
-    const pid = child.pid, engine: Engine = { child, threadId, startedAt: this.now(), stopping: false };
+    const pid = child.pid, engine: Engine = { child, threads: new Set([threadId]), startedAt: this.now(), stopping: false };
     this.engines.set(pid, engine);
     this.oomKills ??= this.read()?.oomKills ?? null;
     child.once("exit", (_code, signal) => this.exited(pid, engine, signal));
     this.arm();
   }
 
+  /** A thread's session now runs in this already tracked engine process. */
+  attach(child: ChildProcess, threadId: string): void {
+    if (child.pid) this.engines.get(child.pid)?.threads.add(threadId);
+  }
+
+  detach(child: ChildProcess, threadId: string): void {
+    if (child.pid) this.engines.get(child.pid)?.threads.delete(threadId);
+  }
+
   turnStarted(threadId: string): void { if (this.enabled) this.active.add(threadId); }
 
   /** This thread's engine process is still running (an engine keeps one between turns), so its turn starts no new one. */
   hasEngine(threadId: string): boolean {
-    for (const engine of this.engines.values()) if (engine.threadId === threadId && !engine.stopping) return true;
+    for (const engine of this.engines.values()) if (engine.threads.has(threadId) && !engine.stopping) return true;
     return false;
   }
 
@@ -141,15 +154,30 @@ export class EngineMemory {
 
   /** Tasks running on engines here now, or about to (admitted, not yet started); `also` counts one more thread. */
   busy(also?: string): number {
-    const threads = new Set(this.reserved.keys());
+    const threads = this.busyThreads();
     if (also !== undefined) threads.add(also);
-    for (const engine of this.engines.values()) if (!engine.stopping && this.active.has(engine.threadId)) threads.add(engine.threadId);
     return threads.size;
   }
 
-  /** Resolves once a new engine for this thread fits; `notify` tells the person when it has to wait. False when aborted. */
-  async admit(threadId: string, abort: AbortSignal, notify: (text: string) => void): Promise<boolean> {
+  private othersBusy(threadId: string): number {
+    const threads = this.busyThreads();
+    threads.delete(threadId);
+    return threads.size;
+  }
+
+  private busyThreads(): Set<string> {
+    const threads = new Set(this.reserved.keys());
+    for (const engine of this.engines.values()) if (!engine.stopping) for (const threadId of this.working(engine)) threads.add(threadId);
+    return threads;
+  }
+
+  /** Resolves once a new engine process, or a session in the running one `joining` names by pid, fits for this thread;
+   * `notify` tells the person when it has to wait. False when aborted. A thread joining a process counts on it at once, so
+   * that process is never stopped as idle to make room for its own new session. */
+  async admit(threadId: string, abort: AbortSignal, notify: (text: string) => void, start: "process" | "session" = "process",
+    joining?: number): Promise<boolean> {
     if (!this.enabled) return true;
+    if (joining !== undefined) this.engines.get(joining)?.threads.add(threadId);
     const waiter: Waiter = { wake: () => {} };
     this.queue.push(waiter);
     let announced: number | null = null;
@@ -157,16 +185,17 @@ export class EngineMemory {
       for (;;) {
         if (abort.aborted) return false;
         if (this.queue[0] === waiter) {
-          const room = this.room();
+          const room = this.room(start, threadId);
           if (room === "admit") {
-            this.reserved.set(threadId, this.now());
+            this.reserved.set(threadId, { at: this.now(), start });
             this.arm();
             return true;
           }
           if (room !== "wait") { await this.stop(room, "idle"); continue; }
         }
         if (announced === null || this.now() - announced >= NOTICE_REPEAT_MS) {
-          notify(announced === null ? memoryWaitText(this.busy()) : memoryStillWaitingText(this.busy()));
+          const others = this.othersBusy(threadId);
+          notify(announced === null ? memoryWaitText(others) : memoryStillWaitingText(others));
           announced = this.now();
         }
         await new Promise<void>((resolve) => {
@@ -209,12 +238,20 @@ export class EngineMemory {
     const critical = free < Math.max(160 * MB, memory.totalBytes * 0.04) || ((memory.fullStall10 ?? 0) >= 40 && free < this.floor(memory));
     if (!critical || this.now() - this.lastRelief < RELIEF_COOLDOWN_MS) return;
     const idle = this.idle();
-    const newest = [...this.engines.values()].filter((engine) => !engine.stopping && this.active.has(engine.threadId)).sort((a, b) => b.startedAt - a.startedAt);
+    const newest = [...this.engines.values()].filter((engine) => !engine.stopping && this.working(engine).length).sort((a, b) => b.startedAt - a.startedAt);
     const victim = idle ?? (newest.length >= 2 ? newest[0]! : null);
     if (!victim) return;
     this.lastRelief = this.now();
-    if (!idle) this.stops.set(victim.threadId, count);
+    if (!idle) for (const threadId of this.working(victim)) this.stops.set(threadId, count);
     void this.stop(victim, idle ? "idle" : "relief");
+  }
+
+  /** How much of an idle engine's keep-alive memory allows: 1 with half the machine free above the floor, down to a tenth
+   * as it runs out; 1 where memory can't be read or the gate is off. */
+  headroom(): number {
+    const memory = this.enabled ? this.read() : null;
+    if (!memory) return 1;
+    return Math.min(1, Math.max(0.1, (this.free(memory) - this.floor(memory)) / (memory.totalBytes / 2)));
   }
 
   /** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
@@ -222,26 +259,33 @@ export class EngineMemory {
 
   private free(memory: HostMemory): number { return memory.availableBytes + memory.swapFreeBytes / 2; }
 
+  private working(engine: Engine): string[] {
+    return [...engine.threads].filter((threadId) => this.active.has(threadId));
+  }
+
   private idle(): Engine | null {
-    return [...this.engines.values()].filter((engine) => !engine.stopping && !this.active.has(engine.threadId))
+    return [...this.engines.values()].filter((engine) => !engine.stopping && !this.working(engine).length)
       .sort((a, b) => a.startedAt - b.startedAt)[0] ?? null;
   }
 
-  private room(): "admit" | "wait" | Engine {
+  private room(start: "process" | "session", threadId: string): "admit" | "wait" | Engine {
     const memory = this.read();
     if (!memory) return "admit";
     const groups = this.groups(), at = this.now();
     const live = [...this.engines.entries()].filter(([, engine]) => !engine.stopping);
     const measured = live.filter(([, engine]) => at - engine.startedAt >= SETTLED_MS).map(([pid]) => groups.get(pid)).filter((bytes) => bytes !== undefined);
-    const need = Math.min(ENGINE_MAX_BYTES, Math.max(ENGINE_MIN_BYTES, measured.length ? measured.reduce((sum, bytes) => sum + bytes, 0) / measured.length : ENGINE_DEFAULT_BYTES));
+    const process = Math.min(ENGINE_MAX_BYTES, Math.max(ENGINE_MIN_BYTES, measured.length ? measured.reduce((sum, bytes) => sum + bytes, 0) / measured.length : ENGINE_DEFAULT_BYTES));
     let held = 0;
-    for (const [threadId, since] of this.reserved) {
-      if (at - since >= RESERVE_MS) { this.reserved.delete(threadId); continue; }
-      const pid = live.find(([, engine]) => engine.threadId === threadId)?.[0];
-      held += Math.max(0, need - (pid === undefined ? 0 : groups.get(pid) ?? 0));
+    for (const [threadId, admitted] of this.reserved) {
+      if (at - admitted.at >= RESERVE_MS) { this.reserved.delete(threadId); continue; }
+      // A session's growth hides inside its shared process's total, so it stays held in full until it settles.
+      if (admitted.start === "session") { held += SESSION_BYTES; continue; }
+      const pid = live.find(([, engine]) => engine.threads.has(threadId))?.[0];
+      held += Math.max(0, process - (pid === undefined ? 0 : groups.get(pid) ?? 0));
     }
+    const need = start === "session" ? SESSION_BYTES : process;
     if (this.free(memory) - this.floor(memory) - held >= need) return "admit";
-    return this.idle() ?? (this.busy() === 0 ? "admit" : "wait");
+    return this.idle() ?? (this.othersBusy(threadId) === 0 ? "admit" : "wait");
   }
 
   private async stop(engine: Engine, why: "idle" | "relief"): Promise<void> {
@@ -259,10 +303,11 @@ export class EngineMemory {
 
   private exited(pid: number, engine: Engine, signal: NodeJS.Signals | null): void {
     if (this.engines.get(pid) === engine) this.engines.delete(pid);
-    if (signal === "SIGKILL" && !engine.stopping && this.active.has(engine.threadId)) {
+    const working = this.working(engine);
+    if (signal === "SIGKILL" && !engine.stopping && working.length) {
       const kills = this.read()?.oomKills ?? null;
       if (kills !== null && this.oomKills !== null && kills > this.oomKills) {
-        this.stops.set(engine.threadId, this.busy(engine.threadId));
+        for (const threadId of working) this.stops.set(threadId, this.busy(threadId));
         this.log(`the kernel stopped an engine (pid ${pid}) for memory`);
       }
       this.oomKills = kills ?? this.oomKills;
@@ -322,22 +367,24 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
     },
     sendTurn: async (input) => {
       const { threadId } = input;
-      if (!memory.hasEngine(threadId)) {
+      const admit = async (start: "process" | "session", joining?: number) => {
         const controller = new AbortController();
         waiting.get(threadId)?.abort();
         waiting.set(threadId, controller);
         try {
           const admitted = await memory.admit(threadId, controller.signal, (message) => {
             for (const listener of listeners) listener(event(threadId, { type: "runtime.notice", message }));
-          });
+          }, start, joining);
           if (!admitted) throw new TurnNotStartedError(newId(), "stopped while waiting for memory");
         } finally {
           if (waiting.get(threadId) === controller) waiting.delete(threadId);
         }
-      }
+      };
+      const driverAdmits = adapter.capabilities.engineAdmission === true;
+      if (!driverAdmits && !memory.hasEngine(threadId)) await admit("process");
       memory.turnStarted(threadId);
       try {
-        return await memory.within(threadId, () => adapter.sendTurn(input));
+        return await memory.within(threadId, () => adapter.sendTurn(driverAdmits ? { ...input, engineAdmission: admit } : input));
       } catch (error) {
         memory.turnEnded(threadId);
         throw error;
