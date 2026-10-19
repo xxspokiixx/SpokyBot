@@ -51,6 +51,18 @@ describe("reading the host", () => {
   });
 });
 
+it("scales an idle engine's keep-alive by the memory left above the floor", () => {
+  const at = (available: number) => new EngineMemory({ enabled: true,
+    read: () => ({ totalBytes: 4 * GB, availableBytes: available, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }) }).headroom();
+  // The floor is 410 MB on 4 GB; half the machine above it is full headroom.
+  expect(at(3.4 * GB)).toBe(1);
+  expect(at(2 * GB + 410 * MB)).toBeCloseTo(1, 2);
+  expect(at(1 * GB + 410 * MB)).toBeCloseTo(0.5, 2);
+  expect(at(300 * MB)).toBe(0.1);
+  expect(new EngineMemory({ enabled: false, read: () => ({ totalBytes: 4 * GB, availableBytes: 0, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }) }).headroom()).toBe(1);
+  expect(new EngineMemory({ enabled: true, read: () => null }).headroom()).toBe(1);
+});
+
 class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
