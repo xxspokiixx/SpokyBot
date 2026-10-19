@@ -335,6 +335,97 @@ describe("an engine's adapter on a Cloud home", () => {
   });
 });
 
+describe("engines that run several threads' sessions", () => {
+  it("lets a session into a running engine where a whole new engine would not fit", async () => {
+    // One busy engine on 1.6 GB: 900 MB free less the 410 MB kept back fits a 200 MB session but not a 700 MB engine.
+    const h = host({ available: 1.6 * GB });
+    h.memory.turnStarted("a");
+    const child = h.spawn("a");
+    expect(await h.memory.admit("c", new AbortController().signal, () => {}, "session")).toBe(true);
+    h.advance(90_000);
+    const notices: string[] = [];
+    const stop = new AbortController();
+    const process = h.memory.admit("b", stop.signal, (text) => notices.push(text), "process");
+    await settle();
+    expect(notices).toEqual([memoryWaitText(1)]);
+    h.memory.attach(child as unknown as ChildProcess, "c");
+    expect(h.memory.hasEngine("c")).toBe(true);
+    h.memory.detach(child as unknown as ChildProcess, "c");
+    expect(h.memory.hasEngine("c")).toBe(false);
+    expect(h.memory.hasEngine("a")).toBe(true);
+    stop.abort();
+    expect(await process).toBe(false);
+  });
+
+  it("never stops the idle engine a thread is joining to make room for that thread, and never holds back the only task", async () => {
+    // One idle shared engine and too little memory for even a session.
+    const h = host({ available: 900 * MB });
+    h.memory.turnStarted("chief");
+    const engine = h.spawn("chief");
+    h.memory.turnEnded("chief");
+    h.memory.turnStarted("w1");
+    expect(await h.memory.admit("w1", new AbortController().signal, () => {}, "session", engine.pid)).toBe(true);
+    expect(h.signals).toEqual([]);
+    h.memory.turnStarted("w2");
+    const notices: string[] = [];
+    const stop = new AbortController();
+    const second = h.memory.admit("w2", stop.signal, (text) => notices.push(text), "session", engine.pid);
+    await settle();
+    expect([notices, h.signals]).toEqual([[memoryWaitText(1)], []]);
+    stop.abort();
+    expect(await second).toBe(false);
+  });
+
+  it("stops a shared engine only as a whole, names memory for every task it ran, and counts it idle only when all are done", async () => {
+    const h = host();
+    h.memory.turnStarted("x"); h.spawn("x");
+    h.advance(1_000);
+    for (const thread of ["s1", "s2"]) h.memory.turnStarted(thread);
+    const shared = h.spawn("s1");
+    h.memory.attach(shared as unknown as ChildProcess, "s2");
+    expect(h.memory.busy()).toBe(3);
+    h.state.available = 1.5 * GB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual([`SIGKILL -${shared.pid}`]);
+    expect([h.memory.stopText("s1"), h.memory.stopText("s2"), h.memory.stopText("x")]).toEqual([memoryStopText(3), memoryStopText(3), null]);
+
+    const g = host();
+    for (const thread of ["s1", "s2"]) g.memory.turnStarted(thread);
+    const engine = g.spawn("s1");
+    g.memory.attach(engine as unknown as ChildProcess, "s2");
+    g.memory.turnEnded("s1");
+    g.state.available = 800 * MB;
+    g.memory.tick();
+    await settle();
+    expect(g.signals).toEqual([]);
+    g.memory.turnEnded("s2");
+    g.memory.tick();
+    await settle();
+    expect(g.signals).toEqual([`SIGTERM -${engine.pid}`]);
+  });
+
+  it("hands admission to a driver that starts or joins engines itself, instead of holding its turn up front", async () => {
+    const h = host({ available: 300 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    (fake.instance.adapter.capabilities as { engineAdmission?: boolean }).engineAdmission = true;
+    let admission: SendTurnInput["engineAdmission"];
+    const sendTurn = fake.instance.adapter.sendTurn;
+    (fake.instance.adapter as { sendTurn: typeof sendTurn }).sendTurn = async (input) => { admission = input.engineAdmission; return sendTurn(input); };
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    expect(await decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput)).toEqual({ turnId: "turn-t1" });
+    expect(fake.sent).toEqual(["t1"]);
+    const waiting = admission!("process");
+    await settle();
+    expect(seen).toEqual([expect.objectContaining({ type: "runtime.notice", threadId: "t1", message: memoryWaitText(1) })]);
+    await decorated.adapter.interruptTurn("t1");
+    await expect(waiting).rejects.toBeInstanceOf(TurnNotStartedError);
+  });
+});
+
 it("words a stall the same way the Cloud's health report classifies it", () => {
   expect(memoryStallText("no activity for 20 minutes — the turn was stopped", 1)).toMatch(/ran out of memory while 1 task ran at once/);
 });
