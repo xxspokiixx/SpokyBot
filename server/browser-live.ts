@@ -20,6 +20,11 @@ const BUSY_LIMIT_MS = 10 * 60_000;
 const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 const RESTART_NEEDED = "A browser action was interrupted. Choose Restart browser… in the browser menu before continuing.";
 const INPUT_RELAY = { timeoutMs: 30_000, maxBytes: 65_536 };
+/** Frames a view may have on its way without acknowledging them: over a slow link one acknowledgement round trip per frame
+ * held a Cloud's panel to a few frames a second. */
+const FRAME_WINDOW = 2;
+/** Inputs one request may carry, so a remote panel's typing does not wait a round trip per key. */
+export const INPUT_BATCH_LIMIT = 64;
 const ENDED_PROBE = { timeoutMs: 5_000, maxBytes: 65_536 };
 /** How long a person's hold outlives their view's dropped stream, for that panel to reconnect and carry on. */
 const RESUME_MS = 2 * 60_000;
@@ -145,7 +150,15 @@ export function browserRestartRefusal(interrupted: boolean, busyBots: ReadonlyAr
 }
 
 type Action = { type: "take" | "release" | "restart" } | { type: "ack"; seq: number }
-  | { type: "command"; args: string[] } | { type: "input"; message: ObjectValue };
+  | { type: "command"; args: string[] } | { type: "input"; message: ObjectValue } | { type: "inputs"; messages: ObjectValue[] };
+
+/** A move the next one replaces changes nothing the page keeps. */
+function withoutReplacedMoves(messages: ObjectValue[]): ObjectValue[] {
+  return messages.filter((message, at) => {
+    const next = messages[at + 1];
+    return !(message.eventType === "mouseMoved" && next?.eventType === "mouseMoved" && next.button === message.button && next.modifiers === message.modifiers);
+  });
+}
 
 /** HTTP bodies can select a fixed action, never a CLI command, flag, port or CDP method. */
 export function parseBrowserLiveAction(value: unknown): Action {
@@ -154,6 +167,15 @@ export function parseBrowserLiveAction(value: unknown): Action {
   if (!body) throw invalid();
   if (body.type === "take" || body.type === "release" || body.type === "restart") return { type: body.type };
   if (body.type === "ack" && integer(body.seq, 1, Number.MAX_SAFE_INTEGER)) return { type: "ack", seq: body.seq };
+  if (body.type === "input_batch") {
+    if (!Array.isArray(body.events) || !body.events.length || body.events.length > INPUT_BATCH_LIMIT) throw invalid();
+    const messages = body.events.map((event: unknown) => {
+      const parsed = parseBrowserLiveAction(event);
+      if (parsed.type !== "input") throw invalid();
+      return parsed.message;
+    });
+    return { type: "inputs", messages: withoutReplacedMoves(messages) };
+  }
   if (body.type === "back" || body.type === "forward" || body.type === "reload") return { type: "command", args: [body.type] };
   if (body.type === "navigate" || body.type === "tab-new") {
     if (body.type === "tab-new" && body.url === undefined) return { type: "command", args: ["tab", "new"] };
@@ -210,8 +232,10 @@ interface Viewer extends OpenOptions {
   blocked: boolean;
   heartbeat?: NodeJS.Timeout;
   drainTimer?: NodeJS.Timeout;
+  /** A frame upstream still waits on: acknowledged once the view has fewer than FRAME_WINDOW frames on their way. */
   frameSeq?: number;
-  frameAt?: number;
+  /** Frames sent to the view that it has not acknowledged yet, by sequence, with when each was sent. */
+  unacked: Map<number, number>;
   hiddenFrame?: ObjectValue;
   pendingFrame?: ObjectValue;
   pendingActions: number;
@@ -277,9 +301,9 @@ export class BrowserLive {
     for (const viewer of this.viewers.values()) {
       if (viewer.session !== session) continue;
       const held = Boolean(this.runtime.heldBy(session));
-      if (held && this.runtime.heldBy(session) !== viewer.id && viewer.frameSeq) {
-        try { this.sendSocket(viewer, { type: "ack", seq: viewer.frameSeq }); } catch { this.close(viewer); continue; }
-        viewer.frameSeq = undefined; viewer.frameAt = undefined;
+      if (held && this.runtime.heldBy(session) !== viewer.id && (viewer.frameSeq || viewer.unacked.size)) {
+        viewer.unacked.clear();
+        try { this.release(viewer); } catch { this.close(viewer); continue; }
       }
       if (held && this.runtime.heldBy(session) !== viewer.id && viewer.pendingFrame) {
         const pending = viewer.pendingFrame; viewer.pendingFrame = undefined;
@@ -304,8 +328,28 @@ export class BrowserLive {
     // ACKs can arrive before the SSE transport drains: keep the newest frame rather than wait for an ACK the viewer cannot send.
     if (viewer.blocked) { viewer.pendingFrame = frame; return; }
     viewer.pendingFrame = undefined;
-    viewer.frameSeq = frame.seq as number; viewer.frameAt = Date.now();
+    viewer.unacked.set(frame.seq as number, Date.now());
+    viewer.frameSeq = frame.seq as number;
     this.send(viewer, frame);
+    if (viewer.closed) return;
+    try { this.release(viewer); } catch { this.close(viewer); }
+  }
+
+  /** Lets upstream send its next frame while the view has room for it. */
+  private release(viewer: Viewer): void {
+    if (viewer.frameSeq === undefined || viewer.unacked.size >= FRAME_WINDOW) return;
+    this.sendSocket(viewer, { type: "ack", seq: viewer.frameSeq });
+    viewer.frameSeq = undefined;
+  }
+
+  /** The view rendered `seq`, and every frame sent before it. */
+  private rendered(viewer: Viewer, seq: number): void {
+    if (!viewer.unacked.has(seq)) return;
+    for (const sent of viewer.unacked.keys()) {
+      viewer.unacked.delete(sent);
+      if (sent === seq) break;
+    }
+    this.release(viewer);
   }
 
   private sendSocket(viewer: Viewer, message: ObjectValue): void {
@@ -324,7 +368,7 @@ export class BrowserLive {
     this.viewers.delete(viewer.id);
     clearTimeout(viewer.heartbeat); clearTimeout(viewer.drainTimer);
     viewer.socket?.close();
-    viewer.hiddenFrame = undefined; viewer.pendingFrame = undefined;
+    viewer.hiddenFrame = undefined; viewer.pendingFrame = undefined; viewer.unacked.clear();
     if (!viewer.restarting) {
       if (dropped && this.holds(viewer)) this.park(viewer);
       else {
@@ -559,7 +603,7 @@ export class BrowserLive {
     if (this.viewers.size >= 8 || [...this.viewers.values()].filter((v) => v.session === options.session).length >= 2) {
       throw new BrowserLiveError("Too many browser views are open. Close another browser panel first.", 429);
     }
-    const viewer: Viewer = { ...options, id: randomUUID(), closed: false, blocked: false, pendingActions: 0, restarting: false, pressedKeys: new Map(), pressedButtons: new Set(), pointer: { x: 0, y: 0 }, waiting: false, abort: new AbortController(), unwatch: () => {} };
+    const viewer: Viewer = { ...options, id: randomUUID(), closed: false, blocked: false, pendingActions: 0, restarting: false, pressedKeys: new Map(), pressedButtons: new Set(), pointer: { x: 0, y: 0 }, unacked: new Map(), waiting: false, abort: new AbortController(), unwatch: () => {} };
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     viewer.unwatch = this.runtime.watch(viewer.session, viewer.spec);
     this.viewers.set(viewer.id, viewer);
@@ -577,7 +621,7 @@ export class BrowserLive {
       viewer.socket = socket;
       this.startEvents(viewer);
       viewer.waiting = false;
-      this.send(viewer, { type: "ready", viewerId: viewer.id });
+      this.send(viewer, { type: "ready", viewerId: viewer.id, inputBatch: INPUT_BATCH_LIMIT });
       this.control(viewer.session);
       socket.addEventListener("message", (event) => {
         if (!this.current(viewer)) { this.close(viewer, true, true); return; }
@@ -603,7 +647,8 @@ export class BrowserLive {
       });
       if (!this.current(viewer)) { this.close(viewer); return; }
       viewer.heartbeat = setInterval(() => {
-        if (!this.current(viewer) || (viewer.frameAt && Date.now() - viewer.frameAt > 2 * HEARTBEAT_MS)) { this.close(viewer, true, true); return; }
+        const oldest = viewer.unacked.values().next().value;
+        if (!this.current(viewer) || (oldest !== undefined && Date.now() - oldest > 2 * HEARTBEAT_MS)) { this.close(viewer, true, true); return; }
         this.control(viewer.session);
         this.send(viewer, { type: "heartbeat" });
       }, HEARTBEAT_MS);
@@ -653,10 +698,7 @@ export class BrowserLive {
       finally { viewer.restarting = false; if (viewer.closed) this.runtime.release(viewer.session, viewer.id); this.control(viewer.session); }
     }
     if (action.type === "ack") {
-      if (viewer.frameSeq === action.seq) {
-        this.sendSocket(viewer, { type: "ack", seq: action.seq });
-        viewer.frameSeq = undefined; viewer.frameAt = undefined;
-      }
+      this.rendered(viewer, action.seq);
       return { ok: true };
     }
     if (action.type === "release") {
@@ -682,6 +724,7 @@ export class BrowserLive {
       await this.runtime.withHumanAction(viewer.session, viewer.id, async () => {
         if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409);
         if (action.type === "input") await this.input(viewer, action.message);
+        else if (action.type === "inputs") { for (const message of action.messages) await this.input(viewer, message); }
         else if (action.type === "command") await this.command(viewer, action.args, COMMAND_TIMEOUT_MS, true).catch(async (error: unknown) => {
           throw error instanceof BrowserBusyError && viewer.port && await this.ended(viewer.port) ? new BrowserSlowActionError() : error;
         });
