@@ -182,7 +182,14 @@ same rules hold on the desktop, a server and Cloud:
 - **Leftovers are swept.** A crash or a kill closes nothing, so the server
   sweeps when it starts, every minute, and at shutdown. It closes only this
   data dir's browsers: each bot's own, each built-in profile's, and its
-  temporary browsers, whose names carry a tag of the data dir. A Chrome whose
+  temporary browsers, whose names carry a tag of the data dir. On a MausBot
+  Cloud home, whose HOME is the server's alone, it also closes the browser
+  of any bot that no longer exists (a `bot-` session), within a minute.
+  Deleting a bot or profile closes its browser and erases its saved
+  sign-ins with the agent-browser OpenMausBot installed, or on a Cloud home
+  the image's own; an agent-browser found only on PATH elsewhere just has
+  the running browser closed, since a wrapper there could fail the erase
+  for good. A Chrome whose
   daemon was killed under it (by the OOM killer, by hand) can never be used
   again: it is found by the session its environment names and stopped, and
   its profile folder removed. Anything else under the same HOME, such as a
