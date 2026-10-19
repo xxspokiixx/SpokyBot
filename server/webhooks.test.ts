@@ -19,6 +19,9 @@ function harness() {
   const cancelled: Array<{ id: string; message: string }> = [];
   const emitted: unknown[] = [];
   const posted: Array<{ botId: string; threadId: string; text: string }> = [];
+  const roomPosts: Array<{ webhookId: string; payload: unknown }> = [];
+  let roomPostError: Error | null = null;
+  let roomMemberFails = false;
   // Mirrors index.ts's resolvePostThread (create on first use, then reuse); postThreadCreations records only new allocations.
   const postThreads = new Map<string, string>();
   const postThreadCreations: string[] = [];
@@ -34,6 +37,14 @@ function harness() {
     cancelQueued: (id, message) => cancelled.push({ id, message }),
     pendingRuns: () => pending,
     post: (botId, threadId, text) => posted.push({ botId, threadId, text }),
+    roomPost: async (trigger, payload) => {
+      if (roomPostError) throw roomPostError;
+      roomPosts.push({ webhookId: trigger.id, payload });
+      return { posted: true as const, attachments: 0, threadId: `${trigger.groupId}-thread` };
+    },
+    roomMember: (botId, groupId) => (roomMemberFails
+      ? { ok: false as const, status: 403, error: `${botId} is not a member of ${groupId}` }
+      : { ok: true as const }),
     resolvePostThread: (trigger, forceNew) => {
       if (!forceNew) {
         const existing = postThreads.get(trigger.id);
@@ -54,10 +65,13 @@ function harness() {
     cancelled,
     emitted,
     posted,
+    roomPosts,
     postThreadCreations,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
     setPending: (value: number) => (pending = value),
+    setRoomPostError: (error: Error | null) => (roomPostError = error),
+    setRoomMemberFails: (value: boolean) => (roomMemberFails = value),
   };
 }
 
@@ -222,6 +236,111 @@ describe("WebhookManager", () => {
     expect(h.posted[2]).toEqual({ botId: "maus-1", threadId: "post-thread-1", text: "third" });
   });
 
+  describe("room delivery", () => {
+    it("refuses a groupId on a delivery \"run\" webhook", () => {
+      const h = harness();
+      expect(() => h.manager.create({ name: "Room run", prompt: "x", botId: "maus-1", delivery: "run", groupId: "room-1" }))
+        .toThrow(/only for delivery "post"/);
+      expect(h.manager.list()).toHaveLength(0);
+    });
+
+    it("refuses a room whose membership check fails, on create and on patch", () => {
+      const h = harness();
+      h.setRoomMemberFails(true);
+      expect(() => h.manager.create({ name: "Room", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-9" }))
+        .toThrow(expect.objectContaining({ status: 403 }));
+      h.setRoomMemberFails(false);
+      const { webhook } = h.manager.create({ name: "Room", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      h.setRoomMemberFails(true);
+      expect(() => h.manager.update(webhook.id, { groupId: "room-9" })).toThrow(/not a member/);
+      expect(h.manager.list()[0]).toMatchObject({ groupId: "room-1" });
+    });
+
+    it("posts a delivery straight to the room and enqueues no run", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const result = await h.manager.receive(webhook.endpointId, secret, {
+        payload: { text: "Deploy done", voiceNote: "deploy done" },
+        contentType: "application/json",
+        deliveryId: "room-evt-1",
+      });
+
+      expect(result).toEqual({ threadId: "room-1-thread", deliveryId: "room-evt-1", duplicate: false });
+      expect(h.queued).toHaveLength(0);
+      expect(h.posted).toHaveLength(0);
+      expect(h.roomPosts).toHaveLength(1);
+      expect(h.roomPosts[0]).toMatchObject({ webhookId: webhook.id, payload: { text: "Deploy done", voiceNote: "deploy done" } });
+      expect(h.postThreadCreations).toEqual([]);
+      expect(h.manager.list()[0]).toMatchObject({ delivery: "post", groupId: "room-1", deliveryCount: 1 });
+      expect(h.manager.listAttempts().at(-1)).toMatchObject({ outcome: "accepted", statusCode: 202, threadId: "room-1-thread" });
+    });
+
+    it("posts once for a retried delivery id", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "room-dup" };
+      expect(await h.manager.receive(webhook.endpointId, secret, event)).toMatchObject({ duplicate: false });
+      expect(await h.manager.receive(webhook.endpointId, secret, event)).toMatchObject({ duplicate: true });
+      expect(h.roomPosts).toHaveLength(1);
+      expect(h.manager.list()[0]?.deliveryCount).toBe(1);
+    });
+
+    it("receipts the room's thread, never the room id, and never echoes it back as the groupId", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const result = await h.manager.receive(webhook.endpointId, secret, { payload: { text: "hi" }, deliveryId: "room-thread-evt" });
+      expect(result.threadId).toBe("room-1-thread");
+      expect(result.threadId).not.toBe(webhook.groupId);
+      expect(h.manager.list()[0]?.groupId).toBe("room-1");
+      expect(h.manager.listAttempts().at(-1)?.threadId).toBe("room-1-thread");
+    });
+
+    it("records a rejected attempt and enqueues nothing when the room sink fails", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      h.setRoomPostError(Object.assign(new Error("voice engine down"), { status: 503 }));
+      await expect(h.manager.receive(webhook.endpointId, secret, { payload: { text: "hi" }, deliveryId: "room-fail" }))
+        .rejects.toThrow("voice engine down");
+      expect(h.roomPosts).toHaveLength(0);
+      expect(h.queued).toHaveLength(0);
+      expect(h.manager.list()[0]?.deliveryCount).toBe(0);
+      expect(h.manager.listAttempts().at(-1)).toMatchObject({ outcome: "rejected", statusCode: 503 });
+
+      h.setRoomPostError(null);
+      expect(await h.manager.receive(webhook.endpointId, secret, { payload: { text: "hi" }, deliveryId: "room-fail" }))
+        .toMatchObject({ duplicate: false, threadId: "room-1-thread" });
+      expect(h.roomPosts).toHaveLength(1);
+    });
+
+    it("fails a room delivery with 503 instead of downgrading to a thread post when there is no room sink", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const without = new WebhookManager({ ...h.options, roomPost: undefined });
+      await expect(without.receive(webhook.endpointId, secret, { payload: { text: "hello" }, deliveryId: "room-nosink" }))
+        .rejects.toThrow(/cannot post webhook messages to rooms/);
+      expect(h.queued).toHaveLength(0);
+      expect(h.posted).toHaveLength(0);
+    });
+
+    it("refuses the test button for a room webhook", () => {
+      const h = harness();
+      const { webhook } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      expect(() => h.manager.test(webhook.id)).toThrow(expect.objectContaining({ status: 400 }));
+      expect(() => h.manager.test(webhook.id)).toThrow(/not the test button/);
+      expect(h.roomPosts).toHaveLength(0);
+      expect(h.queued).toHaveLength(0);
+    });
+
+    it("keeps a plain post delivery in its own dedicated thread, not a room", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
+      const result = await h.manager.receive(webhook.endpointId, secret, { payload: { text: "Still a thread" }, deliveryId: "thread-evt" });
+      expect(result).toMatchObject({ deliveryId: "thread-evt", duplicate: false });
+      expect(h.posted).toEqual([{ botId: "maus-1", threadId: "post-thread-1", text: "Still a thread" }]);
+      expect(h.roomPosts).toHaveLength(0);
+    });
+  });
+
   it("uses an authenticated task from the payload when default instructions are empty", () => {
     const h = harness();
     const { webhook, secret } = h.manager.create({ name: "Direct tasks", prompt: "", botId: "maus-1" });
@@ -249,11 +368,11 @@ describe("WebhookManager", () => {
     expect(h.manager.listAttempts().at(-1)).toMatchObject({ outcome: "captured", eventName: "demo" });
   });
 
-  it("deduplicates retries by delivery id, including after a restart", () => {
+  it("deduplicates retries by delivery id, including after a restart", async () => {
     const h = harness();
     const { webhook, secret } = create(h.manager);
     const event = { payload: { id: 1 }, deliveryId: "same-event" };
-    expect(h.manager.receive(webhook.endpointId, secret, event).duplicate).toBe(false);
+    expect(await h.manager.receive(webhook.endpointId, secret, event)).toMatchObject({ duplicate: false });
 
     const reloaded = new WebhookManager(h.options);
     h.setPending(3);
@@ -263,13 +382,13 @@ describe("WebhookManager", () => {
     expect(reloaded.list()[0]?.deliveryCount).toBe(1);
   });
 
-  it("invalidates the previous secret on rotation and honours pause/delete", () => {
+  it("invalidates the previous secret on rotation and honours pause/delete", async () => {
     const h = harness();
     const { webhook, secret } = create(h.manager);
     const rotated = h.manager.rotateSecret(webhook.id)!;
 
     expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {} })).toThrow("Invalid webhook");
-    expect(h.manager.receive(webhook.endpointId, rotated.secret, { payload: {} }).runId).toBe("run-1");
+    expect((await h.manager.receive(webhook.endpointId, rotated.secret, { payload: {} })).runId).toBe("run-1");
 
     h.manager.update(webhook.id, { enabled: false });
     expect(() => h.manager.receive(webhook.endpointId, rotated.secret, { payload: {} })).toThrow("paused");
