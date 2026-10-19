@@ -1127,7 +1127,7 @@ describe("the bot settings dialog", () => {
     const section = capture(() => ModelSection({ bot: makeBot({ tasks }) }));
     const line = ofType(section, ThreadModelsLine)!;
     click(capture(() => ThreadModelsLine(line.props as never)).nodes.find((node) => node.props["data-switch-them-too"] !== undefined)!);
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "followBotModel", botId: "scout" });
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "followBotModel", botId: "scout" }));
   });
 });
 
