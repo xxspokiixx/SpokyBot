@@ -1487,7 +1487,7 @@ export class Store {
       >
     > = {},
     opts: {
-      seedMessages?: boolean;
+      seedMessages?: boolean; id?: string; threadId?: string;
     } = {},
   ): BotRecord {
     const toolScope = parseToolScope(profile.toolScope);
@@ -1496,8 +1496,8 @@ export class Store {
     const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
     const section = sectionKey(profile.section);
     const bot: BotRecord = {
-      id: newId(),
-      threadId: newId(),
+      id: opts.id ?? newId(),
+      threadId: opts.threadId ?? newId(),
       name,
       title: profile.title ?? "",
       description: profile.description ?? "",

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CloudAccountBridge, CloudAccountState, CloudPlanBridge, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudMachine, CloudTrial } from "../../electron/cloud-home.mjs";
 import { CloudMoveSettings } from "./CloudMove";
+import { CloudSendCard } from "./CloudSendCard";
 import { cloudFilesBridge } from "@/lib/cloud-files";
 import { activeLocale, t } from "@/lib/i18n";
 import { buyOfferAllowed, cloudCreditLine, cloudPlanLabel, cloudPlanLine, cloudPlanView, cloudTrialView, moneyBackLine, offerTrialDays, trialRunning, type CloudPlanView } from "@/lib/cloud-plan";
@@ -244,6 +245,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
   </div>;
   return <>
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudAccount.optional")}</p>
+    {machine?.status === "ready" && <CloudSendCard />}
     <Card title={t("settings.section.cloudAccount")} subtitle={t("cloudAccount.separate")}>
       {account?.staging && <StagingMark className="mb-3" />}
       {(!account || view.kind === "unknown") && <p role="status" className="text-[13px] text-ink-secondary">{t("cloudAccount.loading")}</p>}

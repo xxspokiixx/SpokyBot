@@ -94,7 +94,7 @@ import { cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, createCloudPo
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
-import { registerCloudLoginsIpc } from "./cloud-logins.mjs";
+import { installCloudSend } from "./cloud-send-main.mjs";
 import { cloudMoveChoices } from "./cloud-move-choices.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
@@ -2892,7 +2892,7 @@ const savedWorkspace = id => {
 const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath("userData"), cloudTarget(process.env).look), fs), accountId: () => cloudAccount?.state().account?.id ?? null,
   homeEntry: cloudHomeEntry, saveEntry: (origin, look) => persistEnvironments(withEnvironmentLook(environmentsState, origin, look)) });
 const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
-const cloudLogins = registerCloudLoginsIpc({ ipcMain, localOnly, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null) });
+const cloudLogins = installCloudSend({ ipcMain, localOnly, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), local: route => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { redirect: "error", credentials: "omit", signal: AbortSignal.timeout(30_000), headers: { [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running"))), reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, openSettings: () => void openLendingSettings() });
 ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
@@ -3017,7 +3017,7 @@ ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
       ...cloudMenuOptions(from === "howto" ? "app_howto" : "app_menu"),
-      ...(await placesMenuOptions({ cloud: cloudHomeEntry(), activeId: environmentsState.activeId, platform: process.platform, port: SERVER_PORT, onCopy: () => void openLendingSettings() })),
+      ...(await placesMenuOptions({ cloud: cloudHomeEntry(), activeId: environmentsState.activeId, platform: process.platform, port: SERVER_PORT, send: cloudLogins.menu() })),
     }));
     await new Promise((resolve) => menu.popup({ window: mainWindow, callback: resolve }));
   } finally {
