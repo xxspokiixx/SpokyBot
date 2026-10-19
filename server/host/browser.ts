@@ -70,12 +70,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   });
   const agentBrowserLive = new BrowserLive({ runtime: agentBrowserRuntime });
   const host: HostKind = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME || existsSync("/.dockerenv") ? "container" : "server";
+  const idleMs = () => browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
-    idleMs: () => browserIdleMs(cfg),
+    idleMs,
     log: (line) => console.warn(line),
   });
   // A tool call that would open Reddit from MausBot Cloud is refused before it reaches the browser. My Chrome is the
@@ -94,7 +95,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       || (cfg.browserProfiles ?? []).some((profile) => !usesMyChrome(profile.id) && currentBrowserSession("", profile.id) === session),
     live: (session) => usedBrowserSessions.has(session),
     held: (session) => !turnResources.free(`browser:${session}`),
-    closeIdle: (session) => browserRuntime.closeIfIdle(session, browserIdleMs(cfg), usedBrowserSessions.get(session)),
+    closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
   });
   const browserSweep = {
     start() {
@@ -259,7 +260,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
 
   return {
-    browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions,
+    browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseChromeBrowser, engineSummary,

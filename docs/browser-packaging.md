@@ -170,7 +170,7 @@ same rules hold on the desktop, a server and Cloud:
   read from `/proc`, so an image without `ps` works the same.
 - **Unused browsers close.** A browser nothing has used for
   `browserEngine.idleTimeoutMinutes` in `config.json` (1 to 60; 10 when
-  unset) is closed: no bot call (a tool listing counts, and so do a call
+  unset, 3 on a MausBot Cloud home, whose 4 GB fits few browsers) is closed: no bot call (a tool listing counts, and so do a call
   waiting behind another, its page-health reads and recorded step, and
   fill_login's typing; a preview frame only holds off a close while it is
   taken), no turn that has used it and is still running, and no person
