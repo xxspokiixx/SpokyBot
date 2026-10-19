@@ -185,7 +185,8 @@ jobs:
           if timeout 60 docker run --name home-bad -e OMB_CLOUD_ROLE=home omb-cloud-home:ci; then echo "an incomplete contract served"; exit 1; fi
           grep -q "Cloud home configuration is invalid" <<<"$(docker logs home-bad 2>&1)"
           docker rm -f home-bad >/dev/null
-          docker run -d --name home -p 127.0.0.1:18080:8080 -v omb-home-ci:/data "${contract[@]}" omb-cloud-home:ci
+          # A Fly Machine runs the launcher as root with every capability; Docker's defaults leave out the one that lowers an OOM score.
+          docker run -d --name home --cap-add SYS_RESOURCE -p 127.0.0.1:18080:8080 -v omb-home-ci:/data "${contract[@]}" omb-cloud-home:ci
           E=http://127.0.0.1:18080
           healthy() {
             for i in $(seq 1 45); do
@@ -214,6 +215,10 @@ jobs:
           spid=$(docker exec home sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"dist-server/in""dex.js"*) echo "${p#/proc/}";; esac; done')
           test -n "$spid"
           docker exec -u maus home grep -qaF OMB_CLOUD_ROLE=home "/proc/$spid/environ"         # the probe reads it
+          # Out of memory, the kernel takes the engines first and the server and the edge (the health check) last.
+          test "$(docker exec home cat "/proc/$spid/oom_score_adj")" = -800
+          epid=$(docker exec home sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"caddy r""un"*) echo "${p#/proc/}";; esac; done')
+          test "$(docker exec home cat "/proc/$epid/oom_score_adj")" = -900
           for value in "$secret" "box_omb_$relay"; do
             if docker exec -u maus home grep -qaF -- "$value" "/proc/$spid/environ"; then echo "a secret is in the server's environment"; exit 1; fi
           done
