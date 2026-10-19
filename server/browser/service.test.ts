@@ -349,6 +349,59 @@ describe("browsers on one computer", () => {
     expect(backend.chromes).toHaveLength(2);
   });
 
+  it("closes a browser people only watch once it sat unused, leaving their view asleep until the bot's next call wakes it", async () => {
+    const { service, call, text, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await sleep(25);
+    const outputs: string[] = [];
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      outputs.push(output.type);
+      if (output.type === "frame") output.ack();
+    });
+    expect(await service.closeIdle(20)).toEqual([]);
+    await sleep(25);
+    expect(await service.closeIdle(20)).toEqual(["bot:a"]);
+    await sleep(20);
+    expect(outputs).toContain("asleep");
+    expect(outputs).not.toContain("gone");
+    expect(service.profiles()[0]!.hub.size).toBe(1);
+    expect(backend.chromes).toHaveLength(1);
+    outputs.length = 0;
+    expect(text(await call("agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
+    expect(backend.chromes).toHaveLength(2);
+    expect(outputs).toContain("awake");
+    for (let waited = 0; !outputs.includes("frame") && waited < 1_000; waited += 10) await sleep(10);
+    expect(outputs).toContain("frame");
+    await viewer.close();
+  });
+
+  it("counts a person's input through a view as use, never closes a browser a person holds, and starts it again when they ask", async () => {
+    const { service, call, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const outputs: string[] = [];
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      outputs.push(output.type);
+      if (output.type === "frame") output.ack();
+    });
+    await viewer.input({ type: "takeControl" });
+    await sleep(25);
+    expect(await service.closeIdle(20)).toEqual([]);
+    await viewer.input({ type: "key", action: "down", key: "a", code: "KeyA", text: "a", modifiers: 0 });
+    await viewer.input({ type: "key", action: "up", key: "a", code: "KeyA", modifiers: 0 });
+    await viewer.input({ type: "releaseControl" });
+    expect(await service.closeIdle(20)).toEqual([]);
+    await sleep(25);
+    await viewer.input({ type: "resize", width: 900, height: 700 });
+    expect(await service.closeIdle(20)).toEqual(["bot:a"]);
+    await sleep(20);
+    expect(backend.chromes).toHaveLength(1);
+    await viewer.input({ type: "wake" });
+    expect(backend.chromes).toHaveLength(2);
+    expect(outputs.slice(outputs.indexOf("asleep"))).toContain("awake");
+    expect(await service.closeIdle(20)).toEqual([]);
+    await viewer.close();
+  });
+
   it("makes room by closing the least recently used idle browser, and waits, then refuses, when none is idle", async () => {
     const { service, call, backend } = setup({ maxRunning: 1, capacityWaitMs: 100 });
     const other = { session: "bot-b", key: "bot:b" };

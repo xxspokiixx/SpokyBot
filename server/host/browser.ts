@@ -59,11 +59,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const store: Pick<Store, "bots" | "bot"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id) };
 
   const agentBrowserRuntime = new BrowserRuntime({
-    closeBrowser: async (session, spec) => {
-      const closed = await closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }));
-      if (closed) browserLive.closeForSession(session);
-      return closed;
-    },
+    closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
     applyViewport: (spec) => setBrowserViewport(spec.command, spec.env),
     launch: chromeLauncher,
     relayCommand: (spec, session, command, timeoutMs) => relayCommand(spec, session, command, timeoutMs).catch((error: unknown) => {
