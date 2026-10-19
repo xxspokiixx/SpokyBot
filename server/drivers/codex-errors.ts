@@ -28,17 +28,17 @@ function clockHours(hour: string, meridiem: string): number {
   return (Number(hour) % 12) + (meridiem.toUpperCase() === "PM" ? 12 : 0);
 }
 
-/** When Codex says its usage limit resets, from its words "try again at 5:23 PM" (the next such time) or "try again at
+/** When Codex says its usage limit resets, from its words "try again at 5:23 PM" (today) or "try again at
  * Oct 17th, 2026 5:23 PM", in this computer's local time; undefined when it names no time. */
 export function codexLimitResetsAt(said: string, now = Date.now()): number | undefined {
   if (!USAGE_LIMIT.test(said)) return undefined;
   const when = /\btry again at ([^.]+)/i.exec(said)?.[1]?.trim() ?? "";
   const time = /^(\d{1,2}):(\d{2})\s*([AP]M)$/i.exec(when);
   if (time) {
-    const at = new Date(now);
-    at.setHours(clockHours(time[1]!, time[3]!), Number(time[2]), 0, 0);
-    if (at.getTime() <= now) at.setDate(at.getDate() + 1);
-    return at.getTime();
+    // codex-rs/protocol/src/error.rs format_retry_timestamp prints only the time, without seconds, when the reset is on
+    // its own local date. A minute already begun is the reset arriving within it or just past, so it ends with the minute.
+    const at = new Date(now).setHours(clockHours(time[1]!, time[3]!), Number(time[2]), 0, 0);
+    return at <= now ? at + 59_999 : at;
   }
   const dated = /^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4}),?\s+(\d{1,2}):(\d{2})\s*([AP]M)$/i.exec(when);
   const month = dated ? MONTHS.indexOf(dated[1]!.toLowerCase()) : -1;
