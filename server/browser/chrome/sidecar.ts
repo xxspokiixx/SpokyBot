@@ -24,7 +24,10 @@ export interface SidecarOptions {
   noPasskeys?: boolean;
 }
 
-export async function startIdentitySidecar(url: string, identity: ChromeIdentity, connect: typeof connectCdp = connectCdp, options: SidecarOptions = {}): Promise<IdentitySidecar> {
+/** The browser's identity, and the languages its pages are told (a list, see languageList in ./wrapper.ts). */
+export type SidecarIdentity = ChromeIdentity & { acceptLanguage?: string };
+
+export async function startIdentitySidecar(url: string, identity: SidecarIdentity, connect: typeof connectCdp = connectCdp, options: SidecarOptions = {}): Promise<IdentitySidecar> {
   let onClosed!: () => void;
   const closed = new Promise<void>((resolve) => { onClosed = resolve; });
   let cdp: Cdp | null = null;
@@ -44,7 +47,7 @@ export async function startIdentitySidecar(url: string, identity: ChromeIdentity
 }
 
 /** A paused worker answers its overrides only once it runs, so a worker is sent them and released at once. */
-async function applyIdentity(cdp: Cdp, sessionId: string, type: string, identity: ChromeIdentity, options: SidecarOptions): Promise<void> {
+async function applyIdentity(cdp: Cdp, sessionId: string, type: string, identity: SidecarIdentity, options: SidecarOptions): Promise<void> {
   try {
     if (type === "page" && options.noPasskeys) for (const [method, params] of NO_PASSKEY_COMMANDS) await cdp.send(method, params, sessionId).catch(() => undefined);
     if (type === "page" || type === "iframe") {
@@ -74,7 +77,7 @@ export class IdentitySidecars {
 
   attached(session: string): boolean { return this.live.has(session); }
 
-  ensure(session: string, spec: LaunchSpec, identity: ChromeIdentity): Promise<void> {
+  ensure(session: string, spec: LaunchSpec, identity: SidecarIdentity): Promise<void> {
     if (this.live.has(session)) return Promise.resolve();
     let attaching = this.attaching.get(session);
     if (!attaching) {
@@ -89,7 +92,7 @@ export class IdentitySidecars {
     this.live.delete(session);
   }
 
-  private async attach(session: string, spec: LaunchSpec, identity: ChromeIdentity): Promise<void> {
+  private async attach(session: string, spec: LaunchSpec, identity: SidecarIdentity): Promise<void> {
     const url = await this.cdpUrl(session, spec);
     if (!url) return;
     const sidecar = await this.start(url, identity, undefined, { noPasskeys: spec.env?.AGENT_BROWSER_HEADLESS === "1" });

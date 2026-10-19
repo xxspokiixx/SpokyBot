@@ -100,6 +100,11 @@ function savedImage(result: unknown, base: string): string | null {
   return file;
 }
 
+/** "en-US,en;q=0.9" → "en-US,en". */
+export function headerLanguages(header: string | undefined): string {
+  return (header ?? "").split(",").map((part) => part.split(";")[0]!.trim()).filter(Boolean).join(",");
+}
+
 export function identityChecks(reports: ProbeReports, expected: string): IdentityReadout["checks"] {
   const places: Array<[string, ReportedIdentity | undefined]> = [["page", reports.page], ["dedicated worker", reports.worker], ["service worker", reports.serviceworker], ["cross-site frame", reports.frame]];
   const page = reports.page;
@@ -114,6 +119,7 @@ export function identityChecks(reports: ProbeReports, expected: string): Identit
     { check: "no place reports a headless brand", pass: places.every(([, report]) => !JSON.stringify(report?.brands ?? []).includes("Headless")), detail: JSON.stringify(page?.brands ?? null) },
     { check: "page is 1280x720 inside", pass: page?.inner?.[0] === 1280 && page.inner[1] === 720, detail: `inner ${page?.inner?.join("x")}, outer ${page?.outer?.join("x")}, screen ${page?.screen?.join("x")}, dpr ${page?.dpr}` },
     { check: "navigator.webdriver is false", pass: page?.webdriver === false, detail: String(page?.webdriver) },
+    { check: "navigator.languages are the Accept-Language header's, in order", pass: Boolean(page?.languages.length) && page?.languages.join(",") === headerLanguages(reports.headers.document?.["accept-language"]), detail: `${JSON.stringify(page?.languages ?? null)} against ${reports.headers.document?.["accept-language"] ?? "no header"}` },
     { check: "plugins and window.chrome are present", pass: (page?.plugins ?? 0) > 0 && page?.windowChrome === "object", detail: `${page?.plugins} plugins, window.chrome ${page?.windowChrome}` },
   ];
 }
