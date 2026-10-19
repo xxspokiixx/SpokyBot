@@ -137,7 +137,7 @@ describe("the limit-reset routes", () => {
     const h = harness(reset);
     const created = vi.fn();
     const handler = createLimitResetRoutes({
-      clock: h.clock, routines: h.routines, requests: h.service, engineName: (engine) => engine === "claude" ? "Claude" : engine,
+      clock: h.clock, now: () => NOW, routines: h.routines, requests: h.service, engineName: (engine) => engine === "claude" ? "Claude" : engine,
       threadTitle: (botId, threadId) => botId === "scout" && threadId === "thread-1" ? "Quarterly report" : null,
       threadEngine: () => "claude", created,
     });
