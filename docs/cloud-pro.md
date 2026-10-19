@@ -968,6 +968,13 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   start, are born with `oom_score_adj` 1000; Chrome scores its tabs 200 and
   up; the server is -800 and Caddy -900, so the health check is the last to
   go.
+- **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
+  browser, computer, Data and HighLevel servers are endpoints of this server
+  (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
+  turn's capability in the Authorization header, instead of a Node proxy
+  process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
+  behind a tool selection keeps its stdio gate; the person's own servers are
+  unchanged.
 - **The reason is said.** A turn whose engine was stopped for memory, by the
   home or by the kernel (a SIGKILL while `/proc/vmstat`'s `oom_kill` rose),
   fails with "This Cloud ran out of memory while N tasks ran at once, so this
