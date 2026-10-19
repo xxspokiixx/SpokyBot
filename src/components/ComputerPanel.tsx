@@ -58,6 +58,7 @@ import {
   shouldPollCloudPreview,
 } from "@/lib/local-computer";
 import { moveBetweenTabs, PANEL_TABS, panelTabProps, TAB_PANEL_FOCUS, tabPanelProps, useAndroidTabFallback } from "./computer-panel-tabs";
+import { focusComputerPanelEntry, releaseComputerPanelFocus, takeComputerPanelTabFocus } from "@/lib/computer-panel-focus";
 import {
   computerPanelTabs,
   readComputerPanelView,
@@ -192,6 +193,19 @@ export function ComputerPanel({
     const observer = new ResizeObserver(read);
     observer.observe(panel);
     return () => observer.disconnect();
+  }, []);
+  const panelRef = useRef<HTMLElement>(null);
+  // One shot per open, and it must survive React's double-invoked development effects.
+  const entryFocus = useRef<boolean | undefined>(undefined);
+  const entryFollowing = useRef(false);
+  if (entryFocus.current === undefined) entryFocus.current = takeComputerPanelTabFocus(profileBot.id);
+  useEffect(() => {
+    if (!entryFocus.current) return;
+    const frame = requestAnimationFrame(() => {
+      focusComputerPanelEntry(panelRef.current);
+      entryFollowing.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
   const onSeparatorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -405,6 +419,19 @@ export function ComputerPanel({
     if (view === "browser") setSignInRequest({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId });
     dispatch({ type: "signInFocusConsumed", requestId: requestedSignIn.requestId });
   }, [bot.id, dispatch, requestedSignIn]);
+
+  // Auto resolves its surface long after the panel is up, and a data result or a
+  // sign-in moves the tab too: the entry ring follows the selection until the
+  // keyboard user leaves the tab row.
+  useEffect(() => {
+    if (!entryFollowing.current) return;
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || active.getAttribute("role") !== "tab" || !panelRef.current?.contains(active)) {
+      entryFollowing.current = false;
+      return;
+    }
+    focusComputerPanelEntry(panelRef.current);
+  }, [panelView]);
 
   useEffect(() => {
     let alive = true;
@@ -1273,6 +1300,8 @@ export function ComputerPanel({
         "animate-panel-in relative flex h-full shrink-0 flex-col border-l border-hairline/40 bg-panel",
         "max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full!",
       )}
+      ref={panelRef}
+      data-computer-panel
       style={{ width: panelWidth }}
     >
       <div
@@ -1297,6 +1326,7 @@ export function ComputerPanel({
           {advanced && (
             <button
               onClick={() => {
+                releaseComputerPanelFocus(panelRef.current, bot.id);
                 dispatch({ type: "toggleComputer", open: false });
                 dispatch({ type: "toggleSettings", open: true, section: "access" });
               }}
@@ -1321,7 +1351,11 @@ export function ComputerPanel({
             })}
           </div>
           <button
-            onClick={() => dispatch({ type: "toggleComputer", open: false })}
+            data-computer-panel-close
+            onClick={() => {
+              releaseComputerPanelFocus(panelRef.current, bot.id);
+              dispatch({ type: "toggleComputer", open: false });
+            }}
             className="absolute right-0 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
             aria-label={t("computer.close")}
             title={t("computer.close")}

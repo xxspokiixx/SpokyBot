@@ -9,6 +9,7 @@ import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remo
 import type { Routine } from "@/lib/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { api, ApiError, useStore, type Bot } from "@/state/store";
+import { focusComputerPanelEntry, releaseComputerPanelFocus, takeComputerPanelTabFocus } from "@/lib/computer-panel-focus";
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
@@ -62,6 +63,15 @@ function nextRunLabel(at: number | null) {
 export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const { padClass, dragProps } = useCaptionChrome();
+  const panelRef = useRef<HTMLElement>(null);
+  // One shot per open, and it must survive React's double-invoked development effects.
+  const entryFocus = useRef<boolean | undefined>(undefined);
+  if (entryFocus.current === undefined) entryFocus.current = takeComputerPanelTabFocus(bot.id);
+  useEffect(() => {
+    if (!entryFocus.current) return;
+    const frame = requestAnimationFrame(() => focusComputerPanelEntry(panelRef.current));
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [frame, setFrame] = useState<string | null>(null);
@@ -207,7 +217,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel">
+    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
       <div {...dragProps} className={cn("flex items-center justify-between border-b border-hairline px-5 py-4", padClass)}>
         <div>
           <div className="text-[14px] font-medium text-ink">{bot.name}&apos;s computer</div>
@@ -232,7 +242,11 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           </div>
           <button
             type="button"
-            onClick={() => dispatch({ type: "toggleComputer", open: false })}
+            data-computer-panel-close
+            onClick={() => {
+              releaseComputerPanelFocus(panelRef.current, bot.id);
+              dispatch({ type: "toggleComputer", open: false });
+            }}
             className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
             aria-label="Close computer panel"
           >
