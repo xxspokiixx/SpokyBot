@@ -8,6 +8,7 @@ import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
 import { BROWSER_CONTROL_REFUSAL } from "./control.ts";
 import { REDDIT_REFUSAL } from "./egress/reddit.ts";
 import { BrowserService, type BrowserServiceOptions } from "./service.ts";
+import type { Backend } from "./backends.ts";
 import { FakeBackend, FakeChrome, type FakeDocument, type FakePage } from "./testing/fake-chrome.ts";
 import { TOOL_LIST } from "./tools.ts";
 
@@ -398,6 +399,16 @@ describe("browsers on one computer", () => {
     await viewer.input({ type: "wake" });
     expect(backend.chromes).toHaveLength(2);
     expect(outputs.slice(outputs.indexOf("asleep"))).toContain("awake");
+    expect(await service.closeIdle(20)).toEqual([]);
+    await viewer.close();
+  });
+
+  it("counts a browser's start as use, so one that took long to start is not closed at once", async () => {
+    let real: FakeBackend | null = null;
+    const slow: Backend = { kind: "local", get caps() { return real!.caps; }, open: async (request) => { await sleep(40); return real!.open(request); } };
+    const { service, target, backend } = setup({ backend: () => slow });
+    real = backend;
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => { if (output.type === "frame") output.ack(); });
     expect(await service.closeIdle(20)).toEqual([]);
     await viewer.close();
   });
