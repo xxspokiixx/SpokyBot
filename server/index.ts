@@ -449,7 +449,7 @@ import { parseLoginFields, parseTotpField, createLoginRoutes } from "./routes/lo
 import { loginSite, savedLoginResumePrompt } from "../shared/logins.ts";
 import { browserRestartRefusal } from "./browser-live.ts";
 import { browserEgress } from "./browser/egress/registry.ts";
-import { browserEngineEncryptionKey, clearBrowserSessionState, browserEngineStatus, browserSessionId } from "./browser-engine.ts";
+import { browserEngineEncryptionKey, browserEngineStatus, browserSessionId } from "./browser-engine.ts";
 import { chromeLauncher } from "./browser/chrome/launcher.ts";
 import { createBrowserHost } from "./host/browser.ts";
 import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "./screen-frame-source.ts";
@@ -1657,21 +1657,8 @@ function applyDesktopMutationTokenMessage(raw: unknown): boolean {
 const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator({
   file: join(DATA_DIR, "browser-cleanups.json"),
   send: (request) => {
-    // Only the managed engine: a PATH wrapper can fail the close and wedge the journal on retries.
-    const status = browserEngineStatus({ managedOnly: true });
-    const sessions = request.type === "openmausbot:browser-bot-deleted" && request.botId
-      ? [browserSessionId(request.botId, "")]
-      : request.partitionId
-        ? [browserSessionId("", request.partitionId)]
-        : [];
     // Never acknowledge an erase that did not happen: a failure leaves the intent pending for retry.
-    const work = Promise.all([eraseChromeBrowser(request), ...sessions.map(async (session) => {
-          if (status.kind !== "ready") return true;
-          const ok = await clearBrowserSessionState(status.binaryPath, session, { encryptionKey: browserEngineEncryptionKey() });
-          if (!ok) console.warn(`browser cleanup: could not clear saved state for session ${session}; restart OpenMausBot to retry this profile's cleanup. Do not use state clear --all: it erases other profiles too.`);
-          return ok;
-        })]);
-    void work.then((results) => results.every(Boolean), (error) => {
+    void eraseDeletedBrowser(request).catch((error: unknown) => {
       console.warn("browser cleanup: could not clear saved session state", error);
       return false;
     }).then((ok) => {
@@ -2660,7 +2647,7 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
 const {
   browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions,
   currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, browserSessionSpec, browserIntegration,
-  browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched, eraseChromeBrowser, engineSummary,
+  browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched, eraseDeletedBrowser, engineSummary,
 } = createBrowserHost({ cfg, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT });
 
 const dataSheets = new DataSheetRegistry({
