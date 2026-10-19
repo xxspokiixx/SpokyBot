@@ -131,7 +131,8 @@ it("a bot sent to My Cloud keeps its conversation's id, so Bring newer chats add
   expect((await local("POST", `/api/bots/${kai.id}/messages`, { text: "The Acme deadline is Friday.", threadId: kai.threadId })).status).toBe(202);
   const answered = async () => ((await local("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body?.messages ?? [])
     .some((message: { role: string; kind: string }) => message.role === "bot" && message.kind === "text");
-  for (let tries = 0; !(await answered()) && tries < 200; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
+  const idle = async () => (await local("GET", "/api/bots")).body.bots.every((bot: { activity?: string; busy?: boolean }) => bot.activity !== "working" && !bot.busy);
+  for (let tries = 0; !(await answered() && await idle()) && tries < 300; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
   expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(kai.id)] })).result.bots).toEqual(["Kai"]);
   expect((await onCloud("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body?.messages ?? []).toEqual([]);
 
@@ -140,7 +141,12 @@ it("a bot sent to My Cloud keeps its conversation's id, so Bring newer chats add
     fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...fx.edge } })) as typeof fetch,
     tempRoot: join(fx.root, "move-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
   });
-  const brought = await move.bring({ id: "cloud", name: "My Cloud", origin: fx.cloudBase, kind: "cloud", grant: () => fx.grant("Copy from desktop") });
+  // A bot's turn can still be wrapping up after its reply; a backup refuses "busy" until it has.
+  let brought = await move.bring({ id: "cloud", name: "My Cloud", origin: fx.cloudBase, kind: "cloud", grant: () => fx.grant("Copy from desktop") });
+  for (let tries = 0; brought.error?.code === "busy" && tries < 40; tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    brought = await move.bring({ id: "cloud", name: "My Cloud", origin: fx.cloudBase, kind: "cloud", grant: () => fx.grant("Copy from desktop") });
+  }
   expect(brought.phase, JSON.stringify(brought)).toBe("done");
   const there = (await onCloud("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body.messages as Array<{ role: string; text?: string }>;
   expect(there.some((message) => message.role === "user" && message.text?.startsWith("The Acme deadline is Friday."))).toBe(true);
