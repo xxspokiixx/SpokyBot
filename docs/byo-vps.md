@@ -62,6 +62,20 @@ Host my-vps
 - `ServerAliveInterval`/`ServerAliveCountMax`/`ConnectTimeout` — a dropped VPS must fail fast (under a
   minute, and ten seconds to connect), not hang a turn waiting on a dead TCP session.
 
+### One server per bot
+
+The app-level alias (Settings → API keys) is the default server for every bot. A bot can also be pointed at
+its own alias: Bot Settings → Access → **Server (SSH alias)** appears whenever the **Self-hosted VPS**
+backend is chosen, and an empty field means "use the default". The bot's own server then wins for everything
+that matters to that bot — provisioning, status checks, previews, screenshots, watched desktop sessions, its
+computer tools, and deletion cleanup. The Settings inventory spans every server in play and tags each
+computer with the alias that holds it.
+
+A bot cannot be moved to another server while its computer still lives on the old one, and the default alias
+cannot change while any computer it manages still exists: remove the container by hand first
+(`docker -H ssh://old-server rm -f openmausbot-vps-<bot>-<hash>`). Any alias from your `~/.ssh/config`,
+host key already verified by hand, is all it takes.
+
 **Host key first, by hand.** Connect once manually before pointing OpenMausBot at the alias:
 
 ```sh
@@ -79,8 +93,9 @@ host is unknown simply fails until you have done this once.
 - **Firewall the VPS to SSH only**, ideally from your IP. Nothing OpenMausBot does needs any other inbound
   port open, so anything else open is pure attack surface.
 - **Nothing sensitive is stored.** The only thing OpenMausBot persists is the alias name itself
-  (`~/.openmausbot/config.json`); keys, passphrases, and agent state stay with SSH. The alias is also kept
-  off paired phones — the companion reports configured-or-not, never the name.
+  (`~/.openmausbot/config.json`, plus a bot's own alias in `bots.json` when it has one); keys, passphrases,
+  and agent state stay with SSH. Aliases are also kept off paired phones — the companion reports
+  configured-or-not, never the name.
 - The container itself runs hardened: capabilities dropped, private network/IPC/cgroup namespaces, no host
   mounts or devices, and no automatic removal. Ownership, pinned-image and isolation checks still apply
   when reusing a container; a container that fails them is refused, not repaired.
@@ -88,7 +103,8 @@ host is unknown simply fails until you have done this once.
 ## Container lifecycle
 
 Each bot owns one container on the VPS, named `openmausbot-vps-<bot>-<hash>` — stable across restarts and
-independent of the bot's display name.
+independent of the bot's display name. It lives on the bot's server: the default alias, or the bot's own
+when it has one.
 
 New containers default to 4 GiB memory with no extra swap, 2 CPUs, 512 PIDs, 512 MiB shared memory and an
 `unless-stopped` restart policy. These are creation defaults, not compatibility requirements. Existing

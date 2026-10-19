@@ -39,6 +39,9 @@ import { cacheUntilConfigChanges,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
+  vpsSshAliasForBot,
+  vpsConfigForBot,
+  vpsAliasesInPlay,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
@@ -463,6 +466,23 @@ describe("configuration boundaries", () => {
     });
     expect(vpsSshAlias({ vps: { sshAlias: "production-vps" } })).toBe("production-vps");
     expect(vpsSshAlias({ vps: { sshAlias: "-bad" } })).toBeNull();
+
+    // A bot's own alias wins, invalid or missing overrides fall back to the default, and nothing is invented.
+    expect(vpsSshAliasForBot({ vps: { sshAlias: "production-vps" } }, { vpsAlias: "alpha-vps" })).toBe("alpha-vps");
+    expect(vpsSshAliasForBot({}, { vpsAlias: "alpha-vps" })).toBe("alpha-vps");
+    expect(vpsSshAliasForBot({ vps: { sshAlias: "production-vps" } }, { vpsAlias: "-bad" })).toBe("production-vps");
+    expect(vpsSshAliasForBot({ vps: { sshAlias: "production-vps" } }, null)).toBe("production-vps");
+    expect(vpsSshAliasForBot({}, {})).toBeNull();
+    expect(vpsConfigForBot({ vps: { sshAlias: "production-vps" } }, { vpsAlias: "alpha-vps" })).toEqual({ vps: { sshAlias: "alpha-vps" } });
+    expect(vpsConfigForBot({}, {})).toEqual({});
+
+    // Inventory scans every server in play once, the default first.
+    expect(vpsAliasesInPlay(
+      { vps: { sshAlias: "production-vps" } },
+      [{}, { vpsAlias: "alpha-vps" }, { vpsAlias: "production-vps" }, { vpsAlias: "bad alias" }],
+    )).toEqual(["production-vps", "alpha-vps"]);
+    expect(vpsAliasesInPlay({}, [{ vpsAlias: "alpha-vps" }])).toEqual(["alpha-vps"]);
+    expect(vpsAliasesInPlay({}, [{}])).toEqual([]);
   });
 
   it("validates browserEngine.attachCdpUrl as a bare CDP port or an http(s)/ws(s) URL, and forwards it only when configured", () => {

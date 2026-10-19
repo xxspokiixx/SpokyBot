@@ -153,6 +153,8 @@ export interface ManagedVpsOwner {
 export interface ManagedVpsInventoryInstance {
   name: string;
   state: "created" | "restarting" | "running" | "removing" | "paused" | "exited" | "dead" | "unknown";
+  /** The SSH alias whose host holds this container. */
+  vpsAlias: string;
   ownerBotId: string | null;
   ownerName: string | null;
   orphaned: boolean;
@@ -162,7 +164,8 @@ export interface ManagedVpsInventoryInstance {
 export interface ManagedVpsInventory {
   configured: boolean;
   available: boolean;
-  sshAlias: string | null;
+  /** Every alias the listing covers: the default first, then each bot's own. */
+  vpsAliases: string[];
   problem: string | null;
   instances: ManagedVpsInventoryInstance[];
 }
@@ -677,17 +680,23 @@ const VPS_INVENTORY_STATES = new Set<ManagedVpsInventoryInstance["state"]>([
   "dead",
 ]);
 
-function inventoryFailure(alias: string, error: unknown): ManagedVpsInventory {
+interface ManagedVpsAliasScan {
+  available: boolean;
+  problem: string | null;
+  instances: ManagedVpsInventoryInstance[];
+  containerIds: Map<string, string>;
+}
+
+function inventoryFailure(alias: string, error: unknown): ManagedVpsAliasScan {
   const detail = (error instanceof Error ? error.message : String(error))
     .replace(/[\r\n\t]+/g, " ")
     .trim()
     .slice(0, 200);
   return {
-    configured: true,
     available: false,
-    sshAlias: alias,
-    problem: `Docker over SSH could not list managed computers${detail ? `: ${detail}` : ""}`,
+    problem: `Docker over SSH could not list managed computers on ${alias}${detail ? `: ${detail}` : ""}`,
     instances: [],
+    containerIds: new Map(),
   };
 }
 
@@ -701,19 +710,11 @@ function managedVpsState(value: unknown, running: unknown): ManagedVpsInventoryI
   return "unknown";
 }
 
-async function scanManagedVpsComputers(
-  cfg: AppConfig,
+async function scanManagedVpsAlias(
+  alias: string,
   owners: ManagedVpsOwner[],
-  runner: VpsCommandRunner = defaultRunner,
-): Promise<{ inventory: ManagedVpsInventory; containerIds: Map<string, string> }> {
-  const alias = vpsSshAlias(cfg);
-  if (!alias) {
-    return {
-      inventory: { configured: false, available: false, sshAlias: null, problem: null, instances: [] },
-      containerIds: new Map(),
-    };
-  }
-
+  runner: VpsCommandRunner,
+): Promise<ManagedVpsAliasScan> {
   try {
     const listed = await runner(vpsDockerArgs(alias, [
       "container",
@@ -729,10 +730,7 @@ async function scanManagedVpsComputers(
       throw new Error("the VPS returned an invalid or unexpectedly large managed-container list");
     }
     if (ids.length === 0) {
-      return {
-        inventory: { configured: true, available: true, sshAlias: alias, problem: null, instances: [] },
-        containerIds: new Map(),
-      };
+      return { available: true, problem: null, instances: [], containerIds: new Map() };
     }
 
     const inspected = await runner(
@@ -786,6 +784,7 @@ async function scanManagedVpsComputers(
       instances.push({
         name,
         state: managedVpsState(detail.State?.Status, detail.State?.Running),
+        vpsAlias: alias,
         ownerBotId: owner?.botId ?? null,
         ownerName: owner?.name ?? null,
         orphaned: !owner,
@@ -795,16 +794,9 @@ async function scanManagedVpsComputers(
     if (seenIds.size !== ids.length) {
       throw new Error("the VPS returned an incomplete managed-container inventory");
     }
-    instances.sort((left, right) =>
-      Number(left.orphaned) - Number(right.orphaned) ||
-      (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name),
-    );
-    return {
-      inventory: { configured: true, available: true, sshAlias: alias, problem: null, instances },
-      containerIds,
-    };
+    return { available: true, problem: null, instances, containerIds };
   } catch (error) {
-    return { inventory: inventoryFailure(alias, error), containerIds: new Map() };
+    return inventoryFailure(alias, error);
   }
 }
 
@@ -812,9 +804,32 @@ export async function listManagedVpsComputers(
   cfg: AppConfig,
   owners: ManagedVpsOwner[],
   runner: VpsCommandRunner = defaultRunner,
+  vpsAliases?: string[],
 ): Promise<ManagedVpsInventory> {
   cfg = snapshotVpsConfig(cfg);
-  return (await scanManagedVpsComputers(cfg, owners, runner)).inventory;
+  const defaultAlias = vpsSshAlias(cfg);
+  const requested = vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : [];
+  const scanning = [...new Set(requested.filter(isValidSshAlias))];
+  if (scanning.length === 0) {
+    return { configured: false, available: false, vpsAliases: [], problem: null, instances: [] };
+  }
+  const instances: ManagedVpsInventoryInstance[] = [];
+  let available = true;
+  let problem: string | null = null;
+  for (const alias of scanning) {
+    const scan = await scanManagedVpsAlias(alias, owners, runner);
+    if (!scan.available) {
+      available = false;
+      problem = problem ?? scan.problem;
+    }
+    instances.push(...scan.instances);
+  }
+  instances.sort((left, right) =>
+    Number(left.orphaned) - Number(right.orphaned) ||
+    (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name) ||
+    left.vpsAlias.localeCompare(right.vpsAlias),
+  );
+  return { configured: true, available, vpsAliases: scanning, problem, instances };
 }
 
 export function vpsContainerRunArgs(
@@ -1022,12 +1037,11 @@ export async function removeManagedVpsComputer(
   const key = `${alias}:${containerName}`;
   return withVpsLifecycleLock(key, async () => {
     invalidateVpsStatus(key);
-    const scan = await scanManagedVpsComputers(cfg, owners, runner);
-    const inventory = scan.inventory;
-    if (!inventory.available) {
-      throw Object.assign(new Error(inventory.problem ?? "VPS computer inventory is unavailable"), { status: 503 });
+    const scan = await scanManagedVpsAlias(alias, owners, runner);
+    if (!scan.available) {
+      throw Object.assign(new Error(scan.problem ?? "VPS computer inventory is unavailable"), { status: 503 });
     }
-    const instance = inventory.instances.find((candidate) => candidate.name === containerName);
+    const instance = scan.instances.find((candidate) => candidate.name === containerName);
     if (!instance) throw Object.assign(new Error("managed VPS computer not found"), { status: 404 });
     if (instance.inUse) {
       throw Object.assign(new Error("this VPS computer is in use — stop its bot's work first"), { status: 409 });

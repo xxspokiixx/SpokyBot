@@ -110,8 +110,16 @@ fi
 case "$*" in
   *" run "*) rm -f "$FAKE_DOCKER_DIR/container-missing" ;;
   *" start "*) sed 's/"Running":false/"Running":true/' "$FAKE_DOCKER_DIR/container.json.tpl" > "$FAKE_DOCKER_DIR/container.next"; mv "$FAKE_DOCKER_DIR/container.next" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
-  *" container ls "*) if [ ! -f "$FAKE_DOCKER_DIR/inventory-empty" ]; then echo "${CONTAINER_ID}"; fi ;;
-  *" container inspect "*) name=$(cat "$FAKE_DOCKER_DIR/container.name"); sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
+  *" container ls "*)
+    alias=$(printf '%s' "$2" | sed 's|ssh://||')
+    if [ -f "$FAKE_DOCKER_DIR/inventory-empty" ]; then :;
+    elif [ -f "$FAKE_DOCKER_DIR/container.name.$alias" ]; then echo "${CONTAINER_ID}";
+    elif ls "$FAKE_DOCKER_DIR"/container.name.* >/dev/null 2>&1; then :;
+    else echo "${CONTAINER_ID}"; fi ;;
+  *" container inspect "*)
+    alias=$(printf '%s' "$2" | sed 's|ssh://||')
+    if [ -f "$FAKE_DOCKER_DIR/container.name.$alias" ]; then name=$(cat "$FAKE_DOCKER_DIR/container.name.$alias"); else name=$(cat "$FAKE_DOCKER_DIR/container.name"); fi
+    sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *" image inspect "*)
     if [ -f "$FAKE_DOCKER_DIR/fail-inspect-once" ]; then
       rm "$FAKE_DOCKER_DIR/fail-inspect-once"
@@ -130,7 +138,12 @@ case "$*" in
   *" exec "*"base64"*) cat "$FAKE_DOCKER_DIR/screenshot.b64" ;;
   *" exec "*"status"*) echo "running" ;;
   *" exec "*"rm -f"*) : ;;
-  *" inspect "*) if [ -f "$FAKE_DOCKER_DIR/container-missing" ]; then echo "No such container" >&2; exit 1; fi; for arg in "$@"; do name="$arg"; done; printf '%s' "$name" > "$FAKE_DOCKER_DIR/container.name"; sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
+  *" inspect "*)
+    if [ -f "$FAKE_DOCKER_DIR/container-missing" ]; then echo "No such container" >&2; exit 1; fi
+    for arg in "$@"; do name="$arg"; done
+    alias=$(printf '%s' "$2" | sed 's|ssh://||')
+    if [ -f "$FAKE_DOCKER_DIR/container.name.$alias" ]; then printf '%s' "$name" > "$FAKE_DOCKER_DIR/container.name.$alias"; else printf '%s' "$name" > "$FAKE_DOCKER_DIR/container.name"; fi
+    sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *) echo "unexpected docker invocation: $*" >&2; exit 64 ;;
 esac
 `;
@@ -729,4 +742,82 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       await api("POST", `/api/bots/${asker.id}/interrupt`, {});
     }
   }, 45_000);
+
+  it(
+    "keeps each bot on its own SSH alias: per-bot routing, a merged inventory, and the move guards",
+    async () => {
+      writeFileSync(dockerLog, "");
+      rmSync(join(dirname(dockerLog), "inventory-empty"), { force: true });
+      writeFileSync(gateFile, "open");
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+      const alpha = (await api("POST", "/api/bots")).body.bot;
+      const beta = (await api("POST", "/api/bots")).body.bot;
+      const free = (await api("POST", "/api/bots")).body.bot;
+      const alphaName = vpsContainerName(alpha.id);
+      const betaName = vpsContainerName(beta.id);
+      writeFileSync(join(dirname(dockerLog), "container.name.alpha-vps"), alphaName);
+      writeFileSync(join(dirname(dockerLog), "container.name.production-vps"), betaName);
+
+      expect((await api("PATCH", `/api/bots/${alpha.id}`, { cloudBackend: "vps" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${alpha.id}`, { vpsAlias: "alpha-vps" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${alpha.id}`, { computer: "cloud" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${beta.id}`, { cloudBackend: "vps" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${beta.id}`, { computer: "cloud" })).status).toBe(200);
+      expect((await botById(alpha.id)).vpsAlias).toBe("alpha-vps");
+      expect((await botById(beta.id)).vpsAlias).toBeUndefined();
+
+      // Each bot's status inspects the server it was pointed at.
+      const alphaStatus = await api("GET", `/api/bots/${alpha.id}/computer`);
+      expect(alphaStatus.status, JSON.stringify(alphaStatus.body)).toBe(200);
+      expect(alphaStatus.body).toMatchObject({ backend: "vps", ready: true });
+      const betaStatus = await api("GET", `/api/bots/${beta.id}/computer`);
+      expect(betaStatus.status, JSON.stringify(betaStatus.body)).toBe(200);
+      expect(betaStatus.body).toMatchObject({ backend: "vps", ready: true });
+      const log = readFileSync(dockerLog, "utf8");
+      expect(log).toMatch(/-H ssh:\/\/alpha-vps (?:container )?inspect /);
+      expect(log).toMatch(/-H ssh:\/\/production-vps (?:container )?inspect /);
+
+      // The Settings inventory spans both servers and tags every computer with its alias.
+      const inventory = await api("GET", "/api/computers/vps");
+      expect(inventory.status, JSON.stringify(inventory.body)).toBe(200);
+      expect(inventory.body.vpsAliases).toEqual(["production-vps", "alpha-vps"]);
+      const alphaRow = (inventory.body.instances as any[]).find((row) => row.ownerBotId === alpha.id);
+      const betaRow = (inventory.body.instances as any[]).find((row) => row.ownerBotId === beta.id);
+      expect(alphaRow).toMatchObject({ vpsAlias: "alpha-vps", name: alphaName, state: "running" });
+      expect(betaRow).toMatchObject({ vpsAlias: "production-vps", name: betaName, state: "running" });
+
+      // The default server stays attached while a computer still lives on it.
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "other-vps" } })).status).toBe(409);
+
+      // A live computer blocks its owner's move, even to clear the override.
+      const blocked = await api("PATCH", `/api/bots/${alpha.id}`, { vpsAlias: "gamma-vps" });
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error).toMatch(/remove this bot's VPS computer/i);
+      expect((await api("PATCH", `/api/bots/${alpha.id}`, { vpsAlias: null })).status).toBe(409);
+      expect((await botById(alpha.id)).vpsAlias).toBe("alpha-vps");
+
+      // A bot with no computer of its own chooses a server freely, then falls back to the default.
+      expect((await api("PATCH", `/api/bots/${free.id}`, { vpsAlias: "gamma-vps" })).status).toBe(200);
+      expect((await botById(free.id)).vpsAlias).toBe("gamma-vps");
+      expect((await api("PATCH", `/api/bots/${free.id}`, { vpsAlias: null })).status).toBe(200);
+      expect((await botById(free.id)).vpsAlias).toBeUndefined();
+      expect((await api("PATCH", `/api/bots/${free.id}`, { vpsAlias: "bad alias!" })).status).toBe(400);
+
+      // A real turn mounts the computer bridge against the bot's own server.
+      expect((await api("PATCH", `/api/bots/${alpha.id}`, { browser: false, modelSelection: { instanceId: "vps", model: "fake-model" } })).status).toBe(200);
+      rmSync(`${acpDump}.mcp.json`, { force: true });
+      try {
+        expect((await api("POST", `/api/bots/${alpha.id}/messages`, { text: "Check the desk on my own server" })).status).toBe(202);
+        await until(async () => existsSync(`${acpDump}.mcp.json`), "the alpha turn's computer mount");
+        const servers = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8")) as Array<{ name: string; args?: string[] }>;
+        const computer = servers.find((server) => server.name === "computer");
+        expect(computer, "no computer MCP server reached the agent").toBeTruthy();
+        expect(computer!.args).toContain("alpha-vps");
+        expect(computer!.args).not.toContain("production-vps");
+      } finally {
+        await api("POST", `/api/bots/${alpha.id}/interrupt`, {});
+      }
+    },
+    60_000,
+  );
 });

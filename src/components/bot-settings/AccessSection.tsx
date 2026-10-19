@@ -552,6 +552,65 @@ export function cloudPreferenceShown(bot: Pick<Bot, "computer">, config: { cloud
   return (!bot.computer || bot.computer === "cloud") && !config?.cloudHome;
 }
 
+/**
+ * A bot's own VPS server. PATCHed directly, not via updateBot: the server refuses
+ * a move while the bot's computer still lives on the old host.
+ */
+export function VpsAliasField({ bot }: { bot: Bot }) {
+  const { request: api } = useBotEditor();
+  const { state } = useStore();
+  const defaultAlias = state.config?.vps?.sshAlias ?? "";
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = async (alias: string | null) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ vpsAlias: alias }) });
+      setDraft(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const value = draft ?? bot.vpsAlias ?? "";
+  return (
+    <div className="mt-3 rounded-lg bg-inset p-3">
+      <div className="text-[13px] text-ink">{t("botAccess.cloud.server")}</div>
+      <div className="mt-0.5 text-[11.5px] text-ink-secondary">
+        {defaultAlias
+          ? t("botAccess.cloud.serverDefault", { alias: defaultAlias })
+          : t("botAccess.cloud.serverNoDefault")}
+      </div>
+      <form
+        className="mt-2 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save(value.trim() || null);
+        }}
+      >
+        <input
+          className={cn(inputCls, "font-mono text-[12.5px]")}
+          placeholder={defaultAlias || t("botAccess.cloud.serverPlaceholder")}
+          value={value}
+          aria-label={t("botAccess.cloud.server")}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <button
+          type="submit"
+          disabled={saving || draft === null}
+          className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+        >
+          {t("botAccess.cloud.serverSave")}
+        </button>
+      </form>
+      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
 export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"] }) {
   const { state } = useStore();
   if (!cloudPreferenceShown(bot, state.config)) return null;
@@ -567,6 +626,7 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
         value={bot.cloudBackend ?? "box"}
         onChange={(backend) => patch({ cloudBackend: backend })}
       />
+      {bot.cloudBackend === "vps" && <VpsAliasField bot={bot} />}
       {!bot.computer && bot.cloudBackend === "vps" && (
         <div className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-inset px-3 py-2.5">
           <div className="min-w-0">

@@ -4,8 +4,16 @@ export const BOAT_ACCOUNT_RESOURCES_ERROR =
 export const VPS_ALIAS_RESOURCES_ERROR =
   "remove this installation's VPS computers before changing or clearing the SSH config alias";
 
+export const VPS_BOT_ALIAS_RESOURCES_ERROR =
+  "remove this bot's VPS computer before changing its SSH config alias";
+export const VPS_BOT_ALIAS_CHANGE_ERROR = "stop the active turn before changing this bot's VPS SSH alias";
+
 export function cloudBackendChangeError(botBusy: boolean, activeVpsThread: boolean): string | null {
   return botBusy || activeVpsThread ? CLOUD_BACKEND_CHANGE_ERROR : null;
+}
+
+export function vpsBotAliasChangeError(botBusy: boolean, activeVpsThread: boolean): string | null {
+  return botBusy || activeVpsThread ? VPS_BOT_ALIAS_CHANGE_ERROR : null;
 }
 
 export interface CloudResourceIdentity {

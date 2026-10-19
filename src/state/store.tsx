@@ -323,6 +323,7 @@ export interface Bot {
   computer?: "cloud" | "vm" | "local" | "browser" | "off";
   cloudBackend?: CloudBackend;
   autoStartVps?: boolean;
+  vpsAlias?: string;
   cwd?: string;
   autoApprove?: boolean;
   approvalMode?: ApprovalMode;
@@ -2861,6 +2862,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             computer: source.computer,
             cloudBackend: source.cloudBackend,
             autoStartVps: source.autoStartVps,
+            vpsAlias: source.vpsAlias,
             avatarUrl: source.avatarUrl,
             avatarCrop: source.avatarCrop,
             avatarZoom: source.avatarZoom,

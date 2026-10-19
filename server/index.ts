@@ -183,6 +183,8 @@ import {
   persistableInstanceConfigs,
   type AppConfig,
   vpsSshAlias,
+  vpsSshAliasForBot,
+  vpsConfigForBot,
   DATA_DIR, EVENTS_DIR,
   customMcpServers,
   onConfigSaved,
@@ -6339,10 +6341,11 @@ async function mountBotVps(
   owner: TurnOwner,
   opts: { start: boolean; onClaimed: (capture: () => Promise<{ png: string; format: string }>) => void; onRejected?: (failure: string) => void },
 ) {
-  const vpsResource = `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`;
+  const botVpsConfig = vpsConfigForBot(cfg, bot);
+  const vpsResource = `computer:vps:${vpsSshAliasForBot(cfg, bot)}:${bot.id}`;
   const remote = opts.start
-    ? await vps.vpsComputerAction("provision", cfg, bot.id)
-    : await vps.inspectVpsForAuto(cfg, bot.id);
+    ? await vps.vpsComputerAction("provision", botVpsConfig, bot.id)
+    : await vps.inspectVpsForAuto(botVpsConfig, bot.id);
   if (!remote?.ready || !remote.sshAlias) return { problem: remote?.problem ?? null, reachable: remote?.daemonUp === true };
   const targetCfg = { ...cfg, vps: { sshAlias: remote.sshAlias } };
   const vpsMcp = vps.vpsComputerMcp(targetCfg, bot.id, remote.container_id ?? undefined);
@@ -6512,7 +6515,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   if (plan.computer !== undefined) return plan.computer === "off" && plan.browser ? "browser" : plan.computer;
   const instance = registry.get(bot.modelSelection.instanceId);
   if (bot.cloudBackend === "vps") {
-    const remote = await vps.vpsComputerStatus(cfg, bot.id);
+    const remote = await vps.vpsComputerStatus(vpsConfigForBot(cfg, bot), bot.id);
     if (remote.ready) return "cloud";
   }
   const target = localVmTargetForStatus(bot.id, threadId);
@@ -6545,7 +6548,7 @@ async function selectableComputers(bot: BotRecord) {
       else if (toolsLeaveOut && surface !== "browser") reason = toolsLeaveOut;
       else if (surface === "cloud") {
         if (bot.cloudBackend === "vps") {
-          const status = canWorkOnCloud(cloudEngine(instance)) ? await vps.vpsComputerStatus(cfg, bot.id) : null;
+          const status = canWorkOnCloud(cloudEngine(instance)) ? await vps.vpsComputerStatus(vpsConfigForBot(cfg, bot), bot.id) : null;
           ready = status?.ready === true;
           canStart = Boolean(status?.daemonUp && status.managed && status.container === "stopped" &&
             status.image && status.imageMatches && status.network === "private" && status.mounts === "none" && status.security === "hardened");
@@ -9680,7 +9683,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           error: `stop this bot's work in channel ${activeGroup.group.name} before deleting the bot`,
         });
       }
-      if ((boat.boatConfigured(cfg) || vpsSshAlias(cfg)) && (bot.busy || hasDirectDispatch(bot.id))) {
+      if ((boat.boatConfigured(cfg) || vpsSshAliasForBot(cfg, bot)) && (bot.busy || hasDirectDispatch(bot.id))) {
         return deletionResponse( 409, { error: "stop this bot's work before checking and deleting its cloud computer" });
       }
       const botBoatRecovery = boatCreateRecoverySnapshot().filter((entry) => entry.botId === bot.id);
@@ -9728,7 +9731,8 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           };
         }
 
-        const vpsInventory = await vps.listManagedVpsComputers(cfg, managedBoatOwners());
+        const botVpsConfig = vpsConfigForBot(cfg, bot);
+        const vpsInventory = await vps.listManagedVpsComputers(botVpsConfig, managedBoatOwners());
         if (vpsInventory.configured && !vpsInventory.available) {
           return deletionResponse( 503, {
             error: `${vpsInventory.problem ?? "VPS computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
@@ -9763,7 +9767,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
             }
           }
           for (const instance of ownedVpsComputers) {
-            await vps.removeManagedVpsComputer(cfg, managedBoatOwners(), instance.name, instance.name);
+            await vps.removeManagedVpsComputer(botVpsConfig, managedBoatOwners(), instance.name, instance.name);
           }
           if (localVmCleanup) {
             if (localVmCleanup.removeContainer) {
@@ -16824,7 +16828,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const teamComputer = inheritedTeamComputer(bot);
       if (teamComputer) return json(res, 200, { surface, backend: "box", teamComputer: { id: teamComputer.id, name: teamComputer.name }, ...(await boat.boatStatus(cfg, teamComputerOwner(teamComputer.id))) });
       return bot.cloudBackend === "vps"
-        ? json(res, 200, { surface, backend: "vps", ...(await vps.vpsComputerStatus(cfg, bot.id)) })
+        ? json(res, 200, { surface, backend: "vps", ...(await vps.vpsComputerStatus(vpsConfigForBot(cfg, bot), bot.id)) })
         : json(res, 200, { surface, backend: "box", ...(await boat.boatStatus(cfg, bot.id)) });
     }
     // The person's take and release; the bot has no verb here, only a sign-in request its card settles.
@@ -16931,7 +16935,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (m[2] === "screenshot") {
           let preview = vpsPreviewRequests.get(botId);
           if (!preview) {
-            preview = vps.vpsComputerScreenshot(cfg, botId).finally(() => {
+            preview = vps.vpsComputerScreenshot(vpsConfigForBot(cfg, bot), botId).finally(() => {
               vpsPreviewRequests.delete(botId);
             });
             vpsPreviewRequests.set(botId, preview);
@@ -16955,12 +16959,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           if (m[2] === "join") {
             const remote = auth.kind !== "loopback";
-            const result = await vps.vpsComputerJoin(cfg, botId, undefined, remote);
+            const result = await vps.vpsComputerJoin(vpsConfigForBot(cfg, bot), botId, undefined, remote);
             return json(res, 200, { ...result, joinUrl: remote
               ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
-          return json(res, 200, await vps.vpsComputerAction(action, cfg, botId));
+          return json(res, 200, await vps.vpsComputerAction(action, vpsConfigForBot(cfg, bot), botId));
         } finally {
           releaseComputerLifecycle();
           if (joinSettled) {

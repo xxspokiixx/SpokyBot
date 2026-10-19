@@ -11,9 +11,9 @@ import { parseVisibility } from "../bot-visibility.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { CacheKeepWarm } from "../cache-keepwarm.ts";
-import { cloudBackendChangeError } from "../cloud-backend.ts";
+import { cloudBackendChangeError, vpsBotAliasChangeError, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
-import type { AppConfig } from "../config.ts";
+import { isValidSshAlias, vpsSshAliasForBot, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
@@ -27,6 +27,7 @@ import type { RoutineManager } from "../routines.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import { parseConnectorTools } from "../connector-tools.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
+import * as vps from "../vps-computer.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -345,12 +346,45 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.autoStartVps !== "boolean") return json(res, 400, { error: "autoStartVps must be true or false" });
         patch.autoStartVps = body.autoStartVps;
       }
+      if (body.vpsAlias !== undefined) {
+        if (body.vpsAlias === null || body.vpsAlias === "") {
+          patch.vpsAlias = undefined;
+        } else if (isValidSshAlias(body.vpsAlias)) {
+          patch.vpsAlias = body.vpsAlias;
+        } else {
+          return json(res, 400, {
+            error: "vpsAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore), or null to use the default server",
+          });
+        }
+      }
       if (body.chiefOfStaff !== undefined && typeof body.chiefOfStaff !== "boolean") {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
       }
       if (body.cloudBackend !== undefined) {
         const backendError = cloudBackendChangeError(Boolean(existingBot?.busy), activeVpsThreads.has(m[1]));
         if (backendError) return json(res, 409, { error: backendError });
+      }
+      // Moving a bot to another server is refused while its own computer still lives on the old one.
+      if (body.vpsAlias !== undefined && existingBot && patch.vpsAlias !== existingBot.vpsAlias) {
+        const aliasError = vpsBotAliasChangeError(Boolean(existingBot.busy), activeVpsThreads.has(m[1]));
+        if (aliasError) return json(res, 409, { error: aliasError });
+        const currentAlias = vpsSshAliasForBot(cfg, existingBot);
+        if (currentAlias) {
+          // Scanned with this bot as the only owner: the guard only ever cares about its own container,
+          // and naming the owner keeps a legacy unlabeled container visible to the check.
+          const inventory = await vps.listManagedVpsComputers(
+            { vps: { sshAlias: currentAlias } },
+            [{ botId: existingBot.id, name: existingBot.name, inUse: false }],
+          );
+          if (!inventory.available) {
+            return json(res, 503, {
+              error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
+            });
+          }
+          if (inventory.instances.some((instance) => instance.name === vps.vpsContainerName(existingBot.id))) {
+            return json(res, 409, { error: VPS_BOT_ALIAS_RESOURCES_ERROR });
+          }
+        }
       }
       if (body.cwd !== undefined) {
         const checked = validateBotCwd(body.cwd);

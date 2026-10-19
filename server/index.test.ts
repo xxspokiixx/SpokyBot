@@ -11250,6 +11250,17 @@ describe("harness HTTP API", () => {
     expect((await api("PATCH", `/api/bots/${bot.id}`, { autoStartVps: "yes" })).status).toBe(400);
     const invalid = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "daytona" });
     expect(invalid.status).toBe(400);
+
+    // A bot can be pointed at its own server; with none of its containers anywhere, the empty scan lets it move.
+    const perBot = await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: "alpha-vps" });
+    expect(perBot.status, JSON.stringify(perBot.body)).toBe(200);
+    expect(perBot.body.bot.vpsAlias).toBe("alpha-vps");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: "prod; reboot" })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: "bad alias" })).status).toBe(400);
+    // Clearing the field falls back to the default server.
+    const cleared = await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: null });
+    expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+    expect(cleared.body.bot.vpsAlias).toBeUndefined();
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
   });
 

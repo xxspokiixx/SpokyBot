@@ -111,6 +111,8 @@ function waitForCloudDeleteRefresh(delayMs: number): Promise<void> {
 export interface VpsComputerInventoryInstance {
   name: string;
   state: "created" | "restarting" | "running" | "removing" | "paused" | "exited" | "dead" | "unknown";
+  /** The SSH alias whose host holds this computer. */
+  vpsAlias: string;
   ownerBotId: string | null;
   ownerName: string | null;
   orphaned: boolean;
@@ -120,7 +122,8 @@ export interface VpsComputerInventoryInstance {
 interface VpsComputerInventoryPayload {
   configured: boolean;
   available: boolean;
-  sshAlias: string | null;
+  /** The default alias first, then each bot's own. */
+  vpsAliases: string[];
   problem: string | null;
   instances: VpsComputerInventoryInstance[];
 }
@@ -333,6 +336,7 @@ export function vpsComputerRemovePlan(instance: VpsComputerInventoryInstance): C
     }),
     request: jsonPostRequest(`/api/computers/vps/${encodeURIComponent(instance.name)}/remove`, {
       confirmName: instance.name,
+      alias: instance.vpsAlias,
     }),
   };
 }
@@ -348,7 +352,7 @@ export function confirmComputerAction(
 export function VpsComputersCard({
   instances,
   configured,
-  sshAlias,
+  aliases,
   loading,
   removingName,
   error,
@@ -358,7 +362,7 @@ export function VpsComputersCard({
 }: {
   instances: VpsComputerInventoryInstance[];
   configured: boolean | null;
-  sshAlias: string | null;
+  aliases: string[];
   loading: boolean;
   removingName: string | null;
   error: string | null;
@@ -374,7 +378,7 @@ export function VpsComputersCard({
       <div className="flex items-center justify-between gap-3">
         <div className="text-[12px] text-ink-secondary">
           {configured === true
-            ? t("vm.vps.sshHost", { alias: sshAlias ?? t("vm.vps.configuredFallback") })
+            ? t("vm.vps.sshHost", { alias: aliases.join(", ") || t("vm.vps.configuredFallback") })
             : configured === false
               ? t("vm.vps.needsAlias")
               : t("vm.vps.refreshHint")}
@@ -408,11 +412,16 @@ export function VpsComputersCard({
         aria-busy={loading || removingName !== null}
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
+        {unavailableReason && instances.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-hairline/35 px-3 py-2.5 text-[12px] text-ink-secondary">
+            <AlertTriangle size={14} className="shrink-0 text-warning" /> {unavailableReason}
+          </div>
+        )}
         {loading && instances.length === 0 ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
             <Loader2 size={13} className="animate-spin" /> {t("vm.vps.checkingList")}
           </div>
-        ) : unavailableReason ? (
+        ) : unavailableReason && instances.length === 0 ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
             <AlertTriangle size={14} className="shrink-0 text-warning" /> {unavailableReason}
           </div>
@@ -429,7 +438,7 @@ export function VpsComputersCard({
           const shortId = vpsComputerShortId(instance.name);
           return (
             <div
-              key={instance.name}
+              key={`${instance.vpsAlias ?? ""}:${instance.name}`}
               className={cn(
                 "flex items-start justify-between gap-3 px-3 py-3",
                 index > 0 && "border-t border-hairline/35",
@@ -452,6 +461,11 @@ export function VpsComputersCard({
                   >
                     {state}
                   </span>
+                  {aliases.length > 1 && (
+                    <span className="rounded-full bg-control px-2 py-0.5 font-mono text-[11px] text-ink-secondary">
+                      {instance.vpsAlias}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 text-[11.5px] text-ink-secondary">
                   {instance.orphaned ? t("vm.owner.gone") : t("vm.owner.owned")}
@@ -937,7 +951,7 @@ export function LocalComputerSection() {
   const cloudOverridesRef = useRef<CloudPostActionOverrides>({});
   const [vpsInventory, setVpsInventory] = useState<VpsComputerInventoryInstance[]>([]);
   const [vpsConfigured, setVpsConfigured] = useState<boolean | null>(null);
-  const [vpsSshAlias, setVpsSshAlias] = useState<string | null>(null);
+  const [vpsAliases, setVpsAliases] = useState<string[]>([]);
   const [vpsLoading, setVpsLoading] = useState(true);
   const [vpsError, setVpsError] = useState<string | null>(null);
   const [vpsUnavailableReason, setVpsUnavailableReason] = useState<string | null>(null);
@@ -995,7 +1009,7 @@ export function LocalComputerSection() {
     const payload = body as VpsComputerInventoryPayload;
     setVpsInventory(Array.isArray(payload.instances) ? payload.instances : []);
     setVpsConfigured(payload.configured === true);
-    setVpsSshAlias(typeof payload.sshAlias === "string" ? payload.sshAlias : null);
+    setVpsAliases(Array.isArray(payload.vpsAliases) ? payload.vpsAliases : []);
     setVpsUnavailableReason(
       payload.available || !payload.configured
         ? null
@@ -1352,7 +1366,7 @@ export function LocalComputerSection() {
       <VpsComputersCard
         instances={vpsInventory}
         configured={vpsConfigured}
-        sshAlias={vpsSshAlias}
+        aliases={vpsAliases}
         loading={vpsLoading}
         removingName={vpsRemovingName}
         error={vpsError}
