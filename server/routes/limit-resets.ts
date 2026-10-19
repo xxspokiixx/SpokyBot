@@ -12,6 +12,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface LimitResetRouteDeps {
   clock: LimitResetClock;
+  now?: () => number;
   routines: RoutineManager;
   requests: Pick<RoutineRequestService, "submit">;
   /** The conversation's title, or null when the bot has no such conversation. */
@@ -78,7 +79,7 @@ export function createLimitResetRoutes(deps: LimitResetRouteDeps): RouteHandler 
       if (!routineId || !engine) return json(res, 400, { error: "routineId and engine are required" });
       const reset = deps.clock.resetAt(engine);
       if (reset === null) return json(res, 409, { error: "That limit's reset time is not known yet." });
-      const routine = deps.routines.deferNextRun(routineId, Math.max(reset + AFTER_RESET_MS, Date.now()));
+      const routine = deps.routines.deferNextRun(routineId, Math.max(reset + AFTER_RESET_MS, (deps.now ?? Date.now)()));
       return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such automation" });
     }
     return PASS;
