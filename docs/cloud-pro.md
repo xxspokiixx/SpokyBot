@@ -948,6 +948,15 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   ten minutes (which keeps both stall checks quiet), and the turn starts by
   itself. Stop ends the wait. A thread whose engine is still running never
   waits, and the only task is never held back.
+- **OpenCode threads share a process.** Threads whose OpenCode would start
+  the same way (same login, approval level and settings) run as sessions of one
+  `opencode acp` process, up to six at a time and twelve over its life
+  (`server/drivers/acp/host.ts`). Five sessions measured 811 MB in one process
+  against 2,381 MB in five. A session joining a running process waits only for
+  a session's worth of memory (200 MB). OpenCode 1.19.3 keeps a closed
+  session's memory and MCP servers until its process exits, so a process
+  holding closed sessions ends once none of its sessions has run a turn for a
+  minute, and each thread's next turn loads its session in a new process.
 - **An engine nobody is using gives way first.** Engines stay up between
   turns; one that is idle is stopped to make room before anything waits.
 - **About to run out, the home stops its newest engine** rather than freeze:
