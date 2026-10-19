@@ -224,7 +224,8 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
-      const switchedSettings = { ...wireBot(switched), tasks: store.tasks(switched.id).map((task) => wireTask(task, switched.modelSelection)) };
+      const wiredSwitch = wireBot(switched);
+      const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).
       const responseBot = requestedMessages === "0"
         ? switchedSettings
