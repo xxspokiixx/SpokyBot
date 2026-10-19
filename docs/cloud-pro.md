@@ -1620,6 +1620,24 @@ pairing-link flow as Connect to a server. The code stays in main-process
 memory for that one navigation: never on disk, never in a renderer. A
 malformed session summary or grant is treated as none.
 
+### A Cloud that sleeps: what the desktop does
+
+A plan may let My Cloud sleep when idle (the Admin suspends its machine; Fly starts it again for **any** request through
+its proxy). The session's `cloud.power` (additive, only for such a plan) says `{state: "awake"|"asleep"|"waking", since,
+sleeps: true}`; `cloud.state` stays `ready`. Without `cloud.power`, nothing below happens (`electron/cloud-power.mjs`).
+
+- **Files sync and lending pause** while the session says `asleep`, and also at once when My Cloud answers a held poll
+  `503` with `x-omb-cloud-power: asleep` (it does just before it sleeps). They make no request to My Cloud then, not even
+  a retry, and the session is read every 15 s instead of 60 s while they wait. They resume when it says awake. Files and
+  lending show "My Cloud is asleep" meanwhile.
+- **Opening My Cloud while it sleeps** asks the Admin to wake it first (`POST /api/cloud/desktop/wake`), shows "Waking
+  your Cloud…" after 1.5 s, and gives its sign-in check 30 s instead of 5 (a stopped machine takes about 20 s), so a slow
+  wake never causes a needless new pairing.
+- **Copy:** the menu and the server switcher say "Sleeps when idle" instead of "Always on" for such a Cloud; the buy sheet
+  shows the line for a plan whose allowances say `sleeps`; analytics know the `starter` plan.
+- **App events:** the connected-apps broker asks the Admin to wake a Cloud when it queues an event for one that isn't
+  polling (`cloudflare/composio-broker`, off until `CLOUD_ADMIN_URL` and `CLOUD_GRANT_SECRET` are set).
+
 ## Add a Cloud
 
 The one way to buy MausBot Cloud in the app, the same for every way in:
