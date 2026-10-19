@@ -495,6 +495,12 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
+/** The time on a conversation's last stored row, without reading the conversation. */
+export function lastRowAt(threadId: string): number | undefined {
+  const row = db().prepare("SELECT at FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | undefined;
+  return row?.at;
+}
+
 export function latestMessageAts(threadIds: readonly string[], forOrdering = false): Map<string, number> {
   return forOrdering
     ? newestAts(threadIds, "AND ((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))", "COALESCE(json_extract(json, '$.turnCompletedAt'), at)")
