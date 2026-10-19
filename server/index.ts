@@ -16114,7 +16114,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return removed ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such routine" });
     }
     if (path === "/api/routine-runs/seen-all" && method === "POST") {
-      return json(res, 200, { runs: routines!.markAllSeen() });
+      return json(res, 200, { runs: routines!.markAllSeen((run) => routineVisible(run, visible)) });
     }
     const runMatch = path.match(/^\/api\/routine-runs\/([\w-]+)\/(cancel|seen)$/);
     if (runMatch && method === "POST") {
