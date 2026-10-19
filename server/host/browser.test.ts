@@ -13,7 +13,7 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined) {
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false }: { cloudHome?: boolean } = {}) {
   const cfg = {
     features: { browser: true },
     ...(engine ? { browserEngine: { engine } } : {}),
@@ -30,8 +30,8 @@ function setup(engine: "chrome" | "agent-browser" | undefined) {
     turnResources: { free: () => true },
     activeInternalGenerationByThread: new Map([[turn.threadId, turn.generation]]),
     mintInternalCapability: (capability) => { minted.push(capability); return "capability-token"; },
-    DESKTOP_MANAGED: true,
-    CLOUD_HOME: null,
+    DESKTOP_MANAGED: !cloudHome,
+    CLOUD_HOME: cloudHome ? { machineId: "m-1" } : null,
     PORT: 4100,
   });
   hosts.push(host);
@@ -85,6 +85,16 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     host.browserEngineSwitched();
     expect(host.usedBrowserSessions.has(browser!.session)).toBe(false);
     expect(host.browserSystemPrompt(undefined)).toBe(BUILT_IN_BROWSER_SYSTEM_PROMPT);
+  });
+});
+
+describe("how long an unused browser stays open", () => {
+  it("is three minutes on a Cloud home and ten on a desktop, unless config.json sets it", () => {
+    const cloud = setup(undefined, { cloudHome: true });
+    expect(cloud.host.browserIdleMs()).toBe(3 * 60_000);
+    cloud.cfg.browserEngine = { idleTimeoutMinutes: 20 };
+    expect(cloud.host.browserIdleMs()).toBe(20 * 60_000);
+    expect(setup(undefined).host.browserIdleMs()).toBe(10 * 60_000);
   });
 });
 
