@@ -295,7 +295,7 @@ export interface WireBot {
   /** Auto mode may prepare/start this bot's managed VPS container. */
   autoStartVps?: boolean;
   /** This bot's own SSH config alias for its managed VPS computer; absent
-   * means the default server from Settings → Computer. */
+   * means the default server from Settings → API keys. */
   vpsAlias?: string;
   /** where NEW tasks run their shell tools; absent = home folder. */
   cwd?: string;
