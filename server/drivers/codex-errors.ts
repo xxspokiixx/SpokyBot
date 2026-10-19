@@ -37,7 +37,12 @@ export function codexLimitResetsAt(said: string, now = Date.now()): number | und
   if (time) {
     // codex-rs/protocol/src/error.rs format_retry_timestamp prints only the time, without seconds, when the reset is on
     // its own local date. A minute already begun is the reset arriving within it or just past, so it ends with the minute.
-    const at = new Date(now).setHours(clockHours(time[1]!, time[3]!), Number(time[2]), 0, 0);
+    const hour = clockHours(time[1]!, time[3]!);
+    const minute = Number(time[2]);
+    let at = new Date(now).setHours(hour, minute, 0, 0);
+    // When a DST change repeats this hour, setHours gives the first of the two; once that has passed, Codex meant the second.
+    const later = at + (new Date(at + 3 * 3_600_000).getTimezoneOffset() - new Date(at).getTimezoneOffset()) * 60_000;
+    if (later > at && at + 59_999 < now && new Date(later).getHours() === hour && new Date(later).getMinutes() === minute) at = later;
     return at <= now ? at + 59_999 : at;
   }
   const dated = /^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4}),?\s+(\d{1,2}):(\d{2})\s*([AP]M)$/i.exec(when);
