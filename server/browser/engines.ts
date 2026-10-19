@@ -8,13 +8,13 @@ import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime, BrowserSpawnSpec } from "../browser-runtime.ts";
 import type { StepContext } from "../browser-steps.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
-import { acceptLanguageFor, LocalBackend } from "./backends.ts";
+import { LocalBackend } from "./backends.ts";
 import { sandboxDisabled } from "./chrome/host-setup.ts";
 import type { HostKind } from "./chrome/flags.ts";
 import { ChromeLauncher } from "./chrome/launcher.ts";
 import { ProcessRegistry, sweep } from "./chrome/processes.ts";
 import { browserRoot } from "./chrome/profile.ts";
-import { browserLanguage, browserTimeZone } from "./chrome/wrapper.ts";
+import { browserLanguage, browserTimeZone, languageList } from "./chrome/wrapper.ts";
 import { displayScreen } from "./display.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
@@ -82,7 +82,7 @@ export class ChromeEngine {
       },
       screen: () => (screen ??= displayScreen(options.host, { platform, env })),
       locale: () => locale,
-      acceptLanguages: () => (locale ? acceptLanguageFor(locale).replace(/;q=[\d.]+/gu, "") : "en-US,en"),
+      acceptLanguages: () => languageList(locale ?? undefined),
       timezone: () => browserTimeZone(env, platform) ?? null,
       egressPort: (key) => options.egressPort(key),
       registry: this.#registry,

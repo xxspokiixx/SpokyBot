@@ -97,6 +97,15 @@ suite("the bots' browser service on real Chrome", () => {
     expect(existsSync(folder)).toBe(false);
   }, hostTimeout(90_000));
 
+  it("tells sites the person's languages as Chrome does: a list in navigator.languages, q-values only in the header", async () => {
+    const target = bot();
+    let header: string | undefined;
+    const url = fx.route("/languages", (request) => { header = request.headers["accept-language"]; return { body: "<!doctype html><title>languages</title><p>hi</p>" }; });
+    await real.call(target, "agent_browser_open", { url });
+    expect(await real.read<string[]>(target, "[...navigator.languages]")).toEqual(["en-US", "en"]);
+    expect(header).toBe("en-US,en;q=0.9");
+  }, hostTimeout(90_000));
+
   it("puts a file into a file input", async () => {
     const target = bot();
     const file = join(files, "notes.txt");
