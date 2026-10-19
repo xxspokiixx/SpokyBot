@@ -63,7 +63,7 @@ import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { extractMcpImages } from "../../mcp-tool-images.ts";
 import { acpRpcError } from "./rpc-error.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
-import { sessionIdlePolicy } from "../session-idle.ts";
+import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
 import { engineFailureKind, engineFailureMessage } from "../engine-errors.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
@@ -552,7 +552,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         return stopped;
       };
-      const { idleMs: SESSION_IDLE_MS } = sessionIdlePolicy("ACP");
+      const sessionIdle = sessionIdlePolicy("ACP");
 
       const closeSession = (threadId: string, why: string) => {
         const session = sessions.get(threadId);
@@ -578,7 +578,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const session = sessions.get(threadId);
         if (!session) return;
         if (session.idleTimer) clearTimeout(session.idleTimer);
-        session.idleTimer = setTimeout(() => closeSession(threadId, "idle"), SESSION_IDLE_MS);
+        session.idleTimer = setTimeout(() => closeSession(threadId, "idle"), engineIdleMs(threadId, sessionIdle));
         session.idleTimer.unref?.();
       };
     // Session allows the driver keeps when the agent offered no `allow_always`: exact operations per

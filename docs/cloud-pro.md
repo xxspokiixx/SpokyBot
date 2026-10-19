@@ -950,6 +950,13 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   waits, and the only task is never held back.
 - **An engine nobody is using gives way first.** Engines stay up between
   turns; one that is idle is stopped to make room before anything waits.
+- **Idle engines stay up only for the conversation in front of a person**
+  (`engineIdleMs` in `server/drivers/session-idle.ts`). A thread a person
+  wrote in from any channel, or opened or read in the app, in the last 30
+  minutes keeps its engine the configured 10 minutes after a turn, scaled by
+  the memory left: all of it with half the machine free above the tenth, down
+  to a tenth of it as memory runs out. Any other thread (a teammate's
+  delegated work, a routine) keeps its engine 30 seconds.
 - **About to run out, the home stops its newest engine** rather than freeze:
   every 2 s while engines run, when free memory falls under 4% (160 MB at
   least), or the memory stall reaches 40% below the tenth, it stops an idle

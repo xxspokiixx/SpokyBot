@@ -630,6 +630,7 @@ import { createUsageRoutes } from "./routes/usage.ts";
 import { createBotMessageRoutes } from "./routes/bot-messages.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
+import { personAsks as personAskAt } from "./thread-presence.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -6104,7 +6105,6 @@ function isInternalTurn(threadId: string): boolean {
   return internalTurnThreads.has(threadId);
 }
 const reviewAnswerThreads = new Set<string>();
-const personAskAt = new Map<string, number>();
 let routines: RoutineManager | null = null;
 let calendarCalls: CalendarCallManager | null = null;
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;

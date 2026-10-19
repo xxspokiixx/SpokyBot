@@ -217,6 +217,14 @@ export class EngineMemory {
     void this.stop(victim, idle ? "idle" : "relief");
   }
 
+  /** How much of an idle engine's keep-alive memory allows: 1 with half the machine free above the floor, down to a tenth
+   * as it runs out; 1 where memory can't be read or the gate is off. */
+  headroom(): number {
+    const memory = this.enabled ? this.read() : null;
+    if (!memory) return 1;
+    return Math.min(1, Math.max(0.1, (this.free(memory) - this.floor(memory)) / (memory.totalBytes / 2)));
+  }
+
   /** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
   private floor(memory: HostMemory): number { return Math.max(320 * MB, memory.totalBytes * 0.1); }
 
