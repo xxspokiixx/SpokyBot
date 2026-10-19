@@ -1083,7 +1083,6 @@
   "sidebar.preview.waiting": "Sizi bekliyor…",
   "sidebar.preview.waitingOnTeammate": "Bir ekip arkadaşı bekleniyor…",
   "sidebar.preview.working": "Çalışıyor…",
-  "sidebar.preview.screenFrame": "Ekran karesi",
   "sidebar.preview.botWorking": "{name} çalışıyor…",
   "sidebar.preview.botWorkingQueued": "{name} çalışıyor… · {count} sırada",
   "sidebar.preview.aBot": "Bir bot",
