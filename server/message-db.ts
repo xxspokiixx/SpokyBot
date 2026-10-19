@@ -542,6 +542,15 @@ export function deleteThreads(threadIds: readonly string[], beforeCommit?: () =>
   });
 }
 
+/** Option-card rows whose card names one of `tools`, oldest first; the caller judges each card itself. */
+export function optionCardsForTools(tools: readonly string[]): Array<{ threadId: string; messageId: string }> {
+  if (tools.length === 0) return [];
+  const rows = db()
+    .prepare(`SELECT thread_id, id FROM messages WHERE kind = 'options' AND json_extract(json, '$.card.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY rowid`)
+    .all(...tools) as Array<{ thread_id: string; id: string }>;
+  return rows.map((row) => ({ threadId: row.thread_id, messageId: row.id }));
+}
+
 export function threadsReferencing(fragment: string): string[] {
   if (!fragment) return [];
   const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
