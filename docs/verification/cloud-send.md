@@ -37,11 +37,24 @@ checks:
   chats included; a new message goes on a later check (chats alone at most
   every five minutes), and only its rows; nothing goes once the switch is off;
 - when My Cloud's 1Password refuses this computer's token, everything else
-  arrives and the strip's notice says *1Password* and why, never a login's site.
+  arrives and the strip's notice says *1Password* and why, never a login's site;
+- **a long conversation, sent in pages by the real send** (tool-heavy turns, so
+  a few turns make several 300-row pages): a new bot's conversation of three
+  pages and more with the first send by itself, one My Cloud got from a Bring
+  and then sent from its first row, a later send of two pages and more, a
+  context summary that ends a send, and a room of three pages and more (made on
+  My Cloud under the same ids). Each is read back on both servers the way the
+  chat view pages it, and the path from each server's own leaf, which is what
+  its bot reads, must match row for row, summaries included.
 
 `server/cloud-send-chats.test.ts` covers the row cursor (pages, a deleted row
-starting a conversation over) and My Cloud's side (a removed conversation never
-comes back, a busy one waits). `server/login-handoff.test.ts` and
+starting a conversation over, each page's own leaf, a page never ending between
+a row and a row above it that was stored after it) and My Cloud's side (pages
+of one conversation continuing one another, summaries kept, a removed
+conversation or room never coming back, a busy one waiting, a room made under
+the sender's ids). `electron/cloud-send.node-test.mjs` covers main's paging (a
+page's `sent` as it goes, a conversation's later pages waiting once one is not
+taken) and a send that goes on once My Cloud is back after being away. `server/login-handoff.test.ts` and
 `electron/cloud-send.node-test.mjs` cover the
 rest of the reasons a person reads: a send that stops as a whole, logins this
 computer's server did not hand over, and a 1Password token 1Password already
