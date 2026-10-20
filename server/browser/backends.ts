@@ -3,9 +3,10 @@
 import { CdpBrowser, type BrowserOptions } from "./cdp/browser.ts";
 import type { Identity } from "./cdp/identity.ts";
 import { webSocketTransport } from "./cdp/transport.ts";
-import type { BrowserMode, HostKind, ScreenSpec } from "./chrome/flags.ts";
+import { fitPage, pageLimit, type BrowserMode, type HostKind, type ScreenSpec } from "./chrome/flags.ts";
 import { launchChrome, type ChromeProcess } from "./chrome/launch.ts";
 import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chrome/processes.ts";
+import { languageList } from "./chrome/wrapper.ts";
 import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
 
 export type BackendKind = "local" | "my-chrome" | "cdp-url";
@@ -33,6 +34,8 @@ export interface OpenRequest {
 
 export interface OpenedBrowser {
   readonly browser: CdpBrowser;
+  /** The largest page its windows may show, as no real window is larger than its screen; null where OpenMausBot sizes no window. */
+  readonly pageLimit?: { width: number; height: number } | null;
   readonly pid: number | null;
   /** The Chrome version that answered, e.g. 155.0.8059.80. */
   readonly version: string;
@@ -98,6 +101,9 @@ export class LocalBackend implements Backend {
     const headless = request.mode === "headless";
     const locale = options.locale?.() ?? null;
     const egressPort = await options.egressPort(request.key);
+    const screen = headless ? await options.screen() : null;
+    const limit = screen ? pageLimit(screen, platform) : null;
+    const viewport = fitPage(request.viewport, limit);
     const chrome: ChromeProcess = await launchChrome({
       executablePath: binary.path,
       userDataDir: dir,
@@ -105,12 +111,12 @@ export class LocalBackend implements Backend {
       host: options.host,
       platform,
       userAgent: headless ? binary.identity.userAgent : null,
-      screen: headless ? await options.screen() : null,
+      screen,
       locale,
       egressPort,
       sandbox: options.sandbox ?? true,
       startUrl: request.fresh || created ? "about:blank" : null,
-      viewport: request.viewport,
+      viewport,
       timezone: options.timezone?.() ?? null,
       sandboxHelper: options.sandboxHelper ?? null,
       profileMarker: profileHash(workspaceId(options.dataDir), request.key),
@@ -122,17 +128,19 @@ export class LocalBackend implements Backend {
       recordOpenedBy(dir, version);
       const browserOptions: BrowserOptions = {
         identity: headless ? binary.identity : null,
-        acceptLanguage: locale ? acceptLanguageFor(locale) : undefined,
+        acceptLanguage: locale ? languageList(locale) : undefined,
         headless,
         downloadDir: request.downloadDir,
         platform,
         maxPages: 8,
-        viewport: headless ? request.viewport : null,
+        viewport: headless ? viewport : null,
+        screen: screen ? { width: screen.width, height: screen.height } : null,
         handleAuth: true,
       };
       const browser = await CdpBrowser.connect(chrome.transport, browserOptions);
       return {
         browser,
+        pageLimit: limit,
         pid: chrome.pid,
         version,
         exited: chrome.exited.then(() => undefined),
@@ -146,13 +154,6 @@ export class LocalBackend implements Backend {
       throw error;
     }
   }
-}
-
-/** The Accept-Language a person with this UI language sends: theirs first, English after. */
-export function acceptLanguageFor(locale: string): string {
-  const base = locale.split("-")[0]!;
-  const languages = [locale, ...(base !== locale ? [base] : []), ...(base === "en" ? [] : ["en-US", "en"])];
-  return languages.map((language, index) => (index === 0 ? language : `${language};q=${(1 - index / 10).toFixed(1)}`)).join(",");
 }
 
 const CONNECTED_CAPS: BackendCaps = { persistentProfile: true, window: false, egressGate: false, identityOverride: false, ownsAllTabs: false, downloads: "none", uploads: "inject", botPasskeys: false };

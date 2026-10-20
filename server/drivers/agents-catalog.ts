@@ -3,12 +3,15 @@ import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { WIDGET_TOOL_DEFINITIONS } from "./agents-widget-tools.ts";
+import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 
 /** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
 export interface CatalogProfile {
   skillAuthoring: boolean;
   sharedComputers: boolean;
   voiceNotes: boolean;
+  /** A treg key or a Cloud plan's research credential is held and this bot's research switch is on. Absent means off. */
+  xResearch?: boolean;
   cloudHome: boolean;
   memoryEnabled?: boolean;
   /** The section's Chief of Staff; the server refuses Chief-only tools to every other bot. */
@@ -25,6 +28,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
+    xResearch: env.OMB_X_RESEARCH === "1",
     cloudHome: env.OMB_CLOUD_HOME === "1",
     memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
     chief: env.OMB_CHIEF_OF_STAFF === "1",
@@ -124,27 +128,48 @@ const ROUTINE_SCHEDULE_SCHEMA = {
 } as const;
 
 // Written out in full on each tool: $ref/$defs do not survive provider conversions.
-const ROUTINE_FIELDS_SCHEMA = {
-  name: { type: "string", minLength: 1, maxLength: 80, description: "Short name shown in Routines." },
+const TRIGGER_FIELDS_SCHEMA = {
+  name: { type: "string", minLength: 1, maxLength: 80, description: "Short name shown on the automation's card and the Automations page." },
   instructions: {
     type: "string",
     minLength: 1,
     maxLength: 20_000,
-    description: "The complete instructions the bot should follow each time the routine runs.",
+    description: "Complete steps for each run, which does NOT see this conversation, in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\". Put judgement here, e.g. \"if it is not about an order, stop\".",
   },
-  schedule: ROUTINE_SCHEDULE_SCHEMA,
+  schedule: { ...ROUTINE_SCHEDULE_SCHEMA, description: `Only for when=schedule. ${ROUTINE_SCHEDULE_SCHEMA.description}` },
+  webhook_event_types: {
+    type: "array",
+    maxItems: 20,
+    items: { type: "string", maxLength: 200 },
+    description: "Only for when=webhook: optional event names to accept (from the caller's event-type header, e.g. push). Omit to accept every call.",
+  },
+  filter: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      from: { type: "string", maxLength: 200 },
+      subject_contains: { type: "string", maxLength: 200 },
+      label: { type: "string", maxLength: 200 },
+      contains: { type: "string", maxLength: 200 },
+    },
+    description: "app_event only: plain words, all must match. Gmail filters at the source.",
+  },
+  event_config: {
+    type: "object",
+    description: "app_event only: settings from list_trigger_events config_fields.",
+  },
   run_on: {
     type: "string",
     // "box" is Boat's historical run_on destination id (agents wire contract).
     enum: ["maus", "box"],
-    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box runs on the bot's cloud computer, same model; it needs cloud computers set up and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
+    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field normally. box runs on the bot's cloud computer, same model; it needs cloud computers set up and is not the generic cloud/VPS option. Legacy cloud values from list_triggers mean box, not VPS.",
   },
   timeout_minutes: {
     type: "integer",
     minimum: 5,
     maximum: 240,
     description:
-      "Optional safety limit for active work, from 5 to 240 minutes. Omit for no limit.",
+      "Schedules only: optional safety limit for active work, from 5 to 240 minutes. Omit for no limit.",
   },
   clear_timeout: {
     type: "boolean",
@@ -152,22 +177,21 @@ const ROUTINE_FIELDS_SCHEMA = {
   },
   continuity: {
     type: "boolean",
-    description: "Opt in to using the latest completed run's bounded report as historical context. Use it for recurring work that builds on last time, such as QA passes, monitoring or follow-ups. Defaults to false; set false in an update to start fresh again. Included in the applied result or pending confirmation.",
+    description: "Schedules only: opt in to using the latest completed run's bounded report as historical context. Use it for recurring work that builds on last time, such as QA passes, monitoring or follow-ups. Defaults to false; set false in an update to start fresh again.",
   },
   overlap: {
     type: "string",
     enum: ["skip", "queue"],
-    description: "While this routine is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog. Manual and webhook requests are separate.",
+    description: "Schedules only: while a run is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog.",
   },
   run_on_startup: {
     type: "boolean",
-    description: "Repeating routines only: also run once each time OpenMausBot starts, besides the schedule, for a computer often off when it is due. Defaults to false.",
+    description: "Repeating schedules only: also run once each time OpenMausBot starts, besides the schedule, for a computer often off when it is due. Defaults to false.",
   },
 } as const;
 
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
-const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
-const SELF_CHANGE_OUTCOME = " Read the result: a change to your own routines, skills, profile or model applies immediately, and the person sees it with an Undo; a change for another bot may wait for the person's confirmation. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success without an applied result; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
+const APPLIES_OUTCOME = " Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.";
 
 const START_THREAD_SELF_ID = "Leave out, or use your own bot ID. For teammates use coordinate_bots.";
 
@@ -212,7 +236,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "shared_computer",
-    description: "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
+    description: "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       computer_id: { type: "string" }, action: { type: "string", enum: ["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"] },
       folder_id: { type: "string" }, path: { type: "string" }, content: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, expected_sha256: { type: "string" },
@@ -233,7 +257,8 @@ const TOOL_DEFINITIONS = [
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Question or task for these teammates; later requests in the same conversation can build on earlier ones. Send separate requests when responsibilities differ." },
       reason: { type: "string", maxLength: 200, description: "Optional one line for the person about why this goes to them (shown as a chip)." },
       rework: { type: "boolean", description: "True only to send concrete work again to someone whose request already finished or failed: a correction, a re-check or a retry." },
-      thread: { type: "string", enum: ["standing", "new"], description: "standing (default): the one work thread this conversation has with each teammate. new: open a new thread on the teammate for this, its own history and run; its result still returns here." },
+      thread: { type: "string", enum: ["standing", "new"], description: "standing (default): this conversation's one work thread with each teammate. new: a new thread on the teammate, its own history and run (in_my_folder: in your folder); its result still returns here." },
+      in_my_folder: { type: "boolean" },
       reply: { type: "string", enum: ["resume", "none"], description: "resume (default): the result resumes you. none: a one-way notice that is never awaited; nothing comes back and nothing resumes you." },
       consult: { type: "boolean", description: "True for a question: the teammate answers from what it knows, acting on nothing, and you are resumed with the answer. Leave out for work." },
       done_when: { type: "string", maxLength: 1000, description: "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it." },
@@ -355,7 +380,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_bot",
     description:
-      "Create a specialist bot in your section. Chief of Staff only. Below Full Access the user approves a card first. instructions become its soul. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through coordinate_bots. Maximum four new bots per turn.",
+      "Create a specialist bot in your section. Chief of Staff only. It is created immediately and the person can undo it. instructions become its soul. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps start disabled and the bot runs at the workspace's default access level. Assign work through coordinate_bots. Maximum four new bots per turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -383,7 +408,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + PROPOSAL_OUTCOME,
+    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -412,7 +437,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "propose_bot_deletion",
-    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, submit a separate deletion request for that exact bot. Deletion removes its conversations, memory, instructions, skills, and any computer owned only by it; generated project files and shared team computers remain. Running work or an unavailable computer provider can block deletion safely. Never delete yourself, substitute an archive, or put deletion into a setup batch. If review is pending, the decision and result resume you once." + PROPOSAL_OUTCOME,
+    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, submit a separate deletion request for that exact bot. Deletion removes its conversations, memory, instructions, skills, and any computer owned only by it; generated project files and shared team computers remain. Running work or an unavailable computer provider can block deletion safely. Never delete yourself, substitute an archive, or put deletion into a setup batch. If review is pending, the decision and result resume you once." + APPLIES_OUTCOME,
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bot_id: { type: "string", minLength: 1 }, reason: { type: "string", minLength: 1, maxLength: 500 },
     }, required: ["bot_id", "reason"] },
@@ -470,7 +495,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "request_credential",
     description:
-      "Ask the user for a supported API key through OpenMausBot's secure credential flow. The desktop app and a freshly QR-paired mobile app show a secure entry card; older mobile pairings show how to pair again or finish on the computer. Never claim a secure field opened unless this request succeeds, and never ask the user to paste a secret into chat. The secret is saved by the desktop app and is never returned to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
+      "Ask for a supported API key or a 1Password service account token (onePasswordToken) through OpenMausBot's secure credential flow: the app shows a secure entry card, as does a freshly QR-paired phone; older pairings show how to pair again. Never claim a secure field opened unless this request succeeds, and never ask the user to paste a secret into chat. OpenMausBot saves it and never returns it to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
     inputSchema: {
       type: "object",
       properties: {
@@ -490,7 +515,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "request_sign_in",
     description:
-      "Ask the person to sign in to a website themselves, in the browser or on the computer you are using now. Use it when a page needs a login you do not have, or a one-time code, CAPTCHA or other step only they can do. They get a card and a notification, sign in where you work, and press Done. Never ask for a password or code in chat. After calling it, end your turn; OpenMausBot resumes you when they finish or decline, and then check you are signed in.",
+      "Ask the person to sign in to a website themselves, in the browser or on the computer you are using now. Use it when a page needs a login you do not have, or a CAPTCHA, passkey or other step only they can do, or a one-time code you cannot read. A code the site sends to the person's own email or messages for a sign-in they asked for is not one: read it there and type it in yourself. They get a card and a notification, sign in where you work, and press Done. Never ask for a password or code in chat. After calling it, end your turn; OpenMausBot resumes you when they finish or decline, and then check you are signed in.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -504,7 +529,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "fill_login",
     description:
-      "Sign in with a login the person saved in OpenMausBot. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, call request_sign_in.",
+      "Sign in with a login the person saved in OpenMausBot. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -532,6 +557,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
+  ...RESEARCH_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:
@@ -617,62 +643,92 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
-    name: "list_routines",
+    name: "list_triggers",
     description:
-      "List routines owned by this bot, including their ids, schedules, status, and next run. The result includes the computer's authoritative current time and timezone; use those when interpreting relative dates. Only call this when the user asks about routines or wants to change one.",
-    inputSchema: { type: "object", additionalProperties: false, properties: {} },
-  },
-  {
-    name: "propose_routine",
-    description:
-      "Prepare a new routine after the user explicitly asks to schedule recurring or future work. Call list_routines first for relative dates or times so you use its authoritative current time and timezone. Convert calendar requests (monthly dates, last days, nth weekdays) into a validated five-field cron schedule with an explicit IANA timeZone; keep elapsed every-N-minutes work as interval. Never approximate unsupported requests with a different weekly schedule or an AI date-check routine; explain the limitation instead. Resolve ambiguous dates, times, timezone, destination, or instructions with the user first, and always give one-time schedules an explicit RFC3339 offset. If the user asks for the routine to run as ANOTHER bot in your section, call list_bots and pass that bot's id as for_bot_id; each run retains that bot's own permissions." + SELF_CHANGE_OUTCOME,
+      "List this bot's triggers, its routines (schedules), app events and webhooks: ids, when they fire, on or paused, next run or last fire, problems. trigger_id: one trigger with its last 10 fires; with include_address, a webhook's private address, to paste into the setup of the app that sends to it. Includes the computer's authoritative current time and timezone.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        ...ROUTINE_FIELDS_SCHEMA,
-        for_bot_id: {
-          type: "string",
-          description:
-            "Only when the user asks to schedule this routine for ANOTHER bot in your section: that bot's id from list_bots. Omit to schedule it for yourself. The routine then belongs to that bot and each run uses its engine and permissions.",
-        },
+        trigger_id: { type: "string", description: "Optional: one trigger's details and recent fires." },
+        include_address: { type: "boolean", description: "With a webhook's trigger_id: also its private address. For the bot that owns it, or a Chief of Staff." },
+        for_bot_id: { type: "string", description: "Only for ANOTHER bot in your section, from list_bots: list that bot's triggers." },
       },
-      required: ["name", "instructions", "schedule"],
     },
   },
   {
-    name: "propose_routine_action",
+    name: "list_trigger_events",
     description:
-      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id. If the user asks to change ANOTHER bot's routine and that bot is in your section, call list_bots and pass that bot's id as for_bot_id; the routine keeps its owner and every run keeps that bot's engine and permissions." + SELF_CHANGE_OUTCOME,
+      "Before create_trigger with when=app_event: the connected apps you may use, with their accounts and events (slug, delivery, config_fields, filter_fields), and popular apps not connected yet.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        routine_id: { type: "string", minLength: 1, description: "Routine id from list_routines." },
+        app: { type: "string", description: "Optional app slug, e.g. gmail." },
+        search: { type: "string", maxLength: 100, description: "Optional words in event names." },
+      },
+    },
+  },
+  {
+    name: "create_trigger",
+    description:
+      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=app_event runs when something happens in a connected app (list_trigger_events first; prefer it to a schedule that keeps checking); when=webhook gives an address another app sends to: the result carries its private address, so you can paste it into that app's setup yourself (never anywhere else). when=limit_reset runs when an AI's usage limit resets (\"run this when my limit resets\", or to finish work your own limit stopped). To the person these are automations: write name and instructions as they would say them. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        when: {
+          type: "string",
+          enum: ["schedule", "app_event", "webhook", "limit_reset"],
+          description: "schedule = on a time rule (give schedule); app_event = something happens in a connected app (give app and event); webhook = when another app calls a link; limit_reset = when an AI engine's usage limit resets.",
+        },
+        ...TRIGGER_FIELDS_SCHEMA,
+        app: { type: "string", description: "app_event: app slug from list_trigger_events." },
+        event: { type: "string", description: "app_event: event slug from list_trigger_events." },
+        account: { type: "string", description: "app_event: account id or alias, only when the app has several." },
+        engine: { type: "string", description: "limit_reset: the engine id whose limit to wait for, e.g. claude or codex. Omit for your own engine." },
+        repeat: { type: "string", enum: ["once", "every_reset"], description: "limit_reset: once (default) or every_reset." },
         for_bot_id: {
           type: "string",
           description:
-            "Only when the requested change targets ANOTHER bot's routine and that bot is in your section: that bot's id from list_bots. Learn the routine id from that bot's own routines (it can run list_routines). Omit to change one of your own routines.",
+            "Only when the trigger should belong to ANOTHER bot in your section: that bot's id from list_bots. Omit for yourself.",
         },
+      },
+      required: ["when", "name", "instructions"],
+    },
+  },
+  {
+    name: "manage_trigger",
+    description:
+      "Change one of this bot's triggers (schedules, app events or webhooks): update, pause, resume, run once now (an app event or webhook gets a test event) or delete. Get the id from list_triggers. It applies at once, with an Undo where possible. for_bot_id: ANOTHER bot's trigger in your section.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        trigger_id: { type: "string", minLength: 1, description: "Trigger id from list_triggers." },
         action: {
           type: "string",
           enum: ["update", "pause", "resume", "run_now", "delete"],
-          description: "The requested action. Supply changes only for update.",
+          description: "The change. Supply changes only for update.",
         },
         changes: {
           type: "object",
           additionalProperties: false,
-          properties: ROUTINE_FIELDS_SCHEMA,
+          properties: TRIGGER_FIELDS_SCHEMA,
           description: "Fields to change when action is update. Omit for every other action.",
         },
+        for_bot_id: {
+          type: "string",
+          description: "Only when the trigger belongs to ANOTHER bot in your section: that bot's id from list_bots.",
+        },
       },
-      required: ["routine_id", "action"],
+      required: ["trigger_id", "action"],
     },
   },
   {
     name: "propose_profile",
     description:
-      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead." + CHIEF_PROFILE_TARGET + SELF_CHANGE_OUTCOME,
+      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead." + CHIEF_PROFILE_TARGET + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -684,7 +740,7 @@ const TOOL_DEFINITIONS = [
         cwd: {
           type: "string",
           maxLength: 1024,
-          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace. A new folder waits for the person's confirmation unless this conversation has Full access.",
+          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace.",
         },
         notifications: {
           type: "boolean",
@@ -706,7 +762,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "propose_model",
     description:
-      "Submit a user-requested switch of this bot's default engine and model. Use the exact instance and model ids the person named, or for a Chief the ids from the team-setup catalog. The result warns about capabilities the switch gains or loses; existing threads keep their current models." + SELF_CHANGE_OUTCOME,
+      "Submit a user-requested switch of this bot's default engine and model. Use the exact instance and model ids the person named, or for a Chief the ids from the team-setup catalog. The result warns about capabilities the switch gains or loses; existing threads keep their current models." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -735,7 +791,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "propose_team_memory",
     description:
-      "Propose a shared fact or decision. Additions and replacements wait for admin review; accepted facts stay unchanged until then. End this turn while pending; do not claim it is remembered.",
+      "Save a shared fact or decision for your team. It applies immediately, with an Undo for the person; on a pending result end this turn and do not claim it is remembered.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -759,7 +815,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + SELF_CHANGE_OUTCOME,
+      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -920,9 +976,12 @@ function catalogTools(profile: CatalogProfile) {
   const VOICE_READY_TOOLS = profile.voiceNotes
     ? SHAREABLE_TOOLS
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
-  const ROLE_TOOLS = profile.chief
+  const RESEARCH_READY_TOOLS = profile.xResearch === true
     ? VOICE_READY_TOOLS
-    : VOICE_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
+    : VOICE_READY_TOOLS.filter((tool) => !RESEARCH_TOOL_NAMES.has(tool.name));
+  const ROLE_TOOLS = profile.chief
+    ? RESEARCH_READY_TOOLS
+    : RESEARCH_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
       if (!CHIEF_TARGET_TOOL_NAMES.has(tool.name)) return tool;
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };

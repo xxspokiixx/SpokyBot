@@ -296,6 +296,17 @@ function pickMcpServerFields(record: Record<string, unknown>): Record<string, un
   return out;
 }
 
+/** The fields Add server and Edit may set, `enabled` included. */
+export function mcpServerBody(body: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!body || typeof body !== "object") return out;
+  const record = body as Record<string, unknown>;
+  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled", "resultBudget"]) {
+    if (record[key] !== undefined) out[key] = record[key];
+  }
+  return out;
+}
+
 export type DisabledMcpServerAdd =
   | { ok: true; name: string; server: StoredMcpServer; next: Record<string, unknown> }
   | { ok: false; status: number; error: string };
@@ -404,6 +415,12 @@ export function parseMcpServersImport(
     servers[name] = result.server;
   }
   return { ok: true, servers };
+}
+
+/** What Paste config names a server another tool calls `raw`; a name OpenMausBot keeps for itself gets an mcp- prefix. */
+export function importedMcpServerName(raw: string): string {
+  const slug = slugMcpName(raw);
+  return RESERVED_MCP_NAMES.has(slug) ? `mcp-${slug}`.slice(0, 32) : slug;
 }
 
 function slugMcpName(raw: string): string {

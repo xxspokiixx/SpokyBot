@@ -1,10 +1,14 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import vm from "node:vm";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CloudAccountState } from "../../electron/cloud-account.mjs";
+import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
+import { registerDesktopPrefs } from "../../electron/desktop-prefs.mjs";
 import { setLocale } from "@/lib/i18n";
 
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: () => true }));
@@ -25,7 +29,9 @@ const ph = vi.hoisted(() => {
   return ph;
 });
 vi.mock("posthog-js", () => ph.module());
-import { CloudProPopup, cloudProPopupView, otherDialogOpen, useOtherDialogOpen, type CloudProPopupView } from "./CloudProPopup";
+import { CLOUD_PRO_HANDOFF_WAIT_MS, CloudProPopup, cloudProCloudPageView, cloudProElsewhereView, cloudProPopupView, otherDialogOpen, takeCloudProHandoff, useOtherDialogOpen,
+  type CloudProPopupView } from "./CloudProPopup";
+import { Spotlight } from "./onboarding/Spotlight";
 
 const DAY = 86_400_000, NOW = Date.UTC(2026, 9, 16);
 const plans = [
@@ -42,6 +48,38 @@ const running = { state: "active" as const, tier: "pro", endsAt: NOW + DAY, amou
 
 beforeEach(() => setLocale("en"));
 
+const PRELOAD = readFileSync(join(process.cwd(), "electron", "preload.cjs"), "utf8").replace(/\r\n/g, "\n");
+type Ogb = NonNullable<Window["ogb"]>;
+const MY_CLOUD = "https://omb-u-1.fly.dev";
+const port = (number: number) => `http://127.0.0.1:${number}`;
+type Desktop = (origin: string) => Ogb;
+// One desktop: main's real record, and the real preload for a page of its window: this computer's, on whichever port
+// the app got that launch, or My Cloud's.
+function oneDesktop(): Desktop {
+  const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+  const listeners = new Map<string, (event: { origin: string; returnValue?: unknown }) => void>();
+  let saved: unknown = null;
+  registerDesktopPrefs({
+    ipcMain: { handle: (channel, handler) => void handlers.set(channel, handler), on: (channel, listener) => void listeners.set(channel, listener) },
+    read: () => saved, write: value => { saved = JSON.parse(JSON.stringify(value)); },
+    page: event => (event as { origin: string }).origin === MY_CLOUD ? "cloud" : "local", cloudOffered: async () => true, thisComputer: async () => true,
+  });
+  return origin => {
+    let ogb: Ogb | undefined;
+    vm.runInNewContext(PRELOAD, {
+      process: { platform: "darwin", argv: [`--omb-local-origin=${origin === MY_CLOUD ? port(8799) : origin}`, "--omb-company-desktop=1"] },
+      location: { origin }, navigator: {}, TextEncoder,
+      require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name: string, value: Ogb) => { ogb = value; } },
+        ipcRenderer: { on() {}, removeListener() {}, send() {},
+          sendSync: (channel: string) => { const event: { origin: string; returnValue?: unknown } = { origin }; listeners.get(channel)?.(event); return event.returnValue; },
+          invoke: async (channel: string, ...args: unknown[]) => handlers.get(channel)?.({ origin }, ...args) } }),
+    });
+    return ogb!;
+  };
+}
+const START = location.href;
+const setURL = (url: string) => (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(url);
+
 describe("what the popup offers, by plan", () => {
   it("waits while the plan or the offer loads, and for a later launch when the Cloud can't be reached", () => {
     for (const account of [null, { status: "signed-out", message: "restoring" }, { status: "connecting" }] as const) {
@@ -54,11 +92,11 @@ describe("what the popup offers, by plan", () => {
 
   it("no plan: the in-app checkout, with the trial, prices, credit and money-back from the live offer", () => {
     const signedOut = cloudProPopupView({ status: "signed-out" }, TRIAL_OFFER) as CloudProPopupView;
-    expect(signedOut).toMatchObject({ primary: { action: "upgrade", via: "checkout", label: "Start free trial" }, plan: "none", signedIn: false, email: null,
+    expect(signedOut).toMatchObject({ primary: { via: "add-cloud", label: "Start free trial" }, seePlans: true, plan: "none", signedIn: false, email: null,
       badge: "Free for 7 days", price: "Then from $29/month + tax. Cancel any time.", moneyBack: "14-day money-back on every plan.", current: null });
     expect(signedOut.points).toContain("$5 of Claude credit to start");
     const costlier = { ...PLAIN_OFFER, plans: PLAIN_OFFER.plans.map(plan => ({ ...plan, amount: plan.amount + 1000 })) };
-    expect(cloudProPopupView(free, costlier)).toMatchObject({ primary: { action: "upgrade", via: "checkout", label: "Upgrade to Cloud Pro" },
+    expect(cloudProPopupView(free, costlier)).toMatchObject({ primary: { via: "add-cloud", label: "Upgrade to Cloud Pro" },
       plan: "none", signedIn: true, email: "person@example.test", badge: null, price: "MausBot Cloud plans from $39/month + tax.", moneyBack: null });
     expect((cloudProPopupView(free, costlier) as CloudProPopupView).points).toContain("Cloud computers and voice included");
   });
@@ -78,9 +116,34 @@ describe("what the popup offers, by plan", () => {
     ];
     for (const [account, plan, label, current] of cases) {
       const view = cloudProPopupView(account, TRIAL_OFFER) as CloudProPopupView;
-      expect(view, plan).toMatchObject({ primary: { via: "settings", label, action: "manage" }, seePlans: false, plan, current, badge: null, price: null, moneyBack: null });
+      expect(view, plan).toMatchObject({ primary: { via: "settings", label }, seePlans: false, plan, current, badge: null, price: null, moneyBack: null });
       expect(view.signedIn, plan).toBe(account.status === "connected");
     }
+  });
+
+  it("My Cloud's page: a plan manages in Settings on This computer, never the plan page in the browser; a plan being checked waits; no plan read offers none", () => {
+    const cases: Array<[CloudPlanSnapshot, string, boolean, string]> = [
+      [{ status: "paid", tier: "personal" }, "personal", true, "Personal active · verified by MausBot Cloud"],
+      [{ status: "paid", tier: "pro", trial: running }, "trial", true, "Pro free trial · verified by MausBot Cloud"],
+      [{ status: "paid" }, "pro", true, "Pro active · verified by MausBot Cloud"],
+      [{ status: "paid", tier: "ultra" }, "other", true, "Cloud active · verified by MausBot Cloud"],
+      [{ status: "attention", tier: "max" }, "none", true, "Max · not active right now"],
+      [{ status: "attention" }, "none", true, "MausBot Cloud · not active right now"],
+      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use My Cloud on this computer. Your plan is not affected."],
+    ];
+    for (const [snapshot, plan, signedIn, current] of cases) {
+      expect(cloudProCloudPageView(snapshot), plan).toMatchObject({ primary: { via: "settings-on-this-computer", label: "Manage plan" }, seePlans: false, plan, signedIn,
+        email: null, current, badge: null, price: null, moneyBack: null });
+    }
+    expect(cloudProCloudPageView(null)).toBe("loading");
+    expect(cloudProCloudPageView({ status: "checking", tier: "pro" })).toBe("offline");
+    expect(cloudProCloudPageView({ status: "none" })).toEqual(cloudProElsewhereView());
+  });
+
+  it("a saved server's page: no plan, price or Compare plans, one way on, through This computer", () => {
+    expect(cloudProElsewhereView()).toEqual({ primary: { via: "this-computer", label: "Continue on this computer" }, seePlans: false, plan: "unknown", signedIn: false,
+      email: null, badge: null, points: ["Routines run on time, day and night", "Reach your bots from your phone, even with this computer off", "Cloud computers and voice included"],
+      price: null, moneyBack: null, current: null });
   });
 });
 
@@ -138,6 +201,21 @@ describe("the popup as a dialog", () => {
     expect([...container.querySelectorAll("button")].map(item => item.textContent)).not.toContain("Compare plans");
   });
 
+  it("while main switches the window its main button is held, and a switch main refuses is said in the popup, which stays", () => {
+    const elsewhere = cloudProElsewhereView();
+    show({ view: elsewhere, switching: true });
+    const primary = () => [...container.querySelectorAll("button")].find(item => item.textContent === "Continue on this computer")!;
+    expect(primary().disabled).toBe(true); expect(primary().getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    show({ view: elsewhere, refused: true });
+    expect(primary().disabled).toBe(false); expect(primary().hasAttribute("aria-busy")).toBe(false);
+    expect(container.querySelector('[role="alert"]')!.textContent)
+      .toBe("Couldn't switch to this computer just now. Try again, or choose This computer from the menu at the top of the sidebar.");
+    expect(container.querySelector('[role="dialog"]')!.contains(container.querySelector('[role="alert"]'))).toBe(true);
+    primary().click(); expect(actions.onPrimary).toHaveBeenCalledOnce();
+    expect(otherDialogOpen(), "the line is no other dialog").toBe(false);
+  });
+
   it("knows when another dialog is open, and notices it opening and closing", () => {
     vi.useFakeTimers();
     try {
@@ -157,6 +235,95 @@ describe("the popup as a dialog", () => {
       expect(seen.at(-1)).toBe(false);
     } finally { vi.useRealTimers(); }
   });
+
+  it("any dialog on screen counts, modal or not, the tour's cards and the card that says a new Cloud is set up; one not shown or its own does not", () => {
+    show();
+    expect(otherDialogOpen()).toBe(false);
+    for (const [attribute, value] of [["role", "dialog"], ["role", "alertdialog"], ["aria-modal", "true"], ["data-tour-card", ""], ["data-cloud-setup-ready", ""]]) {
+      const other = document.body.appendChild(document.createElement("div"));
+      other.setAttribute(attribute!, value!);
+      expect(otherDialogOpen(), `${attribute}=${value}`).toBe(true);
+      other.style.display = "none";
+      expect(otherDialogOpen(), `not shown: ${attribute}=${value}`).toBe(false);
+      other.remove();
+    }
+    const inside = container.querySelector('[role="dialog"]')!.appendChild(document.createElement("div"));
+    inside.setAttribute("role", "alertdialog");
+    expect(otherDialogOpen(), "inside the popup").toBe(false);
+  });
+
+  it("the first conversation's spotlight is a dialog it waits for, and an Escape meant for the spotlight reaches it", () => {
+    const spotRoot = createRoot(document.body.appendChild(document.createElement("div")));
+    const gotIt = vi.fn();
+    flushSync(() => spotRoot.render(createElement(Spotlight, { anchor: null, placement: "below", primary: { label: "Got it", onClick: gotIt }, onDone: gotIt, children: "Approve this step" })));
+    expect(document.querySelector('[role="dialog"]')!.getAttribute("aria-modal"), "the spotlight is not modal").toBeNull();
+    expect(otherDialogOpen()).toBe(true);
+    const spotButton = [...document.querySelectorAll("button")].find(button => button.textContent === "Got it")!;
+    show(); spotButton.focus();
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    spotButton.dispatchEvent(escape);
+    expect(actions.onClose).not.toHaveBeenCalled(); expect(escape.defaultPrevented).toBe(false);
+    expect(gotIt).toHaveBeenCalledOnce();
+    expect(press("Tab").defaultPrevented, "nor does it pull Tab out of the spotlight").toBe(false);
+    expect(document.activeElement).toBe(spotButton);
+    spotRoot.unmount();
+  });
+
+  it("the calendar's Quick create (a dialog with only a label) counts too", () => {
+    const quick = document.body.appendChild(document.createElement("div"));
+    quick.setAttribute("role", "dialog"); quick.setAttribute("aria-label", "Quick create");
+    quick.appendChild(document.createElement("input")).focus();
+    expect(otherDialogOpen()).toBe(true);
+    quick.remove();
+    expect(otherDialogOpen()).toBe(false);
+  });
+
+  it("gives focus back only while it still has it, or nothing does", () => {
+    show();
+    const other = document.body.appendChild(document.createElement("input"));
+    other.focus();
+    flushSync(() => root.render(null));
+    expect(document.activeElement, "focus that moved on stays where it went").toBe(other);
+    show(); expect(document.activeElement!.id).toBe("cloud-pro-popup-title");
+    document.body.focus(); (document.activeElement as HTMLElement | null)?.blur();
+    flushSync(() => root.render(null));
+    expect(document.activeElement, "lost focus goes back to where it was").toBe(other);
+  });
+});
+
+describe("the click main brought This computer's page", () => {
+  const at = (search: string) => new URL(`http://127.0.0.1:8799/${search}`);
+  it("is read off the address main loaded it at, and leaves it", () => {
+    for (const [search, intent, via] of [["?desktop-settings=cloud-add&source=update_popup&via=server", "cloud-pro", "server"],
+      ["?desktop-settings=cloud-add&source=update_popup&via=my_cloud", "cloud-pro", "my_cloud"],
+      ["?desktop-settings=cloud-settings&source=update_popup&via=my_cloud", "manage", "my_cloud"]] as const) {
+      const url = at(`${search}&other=1`);
+      expect(takeCloudProHandoff(url), search).toEqual({ intent, via });
+      expect(url.search, search).toBe(`?desktop-settings=${intent === "manage" ? "cloud-settings" : "cloud-add"}&other=1`);
+    }
+  });
+
+  it("is nothing for the app's own Settings and Add a Cloud requests, or anything that is not exactly the popup's", () => {
+    for (const search of ["?desktop-settings=cloud-add", "?desktop-settings=cloud-settings", "?desktop-settings=cloud-add-howto&source=update_popup&via=server",
+      "?desktop-settings=cloud&source=update_popup&via=server", "?desktop-settings=workspaces&source=update_popup&via=server", "?source=update_popup&via=server",
+      "?desktop-settings=cloud-add&source=app_menu&via=server", "?desktop-settings=cloud-add&source=update_popup", "?desktop-settings=cloud-add&source=update_popup&via=local",
+      "?desktop-settings=cloud-add&source=update_popup&via=constructor", "?desktop-settings=constructor&source=update_popup&via=server",
+      "?desktop-settings=__proto__&source=update_popup&via=server"]) {
+      expect(takeCloudProHandoff(at(search)), search).toBeNull();
+    }
+    const other = at("?desktop-settings=workspaces&source=x&via=y");
+    takeCloudProHandoff(other);
+    expect(other.search, "another request's own parameters stay").toBe("?desktop-settings=workspaces&source=x&via=y");
+  });
+
+  it("is finished from App's own Settings-on-launch, before anything else it opens, and keeps that page's corner cards quiet", () => {
+    const app = readFileSync(join(process.cwd(), "src", "App.tsx"), "utf8").replace(/\r\n/g, "\n");
+    const effect = app.slice(app.indexOf('const requestedSettings = url.searchParams.get("desktop-settings");'), app.indexOf("return window.ogb.environments.onOpenSettings"));
+    const take = effect.indexOf("const handoff = takeCloudProHandoff(url);"), strip = effect.indexOf("window.history.replaceState(");
+    expect(take).toBeGreaterThan(-1); expect(take, "its marks leave the address with the request").toBeLessThan(strip);
+    expect(effect).toMatch(/\n {6}if \(handoff && window\.ogb\.cloudAccount\) \{ setHandedOver\(true\); finishCloudProHandoff\(handoff, window\.ogb\.cloudAccount, dispatch\); \}\n {6}else if \(requestedSettings === "organization"\)/);
+    expect(app).toContain("<AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId) || handedOver} viewer={viewer} />");
+  });
 });
 
 describe("who clicked, through the app's analytics", () => {
@@ -173,22 +340,144 @@ describe("who clicked, through the app's analytics", () => {
   }
   const sent = () => ph.calls.filter(([kind, event]) => kind === "identify" || event === "cloud_pro_popup" || event === "email_submitted");
   const person = { plan: "none" as const, signedIn: true, email: "person@example.test" };
-  afterEach(() => vi.unstubAllGlobals());
+  const identify = ["identify", "person@example.test", { email: "person@example.test" }];
+  // A page of the desktop's window at one origin: that origin's own storage, and the desktop's bridge.
+  async function pageOn(desktop: Desktop, origin: string, stored: Map<string, string>) {
+    setURL(`${origin}/`);
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value) });
+    (window as { ogb?: Ogb }).ogb = desktop(origin);
+    vi.resetModules();
+    vi.doMock("posthog-js", () => ph.module());
+    ph.loads = 0; ph.calls = [];
+    const analytics = await import("@/lib/analytics");
+    await analytics.initAnalytics();
+    return { analytics, report: (await import("./CloudProPopup")).reportCloudProPopup };
+  }
+  afterEach(() => { vi.unstubAllGlobals(); delete (window as { ogb?: Ogb }).ogb; setURL(START); });
 
   it("a click by someone signed in is tied to their Cloud account's email first; showing, Not now and close never are", async () => {
     const report = await fresh(true);
-    for (const action of ["upgrade", "manage", "see_plans"] as const) report(action, person);
-    for (const action of ["shown", "not_now", "close"] as const) report(action, person);
-    report("upgrade", { plan: "none", signedIn: false, email: null });
-    const identify = ["identify", "person@example.test", { email: "person@example.test" }];
-    const event = (action: string, signedIn = true) => ["capture", "cloud_pro_popup", { action, plan: "none", signed_in: signedIn }];
+    for (const action of ["upgrade", "manage", "see_plans"] as const) report(action, person, "local");
+    for (const action of ["shown", "continue", "not_now", "close"] as const) report(action, person, "local");
+    report("upgrade", { plan: "none", signedIn: false, email: null }, "local");
+    const event = (action: string, signedIn = true) => ["capture", "cloud_pro_popup", { action, plan: "none", signed_in: signedIn, page: "local" }];
     expect(sent()).toEqual([identify, event("upgrade"), identify, event("manage"), identify, event("see_plans"),
-      event("shown"), event("not_now"), event("close"), event("upgrade", false)]);
+      event("shown"), event("continue"), event("not_now"), event("close"), event("upgrade", false)]);
+  });
+
+  it("says the page each event is counted on, and on This computer's page which page's click it finishes", async () => {
+    const report = await fresh(true);
+    const server = { plan: "unknown" as const, signedIn: false, email: null };
+    report("shown", server, "server"); report("continue", server, "server");
+    report("continue", { plan: "pro", signedIn: true, email: null }, "my_cloud");
+    report("upgrade", person, "local", "server");
+    expect(sent()).toEqual([
+      ["capture", "cloud_pro_popup", { action: "shown", plan: "unknown", signed_in: false, page: "server" }],
+      ["capture", "cloud_pro_popup", { action: "continue", plan: "unknown", signed_in: false, page: "server" }],
+      ["capture", "cloud_pro_popup", { action: "continue", plan: "pro", signed_in: true, page: "my_cloud" }],
+      identify, ["capture", "cloud_pro_popup", { action: "upgrade", plan: "none", signed_in: true, page: "local", via: "server" }],
+    ]);
+  });
+
+  it("This computer's page finishes a handed-over click with the email tied first; a sign-in still unknown when the wait is over gets Settings", async () => {
+    await fresh(true);
+    const { finishCloudProHandoff } = await import("./CloudProPopup");
+    const listeners = new Set<(next: CloudAccountState) => void>();
+    const bridge = (account: CloudAccountState) => ({ state: async () => account, onState: (listener: (next: CloudAccountState) => void) => { listeners.add(listener); return () => listeners.delete(listener); } });
+    const dispatch = vi.fn();
+    finishCloudProHandoff({ intent: "cloud-pro", via: "server" }, bridge(free), dispatch);
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "update_popup" }));
+    expect(sent()).toEqual([identify, ["capture", "cloud_pro_popup", { action: "upgrade", plan: "none", signed_in: true, page: "local", via: "server" }]]);
+    expect(listeners.size, "it stops listening once it has decided").toBe(0);
+
+    ph.calls = []; dispatch.mockClear();
+    finishCloudProHandoff({ intent: "manage", via: "my_cloud" }, bridge(onPlan("max")), dispatch);
+    expect(dispatch, "Manage plan opens Settings at once").toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+    await vi.waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent()).toEqual([identify, ["capture", "cloud_pro_popup", { action: "manage", plan: "max", signed_in: true, page: "local", via: "my_cloud" }]]);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    try {
+      ph.calls = []; dispatch.mockClear();
+      finishCloudProHandoff({ intent: "cloud-pro", via: "server" }, bridge({ status: "connecting" }), dispatch);
+      await vi.advanceTimersByTimeAsync(CLOUD_PRO_HANDOFF_WAIT_MS - 1);
+      expect(dispatch).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(dispatch.mock.calls).toEqual([[{ type: "toggleAppSettings", open: true, section: "cloudAccount" }]]);
+      expect(sent()).toEqual([["capture", "cloud_pro_popup", { action: "manage", plan: "unknown", signed_in: false, page: "local", via: "server" }]]);
+      for (const listener of listeners) listener(free);
+      await vi.advanceTimersByTimeAsync(CLOUD_PRO_HANDOFF_WAIT_MS);
+      expect(dispatch, "nothing opens later").toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("an opt-out made on port 8799 holds when the app gets 18799: a click there sends nothing, not even the email", async () => {
+    const desktop = oneDesktop();
+    const first = await pageOn(desktop, port(8799), new Map());
+    first.analytics.setAnalyticsEnabled(false);
+    const second = await pageOn(desktop, port(18799), new Map());
+    expect(second.analytics.analyticsEnabled()).toBe(false);
+    second.report("manage", person, "local");
+    expect(ph.loads).toBe(0); expect(ph.calls).toEqual([]);
+  });
+
+  it("an opt-out kept in one port's storage before the desktop kept it moves there the first time that page runs", async () => {
+    const desktop = oneDesktop();
+    await pageOn(desktop, port(8799), new Map([["omb-analytics-opt-out", "1"]]));
+    expect(ph.loads).toBe(0);
+    const second = await pageOn(desktop, port(18799), new Map());
+    expect(second.analytics.analyticsEnabled()).toBe(false);
+    second.report("upgrade", person, "local");
+    expect(ph.calls).toEqual([]);
+  });
+
+  it("the desktop's latest choice wins over an older one left in a port's storage", async () => {
+    const desktop = oneDesktop();
+    const first = await pageOn(desktop, port(8799), new Map([["omb-analytics-opt-out", "1"]]));
+    first.analytics.setAnalyticsEnabled(true);
+    const second = await pageOn(desktop, port(28799), new Map([["omb-analytics-opt-out", "1"]]));
+    expect(second.analytics.analyticsEnabled()).toBe(true);
+    second.report("manage", person, "local");
+    expect(sent()).toEqual([identify, ["capture", "cloud_pro_popup", { action: "manage", plan: "none", signed_in: true, page: "local" }]]);
+  });
+
+  it("with no switch kept yet, a page on another port than the first counts a click without the email: the first port's storage may hold an older opt-out", async () => {
+    const desktop = oneDesktop();
+    const fallback = await pageOn(desktop, port(18799), new Map());
+    expect(fallback.analytics.analyticsEnabled(), "this port's storage holds no choice").toBe(true);
+    fallback.report("upgrade", person, "local");
+    const upgrade = ["capture", "cloud_pro_popup", { action: "upgrade", plan: "none", signed_in: true, page: "local" }];
+    expect(sent()).toEqual([upgrade]);
+    const first = await pageOn(desktop, port(8799), new Map());
+    first.report("upgrade", person, "local");
+    expect(sent(), "the first port's own storage holds no opt-out").toEqual([identify, upgrade]);
+    first.analytics.setAnalyticsEnabled(true);
+    const later = await pageOn(desktop, port(28799), new Map());
+    later.report("upgrade", person, "local");
+    expect(sent(), "once the desktop keeps a switch, every port knows").toEqual([identify, upgrade]);
+  });
+
+  it("turned off in the desktop app, My Cloud's page in its window starts with it off: its popup sends nothing, and it cannot turn the desktop's switch on", async () => {
+    const desktop = oneDesktop();
+    const local = await pageOn(desktop, port(8799), new Map());
+    local.analytics.setAnalyticsEnabled(false);
+    const cloud = await pageOn(desktop, MY_CLOUD, new Map());
+    expect(cloud.analytics.analyticsEnabled()).toBe(false);
+    const view = cloudProCloudPageView({ status: "paid", tier: "pro" }) as CloudProPopupView;
+    cloud.report("shown", view, "my_cloud"); cloud.report("continue", view, "my_cloud");
+    expect(ph.loads).toBe(0); expect(ph.calls).toEqual([]);
+    expect(window.ogb?.desktopAnalytics?.set, "only This computer's page sets it").toBeUndefined();
+    await pageOn(desktop, port(18799), new Map()).then(page => page.analytics.setAnalyticsEnabled(true));
+    for (const [stored, enabled] of [[new Map(), true], [new Map([["omb-analytics-opt-out", "1"]]), false]] as const) {
+      const again = await pageOn(desktop, MY_CLOUD, stored);
+      expect(again.analytics.analyticsEnabled(), "turned back on in the desktop app, My Cloud's page follows its own switch").toBe(enabled);
+    }
   });
 
   it("sends nothing at all with usage analytics off", async () => {
     const report = await fresh(false);
-    for (const action of ["shown", "upgrade", "manage", "see_plans", "not_now", "close"] as const) report(action, person);
+    for (const action of ["shown", "upgrade", "manage", "see_plans", "continue", "not_now", "close"] as const) report(action, person, "local");
     expect(ph.loads).toBe(0);
     expect(ph.calls).toEqual([]);
   });

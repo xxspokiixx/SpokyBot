@@ -5,6 +5,22 @@ import { join } from "node:path";
 import test from "node:test";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 
+test("Files keeps its settings in the folder main names (the staging Admin's own), else cloud-sync", async (t) => {
+  const { existsSync } = await import("node:fs");
+  for (const [stateDir, folder] of [[undefined, "cloud-sync"], ["cloud-sync-staging", "cloud-sync-staging"]]) {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "omb-files-dir-")));
+    const installed = installCloudFiles({
+      app: { getPath: (name) => join(dir, name) }, ipcMain: { handle: () => {} }, dialog: {}, shell: { trashItem: async () => {} }, powerMonitor: { on: () => {} },
+      fetch: async () => { throw new Error("offline"); }, localWorkspaceOnly: (_channel, handler) => handler, send: () => {}, cloudOrigin: () => null,
+      cloudAccount: () => ({ openDashboard: async () => {} }), localDataDir: join(dir, "home", ".openmausbot"), ...(stateDir ? { stateDir } : {}),
+    });
+    // Close before removing: Windows will not delete a folder whose Files database is still open.
+    t.after(() => { installed.close(); rmSync(dir, { recursive: true, force: true }); });
+    assert.ok(existsSync(join(dir, "userData", folder, "settings.json")), folder);
+    assert.equal(existsSync(join(dir, "userData", folder === "cloud-sync" ? "cloud-sync-staging" : "cloud-sync")), false);
+  }
+});
+
 test("Files channels answer this computer's own window only, and share only a folder the person picked here", async (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "omb-files-main-")));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

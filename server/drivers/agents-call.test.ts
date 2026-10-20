@@ -249,4 +249,48 @@ describe("propose_team_memory", () => {
       fromBotId: "bot-voice", fromThreadId: "thread-voice", kind, name: "Fixture name", detail: "Unreviewed detail", aliases: ["Alias"],
     } }]);
   });
+
+  it("reports a fact that applied on its own as applied, with no card to wait for", async () => {
+    const result = await callTool("propose_team_memory", { kind: "term", name: "OKR", detail: "The quarter's goals." }, context({
+      client: {
+        api: async () => ({ status: "applied", state: "applied", requestId: "entry-fixture", summary: "Term: OKR — The quarter's goals." }),
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).not.toBe(true);
+    expect(result.text).toContain("Applied the team memory entry for OKR.");
+    expect(result.text).not.toContain("confirmation card");
+  });
+});
+
+describe("X research tools", () => {
+  const ROUTES = { x_search: "search", x_user_posts: "user-posts", x_post: "post", x_profile: "profile" } as const;
+
+  it("sends each tool's arguments to its route and returns the JSON the route gave", async () => {
+    for (const [tool, route] of Object.entries(ROUTES)) {
+      const calls: Array<{ path: string; body: unknown }> = [];
+      const result = await callTool(tool, { query: "maus", handle: "@maus", post: "42" }, context({
+        client: {
+          api: async () => ({}),
+          apiResponse: async (path, init) => {
+            calls.push({ path, body: JSON.parse(String(init?.body)) });
+            return { ok: true, status: 200, body: { posts: [{ id: "1" }], more: false } };
+          },
+        },
+      }));
+      expect(calls).toEqual([{ path: `/api/internal/x/${route}`, body: { query: "maus", handle: "@maus", post: "42" } }]);
+      expect(result.isError).toBeUndefined();
+      expect(JSON.parse(result.text)).toEqual({ posts: [{ id: "1" }], more: false });
+    }
+  });
+
+  it("hands the bot the route's own sentence when it refuses", async () => {
+    const result = await callTool("x_search", { query: "maus" }, context({
+      client: {
+        api: async () => ({}),
+        apiResponse: async () => ({ ok: false, status: 403, body: { error: "X research is off for this bot. Turn it on in this bot's settings under Access." } }),
+      },
+    }));
+    expect(result).toEqual({ text: "X research is off for this bot. Turn it on in this bot's settings under Access.", isError: true });
+  });
 });

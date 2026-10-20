@@ -8,17 +8,23 @@ import { withViewTransition } from "@/components/onboarding/view-transition";
 import { brand } from "@/lib/brand";
 import { cloudIntentDue, cloudIntentShown, jobRoutine, reopenCloudIntent, useCloudIntent } from "@/lib/cloud-intent";
 import { cn } from "@/lib/cn";
-import { CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, CLOUD_SETUP_MOVE_SKIPPED, cloudSetupItems, cloudSetupStage, type CloudSetupItem, type CloudSetupStep } from "@/lib/cloud-setup";
+import { CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, CLOUD_SETUP_MOVE_SKIPPED, cloudSetupItems, cloudSetupStage, cloudWelcomeStage, type CloudSetupItem, type CloudSetupStep } from "@/lib/cloud-setup";
+import { endWelcomeHere, returnToWelcome, saveWelcomeHints, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
 import { t } from "@/lib/i18n";
 import type { MausMotion } from "@/lib/mascot";
-import { hintSeenPatch, type WelcomeViewer } from "@/lib/onboarding";
+import { hintSeen, type WelcomeViewer } from "@/lib/onboarding";
 import type { LocaleKey } from "@/locales";
 import type { Routine } from "@/lib/routines";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { api, openBot, useStore } from "@/state/store";
+import { openBot, useStore } from "@/state/store";
 
 const TITLE: Record<CloudSetupStep, LocaleKey> = {
   cloud: "cloudSetup.cloud.title", job: "cloudSetup.job.title", engine: "cloudSetup.engine.title", plan: "cloudSetup.plan.title", move: "cloudSetup.move.title",
+  files: "cloudWelcome.step.files",
+};
+const WELCOME_TITLE: Partial<Record<CloudSetupStep, LocaleKey>> = { move: "cloudWelcome.step.bring" };
+const WELCOME_HINT: Partial<Record<CloudSetupStep, LocaleKey>> = {
+  move: "cloudWelcome.compact.bring", engine: "cloudSetup.engine.hint", files: "cloudWelcome.compact.files",
 };
 
 const COLLAPSED_KEY = "omb.cloudSetup.collapsed";
@@ -30,7 +36,7 @@ function storeCollapsed(collapsed: boolean) {
 }
 
 const CARD = "fixed bottom-4 left-4 z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw-32px)] origin-bottom-left overflow-y-auto rounded-2xl border border-hairline/50 bg-menu text-ink shadow-[0_18px_48px_-16px_rgba(0,0,0,0.55),0_4px_12px_-6px_rgba(0,0,0,0.3)]";
-const PRIMARY = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-white transition-transform duration-150 ease-out active:scale-[0.97]";
+const PRIMARY = "ui-button ui-button-primary shrink-0 gap-1.5 text-[12.5px] transition-transform duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none";
 
 function nextRunLabel(at: number | null, now = Date.now()): string | null {
   if (!at) return null;
@@ -88,7 +94,7 @@ function CloudReady({ routine, onDone }: { routine?: Routine; onDone: () => void
           <button type="button" onClick={runNow} disabled={run === "starting" || run === "started"}
             className={run === "started"
               ? "inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-success/15 text-[12.5px] font-medium text-success"
-              : cn(PRIMARY, "h-9 w-full justify-center")}>
+              : cn(PRIMARY, "min-h-9 w-full justify-center")}>
             {run === "started" ? <><Check size={14} strokeWidth={2.5} aria-hidden="true" />{t("cloudSetup.ready.running")}</> : t("cloudSetup.ready.runNow")}
           </button>
           <button type="button" className="py-1 text-[12px] text-ink-secondary transition-colors hover:text-ink" onClick={() => setLeaving(true)}>{t("cloudSetup.ready.later")}</button>
@@ -97,7 +103,7 @@ function CloudReady({ routine, onDone }: { routine?: Routine; onDone: () => void
   </aside>;
 }
 
-export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
+export function CloudSetup({ viewer, welcomeShown = false }: { viewer: WelcomeViewer | null; welcomeShown?: boolean }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const [hidden, setHidden] = useState(false);
@@ -108,26 +114,30 @@ export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
   const wasShown = useRef(false);
   const [chosen, setChosen] = useState<CloudSetupStep | null>(null);
   const intent = useCloudIntent();
-  const record = state.config?.onboarding;
+  const welcome = useCloudWelcome();
+  const record = withEarlyHints(state.config?.onboarding, welcome.early);
   const early: string[] = [];
   if (moveSkipped) early.push(CLOUD_SETUP_MOVE_SKIPPED);
   if (intent.pending || intent.sent) early.push(CLOUD_INTENT_GIVEN);
-  const onboarding = early.length && record ? { ...record, hintsSeen: [...record.hintsSeen, ...early] } : record;
+  const onboarding = withEarlyHints(record, early);
   const routine = jobRoutine(state.routines, intent.sent);
   const facts = {
     viewer, connected: state.connected, enginesKnown: state.instances.length > 0,
-    engineReady: state.instances.some(engineReady), onboarding, planned: Boolean(routine),
+    engineReady: state.instances.some(engineReady), onboarding, planned: Boolean(routine), welcomeShown,
   };
+  const welcomeStage = cloudWelcomeStage(facts);
+  const welcoming = welcomeStage === "pending";
   const stage = hidden ? "hidden" : cloudSetupStage(facts);
   const shown = stage === "shown";
   const moveBridge = shown ? window.ogb?.cloudMove : undefined;
   const move = useCloudMove(moveBridge);
   useEffect(() => {
-    if (stage === "shown") wasShown.current = true;
+    if (welcoming) wasShown.current = false;
+    else if (stage === "shown") wasShown.current = true;
     else if (stage === "done" && wasShown.current) { wasShown.current = false; setFinale(true); }
-  }, [stage]);
+  }, [stage, welcoming]);
   if (finale) return <CloudReady routine={routine} onDone={() => setFinale(false)} />;
-  if (!shown) return stage === "waiting" || !viewer ? null : <CloudMoveSuggestion />;
+  if (!shown) return stage === "waiting" || stage === "welcome" || !viewer ? null : <CloudMoveSuggestion />;
 
   const items = cloudSetupItems({
     ...facts,
@@ -137,12 +147,11 @@ export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
   const todo = items.filter((item) => item.status === "todo");
   const current = (todo.find((item) => item.id === chosen) ?? todo[0])?.id;
   const remember = (id: string) => {
-    const patch = hintSeenPatch(record, id);
-    if (patch) void api("/api/config", { method: "PUT", body: JSON.stringify(patch) })
-      .then((config) => dispatch({ type: "configStatus", config })).catch(() => {});
+    if (!hintSeen(record, id)) void saveWelcomeHints(state.config?.onboarding, [id], dispatch);
   };
   const hide = () => {
     setHidden(true);
+    if (welcoming) endWelcomeHere();
     if (moveBridge && moveItem?.status === "todo") void moveBridge.dismiss().catch(() => {});
     remember(CLOUD_SETUP_HIDDEN);
   };
@@ -158,6 +167,11 @@ export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
   const action = (label: LocaleKey, onClick: () => void) => <button type="button" className={PRIMARY} onClick={onClick}>{t(label)}<ArrowRight size={13} aria-hidden="true" /></button>;
 
   const details = (id: CloudSetupStep): { body: ReactNode; act?: ReactNode } => {
+    const welcomeHint = WELCOME_HINT[id];
+    if (welcoming && welcomeHint) return { body: hint(welcomeHint), act: action("cloudWelcome.compact.continue", () => {
+      returnToWelcome(id === "move" ? "bring" : id);
+      dispatch({ type: "showChat" });
+    }) };
     if (id === "engine") return { body: hint("cloudSetup.engine.hint"), act: state.activeView !== "chat" && action("cloudSetup.engine.action", () => dispatch({ type: "showChat" })) };
     if (id === "move") {
       if (!moveBridge) return { body: null };
@@ -172,7 +186,7 @@ export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
   };
 
   const mark = (item: CloudSetupItem) => {
-    if (item.status === "done") return <span className="check-in mt-px flex size-4 shrink-0 items-center justify-center rounded-full bg-success text-white">
+    if (item.status === "done") return <span className="check-in mt-px flex size-4 shrink-0 items-center justify-center rounded-full bg-success">
       <Check size={10} strokeWidth={3.5} aria-hidden="true" />
     </span>;
     if (item.status === "skipped") return <span className="mt-px flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px] border-ink-secondary/45 text-ink-secondary">
@@ -180,10 +194,11 @@ export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
     </span>;
     return <span className="mt-px size-4 shrink-0 rounded-full border-[1.5px] border-ink-secondary/45" />;
   };
+  const titleOf = (id: CloudSetupStep) => t((welcomeStage !== "none" && WELCOME_TITLE[id]) || TITLE[id]);
   const row = (item: CloudSetupItem, index: number) => {
     const pending = item.status === "todo";
     const title = <span className="min-w-0 flex-1 text-[12.5px] leading-[18px]">
-      {t(TITLE[item.id])}
+      {titleOf(item.id)}
       {item.status === "skipped"
         ? <span> · {t("cloudSetup.skipped")}</span>
         : <span className="sr-only"> ({t(pending ? "cloudSetup.stepTodo" : "cloudSetup.stepDone")})</span>}
@@ -196,13 +211,13 @@ export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
     </li>;
   };
   const inChat = state.activeView === "chat" && !asking;
-  const onScreen = (id: CloudSetupStep) => (id === "job" && asking) || (id === "engine" && inChat)
+  const onScreen = (id: CloudSetupStep) => (id === "job" && asking) || (id === "engine" && inChat && !facts.engineReady)
     || (id === "plan" && inChat && (!jobBot || state.selectedId === jobBot));
   const focus = (id: CloudSetupStep) => {
     const here = onScreen(id);
     const { body, act } = here ? { body: null, act: null } : details(id);
     return <div key={id} data-cloud-setup-step={id} data-status="todo" className="animate-rise mt-4">
-      <h3 className="text-[14px] font-semibold leading-snug text-ink [text-wrap:balance]">{t(TITLE[id])}</h3>
+      <h3 className="text-[14px] font-semibold leading-snug text-ink [text-wrap:balance]">{titleOf(id)}</h3>
       {here
         ? <p className="mt-1.5 flex items-center gap-1.5 text-[12px] font-medium text-accent"><span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />{t("cloudSetup.onScreen")}</p>
         : body}

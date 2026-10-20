@@ -58,7 +58,7 @@ export function isolatedRemoteCommand(command: string): string {
 }
 
 const READY = new Set(["idle", "ready", "running"]);
-const SLEEPING = new Set(["archived", "archiving"]);
+export const SLEEPING_BOAT_STATES = new Set(["archived", "archiving"]);
 /** Never usable again: `cancelled` is a create that got no machine; its GET answers 404 next. */
 const TERMINAL = new Set(["error", "cancelled"]);
 const DEFAULT_BOAT_TTL_SECONDS = 8 * 60 * 60;
@@ -777,12 +777,12 @@ export async function sleepManagedBoat(
   if (instance.inUse) {
     throw Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 });
   }
-  if (!SLEEPING.has(instance.state) && !READY.has(instance.state)) {
+  if (!SLEEPING_BOAT_STATES.has(instance.state) && !READY.has(instance.state)) {
     throw Object.assign(new Error(`this cloud computer cannot sleep while it is ${instance.state}`), { status: 409 });
   }
   const release = claim?.(instance);
   try {
-    if (!SLEEPING.has(instance.state)) await stopBoat(cfg, instance.boxId);
+    if (!SLEEPING_BOAT_STATES.has(instance.state)) await stopBoat(cfg, instance.boxId);
     forgetBoatId(instance.boxId);
     return { ok: true };
   } finally {
@@ -1211,7 +1211,7 @@ const SHOT_CMD = panelShotCommand();
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 const FRAME_TOO_LARGE = "the cloud computer's frame exceeds the 8 MB limit";
 
-async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
+export async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
   let bytes: Buffer | null = null;
   let tooLarge = false;
   try {

@@ -12,7 +12,9 @@ import {
 import { existsSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
+import { engineMemory } from "./engine-memory.ts";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
+import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -77,18 +79,24 @@ export function spawnCli(
 ): ChildProcessByStdio<Writable, Readable, Readable> {
   const resolved = resolveCli(cli, args);
   assertSafeCliArgv(resolved);
-  const child = spawn(resolved.command, resolved.args, {
+  const start = () => spawn(resolved.command, resolved.args, {
     ...opts,
     // POSIX: own group so kill(-pid) reaps child MCP servers; Windows: taskkill /T does it.
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
+  const child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
   if (process.platform !== "win32") cliGroups.add(child);
-  if (process.platform !== "win32" && owner === "bot") rememberEngineSession(child);
+  if (process.platform !== "win32" && owner === "bot") {
+    rememberEngineSession(child);
+    engineMemory.track(child);
+  }
 
   // On Windows a stdin write between taskkill and pipe close errors asynchronously; unlistened, that crashes the harness.
   child.stdin?.on("error", () => {});
   return child;
 }
+
+const EXEC_KILL_GRACE_MS = 2_000;
 
 export function execCli(
   cli: string,
@@ -103,9 +111,17 @@ export function execCli(
     queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
     return;
   }
-  execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) =>
-    cb(err, stdout, stderr),
-  );
+  let escalate: NodeJS.Timeout | undefined;
+  const child = execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
+    clearTimeout(escalate);
+    cb(err, stdout, stderr);
+  });
+  // Node (24) calls back only once the child exits, and a CLI wrapper that traps SIGTERM outlives the timeout's signal.
+  // Only the child is stopped: execFile starts no process group, so a grandchild that ignores SIGTERM can outlive it.
+  if (opts.timeout) {
+    escalate = setTimeout(() => void killCliTree(child, 0), opts.timeout + EXEC_KILL_GRACE_MS);
+    escalate.unref?.();
+  }
 }
 
 /** Node reports a missing cwd as the CLI's own ENOENT, so pass `cwd` to tell a moved folder from a missing CLI. */

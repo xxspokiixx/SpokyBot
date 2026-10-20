@@ -36,10 +36,12 @@ export function restoredWorkspaceConfig(portable: unknown, destination: unknown)
 export function excludedWorkspaceAuthPath(path: string): boolean {
   if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   if (/^mcp-oauth\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
-  // Saved website logins and their key never leave the computer they were saved on.
-  if (/^(?:logins\.json\.enc|logins-key)(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
+  // Saved website logins and their key never leave the computer they were saved on, nor does the key sealing webhook secrets.
+  if (/^(?:logins\.json\.enc|logins-key|webhook-key)(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // The HighLevel connection and its key stay with the installation that connected: its refresh token rotates, so a copy signs one side out.
   if (/^(?:highlevel\.json\.enc|highlevel-key)(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
+  // A Cloud home's connected-apps installation: its connected accounts belong to it, so a copy would share them.
+  if (/^connected-apps-installation\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   return /^(?:(?:providers|caddy|chrome-profile|\.agent-browser)(?:\/|$)|workspace-credentials\.json$|external-runtimes\.json$|browser-engine-key$)/.test(path) ||
     /^(?:config\.json|webhooks\.json|workspace-credentials\.json|external-runtimes\.json|browser-engine-key|sessions\.json|tunnel-account\.json)\.\d+(?:\.[0-9a-f-]+)?\.tmp$/.test(path) ||
     /^(?:vm-home|vm-homes\/[^/]+)\/\.browser-profiles(?:\/|$)/.test(path);
@@ -58,14 +60,15 @@ export function liveDataEnginePath(path: string): boolean {
   return /^bots\/[^/]+\/(?:data\.duckdb(?:\.wal)?$|data-tmp(?:\/|$))/.test(path);
 }
 
-/** Read the link text, never follow it. */
+/** Read the link text, never follow it. A link points at the bot's own skill, or at the same-named skill brought in
+ * from this computer (imported-skills.ts), which the backup carries. */
 export function managedTaskSkillLink(source: string, path: string, roots: string[]): boolean {
-  const match = /^task-workspaces\/([^/]+)\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.exec(path);
+  const match = /^task-workspaces\/([^/]+)\/[^/]+\/\.(?:claude|agents|grok)\/skills\/([^/]+)$/.exec(path);
   if (!match) return false;
   let target: string;
   try { target = resolve(dirname(source), readlinkSync(source).replace(/^\\\\\?\\/, "")); } catch { return false; }
   return roots.some((root) => {
     const rel = relative(join(root, "workspaces", match[1], "skills"), target);
-    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+    return (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) || relative(join(root, "imported-skills", match[2]), target) === "";
   });
 }

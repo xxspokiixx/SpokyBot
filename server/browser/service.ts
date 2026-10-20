@@ -22,12 +22,12 @@ import { isUnanswered } from "./cdp/errors.ts";
 import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
-import { executeTool, toolFailure, type ToolContext } from "./dispatch.ts";
+import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
-import { errorResult, shapeResult, textResult, type ToolResult } from "./shape.ts";
+import { errorResult, shapeResult, textResult, withParts, type ToolResult } from "./shape.ts";
 import { TabRegistry, type Tab } from "./tabs.ts";
 import { parseToolCall, RESTART_TOOL, TOOL_LIST } from "./tools.ts";
-import { personUrl, ViewerHub, type Viewer, type ViewerOptions, type ViewerOutput } from "./viewers/core.ts";
+import { ViewerHub, type Viewer, type ViewerOptions, type ViewerOutput } from "./viewers/core.ts";
 
 /** One profile's browser as the server names it: the session (bot-<id>, a profile's partition, guest-…) and its key. */
 export interface BrowserTarget {
@@ -50,8 +50,8 @@ export interface BrowserServiceOptions {
   maxRunning: number;
   idleMs(): number;
   scrub?: (text: string) => string;
-  /** What the egress gate refused for this session since it was last asked, as one line. */
-  egressNotice?: (session: string) => string | null;
+  /** What the egress gate of this profile's browser refused since it was last asked, as one line. */
+  egressNotice?: (key: string) => string | null;
   onTiming?: (timing: BrowserTiming) => void;
   callBudgetMs?: number;
   laneWaitMs?: number;
@@ -193,16 +193,16 @@ export class BrowserService {
       if (known) return;
       profile.control.adopt(tab);
       page.auth.answerable = () => profile.hub.answersAuth();
-      run.offs.push(page.auth.onChange((challenge) => {
-        if (challenge) profile.hub.broadcast({ type: "authPrompt", origin: challenge.origin, realm: challenge.realm }, { holderOnly: true });
-        else profile.hub.broadcast({ type: "authPromptClosed" }, { holderOnly: true });
-      }));
+      run.offs.push(page.auth.onChange(() => profile.hub.offerAuthPrompt()));
       run.offs.push(page.dialogs.onOpen(() => profile.hub.broadcastControl()), page.dialogs.onClose(() => profile.hub.broadcastControl()));
       run.offs.push(page.frames.onChange((change) => { if (change.frameId === page.frames.mainFrameId) profile.hub.urlChanged(tab); }));
       run.offs.push(page.session.on("Page.navigatedWithinDocument", (params) => { if (params.frameId === page.frames.mainFrameId) profile.hub.urlChanged(tab); }));
       run.offs.push(page.session.on("Page.loadEventFired", () => {
         if (profile.hub.size) void browser.refreshTargets().then(() => profile.hub.titlesChanged(), () => undefined);
       }));
+      run.offs.push(page.session.on("Page.frameStartedLoading", (params) => { if (params.frameId === page.frames.mainFrameId) profile.hub.loading(tab, true); }));
+      run.offs.push(page.session.on("Page.frameStoppedLoading", (params) => { if (params.frameId === page.frames.mainFrameId) profile.hub.loading(tab, false); }));
+      run.offs.push(page.fileChoosers.onChange(() => void profile.hub.offerFileChooser()));
       if (opener && profile.control.owner !== null) {
         profile.hub.popup(tab);
         void browser.bringToFront(page).then(() => profile.hub.tabsChanged(), () => undefined);
@@ -225,6 +225,7 @@ export class BrowserService {
       throw error;
     }
     profile.run = run;
+    profile.lastUsed = Date.now();
     void opened.exited.then(() => this.#exited(profile, run));
     if (profile.reopened?.kind === "idle" || profile.reopened?.kind === "crash") {
       profile.reopened = { ...profile.reopened, pages: profile.tabs.list().filter((tab) => tab.page.url() !== "about:blank").map((tab) => `${tab.id} ${tab.page.url()}`) };
@@ -246,12 +247,11 @@ export class BrowserService {
     for (const off of run.offs) off();
     profile.run = null;
     profile.tabs.clear();
-    if (!run.closing) {
-      profile.reopened = { kind: "crash", pages: [] };
-      profile.control.settle();
-      this.#options.log?.(`browser ${profile.key}: Chrome exited unexpectedly; the next call starts it again`);
-    }
-    profile.hub.stopped(run.closing ? "closed" : "crashed");
+    if (run.closing) return;
+    profile.reopened = { kind: "crash", pages: [] };
+    profile.control.settle();
+    this.#options.log?.(`browser ${profile.key}: Chrome exited unexpectedly; the next call starts it again`);
+    profile.hub.stopped("crashed");
   }
 
   /** Graceful: Chrome's own quit, so its next start reopens the tabs and keeps session cookies. */
@@ -265,7 +265,7 @@ export class BrowserService {
         if (run) {
           run.closing = true;
           for (const off of run.offs) off();
-          profile.hub.stopped("closed");
+          profile.hub.stopped(reopened?.kind === "idle" ? "asleep" : "closed");
           await run.opened.close().catch(() => undefined);
         }
       } finally {
@@ -292,18 +292,18 @@ export class BrowserService {
     for (const folder of ["downloads", "screenshots"]) rmSync(join(root, folder, hash), { recursive: true, force: true });
   }
 
-  #idle(profile: ProfileState, idleMs: number): boolean {
-    return profile.run !== null && !profile.starting && !profile.stopping && profile.calls === 0 && profile.hub.size === 0
+  #unused(profile: ProfileState, idleMs: number): boolean {
+    return profile.run !== null && !profile.starting && !profile.stopping && profile.calls === 0
       && profile.control.owner === null && profile.control.agents === 0 && !this.#lanes.held(profile.key) && Date.now() - profile.lastUsed >= idleMs;
   }
 
-  /** The least recently used idle browser makes room; with none idle, the call waits, then is told why it cannot start. */
+  /** The least recently used unwatched idle browser makes room; with none, the call waits, then is told why it cannot start. */
   async #capacity(profile: ProfileState): Promise<void> {
     const until = Date.now() + this.#options.capacityWaitMs;
     for (;;) {
       const others = this.profiles().filter((other) => other !== profile && (other.run || other.starting));
       if (others.length < this.#options.maxRunning) return;
-      const candidate = others.filter((other) => this.#idle(other, 0)).sort((a, b) => a.lastUsed - b.lastUsed)[0];
+      const candidate = others.filter((other) => other.hub.size === 0 && this.#unused(other, 0)).sort((a, b) => a.lastUsed - b.lastUsed)[0];
       if (candidate) {
         await this.#stop(candidate, { kind: "idle", pages: [] });
         continue;
@@ -313,11 +313,11 @@ export class BrowserService {
     }
   }
 
-  /** Every running browser no one has used for `idleMs` closes; its bot hears why on its next call. */
+  /** Every running browser no one has used for `idleMs` closes, watched or not; its bot hears why on its next call. */
   async closeIdle(idleMs = this.#options.idleMs()): Promise<string[]> {
     const closed: string[] = [];
     for (const profile of this.profiles()) {
-      if (!(idleMs > 0) || !this.#idle(profile, idleMs)) continue;
+      if (!(idleMs > 0) || !this.#unused(profile, idleMs)) continue;
       await this.#stop(profile, { kind: "idle", pages: [] });
       closed.push(profile.key);
     }
@@ -415,6 +415,7 @@ export class BrowserService {
     }
     beforeDispatch?.();
     if (control.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+    control.call = parsed.call.name;
     try {
       const result = await executeTool(this.#context(profile, run, deadline), parsed.call);
       beforeDispatch?.();
@@ -426,7 +427,10 @@ export class BrowserService {
       }
       const failure = toolFailure(error);
       if (!failure) throw error;
-      return failure;
+      // A navigation the egress gate refused (a redirect into Reddit from the cloud) says why.
+      return withParts(failure, this.#options.egressNotice?.(profile.key));
+    } finally {
+      if (control.call === parsed.call.name) control.call = null;
     }
   }
 
@@ -443,7 +447,7 @@ export class BrowserService {
       pointer: (tab) => profile.hub.pointer(tab),
       paused: (tab, work) => profile.hub.paused(tab, work),
       health: (tab) => this.#health(profile, tab),
-      secretOnPage: (tab) => this.#holds.refuses(profile.session, async () => tab.page.url()),
+      secretOnPage: (tab) => this.#holds.refuses(profile.session, async () => tab.page.url(), tab.page.targetId),
       saveScreenshot: (data, pageUrl) => this.#saveScreenshot(profile, data, pageUrl),
       downloads: () => run.browser.downloads?.list() ?? [],
     };
@@ -453,7 +457,7 @@ export class BrowserService {
     let shown = profile.shown.get(tab);
     if (!shown) profile.shown.set(tab, shown = new HealthShown());
     const line = pageHealthLine(tab.page.takeHealth(), { pageUrl: tab.page.url(), loaderId: tab.page.lifecycle.loaderId, shown });
-    const gate = this.#options.egressNotice?.(profile.session) ?? null;
+    const gate = this.#options.egressNotice?.(profile.key) ?? null;
     return [line, gate].filter(Boolean).join(" ") || null;
   }
 
@@ -531,14 +535,15 @@ export class BrowserService {
     });
   }
 
-  /** Runs in the browser's lane, so no capture or read happens while a secret is typed. */
+  /** Runs in the browser's lane, so no capture or read happens while a secret is typed; a hold it leaves is the typing tab's. */
   async withSecretInput<T extends { ok: boolean; text: string; held?: SecretHold }>(target: BrowserTarget, fn: () => Promise<T>): Promise<T> {
     const profile = this.profile(target);
     const outcome = await this.#lanes.run(profile.key, async () => {
       await this.running(profile);
       return profile.control.agent(null, async () => {
+        const tab = profile.active();
         const filled = await fn();
-        if (filled.held) this.#holds.hold(profile.session, filled.held);
+        if (filled.held) this.#holds.hold(profile.session, { ...filled.held, ...(tab ? { tab: tab.page.targetId } : {}) });
         return filled;
       });
     }, this.#options.laneWaitMs);
@@ -577,6 +582,22 @@ export class BrowserService {
 
   heldBy(session: string): string | null {
     return this.#bySession(session)?.control.owner ?? null;
+  }
+
+  /** Whether the page's open picker was offered to `owner`'s view as `chooserId`: an upload for any other is refused unread. */
+  fileChooserOffered(session: string, owner: string, chooserId: string): boolean {
+    return this.#bySession(session)?.hub.fileChooserOffered(owner, chooserId) ?? false;
+  }
+
+  /** A person's files for the page's open picker, which their view was offered as `chooserId`. */
+  answerFileChooser(session: string, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
+    return this.#bySession(session)?.hub.answerFileChooser(owner, chooserId, paths) ?? Promise.resolve(false);
+  }
+
+  /** A file this session's browser finished downloading. */
+  download(session: string, id: string): Download | undefined {
+    const download = this.#bySession(session)?.run?.browser.downloads?.list().find((candidate) => candidate.id === id);
+    return download?.state === "completed" && download.path ? download : undefined;
   }
 
   canControl(session: string, owner: string): boolean {
@@ -625,6 +646,8 @@ export class BrowserService {
       tabs: () => profile.tabs.list(),
       tab: (id: string) => profile.tabs.get(id),
       running: async () => { await this.running(profile); },
+      used: () => { profile.lastUsed = Date.now(); },
+      pageLimit: () => (profile.run && !profile.run.closing ? profile.run.opened.pageLimit ?? null : null),
       take: async (owner: string): Promise<TakeResult> => {
         await this.running(profile);
         const taken = await profile.control.take(owner);

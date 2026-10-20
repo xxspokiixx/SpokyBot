@@ -51,6 +51,17 @@ describe("turn fields from Settings", () => {
     expect(settingsTurnFields({ features: { claudeUserSkills: true } } as AppConfig, data, false, home).userSkillsDir).toBe(join(data, "claude-user-skills"));
   });
 
+  it("takes the link away once the switch is off, never what it points to", () => {
+    const data = temp(), home = temp();
+    mkdirSync(join(home, ".claude", "skills", "deploy"), { recursive: true });
+    writeFileSync(join(home, ".claude", "skills", "deploy", "SKILL.md"), "mine");
+    settingsTurnFields({ features: { claudeUserSkills: true } } as AppConfig, data, false, home);
+    expect(existsSync(join(data, "claude-user-skills", ".claude", "skills"))).toBe(true);
+    settingsTurnFields({} as AppConfig, data, false, home);
+    expect(existsSync(join(data, "claude-user-skills"))).toBe(false);
+    expect(readFileSync(join(home, ".claude", "skills", "deploy", "SKILL.md"), "utf8")).toBe("mine");
+  });
+
   it("keeps the MCP switch its own, and an organization's MCP limit wins", () => {
     const on = { features: { claudeUserMcp: true } } as AppConfig;
     expect(settingsTurnFields(on, temp(), false, temp()).mcpFromUserConfig).toBe(true);

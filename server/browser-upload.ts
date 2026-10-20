@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, linkSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, linkSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
+
+import { safeFileName } from "./browser/cdp/downloads.ts";
 
 const MAX_FILES = 10;
 const NAMED_COPY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -47,6 +49,18 @@ export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: stri
     const named = join(dir, name);
     try { linkSync(file, named); } catch { copyFileSync(file, named); }
     return named;
+  });
+}
+
+/** Files a person picked on their own device for a page's file picker, kept under their own names for a day. */
+export function storeUploads(files: ReadonlyArray<{ name: string; bytes: Uint8Array }>, folder: string, now = Date.now()): string[] {
+  sweepNamedCopies(folder, now);
+  return files.map(({ name, bytes }) => {
+    const dir = join(folder, randomUUID());
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const path = join(dir, safeFileName(name));
+    writeFileSync(path, bytes, { mode: 0o600 });
+    return path;
   });
 }
 

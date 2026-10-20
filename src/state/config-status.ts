@@ -10,6 +10,11 @@ export interface ConfigStatus {
   cerebras?: { configured: boolean };
   groq?: { configured: boolean };
   meta?: { configured: boolean };
+  /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
+   * `unavailable` when the Admin said no to this desktop's paid sign-in. */
+  xResearch?: { included: boolean; unavailable?: boolean };
+  /** The person's own treg key for research: configured or not, never the key. */
+  treg?: { configured: boolean };
   /** `everyClaudeBot`: the key runs every Claude bot, not only "Claude (API key)". */
   anthropic?: { configured: boolean; everyClaudeBot?: boolean };
   openai?: { configured: boolean };
@@ -64,12 +69,15 @@ export interface ConfigStatus {
   /** The decision model: switches and whether a key is on file. The key
    * itself never comes back. `enabled` is the switch as it takes effect
    * (off while no key is saved). `included`: Cloud Pro's decisions, no key
-   * saved. */
+   * saved. OpenRouter only: `keySource` says which key is in use (its own, or
+   * the one under Settings → API keys); `sharedKey`: that one is on file. */
   decider?: {
     provider: "jev" | "openrouter";
     /** The OpenRouter model in use; present only while OpenRouter is the provider. */
     model?: string;
     configured: boolean;
+    keySource?: "own" | "shared";
+    sharedKey?: boolean;
     included?: boolean;
     enabled: boolean;
     jobs: { roomRouting: boolean };
