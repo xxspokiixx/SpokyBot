@@ -42,6 +42,10 @@ export interface CloudSendFixture {
   grant(label: string): Promise<{ origin: string; code: string; expiresAt: number }>;
   /** The switcher's send line, as main builds it. */
   menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
+  /** With `auto`: moves main's clock on, runs Keep My Cloud up to date's next check and waits for any send it starts. */
+  tick(advanceMs?: number): Promise<void>;
+  /** Each request main sent My Cloud's chats route: the rows of each conversation it carried. */
+  chatRequests: Array<Array<{ threadId: string; rows: number }>>;
   close(): Promise<void>;
 }
 
@@ -63,7 +67,7 @@ exports.createClient = async ({ auth }) => {
 
 /** `cloudOnePasswordToken`: the token My Cloud's 1Password accepts (default: this computer's), so a test can make 1Password
  * refuse this computer's token on My Cloud. */
-export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken }: { onePasswordToken: string; cloudOnePasswordToken?: string }): Promise<CloudSendFixture> {
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, auto = false }: { onePasswordToken: string; cloudOnePasswordToken?: string; auto?: boolean }): Promise<CloudSendFixture> {
   const root = mkdtempSync(join(tmpdir(), "omb-cloud-send-"));
   const secret = randomBytes(32).toString("base64url");
   const ownerCapability = randomBytes(32).toString("base64url");
@@ -149,8 +153,16 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
 
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const port = { postMessage: (message: unknown) => { desktop.send(message as object); } };
-  const throughEdge = (bearer: string | null) => async (url: string | URL | Request, init: RequestInit = {}) =>
-    remember(await fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...EDGE, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } }));
+  const chatRequests: CloudSendFixture["chatRequests"] = [];
+  const throughEdge = (bearer: string | null) => async (url: string | URL | Request, init: RequestInit = {}) => {
+    if (String(url).endsWith("/api/cloud-send/chats") && init.method === "POST" && typeof init.body === "string") {
+      chatRequests.push((JSON.parse(init.body) as { conversations: Array<{ threadId: string; rows: unknown[] }> }).conversations.map((entry) => ({ threadId: entry.threadId, rows: entry.rows.length })));
+    }
+    return remember(await fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...EDGE, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } }));
+  };
+  // Keep My Cloud up to date's timer, run by hand.
+  let clockAt = Date.now(), timer: (() => void) | null = null;
+  const clock = { now: () => clockAt, setTimer: ((callback: () => void) => { timer = callback; return 1; }) as unknown as typeof setTimeout, clearTimer: (() => { timer = null; }) as typeof clearTimeout };
   // Bring newer chats, as main.mjs gives it to Send to My Cloud.
   const move = createCloudMove({
     localRequest: (route, init) => fetch(`${desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": ownerCapability } }),
@@ -176,7 +188,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     openSettings: () => {},
     fetch: throughEdge(null) as typeof fetch,
     bringChats: () => move.bring({ id: "cloud", name: "My Cloud", origin: cloudBase, kind: "cloud", grant: async () => ({ origin: cloudBase, code: await mintCode("Copy from desktop") }) }),
-    keepUpToDate: false,
+    keepUpToDate: auto,
+    clock,
   });
   desktop.on("message", (message) => main.receive(port, message));
 
@@ -188,6 +201,15 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     },
     call: <T>(channel: string, page: "local" | "cloud", ...args: unknown[]) => Promise.resolve(handlers.get(channel)!({ page }, ...args)) as Promise<T>,
     menu: () => main.menu(),
+    chatRequests,
+    async tick(advanceMs = 0) {
+      clockAt += advanceMs;
+      const run = timer;
+      timer = null;
+      run?.();
+      // The check sets its next timer only once it, and any send it started, is done.
+      for (let tries = 0; !timer && tries < 1200; tries++) await new Promise((resolve) => setTimeout(resolve, 50));
+    },
     grant: async (label) => ({ origin: cloudBase, code: await mintCode(label), expiresAt: Date.now() + 300_000 }),
     async close() {
       await move.close();

@@ -53,7 +53,16 @@ export interface CloudSendNotice {
   signature: string;
   dismissed: boolean;
   running: boolean;
-  last: ({ at: number; failed: number } & CloudSendFailure) | null;
+  /** The running send's reason ("first": the one this computer makes by itself the first time), progress and phase. */
+  runningReason?: string;
+  progress?: { done: number; total: number };
+  phase?: "chats";
+  /** `sent`: counts only; `seen`: the person closed this result on the strip. */
+  last: ({ at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts } & CloudSendFailure) | null;
+}
+export interface CloudSendCounts {
+  bots: number; updatedBots: number; skills: number; logins: number; onePassword: boolean; settings: number;
+  chats: { conversations: number; messages: number } | null;
 }
 
 export interface CloudSendBridge {
@@ -95,7 +104,8 @@ export function createCloudSend(deps: {
     open(): Promise<CloudSendSession>;
   };
   handoff(what: { kind: "login"; id: string } | { kind: "1password" }): Promise<{ login?: Record<string, any>; onePassword?: { token: string; grants: Record<string, unknown> } }>;
-  chats?: (() => Promise<{ conversations: number; messages: number }>) | null;
+  /** Bring newer chats' copy, for a Cloud too old to take chats by row. */
+  bringChats?: (() => Promise<{ conversations: number; messages: number }>) | null;
   store: { read(): unknown; write(value: unknown): void };
   onChange?(snapshot: CloudSendSnapshot): void;
   now?(): number;

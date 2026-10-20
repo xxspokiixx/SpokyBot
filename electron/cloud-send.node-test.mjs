@@ -74,7 +74,7 @@ test("a bot's fields reach My Cloud without Custom approval and without naming b
   assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], peers: ["juno"], modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
   assert.ok(!Object.values(BOT_PARTS).flat().includes("cwd"), "a working folder is this computer's");
   assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" } } } }).clouds,
-    { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null } });
+    { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, chats: {} } });
   assert.equal(parseSendState(null).auto, true, "Keep My Cloud up to date is on unless the person turned it off");
 });
 
@@ -203,7 +203,7 @@ test("the bridge: Settings → MausBot Cloud only on this computer's page; My Cl
   assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send")))), [["cloud-send:page-send"]]);
 });
 
-test("Keep My Cloud up to date: sends what waits, asks My Cloud only when something here changed, never while it sleeps or when switched off", async () => {
+test("Keep My Cloud up to date: the first time it sends everything by itself, then asks My Cloud only when something here changed, never while it sleeps or when switched off", async () => {
   const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
   let fire = null;
   let now = 1_000;
@@ -218,7 +218,7 @@ test("Keep My Cloud up to date: sends what waits, asks My Cloud only when someth
   await tick();
   assert.deepEqual(reads, ["/api/cloud-send"]);
   assert.ok(sides.calls.includes("POST /api/bots"), "what waited went by itself");
-  assert.equal(send.snapshot().last.reason, "auto");
+  assert.equal(send.snapshot().last.reason, "first", "the first send to this Cloud, with no click");
   const calls = sides.calls.length;
   reads.length = 0;
   await tick();
@@ -309,7 +309,8 @@ test("a send that stops as a whole is that send's outcome, so the strip and Sett
   const last = send.snapshot().last;
   assert.equal(last.reason, "my-cloud");
   assert.equal(last.error, "Too many connection links. Wait a few minutes and try again.");
-  assert.deepEqual(sendNotice(send.snapshot()).last, { at: last.at, failed: 0, error: "Too many connection links. Wait a few minutes and try again." });
+  const told = sendNotice(send.snapshot()).last;
+  assert.deepEqual({ failed: told.failed, error: told.error, reason: told.reason, seen: told.seen }, { failed: 0, error: "Too many connection links. Wait a few minutes and try again.", reason: "my-cloud", seen: false });
 });
 
 test("My Cloud's notice says what did not go, by kind, with each reason: logins only counted, never a site", async () => {
@@ -342,13 +343,13 @@ test("1Password refused on My Cloud is told in words for this computer, not My C
     error: "1Password did not accept this computer's token on My Cloud: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, then send again." }]);
 });
 
-test("chats go with a send the person asks for, never with the background one or a send of one item, and a refusal is told", async () => {
+test("a Cloud too old to take chats by row gets Bring newer chats' copy from a send the person asked for or the first one, never the background one or a send of one item", async () => {
   const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
   const asked = [];
   let answer = { conversations: 3, messages: 40 };
-  sides.deps.chats = async () => { asked.push(true); sides.calls.push("chats"); if (answer instanceof Error) throw answer; return answer; };
+  sides.deps.bringChats = async () => { asked.push(true); sides.calls.push("chats"); if (answer instanceof Error) throw answer; return answer; };
   const send = createCloudSend(sides.deps);
-  for (const reason of ["button", "my-cloud", "menu"]) {
+  for (const reason of ["button", "my-cloud", "menu", "first"]) {
     asked.length = 0;
     assert.deepEqual((await send.send({ reason })).result.chats, { conversations: 3, messages: 40 }, reason);
     assert.equal(asked.length, 1, reason);
@@ -389,4 +390,60 @@ test("Bring newer chats' answer becomes the send's chats, and a copy already run
   pairing = false;
   const { failed, error, reasons } = (await handlers.get("cloud-send:page-send")({})).last;
   assert.deepEqual({ failed, error, reasons }, { failed: 0, error: "This app could not sign in to My Cloud. Try again.", reasons: undefined });
+});
+
+test("with Keep My Cloud up to date off before this computer meets a Cloud, nothing goes by itself, the first send included", async () => {
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+  let fire = null;
+  const send = createCloudSend({ ...sides.deps, store: { read: () => ({ auto: false }), write() {} }, setTimer: (callback) => { fire = callback; return 1; }, clearTimer() {} });
+  send.start();
+  const run = fire; fire = null; await run();
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sides.calls, []);
+  assert.equal(send.snapshot().last, null);
+  assert.equal(send.waiting(), null, "nothing compared yet");
+});
+
+test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {
+  const rows = { "t-a": [{ id: "a1", at: 1 }, { id: "a2", at: 2 }], "t-b": [{ id: "b1", at: 1 }], "t-c": [{ id: "c1", at: 1 }] };
+  const heads = () => Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: threadId === "t-c" }));
+  const posted = [];
+  let removedThere = new Set();
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })], cloudItems: [bot("ember", { soul: "s" })] });
+  const call = sides.deps.cloud.open;
+  sides.deps.cloud.open = async () => {
+    const session = await call();
+    const inner = session.call;
+    session.call = async (method, route, body) => {
+      if (route === "/api/cloud-send") return { status: 200, ok: true, body: { ...summary([bot("ember", { soul: "s" })]), chats: 1 } };
+      if (route === "/api/cloud-send/chats") {
+        posted.push(body.conversations.map((entry) => [entry.threadId, entry.rows.map((row) => row.id), entry.sent]));
+        const removed = body.conversations.filter((entry) => removedThere.has(entry.threadId)).map((entry) => entry.threadId);
+        return { status: 200, ok: true, body: { conversations: 0, messages: 1, accepted: body.conversations.map((entry) => entry.threadId).filter((id) => !removed.includes(id)), waiting: [], removed } };
+      }
+      return inner(method, route, body);
+    };
+    return session;
+  };
+  const local = sides.deps.local;
+  sides.deps.local = async (route) => {
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: heads() }), { status: 200 });
+    const asked = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)&id=/u.exec(route);
+    if (asked) {
+      const list = rows[asked[1]], from = Number(asked[2]);
+      return new Response(JSON.stringify({ rows: list.slice(from), leaf: list.at(-1).id, task: null, last: list.length, lastId: list.at(-1).id, more: false, restarted: false, attachments: [] }), { status: 200 });
+    }
+    return local(route);
+  };
+  const send = createCloudSend(sides.deps);
+  await send.send();
+  assert.deepEqual(posted.at(-1), [["t-a", ["a1", "a2"], false], ["t-b", ["b1"], false]], "the conversation being answered waits");
+  rows["t-a"].push({ id: "a3", at: 3 });
+  rows["t-b"].push({ id: "b2", at: 2 });
+  removedThere = new Set(["t-b"]);
+  await send.send();
+  assert.deepEqual(posted.at(-1), [["t-a", ["a3"], true], ["t-b", ["b2"], true]], "only the new rows, each marked as sent before");
+  rows["t-b"].push({ id: "b3", at: 3 });
+  await send.send();
+  assert.deepEqual(posted.length, 2, "nothing new but in a conversation removed on My Cloud: no request at all");
 });

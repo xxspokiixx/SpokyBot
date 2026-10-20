@@ -1,6 +1,6 @@
 // What Settings → MausBot Cloud and My Cloud's strip say about Send to My Cloud (electron/cloud-send.mjs), in words.
 import { failedSummary, type PlanRow, type RowState, type SendKind } from "../../electron/cloud-send-parts.mjs";
-import type { CloudSendFailure, CloudSendNotice, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
+import type { CloudSendCounts, CloudSendFailure, CloudSendNotice, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import type { LocaleKey } from "@/locales";
 import { activeLocale, t } from "@/lib/i18n";
 
@@ -120,6 +120,19 @@ export function resultLines(outcome: CloudSendOutcome): { text: string; failed: 
   return { text, failed: Boolean(failure), notes };
 }
 
+/** Settings' one line on where things stand: sending, what couldn't go, or that all is there. */
+export function sendStateLine(snapshot: CloudSendSnapshot, last: CloudSendOutcome | null): { kind: "sending" | "failed" | "off" | "soon" | "done"; text: string } {
+  const running = snapshot.running;
+  if (running) {
+    const key = running.phase === "chats" ? "cloudSend.sendingChats" : "cloudSend.sending";
+    return { kind: "sending", text: running.progress ? `${t(key)} ${t("cloudSend.progress", running.progress)}` : t(key) };
+  }
+  const failure = last ? failedLine(failedSummary(last)) : null;
+  if (failure) return { kind: "failed", text: failure };
+  if (!snapshot.auto) return { kind: "off", text: t("cloudSend.state.off") };
+  return snapshot.pending ? { kind: "soon", text: t("cloudSend.state.soon") } : { kind: "done", text: t("cloudSend.state.done") };
+}
+
 /** The status line at the top: online and its version, or why it can't compare now. */
 export function statusLine(snapshot: CloudSendSnapshot, comparing: boolean): { text: string; tone: "status" | "note" } | null {
   if (snapshot.cloud === "none") return null;
@@ -143,24 +156,37 @@ function olderVersion(a: string, b: string): boolean {
   return false;
 }
 
-/** My Cloud's strip: "Ember, 2 skills and 1Password are on This computer but not here." Null when nothing waits. */
-export function noticeLine(notice: CloudSendNotice): { text: string; one: boolean } | null {
-  const missing = [
-    ...notice.bots,
-    ...(notice.skills ? [counted(notice.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
-    ...(notice.logins ? [counted(notice.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
-    ...(notice.onePassword ? [t("cloudSend.list.onePassword")] : []),
+/** "12 bots, 3 skills, 2 logins, 1Password and 48 chats", from counts only. */
+export function countedList(sent: CloudSendCounts): string[] {
+  const chats = sent.chats;
+  return [
+    ...(sent.bots ? [counted(sent.bots, "cloudSend.list.botOne", "cloudSend.list.bots")] : []),
+    ...(sent.updatedBots ? [counted(sent.updatedBots, "cloudSend.list.changedBotOne", "cloudSend.list.changedBots")] : []),
+    ...(sent.skills ? [counted(sent.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
+    ...(sent.logins ? [counted(sent.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
+    ...(sent.onePassword ? [t("cloudSend.list.onePassword")] : []),
+    ...(sent.settings ? [t("cloudSend.list.settings")] : []),
+    ...(chats?.conversations ? [counted(chats.conversations, "cloudSend.list.chatOne", "cloudSend.list.chats")]
+      : chats?.messages ? [counted(chats.messages, "cloudSend.list.messageOne", "cloudSend.list.messages")] : []),
   ];
-  const newer = [
-    ...(notice.updatedBots.length ? [t("cloudSend.list.changesTo", { names: names(notice.updatedBots) })] : []),
-    ...(notice.settings ? [t("cloudSend.list.settings")] : []),
-  ];
-  if (missing.length) {
-    const one = notice.bots.length + notice.skills + notice.logins + (notice.onePassword ? 1 : 0) === 1 && !newer.length;
-    return { text: t(one ? "cloudSend.strip.missingOne" : "cloudSend.strip.missing", { list: listOf([...missing, ...newer]) }), one };
+}
+
+/** My Cloud's strip, or null when all is well: this computer's things on their way (the first send, or Try again), what
+ * the first send brought, or what couldn't come and why. */
+export function stripLine(notice: CloudSendNotice, sending: boolean, unanswered: string | null): { kind: "sending" | "failed" | "done"; text: string } | null {
+  if (sending || (notice.running && notice.runningReason === "first")) {
+    const progress = notice.progress;
+    const key = notice.phase === "chats" ? "cloudSend.strip.bringingChats" : "cloudSend.strip.bringing";
+    return { kind: "sending", text: progress ? `${t(key)} ${t("cloudSend.progress", progress)}` : t(key) };
   }
-  if (newer.length) return { text: t("cloudSend.strip.newer", { list: listOf(newer) }), one: false };
-  return null;
+  if (unanswered !== null) return { kind: "failed", text: t("cloudSend.failedSend", { error: unanswered }) };
+  const last = notice.last;
+  if (!last || last.seen) return null;
+  const failure = failedLine(last);
+  if (failure) return { kind: "failed", text: failure };
+  if (last.reason !== "first") return null;
+  const list = countedList(last.sent);
+  return { kind: "done", text: list.length ? t("cloudSend.strip.arrived", { list: listOf(list) }) : t("cloudSend.strip.allHere") };
 }
 
 /** The rows the details list shows, grouped: bots with their skills under them, then logins, then settings. */

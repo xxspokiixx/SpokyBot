@@ -1,19 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Cloud, Laptop, Loader2, RefreshCw } from "lucide-react";
-import type { PlanRow, RowState } from "../../electron/cloud-send-parts.mjs";
 import type { CloudSendBridge, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import type { LocaleKey } from "@/locales";
-import { detailRows, ipcErrorText, resultLines, rowName, sideLines, statusLine, type SideKind } from "@/lib/cloud-send";
+import { ipcErrorText, resultLines, sendStateLine, sideLines, statusLine, type SideKind } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { Card, Switch } from "./SettingsPrimitives";
 
 const KIND_LABEL: Record<SideKind, LocaleKey> = {
   bots: "cloudSend.kind.bots", skills: "cloudSend.kind.skills", logins: "cloudSend.kind.logins", settings: "cloudSend.kind.settings",
-};
-const ROW_STATE: Record<RowState, LocaleKey> = {
-  "only-here": "cloudSend.row.onlyHere", "on-both": "cloudSend.row.onBoth", "to-update": "cloudSend.row.toUpdate",
-  differs: "cloudSend.row.differs", removed: "cloudSend.row.removed", off: "cloudSend.row.off",
 };
 
 const cleanError = (cause: unknown) => ipcErrorText(cause) ?? t("cloudSend.status.unreachable");
@@ -75,25 +70,13 @@ function SideBySide({ snapshot }: { snapshot: CloudSendSnapshot }) {
   </table>;
 }
 
-function ItemRow({ row, onItem, onUseMine, busy }: { row: PlanRow; onItem(key: string, on: boolean): void; onUseMine(key: string): void; busy: boolean }) {
-  const name = row.kind === "skill" ? row.label : rowName(row);
-  const on = row.state !== "off" && row.state !== "removed";
-  return <li data-cloud-send-row={row.key} data-state={row.state} className={`flex items-center gap-3 py-2 ${row.kind === "skill" ? "ps-6" : ""}`}>
-    <div className="min-w-0 flex-1">
-      <div dir="auto" className="truncate text-[13px] text-ink">{name}</div>
-      <div className={`text-[11.5px] ${row.state === "only-here" || row.state === "to-update" ? "text-accent-text" : "text-ink-tertiary"}`}>{t(ROW_STATE[row.state])}</div>
-    </div>
-    {row.state === "differs" && <button type="button" className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
-      disabled={busy} onClick={() => onUseMine(row.key)}>{t("cloudSend.row.useMine")}</button>}
-    {row.kind !== "skill" && <Switch checked={on} disabled={busy} aria-label={t("cloudSend.row.also", { name })} onClick={() => onItem(row.key, !on)} />}
-  </li>;
-}
-
-/** Settings → MausBot Cloud, first: what each side has, Send everything, and Keep My Cloud up to date. */
+/** Settings → MausBot Cloud, first: whether My Cloud is online, one plain line on where things stand (with one Try again
+ * when something couldn't go), and Keep My Cloud up to date. Sending happens by itself; the comparison and a manual send
+ * sit under More. */
 export function CloudSendCard() {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSend;
   const send = useCloudSend(bridge);
-  const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
   const { snapshot } = send;
   if (!bridge || !snapshot || snapshot.cloud === "none") return null;
   const ready = snapshot.cloud === "ready";
@@ -102,8 +85,7 @@ export function CloudSendCard() {
   // The newer of this page's own send and main's record: a send that failed as a whole is only in main's.
   const last = send.outcome && (!snapshot.last || send.outcome.at >= snapshot.last.at) ? send.outcome : snapshot.last;
   const shown = last ? resultLines(last) : null;
-  const progress = snapshot.running?.progress;
-  const rows = detailRows(snapshot.rows);
+  const line = ready ? sendStateLine(snapshot, last) : null;
   return <Card title={t("cloudSend.title")} subtitle={t("cloudSend.intro")}>
     <div data-cloud-send={snapshot.cloud} data-running={running || undefined} className="flex flex-col gap-4">
       {status && <div className="flex flex-wrap items-center gap-2">
@@ -111,20 +93,15 @@ export function CloudSendCard() {
         {!ready && !send.comparing && <button type="button" className="inline-flex items-center gap-1 text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" onClick={send.refresh}>
           <RefreshCw size={12} aria-hidden="true" />{t("cloudSend.check")}</button>}
       </div>}
-      {ready && <SideBySide snapshot={snapshot} />}
-      <div className="flex flex-col items-start gap-2">
-        <button type="button" data-cloud-send-all className="ui-button ui-button-primary inline-flex items-center gap-2" disabled={!ready || running} onClick={() => void send.sendAll()}>
-          {running && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
-          {running ? t(snapshot.running?.phase === "chats" ? "cloudSend.sendingChats" : "cloudSend.sending") : t("cloudSend.send")}
-          {running && progress && snapshot.running?.phase !== "chats" && <span className="tabular-nums opacity-80">{t("cloudSend.progress", progress)}</span>}
-        </button>
+      {line && <div data-cloud-send-state={line.kind} className="flex flex-col items-start gap-1">
+        <p role={line.kind === "failed" ? "alert" : "status"} className={`inline-flex items-center gap-2 text-[13px] ${line.kind === "failed" ? "text-danger" : "text-ink"}`}>
+          {line.kind === "sending" && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{line.text}
+        </p>
+        {line.kind === "failed" && <button type="button" data-cloud-send-retry className="text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" onClick={() => void send.sendAll()}>{t("cloudSend.strip.retry")}</button>}
+        {line.kind !== "sending" && shown?.notes.map((note) => <p key={note} className="text-[12px] text-ink-secondary">{note}</p>)}
+        {line.kind !== "sending" && last && <p className="text-[12px] text-ink-tertiary">{t(last.reason === "auto" || last.reason === "first" ? "cloudSend.result.auto" : "cloudSend.result.when", { when: localizedRelativeTime(last.at, activeLocale()) })}</p>}
         {send.error && send.error !== last?.error && <p role="alert" className="text-[13px] text-danger">{send.error}</p>}
-        {shown && !running && <div data-cloud-send-result className="flex flex-col gap-1">
-          <p role={shown.failed ? "alert" : "status"} className={shown.failed ? "text-[13px] text-danger" : "text-[13px] text-ink"}>{shown.text}</p>
-          {shown.notes.map((note) => <p key={note} className="text-[12px] text-ink-secondary">{note}</p>)}
-          {last && <p className="text-[12px] text-ink-tertiary">{t(last.reason === "auto" ? "cloudSend.result.auto" : "cloudSend.result.when", { when: localizedRelativeTime(last.at, activeLocale()) })}</p>}
-        </div>}
-      </div>
+      </div>}
       <div className="flex items-start justify-between gap-4 rounded-lg bg-raised/60 p-3">
         <div className="min-w-0">
           <div id="cloud-send-auto" className="text-[13px] font-medium text-ink">{t("cloudSend.auto")}</div>
@@ -133,13 +110,14 @@ export function CloudSendCard() {
         <Switch checked={snapshot.auto} aria-labelledby="cloud-send-auto" data-cloud-send-auto onClick={() => void send.setAuto(!snapshot.auto)} />
       </div>
       <p className="text-[12px] leading-relaxed text-ink-secondary" data-cloud-send-separate>{t("cloudSend.separate")}</p>
-      {ready && rows.length > 0 && <div>
-        <button type="button" aria-expanded={open} className="inline-flex items-center gap-1 text-[13px] font-medium text-ink hover:text-accent-text" onClick={() => setOpen(!open)}>
-          <ChevronRight size={14} aria-hidden="true" className={open ? "rotate-90 transition-transform" : "transition-transform"} />{t("cloudSend.details")}
+      {ready && <div>
+        <button type="button" aria-expanded={more} data-cloud-send-more className="inline-flex items-center gap-1 text-[12.5px] text-ink-secondary hover:text-ink" onClick={() => setMore(!more)}>
+          <ChevronRight size={13} aria-hidden="true" className={more ? "rotate-90 transition-transform" : "transition-transform"} />{t("cloudSend.moreLink")}
         </button>
-        {open && <ul data-cloud-send-rows className="mt-1 divide-y divide-hairline/30">
-          {rows.map((row) => <ItemRow key={row.key} row={row} busy={running} onItem={(key, on) => void send.setItem(key, on)} onUseMine={(key) => void send.useMine(key)} />)}
-        </ul>}
+        {more && <div className="mt-2 flex flex-col items-start gap-3">
+          <SideBySide snapshot={snapshot} />
+          <button type="button" data-cloud-send-all className="ui-button inline-flex items-center gap-2" disabled={running} onClick={() => void send.sendAll()}>{t("cloudSend.send")}</button>
+        </div>}
       </div>}
     </div>
   </Card>;

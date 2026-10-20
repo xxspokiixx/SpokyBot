@@ -30,13 +30,19 @@ checks:
 - My Cloud's page is told bot names and counts only, never a login's site;
 - every send signs its session out, and no answer or log carries a secret;
 - **Bring newer chats** adds a sent bot's chats to My Cloud;
-- **Send everything** brings the chats too, under the same bot and conversation
-  ids; a second send adds only the new messages, nothing twice; a send of one
-  item never carries chats;
+- **Send everything** brings the chats too, by row, under the same bot and
+  conversation ids; a second send adds only the new messages, nothing twice; a
+  send of one item never carries chats;
+- **Keep My Cloud up to date**: the first check sends everything with no click,
+  chats included; a new message goes on a later check (chats alone at most
+  every five minutes), and only its rows; nothing goes once the switch is off;
 - when My Cloud's 1Password refuses this computer's token, everything else
   arrives and the strip's notice says *1Password* and why, never a login's site.
 
-`server/login-handoff.test.ts` and `electron/cloud-send.node-test.mjs` cover the
+`server/cloud-send-chats.test.ts` covers the row cursor (pages, a deleted row
+starting a conversation over) and My Cloud's side (a removed conversation never
+comes back, a busy one waits). `server/login-handoff.test.ts` and
+`electron/cloud-send.node-test.mjs` cover the
 rest of the reasons a person reads: a send that stops as a whole, logins this
 computer's server did not hand over, and a 1Password token 1Password already
 refused here.

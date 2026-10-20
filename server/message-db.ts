@@ -495,6 +495,39 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
+/** Each conversation's newest stored row, by its row number: what Keep My Cloud up to date compares with what it sent. */
+export function threadHeads(): Map<string, { last: number; lastId: string }> {
+  const rows = db().prepare("SELECT m.thread_id AS threadId, m.rowid AS last, m.id AS lastId FROM messages m " +
+    "JOIN (SELECT thread_id, MAX(rowid) AS head FROM messages GROUP BY thread_id) h ON m.rowid = h.head").all() as Array<{ threadId: string; last: number; lastId: string }>;
+  return new Map(rows.map((row) => [row.threadId, { last: Number(row.last), lastId: row.lastId }]));
+}
+
+/**
+ * A conversation's rows stored after `after`, oldest first. `after` counts only while its row is still `afterId`: a
+ * deleted row's number can be given out again, so otherwise the conversation starts over (`restarted`), which adding by
+ * id makes harmless. A legacy row without a parent takes the row before it.
+ */
+export function threadRowsAfter(threadId: string, after: number, afterId: string | null, limit: number):
+  { rows: Message[]; leaf: string | null; last: number; lastId: string | null; more: boolean; restarted: boolean } {
+  const database = db();
+  const held = after > 0 && afterId !== null && (database.prepare("SELECT rowid AS at FROM messages WHERE thread_id = ? AND id = ?").get(threadId, afterId) as { at: number } | undefined)?.at === after;
+  const from = held ? after : 0;
+  const found = database.prepare("SELECT rowid AS at, id, json FROM messages WHERE thread_id = ? AND rowid > ? ORDER BY rowid LIMIT ?")
+    .all(threadId, from, limit + 1) as Array<{ at: number; id: string; json: string }>;
+  const more = found.length > limit;
+  if (more) found.length = limit;
+  let previous = from ? (database.prepare("SELECT id FROM messages WHERE thread_id = ? AND rowid <= ? ORDER BY rowid DESC LIMIT 1").get(threadId, from) as { id: string } | undefined)?.id ?? null : null;
+  const rows = found.map((row) => {
+    const message = rowToMessage(row);
+    if (message.parentId === undefined) message.parentId = previous;
+    previous = message.id;
+    return message;
+  });
+  const state = database.prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?").get(threadId) as { active_leaf_id: string | null } | undefined;
+  const last = found.at(-1);
+  return { rows, leaf: state?.active_leaf_id ?? null, last: last ? Number(last.at) : from, lastId: last?.id ?? (held ? afterId : null), more, restarted: after > 0 && !held };
+}
+
 /** The time on a conversation's last stored row, without reading the conversation. */
 export function lastRowAt(threadId: string): number | undefined {
   const row = db().prepare("SELECT at FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | undefined;

@@ -12,7 +12,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 import { CloudSendCard } from "./CloudSendCard";
 import { CloudSendStrip } from "./CloudSendStrip";
 
-type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; "aria-checked"?: boolean; "aria-label"?: string; "data-cloud-send-all"?: boolean }>;
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; "aria-checked"?: boolean; "aria-label"?: string; "data-cloud-send-all"?: boolean; "data-cloud-send-more"?: boolean }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 function render(component: () => ReactNode) {
   f.index = 0; f.effects = []; let tree: ReactNode;
@@ -57,35 +57,50 @@ async function ready() {
   render(card); for (const effect of f.effects) effect(); await flush();
 }
 
-it("Settings → MausBot Cloud: both sides side by side, Send everything, and the switch, on by default", async () => {
+const counts = { bots: 0, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null };
+
+it("Settings → MausBot Cloud: online, one line on where things stand, and the switch, on by default; no buttons to send", async () => {
+  vi.mocked(bridge.refresh).mockResolvedValue({ ...snapshot, pending: 0, last: { at: 1, reason: "auto", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: { conversations: 0, messages: 3 }, failed: [], notes: [] } } });
   await ready();
   const { html } = render(card);
   expect(bridge.refresh).toHaveBeenCalledTimes(1);
   expect(html).toContain("This computer and My Cloud");
   expect(html).toContain("My Cloud is online · version 0.1.117");
-  expect(html).toContain("Ember only here · 1 different on My Cloud · Miso only on My Cloud");
-  expect(html).toContain("1Password only here");
-  expect(html).toContain("Send everything to My Cloud");
+  expect(html).toContain("Everything from this computer is on My Cloud.");
   expect(html).toContain("Keep My Cloud up to date with this computer");
   expect(html).toContain('aria-labelledby="cloud-send-auto" data-cloud-send-auto="true" type="button" role="switch" aria-checked="true"');
-  expect(html).toContain("Send everything brings the chats too");
-  expect(html).not.toContain("the chats on each side");
-  tree(card).find((node) => node.props["data-cloud-send-all"])!.props.onClick!(); await flush();
-  expect(bridge.send).toHaveBeenCalledWith();
-  expect(render(card).html).toContain("Sent to My Cloud: Ember, 1Password, and 48 chats.");
+  expect(html).toContain("Stays separate: sign-ins to Claude");
+  for (const gone of ["Send everything to My Cloud", "Choose what goes", "Use this computer's", "Also on My Cloud", "Bring them over", "Ember only here"]) expect(html).not.toContain(gone);
   tree(card).find((node) => node.props["aria-checked"] === true)!.props.onClick!(); await flush();
   expect(bridge.setAuto).toHaveBeenCalledWith(false);
 });
 
-it("Choose what goes: a switch per item, and Use this computer's where My Cloud's differs", async () => {
+it("says it is sending, with progress, and what couldn't go with one Try again", async () => {
+  vi.mocked(bridge.refresh).mockResolvedValue({ ...snapshot, running: { reason: "first", progress: { done: 3, total: 12 }, phase: "chats" } });
   await ready();
-  tree(card).find((node) => node.type === "button" && text(node).includes("Choose what goes"))!.props.onClick!();
-  const open = tree(card);
-  expect(render(card).html).toContain("Different on My Cloud");
-  open.find((node) => node.props["aria-label"] === "Also on My Cloud: Ember")!.props.onClick!(); await flush();
-  expect(bridge.setItem).toHaveBeenCalledWith("bot:ember", false);
-  open.find((node) => node.type === "button" && text(node) === "Use this computer's")!.props.onClick!(); await flush();
-  expect(bridge.send).toHaveBeenCalledWith({ keys: ["bot:juno"], force: ["bot:juno"] });
+  expect(render(card).html).toContain("Bringing chats to My Cloud… 3 of 12");
+  expect(render(card).html).not.toContain("Try again");
+  f.values = [];
+  vi.mocked(bridge.refresh).mockResolvedValue({ ...snapshot, last: { at: 5, reason: "auto", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, notes: [],
+    failed: [{ key: "1password", kind: "1password", label: "1Password", error: "1Password did not accept this computer's token on My Cloud." }] } } });
+  await ready();
+  expect(render(card).html).toContain("1Password couldn't be sent: 1Password did not accept this computer's token on My Cloud.");
+  const retries = tree(card).filter((node) => node.type === "button" && text(node) === "Try again");
+  expect(retries).toHaveLength(1);
+  retries[0]!.props.onClick!(); await flush();
+  expect(bridge.send).toHaveBeenCalledWith();
+});
+
+it("keeps the comparison and a manual send under More, and says so when Keep My Cloud up to date is off", async () => {
+  vi.mocked(bridge.refresh).mockResolvedValue({ ...snapshot, auto: false });
+  await ready();
+  expect(render(card).html).toContain("Keep My Cloud up to date is off: what you add on this computer stays here.");
+  tree(card).find((node) => node.props["data-cloud-send-more"])!.props.onClick!();
+  const html = render(card).html;
+  expect(html).toContain("Ember only here · 1 different on My Cloud · Miso only on My Cloud");
+  expect(html).toContain("Send everything to My Cloud");
+  tree(card).find((node) => node.props["data-cloud-send-all"])!.props.onClick!(); await flush();
+  expect(bridge.send).toHaveBeenCalledWith();
 });
 
 it("is absent without My Cloud, in a browser and on a paired remote client", async () => {
@@ -104,53 +119,53 @@ it("is absent without My Cloud, in a browser and on a paired remote client", asy
 const notice: CloudSendNotice = { ready: true, bots: ["Ember"], updatedBots: [], skills: 2, logins: 0, onePassword: true, settings: 0, signature: "sig-1", dismissed: false, running: false, last: null };
 let page: CloudSendPageBridge;
 const strip = (cloudHome = true) => () => CloudSendStrip({ cloudHome });
-async function onCloud(value = notice, cloudHome = true) {
-  page = { notice: vi.fn().mockResolvedValue(value), send: vi.fn().mockResolvedValue({ ...value, bots: [], skills: 0, onePassword: false, signature: "", last: { at: 2, failed: 0 } }),
-    dismiss: vi.fn().mockResolvedValue({ ...value, dismissed: true }), onNotice: vi.fn(() => () => {}) };
+async function onCloud(value: CloudSendNotice = notice, cloudHome = true) {
+  page = { notice: vi.fn().mockResolvedValue(value), send: vi.fn().mockResolvedValue({ ...value, last: { at: 9, reason: "my-cloud", failed: 0, seen: false, sent: counts } }),
+    dismiss: vi.fn().mockResolvedValue({ ...value, last: value.last && { ...value.last, seen: true } }), onNotice: vi.fn(() => () => {}) };
   vi.stubGlobal("window", { ogb: { cloudSendPage: page } });
   render(strip(cloudHome)); for (const effect of f.effects) effect(); await flush();
 }
 
-it("My Cloud's strip names what is on This computer but not here; Bring them over sends, Not now hides it until something new", async () => {
+it("My Cloud's strip has nothing to press while all is well: what waits goes by itself", async () => {
   await onCloud();
-  expect(render(strip()).html).toContain("Ember, 2 skills, and 1Password are on This computer but not here.");
-  const bring = tree(strip()).find((node) => node.type === "button" && text(node) === "Bring them over")!;
-  bring.props.onClick!(); await flush();
-  expect(page.send).toHaveBeenCalledTimes(1);
-  expect(render(strip()).html).toContain("Done. My Cloud has them now.");
+  const html = render(strip()).html;
+  expect(html).toBe("");
+  for (const gone of ["Bring them over", "Not now"]) expect(html).not.toContain(gone);
   f.values = [];
-  await onCloud();
-  tree(strip()).find((node) => node.type === "button" && text(node) === "Not now")!.props.onClick!(); await flush();
-  expect(page.dismiss).toHaveBeenCalledWith("sig-1");
+  await onCloud({ ...notice, last: { at: 2, reason: "auto", failed: 0, seen: false, sent: { ...counts, chats: { conversations: 0, messages: 4 } } } });
+  expect(render(strip()).html, "a background send that went well says nothing").toBe("");
+});
+
+it("the first send, by itself: the strip shows it arriving with progress, then what came, until closed", async () => {
+  await onCloud({ ...notice, running: true, runningReason: "first", progress: { done: 4, total: 12 } });
+  expect(render(strip()).html).toContain("Bringing this computer's bots, logins and chats here… 4 of 12");
+  expect(tree(strip()).some((node) => node.type === "button")).toBe(false);
+  f.values = [];
+  await onCloud({ ...notice, last: { at: 3, reason: "first", failed: 0, seen: false, sent: { ...counts, bots: 12, skills: 3, logins: 2, onePassword: true, chats: { conversations: 48, messages: 900 } } } });
+  expect(render(strip()).html).toContain("12 bots, 3 skills, 2 logins, 1Password, and 48 chats came over from This computer.");
+  tree(strip()).find((node) => node.type === "button" && text(node) === "Close")!.props.onClick!(); await flush();
+  expect(page.dismiss).toHaveBeenCalledWith("result:3");
   expect(render(strip()).html).toBe("");
 });
 
-it("the strip stays away when nothing waits, when dismissed, and on any page but My Cloud's", async () => {
-  await onCloud({ ...notice, bots: [], skills: 0, onePassword: false });
-  expect(render(strip()).html).toBe("");
-  f.values = [];
-  await onCloud({ ...notice, dismissed: true });
-  expect(render(strip()).html).toBe("");
-  f.values = [];
-  await onCloud(notice, false);
+it("the strip stays away on any page but My Cloud's", async () => {
+  await onCloud({ ...notice, running: true, runningReason: "first" }, false);
   expect(render(strip(false)).html).toBe("");
   expect(page.notice).not.toHaveBeenCalled();
 });
 
-it("My Cloud's strip says what could not be brought over and why, with Try again, instead of pointing elsewhere", async () => {
-  await onCloud();
-  const failed = { ...notice, bots: [], skills: 0, onePassword: true, signature: "sig-2",
-    last: { at: 3, failed: 3, reasons: [{ what: { bots: [], skills: 0, logins: 2, onePassword: true, settings: 0, chats: false }, error: "OpenMausBot on this computer did not answer. Try again." }] } };
-  vi.mocked(page.send).mockResolvedValue(failed);
-  tree(strip()).find((node) => node.type === "button" && text(node) === "Bring them over")!.props.onClick!(); await flush();
+it("My Cloud's strip says what could not be brought over and why, with one Try again", async () => {
+  const failed: CloudSendNotice = { ...notice, last: { at: 3, reason: "auto", failed: 3, seen: false, sent: counts,
+    reasons: [{ what: { bots: [], skills: 0, logins: 2, onePassword: true, settings: 0, chats: false }, error: "OpenMausBot on this computer did not answer. Try again." }] } };
+  await onCloud(failed);
   const html = render(strip()).html;
   expect(html).toContain("2 logins and 1Password couldn't be sent: OpenMausBot on this computer did not answer. Try again.");
   expect(html).not.toContain("See This computer's Settings");
-  tree(strip()).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();
-  expect(page.send).toHaveBeenCalledTimes(2);
-  // A send that stopped as a whole says why too.
-  vi.mocked(page.send).mockResolvedValue({ ...failed, last: { at: 4, failed: 0, error: "This app could not sign in to My Cloud. Try again." } });
-  tree(strip()).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();
+  const retry = tree(strip()).filter((node) => node.type === "button" && text(node) === "Try again");
+  expect(retry).toHaveLength(1);
+  vi.mocked(page.send).mockResolvedValue({ ...failed, last: { at: 4, reason: "my-cloud", failed: 0, seen: false, sent: counts, error: "This app could not sign in to My Cloud. Try again." } });
+  retry[0]!.props.onClick!(); await flush();
+  expect(page.send).toHaveBeenCalledTimes(1);
   expect(render(strip()).html).toContain("Send to My Cloud stopped: This app could not sign in to My Cloud. Try again.");
   vi.mocked(page.send).mockRejectedValue(new Error("Error invoking remote method 'cloud-send:page-send': Error: cloud-send:page-send is only available in this app's window"));
   tree(strip()).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();

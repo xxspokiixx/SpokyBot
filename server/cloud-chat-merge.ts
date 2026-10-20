@@ -28,7 +28,7 @@ export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messa
 const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
   "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt"] as const;
 const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId"] as const;
-const ATTACHMENT_NAME = /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/;
+export const ATTACHMENT_NAME = /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/;
 
 const ownerKey = (owner: Owner) => `${owner.kind}:${owner.id}`;
 const newest = (values: Iterable<number>) => { let max = Number.NEGATIVE_INFINITY; for (const value of values) if (value > max) max = value; return max; };
@@ -191,7 +191,8 @@ export function liveChats(store: ChatStore): ChatsSide {
   return { bots: store.bots, groups: store.groups, thread: (threadId) => ({ rows: store.messagesFor(threadId), leaf: store.activeLeaf(threadId) }) };
 }
 
-function attachmentNames(message: Message, source: string): string[] {
+/** The attachments in this computer's folder a row names, by file name. */
+export function attachmentNames(message: Message, source: string): string[] {
   const root = `${source.replaceAll("\\", "/").replace(/\/$/, "")}/attachments/`;
   const fold = (value: string) => /^(?:[A-Za-z]:\/|\/\/)/.test(root) ? value.toLowerCase() : value;
   const paths: unknown[] = Array.isArray(message.attachments) ? message.attachments.map((attachment) => (attachment as { path?: unknown } | null)?.path) : [];
@@ -245,19 +246,73 @@ export function applyChatMerge(store: ChatStore, plan: ChatMergePlan): void {
   }
 }
 
+/** Rebases the added rows' paths from the other computer's folder to this one's, then adds them. */
+function applyFrom(store: ChatStore, dataDir: string, plan: ChatMergePlan, sourceDataDir: string, carry?: (name: string) => boolean): void {
+  const destination = resolve(dataDir), paths = restorePaths(sourceDataDir, destination);
+  let copied = false;
+  for (const thread of plan.threads) for (const message of thread.added) {
+    if (carry) for (const name of attachmentNames(message, sourceDataDir)) copied = carry(name) || copied;
+    if (sourceDataDir !== destination) paths.message(message);
+  }
+  if (copied) cleanupStaleAttachmentPartials();
+  applyChatMerge(store, plan);
+}
+
 export function mergeStagedChats(store: ChatStore, dataDir: string, staged: { data: string; sourceDataDir: string }, syncedAt?: number): ChatMergeResult {
   const from = stagedChats(staged.data);
   try {
     const plan = planChatMerge(from, liveChats(store), syncedAt);
-    const destination = resolve(dataDir), paths = restorePaths(staged.sourceDataDir, destination);
-    let copied = false;
-    for (const thread of plan.threads) for (const message of thread.added) {
-      for (const name of attachmentNames(message, staged.sourceDataDir)) copied = carryAttachment(staged.data, dataDir, name) || copied;
-      if (staged.sourceDataDir !== destination) paths.message(message);
-    }
-    if (copied) cleanupStaleAttachmentPartials();
-    applyChatMerge(store, plan);
+    applyFrom(store, dataDir, plan, staged.sourceDataDir, (name) => carryAttachment(staged.data, dataDir, name));
     const { threads: _threads, ...result } = plan;
     return result;
   } finally { from.close(); }
+}
+
+/** One bot conversation's rows another computer stored since it last sent it (server/cloud-send-chats.ts). */
+export interface SentConversation {
+  bot: string;
+  threadId: string;
+  /** The conversation's entry in the bot's list; null for the bot's main conversation. */
+  task: TaskRecord | null;
+  rows: Message[];
+  leaf: string | null;
+  /** Rows of it went before: a conversation this server lacks now was removed here, and is not brought back. */
+  sent: boolean;
+}
+export interface SentChatsResult {
+  conversations: number;
+  messages: number;
+  /** Taken (rows added, or nothing new): the sender's cursor moves past what it sent. */
+  accepted: string[];
+  /** Its bot is not here, or is answering in it now: sent again later. */
+  waiting: string[];
+  /** Removed here since: never sent again. */
+  removed: string[];
+}
+
+/**
+ * Adds each sent conversation's rows the way a copy's are added (planChatMerge), one conversation at a time, so rows
+ * one conversation shares never make another look deleted. Attachments arrived before, under their own names.
+ */
+export function addSentChats(store: ChatStore, dataDir: string, sourceDataDir: string, sent: readonly SentConversation[],
+  { busy, syncedAt = Number.NEGATIVE_INFINITY }: { busy(threadId: string): boolean; syncedAt?: number }): SentChatsResult {
+  const result: SentChatsResult = { conversations: 0, messages: 0, accepted: [], waiting: [], removed: [] };
+  for (const conversation of sent) {
+    const bot = store.bot(conversation.bot);
+    if (!bot || busy(conversation.threadId)) { result.waiting.push(conversation.threadId); continue; }
+    const listed = bot.threadId === conversation.threadId || (bot.tasks ?? []).some((task) => task.threadId === conversation.threadId);
+    if (conversation.sent && !listed && !store.messagesFor(conversation.threadId).length) { result.removed.push(conversation.threadId); continue; }
+    const from: ChatsSide = {
+      bots: [{ id: bot.id, threadId: conversation.task ? bot.threadId : conversation.threadId, tasks: conversation.task ? [conversation.task] : [] }],
+      groups: [],
+      thread: (threadId) => threadId === conversation.threadId ? { rows: conversation.rows, leaf: conversation.leaf } : { rows: [], leaf: null },
+    };
+    const plan = planChatMerge(from, liveChats(store), syncedAt);
+    if (plan.deleted) { result.removed.push(conversation.threadId); continue; }
+    applyFrom(store, dataDir, plan, sourceDataDir);
+    result.conversations += plan.conversations;
+    result.messages += plan.messages;
+    result.accepted.push(conversation.threadId);
+  }
+  return result;
 }
