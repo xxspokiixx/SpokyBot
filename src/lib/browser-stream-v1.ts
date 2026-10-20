@@ -20,6 +20,8 @@ const SILENT_MS = 25_000;
 const SILENCE_CHECK_MS = 5_000;
 const QUEUE_LIMIT = 32;
 const CHAR_LIMIT = 4_096;
+/** Under the 32 KB the server reads of one action's body. */
+const BATCH_BYTES = 24_000;
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, Number.isFinite(value) ? value : 0));
 const delta = (value: number) => clamp(value, -10_000, 10_000);
 
@@ -75,12 +77,14 @@ export function liveAction(input: PreviewStreamInput): Body | Body[] | null {
 }
 
 const movement = (body: Body) => body.type === "input_mouse" && (body.eventType === "mouseMoved" || body.eventType === "mouseWheel");
+const batchable = (body: Body) => body.type === "input_mouse" || body.type === "input_keyboard";
+const releases = (body: Body) => (body.type === "input_mouse" && body.eventType === "mouseReleased") || (body.type === "input_keyboard" && body.eventType === "keyUp");
 /** What still goes once input has halted: releases, so nothing stays held, and toolbar actions. */
-const afterHalt = (body: Body) => (body.type === "input_mouse" && body.eventType === "mouseReleased") || (body.type === "input_keyboard" && body.eventType === "keyUp")
-  || (body.type !== "input_mouse" && body.type !== "input_keyboard");
+const afterHalt = (body: Body) => releases(body) || !batchable(body);
 
-/** One request at a time: key and button order is kept, movement coalesced, and a reconnect never replays old input. */
-export function createLiveInputQueue(send: (body: Body) => Promise<unknown>, onError: (cause: unknown) => void) {
+/** One request at a time: key and button order is kept, movement coalesced, and a reconnect never replays old input. Where
+ * the server takes batches (`batchLimit` above 1), every input queued behind a request goes in the next one. */
+export function createLiveInputQueue(send: (body: Body) => Promise<unknown>, onError: (cause: unknown) => void, batchLimit: () => number = () => 1) {
   let queue: Body[] = [];
   let active: Promise<void> | null = null;
   let generation = 0;
@@ -89,14 +93,31 @@ export function createLiveInputQueue(send: (body: Body) => Promise<unknown>, onE
     queue = queue.filter(afterHalt);
     if (!stopped) { stopped = true; onError(cause); }
   };
+  const next = (): Body[] => {
+    const taken = [queue.shift()!];
+    const limit = stopped ? 1 : batchLimit();
+    let bytes = JSON.stringify(taken[0]).length;
+    while (batchable(taken[0]!) && taken.length < limit && queue.length && batchable(queue[0]!)) {
+      const size = JSON.stringify(queue[0]).length;
+      if (bytes + size > BATCH_BYTES) break;
+      bytes += size;
+      taken.push(queue.shift()!);
+    }
+    return taken;
+  };
   const run = () => {
     if (active || !queue.length) return;
     const current = generation;
     active = (async () => {
       while (current === generation && queue.length) {
-        const body = queue.shift()!;
-        try { await send(body); }
-        catch (cause) { if (current === generation) halt(cause); }
+        const taken = next();
+        try { await send(taken.length === 1 ? taken[0]! : { type: "input_batch", events: taken }); }
+        catch (cause) {
+          if (current !== generation) continue;
+          // The server stops a batch at its first failure, so its later releases may never have been sent.
+          if (taken.length > 1) queue.unshift(...taken.slice(1).filter(releases));
+          halt(cause);
+        }
       }
     })().finally(() => { active = null; run(); });
   };
@@ -157,6 +178,8 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
   let control: PreviewStreamControl | null = null;
   let viewport: { width: number; height: number } | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
+  /** Inputs one request may carry: what this view's server said, 1 for one that takes no batches. */
+  let inputBatch = 1;
 
   const dropped = (live: EventSource, retryable: boolean) => {
     live.close();
@@ -186,7 +209,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
   const postTo = (body: Body, sentTo: string) => post(body, sentTo).catch((cause: unknown) => { viewGone(cause, sentTo); throw cause; });
   const queue = createLiveInputQueue((body) => (viewerId ? postTo(body, viewerId) : Promise.reject(new Error("Open the browser connection first."))), (cause) => {
     events.onMessage?.({ type: "notice", message: cause instanceof Error ? cause.message : String(cause) });
-  });
+  }, () => inputBatch);
 
   const connect = () => {
     retry = null;
@@ -204,6 +227,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     listen("ready", (data) => {
       if (typeof data.viewerId !== "string" || !data.viewerId) return;
       viewerId = data.viewerId;
+      inputBatch = Number.isSafeInteger(data.inputBatch) ? Math.max(1, Math.min(Number(data.inputBatch), 64)) : 1;
       resume.viewer = "";
       events.onConnectedChange(true);
     });
