@@ -139,6 +139,20 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("account email unavailable");
   });
 
+  it("offers removal for an added Antigravity account only", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const account = (instanceId: string): InstanceInfo => ({
+      instanceId, driverKind: "antigravityAgent", displayName: "Google account", cliDefault: "agy_acp_server",
+      snapshot: { state: "available", authenticated: true }, models: { default: "gemini", options: [] },
+    });
+    fixture.instances = [account("antigravity")];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Remove<");
+    fixture.instances = [account("antigravity-work")];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Remove<");
+  });
+
   it("shows every Company provider as read-only while preserving personal controls", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];
