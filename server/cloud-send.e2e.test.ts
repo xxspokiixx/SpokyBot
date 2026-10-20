@@ -204,7 +204,7 @@ it("when My Cloud refuses this computer's 1Password token, the strip and Setting
     expect((await local("POST", "/api/logins/1password", { token: TOKEN })).status).toBe(200);
     expect((await refusing.call<CloudSendSnapshot>("cloud-send:refresh", "local")).cloud).toBe("ready");
     const notice = await refusing.call<CloudSendNotice>("cloud-send:page-send", "cloud");
-    const why = "1Password did not accept this computer's token on My Cloud: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, then send again.";
+    const why = "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself.";
     expect(notice.last).toMatchObject({ failed: 1, reasons: [{ what: { bots: [], skills: 0, logins: 0, onePassword: true, settings: 0, chats: false }, error: why }] });
     expect(notice.last?.error).toBeUndefined();
     expect(JSON.stringify(notice)).not.toContain("example.test");

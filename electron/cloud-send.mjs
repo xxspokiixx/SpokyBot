@@ -47,7 +47,7 @@ function refusal(answer, fallback) {
 function onePasswordRefusal(answer) {
   const said = sentence(answer.body?.error);
   if (answer.status === 400 && said && /did not accept the token|not a whole 1Password|service account token/iu.test(said)) {
-    return "1Password did not accept this computer's token on My Cloud: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, then send again.";
+    return "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself.";
   }
   return refusal(answer, "My Cloud could not connect 1Password.");
 }

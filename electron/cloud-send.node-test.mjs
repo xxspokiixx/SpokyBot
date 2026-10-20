@@ -341,7 +341,7 @@ test("1Password refused on My Cloud is told in words for this computer, not My C
   sides.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
   const outcome = await createCloudSend(sides.deps).send();
   assert.deepEqual(outcome.result.failed, [{ key: "1password", kind: "1password", label: "1Password",
-    error: "1Password did not accept this computer's token on My Cloud: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, then send again." }]);
+    error: "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself." }]);
 });
 
 test("a Cloud too old to take chats by row gets Bring newer chats' copy from a send the person asked for or the first one, never the background one or a send of one item", async () => {
