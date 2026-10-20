@@ -16,6 +16,8 @@ const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\/chats|cloud-send\/chats\/
 const AUTO_FIRST_MS = 20_000;
 /** A Cloud this computer has not sent to yet is checked this soon once it is there, not at the next two-minute check. */
 const KICK_MS = 1_000;
+/** A kick looks at a Cloud the last look found away at most this often. */
+const LOOK_AGAIN_MS = 30_000;
 const AUTO_EVERY_MS = 2 * 60_000;
 const AUTO_FULL_MS = 30 * 60_000;
 /** Chats alone go at most this often: each send is one sign-in at My Cloud, which the Admin limits. */
@@ -173,7 +175,7 @@ function emptyResult() {
 export function createCloudSend({ local, cloud, handoff, bringChats = null, store, onChange = () => {}, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null };
-  let running = null, progress = null, timer = null, dueAt = 0, stopped = true, ticking = false, kicked = false, firstTickAt = 0;
+  let running = null, progress = null, timer = null, dueAt = 0, stopped = true, ticking = false, kicked = false, firstTickAt = 0, lookedAt = Number.NEGATIVE_INFINITY;
   let autoDigest = "", autoAt = 0, autoFailedDigest = "", autoFailedAt = 0, chatsAt = 0;
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
@@ -243,6 +245,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     if (!origin) { view = { cloud: "none", plan: null, local: null, theirs: null }; return publish(); }
     if (cloud.asleep()) { view = { ...view, cloud: "asleep" }; return publish(); }
     const [mine, theirs] = await Promise.all([localJson("/api/cloud-send").then(parseSendSummary).catch(() => null), readCloud()]);
+    lookedAt = now();
     if (!mine) { view = { ...view, cloud: "local-unavailable" }; return publish(); }
     if (theirs.state !== "ready") { view = { cloud: theirs.state, plan: null, local: mine, theirs: null }; return publish(); }
     view = { cloud: "ready", plan: plan(origin, mine, theirs.summary), local: mine, theirs: theirs.summary };
@@ -640,6 +643,10 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
    * here changed (or half an hour passed), and only while it is awake. The first time this computer meets a Cloud it
    * sends everything; after that new chats go at most every few minutes. A send with failures waits half an hour
    * unless something here changes. */
+  /** The last look found My Cloud away (unreachable, asleep, outdated, or this computer not ready): look again each
+   * check. Never for signed out, where a look means a new sign-in at the Admin. */
+  const away = () => view.cloud !== "ready" && view.cloud !== "signed-out";
+
   async function tick() {
     timer = null;
     if (stopped) return;
@@ -657,18 +664,21 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         const itemsDue = digest && (digest !== autoDigest || now() - autoAt >= AUTO_FULL_MS);
         const chatsDue = view.cloud === "ready" && view.theirs?.chats && now() - chatsAt >= CHATS_EVERY_MS
           && (await chatsWaiting(origin, view.theirs)).ready.length > 0;
-        if (digest && !backoff && (first || itemsDue || chatsDue)) {
+        const back = away();
+        if (digest && (back || (!backoff && (first || itemsDue || chatsDue)))) {
           await compare();
+          autoDigest = digest; autoAt = now();
           if (view.cloud === "ready" && saved.auto) {
+            // Back after being away: what waited goes now, a failure from before held against it or not.
+            if (back) chatsAt = 0;
             const chats = view.theirs.chats && now() - chatsAt >= CHATS_EVERY_MS ? (await chatsWaiting(origin, view.theirs)).ready.length : 0;
-            if (first || pendingRows(view.plan).length || chats) {
+            if ((back || !backoff) && (first || pendingRows(view.plan).length || chats)) {
               const outcome = await send({ reason: first ? "first" : "auto" }).catch((error) => {
                 autoFailedDigest = digest; autoFailedAt = now(); chatsAt = now();
                 throw error;
               });
               if (outcome.result.failed.length) { autoFailedDigest = digest; autoFailedAt = now(); } else autoFailedDigest = "";
             }
-            autoDigest = digest; autoAt = now();
           }
         }
       }
@@ -694,13 +704,14 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       if (saved.auto) { autoDigest = ""; schedule(KICK_MS); }
       return publish();
     },
-    /** My Cloud is there, and this computer has not sent to it yet: the first send goes in a moment, never sooner than the
-     * first check after start, never twice at once, and never later than a check already due. */
+    /** The account changed: My Cloud may be there now, or back after being away. A Cloud this computer has not sent to yet,
+     * or one the last look found away, is looked at in a moment: never sooner than the first check after start, nor
+     * LOOK_AGAIN_MS after the last look, never twice at once, and never later than a check already due. */
     kick() {
       const origin = cloud.origin();
-      if (stopped || !saved.auto || !origin || entry(origin).last) return;
+      if (stopped || !saved.auto || !origin || (entry(origin).last && !away())) return;
       if (ticking) { kicked = true; return; }
-      const wait = Math.max(KICK_MS, firstTickAt - now());
+      const wait = Math.max(KICK_MS, firstTickAt - now(), lookedAt + LOOK_AGAIN_MS - now());
       if (timer !== null && dueAt <= now() + wait) return;
       schedule(wait);
     },

@@ -718,3 +718,89 @@ test("My Cloud's page is told the latest whole send, which a later one-login sen
   assert.deepEqual(parseSendState({ clouds: { [CLOUD]: { whole: { at: "x" }, arrived: { bots: -2, logins: 1.5, chats: "lots" } } } }).clouds[CLOUD].arrived,
     { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } });
 });
+
+/** chatSides whose My Cloud can go away (`down`: reads and sessions fail) or sign this app out (`signedOut`). */
+function awaySides(threads) {
+  const sides = chatSides({ threads });
+  const state = { down: false, signedOut: false, reads: 0, opened: 0 };
+  const read = sides.sides.deps.cloud.read, open = sides.sides.deps.cloud.open;
+  sides.sides.deps.cloud.read = async (route) => {
+    state.reads++;
+    if (state.down) throw new TypeError("fetch failed");
+    return state.signedOut ? new Response("", { status: 401 }) : read(route);
+  };
+  sides.sides.deps.cloud.open = async () => { state.opened++; if (state.down) throw new Error("This app could not sign in to My Cloud. Try again."); return open(); };
+  return { ...sides, state };
+}
+
+test("once My Cloud is back after being away, the next check sends what waited, instead of the half-hour round", async () => {
+  const { sides, rows, posted, state } = awaySides({ a: 1 });
+  const { send, tick } = clocked({ ...sides.deps, store: stored() });
+  send.start();
+  await tick(20_000);
+  assert.equal(posted.length, 1);
+  rows.a.push({ id: "a-2", at: 2 });
+  state.down = true;
+  await tick(6 * 60_000);
+  assert.equal(send.snapshot().cloud, "unreachable");
+  state.down = false;
+  await tick(2 * 60_000);
+  assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-2"], sent: true }]);
+  assert.equal(send.snapshot().cloud, "ready", "Settings no longer says My Cloud didn't answer");
+});
+
+test("a kick when the account changes looks at a Cloud the last look found away, at most every 30 seconds", async () => {
+  const { sides, rows, posted, state } = awaySides({ a: 1 });
+  const { send, clock, tick } = clocked({ ...sides.deps, store: stored() });
+  send.start();
+  await tick(20_000);
+  rows.a.push({ id: "a-2", at: 2 });
+  state.down = true;
+  await tick(6 * 60_000);
+  state.down = false;
+  send.kick();
+  assert.equal(clock.waits.at(-1), 30_000);
+  await tick(30_000);
+  assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-2"], sent: true }]);
+  send.kick();
+  assert.equal(clock.waits.at(-1), 2 * 60_000, "back and in step: a kick does nothing");
+});
+
+test("a Cloud that stays away is read once a check and never signed in to; signed out, it is not read every check", async () => {
+  const { sides, rows, state } = awaySides({ a: 1 });
+  const { send, tick } = clocked({ ...sides.deps, store: stored() });
+  send.start();
+  await tick(20_000);
+  rows.a.push({ id: "a-2", at: 2 });
+  state.down = true;
+  await tick(6 * 60_000);
+  const [reads, opened] = [state.reads, state.opened];
+  for (let i = 0; i < 15; i++) await tick(2 * 60_000);
+  assert.equal(state.reads - reads, 15);
+  assert.equal(state.opened, opened, "no sign-in while it is away");
+  state.down = false;
+  state.signedOut = true;
+  await tick(2 * 60_000);
+  assert.equal(send.snapshot().cloud, "signed-out");
+  const before = state.reads;
+  for (let i = 0; i < 10; i++) await tick(2 * 60_000);
+  assert.ok(state.reads - before <= 1, `read ${state.reads - before} times in 20 minutes while signed out`);
+});
+
+test("a send that failed before My Cloud went away is tried again as soon as it is back", async () => {
+  const { sides, rows, posted, state } = awaySides({ a: 1 });
+  const { send, tick } = clocked({ ...sides.deps, store: stored() });
+  send.start();
+  await tick(20_000);
+  rows.a.push({ id: "a-2", at: 2 });
+  state.down = true;
+  const read = sides.deps.cloud.read;
+  sides.deps.cloud.read = async (route) => { if (state.down && state.reads === 1) { state.reads++; return new Response(JSON.stringify({ ...summary([bot("ember", { soul: "s" })]), chats: 1 }), { status: 200 }); } return read(route); };
+  await tick(6 * 60_000);
+  assert.ok(send.snapshot().last.error, "the send failed as a whole");
+  await send.compare();
+  assert.equal(send.snapshot().cloud, "unreachable");
+  state.down = false;
+  await tick(2 * 60_000);
+  assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-2"], sent: true }]);
+});
