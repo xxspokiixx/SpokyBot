@@ -100,6 +100,17 @@ describe("buildSystemPrompt", () => {
     expect(built.volatile).not.toContain("Search past sessions");
   });
 
+  it("keeps a turn's switched-on instructions volatile and the webhook's untrusted-data rule stable", () => {
+    const built = buildSystemPrompt("You are Kiwi.", "", [
+      { id: "skill-instructions", label: "Skill instructions", text: " Use the deploy skill." },
+      { id: "routine-execution", label: "Routine execution", text: ROUTINE_EXECUTION_PROMPT },
+      { id: "webhook", label: "Webhook provenance", text: WEBHOOK_PROMPT },
+    ]);
+    expect(built.volatile).toContain("Use the deploy skill.");
+    expect(built.volatile).toContain(ROUTINE_EXECUTION_PROMPT);
+    expect(built.stable).toBe(`You are Kiwi.${WEBHOOK_PROMPT}`);
+  });
+
   it("has an empty volatile half when nothing mid-conversation is present", () => {
     const built = buildSystemPrompt("You are Kiwi.", "", [{ id: "recall", label: "Recall", text: " Search." }]);
     expect(built.volatile).toBe("");
