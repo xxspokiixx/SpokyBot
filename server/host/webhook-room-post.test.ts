@@ -1,20 +1,12 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 import type { WebhookTrigger } from "../../shared/webhooks.ts";
-import { __resetAttachmentAccountingForTests } from "../attachments.ts";
+import { __resetAttachmentAccountingForTests, ATTACHMENTS_DIR } from "../attachments.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { RoomTalksVerdict } from "./room-access.ts";
 import { createWebhookRoomPost } from "./webhook-room-deps.ts";
 import { parseRoomPostPayload, postWebhookToRoom, type RoomPostDeps, type RoomPostRoom } from "./webhook-room-post.ts";
-
-// `server/config.ts` freezes DATA_DIR at import, so the attachment directory has to exist before this file loads.
-const roomDepsDataDir = mkdtempSync(join(tmpdir(), "omb-webhook-room-deps-"));
-process.env.OMB_DATA_DIR = roomDepsDataDir;
-const attachmentsDir = join(roomDepsDataDir, "attachments");
-afterAll(() => rmSync(roomDepsDataDir, { recursive: true, force: true }));
 
 const limits = { maxTextChars: 200, maxVoiceChars: 1_000, maxImages: 4, maxImageBytes: 64 };
 
@@ -233,46 +225,103 @@ describe("postWebhookToRoom", () => {
 });
 
 describe("createWebhookRoomPost", () => {
-  it("re-checks the room after synthesis and deletes every staged file when the room turned it down", async () => {
-    rmSync(attachmentsDir, { recursive: true, force: true });
-    mkdirSync(attachmentsDir, { recursive: true });
+  const stored = () => (existsSync(ATTACHMENTS_DIR) ? readdirSync(ATTACHMENTS_DIR).filter((name) => !name.startsWith(".")) : []);
+  function host(cfg: Record<string, unknown>, fetchImpl: typeof fetch) {
+    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
     __resetAttachmentAccountingForTests();
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 30));
-      return new Response(new Uint8Array([0xff, 0xf1, 0xa0]), { status: 200, headers: { "content-type": "audio/mpeg" } });
-    };
-    try {
-      const group: GroupRecord = { id: "room-1", threadId: "room-1-thread", name: "Ops", dm: false, memberIds: ["maus-1"], section: "Build" } as unknown as GroupRecord;
-      const bot = { id: "maus-1", name: "Maus", section: "Build", voice: "voice-1" } as unknown as BotRecord;
-      const appended: unknown[] = [];
-      const broadcasts: unknown[] = [];
-      const store = {
-        bot: (id: string) => (id === bot.id ? bot : undefined),
-        group: (id: string) => (id === group.id ? group : undefined),
-        appendMessage: (threadId: string, message: unknown) => appended.push({ threadId, message }),
-        patchGroup: () => group,
-      } as unknown as Store;
-      const { roomPost } = createWebhookRoomPost({
-        store,
-        cfg: { tts: { provider: "chatterbox", baseUrl: "http://127.0.0.1:9", voice: "voice-1" } } as never,
-        roomTalks: (speaker, room): RoomTalksVerdict =>
-          room.memberIds.includes(speaker.id) ? { ok: true } : { ok: false, problem: "not-member" },
-        broadcast: (message) => broadcasts.push(message),
-      });
+    const group = { id: "room-1", threadId: "room-1-thread", name: "Ops", dm: false, memberIds: ["maus-1"], section: "Build" } as unknown as GroupRecord;
+    const bot = { id: "maus-1", name: "Maus", color: "teal", section: "Build", voice: "voice-1" } as unknown as BotRecord;
+    const appended: Array<{ threadId: string; message: Record<string, unknown> }> = [];
+    const store = {
+      bot: (id: string) => (id === bot.id ? bot : undefined),
+      group: (id: string) => (id === group.id ? group : undefined),
+      appendMessage: (threadId: string, message: Record<string, unknown>) => appended.push({ threadId, message }),
+      patchGroup: () => group,
+    } as unknown as Store;
+    const { roomPost, roomMember } = createWebhookRoomPost({
+      store,
+      cfg: cfg as never,
+      roomTalks: (speaker, target): RoomTalksVerdict =>
+        target.memberIds.includes(speaker.id) ? { ok: true } : { ok: false, problem: "not-member" },
+    });
+    globalThis.fetch = fetchImpl;
+    return { group, appended, roomPost: roomPost!, roomMember: roomMember! };
+  }
+  const chatterbox = { tts: { provider: "chatterbox", baseUrl: "http://127.0.0.1:9", voice: "voice-1" } };
+  const mp3 = (async () => new Response(new Uint8Array([0xff, 0xf1, 0xa0]), { status: 200, headers: { "content-type": "audio/mpeg" } })) as typeof fetch;
+  const image = { data: pngBytes.toString("base64"), mime: "image/png" };
+  const realFetch = globalThis.fetch;
+  const restore = () => { globalThis.fetch = realFetch; };
 
-      const image = { data: pngBytes.toString("base64"), mime: "image/png" };
-      const delivery = roomPost!({ ...trigger, groupId: "room-1" } as WebhookTrigger, { text: "Deploy done", voiceNote: "deploy done", images: [image] });
+  it("appends one bot-authored webhook line with the voice note and the image, both stored", async () => {
+    try {
+      const h = host(chatterbox, mp3);
+      const result = await h.roomPost({ ...trigger, groupId: "room-1" } as WebhookTrigger, { text: "Deploy done", voiceNote: "deploy done", images: [image] });
+      expect(result).toEqual({ posted: true, attachments: 2, threadId: "room-1-thread" });
+      expect(h.appended).toHaveLength(1);
+      expect(h.appended[0]).toMatchObject({
+        threadId: "room-1-thread",
+        message: { role: "bot", kind: "text", text: "Deploy done", from: { botId: "maus-1", name: "Maus", color: "teal" }, webhookPost: true,
+          attachments: [{ kind: "audio", mime: "audio/mpeg" }, { kind: "image", mime: "image/png" }] },
+      });
+      expect(stored()).toHaveLength(2);
+    } finally {
+      restore();
+    }
+  });
+
+  it("re-checks the room after synthesis and deletes every staged file when the room turned it down", async () => {
+    try {
+      const h = host(chatterbox, (async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+        return new Response(new Uint8Array([0xff, 0xf1, 0xa0]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+      }) as typeof fetch);
+      const delivery = h.roomPost({ ...trigger, groupId: "room-1" } as WebhookTrigger, { text: "Deploy done", voiceNote: "deploy done", images: [image] });
       // The bot leaves the room while the voice note is still being synthesized.
       await new Promise((resolve) => setTimeout(resolve, 10));
-      group.memberIds = ["someone-else"];
+      h.group.memberIds = ["someone-else"];
 
-      await expect(delivery).rejects.toMatchObject({ status: 403, message: /not a member/ });
-      expect(appended).toEqual([]);
-      expect(broadcasts).toEqual([]);
-      expect(readdirSync(attachmentsDir)).toEqual([]);
+      await expect(delivery).rejects.toMatchObject({ status: 403, message: "@Maus is not a member of the room “Ops”. Add @Maus to the room, or point the webhook at a room it is in." });
+      expect(h.appended).toEqual([]);
+      expect(stored()).toEqual([]);
     } finally {
-      globalThis.fetch = previousFetch;
+      restore();
     }
+  });
+
+  it("answers 409 with the owner's next step when no voice is set up, and stores nothing", async () => {
+    try {
+      const h = host({ tts: { provider: "chatterbox", voice: "voice-1" } }, mp3);
+      await expect(h.roomPost({ ...trigger, groupId: "room-1" } as WebhookTrigger, { text: "Deploy done", voiceNote: "deploy done", images: [image] }))
+        .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/^The voice note could not be made: Add the address of your Chatterbox server/) });
+      expect(h.appended).toEqual([]);
+      expect(stored()).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("never passes a voice provider's own 401 through as the webhook's", async () => {
+    try {
+      const h = host(chatterbox, (async () => new Response("bad key", { status: 401 })) as typeof fetch);
+      const failure = await h.roomPost({ ...trigger, groupId: "room-1" } as WebhookTrigger, { text: "Deploy done", voiceNote: "deploy done" })
+        .catch((error: { status?: number; message: string }) => error);
+      expect(failure).toMatchObject({ status: 502, message: expect.stringMatching(/^The voice note could not be made: /) });
+      expect(h.appended).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("names the room and the way out when the bot is not in it, and when the room is gone", () => {
+    const h = host(chatterbox, mp3);
+    restore();
+    expect(h.roomMember("maus-1", "room-1")).toEqual({ ok: true });
+    h.group.memberIds = ["someone-else"];
+    expect(h.roomMember("maus-1", "room-1")).toEqual({ ok: false, status: 403,
+      error: "@Maus is not a member of the room “Ops”. Add @Maus to the room, or point the webhook at a room it is in." });
+    expect(h.roomMember("maus-1", "room-gone")).toEqual({ ok: false, status: 404,
+      error: "The room this webhook posts to no longer exists. Point the webhook at another room, or delete it." });
   });
 });
