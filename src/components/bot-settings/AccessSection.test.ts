@@ -130,9 +130,9 @@ describe("AccessSection always-allowed list", () => {
     const markup = render(makeBot({ busy: true, mcpServers: ["notes"] }));
     expect(markup).toContain('disabled="" aria-label="Let this bot use notes"');
     expect(markup).toContain('disabled="" aria-label="Let this bot use offline"');
-    expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Use every enabled tool<\/button>/);
+    expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Use every enabled server<\/button>/);
     expect(markup).toContain("finishes all active tasks");
-    expect(markup).toContain("Approval for each tool depends on its AI and approval mode.");
+    expect(markup).toContain("Individual tool approvals depend on the model provider and approval mode.");
     const idle = render(makeBot({ mcpServers: ["notes"] }));
     expect(idle).not.toContain('disabled="" aria-label="Let this bot use notes"');
     expect(idle).toContain('disabled="" aria-label="Let this bot use offline"');
@@ -161,7 +161,7 @@ describe("AccessSection always-allowed list", () => {
     fixture.mcpError = true;
     fixture.servers = [{ name: "notes", enabled: true }];
     const markup = render(makeBot());
-    expect(markup).toContain("Could not refresh custom tools.");
+    expect(markup).toContain("Could not refresh MCP servers.");
     expect(markup).toContain("Retry");
     expect(markup).toContain('role="alert"');
     expect(markup).toContain('disabled="" aria-label="Let this bot use notes"');

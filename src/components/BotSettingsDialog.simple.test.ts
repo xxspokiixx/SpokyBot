@@ -900,7 +900,7 @@ describe("the Settings tab", () => {
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const text of ["What Scout does", "Voice", "Notifications", "Team", "Chief of Staff", "Ask me before contacting other bots",
-      "Custom tools", "Tool selection", "Webhooks", "Always allowed", "Get it on your phone", "Phone and email", "Overview",
+      "MCP servers", "Tool selection", "Webhooks", "Always allowed", "Get it on your phone", "Phone and email", "Overview",
       "What Scout sees", "History", "Usage for all bots", "Pin to top", "Duplicate", "Copy conversation ID",
       "Mark all conversations as read", "Archive Scout", "Delete Scout"]) expect(html).toContain(text);
     expect(html).not.toContain("Who can see it");

@@ -47,12 +47,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe("Your custom tools inside the Apps pop-up", () => {
-  it("lists each server with Test, Edit and an on/off switch, plus Paste config and Add a custom tool", () => {
+describe("Your MCP servers inside the Apps pop-up", () => {
+  it("lists each server with Test, Edit and an on/off switch, plus Paste config and Add MCP server", () => {
     const html = render(true);
-    expect(html).toContain("Your custom tools");
+    expect(html).toContain("Your MCP servers");
     expect(html).toContain("Paste config");
-    expect(html).toContain("Add a custom tool");
+    expect(html).toContain("Add MCP server");
     expect(html.match(/role="switch"/g)?.length).toBeGreaterThanOrEqual(3); // two servers + the Claude Code switch
     expect(html).toMatch(/aria-label="Turn notes off" type="button" role="switch" aria-checked="true"/);
     expect(html).toMatch(/aria-label="Turn docs on" type="button" role="switch" aria-checked="false"/);
@@ -85,7 +85,7 @@ describe("Your custom tools inside the Apps pop-up", () => {
     expect(html).toContain("no API key needed");
     expect(html).toContain("admin access across businesses");
     expect(html).not.toContain("<textarea");
-    expect(html).not.toContain("Your custom tools");
+    expect(html).not.toContain("Your MCP servers");
     expect(html).not.toContain("Paste config");
   });
 

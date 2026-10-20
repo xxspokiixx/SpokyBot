@@ -11,7 +11,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "Today, notifications and alerts": ["today.", "attention.", "notifications.", "error.", "readyBots.", "app.loading."],
   "the sidebar and the switcher": ["sidebar."],
   "the bot panel": [
-    "botPanel.", "botSettings.simple.", "botAccess.mcp", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
+    "botPanel.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
   ],
   "the Screen panel and where a bot works": [
     "place.", "computer.tab.", "computer.simple.", "computer.phase.", "computer.cloud.", "computer.badge.", "computer.problem.",
@@ -42,11 +42,6 @@ const EVERYDAY_KEYS: Record<string, readonly string[]> = {
     "botSettings.replyStyle.conversationalHint", "voice.engine",
   ],
   "adding and sharing a bot": ["newBot.presetKeeps", "presetShare.never"],
-  "Apps → Custom tools": [
-    "mcp.title", "mcp.subtitle", "mcp.refreshAria", "mcp.trustNotice", "mcp.loading", "mcp.empty.title", "mcp.empty.desc", "mcp.auth.required",
-    "mcp.removeConfirm", "mcp.claude.title", "mcp.claude.aria", "mcp.claude.desc", "mcp.claudeSkills.desc", "whop.connected", "whop.accessHint",
-    "highlevel.unavailable", "policy.mcpRestricted", "policy.mcpBlocked",
-  ],
   "signing in to an AI, the Cloud's own sign-in included": [
     "engineSetup.claude.description", "engineSetup.claude.connectedAccount", "engineSetup.device.description", "engineSetup.device.security",
     "engineSetup.device.connectedAccount", "engineSetup.device.failed", "engineSetup.device.enableHint", "engineSetup.grok.description",
@@ -66,8 +61,7 @@ type Word = { word: string; pattern: RegExp; say: string };
 const INTERNAL_WORDS: readonly Word[] = [
   { word: "engine", pattern: /\bengines?\b/i, say: "AI" },
   { word: "instance", pattern: /\binstances?\b/i, say: "AI account" },
-  { word: "server", pattern: /(?<!(?:Discord|Slack) )\bservers?\b/i, say: "the app, or the Cloud when it is hosted" },
-  { word: "MCP", pattern: /\bMCP\b/, say: "app, tool or custom tool" },
+  { word: "server", pattern: /(?<!(?:Discord|Slack|MCP) )\bservers?\b/i, say: "the app, or the Cloud when it is hosted" },
   { word: "Composio", pattern: /composio/i, say: "connected apps" },
   { word: "Cloud computer", pattern: /\bcloud computers?\b/i, say: "cloud desktop" },
   { word: "VPS", pattern: /\bVPS\b/, say: "your own machine" },
@@ -116,14 +110,14 @@ describe("everyday screens", () => {
     expect(stale).toEqual([]);
   });
 
-  it("catch each internal word, and let placeholders, commands and Discord or Slack servers through", () => {
+  it("catch each internal word, and let placeholders, commands, MCP servers and Discord or Slack servers through", () => {
     for (const bad of [
-      "Switch to another engine", "Add an instance", "Restart the server", "Your MCP servers", "Connect apps through Composio",
+      "Switch to another engine", "Add an instance", "Restart the server", "Connect apps through Composio",
       "Start the cloud computer", "Self-hosted VPS", "Create Local VM", "Choose a workspace",
     ]) expect(wordsIn(bad), bad).not.toEqual([]);
     for (const good of [
       "Switch this bot to another AI", "Pick a Discord server", "Post in your Slack servers", "Copy to {server}",
-      "Run `openmausbot server start`", "Open the Cloud", "Start the cloud desktop", "Add a custom tool", "Private desktop",
+      "Run `openmausbot server start`", "Open the Cloud", "Start the cloud desktop", "Your MCP servers", "Add MCP server", "Private desktop",
     ]) expect(wordsIn(good), good).toEqual([]);
   });
 
