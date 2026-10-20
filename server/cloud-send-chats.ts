@@ -45,9 +45,10 @@ export function chatHeads(bots: readonly BotRecord[], heads = threadHeads()): Ch
 
 /** A row as it goes: whole, or past CHAT_ROW_MAX its text cut and only what a message is kept. */
 export function fittedRow(row: Message): Message {
-  if (JSON.stringify(row).length <= CHAT_ROW_MAX) return row;
+  if (Buffer.byteLength(JSON.stringify(row), "utf8") <= CHAT_ROW_MAX) return row;
   const { id, at, role, kind, parentId, turnId, turnCompletedAt } = row as Message & { turnId?: string; turnCompletedAt?: number };
   return { id, at, role, kind, parentId, ...(turnId ? { turnId } : {}), ...(turnCompletedAt ? { turnCompletedAt } : {}),
+    // At most four UTF-8 bytes a character: a quarter of the limit in characters stays under it.
     text: `${(row.text ?? "").slice(0, CHAT_ROW_MAX / 4)}${SHORTENED}` } as Message;
 }
 
