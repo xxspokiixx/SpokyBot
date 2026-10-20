@@ -423,7 +423,8 @@ it("on the Cloud itself, opens this Cloud's phone pairing directly; never where 
 });
 
 it("once the Cloud is ready, offers Copy this computer here for the Cloud itself", async () => {
-  const move = { state: vi.fn().mockResolvedValue({ phase: "idle", local: null, cloud: null, suggest: false, destination: { id: "cloud", name: "My Cloud", origin, kind: "cloud" }, blocked: null }),
+  const move = { state: vi.fn().mockResolvedValue({ phase: "idle", local: null, suggest: false, destination: { id: "cloud", name: "My Cloud", origin, kind: "cloud" }, blocked: null,
+    cloud: { contents: { bots: 3, rooms: 0, chats: 9 }, empty: false, freeBytes: 10 ** 10, previous: null, heldBytes: 0 } }),
     start: vi.fn(), cancel: vi.fn(), restorePrevious: vi.fn(), dismiss: vi.fn(), onState: vi.fn(() => () => {}) };
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge, cloudMove: move } });
   vi.mocked(bridge.state).mockResolvedValue(readyCloud);
