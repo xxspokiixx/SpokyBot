@@ -2196,6 +2196,8 @@
   "model.threadsOwnModelOne": "1 thread uses its own model.",
   "model.switchThemToo": "Switch them too",
   "model.switchItToo": "Switch it too",
+  "model.busyThreadKeptModelOne": "1 thread is busy, so it kept its own model. Try again when it's done.",
+  "model.busyThreadsKeptModel": "{count} threads are busy, so they kept their own model. Try again when they're done.",
   "model.account": "Account",
   "model.refreshing": "Refreshing {name} models",
   "model.refresh": "Refresh {name} models",
