@@ -4,8 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type InstanceInfo } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
-const fixture = vi.hoisted(() => ({ state: {} as Partial<AppState> }));
+const fixture = vi.hoisted(() => ({ state: {} as Partial<AppState>, advanced: true }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => false }));
+vi.mock("@/lib/interface-mode", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => fixture.advanced,
+}));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -78,6 +82,7 @@ describe("sidebar bot row", () => {
 
   beforeEach(() => {
     fixture.state = { bots: [bot("claude", "opus")], instances: [claude], activeView: "chat", selectedId: "other" };
+    fixture.advanced = true;
     vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
     vi.stubGlobal("document", { body: {} });
     vi.stubGlobal("HTMLInputElement", class {});
@@ -93,6 +98,12 @@ describe("sidebar bot row", () => {
       expect(found[0]).toContain('aria-label="Model: Opus 4.1 (Claude)"');
       expect(found[0]).toContain(placement);
     });
+
+  // Simple mode hides the model picker, so its rows do not name the model either.
+  it.each<SidebarDensity>(["comfortable", "compact", "icons"])("shows no model in a Simple mode %s row", (density) => {
+    fixture.advanced = false;
+    expect(badges(render(bot("claude", "opus"), density))).toEqual([]);
+  });
 
   it("shows no badge while the bot's engine is missing", () => {
     expect(render(bot("gone", "opus"), "comfortable")).not.toContain('data-testid="model-badge"');
