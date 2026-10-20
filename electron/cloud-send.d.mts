@@ -14,12 +14,13 @@ export interface CloudSendResult {
   settings: string[];
   /** The chats My Cloud lacked, added by Bring newer chats; null when this send did not bring chats. */
   chats: { conversations: number; messages: number } | null;
-  failed: Array<{ key: string; kind: SendKind | "chats"; label: string; error: string }>;
+  failed: Array<{ key: string; kind: SendKind | "chats"; label: string; error: string; final?: true }>;
   /** model: kept My Cloud's engine; settings: a setting My Cloud refused; narrowed: a login kept to bots My Cloud lacks; memory: notes not copied. */
   notes: Array<{ kind: "model" | "settings" | "narrowed" | "memory"; bot?: string; login?: string }>;
 }
-/** `error`: the send failed as a whole (nothing after that point went), in words for the person. */
-export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult; error?: string }
+/** `error`: the send failed as a whole (nothing after that point went), in words for the person. `stopped: "off"`:
+ * Keep My Cloud up to date was turned off while it sent, so the rest stayed on this computer. */
+export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult; error?: string; stopped?: "off" }
 /** What did not go, grouped by reason (bots by name, logins only counted, at most three reasons), and `error`: why the
  * send stopped as a whole. */
 export interface CloudSendFailure {
@@ -37,6 +38,10 @@ export interface CloudSendSnapshot {
   signature: string;
   dismissed: string;
   last: CloudSendOutcome | null;
+  /** The latest send of everything (first, auto, Send everything), which a later send of one login or item never replaces. */
+  whole: CloudSendOutcome | null;
+  /** What reached My Cloud from this computer, all sends together. */
+  arrived: CloudSendArrived;
   cloudVersion: string | null;
   localVersion: string | null;
 }
@@ -44,6 +49,8 @@ export interface CloudSendSnapshot {
 /** What My Cloud's own page is told: names of this computer's bots that wait, and counts, never logins' sites. */
 export interface CloudSendNotice {
   ready: boolean;
+  /** Keep My Cloud up to date is on: this computer's things come over by themselves. */
+  auto: boolean;
   bots: string[];
   updatedBots: string[];
   skills: number;
@@ -53,7 +60,23 @@ export interface CloudSendNotice {
   signature: string;
   dismissed: boolean;
   running: boolean;
-  last: ({ at: number; failed: number } & CloudSendFailure) | null;
+  /** The running send's reason ("first": the one this computer makes by itself the first time), progress and phase. */
+  runningReason?: string;
+  progress?: { done: number; total: number };
+  phase?: "chats";
+  /** `sent`: counts only; `seen`: the person closed this result on the strip. */
+  /** `final`: every failure is one trying again can't fix (1Password refused the token), so no Try again. */
+  last: CloudSendTold | null;
+  /** The latest send of everything, which a send of one login or item never replaces; absent from an older desktop. */
+  whole?: CloudSendTold | null;
+  /** What reached My Cloud from this computer, all sends together; absent from an older desktop. */
+  arrived?: CloudSendArrived;
+}
+export type CloudSendTold = { at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean; stopped?: "off" } & CloudSendFailure;
+export interface CloudSendArrived extends CloudSendCounts { chats: { conversations: number; messages: number } }
+export interface CloudSendCounts {
+  bots: number; updatedBots: number; skills: number; logins: number; onePassword: boolean; settings: number;
+  chats: { conversations: number; messages: number } | null;
 }
 
 export interface CloudSendBridge {
@@ -79,8 +102,9 @@ export interface CloudSendSession {
 
 export class CloudSendError extends Error {
   code: string;
-  constructor(code: string, message: string);
+  constructor(code: string, message: string, options?: { cause?: unknown });
 }
+export function unanswered(error: unknown): boolean;
 
 export function botPatch(bot: Record<string, unknown>, parts: string[], cloudBots: ReadonlySet<string>): Record<string, unknown>;
 export function parseSendState(value: unknown): { v: 1; auto: boolean; clouds: Record<string, unknown> };
@@ -95,7 +119,8 @@ export function createCloudSend(deps: {
     open(): Promise<CloudSendSession>;
   };
   handoff(what: { kind: "login"; id: string } | { kind: "1password" }): Promise<{ login?: Record<string, any>; onePassword?: { token: string; grants: Record<string, unknown> } }>;
-  chats?: (() => Promise<{ conversations: number; messages: number }>) | null;
+  /** Bring newer chats' copy, for a Cloud too old to take chats by row. */
+  bringChats?: (() => Promise<{ conversations: number; messages: number }>) | null;
   store: { read(): unknown; write(value: unknown): void };
   onChange?(snapshot: CloudSendSnapshot): void;
   now?(): number;
@@ -106,6 +131,7 @@ export function createCloudSend(deps: {
   compare(): Promise<CloudSendSnapshot>;
   send(options?: { keys?: string[] | null; force?: string[]; reason?: string }): Promise<CloudSendOutcome>;
   setAuto(on: boolean): CloudSendSnapshot;
+  kick(): void;
   setItem(key: string, on: boolean): CloudSendSnapshot;
   dismiss(signature: string): CloudSendSnapshot;
   start(): void;

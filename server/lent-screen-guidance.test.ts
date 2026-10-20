@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LENT_BROWSER_NO_ENDPOINT, LENT_SCREEN_BROWSING, lentScreenResult } from "./lent-screen-guidance.ts";
+import { omittedFromErrorNote } from "./mcp-error-result.ts";
 
 const call = (tool_name: string) => ({ action: "computer_call", tool_name });
 const failed = (text: string) => ({ content: [{ type: "text", text }], isError: true });
@@ -33,5 +34,12 @@ describe("a lent screen's answers carry the fix", () => {
     expect(texts(lentScreenResult(call("click"), failed("Computer-control transport closed")))[0]).toMatch(/^Computer control stopped on this computer: .*Try the action once more/);
     expect(texts(lentScreenResult(call("click"), failed("Computer control is unavailable. Enable it in the local app and grant OS permissions first.")))[0]).toMatch(/^Computer control is not running on this computer\./);
     expect(texts(lentScreenResult(call("click"), failed("fetch failed")))[0]).toMatch(/restart OpenMausBot on that computer/);
+  });
+  it("passes a lent screen's error on as text only, and its successful screenshots unchanged", () => {
+    const image = { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" };
+    const refused = { content: [{ type: "text", text: "refused" }, image], isError: true };
+    expect(lentScreenResult(call("click"), refused)).toEqual({ content: [{ type: "text", text: "refused" }, { type: "text", text: omittedFromErrorNote(1) }], isError: true });
+    const shot = { content: [image] };
+    expect(lentScreenResult(call("get_desktop_state"), shot)).toBe(shot);
   });
 });

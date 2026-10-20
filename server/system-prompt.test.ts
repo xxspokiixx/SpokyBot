@@ -21,6 +21,7 @@ import {
   TRIGGER_PROMPT,
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
+  SANDBOX_DESKTOP_INPUT,
   SIGN_IN_PROMPT,
   savedLoginsPrompt,
   type ComputerPromptKind,
@@ -158,6 +159,15 @@ describe("computerPrompt", () => {
     expect(prompt).toContain("including through shell scripts, AppleScript/System Events");
     expect(prompt).toContain("If a background action unexpectedly changes focus");
     expect(computerPrompt("vm-private")).not.toContain("user asked for foreground control");
+  });
+  it("tells sandbox desktops, and never the user's own computer, to send keys in the foreground", () => {
+    for (const kind of ["vm-private", "vm-shared", "vps"] as const) {
+      expect(computerPrompt(kind)).toContain(SANDBOX_DESKTOP_INPUT);
+      expect(computerPrompt(kind).indexOf(SANDBOX_DESKTOP_INPUT)).toBeLessThan(computerPrompt(kind).indexOf(SIGN_IN_PROMPT));
+    }
+    expect(SANDBOX_DESKTOP_INPUT).toContain('delivery_mode "foreground" for keys, typing, scrolling and pixel clicks');
+    expect(computerPrompt("local")).not.toContain(SANDBOX_DESKTOP_INPUT);
+    expect(computerPrompt("box")).not.toContain(SANDBOX_DESKTOP_INPUT);
   });
   it("is empty with no computer", () => {
     expect(computerPrompt(null)).toBe("");

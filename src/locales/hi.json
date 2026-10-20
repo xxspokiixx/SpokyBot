@@ -1348,7 +1348,7 @@
   "computer.err.openDesktop": "OpenMausBot लाइव डेस्कटॉप नहीं खोल सका",
   "computer.err.openDesktopLink": "OpenMausBot लाइव डेस्कटॉप का लिंक नहीं खोल सका",
   "computer.err.popupBlocked": "आपके ब्राउज़र ने लाइव डेस्कटॉप टैब रोक दिया",
-  "computer.confirm.replaceVm": "{name} का निजी डेस्कटॉप बदलें? उसका निजी फ़ोल्डर बना रहेगा।",
+  "computer.confirm.replaceVm": "{name} का निजी डेस्कटॉप बदलें? उसका निजी फ़ोल्डर और वेबसाइट साइन-इन बने रहेंगे। डेस्कटॉप के अंदर इंस्टॉल किए गए ऐप और उस फ़ोल्डर के बाहर की फ़ाइलें मिटा दी जाएँगी।",
   "computer.confirm.replaceVps": "{name} के VPS कंप्यूटर को इस OpenMausBot अपडेट के लिए ज़रूरी संस्करण से बदलें? सिर्फ़ अस्थायी कंटेनर के भीतर रखी फ़ाइलें मिट जाएँगी।",
   "computer.phase.checking": "जाँच हो रही है…",
   "computer.phase.starting": "आपके बॉट का डेस्कटॉप शुरू हो रहा है…",

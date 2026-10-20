@@ -1355,7 +1355,7 @@
   "computer.err.openDesktop": "OpenMausBot konnte den Live-Desktop nicht öffnen",
   "computer.err.openDesktopLink": "OpenMausBot konnte den Link zum Live-Desktop nicht öffnen",
   "computer.err.popupBlocked": "Dein Browser hat den Tab mit dem Live-Desktop blockiert",
-  "computer.confirm.replaceVm": "Privaten Desktop von {name} ersetzen? Sein privater Ordner bleibt erhalten.",
+  "computer.confirm.replaceVm": "Privaten Desktop von {name} ersetzen? Sein privater Ordner und die Website-Anmeldungen bleiben erhalten. Im Desktop installierte Apps und Dateien außerhalb dieses Ordners werden gelöscht.",
   "computer.confirm.replaceVps": "VPS-Computer von {name} durch die Version ersetzen, die dieses OpenMausBot-Update verlangt? Dateien, die nur im Wegwerf-Container liegen, werden gelöscht.",
   "computer.phase.checking": "Wird geprüft…",
   "computer.phase.starting": "Der Desktop deines Bots startet…",

@@ -34,6 +34,10 @@ export interface BrokerFake {
   /** One signed Composio delivery for a trigger, as the live project subscription sends it. */
   deliver(triggerId: string, data: Record<string, unknown>, id?: string): Promise<Response>;
   userFor(installationId: string): string;
+  /** The Composio user the installation acts as: its own, or the one another installation shared with it. */
+  actingUser(installationId: string): string;
+  /** The Composio user of each tool router Session the broker made, in order. */
+  sessionUsers: string[];
   /** Today's queued count for an installation, set directly, to reach the daily limit without 500 deliveries. */
   setQueuedToday(installationId: string, queued: number): void;
   cloudMachine(installationId: string): string | null;
@@ -60,6 +64,7 @@ export async function startBrokerFake(): Promise<BrokerFake> {
     config: { user_id: userId, multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true } },
   });
   let sessions = 0;
+  const sessionUsers: string[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.hostname !== "backend.composio.dev") return realFetch(input, init);
@@ -68,6 +73,7 @@ export async function startBrokerFake(): Promise<BrokerFake> {
     if (path === "/auth_configs") return Response.json({ items: [], next_cursor: null });
     if (method === "POST" && path === "/tool_router/session") {
       const request = JSON.parse(String(init?.body ?? "{}")) as { user_id?: string };
+      sessionUsers.push(request.user_id ?? "");
       return Response.json(session(`trs_${++sessions}`, request.user_id ?? ""), { status: 201 });
     }
     const lookup = path.match(/^\/tool_router\/session\/([^/]+)$/)?.[1];
@@ -119,6 +125,9 @@ export async function startBrokerFake(): Promise<BrokerFake> {
       return harness.deliver(mod.message(triggerId, owner?.composio_user_id, data, id ?? `msg_${crypto.randomUUID()}`));
     },
     userFor,
+    actingUser: (installationId) => harness.d1.rows<{ composio_user_id: string; shared_user_id: string | null }>(
+      "SELECT composio_user_id, shared_user_id FROM installations WHERE id = ?", installationId).map((row) => row.shared_user_id ?? row.composio_user_id)[0] ?? "",
+    sessionUsers,
     setQueuedToday(installationId, queued) {
       harness.d1.db.prepare(
         "INSERT INTO app_event_days (day, installation_id, queued) VALUES (?, ?, ?) ON CONFLICT (day, installation_id) DO UPDATE SET queued = excluded.queued",

@@ -53,6 +53,7 @@ describe("what a server reports for Send to My Cloud", () => {
   it("leaves out a bot nobody has touched since it was made, so a fresh install's starter never lands beside My Cloud's own", () => {
     const starter = bot({ soul: "" });
     expect(unused(starter, 0, () => true)).toBe(true);
+    expect(unused(starter, 0, () => true, (botId) => botId === starter.id), "a starter put in a room is in use").toBe(false);
     expect(unused(starter, 0, () => false)).toBe(false);
     expect(unused(starter, 1, () => true)).toBe(false);
     expect(unused(bot({ soul: "", title: "Research" }), 0, () => true)).toBe(false);

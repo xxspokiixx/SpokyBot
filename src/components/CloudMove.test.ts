@@ -194,7 +194,7 @@ it("every state reads as one sentence and one next step, for the Cloud and any o
   expect(view({}, { destination: VPS }, { onServerPage: true }).action).toEqual({ kind: "start", label: "Copy" });
   expect(view({}, { destination: VPS, cloud: { ...emptyCloud, empty: false } }, { onServerPage: true })).toMatchObject({ message: null, action: { kind: "start", label: "Copy" } });
   expect(view({}, { destination: CLOUD, cloud: { ...emptyCloud, empty: false } }, { onServerPage: true })).toMatchObject({
-    action: null, message: { tone: "note", text: expect.stringContaining("open Settings → Servers in this computer's window and choose Copy this computer here") } });
+    action: null, message: { tone: "note", text: expect.stringMatching(/ already has bots and chats, so nothing was copied over them\.$/) } });
   const blocked = (reason: CloudMoveOverview["blocked"], extra: Partial<CloudMoveOverview> = {}) => view({}, { destination: VPS, blocked: reason, ...extra });
   expect(blocked("owner_needed")).toMatchObject({ message: { text: "This app isn't signed in to bots.example.test as its owner. Pair it again with an owner code (openmausbot pair), then copy." }, action: { kind: "open", label: "Open bots.example.test" } });
   expect(blocked("shared_workspace")).toMatchObject({ message: { text: "bots.example.test is shared with other people, so it can't receive this computer's bots and chats. Copy to one only you use." }, action: null });
@@ -349,7 +349,8 @@ it("Settings → Backups on a server: Import from this computer is the same copy
   expect(vi.mocked(bridge.start).mock.calls).toEqual([[undefined]]);
   f.values = [];
   await ready(backups, overview({ destination: CLOUD, cloud: { ...emptyCloud, empty: false } }));
-  expect(render(backups).html).toContain("open Settings → Servers in this computer's window");
+  expect(render(backups).html).toContain("already has bots and chats, so nothing was copied over them.");
+  expect(render(backups).html).not.toContain("Settings → Servers");
   expect(button(backups, "Copy")).toBeUndefined();
   f.values = []; vi.mocked(bridge.state).mockClear();
   vi.stubGlobal("window", { ogb: {} });

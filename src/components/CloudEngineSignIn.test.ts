@@ -112,3 +112,13 @@ it("leaves Grok out where this Cloud computer has no Grok CLI (an older image)",
   expect(html).toContain("grid-cols-2");
   expect(html).toContain("Use an API key");
 });
+
+it("says a Claude connected through an API key runs on that key, not on a subscription", () => {
+  store.instances = [engine("claude", "claudeAgent", "paste-code", { snapshot: { state: "available", authenticated: true, account: { method: "api-key" } } }), codex];
+  const keyed = render().html;
+  expect(keyed).toContain("Runs on your API key.");
+  expect(keyed).not.toContain("Use your Claude subscription.");
+  store.instances = [engine("claude", "claudeAgent", "paste-code", { snapshot: { state: "available", authenticated: true, account: { method: "login", email: "a@example.test" } } }), codex];
+  f.values = [];
+  expect(render().html).toContain("Use your Claude subscription.");
+});

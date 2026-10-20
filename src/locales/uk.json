@@ -1707,7 +1707,7 @@
   "computer.err.openDesktop": "OpenMausBot не зміг відкрити живий стіл",
   "computer.err.openDesktopLink": "OpenMausBot не зміг відкрити живе посилання столу",
   "computer.err.popupBlocked": "Ваш браузер заблокував вкладку живого столу",
-  "computer.confirm.replaceVm": "Замінити приватний робочий стіл {name}? Його приватна папка залишиться.",
+  "computer.confirm.replaceVm": "Замінити приватний робочий стіл {name}? Його приватна папка і входи на вебсайти залишаться. Застосунки, встановлені всередині робочого столу, і файли поза цією папкою буде видалено.",
   "computer.confirm.replaceVps": "Замінити VPS-комп'ютер {name} на версію, яку вимагає це оновлення OpenMausBot? Файли, що зберігаються лише в одноразовому контейнері, буде видалено.",
   "computer.phase.checking": "Перевіряємо…",
   "computer.phase.starting": "Запускаємо робочий стіл бота…",

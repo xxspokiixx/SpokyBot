@@ -445,7 +445,7 @@ export function createCloudMove({ localRequest, fetchImpl = fetch, tempRoot, ava
       fail(why, why === "outdated" ? `${There()} runs ${cloud.appVersion}; this computer runs ${local.appVersion}. Update it, then copy again.` : `${There()} can't receive this copy.`,
         { destVersion: cloud.appVersion, localVersion: local.appVersion });
     }
-    if (requireEmpty && !cloud.empty) fail("not_empty", `${There()} already has bots or chats of its own, so nothing was copied.`);
+    if (requireEmpty && !cloud.empty) fail("not_empty", `${There()} already has bots or chats, so nothing was copied over them.`);
     if (cloud.pendingRestore || cloud.busy || cloud.job?.state === "running") fail("cloud_busy", `${There()} is busy. Try again in a minute.`);
     if (local.bytes > CLOUD_MOVE_MAX_BYTES) fail("too_large", "This workspace is larger than a copy can carry.");
     let disk = null;

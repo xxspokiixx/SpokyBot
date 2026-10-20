@@ -55,7 +55,7 @@ export function parseSendSummary(value) {
       parts,
     });
   }
-  return { v: 1, appVersion: typeof value.appVersion === "string" ? value.appVersion.slice(0, 40) : null, items };
+  return { v: 1, appVersion: typeof value.appVersion === "string" ? value.appVersion.slice(0, 40) : null, items, ...(value.chats === 1 ? { chats: true } : {}) };
 }
 
 /**
@@ -143,3 +143,6 @@ export function failedSummary(outcome) {
   }
   return { ...(reasons.size ? { reasons: [...reasons.values()].slice(0, FAILURE_REASONS) } : {}), ...(outcome.error ? { error: outcome.error } : {}) };
 }
+
+/** Close on My Cloud's strip: kept with the send whose result it closed. */
+export const resultKey = (last) => `result:${last.at}`;

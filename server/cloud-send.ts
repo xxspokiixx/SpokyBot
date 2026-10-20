@@ -26,6 +26,8 @@ export interface CloudSendSources {
   bots(): readonly BotRecord[];
   /** The conversation holds only the greeting a new bot starts with, still under this name. */
   greetingOnly(threadId: string, name: string): boolean;
+  /** The bot is in a room, whose chats go to My Cloud only with their bots. */
+  inRoom?(botId: string): boolean;
   skills(bot: BotRecord): ReadonlyArray<{ name: string; description?: string; sha256: string; enabled: boolean }>;
   /** The stored picture's bytes, or null when it is gone. */
   picture(avatarUrl: string): Uint8Array | null;
@@ -76,15 +78,16 @@ export function botParts(bot: BotRecord, picture: (avatarUrl: string) => Uint8Ar
 
 /** A bot nobody has touched since it was made (a fresh install's starter): left out, so it never lands beside My Cloud's
  * own starter. A bot sent from another computer arrives without a greeting, so it never reads as unused. */
-export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: string, name: string) => boolean): boolean {
-  return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && greetingOnly(bot.threadId, bot.name);
+export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: string, name: string) => boolean, inRoom: (botId: string) => boolean = () => false): boolean {
+  return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && greetingOnly(bot.threadId, bot.name)
+    && !inRoom(bot.id);
 }
 
 export function cloudSendSummary(sources: CloudSendSources): CloudSendSummary {
   const items: CloudSendItem[] = [];
   for (const bot of sources.bots()) {
     const skills = sources.skills(bot);
-    if (unused(bot, skills.length, sources.greetingOnly)) continue;
+    if (unused(bot, skills.length, sources.greetingOnly, sources.inRoom)) continue;
     items.push({ key: itemKey.bot(bot.id), kind: "bot", label: bot.name, id: bot.id, parts: botParts(bot, sources.picture) });
     for (const skill of skills) {
       items.push({ key: itemKey.skill(bot.id, skill.name), kind: "skill", label: skill.name, id: skill.name, bot: bot.id,

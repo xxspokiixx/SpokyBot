@@ -1348,7 +1348,7 @@
   "computer.err.openDesktop": "OpenMausBot n'a pas pu ouvrir le bureau en direct",
   "computer.err.openDesktopLink": "OpenMausBot n'a pas pu ouvrir le lien du bureau en direct",
   "computer.err.popupBlocked": "Votre navigateur a bloqué l'onglet du bureau en direct",
-  "computer.confirm.replaceVm": "Remplacer le bureau privé de {name} ? Son dossier privé est conservé.",
+  "computer.confirm.replaceVm": "Remplacer le bureau privé de {name} ? Son dossier privé et les connexions aux sites web sont conservés. Les applications installées dans le bureau et les fichiers hors de ce dossier sont supprimés.",
   "computer.confirm.replaceVps": "Remplacer l'ordinateur VPS de {name} par la version exigée par cette mise à jour d'OpenMausBot ? Les fichiers stockés uniquement dans le conteneur jetable seront supprimés.",
   "computer.phase.checking": "Vérification…",
   "computer.phase.starting": "Démarrage du bureau de votre bot…",
