@@ -4,7 +4,7 @@
 // against the committed stub — and writes the 319-char unpunctuated reply's
 // first-byte timing. Modeled numbers only: no live engine call, no engine key.
 import { execFileSync } from "node:child_process";
-import { hostname } from "node:os";
+import { cpus } from "node:os";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
       baseCommit: BASE_COMMIT,
       measuredBuildCommit: process.env.OMB_MEASURED_COMMIT ?? "(unset: worktree HEAD)",
       date: new Date().toISOString(),
-      machine: { hostname: hostname(), platform: process.platform, arch: process.arch },
+      machine: { platform: process.platform, arch: process.arch, cpuModel: cpus()[0]?.model ?? null },
       configSummary: { provider: "elevenlabs (record stub)", model: STUB_MODEL, voice: STUB_VOICE },
       synthesis: {
         protocol: "elevenlabs-wire stub on loopback; no live engine call, no engine key",
