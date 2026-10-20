@@ -2,14 +2,15 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CloudLendingBridge, CloudLendingSnapshot } from "../../electron/computer-sharing.mjs";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
+import { localeChoices, locales } from "@/locales";
 const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[] }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = initial; return [f.values[index], (next: unknown) => { f.values[index] = next; }]; },
   useRef: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current: initial }; return f.values[index]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-import { CloudLending, lendingStatusKey, lendingStoppedLine, lentWhat } from "./CloudLending";
+import { CloudLending, lendingFailureKey, lendingStatusKey, lendingStoppedLine, lentWhat } from "./CloudLending";
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean; "data-lending-more"?: boolean }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
@@ -135,4 +136,27 @@ it("says how it is lent when Computer access lent it, terminal included, and whe
   expect(html).toContain("My Cloud last used this computer 3 minutes ago.");
   await ready({ ...lent, activity: [] });
   expect(render().html).toContain("My Cloud hasn&#x27;t used this computer yet.");
+});
+
+it("names a refusal main explains in plain words, and keeps Try again for the rest", () => {
+  const ipc = (message: string) => new Error(`Error invoking remote method 'lending:save': Error: ${message}`);
+  expect(lendingFailureKey(ipc("lending-refused:home-or-root"))).toBe("lending.refused.homeOrRoot");
+  expect(lendingFailureKey(ipc("lending-refused:not-folder"))).toBe("lending.refused.notFolder");
+  expect(lendingFailureKey(ipc("lending-refused:too-many"))).toBe("lending.refused.tooMany");
+  expect(lendingFailureKey(ipc("lending-refused:nothing-to-lend"))).toBe("lending.refused.nothingToLend");
+  expect(lendingFailureKey(ipc("lending-refused:something-new"))).toBe("lending.failed");
+  expect(lendingFailureKey(ipc("socket hang up"))).toBe("lending.failed");
+  expect(lendingFailureKey("not an error")).toBe("lending.failed");
+});
+
+it("nothing to lend names the button the person sees, in every language, and Settings → MausBot Cloud where it is translated", () => {
+  const unseen = localeChoices.flatMap(({ code }) => {
+    setLocale(code);
+    const said = t("lending.refused.nothingToLend");
+    const translated = Object.hasOwn(locales[code]!, "lending.refused.nothingToLend");
+    return [t("lending.more"), ...(translated ? [t("settings.title"), t("settings.section.cloudAccount")] : [])]
+      .filter((label) => !said.includes(label)).map((label) => `${code}: ${label}`);
+  });
+  setLocale("en");
+  expect(unseen).toEqual([]);
 });
