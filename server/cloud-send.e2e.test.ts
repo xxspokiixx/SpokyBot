@@ -2,7 +2,7 @@
 // (scripts/testing/cloud-send-fixture.ts). Disposable homes; no network.
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { itemKey } from "../electron/cloud-send-parts.mjs";
 import type { CloudSendNotice, CloudSendOutcome, CloudSendSnapshot } from "../electron/cloud-send.mjs";
 import { createCloudMove } from "../electron/cloud-move.mjs";
@@ -289,4 +289,106 @@ it("My Cloud keeps an attachment a sent row names under its own name, once, and 
   expect((await fx.onCloud("POST", "/api/cloud-send/chats/attachments", { names: [name] })).body).toEqual({ missing: [] });
   expect(Buffer.from(await (await fetch(`${fx.cloudBase}/api/attachments/${name}`, { headers: { ...fx.edge, authorization: `Bearer ${fx.owner}` } })).arrayBuffer())).toEqual(DOT);
   expect((await fetch(`${fx.cloudBase}/api/cloud-send/chats/attachment/..%2Fescape.png`, { method: "POST", body: DOT, headers: { ...fx.edge, authorization: `Bearer ${fx.owner}` } })).status).toBe(404);
+});
+
+/** A conversation as a server holds it: every row, paged back with `before` as the chat view pages, and the path from
+ * the server's own leaf, which is what its bot reads. */
+async function history(side: CloudSendFixture["local"], threadId: string) {
+  const rows: Array<{ id: string; parentId?: string | null; kind: string }> = [];
+  let leaf: string | null = null;
+  for (let before: string | null = null, more = true; more;) {
+    const page: { messages: typeof rows; activeLeafId: string | null; hasMore?: boolean } = (await side("GET", `/api/threads/${threadId}/messages?limit=500${before ? `&before=${before}` : ""}`)).body;
+    rows.unshift(...page.messages);
+    leaf = page.activeLeafId;
+    more = page.hasMore === true;
+    before = page.messages[0]?.id ?? null;
+  }
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const path: string[] = [];
+  for (let row = leaf ? byId.get(leaf) : undefined; row; row = row.parentId ? byId.get(row.parentId) : undefined) path.unshift(row.id);
+  return { stored: rows.length, leaf, path, summaries: rows.filter((row) => row.kind === "compaction").length };
+}
+
+describe("a long conversation, sent in pages by the real send", () => {
+  let heavy: CloudSendFixture;
+  beforeAll(async () => { heavy = await launchCloudSendFixture({ onePasswordToken: TOKEN, auto: true, toolCalls: 150 }); }, hostTimeout(60_000));
+  afterAll(async () => { await heavy?.close(); });
+  const turn = async (bot: { id: string; threadId: string }, text: string) => {
+    const before = (await history(heavy.local, bot.threadId)).stored;
+    expect((await heavy.local("POST", `/api/bots/${bot.id}/messages`, { text, threadId: bot.threadId })).status).toBe(202);
+    for (let tries = 0; tries < 600; tries++) {
+      const idle = (await heavy.local("GET", "/api/bots")).body.bots.every((entry: { activity?: string; busy?: boolean }) => entry.activity !== "working" && !entry.busy);
+      if (idle && (await history(heavy.local, bot.threadId)).stored > before + 2) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+  const newBot = async (name: string) => (await heavy.local("POST", "/api/bots", { name, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot as { id: string; threadId: string };
+  const sendAll = () => heavy.call<CloudSendOutcome>("cloud-send:send", "local");
+  const sameOnBoth = async (bot: { threadId: string }) => {
+    const [here, there] = [await history(heavy.local, bot.threadId), await history(heavy.onCloud, bot.threadId)];
+    expect({ path: there.path.length, leaf: there.leaf, summaries: there.summaries }).toEqual({ path: here.path.length, leaf: here.leaf, summaries: here.summaries });
+    expect(there.path).toEqual(here.path);
+    return here;
+  };
+
+  it("a new bot's conversation of three pages and more arrives whole with the first send by itself", async () => {
+    const archie = await newBot("Archie");
+    for (let i = 0; i < 5; i++) await turn(archie, `Step ${i}: check the next server.`);
+    expect((await history(heavy.local, archie.threadId)).stored).toBeGreaterThan(2 * 300);
+    await heavy.tick();
+    const first = (await heavy.call<CloudSendSnapshot>("cloud-send:state", "local")).last!;
+    expect([first.reason, first.result.failed]).toEqual(["first", []]);
+    expect(heavy.chatRequests.flat().filter((entry) => entry.threadId === archie.threadId).length).toBeGreaterThanOrEqual(3);
+    await sameOnBoth(archie);
+  }, hostTimeout(240_000));
+
+  it("a conversation My Cloud got from a Bring goes on from where it was, though the send starts from its first row", async () => {
+    const kai = await newBot("Kai");
+    await turn(kai, "Look through the logs.");
+    expect((await heavy.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(kai.id)] })).result.bots).toEqual(["Kai"]);
+    const move = createCloudMove({
+      localRequest: (route, init) => fetch(`${heavy.desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": heavy.ownerCapability } }),
+      fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...heavy.edge } })) as typeof fetch,
+      tempRoot: join(heavy.root, "move-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
+    });
+    let brought = await move.bring({ id: "cloud", name: "My Cloud", origin: heavy.cloudBase, kind: "cloud", grant: () => heavy.grant("Copy from desktop") });
+    for (let tries = 0; brought.error?.code === "busy" && tries < 40; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      brought = await move.bring({ id: "cloud", name: "My Cloud", origin: heavy.cloudBase, kind: "cloud", grant: () => heavy.grant("Copy from desktop") });
+    }
+    await move.close();
+    expect(brought.phase, JSON.stringify(brought)).toBe("done");
+    const copied = await sameOnBoth(kai);
+    for (let i = 0; i < 3; i++) await turn(kai, `Step ${i}: and the next folder.`);
+    expect((await history(heavy.local, kai.threadId)).stored).toBeGreaterThan(2 * 300 + 1);
+    expect((await sendAll()).result.failed).toEqual([]);
+    expect((await sameOnBoth(kai)).path.length).toBeGreaterThan(copied.path.length);
+  }, hostTimeout(240_000));
+
+  it("a later send of two pages and more goes on from the earlier one", async () => {
+    const bea = await newBot("Bea");
+    await turn(bea, "First look.");
+    expect((await sendAll()).result.failed).toEqual([]);
+    await sameOnBoth(bea);
+    const sent = heavy.chatRequests.length;
+    for (let i = 0; i < 2; i++) await turn(bea, `Step ${i}: go on.`);
+    expect((await sendAll()).result.failed).toEqual([]);
+    expect(heavy.chatRequests.slice(sent).flat().filter((entry) => entry.threadId === bea.threadId).length).toBeGreaterThanOrEqual(2);
+    await sameOnBoth(bea);
+  }, hostTimeout(240_000));
+
+  it("a context summary that ends a send reaches My Cloud, and what follows it in the next send shows after it", async () => {
+    const cleo = await newBot("Cleo");
+    await turn(cleo, "Read the report.");
+    expect((await sendAll()).result.failed).toEqual([]);
+    expect((await heavy.local("POST", `/api/bots/${cleo.id}/compact`, { threadId: cleo.threadId })).status).toBe(202);
+    for (let tries = 0; (await history(heavy.local, cleo.threadId)).summaries < 1 && tries < 300; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
+    const summarized = await history(heavy.local, cleo.threadId);
+    expect(summarized.summaries).toBe(1);
+    expect(summarized.path.at(-1)).toBe(summarized.leaf);
+    expect((await sendAll()).result.failed).toEqual([]);
+    await turn(cleo, "Now the next one.");
+    expect((await sendAll()).result.failed).toEqual([]);
+    expect((await sameOnBoth(cleo)).summaries).toBe(1);
+  }, hostTimeout(240_000));
 });

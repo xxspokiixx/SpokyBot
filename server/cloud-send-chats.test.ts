@@ -1,12 +1,40 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { addSentChats } from "./cloud-chat-merge.ts";
-import { chatHeads, CHAT_PAGE_BYTES, CHAT_ROW_MAX, CHAT_ROWS_PAGE, fittedRow } from "./cloud-send-chats.ts";
+import { addSentChats, type SentConversation } from "./cloud-chat-merge.ts";
+import { chatHeads, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROW_MAX, CHAT_ROWS_PAGE, fittedRow, threadRowsAfter } from "./cloud-send-chats.ts";
 import { DATA_DIR } from "./config.ts";
-import { deleteThread, threadHeads, threadRowsAfter } from "./message-db.ts";
+import { deleteThread, threadHeads } from "./message-db.ts";
 import { Store, type Message } from "./store.ts";
 
 const fresh = () => new Store(() => ({ instanceId: "fixture", model: "fixture-model" }));
 const say = (store: Store, threadId: string, text: string, at: number) => store.appendMessage(threadId, { role: "user", kind: "text", text, at });
+const answer = (store: Store, threadId: string, text: string, at: number) => store.appendMessage(threadId, { role: "bot", kind: "text", text, at });
+const ids = (rows: readonly Message[]) => rows.map((row) => row.id);
+
+type Cursor = { after: number; id: string | null };
+/** One send of a conversation as main makes it: this computer's pages from the cursor, each page one sent conversation.
+ * `sent`: a cursor was there before the page went (main moves it as soon as My Cloud takes a page). */
+function pagesOf(store: Store, threadId: string, cursor: Cursor = { after: 0, id: null }): { pages: SentConversation[]; cursor: Cursor } {
+  const pages: SentConversation[] = [];
+  for (let asked = 0; asked < 100; asked++) {
+    const page = chatPage({ store, dataDir: DATA_DIR }, threadId, cursor.after, cursor.id)!;
+    if (page.rows.length) pages.push({ bot: page.bot, threadId, task: page.task, rows: page.rows, leaf: page.leaf, sent: cursor.after > 0 });
+    cursor = { after: page.last, id: page.lastId };
+    if (!page.more || !page.lastId) return { pages, cursor };
+  }
+  throw new Error("the pages never end");
+}
+/** What this computer shows of a conversation, before its rows are cleared so My Cloud can be played in the same database. */
+function shown(store: Store, threadId: string) {
+  return { path: ids(store.activePath(threadId)), leaf: store.activeLeaf(threadId) };
+}
+/** My Cloud: this computer's bots (same ids), none of its rows. */
+function cloudOf(threadIds: readonly string[]): Store {
+  for (const threadId of threadIds) deleteThread(threadId);
+  return fresh();
+}
+const take = (cloud: Store, pages: readonly SentConversation[]) => addSentChats(cloud, DATA_DIR, "/elsewhere/.openmausbot", pages, { busy: () => false });
 
 describe("this computer's chats, by row", () => {
   it("lists each bot conversation's newest row, and hands the rows after a point a page at a time", () => {
@@ -103,5 +131,163 @@ describe("on My Cloud", () => {
     expect(next).toMatchObject({ messages: 2, accepted: ["t-new", ava.threadId] });
     expect(store.messagesFor("t-new").map((entry) => entry.id)).toEqual(["n1", "n2", "n3"]);
     expect(store.messagesFor(ava.threadId).map((entry) => entry.id)).toEqual(["a1", "a2"]);
+  });
+});
+
+describe("a conversation sent in pages", () => {
+  it("into an empty conversation, three pages and more come out as one conversation My Cloud shows whole, and its bot reads whole", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    for (let i = 0; i < 2 * CHAT_ROWS_PAGE + 5; i++) (i % 2 ? answer : say)(here, ava.threadId, `line ${i}`, 10 + i);
+    const task = here.createTask(ava.id, "Plans", false)!;
+    for (let i = 0; i < 2 * CHAT_ROWS_PAGE + 1; i++) (i % 2 ? answer : say)(here, task.threadId, `plan ${i}`, 10 + i);
+    const main = pagesOf(here, ava.threadId), plans = pagesOf(here, task.threadId);
+    expect([main.pages.length, plans.pages.length]).toEqual([3, 3]);
+    const want = { main: shown(here, ava.threadId), plans: shown(here, task.threadId) };
+    const cloud = cloudOf([ava.threadId, task.threadId]);
+    cloud.patchBot(ava.id, { tasks: [] });
+    for (const page of [...main.pages, ...plans.pages]) expect(take(cloud, [page]).accepted).toEqual([page.threadId]);
+    expect(shown(cloud, ava.threadId)).toEqual(want.main);
+    expect(shown(cloud, task.threadId)).toEqual(want.plans);
+    expect(want.main.path).toHaveLength(2 * CHAT_ROWS_PAGE + 5);
+    expect(cloud.bot(ava.id)!.tasks!.map((entry) => entry.threadId)).toEqual([task.threadId]);
+  });
+
+  it("all of a conversation's pages in one request come out the same", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    for (let i = 0; i < 2 * CHAT_ROWS_PAGE + 5; i++) say(here, ava.threadId, `line ${i}`, 10 + i);
+    const { pages } = pagesOf(here, ava.threadId);
+    const want = shown(here, ava.threadId);
+    const cloud = cloudOf([ava.threadId]);
+    expect(take(cloud, pages.map((page) => ({ ...page, sent: false }))).accepted).toEqual(pages.map(() => ava.threadId));
+    expect(shown(cloud, ava.threadId)).toEqual(want);
+  });
+
+  it("into a conversation My Cloud has from a Copy, three pages go on from the Copy's last message, and My Cloud's own replies stay in place", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    const lines = Array.from({ length: 3 * CHAT_ROWS_PAGE - 50 }, (_, i) => (i % 2 ? answer : say)(here, ava.threadId, `line ${i}`, 1_000 + i * 10));
+    const copied = here.activePath(ava.threadId).slice(0, 200);
+    const { pages } = pagesOf(here, ava.threadId);
+    expect(pages).toHaveLength(3);
+    const want = shown(here, ava.threadId);
+    const cloud = cloudOf([ava.threadId]);
+    cloud.importTranscript(ava.threadId, copied.map((row) => ({ ...row })), copied.at(-1)!.id);
+    // Asked on the phone after the Copy, before this computer's next line.
+    const phone = say(cloud, ava.threadId, "From my phone", 1_000 + 199 * 10 + 5);
+    for (const page of pages) expect(take(cloud, [page]).accepted).toEqual([ava.threadId]);
+    const path = ids(cloud.activePath(ava.threadId));
+    expect(path).toHaveLength(lines.length + 1);
+    expect(path.filter((id) => id !== phone.id)).toEqual(want.path);
+    expect(path.indexOf(phone.id)).toBe(200);
+    expect(cloud.activeLeaf(ava.threadId)).toBe(want.leaf);
+  });
+
+  it("a later send of two pages and more goes on from the first, and My Cloud's conversation ends at this computer's last message", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    for (let i = 0; i < 10; i++) say(here, ava.threadId, `early ${i}`, 10 + i);
+    const first = pagesOf(here, ava.threadId);
+    for (let i = 0; i < CHAT_ROWS_PAGE + 5; i++) (i % 2 ? answer : say)(here, ava.threadId, `late ${i}`, 100 + i);
+    const later = pagesOf(here, ava.threadId, first.cursor);
+    expect(later.pages).toHaveLength(2);
+    const want = shown(here, ava.threadId);
+    const cloud = cloudOf([ava.threadId]);
+    for (const page of [...first.pages, ...later.pages]) take(cloud, [page]);
+    expect(cloud.activePath(ava.threadId).at(-1)!.id).toBe(want.leaf);
+    expect(shown(cloud, ava.threadId)).toEqual(want);
+    expect(want.path).toHaveLength(CHAT_ROWS_PAGE + 15);
+  });
+
+  it("a context summary that ends a send is added, so what follows it in the next send is shown after it", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    const early = Array.from({ length: 10 }, (_, i) => say(here, ava.threadId, `x${i}`, 10 + i));
+    const first = pagesOf(here, ava.threadId);
+    const summary = here.appendMessage(ava.threadId, { role: "bot", kind: "compaction", text: "Summary", at: 50,
+      compaction: { summary: "Ten lines about x.", firstKeptId: early[8]!.id, foldedThroughId: early[7]!.id, tokensBefore: 900, by: "person" } });
+    const second = pagesOf(here, ava.threadId, first.cursor);
+    const late = [say(here, ava.threadId, "y0", 60), answer(here, ava.threadId, "y1", 61)];
+    const third = pagesOf(here, ava.threadId, second.cursor);
+    // A summary at the end of a page, with what follows it on the next page.
+    const paged = here.createBot({ name: "Bo" }, { seedMessages: false });
+    for (let i = 0; i < CHAT_ROWS_PAGE - 1; i++) say(here, paged.threadId, `p${i}`, 10 + i);
+    here.appendMessage(paged.threadId, { role: "bot", kind: "compaction", text: "Summary", at: 400,
+      compaction: { summary: "Many lines.", firstKeptId: "x", foldedThroughId: "y", tokensBefore: 900, by: "harness" } });
+    for (let i = 0; i < 5; i++) say(here, paged.threadId, `q${i}`, 500 + i);
+    const boundary = pagesOf(here, paged.threadId);
+    expect(boundary.pages[0]!.rows.at(-1)!.kind).toBe("compaction");
+    const want = { ava: shown(here, ava.threadId), bo: shown(here, paged.threadId) };
+    const cloud = cloudOf([ava.threadId, paged.threadId]);
+    for (const page of [...first.pages, ...second.pages, ...third.pages, ...boundary.pages]) take(cloud, [page]);
+    expect(shown(cloud, ava.threadId)).toEqual(want.ava);
+    expect(want.ava.path).toEqual([...ids(early), summary.id, ...ids(late)]);
+    expect(shown(cloud, paged.threadId)).toEqual(want.bo);
+  });
+
+  it("a page never ends between a row and a row above it that was stored after it, so My Cloud never loses the thread", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    for (let i = 0; i < CHAT_ROWS_PAGE - 2; i++) say(here, ava.threadId, `line ${i}`, 10 + i);
+    const anchor = answer(here, ava.threadId, "Done, here is the screen.", 400);
+    const next = say(here, ava.threadId, "Thanks, now the next one", 401);
+    // The turn's last screen frame lands after the person's next line, and goes above it.
+    const frame = here.insertMessageAfter(ava.threadId, anchor.id, { role: "bot", kind: "screen", png: "iVBORw0KGgo=", mime: "image/png" });
+    for (let i = 0; i < 5; i++) say(here, ava.threadId, `after ${i}`, 500 + i);
+    expect(ids(here.activePath(ava.threadId)).slice(CHAT_ROWS_PAGE - 2, CHAT_ROWS_PAGE + 1)).toEqual([anchor.id, frame.id, next.id]);
+    const { pages } = pagesOf(here, ava.threadId);
+    expect(pages[0]!.rows.map((row) => row.id)).not.toContain(next.id);
+    const want = shown(here, ava.threadId);
+    const cloud = cloudOf([ava.threadId]);
+    for (const page of pages) take(cloud, [page]);
+    expect(shown(cloud, ava.threadId)).toEqual(want);
+  });
+
+  it("a page that would hold only a row whose row above was stored after it reaches that row, however big that makes it", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    say(here, ava.threadId, "Take a screenshot", 1);
+    const anchor = answer(here, ava.threadId, "Done.", 2);
+    const next = say(here, ava.threadId, "Thanks", 3);
+    const big = answer(here, ava.threadId, "z".repeat(CHAT_PAGE_BYTES + 1), 4);
+    const frame = here.insertMessageAfter(ava.threadId, anchor.id, { role: "bot", kind: "screen", png: "iVBORw0KGgo=", mime: "image/png" });
+    const first = chatPage({ store: here, dataDir: DATA_DIR }, ava.threadId, 0, null)!;
+    expect(ids(first.rows)).toEqual(ids(here.messagesFor(ava.threadId)).slice(0, 2));
+    const second = chatPage({ store: here, dataDir: DATA_DIR }, ava.threadId, first.last, first.lastId)!;
+    expect(ids(second.rows)).toEqual([next.id, big.id, frame.id]);
+    expect(second).toMatchObject({ more: false, leaf: big.id });
+    const { pages } = pagesOf(here, ava.threadId);
+    const want = shown(here, ava.threadId);
+    const cloud = cloudOf([ava.threadId]);
+    for (const page of pages) take(cloud, [page]);
+    expect(shown(cloud, ava.threadId)).toEqual(want);
+  });
+});
+
+describe("POST /api/cloud-send/chats", () => {
+  const post = async (body: unknown) => {
+    let answered: { status: number; body: any } | undefined;
+    const store = fresh();
+    const handled = await cloudSendChatsRoute({ store, dataDir: DATA_DIR }, {
+      req: {} as never, res: { setHeader() {} } as never, url: new URL("http://127.0.0.1/api/cloud-send/chats"), path: "/api/cloud-send/chats", method: "POST", auth: {} as never,
+      json: ((_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }) as never, readBody: (async () => body) as never,
+    });
+    expect(handled).toBe(true);
+    return { store, answered: answered! };
+  };
+
+  it("adds a conversation it never had though its rows are older than this server's last Copy from another computer", async () => {
+    const owner = fresh().createBot({ name: "Ledger" }, { seedMessages: false });
+    mkdirSync(join(DATA_DIR, ".backups"), { recursive: true });
+    writeFileSync(join(DATA_DIR, ".backups", "last-restore.json"), JSON.stringify({ restored: true, id: "3f0c2a8e-1b2c-4d3e-8f4a-5b6c7d8e9f00",
+      summary: { createdAt: "2026-10-01T09:00:00.000Z" } }), { mode: 0o600 });
+    const september = Date.parse("2026-09-15T10:00:00.000Z");
+    const { store, answered } = await post({ v: 1, dataDir: "/work-pc/.openmausbot", conversations: [{ bot: owner.id, threadId: "t-sept", sent: false,
+      task: { threadId: "t-sept", title: "September close", createdAt: september },
+      rows: [{ id: "s1", at: september, parentId: null, role: "user", kind: "text", text: "Close September" }], leaf: "s1" }] });
+    expect(answered).toEqual({ status: 200, body: { conversations: 1, messages: 1, accepted: ["t-sept"], waiting: [], removed: [] } });
+    expect(store.bot(owner.id)!.tasks!.map((task) => task.threadId)).toContain("t-sept");
+    expect(ids(store.activePath("t-sept"))).toEqual(["s1"]);
   });
 });

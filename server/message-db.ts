@@ -592,34 +592,18 @@ export function threadHeads(): Map<string, { last: number; lastId: string }> {
   return new Map(rows.map((row) => [row.threadId, { last: Number(row.last), lastId: row.lastId }]));
 }
 
-/**
- * A conversation's rows stored after `after`, oldest first. `after` counts only while its row is still `afterId`: a
- * deleted row's number can be given out again, so otherwise the conversation starts over (`restarted`), which adding by
- * id makes harmless. A legacy row without a parent takes the row before it.
- */
-export function threadRowsAfter(threadId: string, after: number, afterId: string | null, limit: number, maxBytes = Number.POSITIVE_INFINITY):
-  { rows: Message[]; leaf: string | null; last: number; lastId: string | null; more: boolean; restarted: boolean } {
-  const database = db();
-  const held = after > 0 && afterId !== null && (database.prepare("SELECT rowid AS at FROM messages WHERE thread_id = ? AND id = ?").get(threadId, afterId) as { at: number } | undefined)?.at === after;
-  const from = held ? after : 0;
-  const found = database.prepare("SELECT rowid AS at, id, json FROM messages WHERE thread_id = ? AND rowid > ? ORDER BY rowid LIMIT ?")
-    .all(threadId, from, limit + 1) as Array<{ at: number; id: string; json: string }>;
-  // A page holds at most `limit` rows and, past its first row, at most `maxBytes` of them.
-  let kept = 0, bytes = 0;
-  const size = (row: { json: string }) => Buffer.byteLength(row.json, "utf8");
-  while (kept < Math.min(found.length, limit) && (kept === 0 || bytes + size(found[kept]!) <= maxBytes)) bytes += size(found[kept++]!);
-  const more = found.length > kept;
-  found.length = kept;
-  let previous = from ? (database.prepare("SELECT id FROM messages WHERE thread_id = ? AND rowid <= ? ORDER BY rowid DESC LIMIT 1").get(threadId, from) as { id: string } | undefined)?.id ?? null : null;
-  const rows = found.map((row) => {
-    const message = rowToMessage(row);
-    if (message.parentId === undefined) message.parentId = previous;
-    previous = message.id;
-    return message;
-  });
-  const state = database.prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?").get(threadId) as { active_leaf_id: string | null } | undefined;
-  const last = found.at(-1);
-  return { rows, leaf: state?.active_leaf_id ?? null, last: last ? Number(last.at) : from, lastId: last?.id ?? (held ? afterId : null), more, restarted: after > 0 && !held };
+/** A conversation's rows numbered past `after`, oldest first, each with its stored size: `limit` of them, or all up to `through`. */
+export function threadRowsFrom(threadId: string, after: number, upTo: { limit: number } | { through: number }): Array<{ at: number; bytes: number; message: Message }> {
+  const rows = ("limit" in upTo
+    ? db().prepare("SELECT rowid AS at, json FROM messages WHERE thread_id = ? AND rowid > ? ORDER BY rowid LIMIT ?").all(threadId, after, upTo.limit)
+    : db().prepare("SELECT rowid AS at, json FROM messages WHERE thread_id = ? AND rowid > ? AND rowid <= ? ORDER BY rowid").all(threadId, after, upTo.through)) as Array<{ at: number; json: string }>;
+  return rows.map((row) => ({ at: Number(row.at), bytes: Buffer.byteLength(row.json, "utf8"), message: rowToMessage(row) }));
+}
+
+/** Each of a conversation's stored rows by id, with its row number. */
+export function threadRowNumbers(threadId: string): Map<string, number> {
+  const rows = db().prepare("SELECT rowid AS at, id FROM messages WHERE thread_id = ?").all(threadId) as Array<{ at: number; id: string }>;
+  return new Map(rows.map((row) => [row.id, Number(row.at)]));
 }
 
 /** The time on a conversation's last stored row, without reading the conversation. */

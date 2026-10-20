@@ -10,9 +10,8 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES } from "./attachments.ts";
-import { addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation } from "./cloud-chat-merge.ts";
-import { chatsSyncedAt } from "./cloud-move.ts";
-import { threadHeads, threadRowsAfter } from "./message-db.ts";
+import { activePath, addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation } from "./cloud-chat-merge.ts";
+import { threadHeads, threadRowNumbers, threadRowsFrom } from "./message-db.ts";
 import type { RouteContext } from "./routes/table.ts";
 import type { BotRecord, Message, TaskRecord } from "./store.ts";
 
@@ -41,6 +40,59 @@ export function chatHeads(bots: readonly BotRecord[], heads = threadHeads()): Ch
     }
   }
   return out;
+}
+
+/**
+ * A conversation's rows stored after `after`, oldest first. `after` counts only while its row is still `afterId`: a
+ * deleted row's number can be given out again, so otherwise the conversation starts over (`restarted`), which adding by
+ * id makes harmless. A legacy row without a parent takes the row before it.
+ *
+ * `path` is the conversation's active path, root first. A page never ends between a row of it and a row above it on it,
+ * which an inserted row can be stored after, and `leaf` is the deepest row of it whose rows up from the root all are at or
+ * before the page's end: where the conversation stands for whoever has every page up to this one.
+ */
+export function threadRowsAfter(threadId: string, after: number, afterId: string | null, limit: number, maxBytes = Number.POSITIVE_INFINITY, path: readonly string[] = []):
+  { rows: Message[]; leaf: string | null; last: number; lastId: string | null; more: boolean; restarted: boolean } {
+  const numbers = threadRowNumbers(threadId);
+  const held = after > 0 && afterId !== null && numbers.get(afterId) === after;
+  const from = held ? after : 0;
+  let found = threadRowsFrom(threadId, from, { limit: limit + 1 });
+  // A page holds at most `limit` rows and, past its first row, at most `maxBytes` of them.
+  let kept = 0, bytes = 0;
+  while (kept < Math.min(found.length, limit) && (kept === 0 || bytes + found[kept]!.bytes <= maxBytes)) bytes += found[kept++]!.bytes;
+  // The path's rows, each with the highest number among it and the path rows above it.
+  const onPath: Array<{ id: string; at: number; highest: number }> = [];
+  for (const id of path) {
+    const at = numbers.get(id);
+    if (at === undefined) break;
+    onPath.push({ id, at, highest: Math.max(onPath.at(-1)?.highest ?? 0, at) });
+  }
+  const highest = new Map(onPath.map((row) => [row.at, row.highest]));
+  const reach = (rows: ReadonlyArray<{ at: number }>) => rows.reduce((most, row) => Math.max(most, highest.get(row.at) ?? 0), 0);
+  let count = kept;
+  while (count > 0 && reach(found.slice(0, count)) > found[count - 1]!.at) count--;
+  if (!count && kept) {
+    for (let end = reach(found.slice(0, 1)); ;) {
+      found = threadRowsFrom(threadId, from, { through: end });
+      if (reach(found) > end) { end = reach(found); continue; }
+      count = found.length;
+      found.push(...threadRowsFrom(threadId, end, { limit: 1 }));
+      break;
+    }
+  }
+  const more = found.length > count;
+  found.length = count;
+  let previous: string | null = null, previousAt = 0;
+  if (from) for (const [id, at] of numbers) if (at <= from && at > previousAt) { previous = id; previousAt = at; }
+  const rows = found.map(({ message }) => {
+    if (message.parentId === undefined) message.parentId = previous;
+    previous = message.id;
+    return message;
+  });
+  const end = found.at(-1)?.at ?? from;
+  let leaf: string | null = null;
+  for (const row of onPath) { if (row.highest > end) break; leaf = row.id; }
+  return { rows, leaf, last: end, lastId: found.at(-1)?.message.id ?? (held ? afterId : null), more, restarted: after > 0 && !held };
 }
 
 /** A row as it goes: whole, or past CHAT_ROW_MAX its text cut and only what a message is kept. */
@@ -89,6 +141,17 @@ export interface CloudSendChatsDeps {
   dataDir: string;
 }
 
+/** A conversation's rows after a point, a page at a time, as main sends them on; null when no bot here has it. */
+export function chatPage({ store, dataDir }: CloudSendChatsDeps, threadId: string, after: number, afterId: string | null) {
+  const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
+  if (!bot || !Number.isSafeInteger(after) || after < 0) return null;
+  const path = activePath(store.messagesFor(threadId), store.activeLeaf(threadId)).map((row) => row.id);
+  const page = threadRowsAfter(threadId, after, afterId, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES, path);
+  const task = taskOf(bot, threadId);
+  return { v: 1, bot: bot.id, threadId, task: task ? sentTask(task) : null, ...page, rows: page.rows.map(fittedRow),
+    attachments: [...new Set(page.rows.flatMap((row) => attachmentNames(row as Message, dataDir)))] };
+}
+
 /** False when the path is not one of these routes. */
 export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, path, method, url, json, readBody }: RouteContext): Promise<boolean> {
   if (path !== PREFIX && !path.startsWith(`${PREFIX}/`)) return false;
@@ -100,14 +163,9 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     return true;
   }
   if (path === `${PREFIX}/rows` && method === "GET") {
-    const threadId = url.searchParams.get("thread") ?? "";
-    const after = Number(url.searchParams.get("after") ?? 0);
-    const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
-    if (!bot || !Number.isSafeInteger(after) || after < 0) { json(res, 404, { error: "no such conversation" }); return true; }
-    const page = threadRowsAfter(threadId, after, url.searchParams.get("id"), CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
-    const task = taskOf(bot, threadId);
-    json(res, 200, { v: 1, bot: bot.id, threadId, task: task ? sentTask(task) : null, ...page, rows: page.rows.map(fittedRow),
-      attachments: [...new Set(page.rows.flatMap((row) => attachmentNames(row as Message, deps.dataDir)))] });
+    const page = chatPage(deps, url.searchParams.get("thread") ?? "", Number(url.searchParams.get("after") ?? 0), url.searchParams.get("id"));
+    if (!page) json(res, 404, { error: "no such conversation" });
+    else json(res, 200, page);
     return true;
   }
   const named = /^\/api\/cloud-send\/chats\/attachment\/([^/]+)$/u.exec(path)?.[1];
@@ -162,7 +220,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
       for (const task of bot.tasks ?? []) if (task.busy) busy.add(task.threadId);
     }
     const result = addSentChats(store, deps.dataDir, parsed.data.dataDir, parsed.data.conversations as unknown as SentConversation[],
-      { busy: (threadId) => busy.has(threadId), syncedAt: chatsSyncedAt(deps.dataDir) });
+      { busy: (threadId) => busy.has(threadId) });
     json(res, 200, result);
     return true;
   }

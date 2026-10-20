@@ -81,11 +81,14 @@ function interleave(here: Message[][], added: Message[][]): Message[] {
   return out;
 }
 
+/** `keepSummaries`: `from` is this conversation's own rows as another computer sends them, its context summaries too. */
+export interface MergeOptions { keepSummaries?: boolean }
+
 /** Adds `from`'s rows `to` lacks; the ones on `from`'s visible path are placed among `to`'s by time, turn by turn. */
-export function mergeThread(from: ThreadRows, to: ThreadRows): { added: Message[]; relinked: Link[]; leaf: string | null; synced: number } {
+export function mergeThread(from: ThreadRows, to: ThreadRows, { keepSummaries = false }: MergeOptions = {}): { added: Message[]; relinked: Link[]; leaf: string | null; synced: number } {
   const have = new Set(to.rows.map((row) => row.id));
   const synced = newest(from.rows.filter((row) => have.has(row.id)).map((row) => row.at));
-  const source = withoutSummaries(from, have);
+  const source = keepSummaries ? from : withoutSummaries(from, have);
   const added = source.rows.filter((row) => !have.has(row.id));
   const unchanged = { added, relinked: [], leaf: to.leaf, synced };
   if (!added.length) return unchanged;
@@ -120,7 +123,7 @@ function carriedTask(task: TaskRecord | GroupTaskRecord, owner: Owner, rows: rea
  * A conversation `to` lacks is added unless `to` once had it: one with a message from before `syncedAt` (when the two were
  * last in step: the copy, or an earlier bring) or no newer than the newest message both share was there, so `to` deleted it since.
  */
-export function planChatMerge(from: ChatsSide, to: ChatsSide, syncedAt = Number.NEGATIVE_INFINITY): ChatMergePlan {
+export function planChatMerge(from: ChatsSide, to: ChatsSide, syncedAt = Number.NEGATIVE_INFINITY, options: MergeOptions = {}): ChatMergePlan {
   const owners = new Set([...to.bots.map((bot) => `bot:${bot.id}`), ...to.groups.map((group) => `group:${group.id}`)]);
   const homes = new Map<string, string>();
   for (const conversation of conversations(to)) homes.set(conversation.threadId, ownerKey(conversation.owner));
@@ -133,7 +136,7 @@ export function planChatMerge(from: ChatsSide, to: ChatsSide, syncedAt = Number.
     if (!owners.has(ownerKey(owner))) { if (!dm) missing.add(ownerKey(owner)); continue; }
     const home = homes.get(threadId);
     if (home === ownerKey(owner)) {
-      const merged = mergeThread(rows, to.thread(threadId));
+      const merged = mergeThread(rows, to.thread(threadId), options);
       synced = Math.max(synced, merged.synced);
       if (!merged.added.length) continue;
       plan.threads.push({ owner, threadId, added: merged.added, relinked: merged.relinked, leaf: merged.leaf });
@@ -292,10 +295,11 @@ export interface SentChatsResult {
 
 /**
  * Adds each sent conversation's rows the way a copy's are added (planChatMerge), one conversation at a time, so rows
- * one conversation shares never make another look deleted. Attachments arrived before, under their own names.
+ * one conversation shares never make another look deleted. Attachments arrived before, under their own names. Only the
+ * sender knows what it sent before, so only its `sent` makes a conversation this server lacks one removed here.
  */
 export function addSentChats(store: ChatStore, dataDir: string, sourceDataDir: string, sent: readonly SentConversation[],
-  { busy, syncedAt = Number.NEGATIVE_INFINITY }: { busy(threadId: string): boolean; syncedAt?: number }): SentChatsResult {
+  { busy }: { busy(threadId: string): boolean }): SentChatsResult {
   const result: SentChatsResult = { conversations: 0, messages: 0, accepted: [], waiting: [], removed: [] };
   for (const conversation of sent) {
     const bot = store.bot(conversation.bot);
@@ -307,8 +311,7 @@ export function addSentChats(store: ChatStore, dataDir: string, sourceDataDir: s
       groups: [],
       thread: (threadId) => threadId === conversation.threadId ? { rows: conversation.rows, leaf: conversation.leaf } : { rows: [], leaf: null },
     };
-    const plan = planChatMerge(from, liveChats(store), syncedAt);
-    if (plan.deleted) { result.removed.push(conversation.threadId); continue; }
+    const plan = planChatMerge(from, liveChats(store), Number.NEGATIVE_INFINITY, { keepSummaries: true });
     applyFrom(store, dataDir, plan, sourceDataDir);
     result.conversations += plan.conversations;
     result.messages += plan.messages;
