@@ -458,7 +458,8 @@ export interface WireMessage {
     fullResult?: boolean;
   };
   /** A bot line a "post" webhook wrote: whoever called the webhook chose
-   * its words. */
+   * its words. On a room line this also carries `from`, so the room renders
+   * the webhook's bot as the speaker. */
   webhookPost?: boolean;
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;

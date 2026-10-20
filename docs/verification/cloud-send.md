@@ -29,7 +29,34 @@ checks:
 - a password changed here goes on the next send;
 - My Cloud's page is told bot names and counts only, never a login's site;
 - every send signs its session out, and no answer or log carries a secret;
-- **Bring newer chats** adds a sent bot's chats to My Cloud.
+- **Bring newer chats** adds a sent bot's chats to My Cloud;
+- **Send everything** brings the chats too, under the same bot and conversation
+  ids; a second send adds only the new messages, nothing twice; a send of one
+  item never carries chats;
+- when My Cloud's 1Password refuses this computer's token, everything else
+  arrives and the strip's notice says *1Password* and why, never a login's site.
+
+`server/login-handoff.test.ts` and `electron/cloud-send.node-test.mjs` cover the
+rest of the reasons a person reads: a send that stops as a whole, logins this
+computer's server did not hand over, and a 1Password token 1Password already
+refused here.
+
+## The real utility port
+
+```sh
+pnpm build:server && pnpm exec electron scripts/smoke-login-handoff.cjs
+```
+
+CI's macOS smokes job runs it: main's own handoff client asks the packaged
+server, forked as a real Electron utility process, for a saved login. The
+fixture above emulates that port over Node's IPC.
+
+## A real Cloud
+
+Point the same pieces at a disposable Fly test Cloud set up like a customer's
+(never a customer's): this computer's server started as the app starts it,
+main's wiring with Node's own fetch, the Cloud paired through its signed
+pairing route. Print each failed item's error, never a value.
 
 ## The real renderer
 

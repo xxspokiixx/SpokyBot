@@ -103,6 +103,16 @@ describe("LimitResetClock", () => {
     expect(instance.resetAt("claude")).toBeNull();
   });
 
+  it("blocks Codex only until its reset minute ends when it refuses within that minute", () => {
+    const minute = new Date(2026, 9, 19, 17, 23, 0).getTime();
+    const { instance, at } = clock();
+    at(minute + 20_000);
+    instance.noteRefusal("codex", codexLimitResetsAt("You've hit your usage limit. Try again at 5:23 PM.", minute + 20_000));
+    expect(instance.blockedUntil("codex")).toBe(minute + 59_999);
+    at(minute + 60_000);
+    expect(instance.blockedUntil("codex")).toBeNull();
+  });
+
   it("ignores a refusal that names no engine, no time or a time already past", () => {
     const { instance } = clock();
     instance.noteRefusal(undefined, NOW + HOUR);
@@ -138,13 +148,39 @@ describe("LimitResetClock", () => {
 });
 
 describe("codexLimitResetsAt", () => {
-  it("reads Codex's local clock time as the next such time, and a full date as given", () => {
+  it("reads Codex's local clock time as today, and a full date as given", () => {
     const morning = new Date(2026, 9, 19, 9, 0, 0).getTime();
     const today = new Date(2026, 9, 19, 17, 23, 0).getTime();
     expect(codexLimitResetsAt("You've hit your usage limit. Upgrade to Pro or try again at 5:23 PM.", morning)).toBe(today);
-    expect(codexLimitResetsAt("You've hit your usage limit. Try again at 5:23 PM.", today + 60_000)).toBe(today + 24 * HOUR);
     expect(codexLimitResetsAt("You've hit your usage limit for gpt-6.1-sol. Switch to another model now, or try again at Oct 17th, 2026 5:23 PM.", morning))
       .toBe(new Date(2026, 9, 17, 17, 23, 0).getTime());
+  });
+
+  it("reads a clock time whose minute has begun as the end of that minute, not tomorrow", () => {
+    // Codex prints only the time when the reset is on its own date, and drops the seconds.
+    const minute = new Date(2026, 9, 19, 17, 23, 0).getTime();
+    const said = "You've hit your usage limit. Try again at 5:23 PM.";
+    expect(codexLimitResetsAt(said, minute)).toBe(minute + 59_999);
+    expect(codexLimitResetsAt(said, minute + 20_000)).toBe(minute + 59_999);
+    expect(codexLimitResetsAt(said, minute + 90_000)).toBe(minute + 59_999);
+  });
+
+  // America/New_York repeats 1:00-1:59 AM on 2026-11-01 (05:00Z EDT, then 06:00Z EST).
+  it("reads a clock time in the repeated hour after a DST change as the later one once the first has passed", () => {
+    const previousTimezone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      const said = (time: string) => `You've hit your usage limit. Try again at ${time}.`;
+      // In the second 1:30 AM, a reset at 1:50 AM is the second 1:50 AM, 20 minutes away.
+      expect(iso(codexLimitResetsAt(said("1:50 AM"), Date.parse("2026-11-01T06:30:00Z"))!)).toBe("2026-11-01T06:50:00.000Z");
+      // In the first 1:40 AM, a reset 40 minutes away is printed as 1:20 AM.
+      expect(iso(codexLimitResetsAt(said("1:20 AM"), Date.parse("2026-11-01T05:40:00Z"))!)).toBe("2026-11-01T06:20:00.000Z");
+      // A time still ahead in the first hour stays there.
+      expect(iso(codexLimitResetsAt(said("1:50 AM"), Date.parse("2026-11-01T05:30:00Z"))!)).toBe("2026-11-01T05:50:00.000Z");
+    } finally {
+      if (previousTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimezone;
+    }
   });
 
   it("names no time when Codex gives none or the words are not a usage limit", () => {

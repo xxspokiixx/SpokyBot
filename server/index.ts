@@ -9,7 +9,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { extname, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
-
 import { z } from "zod";
 import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
@@ -128,7 +127,7 @@ import { createSkillReview, turnToolSteps } from "./skill-review.ts";
 import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
-import { canAccessTeam, canReachPeer, coordinatorSupervises, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { canAccessTeam, canReachPeer, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -302,6 +301,7 @@ import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngine
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
 import { createRoomAccess } from "./host/room-access.ts";
+import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { CONSENT_RULE, escapeNotes, OUTSIDE, peerLineText, peerProvenanceNote, quoteInNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
@@ -628,6 +628,7 @@ import { createStatusRoutes } from "./routes/status.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 import { createLiveRoutes } from "./routes/live.ts";
 import { createNotificationRoutes } from "./routes/notifications.ts";
+import { createTodayRoutes } from "./routes/today.ts";
 import { createUsageRoutes } from "./routes/usage.ts";
 import { createBotMessageRoutes } from "./routes/bot-messages.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
@@ -1362,7 +1363,7 @@ function calendarAudienceConflict(body: unknown): string | null {
 function memberFrameContext(visible: VisibleSet): FrameContext {
   return {
     visible,
-    webhookBot: (webhookId) => webhooks.list().find((webhook) => webhook.id === webhookId)?.botId,
+    webhook: (webhookId) => webhooks.list().find((webhook) => webhook.id === webhookId),
     freshBot: (botId) => {
       const bot = store.bot(botId);
       return bot ? publicBot(bot) : undefined;
@@ -4124,7 +4125,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
 
 // Load coordination state before registering store listeners or recovering routines: recovery can emit room changes synchronously.
 const groupQueues = new Map<string, Promise<void>>();
-const { roomRootProblem, roomHandoffProblem, roomSetupPending, laneRoomThread } = createRoomAccess({ store });
+const { roomRootProblem, roomHandoffProblem, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store });
 const roomJobs = createRoomJobs({ store, coordinator: { all: () => coordinator.all() }, cfg, laneRoomThread,
   operations: groupId => groupTurnOperations.get(groupId) ?? [], speakerOf: threadId => groupSpeakers.get(threadId)?.botId });
 
@@ -10155,8 +10156,7 @@ const webhooks = new WebhookManager({
   resolvePostThread: (trigger, forceNew) => {
     if (!forceNew && trigger.resultsThreadId) return trigger.resultsThreadId;
     return store.createTask(trigger.botId, "Updates", false)?.threadId;
-  },
-});
+  }, ...createWebhookRoomPost({ store, cfg, roomTalks }) });
 const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" });
 const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => webhookIngressStatus().baseUrl, routines: () => routines!, botState: unattendedDispatchState, timeZone: routineTimeZone, emit: broadcast, connectionMode: () => composio.connectionMode(cfg),
   access: composio.brokerAccess, connectedApps: () => composio.connectedServices(cfg), visibleBot: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId),
@@ -12080,31 +12080,17 @@ function roomPostEligibility(
   bot: BotRecord,
   group: GroupRecord,
 ): { ok: true } | { ok: false; status: number; error: string } {
-  if (group.dm) {
-    return {
-      ok: false,
-      status: 400,
-      error: "that is a one-to-one bot channel, not a room — use coordinate_bots to reach a single bot",
-    };
+  const verdict = roomTalks(bot, group);
+  if (verdict.ok) return verdict;
+  if (verdict.problem === "dm") {
+    return { ok: false, status: 400, error: "that is a one-to-one bot channel, not a room — use coordinate_bots to reach a single bot" };
   }
-  if (!group.memberIds.includes(bot.id)) {
-    return { ok: false, status: 403, error: "you are not a member of that room" };
-  }
-  const outsider = group.memberIds
-    .map((id) => store.bot(id))
-    .find((member) => member && !canAccessTeam(bot, member.section) && !coordinatorSupervises(member, bot));
-  if (outsider) {
-    return {
-      ok: false,
-      status: 403,
-      error: `that room includes @${outsider.name}, who is outside your section — tell the user what you wanted to post there instead`,
-    };
+  if (verdict.problem === "not-member") return { ok: false, status: 403, error: "you are not a member of that room" };
+  if (verdict.problem === "outsider") {
+    return { ok: false, status: 403, error: `that room includes @${verdict.name}, who is outside your section — tell the user what you wanted to post there instead` };
   }
   // A bot must never settle whether a room's unfinished setup still counts as pending.
-  if (roomSetupPending(group)) {
-    return { ok: false, status: 409, error: "that room is still being set up — it cannot receive messages yet" };
-  }
-  return { ok: true };
+  return { ok: false, status: 409, error: "that room is still being set up — it cannot receive messages yet" };
 }
 
 function proposalPersistence(botId: string, threadId: string, opensCard = true) {
@@ -13398,7 +13384,7 @@ ROUTES.push(createBotMemoryRoutes({
     broadcast({ kind: "config", ...configStatus() });
   },
 }));
-ROUTES.push(createDeciderRoutes({ decider, config: () => cfg }), createNotificationRoutes(), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg }));
+ROUTES.push(createDeciderRoutes({ decider, config: () => cfg }), createNotificationRoutes(), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg }), createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }));
 ROUTES.push(createSignInCardRoutes({ settle: settleSignIn, saveLogin: saveLoginFromCard, saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));
 ROUTES.push(createRoomHoldRoutes({
   group: (id) => store.group(id),
