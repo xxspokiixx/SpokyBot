@@ -599,11 +599,12 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update && sudo apt-get install -y xvfb
       - name: Keep the runner's Google Chrome as it is for the whole run
-        # The macOS image's Chrome is older than Google's release, and its
-        # updater replaced the app during the suites (155.0.8059.40 to .82 in
-        # October 2026): a launch inside the swap fails at once, and a profile
-        # the new version opened is refused by the identity read from the old
-        # one. The locked bundle keeps the binary under test fixed.
+        # The macOS image's Chrome is older than Google's release, and about
+        # 30 s after Chrome first runs it starts its bundled GoogleUpdater,
+        # which swaps the new version into the app a minute later (155.0.8059.40
+        # to .85 in October 2026): a launch inside the swap fails at once, and
+        # a profile the new version opened is refused by the identity read
+        # from the old one. The locked bundle keeps the binary under test fixed.
         if: runner.os == 'macOS'
         run: |
           chflags -R uchg "/Applications/Google Chrome.app"

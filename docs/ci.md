@@ -116,7 +116,9 @@ to it, the page's cursor and copied text).
   may add only its budget to that.
 - On macOS the job locks the runner's Google Chrome app before the suites and
   fails if its version changed: the image's Chrome is older than Google's
-  release, and its updater replaced the app mid-run.
+  release, and the GoogleUpdater it starts swaps the new version into the app
+  about a minute and a half after Chrome first runs, in the middle of the
+  suites.
 - Locally: `OMB_CDP_CHROME=<chrome executable> pnpm exec vitest run
   server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e
   server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e` (or
