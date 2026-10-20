@@ -91,6 +91,13 @@ function evalValue(result: unknown): unknown {
   return value && typeof value === "object" && "result" in value ? (value as { result: unknown }).result : value;
 }
 
+/** What a failed tool call told the bot, in the engine's words; null when it succeeded. */
+function refused(result: unknown): string | null {
+  const answer = result as { content?: Array<{ type?: string; text?: string }>; isError?: boolean } | null;
+  if (answer && !answer.isError) return null;
+  return answer?.content?.filter((part) => part.type === "text").map((part) => part.text).join(" ") || JSON.stringify(result).slice(0, 300);
+}
+
 /** The runtime keeps file paths away from the engine, so a screenshot comes back as image content. */
 function savedImage(result: unknown, base: string): string | null {
   const image = (result as { content?: Array<{ type?: string; data?: string; mimeType?: string }> } | null)?.content?.find((part) => part.type === "image" && part.data);
@@ -188,7 +195,8 @@ export async function verifyBrowserIdentity(options: BotBrowserOptions & { publi
   const probe = await startIdentityProbe();
   try {
     return await withBotBrowser(options, async (call, decided, launcher) => {
-      await call("agent_browser_open", { url: probe.url });
+      const failed = refused(await call("agent_browser_open", { url: probe.url }));
+      if (failed) throw new Error(`the bot's browser could not open the probe page: ${failed}`);
       const reports = await probe.complete(30_000);
       const major = String(reports.page?.high?.uaFullVersion ?? "").split(".")[0] ?? "";
       const expected = expectedUserAgent(major);

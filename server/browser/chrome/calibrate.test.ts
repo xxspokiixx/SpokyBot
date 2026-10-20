@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { calibrateIdentity, identityFile, loadOrCalibrateIdentity, type CalibratedIdentity } from "./calibrate.ts";
+import { CdpBrowser } from "../cdp/browser.ts";
+import { FakeChrome } from "../testing/fake-chrome.ts";
+import { calibrateIdentity, identityFile, loadOrCalibrateIdentity, openCalibrationPage, type CalibratedIdentity } from "./calibrate.ts";
 
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders) await removeTempDir(folder); });
@@ -25,6 +27,60 @@ const READ: CalibratedIdentity = {
   fingerprint: "",
   calibratedAt: "2026-10-16T00:00:00.000Z",
 };
+
+/** A Chrome whose first navigations end in `errorText`, as Chrome for Testing on Windows cancels a fresh profile's first one. */
+class FailingFirstNavigations extends FakeChrome {
+  readonly #listeners = new Set<(message: string) => void>();
+  #failures: number;
+  readonly #errorText: string;
+
+  constructor(failures: number, errorText = "net::ERR_ABORTED") {
+    super();
+    this.#failures = failures;
+    this.#errorText = errorText;
+  }
+
+  override onMessage(listener: (message: string) => void): void {
+    this.#listeners.add(listener);
+    super.onMessage(listener);
+  }
+
+  override send(message: string): void {
+    const { id, method, params = {}, sessionId } = JSON.parse(message) as { id: number; method: string; params?: Record<string, unknown>; sessionId?: string };
+    if (method !== "Page.navigate" || this.#failures === 0) return super.send(message);
+    this.#failures--;
+    this.sent.push({ method, params, sessionId: sessionId ?? null });
+    const answer = JSON.stringify({ id, result: { frameId: "T1", loaderId: "aborted", errorText: this.#errorText }, sessionId });
+    queueMicrotask(() => { for (const listener of this.#listeners) listener(answer); });
+  }
+}
+
+async function firstTab(chrome: FakeChrome) {
+  const browser = await CdpBrowser.connect(chrome, { identity: null, headless: true, permissions: false });
+  return browser.waitForPage();
+}
+
+describe("opening the calibration page", () => {
+  const url = "http://127.0.0.1:9/";
+  const navigations = (chrome: FakeChrome) => chrome.sent.filter((sent) => sent.method === "Page.navigate").length;
+
+  it("opens it again when Chrome cancels the first navigation", async () => {
+    const chrome = new FailingFirstNavigations(1);
+    const tab = await firstTab(chrome);
+    await openCalibrationPage(tab, url, 5_000);
+    expect(tab.url()).toBe(url);
+    expect(navigations(chrome)).toBe(2);
+  });
+
+  it("gives up when the second navigation is cancelled too, and never repeats another failure", async () => {
+    const twice = new FailingFirstNavigations(2);
+    await expect(openCalibrationPage(await firstTab(twice), url, 5_000)).rejects.toThrow(/failed: ERR_ABORTED/);
+    expect(navigations(twice)).toBe(2);
+    const refused = new FailingFirstNavigations(1, "net::ERR_CONNECTION_REFUSED");
+    await expect(openCalibrationPage(await firstTab(refused), url, 5_000)).rejects.toThrow(/failed: ERR_CONNECTION_REFUSED/);
+    expect(navigations(refused)).toBe(1);
+  });
+});
 
 describe("reading a Chrome's own identity", () => {
   it.skipIf(process.platform === "win32")("starts the binary headless over a pipe, off the keychain, on the account's real home, and says when it exits", async () => {

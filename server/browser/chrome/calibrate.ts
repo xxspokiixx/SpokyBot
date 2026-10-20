@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CdpBrowser } from "../cdp/browser.ts";
+import { DriverError } from "../cdp/errors.ts";
 import { IDENTITY_PROBE, type Identity, type IdentityProbe } from "../cdp/identity.ts";
+import type { CdpPage } from "../cdp/page.ts";
 import type { HostKind } from "./flags.ts";
 import { headedIdentity, isChromeIdentity } from "./identity.ts";
 import { launchChrome } from "./launch.ts";
@@ -40,6 +42,21 @@ async function loopbackPage(): Promise<{ url: string; close: () => void }> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return { url: `http://127.0.0.1:${port}/`, close: () => server.close() };
+}
+
+/**
+ * Chrome for Testing 155 on Windows cancels a fresh profile's first navigation now and then: net::ERR_ABORTED a moment
+ * after the request starts, with nothing else navigating (35 of 110 starts on GitHub's Windows runner; none of 30 for
+ * its Google Chrome, none of 30 for the same build on macOS). The second request went through every time, and the page
+ * is our own with no side effects, so it is opened once more.
+ */
+export async function openCalibrationPage(tab: CdpPage, url: string, timeoutMs: number): Promise<void> {
+  try {
+    await tab.navigate(url, { timeoutMs });
+  } catch (error) {
+    if (!(error instanceof DriverError) || error.detail?.netError !== "ERR_ABORTED") throw error;
+    await tab.navigate(url, { timeoutMs });
+  }
 }
 
 export interface CalibrateOptions {
@@ -80,7 +97,7 @@ export async function calibrateIdentity(options: CalibrateOptions): Promise<Cali
   try {
     const browser = await CdpBrowser.connect(chrome.transport, { identity: null, headless: true, permissions: false });
     const tab = await browser.waitForPage(() => true, options.timeoutMs ?? 15_000);
-    await tab.navigate(page.url, { timeoutMs: options.timeoutMs ?? 15_000 });
+    await openCalibrationPage(tab, page.url, options.timeoutMs ?? 15_000);
     const probe = await tab.evaluate(IDENTITY_PROBE) as IdentityProbe;
     const identity = headedIdentity({ userAgent: probe.userAgent, hints: probe.high });
     await browser.close();
