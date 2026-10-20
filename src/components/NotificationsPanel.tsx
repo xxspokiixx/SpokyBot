@@ -204,7 +204,7 @@ function NotificationRow({ entry, now, bot, threadName, onOpen }: { entry: Notif
       )}
     >
       {bot ? (
-        <span className="mt-px shrink-0" aria-hidden="true"><BotAvatar bot={bot} state="happy" size={24} /></span>
+        <span className="mt-px shrink-0" aria-hidden="true"><BotAvatar bot={bot} state="happy" size={24} animated={false} /></span>
       ) : (
         <Icon size={16} aria-hidden="true" className={cn("mt-0.5 shrink-0", className)} />
       )}

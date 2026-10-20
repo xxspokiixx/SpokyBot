@@ -20,8 +20,22 @@ export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 /** Below Cloudflare's transport ceiling; a local inbox, not unbounded storage. */
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 
+export const DEFAULT_ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
+
+/** A team server can raise the ceiling with OMB_ATTACHMENTS_MAX_BYTES; a missing or invalid value keeps 512 MB. */
+export function attachmentsMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OMB_ATTACHMENTS_MAX_BYTES?.trim();
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_ATTACHMENTS_MAX_BYTES;
+}
+
 /** Never evict: prompts refer to attachment paths, so at this ceiling a new upload gets an explicit 507. */
-export const ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
+export const ATTACHMENTS_MAX_BYTES = attachmentsMaxBytes();
+
+function formatStoreLimit(bytes: number): string {
+  const mb = Math.round(bytes / (1024 * 1024));
+  return mb >= 1 ? `${mb} MB` : `${bytes} bytes`;
+}
 
 /** Cleanup removes only our stale partial files, never a committed attachment a transcript may reference. */
 export const ATTACHMENT_PARTIAL_MAX_AGE_MS = 60 * 60 * 1000;
@@ -203,7 +217,7 @@ class AttachmentReservation {
     if (available < required) {
       throw statusError(
         507,
-        `attachments storage is full (limit ${ATTACHMENTS_MAX_BYTES} bytes)`,
+        `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)`,
       );
     }
     const granted = Math.min(preferred, available);

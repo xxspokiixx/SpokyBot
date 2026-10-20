@@ -700,6 +700,19 @@ describe("Chat MCP schema validation", () => {
     expect(() => session.validate("audit_write", {value:[2]})).not.toThrow();
   });
 
+  it("accepts GitHub MCP's x-mcp-header annotation and still enforces the schema", async () => {
+    const toolSchema = {
+      type: "object",
+      properties: { owner: { type: "string", "x-mcp-header": "owner" }, repo: { type: "string", "x-mcp-header": "repo" } },
+      required: ["owner", "repo"],
+    };
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(() => session.validate("audit_write", { owner: "octo", repo: "hello" })).not.toThrow();
+    expect(() => session.validate("audit_write", { owner: "octo" })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { owner: 1, repo: "hello" })).toThrow("input schema");
+  });
+
   it.each([
     ["email", "user@example.com", "invalid"],
     ["uri", "https://example.com/path", "not a uri"],
@@ -715,6 +728,7 @@ describe("Chat MCP schema validation", () => {
     { type: "object", properties: {value:{type:"string",format:"unregistered-format"}} },
     { type: "object", properties: {value:{$ref:"https://example.invalid/private-schema"}} },
     { type: "object", properties: {value:{type:"string",unrecognizedAssertion: true}} },
+    { type: "object", properties: {value:{type:"string","x-mcp-header": 5}} },
   ])("refuses schemas it cannot validate instead of silently weakening them %#", async (toolSchema) => {
     const f = fixture("", toolSchema);
     await expectSkipped(f, /schema could not be validated/);

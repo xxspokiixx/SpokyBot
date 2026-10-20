@@ -203,41 +203,18 @@ describe("Settings → Logins with My Cloud", () => {
   afterEach(() => { delete (window as { ogb?: unknown }).ogb; });
   const where = (site: string) => host.querySelector(`[data-login-row="${site}"] [data-login-where]`)?.textContent;
 
-  it("says where each login is, and sends one to My Cloud only when the person asks", async () => {
-    const send = vi.fn().mockResolvedValue({ sent: true, ...cloudWith([{ site: "example.org", username: "team" }, { site: "example.com", username: "alice@example.com" }]) });
+  it("says where each login and 1Password are, with nothing to press: they go to My Cloud by themselves", async () => {
+    const send = vi.fn();
     (window as { ogb?: unknown }).ogb = { cloudLogins: { state: vi.fn().mockResolvedValue(cloudWith([{ site: "example.org", username: "TEAM" }])), send } };
     fixture.api.mockResolvedValueOnce({ logins: [CARD_LOGIN, SHARED_LOGIN, VAULT_LOGIN], onePassword: VAULTS });
     await render();
     expect(host.querySelector("[data-logins-sides]")!.textContent).toContain("Logins are kept on each side: this computer has its own, and My Cloud has its own. Settings → MausBot Cloud sends this computer's to My Cloud and keeps them up to date");
     expect(where("example.org")).toBe("On this computer and My Cloud");
-    expect(host.querySelector('[data-login-row="example.org"] [data-also-cloud]')).toBeNull();
+    expect(where("example.com")).toBe("On this computer only");
     expect(host.querySelector('[data-onepassword-where]')!.textContent).toBe("On this computer only");
+    expect(host.querySelector("[data-also-cloud]")).toBeNull();
+    expect(host.textContent).not.toContain("Also use on My Cloud");
     expect(send).not.toHaveBeenCalled();
-    await click("Also use the login for example.com on My Cloud");
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(send).toHaveBeenCalledExactlyOnceWith({ kind: "login", id: "l1" });
-    expect(host.querySelector('[data-cloud-outcome="l1"]')!.textContent).toBe("Sent. Bots on My Cloud can use it now.");
-    expect(host.querySelector('[data-login-row="example.com"] [data-login-where="both"]')).not.toBeNull();
-    expect(fixture.api).toHaveBeenCalledTimes(1);
-  });
-
-  it("sends the 1Password service account, says what My Cloud refused in its own words, and when bots were narrowed", async () => {
-    const send = vi.fn()
-      .mockRejectedValueOnce(new Error("Error invoking remote method 'cloud-logins:send': Error: My Cloud said: 1Password could not start on this server, so your token was not checked."))
-      .mockResolvedValueOnce({ sent: true, narrowed: true, ...cloudWith([], true) });
-    (window as { ogb?: unknown }).ogb = { cloudLogins: { state: vi.fn().mockResolvedValue(cloudWith([])), send } };
-    fixture.api.mockResolvedValueOnce({ logins: [], onePassword: VAULTS });
-    await render();
-    const also = () => host.querySelector<HTMLButtonElement>('[data-also-cloud="1password"]');
-    await act(async () => also()!.click());
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(send).toHaveBeenLastCalledWith({ kind: "1password" });
-    expect(host.querySelector('[data-cloud-outcome="1password"][role=alert]')!.textContent).toBe("My Cloud said: 1Password could not start on this server, so your token was not checked.");
-    await act(async () => also()!.click());
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(host.querySelector('[data-cloud-outcome="1password"]')!.textContent).toBe("Sent. On My Cloud it is only for the chosen bots that My Cloud has too; check who can use it there.");
-    expect(host.querySelector('[data-onepassword-where]')!.textContent).toBe("On this computer and My Cloud");
-    expect(also()).toBeNull();
   });
 
   it("without My Cloud says nothing of sides; on My Cloud itself says its logins are its own and sends nothing", async () => {
@@ -253,7 +230,7 @@ describe("Settings → Logins with My Cloud", () => {
     fixture.config = { cloudHome: true };
     fixture.api.mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF });
     await render();
-    expect(host.querySelector("[data-logins-cloud-own]")!.textContent).toContain("open Settings → Logins in OpenMausBot on that computer and choose Also use on My Cloud");
+    expect(host.querySelector("[data-logins-cloud-own]")!.textContent).toContain("come here by themselves");
     expect(host.querySelector("[data-also-cloud]")).toBeNull();
   });
 });

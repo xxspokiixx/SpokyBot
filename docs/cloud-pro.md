@@ -650,8 +650,15 @@ The switch always says where lending stands, whichever way it got there:
 
 On My Cloud's own page, **Settings → MausBot Cloud** lists **Computers lent to
 My Cloud**: each by name and platform, **Online now**, **Offline, last online
-…**, or **No longer lent**, what it lends and when My Cloud last used it, with
-**Change what's lent** opening this computer's switch.
+…**, or **No longer lent**, what it lends and when My Cloud last used it. In
+the desktop app it starts with this computer's own **Let My Cloud use this
+computer** switch and its one line (electron/cloud-lending-ipc.mjs), so nobody
+leaves My Cloud to change it: the page learns only on/off, how it is going and
+folder names, never a path; turning it on needs the person's click and a
+native confirmation naming what goes. Turned on with nothing chosen (here or
+on this computer), lending lends Desktop, Documents and Downloads, read only;
+other folders, editing and the screen wait under **Choose what's lent** on
+this computer.
 
 While lending is on, a menu-bar item shows it (**In use** while the Cloud is
 running something on this Mac) with **Stop lending**. Turning the switch off or

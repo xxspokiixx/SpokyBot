@@ -31,6 +31,11 @@ function polled<T>(channel: string) {
 }
 
 const machine = { status: "ready", origin: "https://omb-u-6b65ec5f6111.fly.dev" };
+// Main's lending stands in here: turned on with nothing chosen, it lends the usual folders, read only (?lending=on starts it on).
+let lendingOn = params.get("lending") === "on";
+const usual = ["Desktop", "Documents", "Downloads"].map((name, i) => ({ id: `0000000${i}-1111-4111-8111-111111111111`, name, path: `/Users/amit/${name}`, write: false }));
+const localLending = () => ({ available: true, screenAvailable: true, activity: [], state: { enabled: lendingOn, connected: lendingOn, busy: false, folders: lendingOn ? usual : [], screen: false } });
+const pageLending = () => ({ available: true, on: lendingOn, status: lendingOn ? "lent" : null, folders: lendingOn ? usual.map(({ name, write }) => ({ name, write })) : [], screen: false });
 const account = { status: "connected", account: { id: "fixture", email: "amit@example.test" }, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: null, version: 3 }, machine } as unknown as CloudAccountState;
 
 async function showMenu() {
@@ -59,7 +64,7 @@ window.ogb = {
   getCapabilities: async () => initialDesktopCapabilities(),
   onCapabilitiesChanged: () => () => {},
   workspaces: { state: async () => page === "cloud" ? { local: false, name: "My Cloud", origin: location.origin } : { local: true, name: "This computer" }, menu: showMenu },
-  cloudLending: { open: async () => {} },
+  cloudLending: { open: async () => {}, state: async () => pageLending(), set: async (on: boolean) => { lendingOn = on; return pageLending(); } },
   cloudSendPage: {
     notice: () => call("cloud-send:notice"), send: () => call("cloud-send:page-send"), dismiss: (signature: string) => call("cloud-send:dismiss", signature),
     onNotice: polled("cloud-send:notice"),
@@ -73,7 +78,7 @@ window.ogb = {
       state: async () => account, refresh: async () => account, begin: async () => account, signInAgain: async () => account, reopen: async () => account,
       cancel: async () => account, signOut: async () => account, openDashboard: async () => account, connectHome: async () => account, connectHomeForPhone: async () => account,
       onState: () => () => {},
-      lending: { state: async () => ({ state: { enabled: true, connected: true, folders: [], screen: true }, activity: [] }), chooseFolder: async () => null, save: async () => ({}), stop: async () => ({}) },
+      lending: { state: async () => localLending(), chooseFolder: async () => null, save: async () => { lendingOn = true; return localLending(); }, stop: async () => { lendingOn = false; return localLending(); } },
     },
     cloudMove: {
       state: async () => ({ phase: "idle", local: { bots: 1, rooms: 0, chats: 23, bytes: 0.2 * GB, files: 120 }, suggest: false, blocked: null,
@@ -98,7 +103,7 @@ try {
   for (const notice of NOTICES) localStorage.setItem(notice, "1");
 } catch {}
 applySkin((params.get("skin") ?? "midnight") as SkinId);
-if (page === "local" && params.get("settings") !== "0" && !params.has("desktop-settings")) {
+if ((page === "local" || params.get("settings") === "1") && params.get("settings") !== "0" && !params.has("desktop-settings")) {
   history.replaceState(null, "", `${location.pathname}?${new URLSearchParams({ ...Object.fromEntries(params), "desktop-settings": "cloud-settings" })}`);
 }
 createRoot(document.getElementById("root")!).render(<App />);
