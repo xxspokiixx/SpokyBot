@@ -940,7 +940,7 @@
   "cloudWelcome.bring.hereBody": "{name}にはすでにボットやチャットがあるため、こちらからの上書きコピーは行いません。",
   "cloudWelcome.bring.sentTitle": "ボットは自動で移ってきます",
   "cloudWelcome.bring.sending": "このコンピューターのボット、チャット、ログイン情報を移しています…",
-  "cloudWelcome.bring.sent": "ボット、チャット、ログイン情報がこのコンピューターから移りました。新しいものも自動で届きます。",
+  "cloudWelcome.bring.keepsComing": "新しいものも自動で届きます。",
   "cloudWelcome.bring.more": "その他",
   "cloudWelcome.count.bots": "{count}体のボット",
   "cloudWelcome.count.botsOne": "1体のボット",

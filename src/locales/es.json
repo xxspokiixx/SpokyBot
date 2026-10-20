@@ -923,7 +923,7 @@
   "cloudWelcome.bring.hereBody": "{name} ya tiene bots o chats, así que no se copia nada encima desde aquí.",
   "cloudWelcome.bring.sentTitle": "Tus bots llegan solos",
   "cloudWelcome.bring.sending": "Trayendo aquí los bots, chats e inicios de sesión de este equipo…",
-  "cloudWelcome.bring.sent": "Tus bots, chats e inicios de sesión llegaron desde este equipo. Los nuevos siguen llegando solos.",
+  "cloudWelcome.bring.keepsComing": "Los nuevos siguen llegando solos.",
   "cloudWelcome.bring.more": "Más",
   "cloudWelcome.count.bots": "{count} bots",
   "cloudWelcome.count.botsOne": "1 bot",

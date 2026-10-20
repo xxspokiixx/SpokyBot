@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { useCloudMove } from "@/components/CloudMove";
 import { useCloudSendNotice } from "@/components/CloudSendStrip";
+import { countedList } from "@/lib/cloud-send";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
 import { track } from "@/lib/analytics";
 import { reopenCloudIntent } from "@/lib/cloud-intent";
@@ -27,12 +28,20 @@ const STEP_TEXT: Record<WelcomeStep, { title: LocaleKey; hint: LocaleKey }> = {
   files: { title: "cloudWelcome.step.files", hint: "cloudWelcome.step.filesHint" },
 };
 
-/** "sending" while this computer's first send runs, "sent" once one has gone, also "sent" when Keep My Cloud up to date is
- * on (it brings everything by itself within moments); null when nothing comes by itself (it was turned off). */
-export function sentHere(notice: CloudSendNotice | null): "sending" | "sent" | null {
-  if (!notice) return null;
-  if (notice.running) return "sending";
-  return notice.last || notice.auto ? "sent" : null;
+/** Sends that carry everything (bots, skills, logins, settings and chats); one login or one item is not one. */
+const WHOLE_SENDS = new Set(["first", "auto", "button", "my-cloud", "menu"]);
+
+/** What came over from this computer, for the Bring step: "sent" once a whole send went through (`last` says what
+ * arrived); "sending" while one runs, or while Keep My Cloud up to date is on and none has gone yet; null otherwise
+ * (switched off, a whole send failed, or a desktop too old to say), which keeps the choice to copy or start fresh. */
+export function sentHere(notice: CloudSendNotice | null): { state: "sending" | "sent"; auto: boolean; last: CloudSendNotice["last"] } | null {
+  if (!notice || typeof notice.auto !== "boolean") return null;
+  const last = notice.last;
+  const whole = Boolean(last && WHOLE_SENDS.has(last.reason));
+  if (notice.running && WHOLE_SENDS.has(notice.runningReason ?? "")) return { state: "sending", auto: notice.auto, last };
+  if (whole && !last!.error) return { state: "sent", auto: notice.auto, last };
+  if (notice.auto && !whole) return { state: "sending", auto: true, last };
+  return null;
 }
 
 const requestedView = (value: string | null): WelcomeView | null =>
@@ -87,21 +96,30 @@ export function CloudWelcome() {
     } else if (state.selectedId !== anchor.current) stepAsideWelcome();
   }, [state.selectedId]);
 
-  // This computer's things come over by themselves: bringing them is done, with nothing to choose or press.
+  // This computer's things come over by themselves: the welcome moves on at once, with nothing to choose or press, and
+  // ticks Bring your stuff only once they have come over.
+  const movedOn = useRef(false);
   useEffect(() => {
-    if (sent && view === "bring" && !welcomeStepFinished(record, "bring")) finish("bring");
+    if (!sent || welcomeStepFinished(record, "bring")) return;
+    const arrived = sent.state === "sent" ? [welcomeStepHint("bring")] : [];
+    if (arrived.length) remember(arrived);
+    if (view === "bring" && !movedOn.current) {
+      movedOn.current = true;
+      go(welcomeViewAfter(withEarlyHints(record, arrived), "bring"), false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sent]);
+  }, [sent?.state]);
 
   const remember = (ids: string[]) => { void saveWelcomeHints(state.config?.onboarding, ids, dispatch); };
-  const go = (next: WelcomeView) => {
-    navigated.current = true;
+  /** `focus`: the person moved here, so the step's heading takes focus; not when the welcome moves on by itself. */
+  const go = (next: WelcomeView, focus = true) => {
+    navigated.current = focus;
     setView(next);
   };
-  const finish = (step: WelcomeStep, extra: string[] = []) => {
+  const finish = (step: WelcomeStep, extra: string[] = [], focus = true) => {
     const ids = [welcomeStepHint(step), ...extra];
     remember(ids);
-    go(welcomeViewAfter(withEarlyHints(record, ids), step));
+    go(welcomeViewAfter(withEarlyHints(record, ids), step), focus);
   };
   const finishBring = (outcome: BringOutcome) => {
     if (outcome === "copied" || outcome === "skipped") void bridge?.dismiss().catch(() => {});
@@ -129,7 +147,7 @@ export function CloudWelcome() {
   let content;
   if (view === "bring" && asking) content = null;
   else if (view === "bring") {
-    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} sent={sent} headingRef={heading}
+    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} sent={sent && { state: sent.state, auto: sent.auto, arrived: sent.state === "sent" && sent.last ? countedList(sent.last.sent) : null }} headingRef={heading}
       onTeam={() => { reanchor.current = true; }}
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;
@@ -145,15 +163,16 @@ export function CloudWelcome() {
         <div className="mt-3 flex items-center justify-between gap-2 @2xl/welcome:mt-4 @2xl/welcome:flex-1 @2xl/welcome:flex-col @2xl/welcome:items-stretch @2xl/welcome:justify-start">
           <ol className="flex min-w-0 gap-1 @2xl/welcome:flex-col @2xl/welcome:gap-1.5">
             {WELCOME_STEPS.map((step, index) => {
-              const finished = welcomeStepFinished(record, step) || (step === "bring" && (copied || sent !== null));
+              const finished = welcomeStepFinished(record, step) || (step === "bring" && (copied || sent?.state === "sent"));
+              const bringing = step === "bring" && !finished && sent?.state === "sending";
               const current = view === step;
               return <li key={step} className="min-w-0">
-                <button type="button" data-welcome-rail={step} data-finished={finished || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}
+                <button type="button" data-welcome-rail={step} data-finished={finished || undefined} data-bringing={bringing || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}
                   className={cn("flex w-full min-w-0 items-center gap-2 rounded-full text-left transition-colors duration-150 motion-reduce:transition-none @2xl/welcome:items-start @2xl/welcome:gap-2.5 @2xl/welcome:rounded-[10px] @2xl/welcome:p-2.5",
                     current ? "bg-raised py-1.5 pl-1.5 pr-3" : "p-1.5 hover:bg-raised/60")}>
                   <span aria-hidden="true" className={cn("flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] text-[11.5px] font-semibold tabular-nums",
                     finished ? "check-in border-success bg-success" : current ? "border-accent text-accent-text" : "border-ink-secondary/40 text-ink-secondary")}>
-                    {finished ? <Check size={12} strokeWidth={3} /> : index + 1}
+                    {finished ? <Check size={12} strokeWidth={3} /> : bringing ? <Loader2 size={12} strokeWidth={2.5} className="animate-spin" /> : index + 1}
                   </span>
                   <span className={cn("min-w-0", !current && "sr-only @2xl/welcome:not-sr-only")}>
                     <span className={cn("block truncate text-[13px] font-medium @2xl/welcome:whitespace-normal @2xl/welcome:text-[13.5px]", current ? "text-ink" : "text-ink-secondary")}>{t(STEP_TEXT[step].title)}</span>

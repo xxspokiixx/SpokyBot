@@ -5,6 +5,7 @@ import { formatMoveBytes, moveView, type CloudMoveHandle } from "@/components/Cl
 import { TeamLibraryPanel } from "@/components/TeamLibraryPanel";
 import { suggestedChoice, type BringChoice } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
+import { listOf } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Chip, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
@@ -35,9 +36,9 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
   move: CloudMoveHandle | null;
   /** The Cloud has bots or chats of its own (a copy from before, a chat from a phone): nothing is copied over them. */
   cloudHasWork: boolean;
-  /** This computer's things come over by themselves (Keep My Cloud up to date): one line, nothing to choose or press; a
-   * fresh start only behind More. */
-  sent?: "sending" | "sent" | null;
+  /** This computer's things come (or came) over by themselves: one line, nothing to choose or press, a fresh start only
+   * behind More. `arrived`: what the last whole send brought, as countedList names it; `auto`: more keep coming. */
+  sent?: { state: "sending" | "sent"; auto: boolean; arrived: string[] | null } | null;
   headingRef: Ref<HTMLHeadingElement>;
   /** Before the team library selects the bots it adds, so that is not read as the person leaving. */
   onTeam: () => void;
@@ -142,11 +143,13 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
   const library = teams && <TeamLibraryPanel returnFocusRef={teamButton} onClose={() => setTeams(false)}
     onImported={() => { onTeam(); setTeams(false); onFinish("team"); }} />;
   if (sent) {
-    return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" data-bring-sent={sent} className="flex flex-col gap-5">
-      <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.sentTitle")}
+    const arrived = sent.arrived?.length ? t("cloudSend.strip.arrived", { list: listOf(sent.arrived) }) : t("cloudSend.strip.allHere");
+    const line = sent.state === "sending" ? t("cloudWelcome.bring.sending") : sent.auto ? `${arrived} ${t("cloudWelcome.bring.keepsComing")}` : arrived;
+    return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" data-bring-sent={sent.state} className="flex flex-col gap-5">
+      <StepHeading headingRef={headingRef} title={t(sent.auto ? "cloudWelcome.bring.sentTitle" : "cloudWelcome.bring.hereTitle")}
         sub={<span role="status" className="inline-flex items-start gap-2">
-          {sent === "sending" ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin" /> : <Check size={15} strokeWidth={2.5} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />}
-          <span>{t(sent === "sending" ? "cloudWelcome.bring.sending" : "cloudWelcome.bring.sent")}</span>
+          {sent.state === "sending" ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin" /> : <Check size={15} strokeWidth={2.5} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />}
+          <span>{line}</span>
         </span>} />
       {more
         ? <div data-bring-choice="fresh" className={cn(CARD, CARD_IDLE)}>{freshBody}<Footer>

@@ -1057,7 +1057,7 @@
   "cloudWelcome.bring.hereBody": "{name} already has bots or chats, so nothing is copied over them from here.",
   "cloudWelcome.bring.sentTitle": "Your bots come over by themselves",
   "cloudWelcome.bring.sending": "Bringing this computer's bots, chats and logins here…",
-  "cloudWelcome.bring.sent": "Your bots, chats and logins came over from this computer. New ones keep coming by themselves.",
+  "cloudWelcome.bring.keepsComing": "New ones keep coming by themselves.",
   "cloudWelcome.bring.more": "More",
   "cloudWelcome.count.bots": "{count} bots",
   "cloudWelcome.count.botsOne": "1 bot",
