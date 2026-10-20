@@ -39,7 +39,7 @@ describe("Settings → Import", () => {
   it("offers the welcome step's rows, with its counts, sources and switched-off note", () => {
     const shown = apps();
     expect(shown).toContain("2 from Claude Code and Codex");
-    expect(shown).toContain("1 MCP server from Cursor");
+    expect(shown).toContain("1 tool from Cursor");
     expect(shown).toContain("Added switched off.");
     expect(shown).toContain("Bring them in");
   });
