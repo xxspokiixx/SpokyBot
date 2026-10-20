@@ -125,6 +125,36 @@ describe("the automation panel", () => {
   });
 });
 
+describe("Copy address", () => {
+  const kept = { endpointUrl: "http://127.0.0.1:8800/hooks/wh_abc", url: "http://127.0.0.1:8800/hooks/wh_abc/whsec_kept-fixture", secret: "whsec_kept-fixture" };
+  const fresh = { endpointUrl: kept.endpointUrl, url: "http://127.0.0.1:8800/hooks/wh_abc/whsec_new-fixture", secret: "whsec_new-fixture" };
+  const panel = () => {
+    const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: [] });
+    return mount(createElement(AutomationPanel, { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
+  };
+  beforeEach(() => { copied.texts = []; credentials.items.clear(); });
+
+  it("copies the address the server keeps, which the bot that owns it may already have given an app, and never replaces it", async () => {
+    fixture.api.mockImplementation(async (path: unknown) => path === "/api/webhooks/hook-1/address" ? { credential: kept } : { webhook, credential: fresh });
+    const container = panel();
+    flushSync(() => button(container, "Copy address").click());
+    await vi.waitFor(() => expect(copied.texts).toEqual([kept.url]));
+    expect(fixture.api.mock.calls.map(([path]) => path)).not.toContain("/api/webhooks/hook-1/rotate");
+    expect(credentials.items.get("omb-webhook-credentials")).toContain(kept.url);
+  });
+
+  it("makes a new one only for an address from before addresses were kept that nothing here holds", async () => {
+    fixture.api.mockImplementation(async (path: unknown) => {
+      if (path === "/api/webhooks/hook-1/address") throw Object.assign(new Error("this address was made before addresses were kept"), { status: 404 });
+      return { webhook, credential: fresh };
+    });
+    const container = panel();
+    flushSync(() => button(container, "Copy address").click());
+    await vi.waitFor(() => expect(copied.texts).toEqual([fresh.url]));
+    expect(fixture.api).toHaveBeenCalledWith("/api/webhooks/hook-1/rotate", expect.objectContaining({ method: "POST" }));
+  });
+});
+
 describe("the Automations list switch", () => {
   const routine = { id: "routine-1", name: "Morning summary", prompt: "Send me a summary of my inbox.", target: "bot", botId: "bot-a", runOn: "maus", enabled: true,
     schedule: { type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] }, durationMinutes: 30, nextRunAt: now + 3_600_000, createdAt: now, updatedAt: now };

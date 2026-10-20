@@ -121,6 +121,10 @@ export interface SendTurnInput {
   sessionReset?: boolean;
   /** Hold the startup ACK until prompt dispatch (Claude: first model activity); a retired transient setup failure or sign-in refusal may reject with TurnNotStartedError. */
   startupRecovery?: boolean;
+  /** Given to a driver with `capabilities.engineAdmission`: awaited right before it starts an engine process ("process") or
+   * adds this thread's session to the running one whose pid is `joining` ("session"); rejects with TurnNotStartedError when
+   * the turn is stopped first. */
+  engineAdmission?: (start: "process" | "session", joining?: number) => Promise<void>;
   /** The turn with the conversation replayed inline, sent once on a fresh session when the provider refuses resumeCursor before reading the prompt. */
   recoveryText?: string;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
@@ -241,6 +245,8 @@ export interface ProviderAdapter {
     guestTurns?: "confined";
     /** "meter": `contextTokens` / `contextWindow` are the engine's own report, shown on the context meter but never used to time compaction. */
     contextReading?: "meter";
+    /** sendTurn calls `engineAdmission` itself before it starts an engine process or joins one. */
+    engineAdmission?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;

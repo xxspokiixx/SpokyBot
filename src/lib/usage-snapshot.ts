@@ -17,7 +17,7 @@ export const SNAPSHOT_CHECK_MS = 60 * 60 * 1_000;
 const SOURCE_TIMEOUT_MS = 60_000;
 const DAY_KEY = "omb-analytics-snapshot-day";
 
-export type CloudPlanFacts = { plan: "personal" | "pro" | "max" | "other" | "none" | "unknown"; trial?: boolean };
+export type CloudPlanFacts = { plan: "starter" | "personal" | "pro" | "max" | "other" | "none" | "unknown"; trial?: boolean };
 
 export interface UsageInput {
   config: ConfigStatus;

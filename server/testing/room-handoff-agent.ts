@@ -54,7 +54,15 @@ async function askPermission(server: AgentsIntegration, ask: { tool_name: string
   }
 }
 
-async function browserToolCall(server: AgentsIntegration, name: string, args: unknown): Promise<any> {
+/** `{{name}}` in a step's string arguments becomes what an earlier step's `capture` found. */
+function withCaptured(value: unknown, captured: Record<string, string>): unknown {
+  if (typeof value === "string") return value.replace(/\{\{(\w+)\}\}/g, (whole, name: string) => captured[name] ?? whole);
+  if (Array.isArray(value)) return value.map((item) => withCaptured(item, captured));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withCaptured(item, captured)]));
+  return value;
+}
+
+async function serverToolCall(server: AgentsIntegration, name: string, args: unknown): Promise<any> {
   const child = spawn(server.command, server.args, { env: { ...process.env, ...server.env }, stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.resume();
   try {
@@ -63,10 +71,10 @@ async function browserToolCall(server: AgentsIntegration, name: string, args: un
         try {
           const data = JSON.parse(line);
           if (data.id === 2) resolve(data);
-        } catch { reject(new Error("Fixture browser MCP returned malformed JSON")); }
+        } catch { reject(new Error("Fixture MCP server returned malformed JSON")); }
       });
       child.on("error", reject);
-      child.on("exit", (code, signal) => reject(new Error(`Fixture browser MCP exited before answering: ${signal ?? code}`)));
+      child.on("exit", (code, signal) => reject(new Error(`Fixture MCP server exited before answering: ${signal ?? code}`)));
       const send = (id: number, method: string, params: unknown) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
       send(1, "initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "claude-code", version: "fixture" } });
       send(2, "tools/call", { name, arguments: args });
@@ -187,12 +195,22 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       await call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "room-fixture", version: "1" } });
       evidence.push(await call("tools/list"));
       evidence.push(await call("tools/call", { name: "list_room_targets", arguments: {} }));
+      // `server` names another server the turn mounted ("browser", or a person's own MCP server); `capture` { name: regex }
+      // keeps the first group of the result for later steps' `{{name}}`.
+      const captured: Record<string, string> = {};
       for (const step of steps) {
-        const browser = step.server === "browser" ? (launch ? undefined : JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers?.browser as AgentsIntegration | undefined) : undefined;
-        if (step.server === "browser" && !browser) throw new Error("A scripted browser step needs the turn's browser tools");
-        const response = browser ? await browserToolCall(browser, step.tool, step.arguments) : await call("tools/call", { name: step.tool ?? "coordinate_bots", arguments: step.arguments });
+        const server = step.server ? (launch ? undefined : JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers?.[step.server] as AgentsIntegration | undefined) : undefined;
+        if (step.server && !server) throw new Error(`A scripted ${step.server} step needs that server mounted for the turn`);
+        const args = withCaptured(step.arguments, captured);
+        const response = server ? await serverToolCall(server, step.tool, args) : await call("tools/call", { name: step.tool ?? "coordinate_bots", arguments: args });
         evidence.push({ step, response });
         if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
+        for (const [name, pattern] of Object.entries((step.capture ?? {}) as Record<string, string>)) {
+          const text = (response.result?.content ?? []).map((part: any) => part?.text ?? "").join("\n");
+          const found = new RegExp(pattern).exec(text)?.[1];
+          if (!found) throw new Error(`Scripted capture ${name} found nothing in: ${text.slice(0, 300)}`);
+          captured[name] = found;
+        }
       }
       // A person's answer, like a test gate, is owned by the parent test's timeout.
       if (plan.gateFile || plan.approve || plan.screenCalls) clearTimeout(timer);

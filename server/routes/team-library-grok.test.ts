@@ -77,7 +77,7 @@ describe("POST /api/team-library/grok", () => {
     expect((await post({})).status).toBe(400);
     const foreign = await post({ url: `https://evil.example/bot/${ID}` });
     expect(foreign.status).toBe(400);
-    expect(((await foreign.json()) as { error: string }).error).toMatch(/Grok Bot share link/);
+    expect(((await foreign.json()) as { error: string }).error).toMatch(/Paste a Grok Bot link/);
     expect(upstream).not.toHaveBeenCalled();
     expect((await post({ url: `https://x.ai/bot/${ID}` })).status).toBe(404);
   });
@@ -119,7 +119,7 @@ describe("POST /api/team-library/grok", () => {
     const response = await post({ url: `https://x.ai/bot/${ID}` });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({ shareId: ID, name: "DOGE (Department of Grok Efficiency)", exportNote: "Your Cursor sign-in has expired. Sign in again." });
+    expect(body).toMatchObject({ shareId: ID, name: "DOGE (Department of Grok Efficiency)", exportNote: "Cursor refused the sign-in (HTTP 401). Sign in again." });
     expect(body.export).toBeUndefined();
     expect((await (await post.get("/api/team-library/cursor")).json())).toEqual({ signedIn: false, waiting: false });
   });

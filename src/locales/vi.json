@@ -1083,7 +1083,6 @@
   "sidebar.preview.waiting": "Đang chờ bạn…",
   "sidebar.preview.waitingOnTeammate": "Đang chờ đồng đội…",
   "sidebar.preview.working": "Đang xử lý…",
-  "sidebar.preview.screenFrame": "Khung hình màn hình",
   "sidebar.preview.botWorking": "{name} đang xử lý…",
   "sidebar.preview.botWorkingQueued": "{name} đang xử lý… · {count} trong hàng đợi",
   "sidebar.preview.aBot": "Một bot",

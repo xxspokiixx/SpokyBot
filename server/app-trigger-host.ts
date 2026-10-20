@@ -8,14 +8,16 @@ import { appEventCatalog, appLabel } from "./app-event-catalog.ts";
 import { brokerClient, type AppTriggerBroker, type BrokerAccess } from "./app-trigger-broker.ts";
 import { AppTriggerRequestService, type AppTriggerRequestStore } from "./app-trigger-requests.ts";
 import { AppTriggerError, AppTriggerManager, type AppTriggerPatch } from "./app-triggers.ts";
+import type { RosterMember } from "./peer-roster.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { RoutineManager } from "./routines.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./routes/table.ts";
 import { listTriggers, triggerTarget } from "./trigger-tools.ts";
+import { addressFor } from "./webhook-address.ts";
 import type { WebhookManager } from "./webhooks.ts";
 
-type Bot = {
-  id: string; name: string; color: string; section?: string; hidden?: boolean; composio?: boolean;
+type Bot = RosterMember & {
+  color: string; composio?: boolean;
   connectorTools?: Record<string, ConnectorToolGrant>; connectorScopes?: { apps: Record<string, "read" | "write"> };
 };
 type Connected = Record<string, { connected: boolean; accounts: Array<{ id: string; alias?: string; status: string }> }>;
@@ -29,6 +31,8 @@ export interface AppTriggerHostDeps {
   connectedApps: () => Promise<Connected>;
   routines: () => RoutineManager;
   webhooks: WebhookManager;
+  /** Where webhook addresses start: this computer's receiver, or the workspace's public address. */
+  webhookBase: () => string;
   botState: (botId: string) => "ready" | "busy" | "missing";
   timeZone: () => string;
   visibleBot: (auth: RequestAuth, botId: string) => boolean;
@@ -43,6 +47,8 @@ export interface InternalTriggerContext {
   ownsThread: (botId: string, threadId: string) => boolean;
   /** A turn on a Cloud its owner did not drive. */
   guestDriven: boolean;
+  /** A run a webhook or app event started, or work one handed on. */
+  outsideDriven: () => boolean;
   canCommit: () => boolean;
 }
 
@@ -169,10 +175,17 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     }
     const target = triggerTarget(context.from, url.searchParams.get("forBotId") ?? undefined, (id) => deps.store.bot(id));
     if ("error" in target) return json(res, target.status, { error: target.error });
-    return json(res, 200, listTriggers({
-      botId: target.forBot?.botId ?? context.from.id, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines(),
+    const ownerId = target.forBot?.botId ?? context.from.id;
+    const listing = listTriggers({
+      botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines(),
       webhooks: deps.webhooks.list(), appTriggers: manager.list(), runs: deps.routines().listRuns(), timeZone: deps.timeZone(), now: Date.now(),
-    }));
+    });
+    const shown = listing.trigger;
+    if (url.searchParams.get("includeAddress") !== "1" || !shown) return json(res, 200, listing);
+    if (shown.kind !== "webhook") return json(res, 200, { ...listing, trigger: { ...shown, addressRefused: "Only an automation another app sends to (a webhook) has an address." } });
+    const owner = deps.store.bot(ownerId);
+    const address = owner ? addressFor({ from: context.from, owner, guestDriven: context.guestDriven, outsideDriven: context.outsideDriven() }, deps.webhooks, shown.id, deps.webhookBase()) : {};
+    return json(res, 200, { ...listing, trigger: { ...shown, ...address } });
   };
 
   /** create_trigger (when=app_event) and manage_trigger on one: applies at once and leaves the receipt card. */
