@@ -44,7 +44,7 @@ beforeEach(() => {
   f.values = []; f.index = 0; f.effects = [];
   bridge = {
     state: vi.fn().mockResolvedValue(snapshot), refresh: vi.fn().mockResolvedValue(snapshot), onState: vi.fn(() => () => {}),
-    send: vi.fn().mockResolvedValue({ at: 1, reason: "button", result: { bots: ["Ember"], updatedBots: [], skills: 0, logins: 0, onePassword: true, settings: [], failed: [], notes: [] } }),
+    send: vi.fn().mockResolvedValue({ at: 1, reason: "button", result: { bots: ["Ember"], updatedBots: [], skills: 0, logins: 0, onePassword: true, settings: [], chats: { conversations: 48, messages: 900 }, failed: [], notes: [] } }),
     setAuto: vi.fn().mockResolvedValue({ ...snapshot, auto: false }), setItem: vi.fn().mockResolvedValue(snapshot),
   };
   setLocale("en");
@@ -68,10 +68,11 @@ it("Settings → MausBot Cloud: both sides side by side, Send everything, and th
   expect(html).toContain("Send everything to My Cloud");
   expect(html).toContain("Keep My Cloud up to date with this computer");
   expect(html).toContain('aria-labelledby="cloud-send-auto" data-cloud-send-auto="true" type="button" role="switch" aria-checked="true"');
-  expect(html).toContain("Stays separate: the chats on each side");
+  expect(html).toContain("Send everything brings the chats too");
+  expect(html).not.toContain("the chats on each side");
   tree(card).find((node) => node.props["data-cloud-send-all"])!.props.onClick!(); await flush();
   expect(bridge.send).toHaveBeenCalledWith();
-  expect(render(card).html).toContain("Sent to My Cloud: Ember and 1Password.");
+  expect(render(card).html).toContain("Sent to My Cloud: Ember, 1Password, and 48 chats.");
   tree(card).find((node) => node.props["aria-checked"] === true)!.props.onClick!(); await flush();
   expect(bridge.setAuto).toHaveBeenCalledWith(false);
 });
@@ -134,4 +135,24 @@ it("the strip stays away when nothing waits, when dismissed, and on any page but
   await onCloud(notice, false);
   expect(render(strip(false)).html).toBe("");
   expect(page.notice).not.toHaveBeenCalled();
+});
+
+it("My Cloud's strip says what could not be brought over and why, with Try again, instead of pointing elsewhere", async () => {
+  await onCloud();
+  const failed = { ...notice, bots: [], skills: 0, onePassword: true, signature: "sig-2",
+    last: { at: 3, failed: 3, reasons: [{ what: { bots: [], skills: 0, logins: 2, onePassword: true, settings: 0, chats: false }, error: "OpenMausBot on this computer did not answer. Try again." }] } };
+  vi.mocked(page.send).mockResolvedValue(failed);
+  tree(strip()).find((node) => node.type === "button" && text(node) === "Bring them over")!.props.onClick!(); await flush();
+  const html = render(strip()).html;
+  expect(html).toContain("2 logins and 1Password couldn't be sent: OpenMausBot on this computer did not answer. Try again.");
+  expect(html).not.toContain("See This computer's Settings");
+  tree(strip()).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();
+  expect(page.send).toHaveBeenCalledTimes(2);
+  // A send that stopped as a whole says why too.
+  vi.mocked(page.send).mockResolvedValue({ ...failed, last: { at: 4, failed: 0, error: "This app could not sign in to My Cloud. Try again." } });
+  tree(strip()).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();
+  expect(render(strip()).html).toContain("Send to My Cloud stopped: This app could not sign in to My Cloud. Try again.");
+  vi.mocked(page.send).mockRejectedValue(new Error("Error invoking remote method 'cloud-send:page-send': Error: cloud-send:page-send is only available in this app's window"));
+  tree(strip()).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();
+  expect(render(strip()).html).toContain("Send to My Cloud stopped: cloud-send:page-send is only available in this app's window");
 });

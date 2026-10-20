@@ -53,7 +53,7 @@ export class BotLogins {
 
   /** The desktop main process's private ask for one login, for "Also use on My Cloud" (login-handoff.ts). */
   receiveHandoff(message: unknown, post: (reply: LoginHandoffResult) => boolean): boolean {
-    return receiveLoginHandoff(message, this.store, post);
+    return receiveLoginHandoff(message, this.store, post, () => this.onePassword.status().error);
   }
 
   /** Where each login the bot may use fills, with its username. */

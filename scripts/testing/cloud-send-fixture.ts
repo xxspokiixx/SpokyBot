@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createCloudMove } from "../../electron/cloud-move.mjs";
 import { installCloudSend } from "../../electron/cloud-send-main.mjs";
 import { cloudPairingSignature } from "../../server/cloud-home.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
@@ -60,7 +61,9 @@ exports.createClient = async ({ auth }) => {
   return at;
 }
 
-export async function launchCloudSendFixture({ onePasswordToken }: { onePasswordToken: string }): Promise<CloudSendFixture> {
+/** `cloudOnePasswordToken`: the token My Cloud's 1Password accepts (default: this computer's), so a test can make 1Password
+ * refuse this computer's token on My Cloud. */
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken }: { onePasswordToken: string; cloudOnePasswordToken?: string }): Promise<CloudSendFixture> {
   const root = mkdtempSync(join(tmpdir(), "omb-cloud-send-"));
   const secret = randomBytes(32).toString("base64url");
   const ownerCapability = randomBytes(32).toString("base64url");
@@ -70,7 +73,7 @@ export async function launchCloudSendFixture({ onePasswordToken }: { onePassword
   const children: ChildProcess[] = [];
   const remember = async (response: Response) => { answers.push(await response.clone().text()); return response; };
 
-  async function start(name: string, env: NodeJS.ProcessEnv, port: number, extra: string[] = [], ipc = false): Promise<ChildProcess> {
+  async function start(name: string, env: NodeJS.ProcessEnv, port: number, extra: string[] = [], ipc = false, acceptedToken = onePasswordToken): Promise<ChildProcess> {
     const home = join(root, name);
     const dataDir = join(home, ".openmausbot");
     mkdirSync(dataDir, { recursive: true });
@@ -88,7 +91,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const child = spawn(process.execPath, ["--import", offline, ...extra, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
-        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), onePasswordToken), ...env },
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken), ...env },
       stdio: ["ignore", "pipe", "pipe", ...(ipc ? ["ipc" as const] : [])],
     });
     children.push(child);
@@ -119,7 +122,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const cloudPort = await freePortBlock([0, 1]);
   const cloudBase = `http://127.0.0.1:${cloudPort}`;
   await start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
-    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}` }, cloudPort);
+    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}` }, cloudPort, [], false, cloudOnePasswordToken);
 
   const mintCode = async (label: string) => {
     const body = JSON.stringify({ label, ttlSeconds: 300 });
@@ -148,6 +151,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const port = { postMessage: (message: unknown) => { desktop.send(message as object); } };
   const throughEdge = (bearer: string | null) => async (url: string | URL | Request, init: RequestInit = {}) =>
     remember(await fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...EDGE, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } }));
+  // Bring newer chats, as main.mjs gives it to Send to My Cloud.
+  const move = createCloudMove({
+    localRequest: (route, init) => fetch(`${desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": ownerCapability } }),
+    fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...EDGE } })) as typeof fetch,
+    tempRoot: join(root, "send-move-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
+  });
   const main = installCloudSend({
     ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler); } },
     localOnly: (channel, handler) => ((event: { page?: string }, ...args: unknown[]) => {
@@ -166,6 +175,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     localOrigin: () => desktopBase,
     openSettings: () => {},
     fetch: throughEdge(null) as typeof fetch,
+    bringChats: () => move.bring({ id: "cloud", name: "My Cloud", origin: cloudBase, kind: "cloud", grant: async () => ({ origin: cloudBase, code: await mintCode("Copy from desktop") }) }),
     keepUpToDate: false,
   });
   desktop.on("message", (message) => main.receive(port, message));
@@ -180,6 +190,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     menu: () => main.menu(),
     grant: async (label) => ({ origin: cloudBase, code: await mintCode(label), expiresAt: Date.now() + 300_000 }),
     async close() {
+      await move.close();
       for (const child of children) await waitForExit(child, { signal: "SIGTERM" });
       await removeTempDir(root);
     },

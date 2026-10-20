@@ -23,11 +23,12 @@ function folder(): string {
   folders.push(made);
   return made;
 }
-const manager = (file: string) => new WebhookManager({ file, botState: () => "ready", enqueue: () => ({ id: "run-1" }) });
+const manager = (file: string) => new WebhookManager({ file, botState: () => "ready", enqueue: () => ({ id: "run-1" }), roomMember: () => ({ ok: true }),
+  roomPost: async (trigger) => ({ posted: true, attachments: 0, threadId: `${trigger.groupId}-thread` }) });
 
-async function serve(seen: (botId: string) => boolean = () => true, file = join(folder(), "webhooks.json")) {
+async function serve(seen: (botId: string) => boolean = () => true, file = join(folder(), "webhooks.json"), seesRoom: (groupId: string) => boolean = () => true) {
   const webhooks = manager(file);
-  const routes = [createWebhookRoutes({ webhooks, ingress: () => ({ available: true, baseUrl: "http://127.0.0.1:8800" }), visible: () => ({ everything: false, bot: seen }) })];
+  const routes = [createWebhookRoutes({ webhooks, ingress: () => ({ available: true, baseUrl: "http://127.0.0.1:8800" }), visible: () => ({ everything: false, bot: seen, group: seesRoom }) })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth: { kind: "loopback", scopes: ["admin", "client"] }, json, readBody });
@@ -74,5 +75,16 @@ describe("a webhook's address for the person", () => {
     // The address a person copied before still works: reading never replaced it.
     expect(legacy.webhooks.authorize(old.webhook.endpointId, old.secret)).toBe(true);
     expect(legacy.webhooks.currentSecret(old.webhook.id, false)?.secret).toBeNull();
+  });
+
+  it("shows a room webhook, and what it posted, only to someone who sees the room as well as the bot", async () => {
+    const member = await serve(() => true, undefined, (groupId) => groupId !== "room-private");
+    member.webhooks.create({ name: "Open room", prompt: "", botId: "bot-a", delivery: "post", groupId: "room-open" });
+    const closed = member.webhooks.create({ name: "Closed room", prompt: "", botId: "bot-a", delivery: "post", groupId: "room-private" });
+    await member.webhooks.receive(closed.webhook.endpointId, closed.secret, { payload: { text: "The salary review moved to Friday" } });
+    const listed = (await member.call("GET", "/api/webhooks")).body;
+    expect(listed.webhooks.map((hook: { name: string }) => hook.name)).toEqual(["Open room"]);
+    expect(listed.attempts).toEqual([]);
+    expect(await member.call("GET", `/api/webhooks/${closed.webhook.id}/address`)).toEqual({ status: 404, body: { error: "no such webhook" } });
   });
 });

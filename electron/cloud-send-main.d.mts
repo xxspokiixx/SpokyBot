@@ -21,6 +21,7 @@ export function installCloudSend(deps: {
   localOrigin(): string;
   openSettings(): void;
   fetch?: typeof fetch;
+  bringChats?: (() => Promise<{ phase: string; action?: string; brought?: { conversations: number; messages: number }; error?: { message?: string } }>) | null;
   keepUpToDate?: boolean;
 }): {
   receive(proc: unknown, message: unknown): boolean;

@@ -260,6 +260,9 @@ jobs:
       - name: Verify paired phone authorization against packaged harness
         # Forks dist-server/index.js, built by the packaged server step.
         run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
+      - name: Verify Send to My Cloud's login handoff over the real utility port
+        # Forks dist-server/index.js, built by the packaged server step.
+        run: pnpm exec electron scripts/smoke-login-handoff.cjs
 
   gate:
     # One aggregation, not three queued runners doing the same check.
