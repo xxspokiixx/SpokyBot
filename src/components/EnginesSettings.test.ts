@@ -56,6 +56,9 @@ describe("Settings → Engines → ChatGPT accounts", () => {
     expect(accountActions("chatgpt", account("chatgpt", true, true))).toEqual({ signOut: true, remove: false });
     expect(accountActions("chatgpt", account("chatgpt-work", true, false))).toEqual({ signOut: false, remove: true });
     expect(accountActions("chatgpt", account("chatgpt-work", false, true))).toEqual({ signOut: false, remove: true });
+    fixture.instances = [{ ...account("chatgpt-work", true, false), cliDefault: "codex" }];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Remove<");
   });
 });
 
@@ -361,6 +364,7 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(accountActions("claude", claude("claude", "Personal", true))).toEqual({ signOut: true, remove: false });
     expect(accountActions("claude", claude("claude-work", "Work", false))).toEqual({ signOut: false, remove: true });
     expect(accountActions("claude", claude("claude-work", "Work", true, { authentication: { method: "paste-code", signOut: false } }))).toEqual({ signOut: false, remove: true });
+    expect(renderClaude(claude("claude-work", "Work", true))).toContain(">Remove<");
   });
 
   it("shows Claude Code's setup instead of accounts while it is missing", () => {
