@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkChats, checkSecrets, manifestGaps, missingAttachments, noGaps } from "./cloud-send-check.mjs";
+import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, noGaps } from "./cloud-send-check.mjs";
 
 const manifest = (extra = {}) => ({
   v: 1, appVersion: "0.1.120",
@@ -46,8 +46,9 @@ test("a move's check names what My Cloud lacks: items, parts, memory, rooms, con
   assert.equal(manifestGaps(null, there), null);
 });
 
-/** This computer's rows and path for `thread`, and a My Cloud that checks them against its own `cloudPath`/`cloudRows`. */
-function chatsSides({ rows, path, cloudRows = rows, cloudPath = path }) {
+/** This computer's rows and path for `thread`, and a My Cloud that checks them against its own `cloudPath`/`cloudRows`;
+ * `unstamped`: the rows it holds of the owner's that do not carry the owner yet. */
+function chatsSides({ rows, path, cloudRows = rows, cloudPath = path, unstamped = [] }) {
   const asked = [];
   const localJson = async (route) => {
     const from = Number(/from=(\d+)/u.exec(route)[1]);
@@ -59,7 +60,7 @@ function chatsSides({ rows, path, cloudRows = rows, cloudPath = path }) {
       const { threadId, ids, path: chunk } = body.conversations[0];
       let at = chunk?.after ? cloudPath.indexOf(chunk.after) + 1 : 0, holds = true, last = chunk?.after ?? null;
       for (const id of chunk?.ids ?? []) { const found = cloudPath.indexOf(id, at); if (found < 0) { holds = false; break; } at = found + 1; last = id; }
-      return { ok: true, status: 200, body: { v: 1, conversations: [{ threadId, missing: ids.filter((id) => !cloudRows.includes(id)),
+      return { ok: true, status: 200, body: { v: 1, conversations: [{ threadId, missing: ids.filter((id) => !cloudRows.includes(id)), unstamped: ids.filter((id) => unstamped.includes(id)).length,
         ...(chunk ? { path: { holds, at: last, ...(chunk.last ? { leaf: cloudPath.at(-1), length: cloudPath.length } : {}) } } : {}) }] } };
     },
   };
@@ -70,18 +71,37 @@ test("each conversation's check says the rows My Cloud lacks and whether its pat
   const ids = (count, prefix = "r") => Array.from({ length: count }, (_, i) => `${prefix}${i}`);
   const long = ids(12_001);
   const equal = chatsSides({ rows: long, path: long });
-  assert.deepEqual(await checkChats({ localJson: equal.localJson, session: equal.session, threads: ["t-a"] }), [{ threadId: "t-a", missing: 0, path: "equal" }]);
+  assert.deepEqual(await checkChats({ localJson: equal.localJson, session: equal.session, threads: ["t-a"] }), [{ threadId: "t-a", missing: 0, unstamped: 0, path: "equal" }]);
   assert.equal(equal.asked.length, 3, "ids and the path go in chunks of 5,000");
   assert.deepEqual(equal.asked.map((chunk) => chunk.path.after), [null, "r4999", "r9999"]);
 
   const woven = chatsSides({ rows: ids(4), path: ids(4), cloudRows: [...ids(4), "c1"], cloudPath: ["r0", "r1", "c1", "r2", "r3"] });
-  assert.deepEqual(await checkChats({ localJson: woven.localJson, session: woven.session, threads: ["t-b"] }), [{ threadId: "t-b", missing: 0, path: "inside" }]);
+  assert.deepEqual(await checkChats({ localJson: woven.localJson, session: woven.session, threads: ["t-b"] }), [{ threadId: "t-b", missing: 0, unstamped: 0, path: "inside" }]);
 
   // As the hidden-chat bug left one: every row there, the first turns off the path My Cloud shows.
   const hidden = chatsSides({ rows: ids(6), path: ids(6), cloudPath: ["r3", "r4", "r5"] });
-  assert.deepEqual(await checkChats({ localJson: hidden.localJson, session: hidden.session, threads: ["t-c"] }), [{ threadId: "t-c", missing: 0, path: "broken" }]);
+  assert.deepEqual(await checkChats({ localJson: hidden.localJson, session: hidden.session, threads: ["t-c"] }), [{ threadId: "t-c", missing: 0, unstamped: 0, path: "broken" }]);
   const short = chatsSides({ rows: ids(3), path: ids(3), cloudRows: ["r0"], cloudPath: ["r0"] });
-  assert.deepEqual(await checkChats({ localJson: short.localJson, session: short.session, threads: ["t-d"] }), [{ threadId: "t-d", missing: 2, path: "broken" }]);
+  assert.deepEqual(await checkChats({ localJson: short.localJson, session: short.session, threads: ["t-d"] }), [{ threadId: "t-d", missing: 2, unstamped: 0, path: "broken" }]);
+  // Rows My Cloud held before it kept its owner's lines as theirs, counted across chunks.
+  const held = chatsSides({ rows: long, path: long, unstamped: ["r3", "r7000"] });
+  assert.deepEqual(await checkChats({ localJson: held.localJson, session: held.session, threads: ["t-e"] }), [{ threadId: "t-e", missing: 0, unstamped: 2, path: "equal" }]);
+});
+
+test("a move's check passes only when nothing is missing, every path holds, and every line of the owner's carries them", () => {
+  const passing = { gaps: { items: [], parts: [], memory: [], rooms: [], connections: [], conversations: [] },
+    chats: [{ threadId: "t-a", missing: 0, unstamped: 0, path: "equal" }, { threadId: "t-b", missing: 0, unstamped: 0, path: "inside" }],
+    attachments: [], secrets: { equal: ["1password"], differs: [], missing: [] } };
+  assert.equal(checkPassed(passing), true);
+  for (const [why, failing] of [
+    ["a gap", { ...passing, gaps: { ...passing.gaps, memory: [{ bot: "ember", path: "MEMORY.md" }] } }],
+    ["a missing row", { ...passing, chats: [{ ...passing.chats[0], missing: 1 }] }],
+    ["a line of the owner's that does not carry them", { ...passing, chats: [{ ...passing.chats[0], unstamped: 1 }] }],
+    ["a path that does not hold", { ...passing, chats: [{ ...passing.chats[0], path: "broken" }] }],
+    ["a missing attachment", { ...passing, attachments: ["00000001.png"] }],
+    ["a credential held otherwise", { ...passing, secrets: { ...passing.secrets, differs: ["key:openrouter"] } }],
+    ["a missing credential", { ...passing, secrets: { ...passing.secrets, missing: ["mcp:docs"] } }],
+  ]) assert.equal(checkPassed(failing), false, why);
 });
 
 test("the attachments and credentials My Cloud lacks or holds otherwise are named, by name and id only", async () => {

@@ -1,7 +1,7 @@
 // What a move to the person's own Cloud checks once it has run, from both servers' own answers and never a secret:
-// the two manifests (GET /api/cloud-send/manifest), each conversation's rows and visible path (this computer's
-// /api/cloud-send/chats/ids against My Cloud's /chats/verify), the attachments the rows name, and each credential's
-// fingerprint under a fresh nonce (this computer's private port against My Cloud's /verify-secrets).
+// the two manifests (GET /api/cloud-send/manifest), each conversation's rows, its owner's lines and its visible path
+// (this computer's /api/cloud-send/chats/ids against My Cloud's /chats/verify), the attachments the rows name, and each
+// credential's fingerprint under a fresh nonce (this computer's private port against My Cloud's /verify-secrets).
 import { randomBytes } from "node:crypto";
 import { EMPTY } from "./cloud-send-parts.mjs";
 
@@ -53,37 +53,52 @@ export function manifestGaps(here, there, { sent = {}, removed = new Set(), skip
 
 export const noGaps = (gaps) => Boolean(gaps) && Object.values(gaps).every((entries) => entries.length === 0);
 
+/** A conversation's row ids on this computer, and its visible path's, a chunk at a time. */
+export async function* rowIdChunks(localJson, threadId) {
+  for (let from = 0, more = true; more; from += IDS) {
+    const page = await localJson(`/api/cloud-send/chats/ids?thread=${threadId}&from=${from}`);
+    if (!record(page)) throw new Error("OpenMausBot on this computer did not list a conversation's rows.");
+    more = page.more === true;
+    yield { ids: list(page.ids), path: list(page.path), leaf: page.leaf ?? null, more };
+  }
+}
+
 /**
  * Each conversation's rows and visible path checked on My Cloud, a chunk at a time, ids only: `missing`, the rows My
- * Cloud lacks; `path`: "equal" when My Cloud shows exactly this computer's path, "inside" when this computer's path
- * appears in order inside a longer one of My Cloud's (both sides added to it), "broken" otherwise.
+ * Cloud lacks; `unstamped`, the lines of its owner's it holds that do not carry the owner yet; `path`: "equal" when My
+ * Cloud shows exactly this computer's path, "inside" when this computer's path appears in order inside a longer one of
+ * My Cloud's (both sides added to it), "broken" otherwise.
  */
 export async function checkChats({ localJson, session, threads }) {
   const out = [];
   for (const threadId of threads.filter((id) => THREAD.test(id))) {
-    let missing = 0, after = null, holds = true, cloud = null, localLeaf = null, length = 0;
-    for (let from = 0, more = true; more; from += IDS) {
-      const page = await localJson(`/api/cloud-send/chats/ids?thread=${threadId}&from=${from}`);
-      if (!record(page)) throw new Error("OpenMausBot on this computer did not list a conversation's rows.");
-      more = page.more === true;
-      localLeaf = page.leaf ?? localLeaf;
-      length += list(page.path).length;
-      const asked = { threadId, ids: list(page.ids), ...(holds ? { path: { after, ids: list(page.path), last: !more } } : {}) };
+    let missing = 0, unstamped = 0, after = null, holds = true, cloud = null, localLeaf = null, length = 0;
+    for await (const chunk of rowIdChunks(localJson, threadId)) {
+      localLeaf = chunk.leaf ?? localLeaf;
+      length += chunk.path.length;
+      const asked = { threadId, ids: chunk.ids, ...(holds ? { path: { after, ids: chunk.path, last: !chunk.more } } : {}) };
       const answer = await session.call("POST", "/api/cloud-send/chats/verify", { v: 1, conversations: [asked] });
       const checked = answer.ok ? list(answer.body?.conversations).find((entry) => entry?.threadId === threadId) : null;
       if (!checked) throw Object.assign(new Error("My Cloud did not check the chats."), { status: answer.status });
       missing += list(checked.missing).length;
+      unstamped += Number.isSafeInteger(checked.unstamped) ? checked.unstamped : 0;
       if (asked.path) {
         holds = checked.path?.holds === true;
         after = checked.path?.at ?? null;
-        if (!more) cloud = checked.path;
+        if (!chunk.more) cloud = checked.path;
       }
     }
     const path = !holds ? "broken" : cloud && cloud.leaf === localLeaf && cloud.length === length ? "equal" : "inside";
-    out.push({ threadId, missing, path });
+    out.push({ threadId, missing, unstamped, path });
   }
   return out;
 }
+
+/** A move's check passes when nothing is missing: no gap, every conversation's rows there on a path that holds with
+ * each line of the owner's carrying them, and every attachment and credential there as it is here. */
+export const checkPassed = ({ gaps, chats, attachments, secrets }) => noGaps(gaps)
+  && chats.every((thread) => !thread.missing && !thread.unstamped && thread.path !== "broken")
+  && !attachments.length && !secrets.differs.length && !secrets.missing.length;
 
 /** The attachments of `names` My Cloud lacks. */
 export async function missingAttachments(session, names) {

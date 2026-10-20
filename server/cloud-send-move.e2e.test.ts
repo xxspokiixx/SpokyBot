@@ -11,7 +11,9 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createComputerSharing } from "../electron/computer-sharing.mjs";
+import { createCloudMove } from "../electron/cloud-move.mjs";
 import { itemKey } from "../electron/cloud-send-parts.mjs";
+import type { CloudSendOutcome } from "../electron/cloud-send.mjs";
 import { launchCloudSendFixture, type CloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
 import { FAKE_LOCATION_ID, startFakeHighLevel, startFakeRelay, type FakeHighLevel, type FakeRelay } from "./testing/fake-highlevel.ts";
@@ -76,7 +78,7 @@ afterAll(async () => {
 });
 
 type Side = CloudSendFixture["local"];
-type Row = { id: string; parentId?: string | null; kind: string; role: string; sender?: { id?: string } };
+type Row = { id: string; parentId?: string | null; kind: string; role: string; text?: string; at: number; sender?: { id?: string } };
 /** A conversation as a server holds it: every row, paged back with `before` as the chat view pages, and the path from the
  * server's own leaf, which is what its bot reads. */
 async function history(side: Side, threadId: string) {
@@ -107,13 +109,82 @@ function onlyDailyLogsLeft(report: Awaited<ReturnType<CloudSendFixture["check"]>
   const { memory, ...rest } = report.gaps;
   expect(rest).toEqual({ items: [], parts: [], rooms: [], connections: [], conversations: [] });
   expect(memory.map((note) => note.path).every((path) => /^memory\/log\/\d{4}-\d{2}-\d{2}\.md$/u.test(path)), JSON.stringify(memory)).toBe(true);
-  expect(report.chats.filter((entry) => entry.missing || entry.path === "broken")).toEqual([]);
+  expect(report.chats.filter((entry) => entry.missing || entry.unstamped || entry.path === "broken")).toEqual([]);
   expect([report.attachments, report.secrets.differs, report.secrets.missing]).toEqual([[], [], []]);
   return report.ok === (memory.length === 0);
 }
 
+/** Bring newer chats, as 0.1.117 to 0.1.119 copied a computer's chats to My Cloud: the rows arrive naming nobody. */
+async function bring() {
+  const copy = createCloudMove({
+    localRequest: (route, init) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": fx.ownerCapability } }),
+    fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...fx.edge } })) as typeof fetch,
+    tempRoot: join(fx.root, "bring-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
+  });
+  try {
+    const once = () => copy.bring({ id: "cloud", name: "My Cloud", origin: fx.cloudBase, kind: "cloud", grant: () => fx.grant("Copy from desktop") });
+    let brought = await once();
+    // A bot's turn can still be wrapping up after its reply; a backup refuses "busy" until it has.
+    for (let tries = 0; brought.error?.code === "busy" && tries < 40; tries++) { await new Promise((resolve) => setTimeout(resolve, 250)); brought = await once(); }
+    expect(brought.phase, JSON.stringify(brought)).toBe("done");
+  } finally {
+    await copy.close();
+  }
+}
+
 let archie: { id: string; threadId: string }, cleo: { id: string; threadId: string }, pip: { id: string; threadId: string }, ember: { id: string; threadId: string };
+let kai: { id: string; threadId: string };
 let room: { id: string; threadId: string };
+
+/** The latest turn on My Cloud of a bot in a conversation, as its engine got it (fake-claude-cli.ts's dump). */
+async function turnDump(botId: string, threadId: string, seen: Set<string>) {
+  let dump: { systemPrompt?: string; mcpConfig?: { mcpServers?: { agents?: { command: string; args: string[]; env: Record<string, string> } } } } | undefined;
+  await expect.poll(() => {
+    for (const name of readdirSync(join(scratch, "turns")).filter((entry) => entry.endsWith(".json") && !seen.has(entry))) {
+      let found: typeof dump;
+      try { found = JSON.parse(readFileSync(join(scratch, "turns", name), "utf8")); } catch { continue; }
+      const env = found?.mcpConfig?.mcpServers?.agents?.env;
+      if (env?.OMB_BOT_ID === botId && env.OMB_THREAD_ID === threadId) { dump = found; return true; }
+    }
+    return false;
+  }, { timeout: 30_000 }).toBe(true);
+  return dump!;
+}
+
+it("lines My Cloud already held of this computer's become its owner's when the move names them, at once for what its bots recall", async () => {
+  const { local, onCloud } = fx;
+  // Kai's and Lux's conversations reached My Cloud before My Cloud kept its owner's lines as theirs, as any send or Bring
+  // before this one left them. The move (next) names Kai's; Lux's are named here, over the owner's own session.
+  kai = await newBot("Kai");
+  await turn(local, kai, "Keep the Acme notes.");
+  const lux = await newBot("Lux");
+  await turn(local, lux, "Draft the launch memo.");
+  expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(kai.id), itemKey.bot(lux.id)] })).result.bots.sort()).toEqual(["Kai", "Lux"]);
+  await bring();
+  for (const bot of [kai, lux]) {
+    const brought = (await history(onCloud, bot.threadId)).rows.filter((row) => row.role === "user");
+    expect(brought.map((row) => row.sender?.id ?? null), "the line came over naming nobody").toEqual([null]);
+  }
+
+  // What Lux, in a conversation of its own on My Cloud, is told of its recent work elsewhere.
+  const latest = (await history(onCloud, lux.threadId)).rows.filter((row) => row.role === "bot" && row.kind === "text" && row.text).sort((a, b) => a.at - b.at).at(-1)!;
+  const said = `you said: ${JSON.stringify(latest.text!.replace(/\s+/gu, " ").trim().slice(0, 40)).slice(0, -1)}`;
+  const recentWork = async () => {
+    const task = (await onCloud("POST", `/api/bots/${lux.id}/tasks`, { title: "Follow-up" })).body.task as { threadId: string };
+    const seen = new Set(readdirSync(join(scratch, "turns")));
+    expect((await onCloud("POST", `/api/bots/${lux.id}/messages`, { text: "Where are we?", threadId: task.threadId })).status).toBe(202);
+    const prompt = (await turnDump(lux.id, task.threadId, seen)).systemPrompt ?? "";
+    await expect.poll(() => idle(onCloud), { timeout: 30_000, interval: 100 }).toBe(true);
+    return prompt;
+  };
+  expect(await recentWork()).not.toContain(said);
+  const before = await recentWork();
+  expect(before, "the first Follow-up is listed").toContain("Your recent work");
+  expect(before, "a conversation with a line that names nobody is never recalled on a Cloud home").not.toContain(said);
+  const ids = (await history(local, lux.threadId)).rows.map((row) => row.id);
+  expect((await onCloud("POST", "/api/cloud-send/chats/owner", { v: 1, conversations: [{ threadId: lux.threadId, ids }] })).body).toEqual({ v: 1, stamped: 1 });
+  expect(await recentWork(), "once its lines are the owner's, at once: nothing else in it changed").toContain(said);
+}, hostTimeout(180_000));
 
 it("a move carries everything, apps and keys first, and its check finds every row, path, attachment and credential there", async () => {
   const { local, onCloud } = fx;
@@ -183,9 +254,10 @@ it("a move carries everything, apps and keys first, and its check finds every ro
   const report = await fx.check();
   expect(onlyDailyLogsLeft(report)).toBe(true);
   const path = Object.fromEntries(report.chats.map((entry) => [entry.threadId, entry]));
-  expect(path[archie.threadId]).toEqual({ threadId: archie.threadId, missing: 0, path: "equal" });
-  expect(path[room.threadId]).toEqual({ threadId: room.threadId, missing: 0, path: "equal" });
-  expect(path[cleo.threadId]).toEqual({ threadId: cleo.threadId, missing: 0, path: "inside" });
+  expect(path[archie.threadId]).toEqual({ threadId: archie.threadId, missing: 0, unstamped: 0, path: "equal" });
+  expect(path[room.threadId]).toEqual({ threadId: room.threadId, missing: 0, unstamped: 0, path: "equal" });
+  expect(path[cleo.threadId]).toEqual({ threadId: cleo.threadId, missing: 0, unstamped: 0, path: "inside" });
+  expect(path[kai.threadId], "the line Kai's conversation came with is its owner's now").toEqual({ threadId: kai.threadId, missing: 0, unstamped: 0, path: "equal" });
   expect(report.attachments).toEqual([]);
   expect(report.secrets.differs).toEqual([]);
   expect(report.secrets.missing).toEqual([]);
@@ -211,17 +283,8 @@ it("a move run again changes nothing on My Cloud, and its check still finds ever
 
 /** The latest turn on My Cloud of a bot in a conversation: its agents tools, as the engine got them. */
 async function agentsFor(botId: string, threadId: string, seen: Set<string>) {
-  let agents: { command: string; args: string[]; env: Record<string, string> } | undefined;
-  await expect.poll(() => {
-    for (const name of readdirSync(join(scratch, "turns")).filter((entry) => entry.endsWith(".json") && !seen.has(entry))) {
-      let found: { mcpConfig?: { mcpServers?: { agents?: typeof agents } } };
-      try { found = JSON.parse(readFileSync(join(scratch, "turns", name), "utf8")); } catch { continue; }
-      const env = found.mcpConfig?.mcpServers?.agents?.env;
-      if (env?.OMB_BOT_ID === botId && env.OMB_THREAD_ID === threadId) { agents = found.mcpConfig!.mcpServers!.agents; return true; }
-    }
-    return false;
-  }, { timeout: 30_000 }).toBe(true);
-  const proxy = spawn(agents!.command, agents!.args, { env: { PATH: process.env.PATH, HOME: scratch, ...agents!.env }, stdio: ["pipe", "pipe", "pipe"] });
+  const agents = (await turnDump(botId, threadId, seen)).mcpConfig!.mcpServers!.agents!;
+  const proxy = spawn(agents.command, agents.args, { env: { PATH: process.env.PATH, HOME: scratch, ...agents.env }, stdio: ["pipe", "pipe", "pipe"] });
   proxies.push(proxy);
   const replies = new Map<number, (value: any) => void>();
   createInterface({ input: proxy.stdout! }).on("line", (line) => { const message = JSON.parse(line); replies.get(message.id)?.(message.result); replies.delete(message.id); });
@@ -267,6 +330,16 @@ it("a moved conversation may use the lent Mac and feeds its bot's memory on My C
     await expect.poll(async () => (await logs()).length, { timeout: 30_000, interval: 250 }).toBeGreaterThan(0);
     const today = (await fx.onCloud("GET", `/api/bots/${pip.id}/memory/file?path=${encodeURIComponent((await logs())[0]!.path)}`)).body.text as string;
     expect(today.trim().length).toBeGreaterThan(0);
+
+    // Kai's conversation, there before My Cloud kept its owner's lines as theirs, may use the lent Mac too.
+    rmSync(release, { force: true });
+    const seenBefore = new Set(readdirSync(join(scratch, "turns")));
+    expect((await fx.onCloud("POST", `/api/bots/${kai.id}/messages`, { text: "Read plan.md from my Mac.", threadId: kai.threadId })).status).toBe(202);
+    const kaiCall = await agentsFor(kai.id, kai.threadId, seenBefore);
+    const kaiListing = JSON.parse((await kaiCall("list_shared_computers")).content[0].text);
+    expect(kaiListing.unavailable).toBeUndefined();
+    expect(kaiListing.computers.map((entry: { id: string }) => entry.id)).toEqual([lent[0].id]);
+    writeFileSync(release, "");
   } finally {
     connector.close();
     writeFileSync(release, "");
@@ -275,6 +348,8 @@ it("a moved conversation may use the lent Mac and feeds its bot's memory on My C
 }, hostTimeout(180_000));
 
 it("lines the owner wrote on this computer arrive as the same owner as the lines they write on My Cloud", async () => {
+  const before = (await history(fx.onCloud, kai.threadId)).rows.filter((row) => row.role === "user").map((row) => row.sender?.id);
+  expect(before.length).toBeGreaterThan(0);
   const [here, there] = [await history(fx.local, cleo.threadId), await history(fx.onCloud, cleo.threadId)];
   const typedHere = new Set(here.rows.filter((row) => row.role === "user").map((row) => row.id));
   expect(here.rows.filter((row) => row.role === "user").every((row) => row.sender === undefined), "this computer's own lines name nobody").toBe(true);
@@ -282,4 +357,5 @@ it("lines the owner wrote on this computer arrive as the same owner as the lines
   expect(owners.filter(([mine]) => mine)).toHaveLength(typedHere.size);
   expect(new Set(owners.map(([, owner]) => owner)), "this computer's lines and My Cloud's own carry one owner").toEqual(new Set([owners[0]![1]]));
   expect(owners[0]![1]).toMatch(/^p_/u);
+  expect(new Set(before), "and so do the lines My Cloud held from before").toEqual(new Set([owners[0]![1]]));
 });

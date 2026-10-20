@@ -124,9 +124,10 @@ export interface CloudMoveCheck {
     connections: string[];
     conversations: string[];
   };
-  /** Per conversation: rows My Cloud lacks, and whether this computer's visible path is My Cloud's ("equal"), appears in
-   * order inside a longer one ("inside", both sides added to it) or does not hold ("broken"). */
-  chats: Array<{ threadId: string; missing: number; path: "equal" | "inside" | "broken" }>;
+  /** Per conversation: rows My Cloud lacks, lines of its owner's it holds that do not carry the owner yet, and whether
+   * this computer's visible path is My Cloud's ("equal"), appears in order inside a longer one ("inside", both sides added
+   * to it) or does not hold ("broken"). */
+  chats: Array<{ threadId: string; missing: number; unstamped: number; path: "equal" | "inside" | "broken" }>;
   attachments: string[];
   /** Credentials by id, compared by fingerprint only. */
   secrets: { equal: string[]; differs: string[]; missing: string[] };

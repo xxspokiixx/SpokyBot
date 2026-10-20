@@ -24,15 +24,23 @@ function answeredInWindow(card: NonNullable<Message["card"]>): boolean {
   return answeredByPerson(card) && (!card.answeredBy || card.answeredBy.kind === "loopback");
 }
 
+/** A row of the owner's own that does not carry them yet: a line they wrote, or a card they answered, in that
+ * computer's own window. */
+export const unstamped = (row: Message): boolean => ownersOwnLine(row) || Boolean(row.card && answeredInWindow(row.card));
+
+/** What makes a row the owner's on My Cloud; null when it is someone else's, an automation's, or carries them already. */
+export function ownerStamp(row: Message, owner: CloudOwner): Pick<Message, "sender" | "card"> | null {
+  const line = ownersOwnLine(row);
+  const card = row.card && answeredInWindow(row.card) ? row.card : null;
+  if (!line && !card) return null;
+  const answeredBy: CardAnswerer = { kind: "session", name: owner.name, person: owner.person, ...(card?.answeredBy?.via ? { via: card.answeredBy.via } : {}) };
+  return { ...(line ? { sender: { name: owner.name, id: owner.person } } : {}), ...(card ? { card: { ...card, answeredBy } } : {}) };
+}
+
 /** A bot conversation's rows as My Cloud keeps them: the owner's own lines and answers carry the owner. */
 export function stampOwner(rows: readonly Message[], owner: CloudOwner): Message[] {
-  const sender = { name: owner.name, id: owner.person };
   return rows.map((row) => {
-    let stamped = ownersOwnLine(row) ? { ...row, sender } : row;
-    if (row.card && answeredInWindow(row.card)) {
-      const answeredBy: CardAnswerer = { kind: "session", name: owner.name, person: owner.person, ...(row.card.answeredBy?.via ? { via: row.card.answeredBy.via } : {}) };
-      stamped = { ...stamped, card: { ...row.card, answeredBy } };
-    }
-    return stamped;
+    const stamp = ownerStamp(row, owner);
+    return stamp ? { ...row, ...stamp } : row;
   });
 }

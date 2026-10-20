@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { BOT_PARTS, EMPTY, PICTURE_PART, differenceSignature, failedSummary, itemKey, parseSendSummary, pendingRows, planSend, resultKey } from "./cloud-send-parts.mjs";
 import { collectConnections, releaseConnections, sendConnections } from "./cloud-connections.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
-import { checkChats, checkSecrets, manifestGaps, missingAttachments } from "./cloud-send-check.mjs";
+import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, rowIdChunks } from "./cloud-send-check.mjs";
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
 /** One request's chats: a few conversations' rows, well under My Cloud's body limit. */
@@ -26,6 +26,9 @@ const CHATS_BATCH_BYTES = 4 * 1024 * 1024;
 const CHATS_BATCH_PAGES = 40;
 /** My Cloud checks at most this many attachment names a request. */
 const ATTACHMENT_NAMES = 2000;
+/** My Cloud takes at most this many row ids, of at most this many conversations, a request. */
+const ROW_IDS = 10_000;
+const ROW_ID_CONVERSATIONS = 200;
 const MEMORY_FILES = 100;
 const PICTURE_TYPES = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const VAULT_ID = /^[\w-]{1,128}$/u;
@@ -363,8 +366,10 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         job.chats = true;
         progress = null;
         publish();
-        try { await sendChatRows(origin, session, latest, result, { everything: move }); }
-        catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
+        try {
+          await sendChatRows(origin, session, latest, result, { everything: move });
+          if (move) await stampHeld(origin, session, latest);
+        } catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
       }
       return latest;
     } finally {
@@ -480,6 +485,31 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       }
       progress = { done: ++done, total };
       publish();
+    }
+    await flush();
+  }
+
+  /** A move has My Cloud make its owner's lines and answers its owner's among the rows it already held of this computer's
+   * bots, which an earlier send or a Bring left naming nobody: this computer's row ids go, never a row. */
+  async function stampHeld(origin, session, theirs) {
+    const listed = await localJson("/api/cloud-send/chats");
+    const kept = entry(origin);
+    const cloudBots = new Set(theirs.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id));
+    const threads = (Array.isArray(listed?.conversations) ? listed.conversations : []).filter((head) => record(head) && cloudBots.has(head.bot)
+      && typeof head.threadId === "string" && /^[\w-]{1,200}$/u.test(head.threadId) && kept.chats[head.threadId] !== "removed").map((head) => head.threadId);
+    let batch = [], ids = 0;
+    const flush = async () => {
+      if (!batch.length) return;
+      const answer = await session.call("POST", "/api/cloud-send/chats/owner", { v: 1, conversations: batch });
+      if (!answer.ok) throw new CloudSendError("refused", refusal(answer, "My Cloud could not keep the chats' lines as yours."));
+      batch = []; ids = 0;
+    };
+    for (const threadId of threads) {
+      for await (const chunk of rowIdChunks(localJson, threadId)) {
+        if (ids + chunk.ids.length > ROW_IDS || batch.length >= ROW_ID_CONVERSATIONS) await flush();
+        batch.push({ threadId, ids: chunk.ids });
+        ids += chunk.ids.length;
+      }
     }
     await flush();
   }
@@ -721,9 +751,10 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
 
   /**
    * What did not arrive of what a move carried, from both sides' own answers, over one owner session that counts as
-   * someone using My Cloud: `gaps`, the manifests compared (cloud-send-check.mjs); `chats`, each conversation's rows and
-   * visible path; `attachments`, the stored ones My Cloud lacks; `secrets`, each credential by its fingerprint. Left out:
-   * what was removed on My Cloud, and a 1Password token 1Password itself refused. `ok` when nothing is missing.
+   * someone using My Cloud: `gaps`, the manifests compared (cloud-send-check.mjs); `chats`, each conversation's rows, its
+   * owner's lines and its visible path; `attachments`, the stored ones My Cloud lacks; `secrets`, each credential by its
+   * fingerprint. Left out: what was removed on My Cloud, and a 1Password token 1Password itself refused. `ok` when
+   * nothing is missing.
    */
   async function check() {
     const origin = cloud.origin();
@@ -745,9 +776,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const chats = await checkChats({ localJson, session, threads });
       const attachments = await missingAttachments(session, Array.isArray(here.attachments) ? here.attachments : []);
       const secrets = await checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) });
-      const ok = Object.values(gaps).every((entries) => !entries.length) && chats.every((thread) => !thread.missing && thread.path !== "broken")
-        && !attachments.length && !secrets.differs.length && !secrets.missing.length;
-      return { ok, gaps, chats, attachments, secrets };
+      return { ok: checkPassed({ gaps, chats, attachments, secrets }), gaps, chats, attachments, secrets };
     } finally {
       try { await session.close(); } catch {}
     }

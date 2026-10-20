@@ -16,9 +16,10 @@ const stored = (value = null) => ({ read: () => value, write(next) { value = str
 /**
  * This computer (`here`: its items, bots, connections and conversations) and a My Cloud that keeps what it is sent
  * (`there`: items by key, so a bot it makes takes its defaults until its fields arrive). `takesMove`: My Cloud says it
- * takes a move. Every call to My Cloud is in `calls`.
+ * takes a move. `rowIds`: how many rows each of this computer's conversations has (one by default). Every call to My Cloud
+ * is in `calls`.
  */
-function sides({ here = [], bots = {}, there = [], connections = [], secrets = {}, takesMove = true, conversations = [], onCall = () => {} } = {}) {
+function sides({ here = [], bots = {}, there = [], connections = [], secrets = {}, takesMove = true, conversations = [], rowIds = {}, onCall = () => {} } = {}) {
   const calls = [];
   const cloud = new Map(there.map((item) => [item.key, structuredClone(item)]));
   const session = {
@@ -60,6 +61,11 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
       if (route.includes("/memory/file")) return json({ exists: false, text: "" });
       if (route === "/api/cloud-connections") return json({ computer: { environmentId: "env-desk", label: "Amit's Mac" }, connections, engines: [], commands: [] });
       if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations });
+      const listed = /^\/api\/cloud-send\/chats\/ids\?thread=([\w-]+)&from=(\d+)$/u.exec(route);
+      if (listed) {
+        const all = Array.from({ length: rowIds[listed[1]] ?? 1 }, (_, i) => `${listed[1]}-${i + 1}`), from = Number(listed[2]);
+        return json({ v: 1, ids: all.slice(from, from + 5_000), path: all.slice(from, from + 5_000), leaf: all.at(-1), more: from + 5_000 < all.length });
+      }
       const rows = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)/u.exec(route);
       if (rows) return json({ rows: [{ id: `${rows[1]}-1`, at: 1 }], leaf: `${rows[1]}-1`, task: null, last: 1, lastId: `${rows[1]}-1`, more: false, restarted: false, attachments: [] });
       return json({}, 404);
@@ -212,4 +218,51 @@ test("an app or key that could not move is said with My Cloud's reason, counted,
   assert.deepEqual(outcome.result.failed, [{ key: "key:openrouter", kind: "connection", label: "OpenRouter", error: "My Cloud said: this key is not for this Cloud", final: true }]);
   assert.deepEqual(sendNotice(send.snapshot()).last.reasons, [{ what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, connections: 1, chats: false },
     error: "My Cloud said: this key is not for this Cloud" }]);
+});
+
+test("a move has My Cloud keep as its owner's the lines it already held of this computer's bots, by row id only; never a room's, and Send everything never asks", async () => {
+  const conversations = [
+    { bot: "ember", threadId: "t-ember", last: 1, lastId: "t-ember-1", busy: false },
+    { bot: "juno", threadId: "t-juno", last: 1, lastId: "t-juno-1", busy: false },
+    { room: "r1", threadId: "t-room", last: 1, lastId: "t-room-1", busy: false },
+  ];
+  const asked = [];
+  const make = () => sides({ here: [bot("ember", { soul: "s" })], there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } }, conversations, rowIds: { "t-ember": 12_001 },
+    onCall: (method, route, body) => {
+      if (route !== "/api/cloud-send/chats/owner") return null;
+      asked.push(body.conversations.map((entry) => [entry.threadId, entry.ids.length, entry.ids[0]]));
+      return reply(200, { v: 1, stamped: 1 });
+    } });
+  const outcome = await createCloudSend(make().deps).send({ reason: "move" });
+  assert.deepEqual(outcome.result.failed, []);
+  assert.deepEqual(asked, [[["t-ember", 5_000, "t-ember-1"], ["t-ember", 5_000, "t-ember-5001"]], [["t-ember", 2_001, "t-ember-10001"]]],
+    "Ember's row ids, at most 10,000 a request; Juno is not on My Cloud, and a room's lines are never the owner's");
+  asked.length = 0;
+  await createCloudSend(make().deps).send();
+  assert.deepEqual(asked, [], "only the move asks");
+});
+
+test("a move names at most 200 of the conversations My Cloud held a request, never one removed there, and says it when My Cloud refuses", async () => {
+  const conversations = [
+    ...Array.from({ length: 201 }, (_, i) => ({ bot: "ember", threadId: `t-ember-${i}`, last: 1, lastId: `t-ember-${i}-1`, busy: false })),
+    { bot: "ember", threadId: "t-gone", last: 1, lastId: "t-gone-1", busy: false },
+  ];
+  let refuse = false;
+  const asked = [];
+  const make = () => {
+    const both = sides({ here: [bot("ember", { soul: "s" })], there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } }, conversations,
+      onCall: (method, route, body) => {
+        if (route !== "/api/cloud-send/chats/owner") return null;
+        asked.push(body.conversations.map((entry) => entry.threadId));
+        return refuse ? reply(500, { error: "the store is busy" }) : reply(200, { v: 1, stamped: 0 });
+      } });
+    both.deps.store = stored({ v: 1, clouds: { [CLOUD]: { chats: { "t-gone": "removed" } } } });
+    return both;
+  };
+  assert.deepEqual((await createCloudSend(make().deps).send({ reason: "move" })).result.failed, []);
+  assert.deepEqual(asked.map((threads) => threads.length), [200, 1]);
+  assert.ok(!asked.flat().includes("t-gone"), "removed on My Cloud, its lines are never named");
+  refuse = true;
+  const refused = await createCloudSend(make().deps).send({ reason: "move" });
+  assert.deepEqual(refused.result.failed.map((failure) => [failure.key, failure.error]), [["chats", "My Cloud said: the store is busy"]]);
 });

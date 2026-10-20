@@ -214,7 +214,7 @@ test("Also use on My Cloud says plainly when My Cloud is too old to receive a lo
     server: () => null, local: async () => new Response(JSON.stringify(summary([{ key: "1password", kind: "1password", label: "1Password", parts: { token: "t" } }])), { status: 200 }),
     home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) }),
     cookieFetch: async () => new Response("", { status: 404 }), reconnect: async () => false, power: { asleep: () => false },
-    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {}, keepUpToDate: false,
+    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {},
   });
   assert.deepEqual(await handlers.get("cloud-logins:state")({}), { cloud: { reachable: false } });
   await assert.rejects(handlers.get("cloud-logins:send")({}, { kind: "1password" }), /My Cloud needs an update/);
@@ -354,7 +354,7 @@ test("Bring newer chats' answer becomes the send's chats, and a copy already run
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localOnly: (_channel, handler) => handler, cloudPage: () => "cloud",
     server: () => null, local: localResponse, home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) }),
     cookieFetch: async () => new Response(JSON.stringify(summary([])), { status: 200 }), reconnect: async () => false, power: { asleep: () => false },
-    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {}, keepUpToDate: false,
+    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {},
     fetch: async (url) => String(url).endsWith("/api/auth/pair") && !pairing ? new Response("{}", { status: 401 })
       : new Response(JSON.stringify(String(url).endsWith("/api/auth/pair") ? { token: "omb_sess_fake" } : String(url).endsWith("/api/cloud-send") ? summary([]) : {}), { status: 200 }),
     bringChats: async () => state,

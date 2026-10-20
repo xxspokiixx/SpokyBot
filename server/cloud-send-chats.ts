@@ -1,4 +1,4 @@
-// Keep My Cloud up to date's chats, by row, never as a copy. This computer lists each bot conversation's newest stored
+// Send to My Cloud's chats, by row, never as a copy. This computer lists each bot conversation's newest stored
 // row (GET /api/cloud-send/chats) and hands main the rows stored after the last one My Cloud took (GET
 // /api/cloud-send/chats/rows); My Cloud adds them as Bring newer chats adds a copy's (cloud-chat-merge.ts): only what it
 // lacks, never replacing or deleting anything. A conversation's history therefore goes once, and then only what is new.
@@ -12,10 +12,10 @@ import { z } from "zod";
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES } from "./attachments.ts";
 import { activePath, addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation, type SentRoom } from "./cloud-chat-merge.ts";
 import { threadHeads, threadRowNumbers, threadRowsFrom } from "./message-db.ts";
-import type { CloudOwner } from "./cloud-owner-lines.ts";
+import { ownerStamp, unstamped, type CloudOwner } from "./cloud-owner-lines.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { RouteContext } from "./routes/table.ts";
-import type { BotRecord, GroupRecord, GroupTaskRecord, Message, TaskRecord } from "./store.ts";
+import type { BotRecord, GroupRecord, GroupTaskRecord, Message, Store, TaskRecord } from "./store.ts";
 
 export const CHAT_ROWS_PAGE = 300;
 /** A page's rows past its first, by their stored size: main sends a few pages per request, under CHATS_BODY_MAX. */
@@ -155,13 +155,15 @@ function rawBody(req: IncomingMessage, limit: number): Promise<Buffer | null> {
 }
 
 export interface CloudSendChatsDeps {
-  store: ChatStore & { bots: BotRecord[] };
+  store: ChatStore & Pick<Store, "patchMessage"> & { bots: BotRecord[] };
   dataDir: string;
   /** My Cloud's owner, when the request is the owner's own session on a Cloud home; null otherwise. */
   owner?(auth: RequestAuth): CloudOwner | null;
+  /** Lines of a conversation it held became its owner's: whatever remembers who wrote in it looks again. */
+  stamped?(threadId: string): void;
 }
 
-const ownerOf = (store: CloudSendChatsDeps["store"], threadId: string) => {
+const ownerOf = (store: Pick<ChatStore, "bots" | "groups">, threadId: string) => {
   const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
   return { bot, room: bot ? undefined : store.groups.find((candidate) => roomThreads(candidate).includes(threadId)) };
 };
@@ -205,6 +207,30 @@ export function inOrder(path: readonly string[], after: string | null, ids: read
   return { holds: true, at: last };
 }
 
+const idsSchema = z.object({
+  v: z.literal(1),
+  conversations: z.array(z.object({ threadId: z.string().regex(/^[\w-]{1,200}$/u), ids: z.array(z.string().max(200)).max(VERIFY_IDS) })).max(200),
+}).refine((body) => body.conversations.reduce((sum, entry) => sum + entry.ids.length, 0) <= 2 * VERIFY_IDS);
+
+/** My Cloud's side of the move's own lines: of these rows it holds of a bot conversation, each its owner wrote or
+ * answered in the window they came from, which an earlier send or a Bring left naming nobody, becomes the owner's as an
+ * arriving one does. A room's never do. Ids only. */
+export function stampHeld(store: CloudSendChatsDeps["store"], conversations: ReadonlyArray<{ threadId: string; ids: readonly string[] }>, owner: CloudOwner): { stamped: number; threads: string[] } {
+  let stamped = 0;
+  const threads = new Set<string>();
+  for (const { threadId, ids } of conversations) {
+    if (!ownerOf(store, threadId).bot) continue;
+    const named = new Set(ids);
+    for (const row of store.messagesFor(threadId)) {
+      const stamp = named.has(row.id) ? ownerStamp(row, owner) : null;
+      if (!stamp || !store.patchMessage(threadId, row.id, stamp)) continue;
+      stamped++;
+      threads.add(threadId);
+    }
+  }
+  return { stamped, threads: [...threads] };
+}
+
 const verifySchema = z.object({
   v: z.literal(1),
   conversations: z.array(z.object({
@@ -214,16 +240,18 @@ const verifySchema = z.object({
   })).max(200),
 }).refine((body) => body.conversations.reduce((sum, entry) => sum + (entry.ids?.length ?? 0) + (entry.path?.ids.length ?? 0), 0) <= 2 * VERIFY_IDS);
 
-/** My Cloud's side of checking a move's chats: which of the sent ids it lacks, and whether the sender's visible path
- * holds on its own, in order (a conversation both sides added to weaves the two together). The last chunk of a path
- * also gets My Cloud's leaf and path length, so the sender can tell an equal path from one that holds inside a longer
- * one. Ids only, never a row. */
+/** My Cloud's side of checking a move's chats: which of the sent ids it lacks, how many of them are a bot conversation's
+ * lines of its owner's that do not carry the owner yet, and whether the sender's visible path holds on its own, in order
+ * (a conversation both sides added to weaves the two together). The last chunk of a path also gets My Cloud's leaf and
+ * path length, so the sender can tell an equal path from one that holds inside a longer one. Ids only, never a row. */
 export function verifyChats(store: ChatStore, conversations: z.infer<typeof verifySchema>["conversations"]) {
   return conversations.map(({ threadId, ids, path }) => {
     const rows = store.messagesFor(threadId);
-    const have = new Set(rows.map((row) => row.id));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const bot = Boolean(ownerOf(store, threadId).bot);
     const visible = path ? activePath(rows, store.activeLeaf(threadId)).map((row) => row.id) : [];
-    return { threadId, missing: (ids ?? []).filter((id) => !have.has(id)),
+    return { threadId, missing: (ids ?? []).filter((id) => !byId.has(id)),
+      unstamped: bot ? (ids ?? []).filter((id) => { const row = byId.get(id); return row !== undefined && unstamped(row); }).length : 0,
       ...(path ? { path: { ...inOrder(visible, path.after, path.ids), ...(path.last ? { leaf: visible.at(-1) ?? null, length: visible.length } : {}) } } : {}) };
   });
 }
@@ -248,6 +276,16 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     const parsed = verifySchema.safeParse(await readBody(req, 2 * 1024 * 1024));
     if (!parsed.success) { json(res, 400, { error: `send { v: 1, conversations: [{ threadId, ids, path }] }, at most ${VERIFY_IDS} ids of each` }); return true; }
     json(res, 200, { v: 1, conversations: verifyChats(store, parsed.data.conversations) });
+    return true;
+  }
+  if (path === `${PREFIX}/owner` && method === "POST") {
+    const owner = deps.owner?.(auth) ?? null;
+    if (!owner) { json(res, 403, { error: "Only My Cloud's owner can say which of its lines are theirs." }); return true; }
+    const parsed = idsSchema.safeParse(await readBody(req, 2 * 1024 * 1024));
+    if (!parsed.success) { json(res, 400, { error: `send { v: 1, conversations: [{ threadId, ids }] }, at most ${VERIFY_IDS} ids of each` }); return true; }
+    const { stamped, threads } = stampHeld(store, parsed.data.conversations, owner);
+    for (const threadId of threads) deps.stamped?.(threadId);
+    json(res, 200, { v: 1, stamped });
     return true;
   }
   if (path === `${PREFIX}/rows` && method === "GET") {
