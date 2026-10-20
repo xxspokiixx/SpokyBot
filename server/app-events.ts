@@ -6,7 +6,7 @@ import { filtersAtSource } from "../shared/app-triggers.ts";
 /** Event data in one run, as for a webhook delivery; and how many events one run takes before another starts. */
 export const MAX_EVENT_CHARS = 48_000;
 export const MAX_EVENTS_PER_RUN = 20;
-const BLOCK_OPEN = "[UNTRUSTED APP EVENT DATA]";
+export const BLOCK_OPEN = "[UNTRUSTED APP EVENT DATA]";
 const BLOCK_CLOSE = "[/UNTRUSTED APP EVENT DATA]";
 
 const FIELDS: Record<keyof AppTriggerFilter, string[]> = {

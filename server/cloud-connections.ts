@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 
 import { canonicalJson } from "../shared/package-format.ts";
+import { fingerprint } from "./cloud-send-verify.ts";
 import type { ComposioIdentity } from "./composio-share.ts";
 import type { AppConfig } from "./config.ts";
 import type { HighLevelConnection } from "./highlevel/store.ts";
@@ -234,6 +235,29 @@ export function releaseConnection(id: string, digest: string, sources: ReleaseSo
     return { ok: true, release: { released: true } };
   }
   return { ok: false, error: "Only a sign-in that moved is let go of." };
+}
+
+/** Each connection's own secrets in a fingerprint under `nonce` (cloud-send-verify.ts), by the id it moves under. A
+ * sign-in that refreshes itself is left out: it moves once and this computer lets go of it, so the two sides never
+ * hold it at once. */
+export function connectionFingerprints(nonce: string, sources: Pick<HandoffSources, "config" | "highlevel">): Record<string, string> {
+  const cfg = sources.config;
+  const out: Record<string, string> = {};
+  for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {
+    const parsed = parseStoredMcpServer(name, raw);
+    if (!parsed.ok) continue;
+    const server = parsed.server;
+    out[`mcp:${name}`] = fingerprint(nonce, isRemoteMcpServer(server) ? { headers: server.headers ?? {}, clientSecret: server.oauth?.clientSecret ?? null } : { env: server.env });
+  }
+  for (const provider of KEY_PROVIDERS) {
+    const fragment = provider.config(cfg);
+    if (fragment) out[`key:${provider.id}`] = fingerprint(nonce, fragment);
+  }
+  const apiKey = cfg.composio?.apiKey?.trim(), userId = cfg.composio?.userId;
+  if (apiKey && userId) out.composio = fingerprint(nonce, { apiKey, userId });
+  const highlevel = sources.highlevel();
+  if (highlevel?.kind === "token") out.highlevel = fingerprint(nonce, { token: highlevel.accessToken, locationId: highlevel.locationId });
+  return out;
 }
 
 /** Programs a command-line MCP server may start that this server has on its PATH. */

@@ -6,12 +6,12 @@ const handler = (messages: Array<{ role: string; text?: string }>, hasMore = fal
   bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki", title: "", description: "", soul: "", tasks: [{ threadId: "thread-0001" }] } as never],
   messagesTail: () => ({ messages, hasMore }),
   skills: () => [],
-  logins: { changes: () => [], onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}) },
+  logins: { changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
   config: () => ({}),
 });
 async function bots(route: ReturnType<typeof createCloudSendRoutes>): Promise<string[]> {
   let body: { items: Array<{ kind: string; label: string }> } | undefined;
-  await route({ path: "/api/cloud-send", method: "GET", res: { setHeader() {} }, json: (_res: unknown, _status: number, value: unknown) => { body = value as typeof body; } } as never);
+  await route({ path: "/api/cloud-send", method: "GET", url: new URL("http://127.0.0.1/api/cloud-send"), res: { setHeader() {} }, json: (_res: unknown, _status: number, value: unknown) => { body = value as typeof body; } } as never);
   return body!.items.filter((item) => item.kind === "bot").map((item) => item.label);
 }
 
@@ -22,5 +22,41 @@ describe("GET /api/cloud-send", () => {
     expect(await bots(handler([{ role: "bot", text: "Hi, I'm Yuki." }, { role: "user", text: "hello" }]))).toEqual(["Yuki"]);
     expect(await bots(handler([]))).toEqual(["Yuki"]);
     expect(await bots(handler([{ role: "bot", text: "Hi, I'm Yuki." }], true))).toEqual(["Yuki"]);
+  });
+});
+
+describe("what a move asks of a server", () => {
+  const PASSWORD = "fake-verify-Passw0rd";
+  const ask = async (route: ReturnType<typeof createCloudSendRoutes>, path: string, method = "GET", body: unknown = undefined) => {
+    let answered: { status: number; body: any } | undefined;
+    await route({ path: path.split("?")[0], method, url: new URL(`http://127.0.0.1${path}`), req: {} as never, res: { setHeader() {} },
+      json: (_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }, readBody: async () => body } as never);
+    return answered!;
+  };
+  const stored = { id: "l1", site: "example.test", hosts: ["accounts.example.test"], exactHost: false, username: "alice", password: PASSWORD, updatedAt: 5 };
+  const withLogins = (cloudHome: boolean) => createCloudSendRoutes({
+    appVersion: "0.1.120",
+    bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki", soul: "Be brief." } as never, { id: "bot-00000002", threadId: "thread-0002", name: "Kit", soul: "Plan." } as never],
+    messagesTail: () => ({ messages: [], hasMore: false }), skills: () => [],
+    logins: { changes: () => [stored], get: (id) => (id === "l1" ? stored as never : null), onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
+    config: () => ({}), cloudHome, connectionFingerprints: () => ({ "key:openrouter": "f".repeat(64) }),
+  });
+
+  it("one item's comparison, with its skills, to record it as soon as it went", async () => {
+    const one = await ask(withLogins(false), "/api/cloud-send?item=bot%3Abot-00000002");
+    expect(one.body.items.map((item: { key: string }) => item.key)).toEqual(["bot:bot-00000002"]);
+    expect((await ask(withLogins(false), "/api/cloud-send")).body.items.filter((item: { kind: string }) => item.kind === "bot")).toHaveLength(2);
+  });
+
+  it("fingerprints of the credentials, only on a Cloud home, under the asker's nonce, never a secret", async () => {
+    const nonce = "n".repeat(43);
+    expect((await ask(withLogins(false), "/api/cloud-send/verify-secrets", "POST", { nonce })).status, "this computer answers only over its private port").toBe(404);
+    expect((await ask(withLogins(true), "/api/cloud-send/verify-secrets", "POST", { nonce: "short" })).status).toBe(400);
+    const answered = await ask(withLogins(true), "/api/cloud-send/verify-secrets", "POST", { nonce });
+    expect(answered.status).toBe(200);
+    expect(Object.keys(answered.body.secrets).sort()).toEqual(["key:openrouter", "login:example.test|alice"]);
+    expect(JSON.stringify(answered.body)).not.toContain(PASSWORD);
+    const other = await ask(withLogins(true), "/api/cloud-send/verify-secrets", "POST", { nonce: "m".repeat(43) });
+    expect(other.body.secrets["login:example.test|alice"]).not.toBe(answered.body.secrets["login:example.test|alice"]);
   });
 });

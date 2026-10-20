@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { addSentChats, type SentConversation } from "./cloud-chat-merge.ts";
-import { chatHeads, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROW_MAX, CHAT_ROWS_PAGE, fittedRow, threadRowsAfter } from "./cloud-send-chats.ts";
+import { chatHeads, chatIds, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROW_MAX, CHAT_ROWS_PAGE, fittedRow, inOrder, threadRowsAfter, verifyChats, VERIFY_IDS } from "./cloud-send-chats.ts";
 import { DATA_DIR } from "./config.ts";
 import { deleteThread, threadHeads } from "./message-db.ts";
 import { Store, type Message } from "./store.ts";
@@ -361,5 +361,74 @@ describe("a room's chats", () => {
     expect(answered).toMatchObject({ accepted: [], removed: ["t-room-gone", "t-thread-gone"], waiting: ["t-lonely", room.threadId] });
     expect([store.group("room-gone"), store.group("room-lonely")]).toEqual([undefined, undefined]);
     expect(store.group(room.id)!.tasks!.map((task) => task.threadId)).toEqual([room.threadId]);
+  });
+});
+
+describe("over the owner's own session", () => {
+  const OWNER = { person: "p_cloudowner00000000000", name: "Amit" };
+  /** `ownerSession`: the request is My Cloud's owner's own session; the route asks its deps whose session it is. */
+  const route = (store: Store, body: unknown, ownerSession: boolean) => {
+    let answered: any;
+    return cloudSendChatsRoute({ store, dataDir: DATA_DIR, owner: (auth) => (auth as { owner?: boolean }).owner ? OWNER : null }, {
+      req: {} as never, res: { setHeader() {} } as never, url: new URL("http://127.0.0.1/api/cloud-send/chats"), path: "/api/cloud-send/chats", method: "POST",
+      auth: { owner: ownerSession } as never, json: ((_res: unknown, _status: number, value: unknown) => { answered = value; }) as never, readBody: (async () => body) as never,
+    }).then(() => answered);
+  };
+  const sent = (bot: string, threadId: string, rows: Message[], extra: Record<string, unknown> = {}) =>
+    ({ v: 1, dataDir: "/desk/.openmausbot", conversations: [{ bot, threadId, task: null, rows, leaf: rows.at(-1)!.id, sent: false, ...extra }] });
+  const typed = (id: string, at: number, parentId: string | null): Message => ({ id, at, parentId, role: "user", kind: "text", text: id });
+
+  it("a bot conversation's lines its owner wrote, and the cards it answered, arrive as My Cloud's owner's", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const card: Message = { id: "c1", at: 2, parentId: "u1", role: "bot", kind: "options", card: { title: "Run it?", subtitle: "", options: ["Allow"], requestId: "q1", answered: "Allow", answeredBy: { kind: "loopback" } } };
+    const peer: Message = { id: "p1", at: 3, parentId: "c1", role: "user", kind: "text", text: "From Chief", peerAsk: { botId: "chief", name: "Chief" } };
+    expect((await route(store, sent(ava.id, ava.threadId, [typed("u1", 1, null), card, peer]), true)).accepted).toEqual([ava.threadId]);
+    const there = new Map(store.messagesFor(ava.threadId).map((row) => [row.id, row]));
+    expect(there.get("u1")!.sender).toEqual({ name: "Amit", id: OWNER.person });
+    expect(there.get("c1")!.card!.answeredBy).toEqual({ kind: "session", name: "Amit", person: OWNER.person });
+    expect(there.get("p1")!.sender, "a peer's ask is never the owner's").toBeUndefined();
+  });
+
+  it("any other session's send, and a room's lines, arrive as they were", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    await route(store, sent(ava.id, ava.threadId, [typed("g1", 1, null)]), false);
+    expect(store.messagesFor(ava.threadId)[0]!.sender).toBeUndefined();
+    const room = store.createGroup("Launch", [ava.id]);
+    await route(store, { v: 1, dataDir: "/desk/.openmausbot", conversations: [{ room: room.id, threadId: room.threadId, task: null, rows: [typed("r1", 1, null)], leaf: "r1", sent: false }] }, true);
+    expect(store.messagesFor(room.threadId).map((row) => [row.id, row.sender])).toEqual([["r1", undefined]]);
+  });
+});
+
+describe("checking a move's chats", () => {
+  it("this computer hands its row ids and its visible path, a chunk at a time", () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const rows = Array.from({ length: VERIFY_IDS + 3 }, (_, i) => say(store, ava.threadId, `line ${i}`, 10 + i));
+    const first = chatIds({ store, dataDir: DATA_DIR }, ava.threadId, 0)!;
+    expect({ ids: first.ids.length, path: first.path.length, more: first.more, leaf: first.leaf }).toEqual({ ids: VERIFY_IDS, path: VERIFY_IDS, more: true, leaf: rows.at(-1)!.id });
+    const second = chatIds({ store, dataDir: DATA_DIR }, ava.threadId, VERIFY_IDS)!;
+    expect([second.ids, second.path, second.more]).toEqual([rows.slice(VERIFY_IDS).map((row) => row.id), rows.slice(VERIFY_IDS).map((row) => row.id), false]);
+    expect(chatIds({ store, dataDir: DATA_DIR }, "t-nobody", 0)).toBeNull();
+  });
+
+  it("a path holds when it appears in order inside My Cloud's, chunk after chunk; out of order, or a row off the path, it does not", () => {
+    const cloud = ["a", "b", "x", "c", "d", "y", "e"];
+    expect(inOrder(cloud, null, ["a", "b", "c"])).toEqual({ holds: true, at: "c" });
+    expect(inOrder(cloud, "c", ["d", "e"])).toEqual({ holds: true, at: "e" });
+    expect(inOrder(cloud, null, ["a", "c", "b"])).toEqual({ holds: false, at: "c" });
+    expect(inOrder(cloud, null, ["a", "q"])).toEqual({ holds: false, at: "a" });
+    expect(inOrder(cloud, "nope", ["a"])).toEqual({ holds: false, at: null });
+  });
+
+  it("My Cloud names the rows it lacks and whether the path holds, with its own leaf and length on the last chunk", () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const rows = Array.from({ length: 6 }, (_, i) => say(store, ava.threadId, `line ${i}`, 10 + i).id);
+    const [checked] = verifyChats(store, [{ threadId: ava.threadId, ids: [...rows, "missing-1"], path: { after: null, ids: rows, last: true } }]);
+    expect(checked).toEqual({ threadId: ava.threadId, missing: ["missing-1"], path: { holds: true, at: rows.at(-1), leaf: rows.at(-1), length: 6 } });
+    const [broken] = verifyChats(store, [{ threadId: ava.threadId, path: { after: null, ids: [rows[0]!, "elsewhere", rows[1]!], last: false } }]);
+    expect(broken).toEqual({ threadId: ava.threadId, missing: [], path: { holds: false, at: rows[0] } });
   });
 });

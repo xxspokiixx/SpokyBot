@@ -3,7 +3,7 @@
 // a bot on My Cloud is told about connections that need the person there (cloud-connections-prompt.ts).
 import { hostname } from "node:os";
 
-import { answerConnection, highlevelDigest, launchersOnPath, listConnections, releaseConnection, signInDigest } from "./cloud-connections.ts";
+import { answerConnection, connectionFingerprints, highlevelDigest, launchersOnPath, listConnections, releaseConnection, signInDigest } from "./cloud-connections.ts";
 import { createConnectionPrompt, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
 import * as composio from "./composio.ts";
 import { adoptComposioShare, adoptOwnComposio, composioIdentity, composioShareCode } from "./composio-share.ts";
@@ -36,18 +36,18 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
     Object.fromEntries(Object.entries(await composio.connectionStatus(deps.config(), slugs)).map(([slug, state]) => [slug, state.connected]));
   const prompt = deps.cloudHome ? createConnectionPrompt({ mcpServers: () => deps.config().mcpServers, mcpAuth,
     highlevelConnected: () => deps.highlevel.connected(), composioConnected }, deps.cloudHome.publicOrigin) : null;
+  const connections = async () => {
+    const cfg = deps.config();
+    return listConnections({ config: cfg, mcpAuth, composio: await composioIdentity(cfg).catch(() => null), highlevel: () => deps.highlevel.store.get() });
+  };
 
   return {
+    connections,
+    fingerprints: (nonce: string) => connectionFingerprints(nonce, sources()),
     routes: createCloudConnectionRoutes({
       cloudHome: deps.cloudHome !== null,
       async list() {
-        const cfg = deps.config();
-        return {
-          computer,
-          connections: listConnections({ config: cfg, mcpAuth, composio: await composioIdentity(cfg).catch(() => null), highlevel: () => deps.highlevel.store.get() }),
-          engines: await deps.engines().catch((): string[] => []),
-          commands: commands ??= launchersOnPath(),
-        };
+        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: commands ??= launchersOnPath() };
       },
       adoptShare: adoptComposioShare,
       adoptOwn: (apiKey, userId) => adoptOwnComposio(deps.config(), apiKey, userId),
@@ -69,6 +69,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
         try { return { ok: true, share: { code: await composioShareCode(what.for) } }; }
         catch (error) { return { ok: false, error: error instanceof Error && error.message ? error.message.slice(0, 300) : "Connected apps could not be shared." }; }
       }
+      if (what.kind === "connection-fingerprints") return { ok: true, secrets: connectionFingerprints(what.nonce, sources()) };
       if (what.kind === "connection-release") {
         return releaseConnection(what.id, what.digest, { ...sources(), forgetSignIn: (name) => deps.mcpOAuth.forget(name), forgetHighLevel: () => { deps.highlevel.disconnect(); } });
       }

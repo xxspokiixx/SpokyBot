@@ -1,19 +1,31 @@
-// GET /api/cloud-send: Send to My Cloud's comparison of this server (server/cloud-send.ts), and /api/cloud-send/chats/*:
-// its chats, by row (server/cloud-send-chats.ts). Admin scope (request-auth's default): the owner's app reads it on this
-// computer and on their own Cloud.
+// GET /api/cloud-send: Send to My Cloud's comparison of this server (server/cloud-send.ts), or of one item with `item`;
+// /api/cloud-send/chats/*: its chats, by row (server/cloud-send-chats.ts); GET /api/cloud-send/manifest: all a move
+// carries, to check it by (server/cloud-send-manifest.ts); on a Cloud home, POST /api/cloud-send/verify-secrets: the
+// credentials' fingerprints (server/cloud-send-verify.ts). Admin scope (request-auth's default): the owner's app reads
+// them on this computer and on their own Cloud.
+import { z } from "zod";
+
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import { readAttachment } from "../attachments.ts";
+import { cloudSendManifest } from "../cloud-send-manifest.ts";
 import { cloudSendSummary, type CloudSendSources } from "../cloud-send.ts";
 import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
+import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
 import type { LoginStore } from "../login-store.ts";
+import { threadHeads } from "../message-db.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" | "bots" | "skills"> {
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
-  logins: Pick<LoginStore, "changes" | "onePasswordConnectedAt" | "onePasswordGrants">;
+  logins: Pick<LoginStore, "changes" | "get" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
   config(): Pick<AppConfig, "profile" | "language">;
   chats?: CloudSendChatsDeps;
+  /** This server is the person's own Cloud: it answers what a move asks of the Cloud it moves to. */
+  cloudHome?: boolean;
+  /** This server's connections (cloud-connections.ts), by id. */
+  connections?(): Promise<ReadonlyArray<{ id: string }>>;
+  connectionFingerprints?(nonce: string): Record<string, string>;
 }
 
 export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
@@ -35,12 +47,30 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     settings: () => { const { profile, language } = deps.config(); return { profile, language }; },
   };
   return async (ctx) => {
-    const { res, path, method, json } = ctx;
+    const { req, res, path, method, url, json, readBody } = ctx;
     if (deps.chats && await cloudSendChatsRoute(deps.chats, ctx)) return;
+    if (path === "/api/cloud-send/manifest") {
+      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      if (!deps.chats) return json(res, 404, { error: "not found" });
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, await cloudSendManifest({ summary: () => cloudSendSummary(sources), store: deps.chats.store, dataDir: deps.chats.dataDir,
+        connections: deps.connections ?? (async () => []), heads: threadHeads }));
+    }
+    if (path === "/api/cloud-send/verify-secrets") {
+      if (!deps.cloudHome || !deps.connectionFingerprints) return json(res, 404, { error: "not found" });
+      if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const asked = z.object({ nonce: z.string().regex(VERIFY_NONCE) }).safeParse(await readBody(req, 4096));
+      if (!asked.success) return json(res, 400, { error: "send { nonce }: at least 32 random bytes, base64url" });
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { v: 1, secrets: { ...loginFingerprints(asked.data.nonce, deps.logins), ...deps.connectionFingerprints(asked.data.nonce) } });
+    }
     if (path !== "/api/cloud-send") return PASS;
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });
     res.setHeader("cache-control", "no-store");
+    const summary = cloudSendSummary(sources);
+    const item = url.searchParams.get("item");
+    const items = item === null ? summary.items : summary.items.filter((entry) => entry.key === item || (entry.kind === "skill" && item === `bot:${entry.bot}`));
     // `chats: 1`: this server takes chats by row.
-    return json(res, 200, { ...cloudSendSummary(sources), ...(deps.chats ? { chats: 1 } : {}) });
+    return json(res, 200, { ...summary, items, ...(deps.chats ? { chats: 1 } : {}) });
   };
 }

@@ -284,6 +284,8 @@ function taskFromPayload(payload: JsonValue): string {
   return task.trim().slice(0, 20_000);
 }
 
+export const WEBHOOK_EVENT_DATA = "[UNTRUSTED WEBHOOK EVENT DATA]";
+
 function eventPrompt(trigger: StoredWebhookTrigger, event: WebhookEvent, receivedAt: number, deliveryId: string): string {
   const metadata = [
     `Received: ${new Date(receivedAt).toISOString()}`,
@@ -306,7 +308,7 @@ function eventPrompt(trigger: StoredWebhookTrigger, event: WebhookEvent, receive
   return [
     ...instructionBlock,
     "",
-    "[UNTRUSTED WEBHOOK EVENT DATA]",
+    WEBHOOK_EVENT_DATA,
     ...metadata,
     "",
     serializePayload(event.payload),

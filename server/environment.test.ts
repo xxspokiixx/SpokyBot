@@ -131,8 +131,9 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)
       .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
-      .toEqual({ remoteSessions: true, cloudHome: true, selfUpdate: "operator", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "only a Cloud home takes a move").not.toHaveProperty("move");
   });
 
   it("falls back to the checkout's package.json version, then to unknown", () => {
