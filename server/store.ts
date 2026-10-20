@@ -996,14 +996,14 @@ export class Store {
     setup?: {
       bulletin?: string;
       defaultResponder?: GroupDefaultResponder;
-      completed?: boolean;
+      completed?: boolean; id?: string; threadId?: string;
     },
   ): GroupRecord {
     this.rememberSections([section]);
-    const threadId = newId();
+    const threadId = setup?.threadId ?? newId();
     const createdAt = Date.now();
     const group: GroupRecord = {
-      id: newId(),
+      id: setup?.id ?? newId(),
       threadId,
       name,
       memberIds,

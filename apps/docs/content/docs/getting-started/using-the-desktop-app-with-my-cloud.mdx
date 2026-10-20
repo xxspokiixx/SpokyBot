@@ -1,6 +1,6 @@
 ---
 title: Using the desktop app with My Cloud
-description: What lives on your computer and what lives on My Cloud, how to send your bots, logins and 1Password over, lending your computer, passkey sign-ins, and where the logs are.
+description: What lives on your computer and what lives on My Cloud, how your bots, logins, 1Password and chats get there by themselves, lending your computer, passkey sign-ins, and where the logs are.
 ---
 
 With MausBot Cloud you have two places in one app:
@@ -12,15 +12,15 @@ You switch between them with the switcher at the top of the sidebar. Everything 
 
 ## What lives where
 
-Each place keeps its own bots, chats and settings, so the two can look different. My Cloud may have your Chief of Staff and nine other bots while this computer has one. That's normal, and you can bring this computer's things over at any time.
+Each place keeps its own bots, chats and settings. While **Keep My Cloud up to date** is on (it is unless you turn it off), what you have on this computer goes to My Cloud by itself, so you don't need to press anything.
 
 | | Goes to My Cloud | How |
 |---|---|---|
-| **Bots** (instructions, picture, settings, skills) | Yes | Send everything, or by itself while **Keep My Cloud up to date** is on |
+| **Bots** (instructions, picture, settings, skills) | Yes | By itself |
 | **A new bot's memory notes** | Yes, once | With the bot, the first time it goes |
-| **Logins and 1Password** | Yes | Same, over a private connection, never through a chat |
-| **Your name, email, About me and language** | Yes | Same |
-| **Chats** | When you send everything yourself | **Send everything** (or **Bring newer chats**) adds the conversations and messages My Cloud doesn't have. **Keep My Cloud up to date** doesn't send chats. |
+| **Logins and 1Password** | Yes | By itself, over a private connection, never through a chat |
+| **Your name, email, About me and language** | Yes | By itself |
+| **Chats** | Yes | By itself: the conversations and messages My Cloud doesn't have yet |
 | **Routines and automations** | No | Both places would run them, so nothing would run once. Set them up on My Cloud. |
 | **Sign-ins to Claude, ChatGPT and other engines, API keys** | No | They belong to each machine. Sign in on My Cloud itself. |
 | **Connected apps** (Gmail, Calendar, Slack…) | No | Connect them on My Cloud: each side has its own connections. |
@@ -29,38 +29,33 @@ Each place keeps its own bots, chats and settings, so the two can look different
 
 Nothing ever goes the other way by itself. What you change on My Cloud stays on My Cloud.
 
-## Send your bots, logins and 1Password to My Cloud
+## How your things get to My Cloud
 
-Open **Settings → MausBot Cloud** on this computer. **This computer and My Cloud** shows both sides next to each other: how many bots, skills and logins each has, and what's different, for example *Ember only here* or *1Password only here*.
+The first time this computer connects to your My Cloud, it sends everything by itself: bots, skills, logins, 1Password, your settings and your chats. After that, while the app is open, new chats go every few minutes and other changes a minute or two after you make them. It waits while My Cloud is asleep and never wakes it. Sending only adds and updates: nothing is ever deleted on either side, and a long chat history goes once, then only what's new.
 
-<ProductScreenshot name="docs-my-cloud-compare" alt="Settings, MausBot Cloud: This computer and My Cloud side by side, with Send everything to My Cloud and Keep My Cloud up to date" caption="Both sides at a glance. Send everything adds and updates; it never deletes anything." position="top" />
+**Settings → MausBot Cloud** on this computer shows whether My Cloud is online and one line on where things stand: *Everything from this computer is on My Cloud*, *Bringing chats to My Cloud… 3 of 12*, or, if something couldn't go, what and why, with **Try again**.
 
-- **Send everything to My Cloud** sends what My Cloud doesn't have yet, and anything you changed on this computer since, chats included. Press it as often as you like: it adds and updates, and never deletes anything on either side. The result says what went, for example *Sent to My Cloud: Ember, 3 skills, 2 logins and 48 chats*, and names anything that couldn't go with the reason.
-- **Keep My Cloud up to date with this computer** is on unless you turn it off. While the app is open, new bots, skills, logins and settings on this computer go to My Cloud by themselves, a minute or two later. It waits while My Cloud is asleep and never wakes it. It doesn't send chats: bringing them uploads a copy of this computer's bots and chats, so that happens only when you press **Send everything**.
-- **Choose what goes** lists everything. Turn a switch off to keep that item only on this computer.
+<ProductScreenshot name="docs-my-cloud-compare" alt="Settings, MausBot Cloud: My Cloud is online, Everything from this computer is on My Cloud, and the Keep My Cloud up to date switch" caption="Nothing to press: this computer's things go to My Cloud by themselves." position="top" />
+
+- **Keep My Cloud up to date with this computer** is the one switch. Turn it off and what you add on this computer stays here. If it's off before this computer first connects, nothing is sent, the first time included.
+- **More** shows both sides next to each other and a manual **Send everything to My Cloud**, for when the switch is off.
 
 A few rules keep this safe:
 
-- **What you change on My Cloud is kept.** If you edit a bot on My Cloud, a later change on this computer never overwrites it. The list shows *Different on My Cloud*, with **Use this computer's** if you want this computer's version there.
-- **What you remove on My Cloud stays removed.** Its switch turns off. Turn it back on to send it again.
+- **What you change on My Cloud is kept.** If you edit a bot on My Cloud, a later change on this computer never overwrites it.
+- **What you remove on My Cloud stays removed,** a chat included: it isn't sent again.
 - **A bot keeps its logins.** A login or a 1Password vault kept to Ember is kept to Ember on My Cloud too.
-- **Engines.** A bot that uses an engine My Cloud isn't signed in to uses My Cloud's own engine instead, and the result says so.
+- **Engines.** A bot that uses an engine My Cloud isn't signed in to uses My Cloud's own engine instead, and Settings says so.
 
-### From My Cloud
+### On My Cloud
 
-When you open My Cloud in the desktop app and this computer has something My Cloud doesn't, a line at the top says so, for example *Ember, 2 skills and 1Password are on This computer but not here*. **Bring them over** sends everything at once, chats included. **Not now** hides the line until something new appears. If something can't come over, the line says what and why, for example *1Password couldn't be sent: 1Password did not accept this computer's token on My Cloud…*, with **Try again**.
+When you open My Cloud in the desktop app during that first send, a line at the top shows this computer's things arriving, then what came, for example *12 bots, 3 skills, 2 logins, 1Password and 48 chats came over from This computer*. If something can't come over, the line says what and why, for example *1Password couldn't be sent: 1Password did not accept this computer's token on My Cloud…*, with **Try again**. Otherwise it stays out of the way.
 
-<ProductScreenshot name="docs-my-cloud-strip" alt="My Cloud in the desktop app, with a line at the top: Ember, 2 logins, 1Password and your settings are on This computer but not here. Bring them over. Not now." position="top" />
-
-### From the switcher
-
-The switcher at the top of the sidebar shows, under **My Cloud**, what isn't there yet, for example *1 bot and 4 more not on My Cloud · Send*. Choose it to send, and Settings opens on the result.
-
-<ProductScreenshot name="docs-my-cloud-switcher" alt="The server switcher: This computer, My Cloud, and the line 1 bot and 4 more not on My Cloud, Send" position="top" />
+<ProductScreenshot name="docs-my-cloud-strip" alt="My Cloud in the desktop app, with a line at the top: Ember, 2 logins, 1Password and 3 chats came over from This computer. Close." position="top" />
 
 ### Your chats
 
-**Send everything** brings this computer's chats to My Cloud: the conversations My Cloud doesn't have, and the newer messages of the ones it has. A bot you send is the same bot on both sides, so its chats land under it. It only adds; it never replaces or deletes a chat on either side, and sending again adds only what's new. 
+Chats go by themselves too: the conversations My Cloud doesn't have, and the newer messages of the ones it has, under the same bots. A conversation you're in the middle of goes once the bot has answered.
 
 **Start My Cloud over from this computer**, a link at the bottom of **Settings → MausBot Cloud**, is different: it replaces everything on My Cloud with this computer's, after backing My Cloud up. Use it only to start My Cloud over.
 

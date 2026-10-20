@@ -11,6 +11,17 @@ export const LOGIN_HANDOFF_REQUEST = "openmausbot:login-handoff";
 export const LOGIN_HANDOFF_RESULT = "openmausbot:login-handoff-result";
 
 export type LoginHandoffWhat = { kind: "1password" } | { kind: "login"; id: string };
+/** For a move to the person's own Cloud: one connection's secrets, a code for that Cloud to act as this computer's
+ * connected-apps account, or letting go of a sign-in that moved there (cloud-connections.ts). */
+export type ConnectionHandoffWhat =
+  | { kind: "connection"; id: string }
+  | { kind: "composio-share"; for: string }
+  | { kind: "connection-release"; id: string; digest: string };
+export type ConnectionHandoffAnswer =
+  | { ok: true; connection: object; digest?: string }
+  | { ok: true; share: { code: string } }
+  | { ok: true; release: { released: true } | { changed: true } }
+  | { ok: false; error: string };
 
 /** A saved login as the Cloud's own POST /api/logins takes it: one sign-in address, the 2FA key as an otpauth:// address. */
 export interface HandedLogin {
@@ -26,23 +37,31 @@ export type LoginHandoffAnswer =
   | { ok: true; onePassword: { token: string; grants: Record<string, LoginBots> } }
   | { ok: true; login: HandedLogin }
   | { ok: false; error: string };
-export type LoginHandoffResult = { type: typeof LOGIN_HANDOFF_RESULT; requestId: string } & LoginHandoffAnswer;
+export type LoginHandoffResult = { type: typeof LOGIN_HANDOFF_RESULT; requestId: string } & (LoginHandoffAnswer | ConnectionHandoffAnswer);
 
 const REQUEST_ID = /^[\w-]{8,64}$/u;
 const LOGIN_ID = /^[\w-]{1,128}$/u;
+const CONNECTION_ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel)$/u;
+const INSTALLATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const DIGEST = /^[0-9a-f]{64}$/u;
 
 export function totpAddress(key: TotpKey): string {
   const query = new URLSearchParams({ secret: key.secret, algorithm: key.algorithm, digits: String(key.digits), period: String(key.period) });
   return `otpauth://totp/OpenMausBot?${query}`;
 }
 
-function parse(raw: unknown): { requestId: string; what: LoginHandoffWhat } | null {
+function parse(raw: unknown): { requestId: string; what: LoginHandoffWhat | ConnectionHandoffWhat } | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const message = raw as Record<string, unknown>;
   if (message.type !== LOGIN_HANDOFF_REQUEST || typeof message.requestId !== "string" || !REQUEST_ID.test(message.requestId)) return null;
   const what = message.what as Record<string, unknown> | null;
   if (what?.kind === "1password") return { requestId: message.requestId, what: { kind: "1password" } };
   if (what?.kind === "login" && typeof what.id === "string" && LOGIN_ID.test(what.id)) return { requestId: message.requestId, what: { kind: "login", id: what.id } };
+  if (what?.kind === "connection" && typeof what.id === "string" && CONNECTION_ID.test(what.id)) return { requestId: message.requestId, what: { kind: "connection", id: what.id } };
+  if (what?.kind === "composio-share" && typeof what.for === "string" && INSTALLATION_ID.test(what.for)) return { requestId: message.requestId, what: { kind: "composio-share", for: what.for } };
+  if (what?.kind === "connection-release" && typeof what.id === "string" && CONNECTION_ID.test(what.id) && typeof what.digest === "string" && DIGEST.test(what.digest)) {
+    return { requestId: message.requestId, what: { kind: "connection-release", id: what.id, digest: what.digest } };
+  }
   return null;
 }
 
@@ -50,7 +69,7 @@ type HandoffStore = Pick<LoginStore, "get" | "onePasswordToken" | "onePasswordGr
 /** This computer's own 1Password problem, from its last read of the vaults (OnePasswordLogins.status().error). */
 type OnePasswordProblem = () => string | undefined;
 
-export const ONE_PASSWORD_DEAD_HERE = "1Password did not accept this computer's token, so it was not sent to My Cloud. Connect 1Password again in Settings → Logins with a new service account token, then send again.";
+export const ONE_PASSWORD_DEAD_HERE = "1Password did not accept this computer's token, so it was not sent to My Cloud. Connect 1Password again in Settings → Logins with a new service account token, and it goes to My Cloud by itself.";
 
 export function answerLoginHandoff(store: HandoffStore, what: LoginHandoffWhat, onePasswordProblem: OnePasswordProblem = () => undefined): LoginHandoffAnswer {
   if (what.kind === "1password") {
@@ -67,10 +86,20 @@ export function answerLoginHandoff(store: HandoffStore, what: LoginHandoffWhat, 
     totp: login.totp ? totpAddress(login.totp) : null, bots: login.bots } };
 }
 
-/** True when the message was a handoff ask, answered or refused; anything else is left for the next handler. */
-export function receiveLoginHandoff(raw: unknown, store: HandoffStore, post: (message: LoginHandoffResult) => boolean, onePasswordProblem?: OnePasswordProblem): boolean {
+/** True when the message was a handoff ask, answered or refused; anything else is left for the next handler. A
+ * connection's ask is answered by `connections`, once its answer is ready. */
+export function receiveLoginHandoff(raw: unknown, store: HandoffStore, post: (message: LoginHandoffResult) => boolean, onePasswordProblem?: OnePasswordProblem,
+  connections?: (what: ConnectionHandoffWhat) => Promise<ConnectionHandoffAnswer>): boolean {
   if ((raw as { type?: unknown } | null)?.type !== LOGIN_HANDOFF_REQUEST) return false;
   const ask = parse(raw);
-  if (ask) post({ type: LOGIN_HANDOFF_RESULT, requestId: ask.requestId, ...answerLoginHandoff(store, ask.what, onePasswordProblem) });
+  if (!ask) return true;
+  const { requestId, what } = ask;
+  if (what.kind === "connection" || what.kind === "composio-share" || what.kind === "connection-release") {
+    const refused: ConnectionHandoffAnswer = { ok: false, error: "This connection could not be read on this computer." };
+    const answer = connections ? connections(what).catch((): ConnectionHandoffAnswer => refused) : Promise.resolve(refused);
+    void answer.then((answered) => post({ type: LOGIN_HANDOFF_RESULT, requestId, ...answered }));
+    return true;
+  }
+  post({ type: LOGIN_HANDOFF_RESULT, requestId, ...answerLoginHandoff(store, what, onePasswordProblem) });
   return true;
 }

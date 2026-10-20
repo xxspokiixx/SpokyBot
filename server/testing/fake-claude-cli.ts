@@ -37,6 +37,7 @@
 //   FAKE_CLAUDE_TURN_STATE  counter file keeping FAKE_CLAUDE_COMPACT's turn count across respawns
 //   FAKE_CLAUDE_CONTEXT_TOKENS  latest-prompt size reported in a scripted room-plan reply
 //   FAKE_CLAUDE_AUTH  in (default) | out | unsupported | malformed | inherited-api-key: what `auth status` says
+//     | api-key: signed in on the CLI's own API key (authMethod "api_key")
 //     | file: signed in while <CLAUDE_CONFIG_DIR or ~/.claude>/fake-auth.json exists; `auth login` prints a
 //     claude.ai link and writes it from the pasted code (`alice-…` signs in alice@example.com, `bad-…` is refused),
 //     `auth logout` removes it
@@ -270,9 +271,9 @@ if (argv[0] === "auth" && argv[1] === "status") {
     process.stdout.write("not json\n");
     process.exit(0);
   }
-  const loggedIn = auth === "in" || (auth === "inherited-api-key" && Boolean(process.env.ANTHROPIC_API_KEY));
+  const loggedIn = auth === "in" || auth === "api-key" || (auth === "inherited-api-key" && Boolean(process.env.ANTHROPIC_API_KEY));
   process.stdout.write(
-    JSON.stringify({ loggedIn, authMethod: loggedIn ? "claude.ai" : "none", apiProvider: "firstParty" }) + "\n",
+    JSON.stringify({ loggedIn, authMethod: !loggedIn ? "none" : auth === "api-key" ? "api_key" : "claude.ai", apiProvider: "firstParty" }) + "\n",
     () => process.exit(auth === "out" ? 1 : 0),
   );
 }

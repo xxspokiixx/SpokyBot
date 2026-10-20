@@ -1,8 +1,10 @@
-// GET /api/cloud-send: Send to My Cloud's comparison of this server (server/cloud-send.ts). Admin scope (request-auth's
-// default): the owner's app reads it on this computer and on their own Cloud.
+// GET /api/cloud-send: Send to My Cloud's comparison of this server (server/cloud-send.ts), and /api/cloud-send/chats/*:
+// its chats, by row (server/cloud-send-chats.ts). Admin scope (request-auth's default): the owner's app reads it on this
+// computer and on their own Cloud.
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import { readAttachment } from "../attachments.ts";
 import { cloudSendSummary, type CloudSendSources } from "../cloud-send.ts";
+import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
 import type { AppConfig } from "../config.ts";
 import type { LoginStore } from "../login-store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -11,6 +13,7 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
   logins: Pick<LoginStore, "changes" | "onePasswordConnectedAt" | "onePasswordGrants">;
   config(): Pick<AppConfig, "profile" | "language">;
+  chats?: CloudSendChatsDeps;
 }
 
 export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
@@ -21,6 +24,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       const tail = deps.messagesTail(threadId, 2);
       return !tail.hasMore && tail.messages.length === 1 && tail.messages[0]!.role === "bot" && Boolean(tail.messages[0]!.text?.includes(name));
     },
+    inRoom: (botId) => (deps.chats?.store.groups ?? []).some((group) => !group.dm && group.memberIds.includes(botId)),
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),
@@ -30,10 +34,13 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     },
     settings: () => { const { profile, language } = deps.config(); return { profile, language }; },
   };
-  return async ({ res, path, method, json }) => {
+  return async (ctx) => {
+    const { res, path, method, json } = ctx;
+    if (deps.chats && await cloudSendChatsRoute(deps.chats, ctx)) return;
     if (path !== "/api/cloud-send") return PASS;
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });
     res.setHeader("cache-control", "no-store");
-    return json(res, 200, cloudSendSummary(sources));
+    // `chats: 1`: this server takes chats by row.
+    return json(res, 200, { ...cloudSendSummary(sources), ...(deps.chats ? { chats: 1 } : {}) });
   };
 }

@@ -87,7 +87,7 @@ the same.
 | From before any server could receive one | Update OpenMausBot on {server}, then copy again. | Check again |
 | Not answering | {server} didn't answer. Check that it's running, then try again. | Check again |
 | A copy elsewhere is running | A copy to {other} is running. Wait for it to finish. | none |
-| The Cloud has work, on its own page | My Cloud already has bots and chats of its own… open Settings → Servers in this computer's window… | none |
+| The Cloud has work, on its own page | My Cloud already has bots and chats, so nothing was copied over them. | none |
 | A proxy refuses even 512 KB parts (`proxy_limit`) | A proxy in front of {server} refused a 512 KB upload. Raise its request size limit (nginx: client_max_body_size 64m), then copy again. | Continue the copy |
 | Not back after the restart | {server} hasn't come back yet. If it doesn't start again on its own, start OpenMausBot there; it finishes installing the copy when it starts. | Open {server} |
 | Other failures | what happened | Copy again / Continue the copy |
