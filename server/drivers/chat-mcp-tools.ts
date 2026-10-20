@@ -100,12 +100,20 @@ class ChatMcpClient {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
+    // Read before the pending rejections below: only a call still in flight at entry is genuinely uncertain.
+    const inFlight = this.pending.size > 0;
     for (const entry of this.pending.values()) entry.reject(new Error("MCP session closed"));
     this.pending.clear();
     this.buffer = "";
-    // Windows reaps the tree via taskkill /T, which can exceed shorter budgets on a loaded machine.
-    this.closing = killCliTree(this.child, 5_000).then((stopped) => {
-      if (!stopped) throw new Error("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+    // Windows reaps the tree via taskkill /T, which can exceed shorter budgets on a loaded machine;
+    // elsewhere the budget is the TERM grace before KILL, not a verdict race, so it stays short.
+    this.closing = killCliTree(this.child, process.platform === "win32" ? 15_000 : 5_000).then((stopped) => {
+      if (stopped) return;
+      if (!inFlight) {
+        console.warn("chat-mcp: shutdown could not be confirmed within its budget; no call was in flight, so the turn outcome is unaffected");
+        return;
+      }
+      throw new Error("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
     });
     return this.closing;
   }
