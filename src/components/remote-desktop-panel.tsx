@@ -9,7 +9,7 @@ import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remo
 import type { Routine } from "@/lib/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { api, ApiError, useStore, type Bot } from "@/state/store";
-import { focusComputerPanelEntry, releaseComputerPanelFocus, takeComputerPanelTabFocus } from "@/lib/computer-panel-focus";
+import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer-panel-focus";
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
@@ -63,15 +63,7 @@ function nextRunLabel(at: number | null) {
 export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const { padClass, dragProps } = useCaptionChrome();
-  const panelRef = useRef<HTMLElement>(null);
-  // One shot per open, and it must survive React's double-invoked development effects.
-  const entryFocus = useRef<boolean | undefined>(undefined);
-  if (entryFocus.current === undefined) entryFocus.current = takeComputerPanelTabFocus(bot.id);
-  useEffect(() => {
-    if (!entryFocus.current) return;
-    const frame = requestAnimationFrame(() => focusComputerPanelEntry(panelRef.current));
-    return () => cancelAnimationFrame(frame);
-  }, []);
+  const panelRef = useComputerPanelEntry(bot.id);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [frame, setFrame] = useState<string | null>(null);

@@ -58,7 +58,8 @@ import {
   shouldPollCloudPreview,
 } from "@/lib/local-computer";
 import { moveBetweenTabs, PANEL_TABS, panelTabProps, TAB_PANEL_FOCUS, tabPanelProps, useAndroidTabFallback } from "./computer-panel-tabs";
-import { focusComputerPanelEntry, releaseComputerPanelFocus, takeComputerPanelTabFocus } from "@/lib/computer-panel-focus";
+import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer-panel-focus";
+import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
 import {
   computerPanelTabs,
   readComputerPanelView,
@@ -130,21 +131,6 @@ const computerControlSnapshotSchema = z.object({
   help: z.unknown().optional().transform(parseComputerHelp),
 }).passthrough();
 
-const PANEL_WIDTH_KEY = "omb-computer-panel-width";
-const PANEL_MIN_WIDTH = 360;
-const PANEL_MAX_WIDTH = 960;
-const PANEL_DEFAULT_WIDTH = 400;
-const PANEL_RESIZE_STEP = 40;
-
-function readPanelWidth(): number {
-  try {
-    const stored = Number(localStorage.getItem(PANEL_WIDTH_KEY));
-    if (Number.isFinite(stored) && stored >= PANEL_MIN_WIDTH && stored <= PANEL_MAX_WIDTH) return stored;
-  } catch {
-  }
-  return PANEL_DEFAULT_WIDTH;
-}
-
 export function ComputerPanel({
   bot: profileBot,
   onOpenVmWorkspace,
@@ -153,67 +139,7 @@ export function ComputerPanel({
   onOpenVmWorkspace?: (botId: string) => void;
 }) {
   const { padClass, dragProps } = useCaptionChrome();
-  const [panelWidth, setPanelWidth] = useState(readPanelWidth);
-  const resizeFrom = useRef<{ x: number; width: number } | null>(null);
-  const persistPanelWidth = (width: number) => {
-    try {
-      localStorage.setItem(PANEL_WIDTH_KEY, String(width));
-    } catch {
-    }
-  };
-  const onResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
-    resizeFrom.current = { x: event.clientX, width: panelWidth };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const onResizeMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!resizeFrom.current) return;
-    const next = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, resizeFrom.current.width + (resizeFrom.current.x - event.clientX)));
-    setPanelWidth(next);
-  };
-  const onResizeEnd = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!resizeFrom.current) return;
-    resizeFrom.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    persistPanelWidth(panelWidth);
-  };
-  const onResizeBy = (delta: number) => {
-    setPanelWidth((current) => {
-      const next = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, current + delta));
-      persistPanelWidth(next);
-      return next;
-    });
-  };
-  const separatorRef = useRef<HTMLDivElement>(null);
-  const [separatorWidth, setSeparatorWidth] = useState<number | null>(null);
-  useEffect(() => {
-    const panel = separatorRef.current?.closest("aside");
-    if (!panel) return;
-    const read = () => setSeparatorWidth(panel.offsetWidth);
-    read();
-    const observer = new ResizeObserver(read);
-    observer.observe(panel);
-    return () => observer.disconnect();
-  }, []);
-  const panelRef = useRef<HTMLElement>(null);
-  // One shot per open, and it must survive React's double-invoked development effects.
-  const entryFocus = useRef<boolean | undefined>(undefined);
-  const entryFollowing = useRef(false);
-  if (entryFocus.current === undefined) entryFocus.current = takeComputerPanelTabFocus(profileBot.id);
-  useEffect(() => {
-    if (!entryFocus.current) return;
-    const frame = requestAnimationFrame(() => {
-      focusComputerPanelEntry(panelRef.current);
-      entryFollowing.current = true;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
-  const onSeparatorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
-    const widen = event.key === "ArrowLeft" ? PANEL_RESIZE_STEP : event.key === "ArrowRight" ? -PANEL_RESIZE_STEP : null;
-    if (widen === null || separatorWidth === null) return;
-    event.preventDefault();
-    onResizeBy(widen);
-  };
+  const { panelWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd } = useComputerPanelResize();
   const { state, dispatch, flushBotPatches } = useStore();
   const liveTask = profileBot.tasks?.find((task) => task.threadId === profileBot.threadId);
   const livePlace = effectivePlace(profileBot, liveTask);
@@ -345,6 +271,7 @@ export function ComputerPanel({
   const androidConnected = androidStatus.devices.length > 0;
   const panelTabs = computerPanelTabs({ advanced, androidConnected });
   const panelView = resolveComputerPanelView(storedPanelView, { advanced, androidConnected });
+  const panelRef = useComputerPanelEntry(profileBot.id, panelView);
   const browserAvailableHere = browserAvailable(state.config);
   const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false
     && (browserAvailableHere || state.config?.browserEngine?.installable === true);
@@ -419,19 +346,6 @@ export function ComputerPanel({
     if (view === "browser") setSignInRequest({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId });
     dispatch({ type: "signInFocusConsumed", requestId: requestedSignIn.requestId });
   }, [bot.id, dispatch, requestedSignIn]);
-
-  // Auto resolves its surface long after the panel is up, and a data result or a
-  // sign-in moves the tab too: the entry ring follows the selection until the
-  // keyboard user leaves the tab row.
-  useEffect(() => {
-    if (!entryFollowing.current) return;
-    const active = document.activeElement;
-    if (!(active instanceof HTMLElement) || active.getAttribute("role") !== "tab" || !panelRef.current?.contains(active)) {
-      entryFollowing.current = false;
-      return;
-    }
-    focusComputerPanelEntry(panelRef.current);
-  }, [panelView]);
 
   useEffect(() => {
     let alive = true;

@@ -2,6 +2,7 @@
  * thing: who opened the panel and where focus belongs while it is up. A panel
  * is a lazy screen, so the intent is recorded on open and taken by the panel's
  * first render, never by a timer on the opener's side. */
+import { useEffect, useRef, type RefObject } from "react";
 
 export type ComputerPanelOpen = {
   botId: string;
@@ -39,6 +40,37 @@ function entryTab(root: HTMLElement | null): HTMLElement | null {
  * button when the panel has no tab row. */
 export function focusComputerPanelEntry(root: HTMLElement | null): void {
   (entryTab(root) ?? root?.querySelector<HTMLElement>("[data-computer-panel-close]"))?.focus();
+}
+
+/** A panel's side of the hand-off: the one-shot intent is taken on the first
+ * render, the entry point is focused a frame later, and the ring then follows
+ * `selection` (the panel's own tab) until the keyboard user leaves the tab row. */
+export function useComputerPanelEntry(botId: string, selection?: unknown): RefObject<HTMLElement | null> {
+  const panelRef = useRef<HTMLElement>(null);
+  // One shot per open, and it must survive React's double-invoked development effects.
+  const entryFocus = useRef<boolean | undefined>(undefined);
+  const following = useRef(false);
+  if (entryFocus.current === undefined) entryFocus.current = takeComputerPanelTabFocus(botId);
+  useEffect(() => {
+    if (!entryFocus.current) return;
+    const frame = requestAnimationFrame(() => {
+      focusComputerPanelEntry(panelRef.current);
+      following.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  // Auto resolves its surface long after the panel is up, and a data result or a
+  // sign-in moves the tab too.
+  useEffect(() => {
+    if (!following.current) return;
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || active.getAttribute("role") !== "tab" || !panelRef.current?.contains(active)) {
+      following.current = false;
+      return;
+    }
+    focusComputerPanelEntry(panelRef.current);
+  }, [selection]);
+  return panelRef;
 }
 
 function onScreen(element: HTMLElement): boolean {
