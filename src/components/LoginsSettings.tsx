@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Cloud, KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
 import type { CloudLoginsState } from "../../electron/cloud-logins.mjs";
 import type { LoginBots, LoginSummary, OnePasswordStatus, OnePasswordVault } from "../../shared/logins";
@@ -22,7 +22,6 @@ const SOURCE_KEYS = {
 const ROW_BUTTON = "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
 
 type CloudSide = CloudLoginsState["cloud"];
-type SendWhat = { kind: "1password" } | { kind: "login"; id: string };
 
 /** The same account on My Cloud: one username on one site, as the Cloud's own Logins counts it. */
 export function loginOnCloud(cloud: CloudSide, login: Pick<LoginSummary, "site" | "username">): boolean | null {
@@ -31,38 +30,17 @@ export function loginOnCloud(cloud: CloudSide, login: Pick<LoginSummary, "site" 
   return cloud.logins.some((entry) => entry.site === login.site && entry.username.toLowerCase() === login.username.toLowerCase());
 }
 
-/** This computer's Settings with a My Cloud: what Logins the Cloud has, and Also use on My Cloud. Bots, chats, skills and
- * logins live on each side; a login goes over only when the person sends it, straight to their own Cloud. */
+/** This computer's Settings with a My Cloud: which logins My Cloud has. They go there by themselves with Keep My Cloud up
+ * to date (Settings → MausBot Cloud), straight to the person's own Cloud. */
 function useCloudLogins() {
   const bridge = window.ogb?.cloudLogins;
   const [cloud, setCloud] = useState<CloudSide>(null);
-  const [sending, setSending] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{ id: string; text: string; failed?: boolean } | null>(null);
   const refresh = useCallback(async () => {
     if (!bridge) return;
     try { setCloud((await bridge.state()).cloud); } catch { setCloud(null); }
   }, [bridge]);
   useEffect(() => { void refresh(); }, [refresh]);
-  const send = async (what: SendWhat) => {
-    if (!bridge || sending) return;
-    const id = what.kind === "login" ? what.id : "1password";
-    setSending(id);
-    setOutcome(null);
-    try {
-      const sent = await bridge.send(what);
-      setCloud(sent.cloud);
-      setOutcome({ id, text: t(sent.narrowed ? "settings.logins.sentNarrowed" : "settings.logins.sent") });
-    } catch (cause) {
-      setOutcome({ id, failed: true, text: cause instanceof Error && cause.message ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/u, "") : t("settings.logins.sendError") });
-    } finally { setSending(null); }
-  };
-  return { available: Boolean(bridge) && cloud !== null, cloud, sending, outcome, send };
-}
-
-function CloudOutcome({ id, outcome, inset = false }: { id: string; outcome: { id: string; text: string; failed?: boolean } | null; inset?: boolean }) {
-  if (outcome?.id !== id) return null;
-  return <p role={outcome.failed ? "alert" : "status"} data-cloud-outcome={id}
-    className={`${inset ? "ms-6 " : ""}text-[12px] ${outcome.failed ? "text-danger" : "text-ink-secondary"}`}>{outcome.text}</p>;
+  return { available: Boolean(bridge) && cloud !== null, cloud };
 }
 
 export function LoginsSettings() {
@@ -156,12 +134,6 @@ export function LoginsSettings() {
                   </div>
                   {login.source !== "1password" && (
                     <div className="flex shrink-0 gap-1">
-                      {cloudSide.available && loginOnCloud(cloudSide.cloud, login) !== true && (
-                        <button type="button" className={ROW_BUTTON} disabled={busy || cloudSide.sending !== null} onClick={() => void cloudSide.send({ kind: "login", id: login.id })}
-                          aria-label={t("settings.logins.alsoCloudFor", { site: login.site })} data-also-cloud={login.id}>
-                          {cloudSide.sending === login.id ? <Loader2 size={13} className="animate-spin" /> : <Cloud size={13} />}{t("settings.logins.alsoCloud")}
-                        </button>
-                      )}
                       <button type="button" className={ROW_BUTTON} disabled={busy} onClick={() => startEdit(login)}
                         aria-label={t("settings.logins.changeFor", { site: login.site })}>{t("settings.logins.change")}</button>
                       <button type="button" className={ROW_BUTTON} disabled={busy} onClick={() => void remove(login.id)}
@@ -171,7 +143,6 @@ export function LoginsSettings() {
                     </div>
                   )}
                 </div>
-                <CloudOutcome id={login.id} outcome={cloudSide.outcome} inset />
                 {editing === login.id && (
                   <div className="ms-6 rounded-lg bg-inset/60 p-3">
                     <LoginForm username={false} replacing submitLabel={t("settings.logins.saveChange")} autoFocus
@@ -335,13 +306,7 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange, clo
             <button type="button" className="ui-button ui-button-md" disabled={disabled || busy !== null} onClick={() => void run("disconnect", disconnectOnePassword)}>
               {t("settings.logins.onePassword.disconnect")}
             </button>
-            {cloud.available && onCloud !== true && (
-              <button type="button" className="ui-button ui-button-md" disabled={disabled || busy !== null || cloud.sending !== null} onClick={() => void cloud.send({ kind: "1password" })} data-also-cloud="1password">
-                {cloud.sending === "1password" ? <Loader2 size={13} className="animate-spin" /> : <Cloud size={13} />}{t("settings.logins.alsoCloud")}
-              </button>
-            )}
           </div>
-          <CloudOutcome id="1password" outcome={cloud.outcome} />
         </>
       ) : (
         <form className="flex flex-col gap-2" onSubmit={connect}>

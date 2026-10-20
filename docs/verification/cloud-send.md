@@ -2,8 +2,8 @@
 
 What it covers: Settings → MausBot Cloud's **This computer and My Cloud**
 (Send everything, Keep My Cloud up to date, Choose what goes), My Cloud's
-strip (**Bring them over**), the switcher's send line, and Settings → Logins'
-**Also use on My Cloud**, which is the same send for one login.
+strip (**Bring them over**) and the switcher's send line. Settings → Logins
+shows where each login is; it no longer sends one by hand.
 
 ## Two real servers
 

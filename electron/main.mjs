@@ -93,6 +93,7 @@ import { createDesktopIncludedX } from "./included-x.mjs";
 import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
+import { DEFAULT_FOLDERS, installCloudLending, usualFolders } from "./cloud-lending-ipc.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
 import { installCloudSend } from "./cloud-send-main.mjs";
 import { cloudMoveChoices } from "./cloud-move-choices.mjs";
@@ -2934,33 +2935,13 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
 async function lendingSnapshot() {
   const env = cloudLendingEnvironment();
   const connection = await cuaReady.catch(() => null);
-  return {
-    available: Boolean(env),
-    screenAvailable: Boolean(connection?.mcpCommand),
-    ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}),
-  };
+  return { available: Boolean(env), screenAvailable: Boolean(connection?.mcpCommand), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
 }
-const lendingEnv = () => {
-  const env = cloudLendingEnvironment();
-  if (!env) throw new Error("Open My Cloud first.");
-  return env;
-};
-ipcMain.handle("lending:state", localWorkspaceOnly("lending:state", () => lendingSnapshot()));
-ipcMain.handle("lending:folder", localWorkspaceOnly("lending:folder", async () => {
-  lendingEnv();
-  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder My Cloud can use", properties: ["openDirectory"] });
-  if (picked.canceled || !picked.filePaths[0]) return null;
-  return (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0];
-}));
-ipcMain.handle("lending:save", localWorkspaceOnly("lending:save", async (_event, input) => {
-  await sharingController().saveCloud(lendingEnv(), { folders: input?.folders, screen: input?.screen === true });
-  return lendingSnapshot();
-}));
-ipcMain.handle("lending:stop", localWorkspaceOnly("lending:stop", async () => {
-  sharingController();
-  stopLending();
-  return lendingSnapshot();
-}));
+installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: cloudLendingEnvironment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
+  cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
+  chooseFolder: async () => { const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder My Cloud can use", properties: ["openDirectory"] }); return picked.canceled || !picked.filePaths[0] ? null : (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0]; },
+  defaults: () => usualFolders(DEFAULT_FOLDERS.map(name => app.getPath(name)), validateSharedFolders), validate: validateSharedFolders,
+  confirm: async folders => (await dialog.showMessageBox(mainWindow, { type: "question", message: "Let My Cloud use this computer?", detail: `Bots on My Cloud can read ${folders.length ? folders.join(", ") : "nothing yet"} on this computer, without changing anything, in your own conversations and while this app is open. Turn it off at any time.`, buttons: ["Let My Cloud use it", "Cancel"], defaultId: 0, cancelId: 1 })).response === 0 });
 const cloudSync = installCloudFiles({
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
   fetch: (...args) => session.defaultSession.fetch(...args),
