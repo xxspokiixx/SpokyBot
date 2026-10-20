@@ -811,11 +811,34 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
   const cacheRead = Number(process.env.FAKE_CLAUDE_CACHE_READ_TOKENS);
   const usage = { input_tokens: 10, cache_read_input_tokens: Number.isSafeInteger(cacheRead) && cacheRead > 0 ? cacheRead : 2, output_tokens: 5 };
+  const finish = () => {
+    replaySteered();
+    runHooks("Stop", { stop_hook_active: false });
+    runningCost.total = Number((runningCost.total + 0.01).toFixed(2));
+    const counted = (runningCost.modelUsage[model] ??= { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 });
+    counted.inputTokens += 10;
+    counted.cacheReadInputTokens += 2;
+    counted.outputTokens += 5;
+    counted.costUSD = Number((counted.costUSD + 0.01).toFixed(2));
+    if (costStateFile) writeFileSync(costStateFile, JSON.stringify(runningCost));
+    const queued = process.env.FAKE_CLAUDE_QUEUED_TURN_COUNT;
+    out({
+      type: "result",
+      is_error: false,
+      stop_reason: "end_turn",
+      total_cost_usd: runningCost.total,
+      usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
+      modelUsage: runningCost.modelUsage,
+      ...(queued === "zero" ? { queued_turn_count: 0 } : queued === "count" ? { queued_turn_count: lateSteers.length } : {}),
+    });
+    turnRunning = false;
+    finishIfDone();
+  };
+
   if (streamCadence && mode === "happy") {
     // Deterministic delta replay for the voice-latency harness: stream each
     // scripted reply part as fixed-size text_delta chunks at a fixed interval,
-    // then the assistant message (the driver dedups the streamed text). Turn
-    // completion is scheduled so it always runs after `finish` is defined.
+    // then the assistant message (the driver dedups the streamed text).
     const emitPart = (part: number) => {
       const text = replyParts[part] ?? "";
       let at = 0;
@@ -869,29 +892,6 @@ const playTurn = (prompt: JsonValue, late = false) => {
     runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
   }
 
-  const finish = () => {
-    replaySteered();
-    runHooks("Stop", { stop_hook_active: false });
-    runningCost.total = Number((runningCost.total + 0.01).toFixed(2));
-    const counted = (runningCost.modelUsage[model] ??= { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 });
-    counted.inputTokens += 10;
-    counted.cacheReadInputTokens += 2;
-    counted.outputTokens += 5;
-    counted.costUSD = Number((counted.costUSD + 0.01).toFixed(2));
-    if (costStateFile) writeFileSync(costStateFile, JSON.stringify(runningCost));
-    const queued = process.env.FAKE_CLAUDE_QUEUED_TURN_COUNT;
-    out({
-      type: "result",
-      is_error: false,
-      stop_reason: "end_turn",
-      total_cost_usd: runningCost.total,
-      usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
-      modelUsage: runningCost.modelUsage,
-      ...(queued === "zero" ? { queued_turn_count: 0 } : queued === "count" ? { queued_turn_count: lateSteers.length } : {}),
-    });
-    turnRunning = false;
-    finishIfDone();
-  };
   if (mode === "background-result") {
     // Claude emits a synthetic result when a background task finishes; it does not complete the turn.
     out({ type: "result", origin: { kind: "task-notification" }, is_error: false, total_cost_usd: 99 });
