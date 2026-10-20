@@ -1005,13 +1005,13 @@ export class RoutineManager {
     return cloneRun(run);
   }
 
-  markAllSeen(): RoutineRun[] {
-    if (!this.runs.some((run) => !run.seenAt && isRoutineProblemRun(run))) return [];
+  markAllSeen(visible: (run: RoutineRun) => boolean = () => true): RoutineRun[] {
+    const due = (run: RoutineRun) => !run.seenAt && isRoutineProblemRun(run) && visible(run);
+    if (!this.runs.some(due)) return [];
     const stampAt = this.now();
     const updated: RoutineRun[] = [];
     this.commitMutation(() => {
-      for (const run of this.runs) {
-        if (run.seenAt || !isRoutineProblemRun(run)) continue;
+      for (const run of this.runs.filter(due)) {
         run.seenAt = stampAt;
         updated.push(run);
       }

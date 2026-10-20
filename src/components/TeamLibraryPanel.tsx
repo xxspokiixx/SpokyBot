@@ -15,6 +15,7 @@ import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } 
 import { GrokFinishSetup, grokSetupLeft } from "./GrokFinishSetup";
 import { TEAM_GLYPHS, TeamImportDetails } from "./TeamImportDetails";
 import { GrokImportFlow } from "./GrokImportFlow";
+import { ReadyBotGallery } from "./ReadyBotGallery";
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
 import { MAX_TEAM_BACKUP_BYTES } from "../../shared/team-backup";
@@ -125,6 +126,7 @@ export function TeamLibraryPanel({
   const [roomName, setRoomName] = useState("");
   const [creating, setCreating] = useState(false);
   const [sharing, setSharing] = useState<string | null>(null);
+  const [nestedDialog, setNestedDialog] = useState(false);
   const [orgListing, setOrgListing] = useState<OrgLibraryListing | null>(null);
   const [orgBusy, setOrgBusy] = useState<string | null>(null);
   const [orgNotice, setOrgNotice] = useState("");
@@ -178,7 +180,7 @@ export function TeamLibraryPanel({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (sharing !== null) return;
+      if (sharing !== null || nestedDialog) return;
       if (event.key === "Escape" && !importing) {
         event.preventDefault();
         event.stopPropagation();
@@ -208,7 +210,7 @@ export function TeamLibraryPanel({
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [importing, onClose, pending, sharing]);
+  }, [importing, onClose, pending, sharing, nestedDialog]);
 
   const previewManifest = (preview: PendingTeamImport, nextSource: ImportSource) => {
     setPending(preview);
@@ -670,6 +672,7 @@ export function TeamLibraryPanel({
               )}
               {tab === "explore" && (
                 <div>
+                  <ReadyBotGallery search={search} onDialog={setNestedDialog} onAdded={onClose} />
                   <div className="mb-3 text-[12px] font-medium text-ink-secondary">
                     {search ? t("templates.searchResults") : t("templates.communityTemplates")}
                   </div>

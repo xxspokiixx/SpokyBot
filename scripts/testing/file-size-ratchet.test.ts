@@ -15,13 +15,13 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 17241,
+  "server/index.ts": 17188,
   "src/state/store.tsx": 3581,
   "electron/main.mjs": 3458,
-  "server/store.ts": 2475,
+  "server/store.ts": 2467,
   "src/components/Sidebar.tsx": 2340,
   "server/drivers/claude.ts": 2166,
-  "server/drivers/acp/core.ts": 2009,
+  "server/drivers/acp/core.ts": 1912,
   "server/drivers/codex.ts": 1872,
   "server/routines.ts": 1650,
   "src/components/ComputerPanel.tsx": 1901,
@@ -43,7 +43,7 @@ const LINES: Record<string, number> = {
   "src/components/ModelPicker.tsx": 1204,
   "src/components/PhoneSetupFlow.tsx": 1283,
   "server/cli.ts": 1080,
-  "src/components/SettingsModal.tsx": 1061,
+  "src/components/SettingsModal.tsx": 1059,
   "src/components/ChatMarkdown.tsx": 1039,
   "src/components/PluginsPanel.tsx": 1113,
   "server/org-library.ts": 1003,

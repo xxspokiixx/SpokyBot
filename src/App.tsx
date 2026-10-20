@@ -26,6 +26,7 @@ import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
+import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { finishCloudProHandoff, takeCloudProHandoff } from "@/components/CloudProPopup";
 import { CloudHowTo } from "@/components/CloudHowTo";
@@ -267,6 +268,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <div className="flex h-full flex-col">
       <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
       <CloudAsleepStrip />
+      <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId) || handedOver} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button

@@ -266,6 +266,7 @@ describe("createAppTriggerHost", () => {
       connectedApps: async () => connected,
       routines: () => routines,
       webhooks: { list: () => [] } as never,
+      webhookBase: () => "http://127.0.0.1:8800",
       botState: () => "ready",
       timeZone: () => "UTC",
       visibleBot: () => true,
@@ -275,7 +276,7 @@ describe("createAppTriggerHost", () => {
     const answers: Array<{ status: number; body: any }> = [];
     const json = ((_res: unknown, status: number, body: unknown) => { answers.push({ status, body }); }) as never;
     const operation = { action: "create", trigger: { name: "Acme", instructions: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", filter: { from: "acme.com" } } };
-    const context = (from: any, guestDriven = false) => ({ from, threadId: "thread-1", ownsThread: () => true, guestDriven, canCommit: () => true });
+    const context = (from: any, guestDriven = false) => ({ from, threadId: "thread-1", ownsThread: () => true, guestDriven, outsideDriven: () => false, canCommit: () => true });
     await host.submit({} as never, json, { ...context(bots.scout, true), operation });
     expect(answers.at(-1)).toMatchObject({ status: 403, body: { error: expect.stringContaining("Only the Cloud's owner") } });
     await host.submit({} as never, json, { ...context(bots.narrow), operation });
