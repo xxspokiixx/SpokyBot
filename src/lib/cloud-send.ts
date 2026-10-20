@@ -62,11 +62,14 @@ export function sideLines(snapshot: Pick<CloudSendSnapshot, "rows" | "cloudOnly"
   });
 }
 
+/** More than three bots are counted, not named. */
+const botsNamed = (bots: string[]) => bots.length > 3 ? [t("cloudSend.list.bots", { count: bots.length })] : bots;
+
 /** "Ember, 2 skills, 3 logins, 1Password and 48 chats". */
 export function sentList(result: CloudSendOutcome["result"]): string[] {
   const chats = result.chats;
   return [
-    ...(result.bots.length > 3 ? [t("cloudSend.list.bots", { count: result.bots.length })] : result.bots),
+    ...botsNamed(result.bots),
     ...(result.updatedBots.length ? [t("cloudSend.list.changesTo", { names: names(result.updatedBots) })] : []),
     ...(result.skills ? [counted(result.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
     ...(result.logins ? [counted(result.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
@@ -82,21 +85,22 @@ export function ipcErrorText(cause: unknown): string | null {
   return cause instanceof Error && cause.message ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/u, "") : null;
 }
 
-/** "2 logins and 1Password couldn't be sent: <why>", or why a send stopped; null when nothing failed. */
+/** "2 logins couldn't be sent: <why>. 1Password couldn't be sent: <why>.", or why a send stopped; null when nothing failed. */
 export function failedLine(failure: CloudSendFailure): string | null {
-  const what = failure.what;
-  const error = failure.error ?? "";
-  if (!what) return error ? t("cloudSend.failedSend", { error }) : null;
-  const list = [
-    ...what.bots,
-    ...(what.skills ? [counted(what.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
-    ...(what.logins ? [counted(what.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
-    ...(what.onePassword ? [t("cloudSend.list.onePassword")] : []),
-    ...(what.settings ? [t("cloudSend.list.settings")] : []),
-    ...(what.chats ? [t("cloudSend.list.theChats")] : []),
-  ];
-  const line = t("cloudSend.failedWhat", { list: listOf(list), error });
-  return line.charAt(0).toLocaleUpperCase(activeLocale()) + line.slice(1);
+  const lines = (failure.reasons ?? []).map(({ what, error }) => {
+    const list = [
+      ...botsNamed(what.bots),
+      ...(what.skills ? [counted(what.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
+      ...(what.logins ? [counted(what.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
+      ...(what.onePassword ? [t("cloudSend.list.onePassword")] : []),
+      ...(what.settings ? [t("cloudSend.list.settings")] : []),
+      ...(what.chats ? [t("cloudSend.list.theChats")] : []),
+    ];
+    const line = t("cloudSend.failedWhat", { list: listOf(list), error });
+    return line.charAt(0).toLocaleUpperCase(activeLocale()) + line.slice(1);
+  });
+  if (failure.error) lines.push(t("cloudSend.failedSend", { error: failure.error }));
+  return lines.length ? lines.join(" ") : null;
 }
 
 /** One sentence for what a send did, then a line for each thing worth knowing. */

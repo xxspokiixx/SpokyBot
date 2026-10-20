@@ -124,15 +124,22 @@ export function differenceSignature(plan) {
   return pendingRows(plan).map((row) => `${row.key}#${row.state}#${(row.parts ?? []).join(",")}`).sort().join("\n");
 }
 
-/** What a send did not get across, by kind (bots by name, logins only counted, never a site), and the first reason;
- * the strip on My Cloud and Settings → MausBot Cloud both say it. */
+const FAILURE_REASONS = 3;
+
+/** What a send did not get across, grouped by reason (bots by name, logins only counted, never a site), and why a send
+ * stopped as a whole; the strip on My Cloud and Settings → MausBot Cloud both say it. */
 export function failedSummary(outcome) {
-  const failed = outcome.result.failed;
-  const count = (kind) => failed.filter((entry) => entry.kind === kind).length;
-  const error = outcome.error ?? failed[0]?.error;
-  return {
-    ...(failed.length ? { what: { bots: failed.filter((entry) => entry.kind === "bot").map((entry) => entry.label), skills: count("skill"), logins: count("login"),
-      onePassword: count("1password") > 0, settings: count("setting"), chats: count("chats") > 0 } } : {}),
-    ...(error ? { error } : {}),
-  };
+  const reasons = new Map();
+  for (const entry of outcome.result.failed) {
+    const reason = reasons.get(entry.error) ?? { what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: false }, error: entry.error };
+    const what = reason.what;
+    if (entry.kind === "bot") what.bots.push(entry.label);
+    else if (entry.kind === "skill") what.skills++;
+    else if (entry.kind === "login") what.logins++;
+    else if (entry.kind === "setting") what.settings++;
+    else if (entry.kind === "1password") what.onePassword = true;
+    else if (entry.kind === "chats") what.chats = true;
+    reasons.set(entry.error, reason);
+  }
+  return { ...(reasons.size ? { reasons: [...reasons.values()].slice(0, FAILURE_REASONS) } : {}), ...(outcome.error ? { error: outcome.error } : {}) };
 }

@@ -218,6 +218,23 @@ export function createCloudSend({ local, cloud, handoff, chats = null, store, on
     const result = emptyResult();
     const mine = parseSendSummary(await localJson("/api/cloud-send"));
     if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
+    const latest = await sendItems(origin, mine, result, { keys, force });
+    // After the items' session is signed out: Bring newer chats opens its own for as long as the upload takes.
+    if (chats && !keys && CHAT_REASONS.has(reason)) {
+      job.chats = true;
+      publish();
+      try { result.chats = await chats(); }
+      catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
+    }
+    const outcome = { at: now(), reason, result };
+    entry(origin).last = outcome;
+    persist();
+    view = { cloud: "ready", plan: plan(origin, mine, latest), local: mine, theirs: latest };
+    return outcome;
+  }
+
+  /** Every item that waits, over one owner session, always signed out; what My Cloud holds after. */
+  async function sendItems(origin, mine, result, { keys, force }) {
     const session = await cloud.open().catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again."); });
     try {
       const before = await session.call("GET", "/api/cloud-send");
@@ -243,18 +260,7 @@ export function createCloudSend({ local, cloud, handoff, chats = null, store, on
       }
       const after = parseSendSummary((await session.call("GET", "/api/cloud-send")).body);
       if (after) remember(origin, ctx, after);
-      if (chats && !keys && CHAT_REASONS.has(reason)) {
-        job.chats = true;
-        publish();
-        try { result.chats = await chats(); }
-        catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
-      }
-      const outcome = { at: now(), reason, result };
-      entry(origin).last = outcome;
-      persist();
-      const latest = after ?? theirs;
-      view = { cloud: "ready", plan: plan(origin, mine, latest), local: mine, theirs: latest };
-      return outcome;
+      return after ?? theirs;
     } finally {
       try { await session.close(); } catch {}
     }

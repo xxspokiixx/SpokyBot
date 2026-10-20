@@ -61,14 +61,18 @@ describe("This computer and My Cloud, in words", () => {
       { key: "login:b.test|amit", kind: "login", label: "b.test", error: "OpenMausBot on this computer did not answer. Try again." },
       { key: "1password", kind: "1password", label: "1Password", error: "1Password did not accept this computer's token on My Cloud." },
     ] } });
-    expect(partly.text).toBe("Sent to My Cloud: Ember and 48 chats. 2 logins and 1Password couldn't be sent: OpenMausBot on this computer did not answer. Try again.");
+    expect(partly.text).toBe("Sent to My Cloud: Ember and 48 chats. 2 logins couldn't be sent: OpenMausBot on this computer did not answer. Try again. "
+      + "1Password couldn't be sent: 1Password did not accept this computer's token on My Cloud.");
     expect(partly.text).not.toContain("a.test");
     expect(resultLines({ at: 1, reason: "button", result: { ...none, chats: { conversations: 0, messages: 7 }, failed: [] } }).text).toBe("Sent to My Cloud: 7 new messages.");
     expect(resultLines({ at: 1, reason: "button", result: { ...none, bots: Array.from({ length: 12 }, (_, i) => `Bot ${i}`), skills: 3, chats: { conversations: 48, messages: 900 }, failed: [] } }).text)
       .toBe("Sent to My Cloud: 12 bots, 3 skills, and 48 chats.");
     expect(resultLines({ at: 1, reason: "button", error: "This app could not sign in to My Cloud. Try again.", result: { ...none, failed: [] } }))
       .toMatchObject({ failed: true, text: "Send to My Cloud stopped: This app could not sign in to My Cloud. Try again." });
-    expect(failedLine({ what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: true }, error: "My Cloud is busy." })).toBe("The chats couldn't be sent: My Cloud is busy.");
+    const nothing = { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: false };
+    expect(failedLine({ reasons: [{ what: { ...nothing, chats: true }, error: "My Cloud is busy." }] })).toBe("The chats couldn't be sent: My Cloud is busy.");
+    expect(failedLine({ reasons: [{ what: { ...nothing, bots: ["A", "B", "C", "D", "E"] }, error: "this workspace is limited to 100 bots" }] }))
+      .toBe("5 bots couldn't be sent: this workspace is limited to 100 bots");
     expect(failedLine({})).toBeNull();
   });
 

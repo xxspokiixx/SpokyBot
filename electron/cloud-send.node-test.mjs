@@ -312,17 +312,24 @@ test("a send that stops as a whole is that send's outcome, so the strip and Sett
   assert.deepEqual(sendNotice(send.snapshot()).last, { at: last.at, failed: 0, error: "Too many connection links. Wait a few minutes and try again." });
 });
 
-test("My Cloud's notice says what did not go, by kind, and the first reason: logins only counted, never a site", async () => {
+test("My Cloud's notice says what did not go, by kind, with each reason: logins only counted, never a site", async () => {
   const login = (id, site) => ({ key: itemKey.login(site, "amit"), kind: "login", label: site, detail: "amit", id, parts: { saved: id } });
   const sides = fakeSides({ localItems: [bot("ember", { soul: "s" }), login("l1", "bank.example"), login("l2", "crm.example"), { key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }] });
-  sides.deps.handoff = async () => { throw new Error("OpenMausBot on this computer did not answer. Try again."); };
+  sides.deps.handoff = async (what) => {
+    if (what.kind === "login") throw new Error("OpenMausBot on this computer did not answer. Try again.");
+    throw new Error("1Password did not accept this computer's token, so it was not sent to My Cloud.");
+  };
   const send = createCloudSend(sides.deps);
   const outcome = await send.send();
   assert.deepEqual(outcome.result.bots, ["Ember"]);
   assert.deepEqual(outcome.result.failed.map((entry) => entry.kind), ["login", "login", "1password"]);
   const notice = sendNotice(send.snapshot());
-  assert.deepEqual(notice.last.what, { bots: [], skills: 0, logins: 2, onePassword: true, settings: 0, chats: false });
-  assert.equal(notice.last.error, "OpenMausBot on this computer did not answer. Try again.");
+  const none = { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: false };
+  assert.deepEqual(notice.last.reasons, [
+    { what: { ...none, logins: 2 }, error: "OpenMausBot on this computer did not answer. Try again." },
+    { what: { ...none, onePassword: true }, error: "1Password did not accept this computer's token, so it was not sent to My Cloud." },
+  ]);
+  assert.equal(notice.last.error, undefined, "the send itself did not stop");
   assert.ok(!JSON.stringify(notice).includes("bank.example") && !JSON.stringify(notice).includes("crm.example"));
 });
 
@@ -339,12 +346,13 @@ test("chats go with a send the person asks for, never with the background one or
   const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
   const asked = [];
   let answer = { conversations: 3, messages: 40 };
-  sides.deps.chats = async () => { asked.push(true); if (answer instanceof Error) throw answer; return answer; };
+  sides.deps.chats = async () => { asked.push(true); sides.calls.push("chats"); if (answer instanceof Error) throw answer; return answer; };
   const send = createCloudSend(sides.deps);
   for (const reason of ["button", "my-cloud", "menu"]) {
     asked.length = 0;
     assert.deepEqual((await send.send({ reason })).result.chats, { conversations: 3, messages: 40 }, reason);
     assert.equal(asked.length, 1, reason);
+    assert.ok(sides.calls.lastIndexOf("logout") < sides.calls.lastIndexOf("chats"), "the items' session is signed out before the chats go");
   }
   asked.length = 0;
   for (const options of [{ reason: "auto" }, { reason: "logins", keys: ["1password"] }, { keys: ["bot:ember"] }]) {
@@ -354,7 +362,8 @@ test("chats go with a send the person asks for, never with the background one or
   answer = new Error("Wait for bots on this computer to finish what they are doing, then copy again.");
   const outcome = await send.send();
   assert.deepEqual(outcome.result.failed, [{ key: "chats", kind: "chats", label: "Chats", error: "Wait for bots on this computer to finish what they are doing, then copy again." }]);
-  assert.deepEqual(sendNotice(send.snapshot()).last.what, { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: true });
+  assert.deepEqual(sendNotice(send.snapshot()).last.reasons, [{ what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: true },
+    error: "Wait for bots on this computer to finish what they are doing, then copy again." }]);
 });
 
 test("Bring newer chats' answer becomes the send's chats, and a copy already running is said plainly", async () => {
@@ -375,10 +384,9 @@ test("Bring newer chats' answer becomes the send's chats, and a copy already run
   assert.deepEqual((await handlers.get("cloud-send:send")({})).result.chats, { conversations: 2, messages: 9 });
   state = { phase: "uploading", action: "move" };
   const notice = await handlers.get("cloud-send:page-send")({});
-  assert.deepEqual(notice.last.what?.chats, true);
-  assert.equal(notice.last.error, "Another copy to My Cloud is running. Send again when it has finished.");
+  assert.deepEqual(notice.last.reasons?.map((reason) => [reason.what.chats, reason.error]), [[true, "Another copy to My Cloud is running. Send again when it has finished."]]);
   // The strip's send never loses why a send stopped in a rejected call.
   pairing = false;
-  const { failed, error, what } = (await handlers.get("cloud-send:page-send")({})).last;
-  assert.deepEqual({ failed, error, what }, { failed: 0, error: "This app could not sign in to My Cloud. Try again.", what: undefined });
+  const { failed, error, reasons } = (await handlers.get("cloud-send:page-send")({})).last;
+  assert.deepEqual({ failed, error, reasons }, { failed: 0, error: "This app could not sign in to My Cloud. Try again.", reasons: undefined });
 });

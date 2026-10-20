@@ -20,9 +20,10 @@ export interface CloudSendResult {
 }
 /** `error`: the send failed as a whole (nothing after that point went), in words for the person. */
 export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult; error?: string }
-/** What did not go, by kind (bots by name, logins only counted), and the first reason. */
+/** What did not go, grouped by reason (bots by name, logins only counted, at most three reasons), and `error`: why the
+ * send stopped as a whole. */
 export interface CloudSendFailure {
-  what?: { bots: string[]; skills: number; logins: number; onePassword: boolean; settings: number; chats: boolean };
+  reasons?: Array<{ what: { bots: string[]; skills: number; logins: number; onePassword: boolean; settings: number; chats: boolean }; error: string }>;
   error?: string;
 }
 

@@ -140,7 +140,7 @@ it("the strip stays away when nothing waits, when dismissed, and on any page but
 it("My Cloud's strip says what could not be brought over and why, with Try again, instead of pointing elsewhere", async () => {
   await onCloud();
   const failed = { ...notice, bots: [], skills: 0, onePassword: true, signature: "sig-2",
-    last: { at: 3, failed: 3, what: { bots: [], skills: 0, logins: 2, onePassword: true, settings: 0, chats: false }, error: "OpenMausBot on this computer did not answer. Try again." } };
+    last: { at: 3, failed: 3, reasons: [{ what: { bots: [], skills: 0, logins: 2, onePassword: true, settings: 0, chats: false }, error: "OpenMausBot on this computer did not answer. Try again." }] } };
   vi.mocked(page.send).mockResolvedValue(failed);
   tree(strip()).find((node) => node.type === "button" && text(node) === "Bring them over")!.props.onClick!(); await flush();
   const html = render(strip()).html;
