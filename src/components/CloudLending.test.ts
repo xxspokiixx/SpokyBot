@@ -151,7 +151,6 @@ it("names a refusal main explains in plain words, and keeps Try again for the re
 
 const button = (label: string) => render().nodes.find(node => node.type === "button" && Children.toArray(node.props.children).includes(label))!;
 
-// A Linux computer with no usual folders: the switch stayed on, reading Starting…, above "Nothing is lent yet".
 it("a turn-on main refuses leaves the switch off with its reason, never Starting…, and Choose what's lent in reach", async () => {
   vi.mocked(bridge.save).mockRejectedValueOnce(new Error("Error invoking remote method 'lending:save': Error: lending-refused:nothing-to-lend"));
   await ready(off);
@@ -161,7 +160,6 @@ it("a turn-on main refuses leaves the switch off with its reason, never Starting
   expect(toggle().props.checked).toBe(false);
   expect(view.html).not.toContain("Starting…");
   expect(view.html).toContain("Nothing is lent yet: this computer has no Desktop, Documents or Downloads folder to lend.");
-  // The reason says to pick a folder under Choose what's lent; one picked there is lent.
   expect(view.html).toContain("data-lending-more");
   more();
   button("Add folder").props.onClick!();
@@ -171,7 +169,6 @@ it("a turn-on main refuses leaves the switch off with its reason, never Starting
   expect(toggle().props.checked).toBe(true);
   expect(view.html).toContain("My Cloud can use Plans (read only) on this computer.");
   expect(view.html).not.toContain('role="alert"');
-  // Lent once, the choices go back to living behind an on switch.
   view.nodes.find(node => node.props["aria-label"] === "Remove Plans")!.props.onClick!();
   await flush();
   expect(toggle().props.checked).toBe(false);
@@ -205,7 +202,6 @@ it("once on, the switch says what main says: stopped by main while Settings is o
   expect(view.html).toContain('data-lending-stopped="signed-out"');
 });
 
-// A Japanese message once sent people to a 「貸し出す内容を選ぶ」 button that showed in English.
 it("nothing to lend names the button the person sees, in every language, and Settings → MausBot Cloud where it is translated", () => {
   const unseen = localeChoices.flatMap(({ code }) => {
     setLocale(code);

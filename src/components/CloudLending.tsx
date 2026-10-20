@@ -80,15 +80,12 @@ export function lendingStatusKey(snapshot: CloudLendingSnapshot | null, switched
 /** Security: main picks the Cloud from the verified sign-in; nothing here names a server. */
 export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   const [snapshot, setSnapshot] = useState<CloudLendingSnapshot | null>(null);
-  // Only while a turn-on is on its way; after it, the switch says what main says.
-  const [draftOn, setDraftOn] = useState(false);
+  const [turningOn, setTurningOn] = useState(false);
   const [folders, setFolders] = useState<SharedFolder[]>([]);
   const [screen, setScreen] = useState(false);
   const [working, setWorking] = useState(false);
   const [failed, setFailed] = useState<LocaleKey | null>(null);
   const [more, setMore] = useState(false);
-  // A turn-on that didn't happen keeps Choose what's lent in reach under the off switch until lending is on: its reason
-  // may say to pick a folder there.
   const [turnOnFailed, setTurnOnFailed] = useState(false);
   const pending = useRef(false), mounted = useRef(false);
   const accept = (next: CloudLendingSnapshot) => {
@@ -117,12 +114,12 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
     void perform(() => nextFolders.length || nextScreen ? bridge.save({ folders: nextFolders, screen: nextScreen }) : bridge.stop());
   };
   const enabled = snapshot?.state?.enabled === true;
-  const on = enabled || draftOn;
+  const on = enabled || turningOn;
   // Nothing chosen yet: main lends the usual folders, read only.
   const toggle = () => {
-    if (on) { setDraftOn(false); void perform(() => bridge.stop()); return; }
-    setDraftOn(true);
-    void perform(() => bridge.save({ folders, screen }), (ok) => { setDraftOn(false); setTurnOnFailed(!ok); });
+    if (on) { setTurningOn(false); void perform(() => bridge.stop()); return; }
+    setTurningOn(true);
+    void perform(() => bridge.save({ folders, screen }), (ok) => { setTurningOn(false); setTurnOnFailed(!ok); });
   };
   const choosing = on || turnOnFailed;
   if (!snapshot?.available) return null;
