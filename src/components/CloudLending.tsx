@@ -80,18 +80,16 @@ export function lendingStatusKey(snapshot: CloudLendingSnapshot | null, switched
 /** Security: main picks the Cloud from the verified sign-in; nothing here names a server. */
 export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   const [snapshot, setSnapshot] = useState<CloudLendingSnapshot | null>(null);
-  const [turningOn, setTurningOn] = useState(false);
+  const [draftOn, setDraftOn] = useState(false);
   const [folders, setFolders] = useState<SharedFolder[]>([]);
   const [screen, setScreen] = useState(false);
   const [working, setWorking] = useState(false);
   const [failed, setFailed] = useState<LocaleKey | null>(null);
   const [more, setMore] = useState(false);
-  const [turnOnFailed, setTurnOnFailed] = useState(false);
   const pending = useRef(false), mounted = useRef(false);
   const accept = (next: CloudLendingSnapshot) => {
     if (!mounted.current) return;
     setSnapshot(next);
-    if (next.state?.enabled) setTurnOnFailed(false);
     if (!pending.current && next.state) { setFolders(next.state.folders); setScreen(next.state.screen); }
   };
   useEffect(() => {
@@ -101,27 +99,25 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
     const timer = setInterval(refresh, 3000);
     return () => { mounted.current = false; clearInterval(timer); };
   }, [bridge]);
-  const perform = async (action: () => Promise<CloudLendingSnapshot>, settled?: (ok: boolean) => void) => {
+  const perform = async (action: () => Promise<CloudLendingSnapshot>) => {
     if (pending.current) return;
     pending.current = true; setWorking(true); setFailed(null);
-    let ok = false;
-    try { const next = await action(); pending.current = false; accept(next); ok = true; }
+    try { const next = await action(); pending.current = false; accept(next); }
     catch (cause) { if (mounted.current) setFailed(lendingFailureKey(cause)); }
-    finally { pending.current = false; if (mounted.current) { setWorking(false); settled?.(ok); } }
+    finally { pending.current = false; if (mounted.current) setWorking(false); }
   };
   const lend = (nextFolders: SharedFolder[], nextScreen: boolean) => {
     setFolders(nextFolders); setScreen(nextScreen);
     void perform(() => nextFolders.length || nextScreen ? bridge.save({ folders: nextFolders, screen: nextScreen }) : bridge.stop());
   };
   const enabled = snapshot?.state?.enabled === true;
-  const on = enabled || turningOn;
+  const on = enabled || draftOn;
   // Nothing chosen yet: main lends the usual folders, read only.
   const toggle = () => {
-    if (on) { setTurningOn(false); void perform(() => bridge.stop()); return; }
-    setTurningOn(true);
-    void perform(() => bridge.save({ folders, screen }), (ok) => { setTurningOn(false); setTurnOnFailed(!ok); });
+    if (on) { setDraftOn(false); void perform(() => bridge.stop()); return; }
+    setDraftOn(true);
+    void perform(() => bridge.save({ folders, screen }));
   };
-  const choosing = on || turnOnFailed;
   if (!snapshot?.available) return null;
   const status = lendingStatusKey(snapshot, on);
   const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen) : "";
@@ -140,10 +136,10 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
     {stopped && <p data-lending-stopped={snapshot.state?.stopped?.reason} className="text-[13px] text-ink-secondary">{stopped}</p>}
     {via && <p data-lending-via="access" className="text-[12px] text-ink-secondary">{via}</p>}
     {lastUsed && <p data-lending-last-used className="text-[12px] text-ink-secondary">{lastUsed}</p>}
-    {choosing && <button type="button" aria-expanded={more} data-lending-more className="inline-flex w-fit items-center gap-1 text-[12.5px] text-ink-secondary hover:text-ink" onClick={() => setMore(!more)}>
+    {on && <button type="button" aria-expanded={more} data-lending-more className="inline-flex w-fit items-center gap-1 text-[12.5px] text-ink-secondary hover:text-ink" onClick={() => setMore(!more)}>
       <ChevronRight size={13} aria-hidden="true" className={more ? "rotate-90 transition-transform" : "transition-transform"} />{t("lending.more")}
     </button>}
-    {choosing && more && <>
+    {on && more && <>
       <fieldset disabled={working} className="flex flex-col gap-2 disabled:opacity-60">
         <legend className="mb-1 text-[13px] font-medium text-ink">{t("lending.folders")}</legend>
         <p className="text-[12px] text-ink-secondary">{t("lending.foldersHelp")}</p>
