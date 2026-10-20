@@ -36,7 +36,7 @@ const TOOL_CALLS = [
 
   await ui("click", "--name", "Today");
   await expect.poll(page, { timeout: 30_000 }).toContain("Nothing finished yet today");
-  expect(await page()).toContain("Set up your first routine");
+  expect(await page()).toContain("Set up your first automation");
 
   await runControlOmb(["send", "--bot", fixture!.botId, "--text", "Reply to Sam about the refund for order 1042.", "--url", fixture!.url]);
   await runControlOmb(["wait", "--bot", fixture!.botId, "--timeout", "90", "--url", fixture!.url]);

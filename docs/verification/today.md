@@ -19,9 +19,9 @@ The UI test launches the [headless chat UI](chat-ui.md) fixture with scripted
 fake-engine tool calls (Gmail fetch, draft and send, a multi-execute call that
 posts to Slack and creates a HubSpot contact, and a `Bash` call that must not
 count). It opens Today on the new install and expects the empty state with
-**Set up your first routine**, sends one message, runs a routine named
+**Set up your first automation**, sends one message, runs a routine named
 "Morning briefing", then expects the tiles in order (emails read, drafts,
-emails sent, messages, reports, leads, routines), the time saved, both lines,
+emails sent, messages, reports, leads, automations), the time saved, both lines,
 that a line opens its conversation, and that Simple mode keeps Today at the
 top of its sidebar. The screenshots land where `OMB_TODAY_SCREENSHOT` points
 (`-simple.png` beside it for Simple mode).

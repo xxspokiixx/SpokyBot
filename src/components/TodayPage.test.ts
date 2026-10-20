@@ -82,7 +82,7 @@ describe("the Today page", () => {
   it("asks for today from local midnight and shows only the outcomes that happened, with time saved first", async () => {
     await show(busyDay);
     expect(fixture.api).toHaveBeenCalledWith(`/api/today?since=${rangeStart("today")}`, { timeoutMs: 20_000 });
-    expect(text("[data-today-tile]")).toEqual(["Emails read or sorted12", "Drafts written3", "Emails sent2", "Reports and briefings1", "Routines and triggers4 OK · 1 failed"]);
+    expect(text("[data-today-tile]")).toEqual(["Emails read or sorted12", "Drafts written3", "Emails sent2", "Reports and briefings1", "Automations4 OK · 1 failed"]);
     const saved = host.querySelector("[data-testid=today-time-saved]")!;
     expect(saved.textContent).toContain("≈ 1 h 2 m");
     expect(saved.getAttribute("title")).toContain("Emails read or sorted 2 min, Drafts written 5 min, Emails sent 4 min");
@@ -133,13 +133,13 @@ describe("the Today page", () => {
     await show(report());
     expect(host.querySelector("[data-testid=today-empty]")!.textContent).toContain("Nothing finished yet today");
     expect(host.querySelector("[data-testid=today-time-saved]")).toBeNull();
-    await act(async () => button("Set up your first routine")!.click());
+    await act(async () => button("Set up your first automation")!.click());
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines" });
     act(() => root.unmount());
     root = createRoot(host);
     await show(report({ routineCount: 2, needsYou: [{ kind: "signed-out", id: "n1", at: at(9), instanceId: "claude", botIds: ["atlas"] }] }));
     expect(text("[data-needs-you] p:first-child")).toEqual(["Claude is signed out"]);
-    expect(button("See your routines")).toBeDefined();
+    expect(button("See your automations")).toBeDefined();
   });
 
   it("lists chat work that produced no app outcome without an empty state or a zero estimate", async () => {
@@ -151,7 +151,7 @@ describe("the Today page", () => {
     root = createRoot(host);
     await show(report({ routines: { ok: 0, failed: 2 }, lines: [{ id: "l2", at: at(8), botId: "atlas", routineId: "r1", title: "Lead sweep", ok: false, outcomes: {} }] }));
     expect(host.querySelector("[data-testid=today-time-saved]")).toBeNull();
-    expect(text("[data-today-tile]")).toEqual(["Routines and triggers0 OK · 2 failed"]);
+    expect(text("[data-today-tile]")).toEqual(["Automations0 OK · 2 failed"]);
   });
 
   it("says when it could not load, and tries again", async () => {
