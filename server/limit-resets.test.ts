@@ -166,8 +166,10 @@ describe("codexLimitResetsAt", () => {
   });
 
   // America/New_York repeats 1:00-1:59 AM on 2026-11-01 (05:00Z EDT, then 06:00Z EST).
-  it.runIf(Intl.DateTimeFormat().resolvedOptions().timeZone === "America/New_York")(
-    "reads a clock time in the repeated hour after a DST change as the later one once the first has passed", () => {
+  it("reads a clock time in the repeated hour after a DST change as the later one once the first has passed", () => {
+    const previousTimezone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
       const said = (time: string) => `You've hit your usage limit. Try again at ${time}.`;
       // In the second 1:30 AM, a reset at 1:50 AM is the second 1:50 AM, 20 minutes away.
       expect(iso(codexLimitResetsAt(said("1:50 AM"), Date.parse("2026-11-01T06:30:00Z"))!)).toBe("2026-11-01T06:50:00.000Z");
@@ -175,7 +177,11 @@ describe("codexLimitResetsAt", () => {
       expect(iso(codexLimitResetsAt(said("1:20 AM"), Date.parse("2026-11-01T05:40:00Z"))!)).toBe("2026-11-01T06:20:00.000Z");
       // A time still ahead in the first hour stays there.
       expect(iso(codexLimitResetsAt(said("1:50 AM"), Date.parse("2026-11-01T05:30:00Z"))!)).toBe("2026-11-01T05:50:00.000Z");
-    });
+    } finally {
+      if (previousTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimezone;
+    }
+  });
 
   it("names no time when Codex gives none or the words are not a usage limit", () => {
     expect(codexLimitResetsAt("You've hit your usage limit. Try again later.")).toBeUndefined();
