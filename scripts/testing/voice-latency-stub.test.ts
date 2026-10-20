@@ -40,29 +40,28 @@ describe("voice latency record stub", () => {
 
       const chars = 8;
       const began = Date.now();
-      const spoken = await fetch(`${stub.url}/text-to-speech/${STUB_VOICE}?output_format=mp3_44100_64`, {
+      const spoken = await fetch(`${stub.url}/text-to-speech/${STUB_VOICE}/stream?output_format=mp3_44100_64`, {
         method: "POST",
         headers: { "xi-api-key": "ignored-by-design", "content-type": "application/json" },
         body: JSON.stringify({ text: "a".repeat(chars), model_id: STUB_MODEL }),
       });
-      const elapsed = Date.now() - began;
       expect(spoken.status).toBe(200);
       expect(spoken.headers.get("content-type")).toBe("audio/mpeg");
-      // The response is held back for the modeled synthesis time, no shorter.
-      expect(elapsed).toBeGreaterThanOrEqual(synthesisDelayMs(chars) - 25);
       const bytes = Buffer.from(await spoken.arrayBuffer());
+      // Header to last byte takes the modeled synthesis time, no shorter.
+      expect(Date.now() - began).toBeGreaterThanOrEqual(synthesisDelayMs(chars) - 25);
       expect(bytes.length).toBe(Math.round((chars * SYNTHESIS.audioMsPerChar) / FRAME_MS) * FRAME_BYTES);
     } finally {
       await stub.close();
     }
   });
 
-  it("streams when asked: first chunk at the modeled first byte, last at the whole-clip time", async () => {
+  it("streams: first chunk at the modeled first byte, last at the whole-clip time", async () => {
     const stub = await launchVoiceLatencyStub();
     try {
       const chars = 24; // 840 ms whole clip, 300 ms first byte
       const began = Date.now();
-      const spoken = await fetch(`${stub.url}/text-to-speech/${STUB_VOICE}?output_format=mp3_44100_64&stream=true`, {
+      const spoken = await fetch(`${stub.url}/text-to-speech/${STUB_VOICE}/stream?output_format=mp3_44100_64`, {
         method: "POST",
         headers: { "xi-api-key": "ignored-by-design", "content-type": "application/json" },
         body: JSON.stringify({ text: "a".repeat(chars), model_id: STUB_MODEL }),
@@ -95,7 +94,7 @@ describe("voice latency record stub", () => {
   it("rejects a speak request without text", async () => {
     const stub = await launchVoiceLatencyStub();
     try {
-      const spoken = await fetch(`${stub.url}/text-to-speech/${STUB_VOICE}`, {
+      const spoken = await fetch(`${stub.url}/text-to-speech/${STUB_VOICE}/stream`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: "" }),

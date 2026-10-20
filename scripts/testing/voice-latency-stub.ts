@@ -57,7 +57,7 @@ export function launchVoiceLatencyStub(): Promise<VoiceLatencyStub> {
       res.end(JSON.stringify({ voices: [{ voice_id: STUB_VOICE, name: "OMB record stub" }] }));
       return;
     }
-    if (req.method === "POST" && /^\/text-to-speech\/[^/]+$/.test(path)) {
+    if (req.method === "POST" && /^\/text-to-speech\/[^/]+\/stream$/.test(path)) {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("error", () => fail(400, "body read failed"));
@@ -74,13 +74,6 @@ export function launchVoiceLatencyStub(): Promise<VoiceLatencyStub> {
         const chars = [...body.text].length;
         const bytes = silenceMp3(chars * SYNTHESIS.audioMsPerChar);
         const totalMs = synthesisDelayMs(chars);
-        if (new URL(req.url ?? "/", "http://stub").searchParams.get("stream") !== "true") {
-          setTimeout(() => {
-            res.writeHead(200, { "content-type": "audio/mpeg", "content-length": String(bytes.byteLength) });
-            res.end(bytes);
-          }, totalMs);
-          return;
-        }
         // Streamed delivery, modeled: first chunk at the pinned first-byte
         // latency, the rest spread so the last byte still lands at the
         // whole-clip synthesis time — generation is unchanged, delivery streams.

@@ -92,7 +92,7 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
   firstAudio.promise.catch(() => {});
   void (async () => {
     try {
-      const res = await fetch(`${api}/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${FORMAT}&stream=true`, {
+      const res = await fetch(`${api}/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${FORMAT}`, {
         method: "POST",
         headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
         body: JSON.stringify({ text, model_id: MODEL }),
