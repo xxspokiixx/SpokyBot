@@ -377,6 +377,7 @@ function main(): void {
     generator: "scripts/testing/voice-latency-corpus.ts",
     splitter: { entry: "server/tts/speech-text.ts#toUtterances", minChars: 12, maxChars: 320 },
     cadence: CADENCE,
+    gapThresholdMs: GAP_THRESHOLD_MS,
     synthesis: SYNTHESIS,
     totals,
     shapePins: {

@@ -7,6 +7,7 @@ import {
   corpusFixtureId,
   corpusJson,
   type CorpusTotals,
+  GAP_THRESHOLD_MS,
   MANIFEST_PATH,
   measureCorpus,
   type ReplyMeasurement,
@@ -66,6 +67,11 @@ describe("voice latency corpus fixture", () => {
   it("documents the replay cadence both sides share", () => {
     expect(CADENCE.chunkChars).toBeGreaterThan(0);
     expect(CADENCE.intervalMs).toBeGreaterThan(0);
+  });
+
+  it("pins the gap threshold the protocol shares", () => {
+    const manifest = JSON.parse(readLfText(MANIFEST_PATH)) as { gapThresholdMs: number };
+    expect(manifest.gapThresholdMs).toBe(GAP_THRESHOLD_MS);
   });
 
   it("pins the modeled synthesis timing both sides share", () => {

@@ -11,6 +11,7 @@
     "chunkChars": 24,
     "intervalMs": 150
   },
+  "gapThresholdMs": 200,
   "synthesis": {
     "rtf": 0.5,
     "audioMsPerChar": 70,
