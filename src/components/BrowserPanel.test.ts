@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 
@@ -144,6 +145,21 @@ describe("the browser panel's connection", () => {
     expect(host.textContent).not.toContain("Starting the browser…");
   });
 
+  it("says the browser closed after it sat unused, opens it again only when asked, and shows it once it runs", async () => {
+    const socket = await streaming("unclaimed");
+    await act(async () => socket.message({ type: "asleep" }));
+    await flush();
+    expect(host.textContent).toContain(t("browser.panel.asleep"));
+    expect(socket.sent).not.toContainEqual({ type: "wake" });
+    await act(async () => button(t("browser.panel.wake")).click());
+    expect(socket.sent).toContainEqual({ type: "wake" });
+    expect(button(t("browser.panel.waking")).disabled).toBe(true);
+    await act(async () => socket.message({ type: "awake" }));
+    await flush();
+    expect(host.textContent).not.toContain(t("browser.panel.asleep"));
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
   it("shows the tab's address and enables history from what the stream says", async () => {
     const socket = await streaming();
     expect((host.querySelector<HTMLInputElement>('input[aria-label="Browser address"]')!).value).toBe("https://example.com/");
@@ -170,6 +186,22 @@ describe("a v1 live view whose stream dropped", () => {
     expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
     await emit("ready", { viewerId: "new-viewer" });
     expect(host.textContent).not.toContain("Browser disconnected");
+  });
+
+  it("says the browser closed after it sat unused, and opens a new view only when asked", async () => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
+    await render();
+    await emit("ready", { viewerId: "old-viewer" });
+    await emit("error", { retryable: false, asleep: true, message: "This browser closed after it sat unused, to save memory." });
+    await flush();
+    expect(host.textContent).toContain(t("browser.panel.asleep"));
+    expect(host.textContent).not.toContain("Browser disconnected");
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(FixtureEventSource.instances).toHaveLength(1);
+    await act(async () => button(t("browser.panel.wake")).click());
+    await flush();
+    expect(FixtureEventSource.instances).toHaveLength(2);
+    expect(host.textContent).not.toContain(t("browser.panel.asleep"));
   });
 
   it("comes back when the window is focused after its retries ran out", async () => {
@@ -307,5 +339,52 @@ describe("what the person does in the panel", () => {
     await act(async () => socket.control("you"));
     await flush();
     expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
+  });
+});
+
+describe("a sign-in that stops at a passkey", () => {
+  const PASSKEY = "https://accounts.google.com/v3/signin/challenge/pk/presend?TL=fixture";
+  const notice = () => host.querySelector("section[role=status]");
+  const go = async (socket: FakeSocket, url: string) => {
+    await act(async () => socket.message({ type: "nav", tabId: "t1", url, loading: false, canGoBack: true, canGoForward: false }));
+    await flush();
+  };
+
+  it("explains the passkey step and the ways that work, and goes once the page moves on", async () => {
+    const socket = await streaming("you");
+    expect(notice()).toBeNull();
+    await go(socket, PASSKEY);
+    expect(notice()?.textContent).toContain(t("browser.passkey.title"));
+    expect(notice()?.textContent).toContain(t("browser.passkey.body", { provider: "Google" }));
+    expect(notice()?.textContent).toContain(t("browser.passkey.appsGoogle", { name: "Pepper" }));
+    expect(notice()?.textContent).toContain(t("browser.passkey.otherWayGoogle"));
+    expect(notice()?.querySelectorAll("li")).toHaveLength(2);
+    await go(socket, "https://accounts.google.com/v3/signin/challenge/pwd?TL=fixture");
+    expect(notice()).toBeNull();
+  });
+
+  it("stays dismissed on that step only", async () => {
+    const socket = await streaming("you");
+    await go(socket, PASSKEY);
+    await act(async () => button(t("browser.passkey.dismiss")).click());
+    expect(notice()).toBeNull();
+    await go(socket, "https://accounts.google.com/v3/signin/identifier");
+    await go(socket, `${PASSKEY}&again=1`);
+    expect(notice()).not.toBeNull();
+  });
+
+  it("on My Cloud, offers the lent PC by name, or how to lend one", async () => {
+    fixture.state.config.cloudHome = true;
+    fixture.api.mockImplementation(async (path: string) => path === "/api/shared-computers"
+      ? { computers: [{ name: "Office PC", online: true, scopes: { screen: true } }] } : { ok: true });
+    const socket = await streaming("you");
+    await go(socket, PASSKEY);
+    expect(notice()?.textContent).toContain(t("browser.passkey.lentPc", { computer: "Office PC", name: "Pepper" }));
+    act(() => root.unmount());
+    root = createRoot(host);
+    fixture.api.mockImplementation(async (path: string) => path === "/api/shared-computers" ? { computers: [{ name: "Office PC", online: false, scopes: { screen: true } }] } : { ok: true });
+    const again = await streaming("you");
+    await go(again, PASSKEY);
+    expect(notice()?.textContent).toContain(t("browser.passkey.lendPc", { name: "Pepper" }));
   });
 });

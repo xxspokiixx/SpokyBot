@@ -9,6 +9,20 @@ import type { ToolScope } from "../../shared/tool-scope.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 
+const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
+vi.mock("../procs.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../procs.ts")>();
+  return {
+    ...actual,
+    // Always runs the real kill for cleanup; the override only forces the verdict and records the budget.
+    killCliTree: (child: Parameters<typeof actual.killCliTree>[0], budget = 5_000) => {
+      killProbe.budgets.push(budget);
+      const run = actual.killCliTree(child, budget);
+      return killProbe.override ? run.then(() => killProbe.stopped) : run;
+    },
+  };
+});
+
 const dirs: string[] = [];
 const sessions: ChatToolSession[] = [];
 const controllers: AbortController[] = [];
@@ -341,6 +355,14 @@ describe("Chat MCP session", () => {
     expect(alive(failed.read().pid)).toBe(false);
   });
 
+  it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
+    const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
+    await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
+    expect(alive(empty.read().pid)).toBe(false);
+    expect((await empty.mount(false)).definitions).toEqual([]);
+    expect((await fixture().mount(true, true, { allow: ["mcp:computer:screenshot"] })).definitions).toEqual([]);
+  });
+
   it("advertises only name, description and parameters, never outputSchema or other MCP tool fields", async () => {
     const f = fixture(`if(message.method === "tools/list") { reply(message,{tools:[{name:"write",title:"W",description:"d",inputSchema:${JSON.stringify(schema)},outputSchema:{type:"object"},annotations:{readOnlyHint:true}}]}); continue; }`);
     const session = await f.mount();
@@ -377,6 +399,73 @@ describe("Chat MCP session", () => {
     await rejected;
     expect(alive(receipt.pid)).toBe(false);
     expect(alive(receipt.helper)).toBe(false);
+  });
+});
+
+describe("Chat MCP shutdown verdict", () => {
+  afterEach(() => {
+    killProbe.override = false;
+    killProbe.stopped = false;
+    killProbe.budgets.length = 0;
+  });
+
+  it("a slow shutdown resolves close when no call was in flight", async () => {
+    const f = fixture();
+    const session = await f.mount();
+    killProbe.override = true;
+    killProbe.stopped = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(session.close()).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("chat-mcp:"));
+    } finally { warn.mockRestore(); }
+  });
+
+  it("an unconfirmed shutdown still fails close when a call was in flight", async () => {
+    const f = fixture(`if (message.method === "tools/call") return;`);
+    const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal);
+    const executing = session.execute("audit_write", { value: "in flight" }, f.controller.signal).catch(() => {});
+    await vi.waitFor(() => { expect(f.read().calls.some((call) => call.method === "tools/call")).toBe(true); });
+    killProbe.override = true;
+    killProbe.stopped = false;
+    await expect(session.close()).rejects.toThrow("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+    await executing;
+  });
+
+  it("the close budget is 15 seconds on Windows and 5 seconds elsewhere", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const [platform, budget] of [["win32", 15_000], ["linux", 5_000]] as const) {
+        const f = fixture();
+        const session = await f.mount();
+        killProbe.budgets.length = 0;
+        Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+        try { await session.close(); }
+        finally { Object.defineProperty(process, "platform", descriptor); }
+        expect(killProbe.budgets.at(-1)).toBe(budget);
+      }
+    } finally { warn.mockRestore(); }
+  });
+
+  it("the session close fails only when a server with an in-flight call could not be stopped", async () => {
+    killProbe.override = true;
+    killProbe.stopped = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const one = fixture(); const two = fixture();
+      const session = await mountChatTools({ custom: { alpha: one.server, beta: two.server } }, one.controller.signal);
+      sessions.push(session);
+      await expect(session.close()).resolves.toBeUndefined();
+
+      const busy = fixture(`if (message.method === "tools/call") return;`);
+      const risky = await mountChatTools({ custom: { busy: busy.server } }, busy.controller.signal);
+      const executing = risky.execute("busy_write", { value: "in flight" }, busy.controller.signal).catch(() => {});
+      await vi.waitFor(() => { expect(busy.read().calls.some((call) => call.method === "tools/call")).toBe(true); });
+      await expect(risky.close()).rejects.toBeInstanceOf(ChatToolSessionError);
+      await expect(risky.close()).rejects.toThrow("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+      await executing;
+    } finally { warn.mockRestore(); }
   });
 });
 
