@@ -149,6 +149,62 @@ it("names a refusal main explains in plain words, and keeps Try again for the re
   expect(lendingFailureKey("not an error")).toBe("lending.failed");
 });
 
+const button = (label: string) => render().nodes.find(node => node.type === "button" && Children.toArray(node.props.children).includes(label))!;
+
+// A Linux computer with no usual folders: the switch stayed on, reading Starting…, above "Nothing is lent yet".
+it("a turn-on main refuses leaves the switch off with its reason, never Starting…, and Choose what's lent in reach", async () => {
+  vi.mocked(bridge.save).mockRejectedValueOnce(new Error("Error invoking remote method 'lending:save': Error: lending-refused:nothing-to-lend"));
+  await ready(off);
+  toggle().props.onClick!();
+  await flush();
+  let view = render();
+  expect(toggle().props.checked).toBe(false);
+  expect(view.html).not.toContain("Starting…");
+  expect(view.html).toContain("Nothing is lent yet: this computer has no Desktop, Documents or Downloads folder to lend.");
+  // The reason says to pick a folder under Choose what's lent; one picked there is lent.
+  expect(view.html).toContain("data-lending-more");
+  more();
+  button("Add folder").props.onClick!();
+  await flush();
+  expect(vi.mocked(bridge.save).mock.calls.at(-1)).toEqual([{ folders: [folder], screen: false }]);
+  view = render();
+  expect(toggle().props.checked).toBe(true);
+  expect(view.html).toContain("My Cloud can use Plans (read only) on this computer.");
+  expect(view.html).not.toContain('role="alert"');
+  // Lent once, the choices go back to living behind an on switch.
+  view.nodes.find(node => node.props["aria-label"] === "Remove Plans")!.props.onClick!();
+  await flush();
+  expect(toggle().props.checked).toBe(false);
+  expect(render().html).not.toContain("data-lending-more");
+});
+
+it("a turn-on that fails for a reason trying again can fix also leaves the switch off, saying Try again", async () => {
+  vi.mocked(bridge.save).mockRejectedValueOnce(new Error("Error invoking remote method 'lending:save': Error: My Cloud didn't answer"));
+  await ready(off);
+  toggle().props.onClick!();
+  await flush();
+  const view = render();
+  expect(toggle().props.checked).toBe(false);
+  expect(view.html).not.toContain("Starting…");
+  expect(view.html).toContain("Could not change what is lent. Try again.");
+  toggle().props.onClick!();
+  await flush();
+  expect(toggle().props.checked).toBe(true);
+  expect(render().html).not.toContain('role="alert"');
+});
+
+it("once on, the switch says what main says: stopped by main while Settings is open, it is off with why, never Starting…", async () => {
+  await ready(off);
+  toggle().props.onClick!();
+  await flush();
+  expect(toggle().props.checked).toBe(true);
+  await ready({ ...off, state: { ...off.state!, stopped: { reason: "signed-out", at: new Date(2026, 9, 20, 9, 0).getTime() } } });
+  const view = render();
+  expect(toggle().props.checked).toBe(false);
+  expect(view.html).not.toContain("Starting…");
+  expect(view.html).toContain('data-lending-stopped="signed-out"');
+});
+
 // A Japanese message once sent people to a 「貸し出す内容を選ぶ」 button that showed in English.
 it("nothing to lend names the button the person sees, in every language, and Settings → MausBot Cloud where it is translated", () => {
   const unseen = localeChoices.flatMap(({ code }) => {
