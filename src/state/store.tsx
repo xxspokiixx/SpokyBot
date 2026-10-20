@@ -18,6 +18,8 @@ import type { NotificationLogEntry } from "../../shared/notification";
 import { reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
+import { patchGroupTask } from "./thread-edits";
+import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
@@ -612,7 +614,7 @@ export interface AppState {
   liveCallVersion: number;
   liveCallLookupSeq: number;
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines" | "files";
+  activeView: "chat" | "team-map" | "routines" | "files" | "today";
   /** Folders a finished move left on this computer, for Files to offer sharing. */
   filesSuggest: string[] | null;
   routines: Routine[];
@@ -755,7 +757,7 @@ export type Action =
   | { type: "sections"; sections: string[] }
   | { type: "sectionDeleted"; section: string; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
-  | { type: "showTeamMap" }
+  | { type: "showTeamMap" } | { type: "showToday" }
   | { type: "showFiles"; suggest?: string[] }
   | { type: "showChat" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
@@ -857,7 +859,7 @@ export type Action =
   | { type: "botCreationPending"; on: boolean }
   | { type: "updateTask"; botId: string; threadId: string; patch: TaskUpdatePatch }
   | { type: "refreshTaskPermissions"; botId: string; threadId: string; acknowledgeLocalAuto?: boolean }
-  | { type: "followBotModel"; botId: string }
+  | { type: "followBotModel"; botId: string; onSettled?: (result: { busy: number }) => void }
   | { type: "createProject"; botId: string; name: string; emoji?: string | null; onCreated?: (project: BotProject) => void; onError?: (message: string) => void }
   | { type: "updateProject"; botId: string; projectId: string; patch: ProjectUpdatePatch; onSaved?: () => void; onError?: (message: string) => void }
   | { type: "deleteProject"; botId: string; projectId: string; onDeleted?: () => void; onError?: (message: string) => void }
@@ -1104,10 +1106,10 @@ export function reducer(state: AppState, action: Action): AppState {
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
     case "showTeamMap":
-    case "showFiles":
+    case "showFiles": case "showToday":
       return {
         ...state,
-        activeView: action.type === "showFiles" ? "files" : "team-map",
+        activeView: action.type === "showFiles" ? "files" : action.type === "showToday" ? "today" : "team-map",
         filesSuggest: action.type === "showFiles" && action.suggest?.length ? action.suggest : null,
         settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false, pluginsOpen: false,
       };
@@ -1883,49 +1885,12 @@ export function reducer(state: AppState, action: Action): AppState {
         ),
       }));
     case "renameGroupTask":
-      return {
-        ...state,
-        groups: state.groups.map((group) =>
-          group.id === action.groupId
-            ? {
-                ...group,
-                tasks: (group.tasks ?? []).map((task) =>
-                  task.threadId === action.threadId ? { ...task, title: action.title } : task,
-                ),
-              }
-            : group,
-        ),
-      };
+      return patchGroupTask(state, action.groupId, action.threadId, { title: action.title });
     case "pinGroupTask":
-      return {
-        ...state,
-        groups: state.groups.map((group) =>
-          group.id === action.groupId
-            ? {
-                ...group,
-                tasks: (group.tasks ?? []).map((task) =>
-                  task.threadId === action.threadId ? { ...task, pinned: action.pinned ? true : undefined } : task,
-                ),
-              }
-            : group,
-        ),
-      };
+      return patchGroupTask(state, action.groupId, action.threadId, { pinned: action.pinned ? true : undefined });
     case "setConversationTurnLimit":
-      return {
-        ...state,
-        groups: state.groups.map((group) => {
-          if (group.id !== action.groupId) return group;
-          if (action.dm) return { ...group, turnTimeoutMinutes: action.minutes ?? undefined };
-          return {
-            ...group,
-            tasks: (group.tasks ?? []).map((task) =>
-              task.threadId === action.threadId
-                ? { ...task, turnTimeoutMinutes: action.minutes ?? undefined }
-                : task,
-            ),
-          };
-        }),
-      };
+      if (!action.dm) return patchGroupTask(state, action.groupId, action.threadId, { turnTimeoutMinutes: action.minutes ?? undefined });
+      return { ...state, groups: state.groups.map((group) => group.id === action.groupId ? { ...group, turnTimeoutMinutes: action.minutes ?? undefined } : group) };
     case "taskSwitched": {
       let switched = updateBot(bumpTranscriptGeneration(state, action.bot.threadId), action.bot.id, (bot) => ({
         ...bot,
@@ -2369,6 +2334,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
     };
+    const showSavedState = (owner: SavedOwner) => (error: unknown) => {
+      showError(error);
+      void api<SavedSnapshot>("/api/bots?messages=0").then((snapshot) => {
+        const saved = savedStateAction(owner, snapshot);
+        if (saved?.type === "botPatched") rawDispatch({ ...saved, bot: withTaskWrites({ ...saved.bot, ...botPatchQueue.overlayFor(saved.bot.id) }) });
+        else if (saved) rawDispatch(saved);
+      }).catch(() => {});
+    };
     const cardTarget = (action: { botId: string; messageId: string; groupId?: string }) => {
       const host = action.groupId
         ? stateRef.current.groups.find((g) => g.id === action.groupId)
@@ -2461,7 +2434,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles"].includes(action.type)) selectionRevision++;
+      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showToday"].includes(action.type)) selectionRevision++;
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
@@ -2959,7 +2932,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}`, {
             method: "PATCH",
             body: JSON.stringify(action.patch),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "deleteGroup":
           api(`/api/groups/${action.groupId}`, { method: "DELETE" }).catch(showError);
@@ -3012,8 +2985,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "followBotModel":
-          void api<{ bot: BotAnnouncement }>(`/api/bots/${action.botId}/threads/follow-model`, { method: "POST", body: "{}" })
-            .then(({ bot }) => rawDispatch({ type: "botPatched", bot: withTaskWrites(bot) }))
+          void api<{ bot: BotAnnouncement; busy?: number }>(`/api/bots/${action.botId}/threads/follow-model`, { method: "POST", body: "{}" })
+            .then(({ bot, busy }) => { rawDispatch({ type: "botPatched", bot: withTaskWrites(bot) }); action.onSettled?.({ busy: busy ?? 0 }); })
             .catch(showError);
           break;
         case "createProject":
@@ -3079,7 +3052,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/bots/${action.botId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ title: action.title }),
-          }).catch(showError);
+          }).catch(showSavedState({ botId: action.botId }));
           break;
         case "regenerateTaskTitle":
           api(`/api/bots/${action.botId}/tasks/${action.threadId}/title`, { method: "POST" })
@@ -3105,19 +3078,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ title: action.title }),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "pinGroupTask":
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ pinned: action.pinned, title: action.title }),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "setConversationTurnLimit":
           api(action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ turnTimeoutMinutes: action.minutes }),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "deleteGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "DELETE" })

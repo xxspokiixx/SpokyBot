@@ -18,7 +18,7 @@ import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQue
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import {
   ActivityPanel, BotSettingsDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
-  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TriggersPage,
+  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TodayPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
@@ -300,7 +300,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <TeamMapPage />
       ) : state.activeView === "files" ? (
         <FilesView />
-      ) : state.activeView === "routines" ? (
+      ) : state.activeView === "today" ? <TodayPage /> : state.activeView === "routines" ? (
         <TriggersPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
         <LocalVmWorkspace
