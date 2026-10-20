@@ -608,9 +608,11 @@ this Mac** switch under **Open My Cloud** (it is part of connecting, not
 a dialog). Turning it on shows what can be lent; each change applies at once,
 with no confirmation. The switch and the chosen scopes are the consent.
 
-- **Internet connection**: the bots' browser on My Cloud goes out through this
-  computer, so sites see the person's home connection, not a data centre (see
-  "The internet connection" below). It can be the only thing lent.
+- **Internet connection**: the sites that turn away data centres (Instagram,
+  YouTube, Google sign-in) open for the bots' browser on My Cloud through this
+  computer, so they see the person's home connection; every other site loads
+  straight from My Cloud (see "The internet connection" below). It can be the
+  only thing lent.
 - **Folders**: chosen with the folder picker. Read-only by default; **Can
   edit** lets bots create files and overwrite them, but only after reading the
   current version (the overwrite is checked against its hash). Nothing is ever
@@ -674,7 +676,8 @@ found is left out. A refusal a person can act on (the whole home folder or a
 disk, a file, more than 20 folders) is said in plain words; only a failure
 that trying again can fix says Try again. A computer that lends its internet
 connection shows **Lends: internet connection, …**, and while it is away
-**While it's away, your bots browse from My Cloud's own connection.**
+**While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own
+connection and may turn your bots away.**
 
 **The default grant at the move.** The move to My Cloud turns lending on by
 itself (`installCloudLending(...).lendByDefault({ projects })`): the internet
@@ -699,8 +702,9 @@ still finish.
 Every bot browser on a Cloud home already connects through its per-session
 SOCKS egress gate (`server/browser/egress/gate.ts`). While the owner's lent
 computer is online with the internet connection on, the gate has one more way
-out, the computer itself (`server/device-links.ts`, offered by
-`server/browser/egress/registry.ts`):
+out for the sites that turn away data centres, the computer itself
+(`server/device-links.ts`, offered by `server/browser/egress/registry.ts` for
+the names in `server/browser/egress/home-sites.ts`):
 
 - **The device link.** One WebSocket per lent computer, opened by the desktop's
   main process to `wss://<My Cloud>/api/shared-computers/<id>/link` with the
@@ -716,9 +720,19 @@ out, the computer itself (`server/device-links.ts`, offered by
 - **What goes through it.** Reddit is refused first, as before. A name for
   this machine (`localhost`) and every address that is not on the public
   internet stay on the Cloud's own way, under its own policy (a bot's dev
-  server here still loads; the local network and metadata stay refused).
-  Everything else becomes a stream on the link, and the computer resolves the
-  name itself.
+  server here still loads; the local network and metadata stay refused). Only
+  the sites that turn away data centres become a stream on the link, and the
+  computer resolves the name itself: Instagram (its 429), YouTube with its
+  videos, which play only for the address that asked for them
+  (`googlevideo.com`) and its player's check (`jnn-pa.googleapis.com`), and all
+  of Google in every country (sign-in refuses a data centre and search answers
+  it with "unusual traffic"; a Google account signed in from home stays on
+  home). Every other site loads straight from My Cloud: through a home
+  connection on the other side of the world it is much slower (measured in
+  PR #3201: in India with My Cloud in Frankfurt, BBC News took 58 s instead of
+  2 s and the Python docs 3.6 s instead of 0.6 s), and a site that answers a
+  data centre gains nothing from it. The list is My Cloud's alone, so a new
+  site needs only a Cloud update.
 - **The computer's own check** (`electron/device-egress.mjs`, with the one
   address list both sides use, `electron/egress-addresses.mjs`): only ports 80
   and 443; never loopback, the computer itself, the networks it sits on (its
@@ -728,10 +742,11 @@ out, the computer itself (`server/device-links.ts`, offered by
   and 6to4; every address a name resolves to must pass, and it connects only to
   the addresses it checked. A refusal reaches the bot's page-health line ("the
   person's own computer or home network", "a port other than 80 and 443").
-- **When the computer is away**, new connections go out from My Cloud's own
+- **When the computer is away**, those sites load from My Cloud's own
   connection at once, a connection in flight ends with the link, and the bot
-  is told once: "The person's Mac is away, so pages load from My Cloud's own
-  connection for now…".
+  is told once, the first time one of them loads that way: "The person's Mac is
+  away, so sites that turn away data centres, such as Instagram, YouTube and
+  Google sign-in, load from My Cloud's own connection for now and may refuse…".
 
 ### How it is enforced
 

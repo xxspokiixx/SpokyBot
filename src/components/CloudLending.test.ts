@@ -103,7 +103,7 @@ it("the internet connection is a choice of its own: ticking it lends it, and unt
 
 it("says so while My Cloud is too old to browse through this computer", async () => {
   await ready({ ...lent, state: { ...lent.state!, internet: true, link: "unsupported" } });
-  expect(render().html).toContain("My Cloud is updating. Your bots will browse through this computer once it&#x27;s done.");
+  expect(render().html).toContain("My Cloud is updating. Your bots can use this computer&#x27;s internet connection once it&#x27;s done.");
   await ready({ ...lent, state: { ...lent.state!, internet: true, link: "on" } });
   expect(render().html).not.toContain("My Cloud is updating");
 });

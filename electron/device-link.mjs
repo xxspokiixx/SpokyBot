@@ -4,6 +4,9 @@ import { createDeviceEgress } from "./device-egress.mjs";
 import { createLinkMux } from "./device-link-protocol.mjs";
 
 const PING_MS = 10_000;
+/** An opening that has not finished by now never will (a proxy that took the connection and went quiet): give up, so
+ * lending dials again. */
+const OPEN_MS = 15_000;
 /** Nothing heard for this long: My Cloud is gone without closing (asleep, its network down), so the link ends here. */
 const SILENT_MS = 25_000;
 
@@ -18,7 +21,7 @@ export function linkUrl(origin, path) {
  * Runs one link connection until it ends, then resolves with its close code and reason; `signal` aborting ends it.
  * `egress`: what the computer's own check takes (resolve, connect, interfaces), for tests.
  */
-export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, onOpen = () => {}, traffic = () => {}, now = Date.now }) {
+export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, openMs = OPEN_MS, onOpen = () => {}, traffic = () => {}, now = Date.now }) {
   return new Promise((done) => {
     let seenAs = null;
     let heard = now();
@@ -31,9 +34,12 @@ export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocke
     const deviceEgress = createDeviceEgress({ ...egress, seenAs: () => seenAs });
     const mux = createLinkMux({ send, accept: (target) => deviceEgress.open(target), traffic });
     let pinger = null;
+    const opening = setTimeout(() => finish(1006, "timeout"), openMs);
+    opening.unref?.();
     const finish = (code, reason) => {
       if (finished) return;
       finished = true;
+      clearTimeout(opening);
       clearInterval(pinger);
       signal?.removeEventListener("abort", stop);
       mux.close();
@@ -44,6 +50,7 @@ export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocke
     if (signal?.aborted) { stop(); return; }
     signal?.addEventListener("abort", stop, { once: true });
     ws.onopen = () => {
+      clearTimeout(opening);
       heard = now();
       onOpen();
       pinger = setInterval(() => {

@@ -1,7 +1,7 @@
 // A SOCKS5 server on loopback that a bot's Chrome sends every connection through. It resolves names itself and
 // connects only to addresses its policy allows, so neither redirects nor DNS rebinding reach anything else, and it
-// carries bytes only: TLS, HTTP/2 and WebSockets pass through unchanged. With an upstream, a public destination goes
-// out through the person's own computer instead, which resolves and checks it there.
+// carries bytes only: TLS, HTTP/2 and WebSockets pass through unchanged. A public destination the caller picks may go
+// out through an upstream instead, the person's own computer, which resolves and checks it there.
 //
 // Adapted from pingdotgg/t3code@00cdceb1 apps/server/src/htmlRender/publicProxy.ts, MIT License, Copyright (c) 2026
 // T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: plain Node in place of Effect, the policy is
@@ -26,8 +26,9 @@ export interface GateOptions {
   decide(target: GateTarget, addresses: readonly ResolvedAddress[]): Promise<string | null>;
   onRefusal?(target: GateTarget, reason: string): void;
   resolve?(host: string): Promise<ResolvedAddress[]>;
-  /** Decided per connection, after the name check; one that ends before it answers goes the gate's own way. */
-  upstream?(): GateUpstream | null;
+  /** Decided per connection, after the name check, for a public destination only; one that ends before it answers
+   * goes the gate's own way. */
+  upstream?(target: GateTarget): GateUpstream | null;
   /** This machine's own addresses, which never go upstream: its interfaces unless a test passes them. */
   own?(): BlockList;
 }
@@ -153,7 +154,7 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
       client.on("data", holdEarly);
       void (async () => {
         const named = options.refuseName?.(target) ?? null;
-        const through = named === null && !staysHere(target.host, options.own?.()) ? options.upstream?.() ?? null : null;
+        const through = named === null && !staysHere(target.host, options.own?.()) ? options.upstream?.(target) ?? null : null;
         if (through) {
           const opened = await through.open(target).catch((): LinkOpened => ({ gone: true }));
           if (!("gone" in opened)) {

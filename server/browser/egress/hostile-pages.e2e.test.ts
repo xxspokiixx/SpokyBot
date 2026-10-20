@@ -231,7 +231,8 @@ describe.skipIf(!chrome)("S6: a hostile page in a bot's browser", () => {
   }, hostTimeout(240_000));
 
   // My Cloud's browsing through the person's own computer: every target below is a name only the computer resolves, so
-  // My Cloud cannot judge it; the computer must refuse each one itself, and connect nowhere.
+  // My Cloud cannot judge it; the computer must refuse each one itself, and connect nowhere. My Cloud sends only the sites
+  // that turn away data centres there (home-sites.ts); this gate sends every name, as a Cloud gone wrong would.
   it("through the person's computer, refuses their home network, the computer itself, metadata, NAT64 and other ports, on the computer", async () => {
     const PUBLIC = "93.184.215.14";
     const names: Record<string, string[]> = {

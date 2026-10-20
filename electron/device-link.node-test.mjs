@@ -233,12 +233,12 @@ test("the link signs in like the poll, takes My Cloud's word for this computer's
   const stop = new AbortController();
   let opened = 0;
   const connects = [];
-  const running = runDeviceLink({ url: end.url, headers: { cookie: "omb_session=s", "x-omb-computer-secret": "a".repeat(64) }, signal: stop.signal, onOpen: () => opened++,
+  const running = runDeviceLink({ url: end.url, headers: { cookie: "omb_session=s", "x-omb-computer-secret": "a".repeat(64) }, signal: stop.signal, onOpen: () => opened++, openMs: 100,
     egress: { interfaces: () => ({}), resolve: async () => [{ address: SEEN_AS, family: 4 }], connect: (options) => { connects.push(options); return tcpConnect(1, "127.0.0.1"); } } });
   await until(() => end.sessions.length === 1 && opened === 1, "the link to open");
   assert.equal(end.sessions[0].headers.cookie, "omb_session=s");
   assert.equal(end.sessions[0].headers["x-omb-computer-secret"], "a".repeat(64));
-  await delay(50);
+  await delay(250); // past the opening limit: a link that opened is not ended by it
   assert.deepEqual(await end.sessions[0].mux.open({ host: "home-router.test", port: 443 }), { refused: "home-network" }, "the home's own public address is home");
   assert.equal(connects.length, 0);
   stop.abort();
@@ -253,6 +253,21 @@ test("a My Cloud that stops answering ends the link here within the silence limi
   const ended = await runDeviceLink({ url: end.url, pingMs: 30, silentMs: 120, egress: { interfaces: () => ({}) } });
   assert.deepEqual(ended, { code: 1006, reason: "silent" });
   assert.ok(Date.now() - started < 2000, "ended promptly");
+});
+
+test("a link whose opening never finishes gives up within the opening limit, so lending dials again instead of waiting", async (t) => {
+  // My Cloud's address takes the connection and never answers the upgrade: a half-dead proxy or a machine mid-restart.
+  const held = new Set();
+  const mute = createServer((socket) => { held.add(socket); socket.on("error", () => {}); });
+  await new Promise((resolve) => mute.listen(0, "127.0.0.1", resolve));
+  t.after(() => { for (const socket of held) socket.destroy(); mute.close(); });
+  const started = Date.now();
+  const ended = await Promise.race([
+    runDeviceLink({ url: `ws://127.0.0.1:${mute.address().port}/link`, openMs: 150, egress: { interfaces: () => ({}) } }),
+    delay(3000).then(() => "still waiting"),
+  ]);
+  assert.deepEqual(ended, { code: 1006, reason: "timeout" });
+  assert.ok(Date.now() - started < 2000, "gave up promptly");
 });
 
 test("a link that cannot open says so at once, with the close code My Cloud gave", async (t) => {

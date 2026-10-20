@@ -1,6 +1,7 @@
 // Use my Mac on a real server booted as a Cloud home, with the real desktop connector lending this test process as the
-// Mac. The bots' browsing goes out through the Mac's device link, and the Mac checks every connection itself. "The
-// internet" here is a web server on this machine that only the Mac's own connect reaches, under a public address.
+// Mac. The sites that turn away data centres go out through the Mac's device link, and the Mac checks every connection
+// itself; every other site goes My Cloud's own way. "The internet" here is a web server on this machine that only the
+// Mac's own connect reaches, under a public address. My Cloud itself is offline: it resolves no name and fetches nothing.
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -42,20 +43,24 @@ const visits: Array<{ peer: number; host: string }> = [];
 const macSockets = new Set<number>();
 const proxies: ChildProcess[] = [];
 
-/** The public internet, as the Mac sees it: names resolve here only, and only port 80 or 443 of a public address reaches the website. */
+/** The public internet, as the Mac sees it: names resolve here only, and only port 80 or 443 of a public address reaches
+ * the website. The hostile names are the sites that go through the Mac, resolving (as a hostile network or DNS rebinding
+ * would have them) to the Mac's home network, the Mac itself and the rest. */
 const PUBLIC = "93.184.215.14";
 const names: Record<string, string> = {
-  "www.instagram.example": PUBLIC, "slow.example": PUBLIC,
-  "router.home.example": "192.168.1.1", "mac.example": "127.0.0.1", "metadata.example": "169.254.169.254",
-  "nat64.example": "64:ff9b::c0a8:101", "own.example": "192.168.1.20", "neighbour.example": "2a02:1200:5:6::99",
-  "home-public.example": MAC_PUBLIC,
+  "www.instagram.com": PUBLIC, "slow.youtube.com": PUBLIC, "www.google.zz": PUBLIC, "en.wikipedia.org": PUBLIC,
+  "router.google.com": "192.168.1.1", "mac.google.com": "127.0.0.1", "metadata.googlevideo.com": "169.254.169.254",
+  "nat64.instagram.com": "64:ff9b::c0a8:101", "own.youtube.com": "192.168.1.20", "neighbour.google.com": "2a02:1200:5:6::99",
+  "home.instagram.com": MAC_PUBLIC,
 };
+/** Every name the Mac was asked to look up. */
+const macLookups: string[] = [];
 const macEgress = () => ({
   interfaces: () => ({ en0: [
     { address: "192.168.1.20", cidr: "192.168.1.20/24", family: "IPv4", internal: false, netmask: "255.255.255.0", mac: "00:00:00:00:00:00" },
     { address: "2a02:1200:5:6::20", cidr: "2a02:1200:5:6::20/64", family: "IPv6", internal: false, netmask: "ffff:ffff:ffff:ffff::", mac: "00:00:00:00:00:00", scopeid: 0 },
   ] }) as never,
-  resolve: async (host: string) => names[host] ? [{ address: names[host]!, family: names[host]!.includes(":") ? 6 : 4 }] : [],
+  resolve: async (host: string) => { macLookups.push(host); return names[host] ? [{ address: names[host]!, family: names[host]!.includes(":") ? 6 : 4 }] : []; },
   connect: (options: { host: string; port: number; lookup: (host: string, options: { all: boolean }, callback: (error: Error | null, addresses: Array<{ address: string }>) => void) => void }) => {
     let address = "";
     options.lookup(options.host, { all: true }, (_error, addresses) => { address = addresses[0]?.address ?? ""; });
@@ -180,8 +185,12 @@ function lend(file: string, power = createCloudPowerGate()) {
 
 async function boot() {
   const dataDir = join(home, ".openmausbot");
-  // Off the internet: My Cloud's own fetches go nowhere, and its own way out reaches nothing a test name points at.
-  const offlinePrelude = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
+  // Off the internet: My Cloud's own fetches go nowhere, and its own way out resolves no name, so it reaches nothing.
+  const offlinePrelude = `data:text/javascript,${encodeURIComponent([
+    'import dns from "node:dns/promises"; import { syncBuiltinESMExports } from "node:module";',
+    'dns.lookup = async (host) => { throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND" }); }; syncBuiltinESMExports();',
+    'const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });',
+  ].join("\n"))}`;
   child = spawn(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
@@ -232,7 +241,7 @@ process.stdout.write(JSON.stringify({ success: true, data: args[0] === "session"
   } }));
   website = createServer((req, res) => {
     visits.push({ peer: req.socket.remotePort!, host: String(req.headers.host) });
-    if (req.headers.host === "slow.example") return void setTimeout(() => res.end("late"), 60_000);
+    if (req.headers.host === "slow.youtube.com") return void setTimeout(() => res.end("late"), 60_000);
     res.end(`hello from ${req.headers.host}`);
   });
   await new Promise<void>((resolve) => website.listen(0, "127.0.0.1", resolve));
@@ -263,11 +272,11 @@ it("My Cloud offers the device link, and this Mac lends its internet connection 
   expect(known).toEqual([expect.objectContaining({ online: true, lent: true, scopes: { folders: 0, terminal: false, screen: false, internet: true } })]);
 }, hostTimeout(30_000));
 
-it("a bot's browser on My Cloud reaches the web from the Mac's own connection: the website sees the Mac, not My Cloud", async () => {
+it("a bot's browser on My Cloud reaches Instagram from the Mac's own connection: the website sees the Mac, not My Cloud", async () => {
   ({ gate } = await botTurn("Browser bot"));
-  const page = await throughGate(gate, "www.instagram.example", 443);
+  const page = await throughGate(gate, "www.instagram.com", 443);
   expect(page.code).toBe(0);
-  expect(page.body).toContain("hello from www.instagram.example");
+  expect(page.body).toContain("hello from www.instagram.com");
   expect(visits.length).toBeGreaterThan(0);
   expect(visits.every((visit) => macSockets.has(visit.peer)), "every request the website served came over a socket the Mac opened").toBe(true);
   if (!chrome) return console.log("skipping the real-Chrome page through the Mac: no Chrome found (set OMB_TEST_CHROME)");
@@ -275,9 +284,10 @@ it("a bot's browser on My Cloud reaches the web from the Mac's own connection: t
   try {
     const tab = await browser.page();
     const before = visits.length;
-    expect((await tab.navigate("http://www.instagram.example/")).errorText).toBeUndefined();
-    await tab.loaded("http://www.instagram.example/");
-    expect(await tab.evaluate("document.body.textContent")).toBe("hello from www.instagram.example");
+    // Google in a country, by plain http: Chrome would turn a page of instagram.com into https by itself.
+    expect((await tab.navigate("http://www.google.zz/")).errorText).toBeUndefined();
+    await tab.loaded("http://www.google.zz/");
+    expect(await tab.evaluate("document.body.textContent")).toBe("hello from www.google.zz");
     expect(visits.length).toBeGreaterThan(before);
     expect(visits.slice(before).every((visit) => macSockets.has(visit.peer)), "Chrome's page came through the Mac").toBe(true);
   } finally {
@@ -285,10 +295,22 @@ it("a bot's browser on My Cloud reaches the web from the Mac's own connection: t
   }
 }, hostTimeout(60_000));
 
+it("every other site loads straight from My Cloud: the Mac is never asked, nor looks it up", async () => {
+  const before = { visits: visits.length, sockets: macSockets.size, lookups: macLookups.length };
+  for (const host of ["en.wikipedia.org", "static.cdninstagram.com", "api.ipify.org"]) {
+    const page = await throughGate(gate, host, 443);
+    page.socket.destroy();
+    expect(page.code, `${host}: My Cloud's own way, which resolves nothing here`).toBe(4);
+  }
+  expect(macLookups.length, "the Mac looked up nothing").toBe(before.lookups);
+  expect(macSockets.size).toBe(before.sockets);
+  expect(visits.length).toBe(before.visits);
+}, hostTimeout(30_000));
+
 it("a page that reaches for the Mac's home network, the Mac itself, a metadata service, NAT64 or another port is refused on the Mac", async () => {
   const before = { visits: visits.length, sockets: macSockets.size };
-  for (const [host, targetPort] of [["router.home.example", 443], ["mac.example", 443], ["metadata.example", 80], ["nat64.example", 443], ["own.example", 443],
-    ["neighbour.example", 443], ["home-public.example", 443], ["www.instagram.example", 8080], ["www.instagram.example", 25]] as const) {
+  for (const [host, targetPort] of [["router.google.com", 443], ["mac.google.com", 443], ["metadata.googlevideo.com", 80], ["nat64.instagram.com", 443], ["own.youtube.com", 443],
+    ["neighbour.google.com", 443], ["home.instagram.com", 443], ["www.instagram.com", 8080], ["www.instagram.com", 25]] as const) {
     const attempt = await throughGate(gate, host, targetPort);
     attempt.socket.destroy();
     expect(attempt.code, `${host}:${targetPort}`).toBe(2);
@@ -315,7 +337,7 @@ it("a 2 MiB file on the Mac reads whole through My Cloud, under its 4 MB body", 
 
 it("when the Mac goes away, a page in flight ends at once, My Cloud says it is away, and the next page goes My Cloud's own way without waiting", async () => {
   const slow = await new Promise<{ socket: Socket; closed: Promise<number> }>((resolve) => {
-    const name = Buffer.from("slow.example");
+    const name = Buffer.from("slow.youtube.com");
     const socket = tcpConnect(gate, "127.0.0.1", () => socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0, 3, name.length]), name, Buffer.from([1, 187])])));
     socket.on("error", () => {});
     let received = 0;
@@ -324,19 +346,19 @@ it("when the Mac goes away, a page in flight ends at once, My Cloud says it is a
       if (received >= 12) return;
       received += chunk.length;
       if (received < 12) return;
-      socket.write("GET / HTTP/1.1\r\nhost: slow.example\r\n\r\n");
+      socket.write("GET / HTTP/1.1\r\nhost: slow.youtube.com\r\n\r\n");
       resolve({ socket, closed });
     });
   });
-  await expect.poll(() => visits.some((visit) => visit.host === "slow.example"), { timeout: 5000 }).toBe(true);
+  await expect.poll(() => visits.some((visit) => visit.host === "slow.youtube.com"), { timeout: 5000 }).toBe(true);
   const quit = Date.now();
   mac.connector.close();
   expect(await slow.closed - quit, "the page in flight ended within two seconds").toBeLessThan(2000);
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.find((computer: any) => computer.lent),
     { timeout: hostTimeout(60_000), interval: 500 }).toEqual(expect.objectContaining({ online: false, scopes: expect.objectContaining({ internet: true }) }));
   const started = Date.now();
-  const away = await throughGate(gate, "www.instagram.example", 443);
-  expect(away.code, "My Cloud's own way: this test name means nothing on its own connection").toBe(4);
+  const away = await throughGate(gate, "www.instagram.com", 443);
+  expect(away.code, "My Cloud's own way, which resolves nothing here").toBe(4);
   expect(Date.now() - started, "answered without waiting on a Mac that is gone").toBeLessThan(2000);
 }, hostTimeout(90_000));
 

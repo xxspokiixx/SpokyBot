@@ -61,7 +61,7 @@ it("says how lending is going in plain words", () => {
   expect(pageLendingLine({ ...lent, status: "asleep" })).toBe("My Cloud is asleep. Lending resumes when it wakes.");
   expect(pageLendingLine({ ...lent, status: "starting" })).toBe("Starting…");
   expect(pageLendingLine({ ...lent, folders: [], screen: true, internet: false })).toBe("Your bots can use apps and screen on this computer.");
-  expect(pageLendingLine({ ...lent, link: "unsupported" })).toBe("My Cloud is updating. Your bots will browse through this computer once it's done.");
+  expect(pageLendingLine({ ...lent, link: "unsupported" })).toBe("My Cloud is updating. Your bots can use this computer's internet connection once it's done.");
 });
 
 it("a refused folder says why plainly, with no Try again; only a failure trying again can fix says Try again", async () => {
@@ -81,12 +81,12 @@ it("a refused folder says why plainly, with no Try again; only a failure trying 
   expect(host.querySelector('[role="alert"]')!.textContent).toBe("Could not change what is lent. Try again.");
 });
 
-it("on the phone or in a browser, a computer that lends its internet connection says so, and while it is away that the bots browse from My Cloud's own connection", () => {
+it("on the phone or in a browser, a computer that lends its internet connection says so, and while it is away that the sites that turn away data centres open from My Cloud's own connection", () => {
   const computer = { id: "c", name: "Ash's MacBook", platform: "darwin" as const, online: true, busy: false, lent: true, lastSeenAt: Date.now(), lastUsedAt: null,
     scopes: { folders: 3, terminal: false, screen: false, internet: true } };
   expect(lentComputerLines(computer)).toEqual(["Online now", "Lends: internet connection, 3 folders", "Not used yet"]);
   const away = lentComputerLines({ ...computer, online: false, lastSeenAt: Date.now() - 5 * 60_000 });
-  expect(away).toContain("While it's away, your bots browse from My Cloud's own connection.");
+  expect(away).toContain("While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own connection and may turn your bots away.");
   expect(lentComputerLines({ ...computer, online: false, scopes: { ...computer.scopes, internet: false } }).join(" ")).not.toContain("My Cloud's own connection");
   expect(lentComputerLines({ ...computer, online: false, lent: false }).join(" ")).not.toContain("My Cloud's own connection");
 });

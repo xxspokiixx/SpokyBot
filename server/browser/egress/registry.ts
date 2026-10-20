@@ -7,6 +7,7 @@ import { sanitizePageText } from "../../browser-page-health.ts";
 import { FLEET_FIRST_PORT, FLEET_PORT_STRIDE } from "../../fleet.ts";
 import { botEngineSessions } from "../../procs.ts";
 import { openGate, resolveTarget, type EgressGate, type GateTarget, type GateUpstream, type ResolvedAddress } from "./gate.ts";
+import { opensFromHome } from "./home-sites.ts";
 import { ListenerOwnership } from "./ownership.ts";
 import { allowList, REFUSAL_TEXT, refusalFor, type BrowserEgressConfig, type EgressHost, type EgressRules, type Refusal } from "./policy.ts";
 import { opensReddit, REDDIT_REFUSAL, refusesReddit } from "./reddit.ts";
@@ -90,21 +91,23 @@ export interface EgressSetup {
   ownership?: ListenerOwnership;
   /** How a gate looks names up: the system's resolver unless a test passes one. */
   resolve?(host: string): Promise<ResolvedAddress[]>;
-  /** MausBot Cloud: the person's own computer while it lends its internet connection, or which device is away. */
+  /** MausBot Cloud: the person's own computer while it lends its internet connection, or which device is away. Only
+   * the sites that turn away data centres (home-sites.ts) go through it. */
   device?(): GateUpstream | { away: string } | null;
 }
 
 interface Blocked { target: string; reason: Refusal }
 
-/** What the bot reads once when its pages load from My Cloud's own connection because the person's computer is away. */
-export const awayNotice = (device: string) => `The person's ${device} is away, so pages load from My Cloud's own connection for now, and a site that blocks data centres may refuse them. They go through the ${device} again once it is back.`;
+/** What the bot reads once when a site that turns away data centres loads from My Cloud's own connection because the
+ * person's computer is away. */
+export const awayNotice = (device: string) => `The person's ${device} is away, so sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection for now and may refuse. They open through the ${device} again once it is back.`;
 
 /** One gate per browser session for the life of the server, so a Chrome keeps the port it launched with. */
 export class BrowserEgress {
   private setup: Required<Omit<EgressSetup, "device">> & Pick<EgressSetup, "device"> | null = null;
   private readonly gates = new Map<string, Promise<EgressGate>>();
   private readonly blocked = new Map<string, Blocked[]>();
-  /** Sessions told their pages load from My Cloud's own connection, until the computer is back. */
+  /** Sessions told those sites load from My Cloud's own connection, until the computer is back. */
   private readonly toldAway = new Map<string, string>();
 
   configure(setup: EgressSetup): void {
@@ -140,8 +143,9 @@ export class BrowserEgress {
     };
   }
 
-  /** The way out for one of `session`'s connections: on MausBot Cloud the person's computer while it lends its
-   * connection, else this server's own (when that computer is away, the bot is told once). */
+  /** The way out for one of `session`'s connections to a site that turns away data centres: on MausBot Cloud the
+   * person's computer while it lends its connection, else this server's own (when that computer is away, the bot is told
+   * once). Every other site always goes this server's own way. */
   private through(session: string): GateUpstream | null {
     const device = this.setup?.host === "cloud" ? this.setup.device?.() ?? null : null;
     if (device && "open" in device) { this.toldAway.delete(session); return device; }
@@ -160,7 +164,7 @@ export class BrowserEgress {
         decide: (target, addresses) => refusalFor(target, addresses, this.rules()),
         onRefusal: (target, reason) => this.note(session, target, reason as Refusal),
         resolve: this.setup.resolve,
-        upstream: () => this.through(session),
+        upstream: (target) => opensFromHome(target.host) ? this.through(session) : null,
       });
       this.gates.set(session, gate);
       gate.then((opened) => this.setup?.listeners.add(opened.port), () => this.gates.delete(session));
@@ -175,8 +179,8 @@ export class BrowserEgress {
     this.blocked.set(session, list);
   }
 
-  /** What the gate refused for `session` since the last call, and once that its pages load from My Cloud's own
-   * connection while the person's computer is away, as one page-health line. */
+  /** What the gate refused for `session` since the last call, and once that the sites that turn away data centres load
+   * from My Cloud's own connection while the person's computer is away, as one page-health line. */
   takeNotice(session: string): string | null {
     const list = this.blocked.get(session);
     this.blocked.delete(session);

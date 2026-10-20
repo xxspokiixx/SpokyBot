@@ -9,6 +9,7 @@ export declare function runDeviceLink(options: {
   WebSocket?: typeof globalThis.WebSocket;
   pingMs?: number;
   silentMs?: number;
+  openMs?: number;
   onOpen?: () => void;
   traffic?: () => void;
   now?: () => number;
