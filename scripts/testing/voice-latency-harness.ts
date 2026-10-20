@@ -7,7 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runControlOmb, launchVerificationServer, type VerificationServer } from "../control-omb.ts";
@@ -353,7 +353,7 @@ async function main(): Promise<void> {
       baseCommit: BASE_COMMIT,
       measuredBuildCommit: process.env.OMB_MEASURED_COMMIT ?? "(unset: worktree HEAD)",
       date: new Date().toISOString(),
-      machine: { platform: process.platform, arch: process.arch },
+      machine: { platform: process.platform, arch: process.arch, cpuModel: cpus()[0]?.model ?? null },
       configSummary: { provider: "elevenlabs (record stub)", model: STUB_MODEL, voice: STUB_VOICE },
       synthesis: {
         protocol: "elevenlabs-wire stub on loopback; no live engine call, no engine key",
