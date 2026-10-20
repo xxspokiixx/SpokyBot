@@ -124,6 +124,47 @@ it("sends this computer's bot, its skill, picture and notes, a login, 1Password 
   for (const where of [...fx.answers, fx.logs()]) for (const value of SECRETS) expect(where).not.toContain(value);
 }, hostTimeout(120_000));
 
+const textIds = async (side: CloudSendFixture["local"], threadId: string) => ((await side("GET", `/api/threads/${threadId}/messages?limit=500`)).body?.messages ?? [])
+  .filter((message: { kind: string }) => message.kind === "text").map((message: { id: string }) => message.id) as string[];
+async function chat(bot: { id: string; threadId: string }, text: string) {
+  const before = (await textIds(fx.local, bot.threadId)).length;
+  expect((await fx.local("POST", `/api/bots/${bot.id}/messages`, { text, threadId: bot.threadId })).status).toBe(202);
+  const settled = async () => (await textIds(fx.local, bot.threadId)).length >= before + 2
+    && (await fx.local("GET", "/api/bots")).body.bots.every((entry: { activity?: string; busy?: boolean }) => entry.activity !== "working" && !entry.busy);
+  for (let tries = 0; !(await settled()) && tries < 300; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+it("Send everything brings this computer's chats under the same bots; a second send adds only the new messages, and nothing twice", async () => {
+  const send = () => fx.call<CloudSendOutcome>("cloud-send:send", "local");
+  const lark = (await fx.local("POST", "/api/bots", { name: "Lark", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
+  await chat(lark, "The Acme deadline is Friday.");
+  const first = await send();
+  expect(first.result.failed).toEqual([]);
+  expect(first.result.bots).toContain("Lark");
+  // Its conversation was made with the bot, so its messages count as added to a conversation My Cloud has.
+  expect(first.result.chats?.messages).toBe((await textIds(fx.local, lark.threadId)).length);
+  // Same bot, same conversation, same messages.
+  expect((await fx.onCloud("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === lark.id)).toMatchObject({ threadId: lark.threadId });
+  const firstIds = await textIds(fx.local, lark.threadId);
+  expect(await textIds(fx.onCloud, lark.threadId)).toEqual(firstIds);
+
+  await chat(lark, "Also, invoice 42 is overdue.");
+  const added = (await textIds(fx.local, lark.threadId)).length - firstIds.length;
+  const second = await send();
+  expect(second.result.chats).toEqual({ conversations: 0, messages: added });
+  const there = await textIds(fx.onCloud, lark.threadId);
+  expect(there).toEqual(await textIds(fx.local, lark.threadId));
+  expect(new Set(there).size).toBe(there.length);
+
+  const third = await send();
+  expect(third.result.chats).toEqual({ conversations: 0, messages: 0 });
+  expect(await textIds(fx.onCloud, lark.threadId)).toEqual(there);
+  // One item asked for (Use this computer's, or one login) never carries chats.
+  await chat(lark, "One more thing.");
+  expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(lark.id)], force: [itemKey.bot(lark.id)] })).result.chats).toBeNull();
+  expect(await textIds(fx.onCloud, lark.threadId)).toEqual(there);
+}, hostTimeout(180_000));
+
 it("a bot sent to My Cloud keeps its conversation's id, so Bring newer chats adds its chats there", async () => {
   const { local, onCloud } = fx;
   // Kai has nothing but its chats: My Cloud must still count it as there once it arrives without them.
@@ -151,4 +192,24 @@ it("a bot sent to My Cloud keeps its conversation's id, so Bring newer chats add
   expect(brought.phase, JSON.stringify(brought)).toBe("done");
   const there = (await onCloud("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body.messages as Array<{ role: string; text?: string }>;
   expect(there.some((message) => message.role === "user" && message.text?.startsWith("The Acme deadline is Friday."))).toBe(true);
+}, hostTimeout(120_000));
+
+it("when My Cloud refuses this computer's 1Password token, the strip and Settings say what failed and why, in words for this computer", async () => {
+  const refusing = await launchCloudSendFixture({ onePasswordToken: TOKEN, cloudOnePasswordToken: `ops_fake-other-${randomBytes(8).toString("hex")}` });
+  try {
+    const { local, onCloud } = refusing;
+    const ember = (await local("POST", "/api/bots", { name: "Ember", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
+    await local("PATCH", `/api/bots/${ember.id}`, { soul: "You are Ember." });
+    expect((await local("POST", "/api/logins", { site: "accounts.example.test", username: "alice", password: PASSWORD, bots: [ember.id] })).status).toBe(201);
+    expect((await local("POST", "/api/logins/1password", { token: TOKEN })).status).toBe(200);
+    expect((await refusing.call<CloudSendSnapshot>("cloud-send:refresh", "local")).cloud).toBe("ready");
+    const notice = await refusing.call<CloudSendNotice>("cloud-send:page-send", "cloud");
+    const why = "1Password did not accept this computer's token on My Cloud: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, then send again.";
+    expect(notice.last).toMatchObject({ failed: 1, what: { bots: [], skills: 0, logins: 0, onePassword: true, settings: 0, chats: false }, error: why });
+    expect(JSON.stringify(notice)).not.toContain("example.test");
+    // Everything else arrived, the login included.
+    expect((await onCloud("GET", "/api/logins")).body.logins).toEqual([expect.objectContaining({ site: "example.test", username: "alice", bots: [ember.id] })]);
+    expect((await onCloud("GET", "/api/logins")).body.onePassword).toEqual({ connected: false });
+    for (const where of [...refusing.answers, refusing.logs()]) for (const value of [TOKEN, PASSWORD]) expect(where).not.toContain(value);
+  } finally { await refusing.close(); }
 }, hostTimeout(120_000));

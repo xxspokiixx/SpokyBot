@@ -1,6 +1,6 @@
 // What Settings → MausBot Cloud and My Cloud's strip say about Send to My Cloud (electron/cloud-send.mjs), in words.
-import type { PlanRow, RowState, SendKind } from "../../electron/cloud-send-parts.mjs";
-import type { CloudSendNotice, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
+import { failedSummary, type PlanRow, type RowState, type SendKind } from "../../electron/cloud-send-parts.mjs";
+import type { CloudSendFailure, CloudSendNotice, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import type { LocaleKey } from "@/locales";
 import { activeLocale, t } from "@/lib/i18n";
 
@@ -62,8 +62,9 @@ export function sideLines(snapshot: Pick<CloudSendSnapshot, "rows" | "cloudOnly"
   });
 }
 
-/** "Ember, 2 skills, 3 logins and 1Password". */
+/** "Ember, 2 skills, 3 logins, 1Password and 48 chats". */
 export function sentList(result: CloudSendOutcome["result"]): string[] {
+  const chats = result.chats;
   return [
     ...result.bots,
     ...(result.updatedBots.length ? [t("cloudSend.list.changesTo", { names: names(result.updatedBots) })] : []),
@@ -71,24 +72,48 @@ export function sentList(result: CloudSendOutcome["result"]): string[] {
     ...(result.logins ? [counted(result.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
     ...(result.onePassword ? [t("cloudSend.list.onePassword")] : []),
     ...(result.settings.length ? [t("cloudSend.list.settings")] : []),
+    ...(chats?.conversations ? [counted(chats.conversations, "cloudSend.list.chatOne", "cloudSend.list.chats")]
+      : chats?.messages ? [counted(chats.messages, "cloudSend.list.messageOne", "cloudSend.list.messages")] : []),
   ];
+}
+
+/** The words main threw, without Electron's "Error invoking remote method" wrapper; null when there are none. */
+export function ipcErrorText(cause: unknown): string | null {
+  return cause instanceof Error && cause.message ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/u, "") : null;
+}
+
+/** "2 logins and 1Password couldn't be sent: <why>", or why a send stopped; null when nothing failed. */
+export function failedLine(failure: CloudSendFailure): string | null {
+  const what = failure.what;
+  const error = failure.error ?? "";
+  if (!what) return error ? t("cloudSend.failedSend", { error }) : null;
+  const list = [
+    ...what.bots,
+    ...(what.skills ? [counted(what.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
+    ...(what.logins ? [counted(what.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
+    ...(what.onePassword ? [t("cloudSend.list.onePassword")] : []),
+    ...(what.settings ? [t("cloudSend.list.settings")] : []),
+    ...(what.chats ? [t("cloudSend.list.theChats")] : []),
+  ];
+  const line = t("cloudSend.failedWhat", { list: listOf(list), error });
+  return line.charAt(0).toLocaleUpperCase(activeLocale()) + line.slice(1);
 }
 
 /** One sentence for what a send did, then a line for each thing worth knowing. */
 export function resultLines(outcome: CloudSendOutcome): { text: string; failed: boolean; notes: string[] } {
   const { result } = outcome;
   const sent = sentList(result);
-  const first = result.failed[0];
+  const failure = failedLine(failedSummary(outcome));
   const text = [
-    sent.length ? t("cloudSend.result.sent", { list: listOf(sent) }) : result.failed.length ? "" : t("cloudSend.result.none"),
-    first ? t(result.failed.length === 1 ? "cloudSend.result.failedOne" : "cloudSend.result.failed", { count: result.failed.length, name: first.label, error: first.error }) : "",
+    sent.length ? t("cloudSend.result.sent", { list: listOf(sent) }) : failure ? "" : t("cloudSend.result.none"),
+    failure ?? "",
   ].filter(Boolean).join(" ");
   const notes = [...new Set(result.notes.map((note) =>
     note.kind === "model" ? t("cloudSend.result.model", { bot: note.bot ?? "" })
       : note.kind === "settings" ? t("cloudSend.result.settings", { bot: note.bot ?? "" })
         : note.kind === "memory" ? t("cloudSend.result.memory", { bot: note.bot ?? "" })
           : t("cloudSend.result.narrowed")))];
-  return { text, failed: result.failed.length > 0, notes };
+  return { text, failed: Boolean(failure), notes };
 }
 
 /** The status line at the top: online and its version, or why it can't compare now. */

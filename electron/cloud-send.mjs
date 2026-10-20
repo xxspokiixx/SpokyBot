@@ -1,12 +1,13 @@
 // Send to My Cloud: this computer's bots, their skills, logins, 1Password and settings go to the person's own Cloud. One
 // direction; added and updated, never deleted; one action for every entry point and for "Keep My Cloud up to date".
+// A send the person asks for (not the background one) also brings the chats My Cloud lacks, by Bring newer chats.
 //
 // What each side has comes from both servers' GET /api/cloud-send; what goes is decided part by part (planSend in
 // cloud-send-parts.mjs). Every write is one of My Cloud's own routes, over one owner session per send: the Admin's
 // one-time code for the Cloud it verified, redeemed at that Cloud alone, signed out after, as Copy does. A secret reaches
 // main only over the server's private port (server/login-handoff.ts) and goes only to that session.
 import { createHash } from "node:crypto";
-import { BOT_PARTS, EMPTY, PICTURE_PART, differenceSignature, itemKey, parseSendSummary, pendingRows, planSend } from "./cloud-send-parts.mjs";
+import { BOT_PARTS, EMPTY, PICTURE_PART, differenceSignature, failedSummary, itemKey, parseSendSummary, pendingRows, planSend } from "./cloud-send-parts.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
@@ -16,6 +17,9 @@ const AUTO_FULL_MS = 30 * 60_000;
 const MEMORY_FILES = 100;
 const PICTURE_TYPES = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const VAULT_ID = /^[\w-]{1,128}$/u;
+/** Sends the person asked for: chats go with these, never with the background "Keep My Cloud up to date" one, which would
+ * export and upload this computer's whole workspace every time something changed. */
+const CHAT_REASONS = new Set(["button", "my-cloud", "menu"]);
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, 300) : null);
@@ -29,6 +33,15 @@ function refusal(answer, fallback) {
   if (answer.status === 401 || answer.status === 403) return "My Cloud did not let this app make the change. Open My Cloud in this app once, then try again.";
   if (answer.status === 409 && /limited to \d+ bots/u.test(answer.body?.error ?? "")) return sentence(answer.body.error);
   return sentence(answer.body?.error) ? `My Cloud said: ${sentence(answer.body.error)}` : fallback;
+}
+
+/** My Cloud's own 1Password refusal speaks to someone pasting a token on My Cloud's page; here it was this computer's. */
+function onePasswordRefusal(answer) {
+  const said = sentence(answer.body?.error);
+  if (answer.status === 400 && said && /did not accept the token|not a whole 1Password|service account token/iu.test(said)) {
+    return "1Password did not accept this computer's token on My Cloud: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, then send again.";
+  }
+  return refusal(answer, "My Cloud could not connect 1Password.");
 }
 
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
@@ -77,13 +90,13 @@ export function sendNotice(snapshot) {
     signature: snapshot.signature ?? "",
     dismissed: Boolean(snapshot.signature) && snapshot.signature === snapshot.dismissed,
     running: Boolean(snapshot.running),
-    last: snapshot.last ? { at: snapshot.last.at, failed: snapshot.last.result.failed.length } : null,
+    last: snapshot.last ? { at: snapshot.last.at, failed: snapshot.last.result.failed.length, ...failedSummary(snapshot.last) } : null,
   };
 }
 
 /** What a send did, in counts and the names a person recognises. */
 function emptyResult() {
-  return { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], failed: [], notes: [] };
+  return { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, failed: [], notes: [] };
 }
 
 /**
@@ -97,6 +110,7 @@ function emptyResult() {
  *       upload(route: string, bytes: Uint8Array, type: string): Promise<{ status: number, ok: boolean, body: any }>, close(): Promise<void> }>,
  *   },
  *   handoff: (what: { kind: "login", id: string } | { kind: "1password" }) => Promise<{ login?: Record<string, any>, onePassword?: { token: string, grants: Record<string, unknown> } }>,
+ *   chats?: () => Promise<{ conversations: number, messages: number }>,
  *   store: { read(): unknown, write(value: unknown): void },
  *   onChange?: (snapshot: unknown) => void,
  *   now?: () => number,
@@ -104,7 +118,7 @@ function emptyResult() {
  *   clearTimer?: typeof clearTimeout,
  * }} deps
  */
-export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createCloudSend({ local, cloud, handoff, chats = null, store, onChange = () => {}, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null };
   let running = null, progress = null, timer = null, stopped = true;
@@ -121,7 +135,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     return {
       cloud: origin ? view.cloud : "none",
       auto: saved.auto,
-      running: running ? { reason: running.reason, ...(progress ? { progress } : {}) } : null,
+      running: running ? { reason: running.reason, ...(progress ? { progress } : {}), ...(running.chats ? { phase: "chats" } : {}) } : null,
       rows: plan?.rows ?? [],
       cloudOnly: plan?.cloudOnly ?? [],
       pending: plan ? pendingRows(plan).length : 0,
@@ -183,18 +197,24 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     while (running) await running.promise.catch(() => {});
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
-    const job = { reason, promise: null };
+    const job = { reason, promise: null, chats: false };
     running = job;
     progress = null;
     publish();
     job.promise = (async () => {
-      try { return await sendTo(origin, { keys, force: Array.isArray(force) ? force.filter((key) => typeof key === "string") : [], reason }); }
+      try { return await sendTo(origin, job, { keys, force: Array.isArray(force) ? force.filter((key) => typeof key === "string") : [], reason }); }
+      catch (error) {
+        // Kept as this send's outcome, so the strip and Settings say why, instead of an earlier send's result.
+        entry(origin).last = { at: now(), reason, result: emptyResult(), error: sentence(error?.message) ?? "Nothing could be sent to My Cloud. Try again." };
+        persist();
+        throw error;
+      }
       finally { running = null; progress = null; publish(); }
     })();
     return job.promise;
   }
 
-  async function sendTo(origin, { keys, force, reason }) {
+  async function sendTo(origin, job, { keys, force, reason }) {
     const result = emptyResult();
     const mine = parseSendSummary(await localJson("/api/cloud-send"));
     if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
@@ -223,6 +243,12 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       }
       const after = parseSendSummary((await session.call("GET", "/api/cloud-send")).body);
       if (after) remember(origin, ctx, after);
+      if (chats && !keys && CHAT_REASONS.has(reason)) {
+        job.chats = true;
+        publish();
+        try { result.chats = await chats(); }
+        catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
+      }
       const outcome = { at: now(), reason, result };
       entry(origin).last = outcome;
       persist();
@@ -434,7 +460,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const parts = row.parts ?? ["token", "vaults"];
     if (row.state === "only-here" || parts.includes("token")) {
       const connected = await ctx.session.call("POST", "/api/logins/1password", { token: onePassword.token });
-      if (!connected.ok) throw new CloudSendError("refused", refusal(connected, "My Cloud could not connect 1Password."));
+      if (!connected.ok) throw new CloudSendError("refused", onePasswordRefusal(connected));
     }
     for (const [vault, bots] of Object.entries(onePassword.grants ?? {})) {
       if (!VAULT_ID.test(vault)) continue;

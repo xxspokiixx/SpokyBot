@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PlanRow } from "../../electron/cloud-send-parts.mjs";
 import type { CloudSendNotice, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import { setLocale } from "@/lib/i18n";
-import { detailRows, noticeLine, resultLines, sideLines, statusLine } from "./cloud-send";
+import { detailRows, failedLine, noticeLine, resultLines, sideLines, statusLine } from "./cloud-send";
 
 const row = (key: string, kind: PlanRow["kind"], label: string, state: PlanRow["state"], extra: Partial<PlanRow> = {}): PlanRow => ({ key, kind, label, state, ...extra });
 const snapshot = (extra: Partial<CloudSendSnapshot> = {}): CloudSendSnapshot => ({
@@ -40,18 +40,34 @@ describe("This computer and My Cloud, in words", () => {
   });
 
   it("says what a send did in one sentence, then what is worth knowing", () => {
-    const sent = resultLines({ at: 1, reason: "button", result: { bots: ["Ember"], updatedBots: ["Juno"], skills: 2, logins: 1, onePassword: true, settings: ["profile"], failed: [],
+    const sent = resultLines({ at: 1, reason: "button", result: { bots: ["Ember"], updatedBots: ["Juno"], skills: 2, logins: 1, onePassword: true, settings: ["profile"], chats: null, failed: [],
       notes: [{ kind: "model", bot: "Ember" }, { kind: "narrowed", login: "crm" }] } });
     expect(sent.text).toBe("Sent to My Cloud: Ember, changes to Juno, 2 skills, 1 login, 1Password, and your settings.");
     expect(sent.notes).toEqual([
       "Ember uses My Cloud's own engine: the one it uses here isn't set up on My Cloud.",
       "A login kept to bots that stay on this computer reaches no bot on My Cloud yet. Choose Who can use it in My Cloud's Settings → Logins.",
     ]);
-    expect(resultLines({ at: 1, reason: "button", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], failed: [], notes: [] } }).text)
+    expect(resultLines({ at: 1, reason: "button", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, failed: [], notes: [] } }).text)
       .toBe("My Cloud already has everything from this computer.");
-    const failed = resultLines({ at: 1, reason: "button", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], notes: [],
+    const failed = resultLines({ at: 1, reason: "button", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, notes: [],
       failed: [{ key: "bot:ember", kind: "bot", label: "Ember", error: "this workspace is limited to 50 bots" }] } });
-    expect(failed).toMatchObject({ failed: true, text: "1 thing could not be sent. Ember: this workspace is limited to 50 bots" });
+    expect(failed).toMatchObject({ failed: true, text: "Ember couldn't be sent: this workspace is limited to 50 bots" });
+  });
+
+  it("says what did not go by kind, with the first reason, and why a send stopped", () => {
+    const none = { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, notes: [] };
+    const partly = resultLines({ at: 1, reason: "my-cloud", result: { ...none, bots: ["Ember"], chats: { conversations: 48, messages: 900 }, failed: [
+      { key: "login:a.test|amit", kind: "login", label: "a.test", error: "OpenMausBot on this computer did not answer. Try again." },
+      { key: "login:b.test|amit", kind: "login", label: "b.test", error: "OpenMausBot on this computer did not answer. Try again." },
+      { key: "1password", kind: "1password", label: "1Password", error: "1Password did not accept this computer's token on My Cloud." },
+    ] } });
+    expect(partly.text).toBe("Sent to My Cloud: Ember and 48 chats. 2 logins and 1Password couldn't be sent: OpenMausBot on this computer did not answer. Try again.");
+    expect(partly.text).not.toContain("a.test");
+    expect(resultLines({ at: 1, reason: "button", result: { ...none, chats: { conversations: 0, messages: 7 }, failed: [] } }).text).toBe("Sent to My Cloud: 7 new messages.");
+    expect(resultLines({ at: 1, reason: "button", error: "This app could not sign in to My Cloud. Try again.", result: { ...none, failed: [] } }))
+      .toMatchObject({ failed: true, text: "Send to My Cloud stopped: This app could not sign in to My Cloud. Try again." });
+    expect(failedLine({ what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: true }, error: "My Cloud is busy." })).toBe("The chats couldn't be sent: My Cloud is busy.");
+    expect(failedLine({})).toBeNull();
   });
 
   it("names My Cloud's version, says when it is older, and why it can't compare", () => {

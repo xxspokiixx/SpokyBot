@@ -123,3 +123,16 @@ export function pendingRows(plan) {
 export function differenceSignature(plan) {
   return pendingRows(plan).map((row) => `${row.key}#${row.state}#${(row.parts ?? []).join(",")}`).sort().join("\n");
 }
+
+/** What a send did not get across, by kind (bots by name, logins only counted, never a site), and the first reason;
+ * the strip on My Cloud and Settings → MausBot Cloud both say it. */
+export function failedSummary(outcome) {
+  const failed = outcome.result.failed;
+  const count = (kind) => failed.filter((entry) => entry.kind === kind).length;
+  const error = outcome.error ?? failed[0]?.error;
+  return {
+    ...(failed.length ? { what: { bots: failed.filter((entry) => entry.kind === "bot").map((entry) => entry.label), skills: count("skill"), logins: count("login"),
+      onePassword: count("1password") > 0, settings: count("setting"), chats: count("chats") > 0 } } : {}),
+    ...(error ? { error } : {}),
+  };
+}

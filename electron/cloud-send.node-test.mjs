@@ -298,3 +298,87 @@ test("a send asked while another runs waits for it, then runs as it was asked", 
   assert.deepEqual([a.result.bots, b.result.bots], [["Ember"], []]);
   assert.deepEqual(b.result.failed.map((entry) => entry.key), ["1password"], "the second send carried its own keys");
 });
+
+test("a send that stops as a whole is that send's outcome, so the strip and Settings say why instead of an earlier result", async () => {
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+  const send = createCloudSend(sides.deps);
+  await send.send();
+  assert.equal(send.snapshot().last.result.bots.length, 1);
+  sides.deps.cloud.open = async () => { throw new Error("Too many connection links. Wait a few minutes and try again."); };
+  await assert.rejects(send.send({ reason: "my-cloud" }), /could not sign in|Too many connection links/);
+  const last = send.snapshot().last;
+  assert.equal(last.reason, "my-cloud");
+  assert.equal(last.error, "Too many connection links. Wait a few minutes and try again.");
+  assert.deepEqual(sendNotice(send.snapshot()).last, { at: last.at, failed: 0, error: "Too many connection links. Wait a few minutes and try again." });
+});
+
+test("My Cloud's notice says what did not go, by kind, and the first reason: logins only counted, never a site", async () => {
+  const login = (id, site) => ({ key: itemKey.login(site, "amit"), kind: "login", label: site, detail: "amit", id, parts: { saved: id } });
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" }), login("l1", "bank.example"), login("l2", "crm.example"), { key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }] });
+  sides.deps.handoff = async () => { throw new Error("OpenMausBot on this computer did not answer. Try again."); };
+  const send = createCloudSend(sides.deps);
+  const outcome = await send.send();
+  assert.deepEqual(outcome.result.bots, ["Ember"]);
+  assert.deepEqual(outcome.result.failed.map((entry) => entry.kind), ["login", "login", "1password"]);
+  const notice = sendNotice(send.snapshot());
+  assert.deepEqual(notice.last.what, { bots: [], skills: 0, logins: 2, onePassword: true, settings: 0, chats: false });
+  assert.equal(notice.last.error, "OpenMausBot on this computer did not answer. Try again.");
+  assert.ok(!JSON.stringify(notice).includes("bank.example") && !JSON.stringify(notice).includes("crm.example"));
+});
+
+test("1Password refused on My Cloud is told in words for this computer, not My Cloud's own paste-it-here", async () => {
+  const sides = fakeSides({ localItems: [{ key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }],
+    refuse: { "/api/logins/1password": { status: 400, error: "1Password did not accept the token: it may have been revoked, expired, or lost access to its vault. Make a new service account token in 1Password and paste it here." } } });
+  sides.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
+  const outcome = await createCloudSend(sides.deps).send();
+  assert.deepEqual(outcome.result.failed, [{ key: "1password", kind: "1password", label: "1Password",
+    error: "1Password did not accept this computer's token on My Cloud: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, then send again." }]);
+});
+
+test("chats go with a send the person asks for, never with the background one or a send of one item, and a refusal is told", async () => {
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+  const asked = [];
+  let answer = { conversations: 3, messages: 40 };
+  sides.deps.chats = async () => { asked.push(true); if (answer instanceof Error) throw answer; return answer; };
+  const send = createCloudSend(sides.deps);
+  for (const reason of ["button", "my-cloud", "menu"]) {
+    asked.length = 0;
+    assert.deepEqual((await send.send({ reason })).result.chats, { conversations: 3, messages: 40 }, reason);
+    assert.equal(asked.length, 1, reason);
+  }
+  asked.length = 0;
+  for (const options of [{ reason: "auto" }, { reason: "logins", keys: ["1password"] }, { keys: ["bot:ember"] }]) {
+    assert.equal((await send.send(options)).result.chats, null, JSON.stringify(options));
+  }
+  assert.equal(asked.length, 0);
+  answer = new Error("Wait for bots on this computer to finish what they are doing, then copy again.");
+  const outcome = await send.send();
+  assert.deepEqual(outcome.result.failed, [{ key: "chats", kind: "chats", label: "Chats", error: "Wait for bots on this computer to finish what they are doing, then copy again." }]);
+  assert.deepEqual(sendNotice(send.snapshot()).last.what, { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: true });
+});
+
+test("Bring newer chats' answer becomes the send's chats, and a copy already running is said plainly", async () => {
+  const handlers = new Map();
+  let state = { phase: "done", action: "bring", brought: { conversations: 2, messages: 9, intoExisting: 4, skippedBots: 0, skippedRooms: 0, deleted: 0 } };
+  let pairing = true;
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+  const localResponse = sides.deps.local;
+  installCloudSend({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localOnly: (_channel, handler) => handler, cloudPage: () => "cloud",
+    server: () => null, local: localResponse, home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) }),
+    cookieFetch: async () => new Response(JSON.stringify(summary([])), { status: 200 }), reconnect: async () => false, power: { asleep: () => false },
+    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {}, keepUpToDate: false,
+    fetch: async (url) => String(url).endsWith("/api/auth/pair") && !pairing ? new Response("{}", { status: 401 })
+      : new Response(JSON.stringify(String(url).endsWith("/api/auth/pair") ? { token: "omb_sess_fake" } : String(url).endsWith("/api/cloud-send") ? summary([]) : {}), { status: 200 }),
+    bringChats: async () => state,
+  });
+  assert.deepEqual((await handlers.get("cloud-send:send")({})).result.chats, { conversations: 2, messages: 9 });
+  state = { phase: "uploading", action: "move" };
+  const notice = await handlers.get("cloud-send:page-send")({});
+  assert.deepEqual(notice.last.what?.chats, true);
+  assert.equal(notice.last.error, "Another copy to My Cloud is running. Send again when it has finished.");
+  // The strip's send never loses why a send stopped in a rejected call.
+  pairing = false;
+  const { failed, error, what } = (await handlers.get("cloud-send:page-send")({})).last;
+  assert.deepEqual({ failed, error, what }, { failed: 0, error: "This app could not sign in to My Cloud. Try again.", what: undefined });
+});

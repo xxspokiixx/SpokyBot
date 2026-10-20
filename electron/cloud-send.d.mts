@@ -12,16 +12,24 @@ export interface CloudSendResult {
   onePassword: boolean;
   /** "profile" and/or "language". */
   settings: string[];
-  failed: Array<{ key: string; kind: SendKind; label: string; error: string }>;
+  /** The chats My Cloud lacked, added by Bring newer chats; null when this send did not bring chats. */
+  chats: { conversations: number; messages: number } | null;
+  failed: Array<{ key: string; kind: SendKind | "chats"; label: string; error: string }>;
   /** model: kept My Cloud's engine; settings: a setting My Cloud refused; narrowed: a login kept to bots My Cloud lacks; memory: notes not copied. */
   notes: Array<{ kind: "model" | "settings" | "narrowed" | "memory"; bot?: string; login?: string }>;
 }
-export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult }
+/** `error`: the send failed as a whole (nothing after that point went), in words for the person. */
+export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult; error?: string }
+/** What did not go, by kind (bots by name, logins only counted), and the first reason. */
+export interface CloudSendFailure {
+  what?: { bots: string[]; skills: number; logins: number; onePassword: boolean; settings: number; chats: boolean };
+  error?: string;
+}
 
 export interface CloudSendSnapshot {
   cloud: CloudSendPlace;
   auto: boolean;
-  running: null | { reason: string; progress?: { done: number; total: number } };
+  running: null | { reason: string; progress?: { done: number; total: number }; phase?: "chats" };
   rows: PlanRow[];
   cloudOnly: Array<{ key: string; kind: SendKind; label: string; detail?: string; bot?: string }>;
   pending: number;
@@ -44,7 +52,7 @@ export interface CloudSendNotice {
   signature: string;
   dismissed: boolean;
   running: boolean;
-  last: { at: number; failed: number } | null;
+  last: ({ at: number; failed: number } & CloudSendFailure) | null;
 }
 
 export interface CloudSendBridge {
@@ -86,6 +94,7 @@ export function createCloudSend(deps: {
     open(): Promise<CloudSendSession>;
   };
   handoff(what: { kind: "login"; id: string } | { kind: "1password" }): Promise<{ login?: Record<string, any>; onePassword?: { token: string; grants: Record<string, unknown> } }>;
+  chats?: (() => Promise<{ conversations: number; messages: number }>) | null;
   store: { read(): unknown; write(value: unknown): void };
   onChange?(snapshot: CloudSendSnapshot): void;
   now?(): number;
