@@ -365,7 +365,7 @@
   "settings.section.organization": "Organizasyon",
   "settings.section.cloudAccount": "MausBot Cloud",
   "cloudAccount.optional": "MausBot Cloud isteğe bağlıdır. Ücretsiz yerel kullanım, sohbetleriniz ve kendi model hesaplarınız giriş yapmadan kullanılabilir kalır.",
-  "cloudAccount.separate": "Kişisel Cloud hesabınız organizasyon girişinden ayrıdır. Bağlantı kurmak sohbet geçmişinizi yüklemez.",
+  "cloudAccount.separate": "Kişisel Cloud hesabınız organizasyon girişinden ayrıdır.",
   "cloudAccount.desktopOnly": "MausBot Cloud'u bu bilgisayardaki yerel masaüstü uygulamasında kullanın.",
   "cloudAccount.loading": "Cloud hesabı yükleniyor…",
   "cloudAccount.signIn": "Cloud planınıza giriş yapın",

@@ -546,7 +546,7 @@
   "settings.section.organization": "Organização",
   "settings.section.cloudAccount": "MausBot Cloud",
   "cloudAccount.optional": "O MausBot Cloud é opcional. O uso local gratuito, suas conversas e suas próprias contas de modelos continuam disponíveis sem entrar.",
-  "cloudAccount.separate": "Sua conta pessoal do Cloud é separada do login da organização. Conectar não envia seu histórico de conversas.",
+  "cloudAccount.separate": "Sua conta pessoal do Cloud é separada do login da organização.",
   "cloudAccount.desktopOnly": "Use o MausBot Cloud no app de desktop local deste computador.",
   "cloudAccount.loading": "Carregando a conta do Cloud…",
   "cloudAccount.signIn": "Entrar no seu plano do Cloud",

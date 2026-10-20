@@ -211,7 +211,7 @@
   "settings.section.organization": "组织",
   "settings.section.cloudAccount": "MausBot Cloud",
   "cloudAccount.optional": "MausBot Cloud 是可选的。免费本地使用、你的聊天记录和你自己的模型账号，不登录也照常可用。",
-  "cloudAccount.separate": "你的个人 Cloud 账号与组织登录相互独立。连接后也不会上传你的聊天记录。",
+  "cloudAccount.separate": "你的个人 Cloud 账号与组织登录相互独立。",
   "cloudAccount.desktopOnly": "在这台电脑的本地桌面应用中使用 MausBot Cloud。",
   "cloudAccount.loading": "正在加载 Cloud 账号…",
   "cloudAccount.signIn": "登录你的 Cloud 方案",

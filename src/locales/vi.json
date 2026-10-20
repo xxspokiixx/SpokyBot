@@ -365,7 +365,7 @@
   "settings.section.organization": "Tổ chức",
   "settings.section.cloudAccount": "MausBot Cloud",
   "cloudAccount.optional": "MausBot Cloud là tùy chọn không bắt buộc. Bạn vẫn có thể sử dụng cục bộ miễn phí, truy cập các cuộc trò chuyện và tài khoản mô hình riêng mà không cần đăng nhập.",
-  "cloudAccount.separate": "Tài khoản Cloud cá nhân của bạn tách biệt với đăng nhập của tổ chức. Việc kết nối sẽ không tải lên lịch sử cuộc trò chuyện của bạn.",
+  "cloudAccount.separate": "Tài khoản Cloud cá nhân của bạn tách biệt với đăng nhập của tổ chức.",
   "cloudAccount.desktopOnly": "Sử dụng MausBot Cloud trong ứng dụng desktop cục bộ trên máy tính này.",
   "cloudAccount.loading": "Đang tải tài khoản Cloud…",
   "cloudAccount.signIn": "Đăng nhập vào gói Cloud của bạn",

@@ -556,7 +556,7 @@
   "settings.section.organization": "Organization",
   "settings.section.cloudAccount": "MausBot Cloud",
   "cloudAccount.optional": "MausBot Cloud is optional. Free local use, your chats and your own model accounts remain available without signing in.",
-  "cloudAccount.separate": "Your personal Cloud account is separate from organization sign-in. Connecting does not upload your chat history.",
+  "cloudAccount.separate": "Your personal Cloud account is separate from organization sign-in.",
   "cloudAccount.desktopOnly": "Use MausBot Cloud in the local desktop app on this computer.",
   "cloudAccount.loading": "Loading Cloud account…",
   "cloudAccount.signIn": "Sign in to your Cloud plan",

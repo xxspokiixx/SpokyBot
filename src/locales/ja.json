@@ -546,7 +546,7 @@
   "settings.section.organization": "組織",
   "settings.section.cloudAccount": "MausBot Cloud",
   "cloudAccount.optional": "MausBot Cloud の利用は任意です。サインインしなくても、無料のローカル利用、チャット、ご自身のモデルアカウントは引き続き使えます。",
-  "cloudAccount.separate": "個人の Cloud アカウントは組織のサインインとは別です。接続してもチャット履歴はアップロードされません。",
+  "cloudAccount.separate": "個人の Cloud アカウントは組織のサインインとは別です。",
   "cloudAccount.desktopOnly": "MausBot Cloud は、このコンピューターのローカルデスクトップアプリで使ってください。",
   "cloudAccount.loading": "Cloud アカウントを読み込んでいます…",
   "cloudAccount.signIn": "Cloud プランにサインイン",
