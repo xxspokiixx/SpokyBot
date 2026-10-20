@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WireBot } from "../../shared/wire.ts";
-import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
+import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -17,10 +17,11 @@ import { PASS, type RouteContext } from "./table.ts";
 
 vi.mock("../vps-computer.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../vps-computer.ts")>();
-  return { ...actual, listManagedVpsComputers: vi.fn() };
+  return { ...actual, listManagedVpsComputers: vi.fn(), vpsLifecycleBusy: vi.fn() };
 });
 
 const scan = vi.mocked(vps.listManagedVpsComputers);
+const lifecycleBusy = vi.mocked(vps.vpsLifecycleBusy);
 const sonnet: ModelSelection = { instanceId: "claude", model: "claude-sonnet-5" };
 
 const emptyInventory = (): ManagedVpsInventory => ({
@@ -35,6 +36,8 @@ beforeEach(() => {
   rmSync(DATA_DIR, { recursive: true, force: true });
   scan.mockReset();
   scan.mockResolvedValue(emptyInventory());
+  lifecycleBusy.mockReset();
+  lifecycleBusy.mockReturnValue(false);
 });
 
 function fixture() {
@@ -136,6 +139,28 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
 
     expect(blocked.status).toBe(409);
     expect(blocked.body.error).toBe(VPS_BOT_ALIAS_RESOURCES_ERROR);
+  });
+
+  it("refuses while a VPS computer action is still running, before or during the scan", async () => {
+    const { store, bot, patch } = fixture();
+    lifecycleBusy.mockReturnValue(true);
+
+    const before = await patch(bot.id, { vpsAlias: "gamma-vps" });
+
+    expect(before.status).toBe(409);
+    expect(before.body.error).toBe(VPS_BOT_ALIAS_LIFECYCLE_ERROR);
+    expect(scan).not.toHaveBeenCalled();
+
+    lifecycleBusy.mockReturnValue(false);
+    scan.mockImplementation(async () => {
+      lifecycleBusy.mockReturnValue(true);
+      return emptyInventory();
+    });
+    const during = await patch(bot.id, { vpsAlias: "gamma-vps" });
+
+    expect(during.status).toBe(409);
+    expect(scan).toHaveBeenCalledTimes(1);
+    expect(store.bot(bot.id)?.vpsAlias).toBeUndefined();
   });
 
   it("rescans when the stored alias changes mid-scan", async () => {

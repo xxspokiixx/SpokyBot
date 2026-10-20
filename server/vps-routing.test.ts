@@ -138,6 +138,7 @@ case "$*" in
   *" exec "*"base64"*) cat "$FAKE_DOCKER_DIR/screenshot.b64" ;;
   *" exec "*"status"*) echo "running" ;;
   *" exec "*"rm -f"*) : ;;
+  *" rm -f "*) : ;;
   *" inspect "*)
     if [ -f "$FAKE_DOCKER_DIR/container-missing" ]; then echo "No such container" >&2; exit 1; fi
     for arg in "$@"; do name="$arg"; done
@@ -777,6 +778,14 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       expect(log).toMatch(/-H ssh:\/\/alpha-vps (?:container )?inspect /);
       expect(log).toMatch(/-H ssh:\/\/production-vps (?:container )?inspect /);
 
+      // The preview and the panel's own actions go to the bot's server and never touch the default.
+      const hosts = () => [...readFileSync(dockerLog, "utf8").matchAll(/-H ssh:\/\/([\w.-]+)/g)].map((match) => match[1]);
+      writeFileSync(dockerLog, "");
+      expect((await api("POST", `/api/bots/${alpha.id}/computer/screenshot`, {})).status).toBe(200);
+      expect((await api("POST", `/api/bots/${alpha.id}/computer/provision`, {})).status).toBe(200);
+      expect(hosts().length).toBeGreaterThan(0);
+      expect(new Set(hosts())).toEqual(new Set(["alpha-vps"]));
+
       // The Settings inventory spans both servers and tags every computer with its alias.
       const inventory = await api("GET", "/api/computers/vps");
       expect(inventory.status, JSON.stringify(inventory.body)).toBe(200);
@@ -817,6 +826,15 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       } finally {
         await api("POST", `/api/bots/${alpha.id}/interrupt`, {});
       }
+
+      // Deleting the bot checks and removes its computer on its own server only.
+      await until(async () => (await botById(alpha.id))?.busy === false, "the alpha turn to settle");
+      writeFileSync(dockerLog, "");
+      const deleted = await api("DELETE", `/api/bots/${alpha.id}`);
+      expect(deleted.status, JSON.stringify(deleted.body)).toBeLessThan(300);
+      const deletion = readFileSync(dockerLog, "utf8");
+      expect(deletion).toMatch(/-H ssh:\/\/alpha-vps rm -f /);
+      expect(deletion).not.toContain("ssh://production-vps");
     },
     60_000,
   );

@@ -7,6 +7,7 @@ export const VPS_ALIAS_RESOURCES_ERROR =
 export const VPS_BOT_ALIAS_RESOURCES_ERROR =
   "remove this bot's VPS computer before changing its SSH config alias";
 export const VPS_BOT_ALIAS_CHANGE_ERROR = "stop the active turn before changing this bot's VPS SSH alias";
+export const VPS_BOT_ALIAS_LIFECYCLE_ERROR = "wait for VPS computer actions to finish before changing this bot's SSH alias";
 
 export function cloudBackendChangeError(botBusy: boolean, activeVpsThread: boolean): string | null {
   return botBusy || activeVpsThread ? CLOUD_BACKEND_CHANGE_ERROR : null;

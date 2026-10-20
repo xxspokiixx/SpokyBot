@@ -11,7 +11,7 @@ import { parseVisibility } from "../bot-visibility.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { CacheKeepWarm } from "../cache-keepwarm.ts";
-import { cloudBackendChangeError, vpsBotAliasChangeError, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
+import { cloudBackendChangeError, vpsBotAliasChangeError, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import { isValidSshAlias, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -379,6 +379,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           if (vpsSshAliasForBot(cfg, { ...current, vpsAlias: patch.vpsAlias as string | undefined }) === vpsSshAliasForBot(cfg, current)) break;
           const aliasError = vpsBotAliasChangeError(Boolean(current.busy), activeVpsThreads.has(m[1]));
           if (aliasError) return json(res, 409, { error: aliasError });
+          // A Start or Remove still running on the old host would land after the scan, like the default alias's guard.
+          if (vps.vpsLifecycleBusy()) return json(res, 409, { error: VPS_BOT_ALIAS_LIFECYCLE_ERROR });
           // Primitives, not the record: the store hands out its live object and patchBot mutates it in place.
           const scannedVpsAlias = current.vpsAlias;
           const scannedBusy = current.busy;
@@ -392,7 +394,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           ) : null;
           const settled = store.bot(m[1]);
           if (!settled) return json(res, 404, { error: "no such bot" });
-          if (settled.vpsAlias !== scannedVpsAlias || settled.busy !== scannedBusy || activeVpsThreads.has(m[1])) {
+          if (settled.vpsAlias !== scannedVpsAlias || settled.busy !== scannedBusy || activeVpsThreads.has(m[1]) || vps.vpsLifecycleBusy()) {
             if (attempt === VPS_ALIAS_MOVE_ATTEMPTS) return json(res, 409, { error: VPS_BOT_ALIAS_CHANGE_ERROR });
             continue;
           }
