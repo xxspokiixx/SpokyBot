@@ -102,8 +102,9 @@ export interface CloudSendSession {
 
 export class CloudSendError extends Error {
   code: string;
-  constructor(code: string, message: string);
+  constructor(code: string, message: string, options?: { cause?: unknown });
 }
+export function unanswered(error: unknown): boolean;
 
 export function botPatch(bot: Record<string, unknown>, parts: string[], cloudBots: ReadonlySet<string>): Record<string, unknown>;
 export function parseSendState(value: unknown): { v: 1; auto: boolean; clouds: Record<string, unknown> };

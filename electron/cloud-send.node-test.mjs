@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import { BOT_PARTS, differenceSignature, itemKey, parseSendSummary, pendingRows, planSend } from "./cloud-send-parts.mjs";
-import { botPatch, createCloudSend, parseSendState, sendNotice } from "./cloud-send.mjs";
+import { botPatch, CloudSendError, createCloudSend, parseSendState, sendNotice, unanswered } from "./cloud-send.mjs";
 import { installCloudSend, loginsView, openOwnerSession } from "./cloud-send-main.mjs";
 
 const LOCAL = "http://127.0.0.1:4100";
@@ -729,7 +729,7 @@ function awaySides(threads) {
     if (state.down) throw new TypeError("fetch failed");
     return state.signedOut ? new Response("", { status: 401 }) : read(route);
   };
-  sides.sides.deps.cloud.open = async () => { state.opened++; if (state.down) throw new Error("This app could not sign in to My Cloud. Try again."); return open(); };
+  sides.sides.deps.cloud.open = async () => { state.opened++; if (state.down) throw new TypeError("fetch failed"); return open(); };
   return { ...sides, state };
 }
 
@@ -830,4 +830,65 @@ test("a room's chats go with the room, whatever bots My Cloud has, and never as 
   assert.deepEqual(posted.flat().map((entry) => entry.threadId), ["t-a", "t-room"]);
   const sent = bodies.flat().find((entry) => entry.threadId === "t-room");
   assert.deepEqual({ room: sent.room, roomInfo: sent.roomInfo, bot: sent.bot, task: sent.task.title }, { room: "r-launch", roomInfo: room, bot: undefined, task: "Plan" });
+});
+
+test("nothing answering on the way to My Cloud is told from a refusal", () => {
+  assert.equal(unanswered(new TypeError("fetch failed")), true);
+  assert.equal(unanswered(Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" })), true);
+  assert.equal(unanswered(Object.assign(new Error("Cloud request failed."), { status: 502 })), true);
+  assert.equal(unanswered(new CloudSendError("session", "Cloud request failed.", { cause: new Error("x", { cause: Object.assign(new Error("y"), { status: 503 }) }) })), true);
+  assert.equal(unanswered(Object.assign(new Error("This app could not sign in to My Cloud. Try again."), { status: 401 })), false);
+  assert.equal(unanswered(Object.assign(new Error("Too many connection links."), { status: 429 })), false);
+  assert.equal(unanswered(new TypeError("session.call is not a function")), false);
+  assert.equal(unanswered(new Error("My Cloud is not ready.")), false);
+});
+
+test("an owner session that could not open says whether nothing answered or My Cloud refused", async () => {
+  const opening = (grant, status) => openOwnerSession({ origin: CLOUD, grant }, async () => new Response(JSON.stringify({ error: "no" }), { status })).catch((error) => error);
+  assert.equal(unanswered(await opening(async () => { throw Object.assign(new Error("Cloud request failed."), { status: 503 }); }, 200)), true);
+  assert.equal(unanswered(await opening(async () => ({ origin: CLOUD, code: "C" }), 504)), true);
+  assert.equal(unanswered(await opening(async () => ({ origin: CLOUD, code: "C" }), 401)), false);
+  assert.equal(unanswered(await opening(async () => { throw Object.assign(new Error("Cloud request failed."), { status: 429 }); }, 200)), false);
+});
+
+test("a send that fails because nothing answered tries again at the next check, then waits longer each time, never a sign-in every check", async () => {
+  const { sides, rows, posted, state } = awaySides({ a: 1 });
+  const { send, tick } = clocked({ ...sides.deps, store: stored() });
+  send.start();
+  await tick(20_000);
+  rows.a.push({ id: "a-2", at: 2 });
+  let blip = true;
+  const open = sides.deps.cloud.open;
+  sides.deps.cloud.open = async () => { if (blip) { state.opened++; throw Object.assign(new Error("Cloud request failed."), { status: 502 }); } return open(); };
+  const opened = state.opened;
+  await tick(6 * 60_000);
+  assert.equal(state.opened - opened, 1);
+  await tick(2 * 60_000);
+  assert.equal(state.opened - opened, 2, "the next check tries again");
+  await tick(2 * 60_000);
+  assert.equal(state.opened - opened, 2, "then it waits four minutes");
+  await tick(2 * 60_000);
+  assert.equal(state.opened - opened, 3);
+  blip = false;
+  for (let i = 0; i < 4; i++) await tick(2 * 60_000);
+  assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-2"], sent: true }]);
+  assert.equal(send.snapshot().cloud, "ready");
+});
+
+test("a whole send that went through, whoever asked for it, ends the wait an earlier failure began", async () => {
+  const { sides, rows, posted } = chatSides({ threads: { a: 1 } });
+  const { send, tick } = clocked({ ...sides.deps, store: stored() });
+  send.start();
+  await tick(20_000);
+  rows.a.push({ id: "a-2", at: 2 });
+  const open = sides.deps.cloud.open;
+  sides.deps.cloud.open = async () => { throw new Error("This app could not sign in to My Cloud. Try again."); };
+  await tick(6 * 60_000);
+  assert.ok(send.snapshot().last.error);
+  sides.deps.cloud.open = open;
+  await send.send();
+  assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-2"], sent: true }]);
+  rows.a.push({ id: "a-3", at: 3 });
+  await tick(6 * 60_000);
+  assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-3"], sent: true }], "the next chats go at their usual pace");
 });

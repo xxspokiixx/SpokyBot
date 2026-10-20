@@ -41,7 +41,16 @@ const record = (value) => value !== null && typeof value === "object" && !Array.
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, 300) : null);
 
 export class CloudSendError extends Error {
-  constructor(code, message) { super(message); this.name = "CloudSendError"; this.code = code; }
+  constructor(code, message, options) { super(message, options); this.name = "CloudSendError"; this.code = code; }
+}
+
+/** Nothing answered on the way to My Cloud (no network, a timeout, a gateway error, the Admin's or My Cloud's), as
+ * against a refusal: trying again soon may well work. */
+export function unanswered(error, depth = 0) {
+  if (!error || depth > 4) return false;
+  if ((error.name === "TypeError" && /fetch/iu.test(error.message ?? "")) || error.name === "TimeoutError" || error.name === "AbortError") return true;
+  if (Number.isInteger(error.status) && error.status >= 500) return true;
+  return unanswered(error.cause, depth + 1);
 }
 
 /** One plain sentence for a failed write, from what My Cloud answered. */
@@ -176,7 +185,8 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null };
   let running = null, progress = null, timer = null, dueAt = 0, stopped = true, ticking = false, kicked = false, firstTickAt = 0, lookedAt = Number.NEGATIVE_INFINITY;
-  let autoDigest = "", autoAt = 0, autoFailedDigest = "", autoFailedAt = 0, chatsAt = 0;
+  // The background send waits until `failedUntil` while this computer's items are what failed (`autoFailedDigest`).
+  let autoDigest = "", autoAt = 0, autoFailedDigest = "", failedUntil = 0, unansweredRun = 0, chatsAt = 0;
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
   function persist() { try { store.write(saved); } catch {} }
@@ -270,6 +280,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         kept.last = { at: now(), reason, result: emptyResult(), error: sentence(error?.message) ?? "Nothing could be sent to My Cloud. Try again." };
         if (!keys && CHAT_REASONS.has(reason)) kept.whole = kept.last;
         persist();
+        if (unanswered(error)) view = { ...view, cloud: "unreachable" };
         throw error;
       }
       finally { running = null; progress = null; publish(); }
@@ -292,6 +303,8 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
     }
     if (withChats) chatsAt = now();
+    // Everything went, whoever asked: Keep My Cloud up to date no longer waits on an earlier failure.
+    if (withChats && !result.failed.length && !job.halted) { autoFailedDigest = ""; unansweredRun = 0; }
     const outcome = { at: now(), reason, result, ...(job.halted ? { stopped: "off" } : {}) };
     const kept = entry(origin);
     kept.last = outcome;
@@ -304,7 +317,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
 
   /** Every item that waits, and then the chats, over one owner session, always signed out; what My Cloud holds after. */
   async function sendItems(origin, mine, result, { keys, force, job, withChats }) {
-    const session = await cloud.open().catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again."); });
+    const session = await cloud.open().catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
     try {
       const before = await session.call("GET", "/api/cloud-send");
       if (before.status === 404) throw new CloudSendError("outdated", "My Cloud needs an update before it can receive bots from this computer. It updates by itself; try again later.");
@@ -663,7 +676,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         const last = entry(origin).last;
         // A first send the switch stopped is still the first one when it goes on.
         const first = !last || (last.reason === "first" && last.stopped === "off");
-        const backoff = digest === autoFailedDigest && now() - autoFailedAt < AUTO_FULL_MS;
+        const backoff = digest === autoFailedDigest && now() < failedUntil;
         const itemsDue = digest && (digest !== autoDigest || now() - autoAt >= AUTO_FULL_MS);
         const chatsDue = view.cloud === "ready" && view.theirs?.chats && now() - chatsAt >= CHATS_EVERY_MS
           && (await chatsWaiting(origin, view.theirs)).ready.length > 0;
@@ -672,15 +685,20 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
           await compare();
           autoDigest = digest; autoAt = now();
           if (view.cloud === "ready" && saved.auto) {
-            // Back after being away: what waited goes now, a failure from before held against it or not.
+            // Back after being away: what waited goes now.
             if (back) chatsAt = 0;
             const chats = view.theirs.chats && now() - chatsAt >= CHATS_EVERY_MS ? (await chatsWaiting(origin, view.theirs)).ready.length : 0;
-            if ((back || !backoff) && (first || pendingRows(view.plan).length || chats)) {
+            if (!backoff && (first || pendingRows(view.plan).length || chats)) {
               const outcome = await send({ reason: first ? "first" : "auto" }).catch((error) => {
-                autoFailedDigest = digest; autoFailedAt = now(); chatsAt = now();
+                // Nothing answered: the next check tries again, then 4, 8 and 16 minutes on, then each half hour. A
+                // refusal waits the half hour at once.
+                unansweredRun = unanswered(error) ? unansweredRun + 1 : 0;
+                autoFailedDigest = digest;
+                failedUntil = now() + (unansweredRun ? Math.min(AUTO_FULL_MS, AUTO_EVERY_MS * 2 ** (unansweredRun - 1)) : AUTO_FULL_MS);
+                chatsAt = now();
                 throw error;
               });
-              if (outcome.result.failed.length) { autoFailedDigest = digest; autoFailedAt = now(); } else autoFailedDigest = "";
+              if (outcome.result.failed.length) { autoFailedDigest = digest; failedUntil = now() + AUTO_FULL_MS; unansweredRun = 0; }
             }
           }
         }
