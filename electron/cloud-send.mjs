@@ -43,13 +43,14 @@ function refusal(answer, fallback) {
   return sentence(answer.body?.error) ? `My Cloud said: ${sentence(answer.body.error)}` : fallback;
 }
 
-/** My Cloud's own 1Password refusal speaks to someone pasting a token on My Cloud's page; here it was this computer's. */
+/** My Cloud's own 1Password refusal speaks to someone pasting a token on My Cloud's page; here it was this computer's.
+ * 1Password refusing the token is final: sending it again can't help until 1Password is connected again here. */
 function onePasswordRefusal(answer) {
   const said = sentence(answer.body?.error);
   if (answer.status === 400 && said && /did not accept the token|not a whole 1Password|service account token/iu.test(said)) {
-    return "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself.";
+    return Object.assign(new CloudSendError("refused", "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself."), { final: true });
   }
-  return refusal(answer, "My Cloud could not connect 1Password.");
+  return new CloudSendError("refused", refusal(answer, "My Cloud could not connect 1Password."));
 }
 
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
@@ -105,6 +106,8 @@ export function sendNotice(snapshot) {
     ...(snapshot.running ? { runningReason: snapshot.running.reason, ...(snapshot.running.progress ? { progress: snapshot.running.progress } : {}),
       ...(snapshot.running.phase ? { phase: snapshot.running.phase } : {}) } : {}),
     last: snapshot.last ? { at: snapshot.last.at, reason: snapshot.last.reason, failed: snapshot.last.result.failed.length, sent: sentCounts(snapshot.last.result),
+      // Every failure is one trying again can't fix (1Password refused the token): no Try again.
+      final: !snapshot.last.error && snapshot.last.result.failed.length > 0 && snapshot.last.result.failed.every((entry) => entry.final === true),
       seen: snapshot.dismissed === resultKey(snapshot.last), ...failedSummary(snapshot.last) } : null,
   };
 }
@@ -278,7 +281,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const order = { bot: 0, skill: 1, setting: 2, login: 3, "1password": 4 };
       for (const row of [...rows].sort((a, b) => order[a.kind] - order[b.kind])) {
         try { await sendRow(ctx, row); }
-        catch (error) { result.failed.push({ key: row.key, kind: row.kind, label: row.label, error: sentence(error?.message) ?? "It could not be sent." }); }
+        catch (error) { result.failed.push({ key: row.key, kind: row.kind, label: row.label, error: sentence(error?.message) ?? "It could not be sent.", ...(error?.final === true ? { final: true } : {}) }); }
         if (progress) progress = { done: progress.done + 1, total };
         publish();
       }
@@ -573,7 +576,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     const parts = row.parts ?? ["token", "vaults"];
     if (row.state === "only-here" || parts.includes("token")) {
       const connected = await ctx.session.call("POST", "/api/logins/1password", { token: onePassword.token });
-      if (!connected.ok) throw new CloudSendError("refused", onePasswordRefusal(connected));
+      if (!connected.ok) throw onePasswordRefusal(connected);
     }
     for (const [vault, bots] of Object.entries(onePassword.grants ?? {})) {
       if (!VAULT_ID.test(vault)) continue;

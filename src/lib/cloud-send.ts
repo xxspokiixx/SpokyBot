@@ -120,6 +120,11 @@ export function resultLines(outcome: CloudSendOutcome): { text: string; failed: 
   return { text, failed: Boolean(failure), notes };
 }
 
+/** Every failure in this send is one trying again can't fix (1Password refused the token), so there is no Try again. */
+export function finalFailure(outcome: CloudSendOutcome | null): boolean {
+  return Boolean(outcome && !outcome.error && outcome.result.failed.length && outcome.result.failed.every((entry) => entry.final === true));
+}
+
 /** Settings' one line on where things stand: sending, what couldn't go, or that all is there. */
 export function sendStateLine(snapshot: CloudSendSnapshot, last: CloudSendOutcome | null): { kind: "sending" | "failed" | "off" | "soon" | "done"; text: string } {
   const running = snapshot.running;

@@ -341,7 +341,12 @@ test("1Password refused on My Cloud is told in words for this computer, not My C
   sides.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
   const outcome = await createCloudSend(sides.deps).send();
   assert.deepEqual(outcome.result.failed, [{ key: "1password", kind: "1password", label: "1Password",
-    error: "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself." }]);
+    error: "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself.", final: true }]);
+  const other = fakeSides({ localItems: [{ key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }],
+    refuse: { "/api/logins/1password": { status: 503, error: "busy" } } });
+  other.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
+  const busy = await createCloudSend(other.deps).send();
+  assert.equal(busy.result.failed[0].final, undefined, "any other refusal can be tried again");
 });
 
 test("a Cloud too old to take chats by row gets Bring newer chats' copy from a send the person asked for or the first one, never the background one or a send of one item", async () => {
@@ -448,3 +453,14 @@ test("chats by row: the cursor moves only past what My Cloud took; one removed t
   await send.send();
   assert.deepEqual(posted.length, 2, "nothing new but in a conversation removed on My Cloud: no request at all");
 });
+
+test("1Password refusing the token on My Cloud is final: My Cloud's page is told not to offer Try again; any other failure keeps it", () => {
+  const outcome = (failed, error) => ({ cloud: "ready", rows: [], last: { at: 1, reason: "auto", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, notes: [], failed }, ...(error ? { error } : {}) } });
+  const refused = { key: "1password", kind: "1password", label: "1Password", error: "refused", final: true };
+  const other = { key: "login:a", kind: "login", label: "a.example", error: "did not answer" };
+  assert.equal(sendNotice(outcome([refused])).last.final, true);
+  assert.equal(sendNotice(outcome([refused, other])).last.final, false);
+  assert.equal(sendNotice(outcome([])).last.final, false);
+  assert.equal(sendNotice(outcome([refused], "stopped")).last.final, false, "a send that stopped as a whole can be tried again");
+});
+

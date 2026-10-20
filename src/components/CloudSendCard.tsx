@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Cloud, Laptop, Loader2, RefreshCw } from "lucide-react";
 import type { CloudSendBridge, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import type { LocaleKey } from "@/locales";
-import { ipcErrorText, resultLines, sendStateLine, sideLines, statusLine, type SideKind } from "@/lib/cloud-send";
+import { finalFailure, ipcErrorText, resultLines, sendStateLine, sideLines, statusLine, type SideKind } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { Card, Switch } from "./SettingsPrimitives";
@@ -99,7 +99,7 @@ export function CloudSendCard() {
         <p role={line.kind === "failed" ? "alert" : "status"} className={`inline-flex items-center gap-2 text-[13px] ${line.kind === "failed" ? "text-danger" : "text-ink"}`}>
           {line.kind === "sending" && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{line.text}
         </p>
-        {line.kind === "failed" && <button type="button" data-cloud-send-retry disabled={retrying} className="text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink disabled:opacity-50"
+        {line.kind === "failed" && !finalFailure(last) && <button type="button" data-cloud-send-retry disabled={retrying} className="text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink disabled:opacity-50"
           onClick={() => { setRetrying(true); void send.sendAll().finally(() => setRetrying(false)); }}>{t("cloudSend.strip.retry")}</button>}
         {line.kind !== "sending" && shown?.notes.map((note) => <p key={note} className="text-[12px] text-ink-secondary">{note}</p>)}
         {line.kind !== "sending" && last && <p className="text-[12px] text-ink-tertiary">{t(last.reason === "auto" || last.reason === "first" ? "cloudSend.result.auto" : "cloudSend.result.when", { when: localizedRelativeTime(last.at, activeLocale()) })}</p>}

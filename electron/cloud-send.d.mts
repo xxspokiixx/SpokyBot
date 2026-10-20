@@ -14,7 +14,7 @@ export interface CloudSendResult {
   settings: string[];
   /** The chats My Cloud lacked, added by Bring newer chats; null when this send did not bring chats. */
   chats: { conversations: number; messages: number } | null;
-  failed: Array<{ key: string; kind: SendKind | "chats"; label: string; error: string }>;
+  failed: Array<{ key: string; kind: SendKind | "chats"; label: string; error: string; final?: true }>;
   /** model: kept My Cloud's engine; settings: a setting My Cloud refused; narrowed: a login kept to bots My Cloud lacks; memory: notes not copied. */
   notes: Array<{ kind: "model" | "settings" | "narrowed" | "memory"; bot?: string; login?: string }>;
 }
@@ -60,7 +60,8 @@ export interface CloudSendNotice {
   progress?: { done: number; total: number };
   phase?: "chats";
   /** `sent`: counts only; `seen`: the person closed this result on the strip. */
-  last: ({ at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts } & CloudSendFailure) | null;
+  /** `final`: every failure is one trying again can't fix (1Password refused the token), so no Try again. */
+  last: ({ at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean } & CloudSendFailure) | null;
 }
 export interface CloudSendCounts {
   bots: number; updatedBots: number; skills: number; logins: number; onePassword: boolean; settings: number;

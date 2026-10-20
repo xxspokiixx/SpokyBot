@@ -171,3 +171,24 @@ it("My Cloud's strip says what could not be brought over and why, with one Try a
   tree(strip()).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();
   expect(render(strip()).html).toContain("Send to My Cloud stopped: cloud-send:page-send is only available in this app's window");
 });
+
+it("a refusal trying again can't fix is said plainly with no Try again, in Settings and on My Cloud's strip", async () => {
+  const refused = { key: "1password", kind: "1password" as const, label: "1Password", final: true as const,
+    error: "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself." };
+  vi.mocked(bridge.refresh).mockResolvedValue({ ...snapshot, last: { at: 6, reason: "auto", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, notes: [], failed: [refused] } } });
+  await ready();
+  expect(render(card).html).toContain("1Password couldn't be sent: My Cloud's 1Password did not accept this computer's token");
+  expect(tree(card).filter((node) => node.type === "button" && text(node) === "Try again")).toHaveLength(0);
+  f.values = [];
+  vi.mocked(bridge.refresh).mockResolvedValue({ ...snapshot, last: { at: 7, reason: "auto", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, notes: [],
+    failed: [refused, { key: "login:a", kind: "login", label: "a.example", error: "OpenMausBot on this computer did not answer. Try again." }] } } });
+  await ready();
+  expect(tree(card).filter((node) => node.type === "button" && text(node) === "Try again"), "one failure trying again can fix: Try again is back").toHaveLength(1);
+  const plain: CloudSendNotice = { ...notice, last: { at: 8, reason: "auto", failed: 1, seen: false, sent: counts, final: true,
+    reasons: [{ what: { bots: [], skills: 0, logins: 0, onePassword: true, settings: 0, chats: false }, error: refused.error }] } };
+  await onCloud(plain);
+  expect(render(strip()).html).toContain("1Password couldn't be sent: My Cloud's 1Password did not accept this computer's token");
+  expect(tree(strip()).filter((node) => node.type === "button" && text(node) === "Try again")).toHaveLength(0);
+  expect(tree(strip()).filter((node) => node.type === "button" && text(node) === "Close")).toHaveLength(1);
+});
+

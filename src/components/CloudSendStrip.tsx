@@ -43,7 +43,7 @@ export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   return <div role="status" data-cloud-send-strip={shown.kind} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[12.5px] text-ink-secondary">
     {shown.kind === "sending" ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <CloudUpload size={14} aria-hidden="true" />}
     <span dir="auto" data-cloud-send-strip-line>{shown.text}</span>
-    {shown.kind === "failed" && <>
+    {shown.kind === "failed" && (unanswered !== null || last?.final !== true) && <>
       <button type="button" data-cloud-send-retry className="font-medium text-accent-text underline underline-offset-2 hover:text-ink" onClick={retry}>{t("cloudSend.strip.retry")}</button>
       <span aria-hidden="true">·</span>
     </>}
