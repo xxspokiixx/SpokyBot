@@ -1,5 +1,6 @@
 // What a bot is told when it uses the apps and screen of a computer lent to this server. The desktop relays cua-driver's
 // answers unchanged and older desktops send raw failures, so the plain fix is added here, on the server.
+import { textOnlyErrorResult } from "./mcp-error-result.ts";
 
 type Part = { type?: unknown; text?: unknown };
 type ToolResult = { content?: Part[]; isError?: boolean };
@@ -33,7 +34,7 @@ const withPart = (result: ToolResult, text: string): ToolResult => ({ ...result,
 export function lentScreenResult(operation: { action: string; tool_name?: string }, value: unknown): unknown {
   if (operation.action !== "computer_tools" && operation.action !== "computer_call") return value;
   if (!value || typeof value !== "object" || !Array.isArray((value as ToolResult).content)) return value;
-  const result = value as ToolResult;
+  const result = textOnlyErrorResult(value as ToolResult);
   if (operation.action === "computer_tools") return result.isError ? result : withPart(result, LENT_SCREEN_BROWSING);
   if (result.isError) {
     const text = textOf(result);
