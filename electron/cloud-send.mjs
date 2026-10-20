@@ -14,6 +14,8 @@ import { botsOnCloud } from "./cloud-logins.mjs";
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\/chats|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
 const AUTO_FIRST_MS = 20_000;
+/** A Cloud this computer has not sent to yet is checked this soon once it is there, not at the next two-minute check. */
+const KICK_MS = 1_000;
 const AUTO_EVERY_MS = 2 * 60_000;
 const AUTO_FULL_MS = 30 * 60_000;
 /** Chats alone go at most this often: each send is one sign-in at My Cloud, which the Admin limits. */
@@ -150,7 +152,7 @@ function emptyResult() {
 export function createCloudSend({ local, cloud, handoff, bringChats = null, store, onChange = () => {}, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null };
-  let running = null, progress = null, timer = null, stopped = true;
+  let running = null, progress = null, timer = null, dueAt = 0, stopped = true, ticking = false, kicked = false, firstTickAt = 0;
   let autoDigest = "", autoAt = 0, autoFailedDigest = "", autoFailedAt = 0, chatsAt = 0;
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
@@ -613,6 +615,8 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   async function tick() {
     timer = null;
     if (stopped) return;
+    ticking = true;
+    kicked = false;
     try {
       const origin = cloud.origin();
       if (saved.auto && origin && !running && !cloud.asleep()) {
@@ -630,7 +634,10 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
           if (view.cloud === "ready" && saved.auto) {
             const chats = view.theirs.chats && now() - chatsAt >= CHATS_EVERY_MS ? (await chatsWaiting(origin, view.theirs)).ready.length : 0;
             if (first || pendingRows(view.plan).length || chats) {
-              const outcome = await send({ reason: first ? "first" : "auto" });
+              const outcome = await send({ reason: first ? "first" : "auto" }).catch((error) => {
+                autoFailedDigest = digest; autoFailedAt = now(); chatsAt = now();
+                throw error;
+              });
               if (outcome.result.failed.length) { autoFailedDigest = digest; autoFailedAt = now(); } else autoFailedDigest = "";
             }
             autoDigest = digest; autoAt = now();
@@ -638,11 +645,13 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         }
       }
     } catch { /* the next tick tries again */ }
-    schedule(AUTO_EVERY_MS);
+    finally { ticking = false; }
+    schedule(kicked ? KICK_MS : AUTO_EVERY_MS);
   }
   function schedule(ms) {
     if (stopped) return;
     if (timer !== null) clearTimer(timer);
+    dueAt = now() + ms;
     timer = setTimer(() => void tick(), ms);
     timer?.unref?.();
   }
@@ -654,8 +663,18 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     setAuto(on) {
       saved.auto = on === true;
       persist();
-      if (saved.auto) { autoDigest = ""; schedule(1_000); }
+      if (saved.auto) { autoDigest = ""; schedule(KICK_MS); }
       return publish();
+    },
+    /** My Cloud is there, and this computer has not sent to it yet: the first send goes in a moment, never sooner than the
+     * first check after start, never twice at once, and never later than a check already due. */
+    kick() {
+      const origin = cloud.origin();
+      if (stopped || !saved.auto || !origin || entry(origin).last) return;
+      if (ticking) { kicked = true; return; }
+      const wait = Math.max(KICK_MS, firstTickAt - now());
+      if (timer !== null && dueAt <= now() + wait) return;
+      schedule(wait);
     },
     /** The per-item switch. Turning on something removed on My Cloud forgets that it was sent, so it goes again. */
     setItem(key, on) {
@@ -676,7 +695,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       if (origin && typeof signature === "string") { entry(origin).dismissed = signature.slice(0, 20_000); persist(); }
       return publish();
     },
-    start() { if (!stopped) return; stopped = false; schedule(AUTO_FIRST_MS); },
+    start() { if (!stopped) return; stopped = false; firstTickAt = now() + AUTO_FIRST_MS; schedule(AUTO_FIRST_MS); },
     stop() { stopped = true; if (running) running.cancelled = true; if (timer !== null) clearTimer(timer); timer = null; },
     /** For the native menu: what is waiting, from the last comparison, without asking anyone; nothing while it goes by
      * itself. */

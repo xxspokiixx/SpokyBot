@@ -172,6 +172,8 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
   if (keepUpToDate) send.start();
   return {
     receive: handoff.receive,
+    /** The account changed (a Cloud became ready, say): a Cloud this computer has not sent to yet gets its first send now. */
+    kick: () => send.kick(),
     /** The switcher: what waits, from the last comparison (refreshed in the background), and its Send. */
     menu: () => {
       void fresh();

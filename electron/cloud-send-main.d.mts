@@ -26,5 +26,6 @@ export function installCloudSend(deps: {
   clock?: { now(): number; setTimer: typeof setTimeout; clearTimer: typeof clearTimeout };
 }): {
   receive(proc: unknown, message: unknown): boolean;
+  kick(): void;
   menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
 };

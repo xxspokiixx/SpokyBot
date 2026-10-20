@@ -872,7 +872,7 @@ function ensureCloudAccount() {
       rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       sendUpdaterState();
-      cloudPower.changed(); computerSharing?.cloudChanged();
+      cloudPower.changed(); computerSharing?.cloudChanged(); cloudLogins.kick();
       void includedX.onState(state);
       refreshCloudMenus();
       announceCloudReady(state);

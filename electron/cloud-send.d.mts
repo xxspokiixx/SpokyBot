@@ -120,6 +120,7 @@ export function createCloudSend(deps: {
   compare(): Promise<CloudSendSnapshot>;
   send(options?: { keys?: string[] | null; force?: string[]; reason?: string }): Promise<CloudSendOutcome>;
   setAuto(on: boolean): CloudSendSnapshot;
+  kick(): void;
   setItem(key: string, on: boolean): CloudSendSnapshot;
   dismiss(signature: string): CloudSendSnapshot;
   start(): void;

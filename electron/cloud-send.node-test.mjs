@@ -464,6 +464,7 @@ test("1Password refusing the token on My Cloud is final: My Cloud's page is told
   assert.equal(sendNotice(outcome([refused], "stopped")).last.final, false, "a send that stopped as a whole can be tried again");
 });
 
+
 /** Bot conversations of `count` rows each, handed `page` rows at a time, and a My Cloud whose chats route answers each
  * entry with `answer(entry, post)` ("accepted", "waiting" or "removed"). */
 function chatSides({ threads, page = 300, answer = () => "accepted", onPost = () => {}, onRead = () => {}, attachments = () => [], cloudSummary = null } = {}) {
@@ -605,6 +606,19 @@ test("turned off while the last conversation is read, a send stops before its re
   assert.equal(second.send.snapshot().last.stopped, "off");
 });
 
+test("a send that fails as a whole waits half an hour like any other failure, instead of signing in again every two minutes", async () => {
+  const { sides } = chatSides({ threads: { a: 1 } });
+  let opened = 0;
+  sides.deps.cloud.open = async () => { opened++; throw new Error("This app could not sign in to My Cloud. Try again."); };
+  const { send, tick } = clocked(sides.deps);
+  send.start();
+  await tick();
+  for (let i = 0; i < 14; i++) await tick(2 * 60_000);
+  assert.equal(opened, 1, "one sign-in in the half hour after a failure");
+  await tick(4 * 60_000);
+  assert.equal(opened, 2);
+});
+
 test("more attachments than My Cloud checks at once go in several checks, so the chats still go", async () => {
   const names = Array.from({ length: 2500 }, (_, i) => `${String(i).padStart(8, "0")}.png`);
   const { sides, posted, checked } = chatSides({ threads: { pics: 1 }, attachments: () => names });
@@ -612,4 +626,71 @@ test("more attachments than My Cloud checks at once go in several checks, so the
   assert.deepEqual(checked, [2000, 500]);
   assert.deepEqual(outcome.result.failed, []);
   assert.equal(posted.length, 1);
+});
+
+test("a Cloud this computer has not sent to yet gets its first send a moment after it is there, not at the next two-minute check", async () => {
+  let origin = CLOUD;
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+  sides.deps.cloud.origin = () => origin;
+  const { send, clock, tick } = clocked(sides.deps);
+  send.start();
+  send.kick();
+  assert.deepEqual(clock.waits, [20_000], "never sooner than the first check after the app starts");
+  origin = null;
+  await tick(20_000);
+  assert.equal(clock.waits.at(-1), 2 * 60_000, "no Cloud yet: the usual check");
+  send.kick();
+  assert.equal(clock.waits.at(-1), 2 * 60_000, "a kick without a Cloud does nothing");
+  origin = CLOUD;
+  send.kick();
+  assert.equal(clock.waits.at(-1), 1_000);
+  const waits = clock.waits.length;
+  send.kick();
+  assert.equal(clock.waits.length, waits, "a kick never puts off a check already due");
+  await tick(1_000);
+  assert.equal(send.snapshot().last.reason, "first");
+  assert.ok(sides.calls.includes("POST /api/bots"));
+  send.kick();
+  assert.equal(clock.waits.at(-1), 2 * 60_000, "once something was sent, a kick does nothing");
+});
+
+test("a kick while a check runs never starts a second one at once; the next check comes a moment after", async () => {
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const reads = [];
+  const read = sides.deps.cloud.read;
+  sides.deps.cloud.read = async (route) => { reads.push(route); await gate; return read(route); };
+  const { send, clock, tick, settle } = clocked(sides.deps);
+  send.start();
+  const running = tick(20_000);
+  await settle();
+  const waits = clock.waits.length;
+  send.kick();
+  assert.equal(clock.waits.length, waits, "nothing scheduled while the check runs");
+  release();
+  await running;
+  await settle();
+  assert.equal(reads.length, 1);
+  assert.equal(clock.waits.at(-1), 1_000);
+});
+
+test("main's kick, on the account's changes, brings a new Cloud's first send forward", async () => {
+  let now = 1_000, home = null, fire = null;
+  const waits = [];
+  const main = installCloudSend({
+    ipcMain: { handle() {} }, localOnly: (_channel, handler) => handler, cloudPage: () => "local",
+    server: () => null, local: async () => new Response("{}", { status: 503 }), home: () => home,
+    cookieFetch: async () => new Response("", { status: 401 }), reconnect: async () => false, power: { asleep: () => false },
+    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {},
+    clock: { now: () => now, setTimer: (callback, ms) => { fire = callback; waits.push(ms); return waits.length; }, clearTimer() {} },
+  });
+  now += 20_000;
+  fire();
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+  main.kick();
+  assert.deepEqual(waits, [20_000, 2 * 60_000], "no Cloud: nothing to bring forward");
+  home = { origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) };
+  main.kick();
+  assert.deepEqual(waits, [20_000, 2 * 60_000, 1_000]);
 });
