@@ -228,6 +228,7 @@ const origin = "https://home-7f3k2.fly.dev";
 it("stays exactly as before when the account has no Cloud machine", async () => {
   await ready(free);
   expect(render().html).not.toContain("My Cloud");
+  expect(render().html, "chats do go to My Cloud by themselves now").not.toContain("does not upload your chat history");
   expect(render().html).not.toContain(">Open My Cloud</button>");
   push(pro); expect(render().html).not.toContain(">Open My Cloud</button>");
 });

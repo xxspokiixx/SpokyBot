@@ -47,8 +47,29 @@ Composio --signed POST--> /v1/composio/webhook --> D1 queue per installation <--
 | `GET /v1/events?after=<seq>&wait=<0-25>&limit=<1-50>` + header `x-omb-poller` | installation token | Acks every event at or below `after`, then returns the next events in arrival order, holding up to `wait` seconds. One poller at a time per installation: another `x-omb-poller` gets 409 until the 90 s lease runs out. |
 | `POST /v1/events/test` `{triggerId, data}` | installation token | Queues a synthetic event (`type: "omb.test"`) through the same queue and limits. |
 | `PUT /v1/installation/cloud` `{grant}` | installation token | Marks the installation as a paid Cloud's from an Admin-signed grant. |
+| `POST /v1/installation/share` `{for}` | installation token | A one-time code (10 minutes, only its hash kept) that lets the installation `for` act as this installation's Composio user. |
+| `POST /v1/installation/adopt` `{code}` | installation token | Redeems a code minted for this installation: from then on it acts as that Composio user (`shared_user_id`). Refused with 409 `has_connections` while it has active connected accounts of its own, which stay reachable. The code is spent either way. |
 | `GET /v1/stats/app-events?days=<1-90>` | `Bearer STATS_TOKEN` | Fleet totals per day (queued, delivered, duplicates, drops, expired, unrouted) and current counts. Counts only, never event contents or installation ids. |
 | cron `23 * * * *` | | Expires events not collected within 7 days, disables at Composio the triggers of installations that have not polled for 14 days (re-enabled on their next poll), keeps daily counts for 90 days. |
+
+### One person's desktop and Cloud
+
+Composio ties every connected account to one user, and a tool router Session
+uses only its own user's accounts, so a person's desktop and their own Cloud
+share connected apps by acting as one Composio user. The desktop app mints a
+code for the Cloud's installation id, which the Cloud reports to the app over
+its owner session (the Admin verified that Cloud as the person's); the Cloud's
+server redeems it. A code works only for the installation it names, once,
+within 10 minutes. Sessions, the connected inventory, triggers and the event
+routing all follow the installation's acting user; an instance one sharing
+installation binds is never listed as unbound to the other. `GET /v1/me` adds
+`user`, a digest of the acting user, equal on two installations exactly when
+they reach the same apps.
+
+Deploy order: apply `0004_shared_users.sql` first (additive), then the code.
+Every query reads `installations.*`, so the new code also runs on a database
+without it: `GET /v1/me` then carries no `user`, so no desktop tries to share,
+and sharing answers 503 until it is applied.
 
 ### Limits
 

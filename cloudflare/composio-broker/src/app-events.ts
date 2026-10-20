@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  actingUser,
   CLOUD_DAILY_EVENTS,
   DAY_MS,
   eventLimits,
@@ -243,6 +244,7 @@ async function wakeCloud(env: Env, owner: Owner, now: number) {
 interface OwnerRow {
   id: string;
   composio_user_id: string;
+  shared_user_id?: string | null;
   cloud_machine_id: string | null;
   binding_disabled_at: number | null;
   installation_disabled_at: number | null;
@@ -250,7 +252,7 @@ interface OwnerRow {
 
 async function triggerOwners(env: Env, triggerId: string) {
   const { results } = await env.DB.prepare(
-    `SELECT i.id, i.composio_user_id, i.cloud_machine_id, b.disabled_at AS binding_disabled_at, i.disabled_at AS installation_disabled_at
+    `SELECT i.*, b.disabled_at AS binding_disabled_at, i.disabled_at AS installation_disabled_at
      FROM trigger_bindings b JOIN installations i ON i.id = b.installation_id
      WHERE b.composio_trigger_id = ?`,
   ).bind(triggerId).all<OwnerRow>();
@@ -259,7 +261,7 @@ async function triggerOwners(env: Env, triggerId: string) {
 
 async function accountOwners(env: Env, accountId: string) {
   const { results } = await env.DB.prepare(
-    `SELECT DISTINCT i.id, i.composio_user_id, i.cloud_machine_id, NULL AS binding_disabled_at, i.disabled_at AS installation_disabled_at
+    `SELECT DISTINCT i.*, NULL AS binding_disabled_at, i.disabled_at AS installation_disabled_at
      FROM trigger_bindings b JOIN installations i ON i.id = b.installation_id
      WHERE b.connected_account_id = ?`,
   ).bind(accountId).all<OwnerRow>();
@@ -274,7 +276,7 @@ function unrouted(env: Env, now: number, why: string, triggerId?: string) {
 /** Bindings route by trigger or account id; the Composio user named in the event must also be the installation's,
  *  so a mixed-up binding can never hand one person's events to another installation. */
 function refusal(owner: OwnerRow, userId: unknown) {
-  if (userId !== undefined && userId !== null && userId !== owner.composio_user_id) return "user mismatch";
+  if (userId !== undefined && userId !== null && userId !== actingUser(owner)) return "user mismatch";
   if (owner.installation_disabled_at !== null) return "installation disabled";
   return undefined;
 }
@@ -462,7 +464,7 @@ export async function queueTestEvent(request: Request, installation: EventInstal
     id: eventId,
     type: "omb.test",
     timestamp: new Date(now).toISOString(),
-    metadata: { trigger_slug: bound.trigger_slug, trigger_id: triggerId, connected_account_id: bound.connected_account_id, user_id: installation.composio_user_id },
+    metadata: { trigger_slug: bound.trigger_slug, trigger_id: triggerId, connected_account_id: bound.connected_account_id, user_id: actingUser(installation) },
     data: boundedData(data),
   });
   const result = await enqueue(env, installation, { eventId, kind: "test", triggerId, body }, now);

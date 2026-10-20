@@ -54,7 +54,7 @@ interface McpOAuthClientListing {
   clientSecretConfigured: boolean;
   redirectUri: string;
 }
-export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { managedBy?: string };
+export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { managedBy?: string; runsOn?: { environmentId: string; label: string } };
 
 export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {
   return "url" in server;
@@ -897,7 +897,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
               const whop = isRemoteMcpListing(server) && isWhopServer(server);
               const result = probe[server.name];
               const auth = isRemoteMcpListing(server) ? server.auth : undefined;
-              const canSignIn = isRemoteMcpListing(server)
+              const canSignIn = isRemoteMcpListing(server) && !server.runsOn
                 && (auth === "needs-sign-in" || result?.auth === "required" || ((whop || Boolean(server.oauth)) && auth !== "signed-in"));
               return (
                 <div key={server.name} data-whop-server={whop ? server.name : undefined} className="rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5">
@@ -913,6 +913,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                         {server.managedBy && <span className="rounded-full bg-raised px-2 py-0.5 text-[10.5px] text-ink-secondary">{t("policy.managedBy", { organization: server.managedBy })}</span>}
                       </div>
                       {server.managedBy && <div className="mt-1 text-[11.5px] text-ink-secondary">{t("policy.mcpBlocked", { organization: server.managedBy })}</div>}
+                      {server.runsOn && <div data-mcp-runs-on className="mt-1 text-[11.5px] text-ink-secondary">{t("mcp.runsOn", { computer: server.runsOn.label })}</div>}
                       <div className="mt-1 truncate font-mono text-[11.5px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
                       {isRemoteMcpListing(server)
                         ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>
