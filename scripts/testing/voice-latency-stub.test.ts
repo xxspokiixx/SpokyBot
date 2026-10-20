@@ -56,6 +56,28 @@ describe("voice latency record stub", () => {
     }
   });
 
+  it("serves the legacy path without stream=true as a complete clip after the synthesis delay", async () => {
+    const stub = await launchVoiceLatencyStub();
+    try {
+      const chars = 12;
+      const began = Date.now();
+      const spoken = await fetch(`${stub.url}/text-to-speech/${STUB_VOICE}?output_format=mp3_44100_64`, {
+        method: "POST",
+        headers: { "xi-api-key": "ignored-by-design", "content-type": "application/json" },
+        body: JSON.stringify({ text: "a".repeat(chars), model_id: STUB_MODEL }),
+      });
+      expect(spoken.status).toBe(200);
+      expect(spoken.headers.get("content-type")).toBe("audio/mpeg");
+      const clip = silenceMp3(chars * SYNTHESIS.audioMsPerChar);
+      expect(Number(spoken.headers.get("content-length"))).toBe(clip.byteLength);
+      // Complete-clip delivery: nothing lands before the whole-clip synthesis time.
+      expect(Date.now() - began).toBeGreaterThanOrEqual(synthesisDelayMs(chars) - 25);
+      expect(Buffer.from(await spoken.arrayBuffer())).toEqual(clip);
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("streams: first chunk at the modeled first byte, last at the whole-clip time", async () => {
     const stub = await launchVoiceLatencyStub();
     try {
