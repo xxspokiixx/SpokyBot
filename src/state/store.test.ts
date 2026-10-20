@@ -3018,6 +3018,15 @@ describe("notifications feed", () => {
     expect(state.notifications.every((n) => n.read)).toBe(true);
   });
 
+  it("marks the entries a conversation read elsewhere, and only those", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2), entry("n3", 3)],
+    });
+    state = reducer(state, { type: "notificationsRead", ids: ["n1", "n3", "gone"] });
+    expect(state.notifications.filter((n) => n.read).map((n) => n.id)).toEqual(["n3", "n1"]);
+  });
+
   it("toggleNotifications closes the other docked panels, and vice versa", () => {
     let state = reducer(initialState, { type: "toggleComputer", open: true });
     expect(state.computerOpen).toBe(true);

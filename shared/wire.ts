@@ -907,6 +907,7 @@ export type ServerFrame =
   | { kind: "bot"; bot: WireBot }
   | { kind: "group"; group: WireGroup }
   | { kind: "notify"; notification: NotificationLogEntry }
+  | { kind: "notifications.read"; threadId: string; ids: string[] }
   | { kind: "group.deleted"; groupId: string }
   | { kind: "routine"; routine: Routine }
   | { kind: "routine.deleted"; routineId: string }

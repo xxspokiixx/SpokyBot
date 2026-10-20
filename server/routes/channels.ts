@@ -30,6 +30,7 @@ import type { UsageTrigger } from "../usage-ledger.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
+import { readThreadNotifications } from "./notifications.ts";
 
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
@@ -252,6 +253,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!room) return json(res, 404, { error: "no such room" });
       sawThread(room.threadId);
       const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
+      readThreadNotifications(room.threadId, broadcast);
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: publicGroupState(group) });
     }

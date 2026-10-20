@@ -1660,6 +1660,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "notificationsHydrated":
     case "notificationReceived":
     case "notificationRead":
+    case "notificationsRead":
     case "notificationsMarkAllRead":
       return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
     case "toggleAppSettings": {
@@ -3373,6 +3374,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             visibleNotificationThread(stateRef.current),
           );
           rawDispatch({ type: "notificationReceived", entry: frame.notification });
+          break;
+        case "notifications.read":
+          rawDispatch({ type: "notificationsRead", ids: frame.ids });
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });

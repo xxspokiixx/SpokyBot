@@ -6,6 +6,7 @@ export type NotificationFeedAction =
   | { type: "notificationsHydrated"; notifications: NotificationLogEntry[] }
   | { type: "notificationReceived"; entry: NotificationLogEntry }
   | { type: "notificationRead"; id: string }
+  | { type: "notificationsRead"; ids: string[] }
   | { type: "notificationsMarkAllRead" };
 
 /** Newest first. Hydration takes the server's copy of each entry it returns and keeps live entries it has not seen yet. */
@@ -21,6 +22,10 @@ export function reduceNotificationFeed(feed: NotificationLogEntry[], action: Not
       return feed.some((entry) => entry.id === action.entry.id) ? feed : [action.entry, ...feed].slice(0, NOTIFICATION_FEED_LIMIT);
     case "notificationRead":
       return feed.map((entry) => (entry.id === action.id && !entry.read ? { ...entry, read: true } : entry));
+    case "notificationsRead": {
+      const ids = new Set(action.ids);
+      return feed.map((entry) => (ids.has(entry.id) && !entry.read ? { ...entry, read: true } : entry));
+    }
     case "notificationsMarkAllRead":
       return feed.map((entry) => (entry.read ? entry : { ...entry, read: true }));
   }
