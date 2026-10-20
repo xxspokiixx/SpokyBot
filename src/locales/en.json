@@ -3525,6 +3525,7 @@
   "accounts.removeTitle": "Remove {name}?",
   "accounts.removeBodyClaude": "This removes the account from OpenMausBot. Claude's own sign-in files stay on this computer.",
   "accounts.removeBodyChatgpt": "This signs the account out and removes it from OpenMausBot.",
+  "accounts.removeBodyAntigravity": "This removes the account and its sign-in from OpenMausBot. Your other Antigravity accounts stay connected.",
   "accounts.addClaude": "Add another Claude account",
   "accounts.addChatgpt": "Add another ChatGPT account",
   "accounts.nameLabel": "Account name",
