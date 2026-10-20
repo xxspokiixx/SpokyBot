@@ -475,7 +475,8 @@ import { OutboundRequestService, outboundCard } from "./outbound-requests.ts";
 import { DEFAULT_OUTBOUND_POLICY, connectorCallsIn, outboundCallsIn } from "../shared/outbound.ts";
 import { connectorAccessDecision, describeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
-import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
+import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts";
+import { addressFor } from "./webhook-address.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { tieAutomationsToBots } from "./bot-automations.ts";
@@ -630,6 +631,7 @@ import { createNotificationRoutes } from "./routes/notifications.ts";
 import { createUsageRoutes } from "./routes/usage.ts";
 import { createBotMessageRoutes } from "./routes/bot-messages.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
+import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 import { personAsks as personAskAt } from "./thread-presence.ts";
 
@@ -1069,6 +1071,9 @@ function guestEngineRefusal(threadId: string): string {
     : "This conversation is from before My Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.";
 }
 
+/** A webhook or app event drove this conversation: its run, a payload posted into it, or a conversation that handed it the work. */
+const outsideDrivenThread = (threadId: string) => outsideDriven(threadId, { webhookRun: (id) => activeRoutineRunForThread(id)?.triggerSource === "webhook",
+  webhookPosted: (id) => store.messagesFor(id).some((line) => line.webhookPost), handedFrom: (id) => coordinator.active().filter((node) => node.threadId === id).flatMap((node) => handedFrom(node.id)) });
 /** A guest-driven turn runs in Ask whatever the bot's own level, with no shell. On a Cloud only its owner ever used, only what came in from outside is. */
 function cloudGuestDriven(threadId: string): boolean {
   if (!CLOUD_HOME) return false;
@@ -10153,7 +10158,7 @@ const webhooks = new WebhookManager({
   },
 });
 const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" });
-const appTriggers = createAppTriggerHost({ store, webhooks, routines: () => routines!, botState: unattendedDispatchState, timeZone: routineTimeZone, emit: broadcast, connectionMode: () => composio.connectionMode(cfg),
+const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => webhookIngressStatus().baseUrl, routines: () => routines!, botState: unattendedDispatchState, timeZone: routineTimeZone, emit: broadcast, connectionMode: () => composio.connectionMode(cfg),
   access: composio.brokerAccess, connectedApps: () => composio.connectedServices(cfg), visibleBot: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId),
   audit: (row) => appendDecision(DATA_DIR, { ...row, decision: "auto-approved", source: "routine" }) });
 tieAutomationsToBots(store, { routines: routines!, webhooks, apps: appTriggers.manager });
@@ -10181,6 +10186,7 @@ const webhookIngressStatus = () => ({
   baseUrl: webhookIngress?.baseUrl ?? `http://127.0.0.1:${WEBHOOK_PORT}`,
   ...(webhookIngressError ? { error: webhookIngressError } : {}),
 });
+ROUTES.push(createWebhookRoutes({ webhooks, ingress: webhookIngressStatus, visible: (auth) => visibleTo(viewerFor(auth)) }));
 
 const RUNTIME_KEEP_MS = 30 * 24 * 60 * 60_000;
 let runtimePrunedAt = 0;
@@ -14552,7 +14558,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         return json(res, 200, { rooms: rooms.slice(0, 50), unpostable: unpostable.slice(0, 50) });
       }
-      const triggerContext = { from: internalSender, threadId: internalCapability.threadId, ownsThread: (botId: string, threadId: string) => Boolean(connectorThread(botId, threadId)), guestDriven: cloudGuestDriven(internalCapability.threadId), canCommit: () => internalCapabilityIsActive(internalCapability) };
+      const triggerContext = { from: internalSender, threadId: internalCapability.threadId, ownsThread: (botId: string, threadId: string) => Boolean(connectorThread(botId, threadId)), guestDriven: cloudGuestDriven(internalCapability.threadId), outsideDriven: () => outsideDrivenThread(internalCapability.threadId), canCommit: () => internalCapabilityIsActive(internalCapability) };
       if (await dispatchRoutes([appTriggers.internalRoutes(triggerContext)], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/trigger-requests") {
         const from = internalSender;
@@ -14581,13 +14587,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           appendDecision(DATA_DIR, { threadId: fromThreadId, requestId: applied.requestId, botId: from.id, botName: from.name,
             tool: applied.action === "create" ? "create_trigger" : "manage_trigger", summary: applied.summary, decision: "auto-approved", source: "routine" });
-          return json(res, 201, applied);
+          const hookOwner = store.bot(forBot?.botId ?? from.id);
+          return json(res, 201, { ...applied, ...(applied.action === "create" && hookOwner ? addressFor({ from, owner: hookOwner, guestDriven: false, outsideDriven: outsideDrivenThread(fromThreadId) }, webhooks, applied.resultId, webhookIngressStatus().baseUrl) : {}) });
         }
         const proposedInput = { ...request.proposal, forBot };
         const wasOwners = proposedInput.action !== "create" && typeof proposedInput.routineId === "string" ? cloudRoutineIsOwners(proposedInput.routineId) : false;
         const run = activeRoutineRunForThread(fromThreadId);
-        const outside = Boolean(CLOUD_HOME) && outsideDriven(fromThreadId, { webhookRun: (id) => activeRoutineRunForThread(id)?.triggerSource === "webhook",
-          webhookPosted: (id) => store.messagesFor(id).some((line) => line.webhookPost), handedFrom: (id) => coordinator.active().filter((node) => node.threadId === id).flatMap((node) => handedFrom(node.id)) });
+        const outside = Boolean(CLOUD_HOME) && outsideDrivenThread(fromThreadId);
         const ownersTurn = !outside && (cloudOwnerOnlyThread(fromThreadId) || cloudRoutineRunIsOwners(run, from.id, fromThreadId));
         const ownersLevel = !outside && CLOUD_HOME && !cloudGuestDriven(fromThreadId) && (proposedInput.action === "create" ||
           cloudRoutineAuthors?.writer(String(proposedInput.routineId)) === CLOUD_OWNER_KEY) && (run?.threadId === fromThreadId || ownerSpokeOnly(store.messagesFor(fromThreadId), cloudThreadStarters(fromThreadId), cloudProvenOwnerPerson, cloudCardAnswerer));
@@ -16145,47 +16151,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return calendarCalls!.remove(calendarCallMatch[1])
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such scheduled call" });
-    }
-
-    // Deliveries land on a separate webhook-only loopback listener, so a relay never exposes the rest of the control surface.
-    if (path === "/api/webhooks" && method === "GET") {
-      const shownHooks = webhooks.list().filter((webhook) => visible.bot(webhook.botId));
-      const shownIds = new Set(shownHooks.map((webhook) => webhook.id));
-      return json(res, 200, { webhooks: shownHooks, attempts: webhooks.listAttempts().filter((attempt) => visible.everything || shownIds.has(attempt.webhookId)), ingress: webhookIngressStatus() });
-    }
-    if (path === "/api/webhooks" && method === "POST") {
-      const created = webhooks.create(await readBody(req));
-      const ingress = webhookIngressStatus();
-      return json(res, 201, {
-        webhook: created.webhook,
-        ingress,
-        credential: webhookCredential(ingress.baseUrl, created.webhook.endpointId, created.secret),
-      });
-    }
-    let webhookMatch = path.match(/^\/api\/webhooks\/([\w-]+)\/(rotate|test)$/);
-    if (webhookMatch && method === "POST") {
-      if (webhookMatch[2] === "test") {
-        const result = webhooks.test(webhookMatch[1], await readBody(req));
-        return result ? json(res, 202, result) : json(res, 404, { error: "no such webhook" });
-      }
-      const rotated = webhooks.rotateSecret(webhookMatch[1]);
-      if (!rotated) return json(res, 404, { error: "no such webhook" });
-      const ingress = webhookIngressStatus();
-      return json(res, 200, {
-        webhook: rotated.webhook,
-        ingress,
-        credential: webhookCredential(ingress.baseUrl, rotated.webhook.endpointId, rotated.secret),
-      });
-    }
-    webhookMatch = path.match(/^\/api\/webhooks\/([\w-]+)$/);
-    if (webhookMatch && method === "PATCH") {
-      const webhook = webhooks.update(webhookMatch[1], await readBody(req));
-      return webhook ? json(res, 200, { webhook }) : json(res, 404, { error: "no such webhook" });
-    }
-    if (webhookMatch && method === "DELETE") {
-      return webhooks.remove(webhookMatch[1])
-        ? json(res, 200, { ok: true })
-        : json(res, 404, { error: "no such webhook" });
     }
 
     if (method === "GET" && path === "/api/events") {
