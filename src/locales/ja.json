@@ -2325,6 +2325,7 @@
   "onboarding.engines.intro": "ボットが考えるには AI が必要です。すでにお持ちのアカウントでサインインしてください。",
   "onboarding.engines.otherWays": "ほかの方法",
   "onboarding.engines.connected": "{name} に接続しました。ボットはすぐに使い始められます。",
+  "onboarding.engines.signInHint": "お持ちの{name}アカウントを使います。サインインは提供元のウェブサイトで行うため、パスワードはそちらから外に出ません。",
   "botPanel.noAi": "{name} にはまだ考えるための AI がありません。",
   "onboarding.engines.ready": "利用可能",
   "onboarding.engines.needsSetup": "セットアップが必要",

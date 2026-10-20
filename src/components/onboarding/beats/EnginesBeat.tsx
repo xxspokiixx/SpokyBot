@@ -10,6 +10,13 @@ import { api, useStore, type InstanceInfo } from "@/state/store";
 import { OrganisationRow } from "./OrganisationRow";
 import { PrimaryButton, staggerIndex, type BeatProps } from "./shared";
 
+/** A local-model setup keeps its own words; every sign-in says the same plain line instead of the setup's technical one. */
+function setupFor(instance: InstanceInfo) {
+  return instance.access === "custom"
+    ? { intent: "inject" as const }
+    : { intent: "cloud" as const, description: t("onboarding.engines.signInHint", { name: instance.displayName }) };
+}
+
 function OtherWay({ instance, open, onToggle }: { instance: InstanceInfo; open: boolean; onToggle: () => void }) {
   return (
     <div>
@@ -25,9 +32,7 @@ function OtherWay({ instance, open, onToggle }: { instance: InstanceInfo; open: 
         <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{instance.displayName}</span>
         <ChevronDown size={14} className={cn("shrink-0 text-ink-secondary transition-transform duration-200", open && "rotate-180")} />
       </button>
-      {open && (
-        <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} className="mx-3.5 mb-3.5 border-0 bg-inset" />
-      )}
+      {open && <EngineSetup instance={instance} {...setupFor(instance)} className="mx-3.5 mb-3.5 border-0 bg-inset" />}
     </div>
   );
 }
@@ -101,7 +106,7 @@ export function EnginesBeat({
             </span>
             <span className="truncate text-[13.5px] font-medium text-ink">{recommended.displayName}</span>
           </div>
-          <EngineSetup instance={recommended} intent={recommended.access === "custom" ? "inject" : "cloud"} className="mx-3.5 mb-3.5 border-0 bg-transparent" />
+          <EngineSetup instance={recommended} {...setupFor(recommended)} className="mx-3.5 mb-3.5 border-0 bg-transparent" />
         </div>
       ) : !failed ? (
         <p className="mt-4 text-[12.5px] text-ink-secondary" aria-live="polite">{t("common.checking")}</p>

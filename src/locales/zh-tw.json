@@ -1608,6 +1608,7 @@
   "onboarding.engines.intro": "你的機器人需要一個 AI 來思考。用你已有的帳號登入即可。",
   "onboarding.engines.otherWays": "其他方式",
   "onboarding.engines.connected": "{name} 已連線。你的機器人現在就可以開始了。",
+  "onboarding.engines.signInHint": "使用你已有的 {name} 帳號。你在對方自己的網站上登入，密碼只留在對方那裡。",
   "botPanel.noAi": "{name} 還沒有可用來思考的 AI。",
   "onboarding.engines.ready": "已就緒",
   "onboarding.engines.needsSetup": "需要設定",

@@ -2469,6 +2469,7 @@
   "onboarding.engines.intro": "Your bots need an AI to think with. Sign in with an account you already have.",
   "onboarding.engines.otherWays": "Other ways",
   "onboarding.engines.connected": "{name} is connected. Your bots can start now.",
+  "onboarding.engines.signInHint": "Use the {name} account you already have. You sign in on their own website, so your password stays with them.",
   "botPanel.noAi": "{name} has no AI to think with yet.",
   "onboarding.engines.ready": "Ready",
   "onboarding.engines.needsSetup": "Needs setup",

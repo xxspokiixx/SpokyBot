@@ -725,6 +725,7 @@
   "onboarding.engines.intro": "आपके बॉट को सोचने के लिए एक AI चाहिए। अपने किसी मौजूदा खाते से साइन इन करें।",
   "onboarding.engines.otherWays": "दूसरे तरीके",
   "onboarding.engines.connected": "{name} जुड़ गया है। आपके बॉट अब शुरू कर सकते हैं।",
+  "onboarding.engines.signInHint": "अपना मौजूदा {name} खाता इस्तेमाल करें। आप उनकी अपनी वेबसाइट पर साइन इन करते हैं, इसलिए आपका पासवर्ड उन्हीं के पास रहता है।",
   "botPanel.noAi": "{name} के पास सोचने के लिए अभी कोई AI नहीं है।",
   "onboarding.engines.ready": "तैयार",
   "onboarding.engines.needsSetup": "सेटअप चाहिए",

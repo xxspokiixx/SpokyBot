@@ -27,7 +27,8 @@ vi.mock("@/components/CloudTrialNotice", () => ({ useCloudPlanSnapshot: () => fi
 // The sign-in cards and the team library have their own tests.
 vi.mock("@/components/EngineSetup", async () => {
   const { createElement: h } = await import("react");
-  return { EngineSetup: ({ instance }: { instance: { instanceId: string } }) => h("div", { "data-engine-setup": instance.instanceId }) };
+  return { EngineSetup: ({ instance, description }: { instance: { instanceId: string }; description?: string }) =>
+    h("div", { "data-engine-setup": instance.instanceId, "data-description": description }) };
 });
 vi.mock("@/components/TeamLibraryPanel", async () => {
   const { createElement: h } = await import("react");
@@ -278,7 +279,8 @@ describe("CloudWelcome", () => {
     fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [welcomeStepHint("bring")] };
     render();
     expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull();
-    expect(host.querySelector('[data-welcome-recommended="claude"] [data-engine-setup="claude"]')).not.toBeNull();
+    expect(host.querySelector('[data-welcome-recommended="claude"] [data-engine-setup="claude"]')?.getAttribute("data-description"), "one plain line, not the setup's own")
+      .toBe("Use the Claude account you already have. You sign in on their own website, so your password stays with them.");
     expect(host.querySelector("[data-cloud-choice]")).toBeNull();
     click("Other ways");
     expect(host.querySelector('[data-cloud-choice="codex"]')).not.toBeNull();

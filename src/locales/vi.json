@@ -1928,6 +1928,7 @@
   "onboarding.engines.intro": "Bot của bạn cần một AI để suy nghĩ. Hãy đăng nhập bằng tài khoản bạn đã có.",
   "onboarding.engines.otherWays": "Cách khác",
   "onboarding.engines.connected": "{name} đã được kết nối. Bot của bạn có thể bắt đầu ngay.",
+  "onboarding.engines.signInHint": "Dùng tài khoản {name} bạn đã có. Bạn đăng nhập trên trang web của chính họ, nên mật khẩu của bạn vẫn ở bên họ.",
   "botPanel.noAi": "{name} chưa có AI để suy nghĩ.",
   "onboarding.engines.ready": "Sẵn sàng",
   "onboarding.engines.needsSetup": "Cần thiết lập",

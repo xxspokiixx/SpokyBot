@@ -2365,6 +2365,7 @@
   "onboarding.engines.intro": "Seus bots precisam de uma IA para pensar. Entre com uma conta que você já tem.",
   "onboarding.engines.otherWays": "Outras formas",
   "onboarding.engines.connected": "{name} está conectado. Seus bots já podem começar.",
+  "onboarding.engines.signInHint": "Use a conta do {name} que você já tem. Você entra pelo site deles, então sua senha fica com eles.",
   "botPanel.noAi": "{name} ainda não tem uma IA para pensar.",
   "onboarding.engines.ready": "Prontos",
   "onboarding.engines.needsSetup": "Precisa de configuração",

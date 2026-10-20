@@ -1928,6 +1928,7 @@
   "onboarding.engines.intro": "Botlarınızın düşünmek için bir AI'ya ihtiyacı var. Zaten sahip olduğunuz bir hesapla giriş yapın.",
   "onboarding.engines.otherWays": "Diğer yollar",
   "onboarding.engines.connected": "{name} bağlandı. Botlarınız artık başlayabilir.",
+  "onboarding.engines.signInHint": "Zaten sahip olduğunuz {name} hesabını kullanın. Girişi onların kendi web sitesinde yaparsınız, böylece şifreniz onlarda kalır.",
   "botPanel.noAi": "{name} için henüz düşünecek bir AI yok.",
   "onboarding.engines.ready": "Hazır",
   "onboarding.engines.needsSetup": "Kurulum gerekiyor",

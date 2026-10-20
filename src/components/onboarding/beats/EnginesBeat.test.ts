@@ -10,7 +10,8 @@ const f = vi.hoisted(() => ({ instances: [] as InstanceInfo[], dispatch: vi.fn()
 vi.mock("@/state/store", () => ({ api: async () => ({ instances: f.instances }), useStore: () => ({ state: { instances: f.instances }, dispatch: f.dispatch }) }));
 vi.mock("@/components/EngineSetup", async () => {
   const { createElement: h } = await import("react");
-  return { EngineSetup: ({ instance }: { instance: InstanceInfo }) => h("div", { "data-engine-setup": instance.instanceId }) };
+  return { EngineSetup: ({ instance, intent, description }: { instance: InstanceInfo; intent: string; description?: string }) =>
+    h("div", { "data-engine-setup": instance.instanceId, "data-intent": intent, "data-description": description }) };
 });
 // The row has its own tests; here only whether the step offers it.
 vi.mock("./OrganisationRow", () => ({ OrganisationRow: (props: NonNullable<typeof f.row>) => { f.row = props; return null; } }));
@@ -59,6 +60,23 @@ describe("the welcome's Connect an AI step", () => {
     expect(text()).toContain("Grok");
     expect(text()).toContain("Codex");
     for (const word of [/\bengines?\b/i, /\bReady\b/, /Needs setup/i, /to set up/i, /provider/i]) expect(text()).not.toMatch(word);
+  });
+
+  it("says one plain line on every sign-in in place of the setup's technical one, and leaves a local-model setup its own", async () => {
+    f.instances.push({ ...engine("local", "openai-compat", "Local models", false), access: "custom" });
+    const setup = (id: string) => host.querySelector(`[data-engine-setup="${id}"]`);
+    await show();
+    expect(setup("claude")?.getAttribute("data-description")).toBe("Use the Claude account you already have. You sign in on their own website, so your password stays with them.");
+    await otherWays();
+    const openRow = async (name: string) => {
+      const row = [...host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find((button) => button.textContent?.includes(name))!;
+      await act(async () => { row.click(); });
+    };
+    await openRow("Grok");
+    expect(setup("grok")?.getAttribute("data-description")).toBe("Use the Grok account you already have. You sign in on their own website, so your password stays with them.");
+    await openRow("Local models");
+    expect(setup("local")?.getAttribute("data-intent")).toBe("inject");
+    expect(setup("local")?.hasAttribute("data-description")).toBe(false);
   });
 
   it("says which AI is connected once one is, and recommends nothing more", async () => {

@@ -732,6 +732,7 @@
   "onboarding.engines.intro": "Deine Bots brauchen eine KI zum Denken. Melde dich mit einem Konto an, das du schon hast.",
   "onboarding.engines.otherWays": "Andere Wege",
   "onboarding.engines.connected": "{name} ist verbunden. Deine Bots können jetzt loslegen.",
+  "onboarding.engines.signInHint": "Nutze das {name}-Konto, das du schon hast. Du meldest dich auf deren eigener Website an, dein Passwort bleibt also bei ihnen.",
   "botPanel.noAi": "{name} hat noch keine KI zum Denken.",
   "onboarding.engines.ready": "Bereit",
   "onboarding.engines.needsSetup": "Einrichtung nötig",

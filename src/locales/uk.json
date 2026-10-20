@@ -873,6 +873,7 @@
   "onboarding.engines.intro": "Вашим ботам потрібен AI, щоб думати. Увійдіть з обліковим записом, який у вас уже є.",
   "onboarding.engines.otherWays": "Інші способи",
   "onboarding.engines.connected": "{name} підключено. Ваші боти вже можуть починати.",
+  "onboarding.engines.signInHint": "Скористайтеся обліковим записом {name}, який у вас уже є. Ви входите на їхньому власному сайті, тож ваш пароль залишається в них.",
   "botPanel.noAi": "У {name} ще немає AI, щоб думати.",
   "onboarding.engines.ready": "Готово",
   "onboarding.engines.needsSetup": "Потребує налаштування",
