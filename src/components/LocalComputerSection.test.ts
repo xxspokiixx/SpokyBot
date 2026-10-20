@@ -15,7 +15,6 @@ import {
   LocalComputerSection,
   LocalVmIdleTimeoutSetting,
   LocalVmInventoryCard,
-  VpsComputersCard,
   cloudComputerActionPlan,
   cloudComputerInventoryState,
   computerInventoryRequest,
@@ -32,6 +31,7 @@ import {
   type LocalVmInventoryInstance,
   type VpsComputerInventoryInstance,
 } from "./LocalComputerSection";
+import { VpsComputersCard } from "./VpsComputersCard";
 
 const cloudVm: LocalVmInventoryInstance = {
   botId: "cloud-bot",

@@ -680,12 +680,7 @@ const VPS_INVENTORY_STATES = new Set<ManagedVpsInventoryInstance["state"]>([
   "dead",
 ]);
 
-interface ManagedVpsAliasScan {
-  available: boolean;
-  problem: string | null;
-  instances: ManagedVpsInventoryInstance[];
-  containerIds: Map<string, string>;
-}
+type ManagedVpsAliasScan = Pick<ManagedVpsInventory, "available" | "problem" | "instances"> & { containerIds: Map<string, string> };
 
 function inventoryFailure(alias: string, error: unknown): ManagedVpsAliasScan {
   const detail = (error instanceof Error ? error.message : String(error))
@@ -806,25 +801,21 @@ export async function listManagedVpsComputers(
   runner: VpsCommandRunner = defaultRunner,
   vpsAliases?: string[],
 ): Promise<ManagedVpsInventory> {
-  cfg = snapshotVpsConfig(cfg);
-  const defaultAlias = vpsSshAlias(cfg);
-  const requested = vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : [];
-  const scanning = [...new Set(requested.filter(isValidSshAlias))];
+  const defaultAlias = vpsSshAlias(snapshotVpsConfig(cfg));
+  const scanning = [...new Set((vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : []).filter(isValidSshAlias))];
   if (scanning.length === 0) {
     return { configured: false, available: false, vpsAliases: [], problem: null, instances: [] };
   }
   // Concurrently: one dead host must not delay the others behind its timeouts. Promise.all keeps
   // alias order, so the aggregate below matches the old serial loop exactly.
   const scans = await Promise.all(scanning.map((alias) => scanManagedVpsAlias(alias, owners, runner)));
-  const available = scans.every((scan) => scan.available);
   const problem = scans.find((scan) => !scan.available)?.problem ?? null;
-  const instances = scans.flatMap((scan) => scan.instances);
-  instances.sort((left, right) =>
+  const instances = scans.flatMap((scan) => scan.instances).sort((left, right) =>
     Number(left.orphaned) - Number(right.orphaned) ||
     (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name) ||
     left.vpsAlias.localeCompare(right.vpsAlias),
   );
-  return { configured: true, available, vpsAliases: scanning, problem, instances };
+  return { configured: true, available: scans.every((scan) => scan.available), vpsAliases: scanning, problem, instances };
 }
 
 export function vpsContainerRunArgs(

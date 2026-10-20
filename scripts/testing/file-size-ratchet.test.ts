@@ -16,7 +16,7 @@ const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
   "server/index.ts": 17188,
-  "src/state/store.tsx": 3581,
+  "src/state/store.tsx": 3570,
   "electron/main.mjs": 3458,
   "server/store.ts": 2467,
   "src/components/Sidebar.tsx": 2340,
@@ -30,7 +30,7 @@ const LINES: Record<string, number> = {
   "src/components/ChatView.tsx": 1482,
   "server/routine-requests.ts": 1484,
   "src/components/GroupView.tsx": 1616,
-  "src/components/LocalComputerSection.tsx": 1605,
+  "src/components/LocalComputerSection.tsx": 1475,
   "src/components/CursorAvatar.tsx": 1441,
   "server/skills.ts": 1391,
   "server/composio.ts": 1345,
