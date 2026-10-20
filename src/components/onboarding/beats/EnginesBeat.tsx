@@ -5,16 +5,18 @@ import { engineReady } from "@/components/EngineLibrary";
 import { InstanceProviderMark } from "@/components/ProviderIcons";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { aiChoices, organisationSignIn } from "@/lib/onboarding";
+import { aiChoices, organisationSignIn, plainSignIn } from "@/lib/onboarding";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { OrganisationRow } from "./OrganisationRow";
 import { PrimaryButton, staggerIndex, type BeatProps } from "./shared";
 
-/** A local-model setup keeps its own words; every sign-in says the same plain line instead of the setup's technical one. */
+/** A local-model setup and a step finished in Terminal keep their own words; every other sign-in says the same plain line
+ * instead of the setup's technical one. */
 function setupFor(instance: InstanceInfo) {
-  return instance.access === "custom"
-    ? { intent: "inject" as const }
-    : { intent: "cloud" as const, description: t("onboarding.engines.signInHint", { name: instance.displayName }) };
+  if (instance.access === "custom") return { intent: "inject" as const };
+  return plainSignIn(instance)
+    ? { intent: "cloud" as const, description: t("onboarding.engines.signInHint", { name: instance.displayName }) }
+    : { intent: "cloud" as const };
 }
 
 function OtherWay({ instance, open, onToggle }: { instance: InstanceInfo; open: boolean; onToggle: () => void }) {

@@ -44,7 +44,7 @@ const CLOUD = { id: "cloud", name: "Studio Cloud", origin: "https://omb-u-1a2b3c
 const overview = (extra: Partial<CloudMoveOverview> = {}): CloudMoveOverview => ({
   phase: "idle", local, cloud: emptyCloud, suggest: true, destination: CLOUD, blocked: null, fit: { fit: "now", neededBytes: 1, freeBytes: 2 }, ...extra,
 });
-const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", access: "subscription", snapshot: { state: "available", authenticated: false }, models: { default: "", options: [] } };
+const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", access: "subscription", authentication: { method: "paste-code" }, snapshot: { state: "available", authenticated: false }, models: { default: "", options: [] } };
 const codex = { ...claude, instanceId: "codex", driverKind: "codex", displayName: "Codex" };
 const credit = { instanceId: "trial", driverKind: "openai-compat", displayName: "Trial credit · Claude", readOnly: true, trialCredit: "active", snapshot: { state: "available" }, models: { default: "", options: [] } };
 
@@ -282,6 +282,10 @@ describe("CloudWelcome", () => {
     expect(host.querySelector('[data-welcome-recommended="claude"] [data-engine-setup="claude"]')?.getAttribute("data-description"), "one plain line, not the setup's own")
       .toBe("Use the Claude account you already have. You sign in on their own website, so your password stays with them.");
     expect(host.querySelector("[data-cloud-choice]")).toBeNull();
+    fixture.state.instances = [{ ...claude, authentication: undefined }, codex];
+    render();
+    expect(host.querySelector('[data-welcome-recommended="claude"] [data-engine-setup="claude"]')?.hasAttribute("data-description"), "a sign-in finished in Terminal keeps its own instructions")
+      .toBe(false);
     click("Other ways");
     expect(host.querySelector('[data-cloud-choice="codex"]')).not.toBeNull();
     expect(host.querySelector('[data-cloud-choice="claude"]'), "the recommended way is not offered twice").toBeNull();

@@ -191,6 +191,20 @@ export function aiChoices<Instance extends AiChoice>(instances: readonly Instanc
   return { recommended, others: instances.filter((instance) => instance !== recommended) };
 }
 
+interface SignInStep {
+  snapshot: { state: string; authenticated?: boolean };
+  authentication?: unknown;
+  install?: { server?: unknown; managed?: unknown };
+}
+
+/** Whether the welcome's plain sign-in line fits this setup: a sign-in on the provider's own website, or a setup the app
+ * does by itself before one. A step finished in Terminal keeps the setup's own instructions. */
+export function plainSignIn(instance: SignInStep): boolean {
+  return instance.snapshot.state === "available" && instance.snapshot.authenticated === false
+    ? Boolean(instance.authentication)
+    : Boolean(instance.install?.server || instance.install?.managed);
+}
+
 export function cloudSignInDue<Instance>(
   viewer: WelcomeViewer | null,
   state: { connected: boolean; instances: readonly Instance[] },

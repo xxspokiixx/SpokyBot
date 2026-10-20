@@ -9,6 +9,7 @@ import { usd } from "@/lib/cloud-plan";
 import { welcomeCredit } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { plainSignIn } from "@/lib/onboarding";
 import { useStore, type Bot } from "@/state/store";
 import { CARD, CARD_IDLE, CardIcon, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
@@ -42,7 +43,7 @@ export function WelcomeEngine({ name, headingRef, onFinish }: { name: string; he
     {claude && <div data-welcome-recommended={claude.instanceId} className="mt-6 rounded-2xl border border-hairline/50 bg-card px-4 py-4">
       {engineReady(claude)
         ? claudeCheck && <EngineCheckLine name={claude.displayName} check={claudeCheck} onRetry={() => void engines.live.run(claude.instanceId)} />
-        : <EngineSetup instance={claude} unframed description={t("onboarding.engines.signInHint", { name: claude.displayName })} />}
+        : <EngineSetup instance={claude} unframed description={plainSignIn(claude) ? t("onboarding.engines.signInHint", { name: claude.displayName }) : undefined} />}
     </div>}
     <button type="button" data-welcome-other-ways aria-expanded={more} onClick={() => setMore((value) => !value)}
       className="mt-4 flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-[13px] font-medium text-ink-secondary transition-colors hover:text-ink motion-reduce:transition-none">

@@ -62,18 +62,34 @@ describe("the welcome's Connect an AI step", () => {
     for (const word of [/\bengines?\b/i, /\bReady\b/, /Needs setup/i, /to set up/i, /provider/i]) expect(text()).not.toMatch(word);
   });
 
-  it("says one plain line on every sign-in in place of the setup's technical one, and leaves a local-model setup its own", async () => {
-    f.instances.push({ ...engine("local", "openai-compat", "Local models", false), access: "custom" });
+  it("says one plain line on a sign-in at the provider's website, and leaves a step finished in Terminal and a local-model setup their own words", async () => {
+    const signsIn = (instance: InstanceInfo, method?: "paste-code" | "device-code"): InstanceInfo =>
+      ({ ...instance, snapshot: { state: "available", authenticated: false }, ...(method ? { authentication: { method } } : {}) });
+    f.instances = [
+      signsIn(engine("claude", "claudeAgent", "Claude", false), "paste-code"),
+      signsIn(engine("grok", "grokAgent", "Grok", false), "device-code"),
+      signsIn(engine("kimi", "kimiAgent", "Kimi", false)),
+      engine("codex", "codex", "Codex", false),
+      { ...engine("droid", "droidAgent", "Droid", false), install: { docsUrl: "https://example.test", server: { package: "droid" } } },
+      { ...engine("local", "openai-compat", "Local models", false), access: "custom" },
+    ];
     const setup = (id: string) => host.querySelector(`[data-engine-setup="${id}"]`);
+    const plain = (name: string) => `Use the ${name} account you already have. You sign in on their own website, so your password stays with them.`;
     await show();
-    expect(setup("claude")?.getAttribute("data-description")).toBe("Use the Claude account you already have. You sign in on their own website, so your password stays with them.");
+    expect(setup("claude")?.getAttribute("data-description")).toBe(plain("Claude"));
     await otherWays();
     const openRow = async (name: string) => {
       const row = [...host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find((button) => button.textContent?.includes(name))!;
       await act(async () => { row.click(); });
     };
     await openRow("Grok");
-    expect(setup("grok")?.getAttribute("data-description")).toBe("Use the Grok account you already have. You sign in on their own website, so your password stays with them.");
+    expect(setup("grok")?.getAttribute("data-description")).toBe(plain("Grok"));
+    await openRow("Droid");
+    expect(setup("droid")?.getAttribute("data-description"), "the app installs it, then the sign-in follows").toBe(plain("Droid"));
+    for (const [id, name] of [["kimi", "Kimi"], ["codex", "Codex"]]) {
+      await openRow(name);
+      expect(setup(id)?.hasAttribute("data-description"), `${name} is finished in Terminal: its setup keeps its own instructions`).toBe(false);
+    }
     await openRow("Local models");
     expect(setup("local")?.getAttribute("data-intent")).toBe("inject");
     expect(setup("local")?.hasAttribute("data-description")).toBe(false);
