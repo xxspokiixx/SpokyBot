@@ -155,11 +155,11 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
           {sent.state === "sending" ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin" /> : <Check size={15} strokeWidth={2.5} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />}
           <span>{line}</span>
         </span>} />
-      {more
+      {advanced && (more
         ? <div data-bring-choice="fresh" className={cn(CARD, CARD_IDLE)}>{freshBody}<Footer>
             <button ref={teamButton} type="button" className={SECONDARY} onClick={() => setTeams(true)}>{t("cloudWelcome.bring.chooseTeam")}</button>
           </Footer></div>
-        : <Footer><button type="button" data-bring-more className={QUIET} onClick={() => setMore(true)}>{t("cloudWelcome.bring.more")}</button></Footer>}
+        : <Footer><button type="button" data-bring-more className={QUIET} onClick={() => setMore(true)}>{t("cloudWelcome.bring.more")}</button></Footer>)}
       {library}
     </section>;
   }

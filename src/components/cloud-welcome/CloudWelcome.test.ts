@@ -396,7 +396,17 @@ describe("CloudWelcome", () => {
       expect(host.querySelector('[data-welcome-step="engine"]'), "the person stays where they are").not.toBeNull();
     });
 
-    it("back on its step it says in one line what is happening, with a fresh start only behind More", async () => {
+    it("back on its step it says in one line what is happening, and in Simple mode offers nothing more to choose", async () => {
+      withSend(notice({ last: sentLast() }));
+      fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [SHOWN, welcomeStepHint("bring")] };
+      render();
+      flushSync(() => (rail() as HTMLButtonElement).click());
+      await vi.waitFor(() => expect(text()).toContain("New ones keep coming by themselves."));
+      for (const label of ["More", "Choose a team", "Continue"]) expect(button(label)).toBeUndefined();
+    });
+
+    it("back on its step it says in one line what is happening, with a fresh start only behind More in Advanced mode", async () => {
+      localStorage.setItem(ADVANCED_MODE_KEY, "1");
       withSend(notice({ running: true, runningReason: "first" }));
       render();
       await vi.waitFor(() => expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull());
