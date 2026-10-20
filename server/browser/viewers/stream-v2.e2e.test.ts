@@ -51,6 +51,7 @@ suite("the v2 stream on real Chrome", () => {
   let origin = "";
   let target: BrowserTarget;
   let sessions = 0;
+  const clients = new Set<Client>();
 
   beforeAll(async () => {
     fx = await FixtureServer.start();
@@ -85,6 +86,8 @@ suite("the v2 stream on real Chrome", () => {
   }, hostTimeout(240_000));
 
   afterAll(async () => {
+    // A test that failed midway leaves its socket open, and the server's close waits for every upgraded socket.
+    for (const client of clients) await client.close();
     await new Promise<void>((resolve) => { if (!server) resolve(); else { server.close(() => resolve()); server.closeAllConnections(); } });
     await real?.close();
     await fx?.close();
@@ -93,7 +96,7 @@ suite("the v2 stream on real Chrome", () => {
   async function opened(path: string, html: string): Promise<BrowserTarget> {
     target = { session: `stream-${++sessions}`, key: `bot:stream-${sessions}` };
     const result = await real.call(target, "agent_browser_open", { url: fx.page(path, html) });
-    expect(result.isError).toBeUndefined();
+    expect(result.isError, real.text(result)).toBeUndefined();
     return target;
   }
 
@@ -122,6 +125,7 @@ suite("the v2 stream on real Chrome", () => {
       socket.send("{\"type\":\"ack\"}");
       client.frames.push(jpegSize(Buffer.from(event.data as ArrayBuffer)));
     });
+    clients.add(client);
     return new Promise((resolve, reject) => {
       socket.addEventListener("open", () => resolve(client));
       socket.addEventListener("error", () => reject(new Error("the stream did not open")));
@@ -321,7 +325,10 @@ suite("the v2 stream on real Chrome", () => {
     await asleep();
     await shown(async () => client.send({ type: "wake" }));
     await asleep();
-    await shown(async () => expect((await real.call(target, "agent_browser_get_url")).isError).toBeUndefined());
+    await shown(async () => {
+      const result = await real.call(target, "agent_browser_get_url");
+      expect(result.isError, real.text(result)).toBeUndefined();
+    });
     await client.close();
   }, hostTimeout(90_000));
 });
