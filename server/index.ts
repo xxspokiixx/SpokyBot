@@ -559,7 +559,7 @@ import {
 } from "./admin-activity.ts";
 import {
   frameForMember,
-  memberBody,
+  memberBody, memberFramePayload,
   noteSeen,
   notFoundFor,
   audienceEquals,
@@ -5237,11 +5237,9 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
-  const clientFrame = options.adminOnly
-    ? null
-    : kind === "config"
-      ? `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...configForAccess(payload as ReturnType<typeof configStatus>, false), seq })}\n\n`
-      : frame;
+  // Members get config as configured-or-not and every bot without its server alias.
+  const clientPayload = options.adminOnly ? null : kind === "config" ? configForAccess(payload as ReturnType<typeof configStatus>, false) : memberFramePayload(payload);
+  const clientFrame = clientPayload === null ? null : clientPayload === payload ? frame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...clientPayload, seq })}\n\n`;
   // Keep screen frames' sequence slots for resume-gap detection, never their base64 payloads.
   replayBuffer.push({ seq, kind, frame: kind === "screen" ? null : frame, clientFrame: kind === "screen" ? null : clientFrame, payload: kind === "screen" ? null : payload });
   for (const client of Array.from(sseClients)) {
@@ -13919,13 +13917,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (failure) return json(res, failure.status, { error: failure.error });
     }
     // A member reaches a restricted bot, its threads, rooms, routines and files exactly as an id that does not exist.
-    const visible = visibleTo(viewerFor(auth));
-    if (!visible.everything) {
-      const subject = pathSubject(path);
-      if (subject && !subjectVisible(subject, visible)) return json(res, 404, { error: notFoundFor(subject) });
-      // Every bot a member is sent comes without its audience list or the teammates they cannot see.
-      onJsonBody(res, (body) => memberBody(body, visible));
-    }
+    const viewer = viewerFor(auth), visible = visibleTo(viewer);
+    const subject = visible.everything ? null : pathSubject(path);
+    if (subject && !subjectVisible(subject, visible)) return json(res, 404, { error: notFoundFor(subject) });
+    // Every bot a member is sent comes without its server alias, audience list or the teammates they cannot see.
+    if (viewer.kind === "member") onJsonBody(res, (body) => memberBody(body, visible));
     beginAdminAudit(req, res, method, path, auth);
 
     if (method === "POST" && path === "/api/workspace-backup/restore" && teamComputers.list().some(computer => computer.section !== null)) {
@@ -16140,7 +16136,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     if (method === "GET" && path === "/api/events") {
-      const viewer = viewerFor(auth);
       const visibleNow = visibleTo(viewer);
       const client: SseClient = {
         res,

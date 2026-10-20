@@ -11257,6 +11257,44 @@ describe("harness HTTP API", () => {
     expect(perBot.body.bot.vpsAlias).toBe("alpha-vps");
     expect((await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: "prod; reboot" })).status).toBe(400);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: "bad alias" })).status).toBe(400);
+
+    // A member's session learns a bot's own server as it learns the default one: configured, never the name.
+    const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const paired = await fetch(`${BASE}/api/auth/pair`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }),
+    });
+    const memberToken = ((await paired.json()) as any).token as string;
+    const asMember = async (method: string, path: string, payload?: unknown) => {
+      const res = await fetch(`${BASE}${path}`, {
+        method, headers: { authorization: `Bearer ${memberToken}`, ...(payload ? { "content-type": "application/json" } : {}) },
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
+      return { status: res.status, body: await res.json() as any };
+    };
+    const memberStream = await openSse(`${BASE}/api/events`, { authorization: `Bearer ${memberToken}` });
+    const ownerStream = await openSse(`${BASE}/api/events`);
+    try {
+      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "" });
+      const listed = (await asMember("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id);
+      expect(listed).toMatchObject({ id: bot.id, cloudBackend: "vps" });
+      expect(listed).not.toHaveProperty("vpsAlias");
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id).vpsAlias).toBe("alpha-vps");
+      const display = await asMember("PATCH", `/api/bots/${bot.id}`, { pinned: true });
+      expect(display.status, JSON.stringify(display.body)).toBe(200);
+      expect(display.body.bot).not.toHaveProperty("vpsAlias");
+      expect((await asMember("PATCH", `/api/bots/${bot.id}`, { vpsAlias: "member-vps" })).status).toBe(403);
+      // The live frame for that same change: the owner's carries the alias, the member's does not.
+      const ownerFrame = await ownerStream.until((frame) => frame.kind === "bot" && frame.bot?.id === bot.id && frame.bot.pinned === true);
+      expect(ownerFrame.bot.vpsAlias).toBe("alpha-vps");
+      const memberFrame = await memberStream.until((frame) => frame.kind === "bot" && frame.bot?.id === bot.id && frame.bot.pinned === true);
+      expect(memberFrame.bot.cloudBackend).toBe("vps");
+      expect(memberFrame.bot).not.toHaveProperty("vpsAlias");
+      expect(JSON.stringify(memberStream.frames)).not.toContain("alpha-vps");
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { pinned: false })).status).toBe(200);
+    } finally {
+      memberStream.close();
+      ownerStream.close();
+    }
     // Clearing the field falls back to the default server.
     const cleared = await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: null });
     expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
