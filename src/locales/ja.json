@@ -2447,7 +2447,7 @@
   "onboarding.bot.saving": "保存中…",
   "onboarding.bot.error": "ボットを保存できませんでした。このまま完了して、あとで設定から編集してください。",
   "onboarding.bot.finishAnyway": "このまま完了",
-  "chief.addBotStarter": "手伝ってくれるボットをもう1体ほしいです。何をしてほしいか聞いて。",
+  "chief.addBotStarter": "手伝ってくれるボットをもう1体ほしいです。何をしてほしいか聞いてください。",
   "onboarding.hosted.intro": "これはチーム共有の OpenMausBot です。参加者は全員、同じボット、チャット、ファイルを見ます。組織が AI モデルを提供するので、インストールは不要です。",
   "onboarding.shared.title": "チーム共有の OpenMausBot",
   "onboarding.shared.body": "ここのボット、チャット、ファイルはチームで共有されます。管理者が AI モデルと設定を用意するので、すぐにチャットを始められます。",
