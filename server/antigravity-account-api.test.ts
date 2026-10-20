@@ -113,6 +113,8 @@ it("removes an unused added account but never the original Antigravity account",
   const created = await api("POST", "/api/instances/antigravity-accounts", { displayName: "Remove me", sourceInstanceId: "google-original" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const id = created.body.instanceId as string;
+  mkdirSync(join(tokenPath(id), ".."), { recursive: true });
+  writeFileSync(tokenPath(id), JSON.stringify({ refresh_token: "synthetic-removed" }));
   expect((await api("DELETE", "/api/instances/google-original")).status).toBe(400);
   const removed = await api("DELETE", `/api/instances/${id}`);
   expect(removed.status, JSON.stringify(removed.body)).toBe(200);
@@ -120,4 +122,7 @@ it("removes an unused added account but never the original Antigravity account",
   const saved = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
   expect(saved.instances).not.toHaveProperty(id);
   expect(saved.instances).toHaveProperty("google-original");
+  // The removed account's Google sign-in goes with it; the original account's stays.
+  expect(existsSync(join(tokenPath(id), "..", ".."))).toBe(false);
+  expect(existsSync(tokenPath("google-original"))).toBe(true);
 });

@@ -108,6 +108,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
   return (
     <div ref={menuRef} className="relative flex items-center gap-1">
       {canRemove && <button type="button" disabled={busy || usedBy > 0} onClick={() => setConfirm("remove")}
+        title={usedBy > 0 ? t("accounts.inUse", { count: String(usedBy) }) : undefined}
         className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
         {t("accounts.remove")}
       </button>}
