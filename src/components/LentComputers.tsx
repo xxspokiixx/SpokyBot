@@ -3,9 +3,10 @@ import { Laptop } from "lucide-react";
 
 import type { PageLending } from "../../electron/cloud-lending-ipc.mjs";
 import { activeLocale, t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { localizedRelativeTime } from "@/lib/memory";
 import { api } from "@/state/store";
-import { lendingProblemKey, lentWhat } from "./CloudLending";
+import { lendingFailureKey, lendingProblemKey, lentWhat } from "./CloudLending";
 import { Card, Switch } from "./SettingsPrimitives";
 
 /** A computer lent to this server, now or before (server/shared-computers.ts KnownLentComputer). */
@@ -52,7 +53,7 @@ export function pageLendingLine(lending: PageLending): string {
 function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending> } }) {
   const [lending, setLending] = useState<PageLending | null>(null);
   const [working, setWorking] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<LocaleKey | null>(null);
   useEffect(() => {
     let alive = true;
     const read = () => void bridge.state().then((next) => { if (alive) setLending(next); }).catch(() => {});
@@ -62,8 +63,8 @@ function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>;
   }, [bridge]);
   if (!lending?.available) return null;
   const toggle = () => {
-    setWorking(true); setFailed(false);
-    void bridge.set(!lending.on).then(setLending).catch(() => setFailed(true)).finally(() => setWorking(false));
+    setWorking(true); setFailed(null);
+    void bridge.set(!lending.on).then(setLending).catch((cause: unknown) => setFailed(lendingFailureKey(cause))).finally(() => setWorking(false));
   };
   return <div data-lend-this-computer={lending.on ? "on" : "off"} className="flex flex-col gap-1.5 rounded-lg bg-raised/60 p-3">
     <div className="flex items-start justify-between gap-3">
@@ -71,7 +72,7 @@ function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>;
       <Switch checked={lending.on} disabled={working} aria-labelledby="lend-this-computer" onClick={toggle} />
     </div>
     <p role="status" className="text-[12.5px] text-ink-secondary">{pageLendingLine(lending)}</p>
-    {failed && <p role="alert" className="text-[12.5px] text-danger">{t("lending.failed")}</p>}
+    {failed && <p role="alert" data-lending-failed={failed} className="text-[12.5px] text-danger">{t(failed)}</p>}
   </div>;
 }
 

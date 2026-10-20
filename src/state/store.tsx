@@ -44,7 +44,7 @@ import {
 } from "../../shared/skill-request";
 import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
-import { restrictedCopyRequest } from "@/lib/bot-duplicate";
+import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
 import { botShowsUnread } from "@/lib/bot-unread";
 import { firstUnreadMessageId, threadOpensUnread, threadReadCursor } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
@@ -327,6 +327,7 @@ export interface Bot {
   computer?: "cloud" | "vm" | "local" | "browser" | "off";
   cloudBackend?: CloudBackend;
   autoStartVps?: boolean;
+  vpsAlias?: string;
   cwd?: string;
   autoApprove?: boolean;
   approvalMode?: ApprovalMode;
@@ -662,7 +663,7 @@ export interface AppState {
   connected: boolean;
   hydrated?: true;
   error: string | null;
-  notice: { kind: "thread-gone" | "bot-gone" | "steer-images"; botName: string | null } | null;
+  notice: { kind: "thread-gone" | "bot-gone" | "steer-images" | "note"; botName: string | null; text?: string } | null;
   revealThread: { threadId: string; nonce: number } | null;
   mascotMotion: {
     botId: string;
@@ -1313,7 +1314,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if ((switchedThread || (before.awaitingThreadSnapshot && action.bot.threadId === before.threadId)) &&
           Array.isArray(action.bot.messages)) {
         // The slim deletion broadcast can beat the full snapshot; later duplicate snapshots must not overwrite newer messages.
-        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, toolScope: action.bot.toolScope, managedSections: action.bot.managedSections, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, toolScope: action.bot.toolScope, managedSections: action.bot.managedSections, messages: action.bot.messages, browserProfile: action.bot.browserProfile, vpsAlias: action.bot.vpsAlias } });
       }
       const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
@@ -1326,6 +1327,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computer: action.bot.computer,
         toolScope: action.bot.toolScope,
         section: action.bot.section, managedSections: action.bot.managedSections,
+        vpsAlias: action.bot.vpsAlias,
         tasks: action.bot.tasks ? mergeTaskStamps(b.tasks, action.bot.tasks) : b.tasks,
         // Old approvals must never be sent to the replacement thread while its transcript loads.
         messages: switchedThread ? [] : b.messages,
@@ -1897,6 +1899,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...action.bot,
         computer: action.bot.computer,
         toolScope: action.bot.toolScope, managedSections: action.bot.managedSections,
+        vpsAlias: action.bot.vpsAlias,
         messages: action.bot.messages ?? [],
         hasMore: action.bot.hasMore,
         awaitingThreadSnapshot: false,
@@ -2215,16 +2218,15 @@ export async function persistBotUpdate(
 /** Non-optimistic: local state changes only after the server removed the bot and any computer only it owned. */
 const pendingBotDeletions = new Map<string, Promise<void>>();
 
-export async function requestConfirmedBotDeletion(
+export async function requestConfirmedBotDeletion<Answer>(
   botId: string,
-  requestDelete: (botId: string) => Promise<unknown>,
-  onConfirmed: (botId: string) => void,
+  requestDelete: (botId: string) => Promise<Answer>,
+  onConfirmed: (botId: string, answer: Answer) => void,
 ): Promise<void> {
   const existing = pendingBotDeletions.get(botId);
   if (existing) return existing;
   const deletion = (async () => {
-    await requestDelete(botId);
-    onConfirmed(botId);
+    onConfirmed(botId, await requestDelete(botId));
   })();
   pendingBotDeletions.set(botId, deletion);
   try {
@@ -2524,7 +2526,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "notice":
-          if (action.notice) setTimeout(() => rawDispatch({ type: "notice", notice: null }), 6000);
+          if (action.notice) setTimeout(() => rawDispatch({ type: "notice", notice: null }), action.notice.kind === "note" ? 20_000 : 6000);
           break;
         case "createRoutine":
           api("/api/routines", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
@@ -2798,22 +2800,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "duplicateBot": {
           const source = stateRef.current.bots.find((b) => b.id === action.botId);
           if (!source) break;
-          const duplicateProfile = {
-            name: `${source.name} copy`,
-            title: source.title,
-            description: source.description,
-            soul: source.soul,
-            notifications: source.notifications,
-            modelSelection: source.modelSelection,
-            computer: source.computer,
-            cloudBackend: source.cloudBackend,
-            autoStartVps: source.autoStartVps,
-            avatarUrl: source.avatarUrl,
-            avatarCrop: source.avatarCrop,
-            avatarZoom: source.avatarZoom,
-            avatarFocusX: source.avatarFocusX,
-            avatarFocusY: source.avatarFocusY,
-          };
+          const duplicateProfile = duplicateBotProfile(source);
           // A copy of a restricted bot is restricted from its first moment.
           api("/api/bots", {
             method: "POST",
@@ -2837,11 +2824,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             async (botId) => {
               // Flush first so an older debounced PATCH cannot land after a successful DELETE.
               await botPatchQueue.flush(botId);
-              return api(`/api/bots/${botId}`, { method: "DELETE" });
+              return api<{ notice?: string } | undefined>(`/api/bots/${botId}`, { method: "DELETE" });
             },
-            (botId) => {
+            (botId, answer) => {
               botPatchQueue.cancel(botId);
               rawDispatch({ type: "deleteBot", botId });
+              if (answer?.notice) wrapped({ type: "notice", notice: { kind: "note", botName: null, text: answer.notice } });
             },
           )
             .catch(showError)

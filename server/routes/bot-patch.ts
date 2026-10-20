@@ -11,9 +11,9 @@ import { parseVisibility } from "../bot-visibility.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { CacheKeepWarm } from "../cache-keepwarm.ts";
-import { cloudBackendChangeError } from "../cloud-backend.ts";
+import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
-import type { AppConfig } from "../config.ts";
+import { isValidSshAlias, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
@@ -27,6 +27,8 @@ import type { RoutineManager } from "../routines.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import { parseConnectorTools } from "../connector-tools.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
+import * as vps from "../vps-computer.ts";
+import { vpsSshAliasForBot } from "../vps-hosts.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -345,12 +347,66 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.autoStartVps !== "boolean") return json(res, 400, { error: "autoStartVps must be true or false" });
         patch.autoStartVps = body.autoStartVps;
       }
+      if (body.vpsAlias !== undefined) {
+        if (body.vpsAlias === null || body.vpsAlias === "") {
+          patch.vpsAlias = undefined;
+        } else if (isValidSshAlias(body.vpsAlias)) {
+          patch.vpsAlias = body.vpsAlias;
+        } else {
+          return json(res, 400, {
+            error: "vpsAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore), or null to use the default server",
+          });
+        }
+      }
       if (body.chiefOfStaff !== undefined && typeof body.chiefOfStaff !== "boolean") {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
       }
       if (body.cloudBackend !== undefined) {
         const backendError = cloudBackendChangeError(Boolean(existingBot?.busy), activeVpsThreads.has(m[1]));
         if (backendError) return json(res, 409, { error: backendError });
+      }
+      // Moving a bot to another server is refused while its own computer still lives on the old one.
+      // Resolved hosts, not raw text: pinning a bot to the server it already uses moves nothing.
+      let vpsLeftOn: string | null = null;
+      if (body.vpsAlias !== undefined && existingBot &&
+          vpsSshAliasForBot(cfg, { ...existingBot, vpsAlias: patch.vpsAlias as string | undefined }) !== vpsSshAliasForBot(cfg, existingBot)) {
+        // The scan awaits on SSH; a turn can start or another PATCH can land mid-scan, so every attempt
+        // re-reads the bot first and the scan only counts when the re-read after it is unchanged.
+        const VPS_ALIAS_MOVE_ATTEMPTS = 3;
+        for (let attempt = 1; attempt <= VPS_ALIAS_MOVE_ATTEMPTS; attempt++) {
+          const current = store.bot(m[1]);
+          if (!current) return json(res, 404, { error: "no such bot" });
+          // A concurrent PATCH may have already made this move; persisting the same host moves nothing.
+          if (vpsSshAliasForBot(cfg, { ...current, vpsAlias: patch.vpsAlias as string | undefined }) === vpsSshAliasForBot(cfg, current)) break;
+          const aliasError = vpsBotAliasChangeError(Boolean(current.busy), activeVpsThreads.has(m[1]));
+          if (aliasError) return json(res, 409, { error: aliasError });
+          // A Start or Remove still running on the old host would land after the scan, like the default alias's guard.
+          if (vps.vpsLifecycleBusy()) return json(res, 409, { error: VPS_BOT_ALIAS_LIFECYCLE_ERROR });
+          // Primitives, not the record: the store hands out its live object and patchBot mutates it in place.
+          const scannedVpsAlias = current.vpsAlias;
+          const scannedBusy = current.busy;
+          const scannedName = current.name;
+          const currentAlias = vpsSshAliasForBot(cfg, current);
+          // Scanned with this bot as the only owner: the guard only ever cares about its own container,
+          // and naming the owner keeps a legacy unlabeled container visible to the check.
+          const inventory = currentAlias ? await vps.listManagedVpsComputers(
+            { vps: { sshAlias: currentAlias } },
+            [{ botId: current.id, name: scannedName, inUse: false }],
+          ) : null;
+          const settled = store.bot(m[1]);
+          if (!settled) return json(res, 404, { error: "no such bot" });
+          if (settled.vpsAlias !== scannedVpsAlias || settled.busy !== scannedBusy || activeVpsThreads.has(m[1]) || vps.vpsLifecycleBusy()) {
+            if (attempt === VPS_ALIAS_MOVE_ATTEMPTS) return json(res, 409, { error: VPS_BOT_ALIAS_CHANGE_ERROR });
+            continue;
+          }
+          if (!inventory) break;
+          // A server that cannot answer never keeps the bot: it moves, and the answer says what may be left there.
+          if (!inventory.available) vpsLeftOn = currentAlias;
+          else if (inventory.instances.some((instance) => instance.name === vps.vpsContainerName(current.id))) {
+            return json(res, 409, { error: VPS_BOT_ALIAS_RESOURCES_ERROR });
+          }
+          break;
+        }
       }
       if (body.cwd !== undefined) {
         const checked = validateBotCwd(body.cwd);
@@ -664,7 +720,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         broadcast({ kind: "sections", sections: store.sections });
         audienceChanged();
       }
-      return json(res, 200, { bot: wireBot(store.bot(bot.id)!) });
+      return json(res, 200, { bot: wireBot(store.bot(bot.id)!),
+        ...(vpsLeftOn ? { notice: vpsLeftBehindNotice("Moved", vpsLeftOn, vps.vpsContainerName(bot.id)) } : {}) });
     }
     return PASS;
   };

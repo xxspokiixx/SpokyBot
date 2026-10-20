@@ -278,6 +278,24 @@ describe("Research (treg) card", () => {
   });
 });
 
+describe("a VPS bot's own server", () => {
+  it("is offered on a saved VPS bot beside the default, and never while a new bot or the New bot defaults are drafted", async () => {
+    fixture.config = { vps: { configured: true, sshAlias: "production-vps" } } as Partial<ConfigStatus>;
+    const vpsBot = makeBot({ computer: "cloud", cloudBackend: "vps", vpsAlias: "alpha-vps" });
+    const saved = render(vpsBot);
+    expect(saved).toContain("Server (SSH alias)");
+    expect(saved).toContain("Leave empty to use production-vps from Settings → API keys.");
+    expect(saved).toContain('value="alpha-vps"');
+    expect(render(makeBot({ computer: "cloud", cloudBackend: "box" }))).not.toContain("Server (SSH alias)");
+    const { BotEditorContext } = await import("./BotEditorContext");
+    const { api } = await import("@/state/store");
+    const drafted = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(AccessSection, { bot: vpsBot, derived: makeDerived() }))));
+    expect(drafted).toContain("Self-hosted VPS");
+    expect(drafted).not.toContain("Server (SSH alias)");
+  });
+});
+
 describe("AccessSection Record browser steps", () => {
   type Node = ReactElement<{ children?: ReactNode; [key: string]: unknown }>;
   const nodes = (value: ReactNode): Node[] => {
