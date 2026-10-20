@@ -226,7 +226,7 @@ it("offers no Forget for the environment this app is on", async () => {
 });
 
 // Two controls over one record let the Cloud switch read off while Computer access lent apps and screen to the same Cloud.
-it("My Cloud's entry has one lending control, Let My Cloud use this computer; other servers keep Computer access", async () => {
+it("My Cloud's entry has one lending control, Let my bots use this computer; other servers keep Computer access", async () => {
   config.value = { features: { sharedComputers: true } };
   const open = vi.fn().mockResolvedValue(undefined);
   const cloud = { id: "cloud", name: "My Cloud", origin: "https://omb-u-1.fly.dev", home: true };
@@ -237,6 +237,6 @@ it("My Cloud's entry has one lending control, Let My Cloud use this computer; ot
   const labels = render().nodes.filter(node => node.type === "button").map(node => node.props["aria-label"] ?? Children.toArray(node.props.children).join(""));
   expect(labels).toContain("Computer access for VPS");
   expect(labels).not.toContain("Computer access for My Cloud");
-  render().nodes.find(node => node.type === "button" && Children.toArray(node.props.children).join("") === "Let My Cloud use this computer")!.props.onClick!();
+  render().nodes.find(node => node.type === "button" && Children.toArray(node.props.children).join("") === "Let my bots use this computer")!.props.onClick!();
   expect(open).toHaveBeenCalledOnce();
 });

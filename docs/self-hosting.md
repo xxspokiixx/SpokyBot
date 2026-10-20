@@ -450,8 +450,8 @@ access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
 dialog. They can access information outside the selected folders. Share only
 with a workspace you trust; its bots and AI providers may receive shared content.
-Folder transfers are limited to 256 KiB per file and do not follow links or
-delete files. Local screen control also needs OS permissions and a supported
+A folder read takes a file of up to 2 MiB and a write at most 256 KiB;
+transfers do not follow links or delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
 
 **Bring this computer's bots and chats.** When the server you just connected

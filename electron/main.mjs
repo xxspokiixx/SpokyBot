@@ -93,7 +93,7 @@ import { createDesktopIncludedX } from "./included-x.mjs";
 import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
-import { grantSentence, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs";
+import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin } from "./open-at-login.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
 import { installCloudSend } from "./cloud-send-main.mjs";
 import { cloudMoveChoices } from "./cloud-move-choices.mjs";
@@ -1535,8 +1535,9 @@ function sharingController() {
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments,
     enabled: refreshSharedComputersAllowed,
-    cloud: cloudLendingSnapshot, power: cloudPower, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }),
-    onChange: summary => lendingIndicator().update({ lending: summary.lending.length > 0, busy: Boolean(summary.busy && summary.lending.includes(summary.busy.env)) }),
+    cloud: lendingTarget.cloud, power: cloudPower, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }),
+    linkHeaders: async env => ({ cookie: (await session.defaultSession.cookies.get({ url: env.origin })).map(cookie => `${cookie.name}=${cookie.value}`).join("; ") }),
+    onChange: summary => { lendingIndicator().update({ lending: summary.lending.length > 0, busy: Boolean(summary.busy && summary.lending.includes(summary.busy.env)) }); loginItem.follow(summary.lending.length > 0); },
     cuaConnection: () => cuaReady, screenLocked: () => powerMonitor.getSystemIdleState(1) === "locked",
     hostControl: async (id, signal) => {
       const lease = async action => {
@@ -1555,22 +1556,9 @@ function sharingController() {
   return computerSharing;
 }
 
-let lastCloudHome = null;
-function cloudLendingSnapshot() {
-  if (!cloudAccount) return null;
-  const state = cloudAccount.state();
-  const accountId = state.account?.id ?? null;
-  const origin = state.status === "connected" ? (state.machine?.origin ?? null) : null;
-  if (origin && accountId) lastCloudHome = { accountId, origin };
-  else if (!accountId || lastCloudHome?.accountId !== accountId) lastCloudHome = null;
-  return { status: state.status === "signed-out" && state.message === "restoring" ? "restoring" : state.status, accountId, origin };
-}
-
-function cloudLendingEnvironment() {
-  const snapshot = cloudLendingSnapshot();
-  const origin = snapshot?.origin ?? (lastCloudHome?.accountId === snapshot?.accountId ? lastCloudHome?.origin : null);
-  return origin ? environmentsState.environments.find(entry => entry.origin === origin) ?? null : null;
-}
+const lendingTarget = createLendingTarget({ account: () => cloudAccount, environments: () => environmentsState.environments });
+const loginItem = createOpenAtLogin({ app, file: path.join(app.getPath("userData"), "open-at-login.json"), home: os.homedir() });
+let hiddenStart = false;
 
 function stopLending() {
   for (const env of environmentsState.environments) if (computerSharing?.cloudState(env).enabled) computerSharing.revoke(env);
@@ -2127,7 +2115,7 @@ function createWindow({ deferNavigation = false } = {}) {
         ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : [])],
     },
   });
-  mainWindow = win;
+  mainWindow = win; hiddenStart = false;
   win.on("show", () => desktopTray?.windowShown(win));
   win.on("focus", () => { if (cloudAccount?.checkoutPending()) void cloudAccount.refresh().catch(() => {}); });
   win.on("close", (event) => {
@@ -2933,15 +2921,14 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
 
 // Decided from the verified Cloud sign-in alone: the renderer names no server, account or origin.
 async function lendingSnapshot() {
-  const env = cloudLendingEnvironment();
+  const env = lendingTarget.environment();
   const connection = await cuaReady.catch(() => null);
   return { available: Boolean(env), screenAvailable: Boolean(connection?.mcpCommand), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
 }
-installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: cloudLendingEnvironment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
+installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
   chooseFolder: async () => { const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder My Cloud can use", properties: ["openDirectory"] }); return picked.canceled || !picked.filePaths[0] ? null : (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0]; },
-  defaults: () => usualFolders(usualFolderPaths(name => app.getPath(name), os.homedir()), validateSharedFolders), validate: validateSharedFolders,
-  confirm: async grant => (await dialog.showMessageBox(mainWindow, { type: "question", message: "Let My Cloud use this computer?", detail: grantSentence(grant), buttons: ["Let My Cloud use it", "Cancel"], defaultId: 0, cancelId: 1 })).response === 0 });
+  defaults: () => usualFolders(usualFolderPaths(name => app.getPath(name), os.homedir()), validateSharedFolders), validate: validateSharedFolders });
 const cloudSync = installCloudFiles({
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
   fetch: (...args) => session.defaultSession.fetch(...args),
@@ -3100,14 +3087,15 @@ app.whenReady().then(async () => {
     try {
       desktopTray = createSystemTray({
         Tray, Menu, nativeImage, iconPath: APP_ICON,
-        getWindow: () => startupScreen?.window ?? mainWindow,
+        getWindow: () => startupScreen?.window ?? mainWindow ?? (openWindowForLink?.(), mainWindow),
         onQuit: () => app.quit(),
       });
     } catch (error) {
       slog(`system tray unavailable: ${error?.message ?? error}`);
     }
   }
-  startupScreen = createStartupScreen({
+  hiddenStart = loginItem.startedHidden();
+  startupScreen = hiddenStart ? null : createStartupScreen({
     BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted,
     onQuit: () => app.quit(),
     onHide: desktopTray ? (win) => desktopTray.hide(win) : undefined,
@@ -3115,7 +3103,7 @@ app.whenReady().then(async () => {
     onShow: (win) => desktopTray?.windowShown(win),
     onFinished: () => { startupScreen = null; },
   });
-  await startupScreen.ready;
+  await startupScreen?.ready;
   if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
     item.setSavePath(collisionFreeDownloadPath(app.getPath("downloads"), item.getFilename()));
@@ -3332,7 +3320,7 @@ app.whenReady().then(async () => {
   // A cold-start action owns its first navigation; a default load started first would be aborted by it.
   const deliveredOrganizationEntry = await deliverOrganizationEntry();
   const deliveredCloudEntry = await cloudEntry.ready();
-  if (!restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry && (!mainWindow || mainWindow.isDestroyed())) createWindow();
+  if (!hiddenStart && !restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry && (!mainWindow || mainWindow.isDestroyed())) createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only once the local app is usable.
   if (hostedAccount) void hostedAccount.restore().catch(() => {});
   // Registering from an unreadable store would mint a second installation identity.
@@ -3363,7 +3351,7 @@ app.whenReady().then(async () => {
 
 const allWindowsClosedQuit = createAllWindowsClosedQuit({
   app,
-  allWindows: () => BrowserWindow.getAllWindows(),
+  allWindows: () => BrowserWindow.getAllWindows(), stayOpen: () => hiddenStart,
 });
 
 // The embedded CUA daemon's async cleanup cannot run after the host exits, so the first quit waits for it (capped).

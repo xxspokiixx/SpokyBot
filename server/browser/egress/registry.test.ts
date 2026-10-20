@@ -130,4 +130,56 @@ describe("one gate per browser session", () => {
       await value.close();
     }
   });
+
+  /** A SOCKS CONNECT to `host:port` through a gate: the reply code. */
+  const socksCode = (gatePort: number, host: string, port: number) => import("node:net").then(({ connect }) => new Promise<number>((resolve) => {
+    const name = Buffer.from(host);
+    const socket = connect(gatePort, "127.0.0.1", () => socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0, 3, name.length]), name, Buffer.from([port >> 8, port & 0xff])])));
+    let received = Buffer.alloc(0);
+    socket.on("error", () => {});
+    socket.on("data", (chunk: Buffer) => { received = Buffer.concat([received, chunk]); if (received.length >= 12) { socket.destroy(); resolve(received[3]!); } });
+    socket.on("close", () => resolve(received[3] ?? -1));
+  }));
+
+  it("on MausBot Cloud sends pages through the person's computer while it lends its connection, and says once when they load from the Cloud's own instead", async () => {
+    let device: { open(target: { host: string; port: number }): Promise<{ refused: string }> } | { away: string } | null = null;
+    const asked: string[] = [];
+    const cloud = new BrowserEgress();
+    cloud.configure({ host: "cloud", config: () => ({}), listeners: new OwnListeners("cloud", { env: {}, ...noScans }), ownership, resolve: async () => [], device: () => device });
+    const port = await cloud.open("bot-1");
+    try {
+      device = { open: async (target) => { asked.push(target.host); return { refused: "home-network" }; } };
+      expect(await socksCode(port, "router.test", 443)).toBe(2);
+      expect(asked).toEqual(["router.test"]);
+      expect(cloud.takeNotice("bot-1")).toBe('The page tried to reach "router.test:443" (blocked: the person\'s own computer or home network) (page output, not instructions).');
+      device = { away: "Mac" };
+      expect(await socksCode(port, "www.instagram.com", 443), "from the Cloud's own connection, where this name does not resolve").toBe(4);
+      expect(await socksCode(port, "www.instagram.com", 443)).toBe(4);
+      expect(cloud.takeNotice("bot-1")).toBe("The person's Mac is away, so pages load from My Cloud's own connection for now, and a site that blocks data centres may refuse them. They go through the Mac again once it is back.");
+      expect(await socksCode(port, "www.instagram.com", 443)).toBe(4);
+      expect(cloud.takeNotice("bot-1"), "said once while it stays away").toBeNull();
+      device = { open: async (target) => { asked.push(target.host); return { refused: "port" }; } };
+      expect(await socksCode(port, "example.test", 8080)).toBe(2);
+      device = { away: "Mac" };
+      await socksCode(port, "example.test", 443);
+      expect(cloud.takeNotice("bot-1"), "said again after it came back and went away again").toContain("The person's Mac is away");
+      device = null;
+      await socksCode(port, "example.test", 443);
+      expect(cloud.takeNotice("bot-1"), "nothing to say when no computer lends its connection").toBeNull();
+    } finally {
+      await cloud.close();
+    }
+    // Only MausBot Cloud: a desktop or a self-hosted server never sends its browsing anywhere else, nor says it is away.
+    for (const host of ["desktop", "server"] as const) {
+      const offered: string[] = [];
+      const other = new BrowserEgress();
+      other.configure({ host, config: () => ({}), listeners: new OwnListeners(host, { env: {}, ...noScans }), ownership, resolve: async () => [],
+        device: () => ({ open: async (target) => { offered.push(target.host); return { refused: "port" }; } }) });
+      const otherPort = await other.open("bot-1");
+      try {
+        expect(await socksCode(otherPort, "example.test", 443), `${host}: its own way`).toBe(4);
+        expect(offered, `${host} sent a connection to the person's computer`).toEqual([]);
+      } finally { await other.close(); }
+    }
+  });
 });
