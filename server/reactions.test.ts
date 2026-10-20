@@ -24,6 +24,8 @@ function fixture(options: { queued?: boolean; refuse?: Error } = {}) {
     reply: async (input) => {
       calls.replies.push(input);
       if (options.refuse) throw options.refuse;
+      // As the send path does: a withdrawn sendId stays cancelled, and sending it again is refused.
+      if (calls.withdrawn.includes(input.sendId)) throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
       if (options.queued) return { queued: true };
       store.appendMessage(input.threadId, {
         role: "user", kind: "text", text: input.answer, replyToId: input.target.id, reaction: input.target.reactedWith, sendId: input.sendId,
@@ -52,7 +54,7 @@ describe("a reaction on a bot's message", () => {
     expect(calls.replies).toHaveLength(1);
     const [reply] = calls.replies;
     expect(reply).toMatchObject({ threadId: bot.threadId, answer: "👍", owner: { id: bot.id }, target: { id: asked.id, reactedWith: "👍" } });
-    expect(reply!.sendId).toBe(`${reactionSendPrefix(bot.threadId, asked.id, "user")}0y`);
+    expect(reply!.sendId).toBe(`${reactionSendPrefix(bot.threadId, asked.id, "user")}${result.message.reactions![0]!.at}y`);
     expect(store.messagesFor(bot.threadId).find((message) => message.id === asked.id)?.reactions).toEqual(result.message.reactions);
   });
 
@@ -75,12 +77,12 @@ describe("a reaction on a bot's message", () => {
   it("takes a tap on the same emoji as removing it, and takes a reply still in the queue back", async () => {
     const { bot, calls, react, say } = fixture({ queued: true });
     const asked = say();
-    await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } });
+    const set = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } });
     const removed = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } });
     expect(removed).toMatchObject({ delivery: "none", message: { id: asked.id } });
     expect(removed.message.reactions).toBeUndefined();
     expect(calls.withdrawn).toEqual([calls.replies[0]!.sendId]);
-    expect(calls.withdrawn[0]).toBe(`${reactionSendPrefix(bot.threadId, asked.id, "user")}0y`);
+    expect(calls.withdrawn[0]).toBe(`${reactionSendPrefix(bot.threadId, asked.id, "user")}${set.message.reactions![0]!.at}y`);
     expect(calls.replies).toHaveLength(1);
   });
 
@@ -109,13 +111,18 @@ describe("a reaction on a bot's message", () => {
     const { bot, calls, react, say, store } = fixture();
     const asked = say();
     const tap = (emoji: "👍" | "👎") => react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: { by: "user" } });
-    expect((await tap("👍")).delivery).toBe("started");
-    expect((await tap("👎")).delivery).toBe("started");
-    expect((await tap("👍")).delivery).toBe("started");
+    const stamps: number[] = [];
+    for (const emoji of ["👍", "👎", "👍"] as const) {
+      const result = await tap(emoji);
+      expect(result.delivery).toBe("started");
+      stamps.push(result.message.reactions![0]!.at!);
+    }
     expect((await tap("👍")).message.reactions).toBeUndefined();
     expect((await tap("👍")).delivery).toBe("none");
     const prefix = reactionSendPrefix(bot.threadId, asked.id, "user");
-    expect(calls.replies.map((reply) => [reply.answer, reply.sendId])).toEqual([["👍", `${prefix}0y`], ["👎", `${prefix}1n`], ["👍", `${prefix}2y`]]);
+    expect(calls.replies.map((reply) => [reply.answer, reply.sendId])).toEqual([["👍", `${prefix}${stamps[0]}y`], ["👎", `${prefix}${stamps[1]}n`], ["👍", `${prefix}${stamps[2]}y`]]);
+    expect(stamps[1]).toBeGreaterThan(stamps[0]!);
+    expect(stamps[2]).toBeGreaterThan(stamps[1]!);
     const { react: again } = createReactions({ store, reply: async () => ({ queued: false, repeated: true }), answerCard: async () => ({ ok: true }), withdraw: () => {} });
     expect((await again({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👎", reactor: ALICE })).delivery).toBe("none");
   });
@@ -127,11 +134,28 @@ describe("a reaction on a bot's message", () => {
     const tap = (emoji: "👍" | "👎") => react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: { by: "user" } });
     expect((await tap("👍")).delivery).toBe("started");
     options.queued = true;
-    expect((await tap("👎")).delivery).toBe("queued");
+    const no = await tap("👎");
+    expect(no.delivery).toBe("queued");
     expect((await tap("👍")).delivery).toBe("none");
-    const prefix = reactionSendPrefix(bot.threadId, asked.id, "user");
-    expect(calls.replies.map((reply) => reply.sendId)).toEqual([`${prefix}0y`, `${prefix}1n`]);
-    expect(calls.withdrawn.at(-1)).toBe(`${prefix}1n`);
+    expect(calls.replies).toHaveLength(2);
+    expect(calls.replies[1]!.sendId).toBe(`${reactionSendPrefix(bot.threadId, asked.id, "user")}${no.message.reactions![0]!.at}n`);
+    expect(calls.withdrawn.at(-1)).toBe(calls.replies[1]!.sendId);
+  });
+
+  it("lets a person change their mind as often as they like while the bot is busy: each change waits once, the last one stands", async () => {
+    const { store, bot, calls, react, say } = fixture({ queued: true });
+    const asked = say();
+    const tap = (emoji: "👍" | "👎") => react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: { by: "user" } });
+    expect((await tap("👍")).delivery).toBe("queued");
+    expect((await tap("👎")).delivery).toBe("queued");
+    expect((await tap("👍")).delivery).toBe("queued");
+    expect((await tap("👍")).message.reactions).toBeUndefined();
+    expect((await tap("👍")).delivery).toBe("queued");
+    const sendIds = calls.replies.map((reply) => reply.sendId);
+    expect(calls.replies.map((reply) => reply.answer)).toEqual(["👍", "👎", "👍", "👍"]);
+    expect(new Set(sendIds).size).toBe(4);
+    expect(calls.withdrawn).toEqual(sendIds.slice(0, 3));
+    expect(store.messagesFor(bot.threadId).find((message) => message.id === asked.id)?.reactions?.map((reaction) => reaction.emoji)).toEqual(["👍"]);
   });
 
   it("keeps the answer that waits when a change to it is refused", async () => {

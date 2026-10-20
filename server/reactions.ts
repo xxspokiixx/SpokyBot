@@ -78,10 +78,15 @@ export function createReactions(deps: ReactionDeps) {
     return message.from ? store.bot(message.from.botId) : null;
   }
 
+  /** Each reaction a person sets is stamped later than any before it, so its answer's sendId is its own: a withdrawn
+   * answer's sendId stays cancelled, and choosing that answer again sends a new one. */
+  let lastStamp = 0;
+  const stamp = () => (lastStamp = Math.max(Date.now(), lastStamp + 1));
+
   function answersSent(threadId: string, messageId: string, by: string) {
     const prefix = reactionSendPrefix(threadId, messageId, by);
     const sent = store.messagesFor(threadId).filter((line) => line.sendId?.startsWith(prefix));
-    return { latest: sent.at(-1)?.reaction, sendId: (emoji: string) => `${prefix}${sent.length}${reactionAnswer(emoji) === "yes" ? "y" : "n"}` };
+    return { latest: sent.at(-1)?.reaction, sendId: (entry: Entry) => `${prefix}${entry.at ?? 0}${reactionAnswer(entry.emoji) === "yes" ? "y" : "n"}` };
   }
 
   async function deliver(
@@ -98,7 +103,7 @@ export function createReactions(deps: ReactionDeps) {
     }
     if ((target.kind !== "text" && target.kind !== "widget") || !target.text?.trim() || sent.latest === entry.emoji) return "none";
     const receipt = await deps.reply({
-      auth, threadId, owner, target: { ...target, reactedWith: entry.emoji }, answer: entry.emoji, sendId: sent.sendId(entry.emoji),
+      auth, threadId, owner, target: { ...target, reactedWith: entry.emoji }, answer: entry.emoji, sendId: sent.sendId(entry),
     });
     return receipt.queued ? "queued" : receipt.repeated ? "none" : "started";
   }
@@ -116,12 +121,12 @@ export function createReactions(deps: ReactionDeps) {
     if (next === (previous?.emoji ?? null)) return { message: target, delivery: "none" };
 
     const owner = recipient(target, threadId);
-    const entry: Entry | null = next ? { emoji: next, by: reactor.by, ...(reactor.name ? { name: reactor.name } : {}), at: Date.now() } : null;
+    const entry: Entry | null = next ? { emoji: next, by: reactor.by, ...(reactor.name ? { name: reactor.name } : {}), at: stamp() } : null;
     const message = store.setReaction(threadId, messageId, reactor.by, entry) ?? target;
     if (!owner) return { message, delivery: "none" };
     const sent = answersSent(threadId, messageId, reactor.by);
     const withdrawPrevious = () => {
-      if (previous && reactionAnswer(previous.emoji)) deps.withdraw(threadId, owner, sent.sendId(previous.emoji));
+      if (previous && reactionAnswer(previous.emoji)) deps.withdraw(threadId, owner, sent.sendId(previous));
     };
     if (!entry) {
       withdrawPrevious();

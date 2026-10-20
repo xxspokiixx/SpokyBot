@@ -51,7 +51,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     await settled("Sent it to Sam.");
     const afterYes = await transcript();
     const line = afterYes.find((message) => message.role === "user" && message.replyToId === asked.id);
-    expect(line).toMatchObject({ kind: "text", text: "👍", reaction: "👍", sendId: expect.stringMatching(/^reaction-[0-9a-f]{32}-0y$/) });
+    expect(line).toMatchObject({ kind: "text", text: "👍", reaction: "👍", sendId: expect.stringMatching(new RegExp(`^reaction-[0-9a-f]{32}-${yes.message.reactions[0].at}y$`)) });
     const said = afterYes.filter((message) => message.kind === "text").map((message) => [message.role, message.text]);
     expect(said.slice(said.findIndex(([role]) => role === "user"))).toEqual([
       ["user", "Draft an email to Sam about Friday."],
@@ -92,8 +92,9 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     expect(await react(asked.id, "👍", true)).toMatchObject({ delivery: "started" });
     await settled("Then it stays sent.");
     expect(prompts()[4]).toContain("they reacted 👍 to your earlier message instead of typing a reply.\n👍 means yes, go ahead.");
-    expect((await transcript()).filter((message) => message.reaction).map((message) => [message.reaction, message.sendId.slice(-3)]))
-      .toEqual([["👍", "-0y"], ["👎", "-1n"], ["👍", "-2y"]]);
+    const answers = (await transcript()).filter((message) => message.reaction);
+    expect(answers.map((message) => [message.reaction, message.sendId.slice(-1)])).toEqual([["👍", "y"], ["👎", "n"], ["👍", "y"]]);
+    expect(new Set(answers.map((message) => message.sendId)).size).toBe(3);
 
     const session = await api("GET", "/api/auth/session");
     expect(session).not.toHaveProperty("reactor");

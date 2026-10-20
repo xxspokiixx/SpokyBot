@@ -28,27 +28,36 @@ function withOwn(message: Message, by: string, entry: Entry | null | undefined):
   return { ...message, reactions: reactions.length ? reactions : undefined };
 }
 
+/** The newest tap on each message, from any of its controls: the server's answer to an older tap is out of date. */
+const newestTap = new Map<string, number>();
+let taps = 0;
+
 function useReaction(threadId: string, message: Message) {
   const { dispatch } = useStore();
   const me = useReactor();
   const latest = useRef(message);
-  latest.current = message;
+  useLayoutEffect(() => { latest.current = message; });
   const own = message.reactions?.find((reaction) => reaction.by === me);
   const mine = own?.emoji ?? null;
   const react = (emoji: Reaction) => {
     const on = mine !== emoji;
     const shown = on ? { emoji, by: me, at: Date.now() } : null;
+    const key = `${threadId}:${message.id}`;
+    const tap = ++taps;
+    newestTap.set(key, tap);
+    const newest = () => newestTap.get(key) === tap;
     dispatch({ type: "messagePatched", threadId, message: withOwn(message, me, shown) });
     api<{ message?: Message }>(`/api/threads/${threadId}/messages/${message.id}/reactions`, {
       method: "POST",
       body: JSON.stringify({ emoji, on }),
     })
-      .then((body) => { if (body.message) dispatch({ type: "messagePatched", threadId, message: body.message }); })
+      .then((body) => { if (body.message && newest()) dispatch({ type: "messagePatched", threadId, message: body.message }); })
       .catch((error: unknown) => {
         const now = latest.current.reactions?.find((reaction) => reaction.by === me);
-        if (sameEntry(now, shown) || sameEntry(now, own)) dispatch({ type: "messagePatched", threadId, message: withOwn(latest.current, me, own) });
+        if (newest() && (sameEntry(now, shown) || sameEntry(now, own))) dispatch({ type: "messagePatched", threadId, message: withOwn(latest.current, me, own) });
         dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
-      });
+      })
+      .finally(() => { if (newest()) newestTap.delete(key); });
   };
   return { me, mine, react };
 }

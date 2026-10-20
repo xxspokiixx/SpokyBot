@@ -150,6 +150,23 @@ describe("the react button on a bot's message", () => {
     await act(async () => refuse(new Error("engine unavailable")));
     expect(patched()).toHaveLength(before);
   });
+
+  it("keeps the newest tap when the server answers two taps out of order", async () => {
+    const answers: Array<(body: { message: Message }) => void> = [];
+    fixture.api.mockImplementation(() => new Promise((resolve) => { answers.push(resolve); }));
+    await render(createElement(ReactAction, { threadId: "t1", message: ASKED }));
+    await click(button());
+    await click(choices()[0]!);
+    const yes = patched()[0]!.message;
+    await render(createElement(ReactAction, { threadId: "t1", message: yes }));
+    await click(button());
+    await click(choices()[1]!);
+    expect(fixture.api.mock.calls.map(([, init]) => JSON.parse(init.body))).toEqual([{ emoji: "👍", on: true }, { emoji: "👎", on: true }]);
+    const no: Message = { ...ASKED, reactions: [{ emoji: "👎", by: "user", at: 20 }] };
+    await act(async () => answers[1]!({ message: no }));
+    await act(async () => answers[0]!({ message: { ...ASKED, reactions: [{ emoji: "👍", by: "user", at: 10 }] } }));
+    expect(patched().at(-1)?.message).toEqual(no);
+  });
 });
 
 describe("reaction chips under a message", () => {
