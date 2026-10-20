@@ -464,3 +464,89 @@ test("1Password refusing the token on My Cloud is final: My Cloud's page is told
   assert.equal(sendNotice(outcome([refused], "stopped")).last.final, false, "a send that stopped as a whole can be tried again");
 });
 
+/** Bot conversations of `count` rows each, handed `page` rows at a time, and a My Cloud whose chats route answers each
+ * entry with `answer(entry, post)` ("accepted", "waiting" or "removed"). */
+function chatSides({ threads, page = 300, answer = () => "accepted", onPost = () => {}, onRead = () => {}, attachments = () => [], cloudSummary = null } = {}) {
+  const rows = Object.fromEntries(Object.entries(threads).map(([threadId, count]) => [threadId, Array.from({ length: count }, (_, i) => ({ id: `${threadId}-${i + 1}`, at: i + 1 }))]));
+  const posted = [], checked = [];
+  const ember = [bot("ember", { soul: "s" })];
+  const sides = fakeSides({ localItems: ember, cloudItems: ember });
+  const theirs = { ...summary(ember), chats: 1, ...cloudSummary };
+  sides.deps.cloud.read = async () => new Response(JSON.stringify(theirs), { status: 200 });
+  const open = sides.deps.cloud.open;
+  sides.deps.cloud.open = async () => {
+    const session = await open();
+    const inner = session.call;
+    session.call = async (method, route, body) => {
+      if (route === "/api/cloud-send") return { status: 200, ok: true, body: theirs };
+      if (route === "/api/cloud-send/chats/attachments") { checked.push(body.names.length); return { status: body.names.length > 2000 ? 400 : 200, ok: body.names.length <= 2000, body: { missing: [] } }; }
+      if (route === "/api/cloud-send/chats") {
+        posted.push(body.conversations.map((entry) => ({ threadId: entry.threadId, rows: entry.rows.map((row) => row.id), sent: entry.sent })));
+        const said = body.conversations.map((entry) => [entry.threadId, answer(entry, posted.length)]);
+        const of = (kind) => said.filter(([, answered]) => answered === kind).map(([threadId]) => threadId);
+        const reply = { status: 200, ok: true, body: { conversations: 0, messages: body.conversations.reduce((sum, entry) => sum + entry.rows.length, 0), accepted: of("accepted"), waiting: of("waiting"), removed: of("removed") } };
+        onPost(posted.length);
+        return reply;
+      }
+      return inner(method, route, body);
+    };
+    return session;
+  };
+  const local = sides.deps.local;
+  const json = (value) => new Response(JSON.stringify(value), { status: 200 });
+  sides.deps.local = async (route) => {
+    if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations: Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: false })) });
+    const asked = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)&id=/u.exec(route);
+    if (asked) {
+      onRead(asked[1]);
+      const list = rows[asked[1]], from = Number(asked[2]);
+      const slice = list.slice(from, from + page), last = from + slice.length;
+      return json({ rows: slice, leaf: slice.at(-1)?.id ?? null, task: null, last, lastId: list[last - 1]?.id ?? null, more: last < list.length, restarted: false, attachments: attachments(slice) });
+    }
+    return local(route);
+  };
+  return { sides, rows, posted, checked };
+}
+const stored = () => { let value = null; return { read: () => value, write: (next) => { value = structuredClone(next); }, get value() { return value; } }; };
+const fortyOnePages = () => ({ ...Object.fromEntries(Array.from({ length: 39 }, (_, i) => [`t${i}`, 1])), long: 4 });
+
+test("a conversation split over two requests: its later page says it went before, so one removed on My Cloud in between stays removed", async () => {
+  const { sides, posted } = chatSides({ threads: fortyOnePages(), page: 2 });
+  await createCloudSend(sides.deps).send();
+  assert.equal(posted.length, 2);
+  assert.deepEqual(posted.flat().filter((entry) => entry.threadId === "long"), [
+    { threadId: "long", rows: ["long-1", "long-2"], sent: false },
+    { threadId: "long", rows: ["long-3", "long-4"], sent: true },
+  ]);
+});
+
+test("once My Cloud does not take a page, the conversation's later pages wait too, and the next send starts it where My Cloud stopped", async () => {
+  const { sides, posted } = chatSides({ threads: fortyOnePages(), page: 2, answer: (entry, post) => entry.threadId === "long" && post === 1 ? "waiting" : "accepted" });
+  const send = createCloudSend({ ...sides.deps, store: stored() });
+  await send.send();
+  assert.deepEqual(posted.flat().filter((entry) => entry.threadId === "long").map((entry) => entry.rows), [["long-1", "long-2"]]);
+  await send.send();
+  assert.deepEqual(posted.slice(-1).flat().map((entry) => entry.rows), [["long-1", "long-2"], ["long-3", "long-4"]]);
+});
+
+test("a conversation this computer never sent is never kept as removed, so it goes again", async () => {
+  let removed = true;
+  const { sides, posted } = chatSides({ threads: { kept: 1, other: 1 }, answer: (entry) => entry.threadId === "kept" && removed ? "removed" : "accepted" });
+  const store = stored();
+  const send = createCloudSend({ ...sides.deps, store });
+  await send.send();
+  assert.equal(store.value.clouds[CLOUD].chats.kept, undefined);
+  removed = false;
+  await send.send();
+  assert.deepEqual(posted.at(-1).map((entry) => entry.threadId), ["kept"]);
+  assert.deepEqual(store.value.clouds[CLOUD].chats.kept, { after: 1, id: "kept-1" });
+});
+
+test("more attachments than My Cloud checks at once go in several checks, so the chats still go", async () => {
+  const names = Array.from({ length: 2500 }, (_, i) => `${String(i).padStart(8, "0")}.png`);
+  const { sides, posted, checked } = chatSides({ threads: { pics: 1 }, attachments: () => names });
+  const outcome = await createCloudSend(sides.deps).send();
+  assert.deepEqual(checked, [2000, 500]);
+  assert.deepEqual(outcome.result.failed, []);
+  assert.equal(posted.length, 1);
+});

@@ -21,6 +21,8 @@ const CHATS_EVERY_MS = 5 * 60_000;
 /** One request's chats: a few conversations' rows, well under My Cloud's body limit. */
 const CHATS_BATCH_BYTES = 4 * 1024 * 1024;
 const CHATS_BATCH_PAGES = 40;
+/** My Cloud checks at most this many attachment names a request. */
+const ATTACHMENT_NAMES = 2000;
 const MEMORY_FILES = 100;
 const PICTURE_TYPES = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const VAULT_ID = /^[\w-]{1,128}$/u;
@@ -317,11 +319,13 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   }
 
   /** Each waiting conversation's new rows, page by page, a few conversations per request; the cursor moves only past
-   * what My Cloud took. The attachments those rows name go first, unless My Cloud has them. */
+   * what My Cloud took, and once My Cloud did not take a page, the conversation's later pages wait for the next send too.
+   * The attachments those rows name go first, unless My Cloud has them. */
   async function sendChatRows(origin, session, theirs, result) {
     const { dataDir, ready } = await chatsWaiting(origin, theirs);
     const kept = entry(origin);
     const total = ready.length;
+    const held = new Set();
     let batch = [], bytes = 0, done = 0;
     result.chats = { conversations: 0, messages: 0 };
     progress = total ? { done: 0, total } : null;
@@ -329,10 +333,11 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     const flush = async () => {
       if (!batch.length) return;
       const names = [...new Set(batch.flatMap((page) => page.attachments))];
-      if (names.length) {
-        const checked = await session.call("POST", "/api/cloud-send/chats/attachments", { names });
+      for (let i = 0; i < names.length; i += ATTACHMENT_NAMES) {
+        const asked = names.slice(i, i + ATTACHMENT_NAMES);
+        const checked = await session.call("POST", "/api/cloud-send/chats/attachments", { names: asked });
         if (!checked.ok) throw new CloudSendError("refused", refusal(checked, "My Cloud could not take the chats' attachments."));
-        for (const name of Array.isArray(checked.body?.missing) ? checked.body.missing.filter((name) => names.includes(name)) : []) {
+        for (const name of Array.isArray(checked.body?.missing) ? checked.body.missing.filter((name) => asked.includes(name)) : []) {
           const file = await localBytes(`/api/cloud-send/chats/attachment/${name}`);
           if (!file) continue;
           const stored = await session.upload(`/api/cloud-send/chats/attachment/${name}`, file, "application/octet-stream");
@@ -346,7 +351,10 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const removed = new Set(Array.isArray(answer.body?.removed) ? answer.body.removed : []);
       for (const page of batch) {
         if (accepted.has(page.threadId) && page.lastId) kept.chats[page.threadId] = { after: page.last, id: page.lastId };
-        else if (removed.has(page.threadId)) kept.chats[page.threadId] = "removed";
+        else {
+          held.add(page.threadId);
+          if (removed.has(page.threadId) && page.sent) kept.chats[page.threadId] = "removed";
+        }
       }
       result.chats.conversations += Number.isSafeInteger(answer.body?.conversations) ? answer.body.conversations : 0;
       result.chats.messages += Number.isSafeInteger(answer.body?.messages) ? answer.body.messages : 0;
@@ -354,16 +362,17 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       batch = []; bytes = 0;
     };
     for (const head of ready) {
-      const start = kept.chats[head.threadId];
-      let cursor = record(start) ? start : null;
-      for (let pages = 0; pages < 10_000; pages++) {
+      let cursor = record(kept.chats[head.threadId]) ? kept.chats[head.threadId] : null;
+      for (let pages = 0; pages < 10_000 && !held.has(head.threadId); pages++) {
         const page = await localJson(`/api/cloud-send/chats/rows?thread=${head.threadId}&after=${cursor?.after ?? 0}&id=${encodeURIComponent(cursor?.id ?? "")}`);
         if (!record(page) || !Array.isArray(page.rows)) break;
+        if (page.restarted) delete kept.chats[head.threadId];
         if (page.rows.length) {
           const size = Buffer.byteLength(JSON.stringify(page.rows), "utf8");
           if (bytes + size > CHATS_BATCH_BYTES || batch.length >= CHATS_BATCH_PAGES) await flush();
+          if (held.has(head.threadId)) break;
           batch.push({ bot: head.bot, threadId: head.threadId, task: record(page.task) ? page.task : null, rows: page.rows, leaf: typeof page.leaf === "string" ? page.leaf : null,
-            sent: Boolean(record(start)) && !page.restarted, last: page.last, lastId: page.lastId,
+            sent: record(kept.chats[head.threadId]), last: page.last, lastId: page.lastId,
             attachments: Array.isArray(page.attachments) ? page.attachments.filter((name) => typeof name === "string" && /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/u.test(name)) : [] });
           bytes += size;
         } else if (page.lastId) kept.chats[head.threadId] = { after: page.last, id: page.lastId };
