@@ -76,41 +76,15 @@ describe("scrub", () => {
     expect(scrub([1, [2, [3]]])).toEqual([1, [2, [3]]]);
   });
 
-  it("redacts a withheld alias wherever it hides inside kept strings", () => {
+  it("leaves the alias's text alone wherever it is not a withheld key", () => {
+    // "vps" is a natural SSH alias; the bot's backend, a container name and a message say "vps" too.
     const payload = {
-      configured: true,
-      available: false,
-      vpsAliases: ["hetzner-vps"],
-      problem: "Docker over SSH could not list managed computers on hetzner-vps: ssh connection timed out",
-      instances: [{ name: "openmausbot-vps-one", state: "running", vpsAlias: "hetzner-vps", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false }],
-      note: "the router reboot fixed the office wifi",
+      bot: { id: "b1", cloudBackend: "vps", vpsAlias: "vps", computers: [{ name: "openmausbot-vps-one" }] },
+      messages: [{ text: "Is the vps up?" }],
     };
-    const cleaned = scrub(payload);
-
-    expect(JSON.stringify(cleaned)).not.toContain("hetzner-vps");
-    expect(cleaned).toEqual({
-      configured: true,
-      available: false,
-      problem: "Docker over SSH could not list managed computers on [redacted]: ssh connection timed out",
-      instances: [{ name: "openmausbot-vps-one", state: "running", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false }],
-      note: "the router reboot fixed the office wifi",
-    });
-  });
-
-  it("redacts every withheld key's values, including nested session ids", () => {
-    const payload = {
-      vps: { configured: true, sshAlias: "prod-vps" },
-      bot: { id: "b1", resumeCursors: { ghost: "session-abc" } },
-      problem: "prod-vps refused the connection for session-abc",
-    };
-    const cleaned = scrub(payload);
-
-    expect(JSON.stringify(cleaned)).not.toContain("prod-vps");
-    expect(JSON.stringify(cleaned)).not.toContain("session-abc");
-    expect(cleaned).toEqual({
-      vps: { configured: true },
-      bot: { id: "b1" },
-      problem: "[redacted] refused the connection for [redacted]",
+    expect(scrub(payload)).toEqual({
+      bot: { id: "b1", cloudBackend: "vps", computers: [{ name: "openmausbot-vps-one" }] },
+      messages: [{ text: "Is the vps up?" }],
     });
   });
 
@@ -165,16 +139,6 @@ describe("createSseScrubber", () => {
     expect(out).not.toContain("alpha-vps");
     const data = JSON.parse(out.split("\n").find((l) => l.startsWith("data:"))!.slice(5));
     expect(data).toEqual({ kind: "bot", bot: { id: "b1", computers: [{ name: "n1" }] } });
-  });
-
-  it("redacts a withheld alias inside a frame's kept strings too", () => {
-    const frame = 'id: abc123:7\ndata: {"kind":"inventory","vpsAliases":["alpha-vps"],"problem":"Docker over SSH could not list managed computers on alpha-vps"}\n\n';
-    const out = createSseScrubber()(frame);
-
-    expect(out).toContain("id: abc123:7\n");
-    expect(out).not.toContain("alpha-vps");
-    const data = JSON.parse(out.split("\n").find((l) => l.startsWith("data:"))!.slice(5));
-    expect(data).toEqual({ kind: "inventory", problem: "Docker over SSH could not list managed computers on [redacted]" });
   });
 
   it("emits an event as soon as it is complete, not when the chunk ends", () => {

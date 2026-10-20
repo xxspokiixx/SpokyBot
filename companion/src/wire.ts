@@ -1,64 +1,23 @@
 // Scrubs what a device has no business holding: `resumeCursors` (native
 // session ids, on every bot payload and `bot` frame), `sshAlias` (a label
-// naming one of the user's servers), and the per-bot alias plus inventory
-// alias tags (`vpsAlias`, `vpsAliases`). Correct whether or not upstream
-// stops sending them.
+// naming one of the user's servers) and a bot's own alias plus the
+// inventory's alias tags (`vpsAlias`, `vpsAliases`). Correct whether or not
+// upstream stops sending them. Keys only: no phone-reachable string names an
+// alias, and cutting a value out of every string would also cut a short
+// alias such as "vps" out of `cloudBackend: "vps"` and the user's messages.
 const WITHHELD_KEYS = new Set(["resumeCursors", "sshAlias", "vpsAlias", "vpsAliases"]);
-const REDACTED = "[redacted]";
 
-// A withheld value can also hide inside a kept string: the inventory problem names the alias it failed
-// to list (`... on ${alias}`), so the first pass gathers every withheld string before anything is cut.
-function collectWithheldStrings(value: unknown, into: Set<string>): void {
-  if (typeof value === "string") {
-    if (value) into.add(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectWithheldStrings(item, into);
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const inner of Object.values(value)) collectWithheldStrings(inner, into);
-  }
-}
-
-function gatherWithheld(value: unknown, into: Set<string>): void {
-  if (Array.isArray(value)) {
-    for (const item of value) gatherWithheld(item, into);
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const [key, inner] of Object.entries(value)) {
-      if (WITHHELD_KEYS.has(key)) collectWithheldStrings(inner, into);
-      else gatherWithheld(inner, into);
-    }
-  }
-}
-
-function scrubWith<T>(value: T, withheld: Set<string>): T {
-  if (typeof value === "string") {
-    let out: string = value;
-    for (const secret of withheld) {
-      if (out.includes(secret)) out = out.split(secret).join(REDACTED);
-    }
-    return out as unknown as T;
-  }
-  if (Array.isArray(value)) return value.map((item) => scrubWith(item, withheld)) as unknown as T;
+export function scrub<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(scrub) as unknown as T;
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
       if (WITHHELD_KEYS.has(key)) continue;
-      out[key] = scrubWith(inner, withheld);
+      out[key] = scrub(inner);
     }
     return out as T;
   }
   return value;
-}
-
-export function scrub<T>(value: T): T {
-  const withheld = new Set<string>();
-  gatherWithheld(value, withheld);
-  return scrubWith(value, withheld);
 }
 
 /** Anything else passes through untouched. `+json` counts (RFC 6839): one RFC
