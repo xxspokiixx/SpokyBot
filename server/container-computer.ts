@@ -155,25 +155,25 @@ RUN printf '%s\\n' \\
       'set -eu' \\
       'workspace=${VM_WORKSPACE_GUEST}' \\
       'profiles="$workspace/.browser-profiles"' \\
-      'mkdir -p "$profiles/google-chrome" "$profiles/chromium" "$HOME/.config"' \\
-      'if ! chmod 0700 "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" 2>/dev/null; then' \\
-      '  for directory in "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium"; do' \\
+      'mkdir -p "$profiles/google-chrome" "$profiles/chromium" "$profiles/mozilla" "$HOME/.config"' \\
+      'if ! chmod 0700 "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" "$profiles/mozilla" 2>/dev/null; then' \\
+      '  for directory in "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" "$profiles/mozilla"; do' \\
       '    test -r "$directory" && test -w "$directory" && test -x "$directory"' \\
       '  done' \\
       'fi' \\
       'migrate_profile() {' \\
-      '  name="$1"' \\
-      '  source="$HOME/.config/$name"' \\
-      '  target="$profiles/$name"' \\
+      '  source="$1"' \\
+      '  target="$profiles/$2"' \\
       '  if [ -d "$source" ] && [ ! -L "$source" ] && [ -z "$(find "$target" -mindepth 1 -print -quit)" ]; then' \\
       '    cp -a "$source"/. "$target"/' \\
       '  fi' \\
       '  rm -rf "$source"' \\
       '  ln -s "$target" "$source"' \\
       '}' \\
-      'migrate_profile google-chrome' \\
-      'migrate_profile chromium' \\
-      'find "$profiles" \\( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie -o -name .parentlock \\) -delete' \\
+      'migrate_profile "$HOME/.config/google-chrome" google-chrome' \\
+      'migrate_profile "$HOME/.config/chromium" chromium' \\
+      'migrate_profile "$HOME/.mozilla" mozilla' \\
+      'find "$profiles" \\( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie -o -name .parentlock -o -name lock -type l \\) -delete' \\
       > /usr/local/bin/prepare-openmausbot-workspace.sh \\
     && chmod 0755 /usr/local/bin/prepare-openmausbot-workspace.sh
 # A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs.

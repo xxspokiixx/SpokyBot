@@ -796,8 +796,9 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("prepare-openmausbot-workspace.sh");
     expect(dockerfile).toContain('if ! chmod 0700 "$workspace"');
     expect(dockerfile).toContain('test -r "$directory" && test -w "$directory" && test -x "$directory"');
-    expect(dockerfile).toContain("migrate_profile google-chrome");
-    expect(dockerfile).toContain("migrate_profile chromium");
+    expect(dockerfile).toContain('migrate_profile "$HOME/.config/google-chrome" google-chrome');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.config/chromium" chromium');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.mozilla" mozilla');
     expect(dockerfile).toContain("SingletonLock");
     expect(dockerfile).toContain(`${IMAGE_LAYER_LABEL}="${IMAGE_LAYER_VERSION}"`);
     expect(dockerfile).toContain("did not become ready within 45 seconds");
