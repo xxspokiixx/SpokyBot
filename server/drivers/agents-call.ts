@@ -391,6 +391,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (name === "list_team_setup") {
     return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };
   }
+  if (name === "list_team_library") {
+    return { text: JSON.stringify(await api("/api/internal/team-library")) };
+  }
   if (name === "propose_team_setup" || name === "propose_bot_deletion") {
     const deleting = name === "propose_bot_deletion";
     const result = await api(deleting ? "/api/internal/bot-deletion-requests" : "/api/internal/team-setup-requests", {

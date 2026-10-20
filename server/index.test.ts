@@ -2746,6 +2746,18 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("lets only a Chief read the team library from its turn", async () => {
+    const helper = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, helper.id, helper.threadId);
+      const response = await fetch(`${BASE}/api/internal/team-library`, { headers: { authorization: `Bearer ${token}` } });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Only an active Chief may plan team setup" });
+    } finally {
+      await api("DELETE", `/api/bots/${helper.id}`);
+    }
+  });
+
   it("rejects null and array task, channel, and bot mutation bodies", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     const room = (await api("POST", "/api/groups", { name: "Object bodies", memberIds: [bot.id] })).body.group;
