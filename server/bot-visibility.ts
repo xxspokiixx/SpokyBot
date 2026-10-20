@@ -268,7 +268,7 @@ export interface StreamSeen {
 
 export interface FrameContext {
   visible: VisibleSet;
-  webhookBot: (webhookId: string) => string | undefined;
+  webhook: (webhookId: string) => { botId: string; groupId?: string } | undefined;
   freshBot: (botId: string) => Record<string, unknown> | undefined;
   freshGroup: (groupId: string) => Record<string, unknown> | undefined;
 }
@@ -374,10 +374,10 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       return routineVisible(run, visible) ? payload : undefined;
     }
     case "webhook":
-      return visible.bot(str(field("webhook").botId)) ? payload : undefined;
+      return webhookVisible(field("webhook"), visible) ? payload : undefined;
     case "webhook.attempt": {
-      const botId = ctx.webhookBot(str(field("attempt").webhookId));
-      return botId && visible.bot(botId) ? payload : undefined;
+      const webhook = ctx.webhook(str(field("attempt").webhookId));
+      return webhook && webhookVisible(webhook, visible) ? payload : undefined;
     }
     case "runtime":
       return visible.thread(str(field("event").threadId)) ? payload : undefined;
@@ -408,6 +408,13 @@ export function noteSeen(payload: Record<string, unknown>, seen: StreamSeen): vo
     case "group": if (id(payload.group)) seen.groups.add(id(payload.group)); break;
     case "group.deleted": if (typeof payload.groupId === "string") seen.groups.delete(payload.groupId); break;
   }
+}
+
+/** A room webhook's attempts preview what it posted there, so it is shown only to someone who sees the room as well as the bot. */
+export function webhookVisible(value: { botId?: unknown; groupId?: unknown }, visible: Pick<VisibleSet, "everything" | "bot" | "group">): boolean {
+  if (visible.everything) return true;
+  if (typeof value.botId !== "string" || !visible.bot(value.botId)) return false;
+  return typeof value.groupId !== "string" || !value.groupId || visible.group(value.groupId);
 }
 
 export function routineVisible(value: { botId?: unknown; groupId?: unknown }, visible: VisibleSet): boolean {
