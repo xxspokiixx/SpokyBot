@@ -3,6 +3,7 @@ import { Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
+import { CloudTimeZoneSync } from "@/components/CloudTimeZone";
 import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
@@ -24,6 +25,8 @@ import { NotificationRail, NotificationsPanel } from "@/components/Notifications
 import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
+import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
+import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { finishCloudProHandoff, takeCloudProHandoff } from "@/components/CloudProPopup";
 import { CloudHowTo } from "@/components/CloudHowTo";
@@ -264,6 +267,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   return (
     <div className="flex h-full flex-col">
       <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
+      <CloudAsleepStrip />
+      <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId) || handedOver} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
@@ -396,6 +401,7 @@ function Application() {
           <Shell viewer={viewer} />
         </ThreadRefsProvider>
         <WelcomeGate viewer={viewer} />
+        <CloudTimeZoneSync viewer={viewer} />
         <GuidedTour />
         <LiveCallHost />
         <FirstConversationTour quiet={spotlightsQuiet(viewer)} />
