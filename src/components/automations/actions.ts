@@ -57,9 +57,15 @@ export function useAutomationActions() {
     return true;
   };
 
-  /** The address another app sends to. A bot-made one has no usable secret until the person asks for it: this mints it, once. */
+  /** The address another app sends to, as the server keeps it: the owning bot may already have given it to an app, so
+   * copying never replaces it. Only one from before addresses were kept, and not copied here before, gets a new one. */
   const copyAddress = (webhookId: string, replace = false) => attempt(`copy:${webhookId}`, async () => {
-    let credential: WebhookCredential | undefined = replace ? undefined : loadWebhookCredentials(webhookCredentialStore())[webhookId];
+    let credential: WebhookCredential | undefined;
+    if (!replace) {
+      credential = await api(`/api/webhooks/${webhookId}/address`).then((response) => response.credential as WebhookCredential, () => undefined)
+        ?? loadWebhookCredentials(webhookCredentialStore())[webhookId];
+      if (credential) saveWebhookCredential(webhookCredentialStore(), webhookId, credential);
+    }
     if (!credential) {
       const response = await api(`/api/webhooks/${webhookId}/rotate`, { method: "POST" });
       credential = response.credential as WebhookCredential;

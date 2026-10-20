@@ -304,6 +304,14 @@ function triggerFields(args: Json): { fields: Json; error?: string } {
   return { fields };
 }
 
+/** A webhook's address as the bot reads it: what to paste, or why this turn does not get it. */
+function addressText(r: Json): string {
+  if (typeof r.addressRefused === "string") return `\n\nIts address: ${r.addressRefused}`;
+  if (!jsonRecord(r.address)) return "";
+  if (typeof r.address.unavailable === "string") return `\n\nIts address: ${r.address.unavailable}`;
+  return `\n\nIts private address: ${JSON.stringify(r.address, null, 2)}`;
+}
+
 function appliedText(r: Json, done: string): ToolCallResult {
   const summary = typeof r.summary === "string" && r.summary.trim() ? `\n\n${r.summary.trim()}` : "";
   const detail = typeof r.detail === "string" && r.detail.trim() ? `\n\n${r.detail.trim()}` : "";
@@ -311,7 +319,7 @@ function appliedText(r: Json, done: string): ToolCallResult {
   const attention = r.settlementPending && typeof r.message === "string" ? `\n\nNeeds attention: ${r.message}`
     : jsonRecord(r.result) && typeof r.result.message === "string" ? `\n\nNeeds attention: ${r.result.message}` : "";
   return {
-    text: `${done}${id ? ` (trigger id ${id})` : ""}. It applied at once; the person sees it on a card with Edit, Pause and Undo.${summary}${detail}${attention}\n\nDo not ask for confirmation. Tell the person in one sentence what will happen.`,
+    text: `${done}${id ? ` (trigger id ${id})` : ""}. It applied at once; the person sees it on a card with Edit, Pause and Undo.${summary}${detail}${attention}${addressText(r)}\n\nDo not ask for confirmation. Tell the person in one sentence what will happen.`,
   };
 }
 
@@ -332,6 +340,10 @@ export async function callTriggerTool(name: string, args: Json, context: ToolCal
   if (name === "list_triggers") {
     const query = new URLSearchParams({ fromBotId: context.botId, fromThreadId: context.threadId });
     if (typeof args.trigger_id === "string" && args.trigger_id.trim()) query.set("triggerId", args.trigger_id.trim());
+    if (args.include_address === true) {
+      if (!query.has("triggerId")) return { text: "include_address needs trigger_id: the webhook automation whose address you want, from list_triggers.", isError: true };
+      query.set("includeAddress", "1");
+    }
     if (forBotId) query.set("forBotId", forBotId);
     const r = await context.client.api(`${LIST_ROUTE}?${query.toString()}`);
     const now = typeof r.now === "string" ? r.now : new Date().toISOString();

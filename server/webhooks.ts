@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -13,7 +13,7 @@ export type WebhookVerificationSample = z.output<typeof verificationSampleSchema
 export type WebhookAttempt = z.output<typeof webhookAttemptSchema>;
 export type WebhookAttemptOutcome = WebhookAttempt["outcome"];
 type StoredWebhookTrigger = z.output<typeof storedWebhookSchema>;
-export type WebhookTrigger = Omit<StoredWebhookTrigger, "secretHash">;
+export type WebhookTrigger = Omit<StoredWebhookTrigger, "secretHash" | "sealedSecret">;
 type DeliveryReceipt = z.output<typeof deliveryReceiptSchema>;
 type WebhookFile = z.output<typeof webhookFileSchema>;
 
@@ -136,6 +136,9 @@ const storedWebhookSchema = z.object({
   // A hand-edited value out of range falls back to the default instead of making the file unreadable.
   maxPendingRuns: maxPendingRunsSchema.optional().catch(undefined),
   secretHash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** The current secret, sealed under WEBHOOK_KEY_FILE beside this file, so the person and the owning bot get the same
+   * address back. Never in a public trigger or a workspace backup; absent for a webhook made before it was kept. */
+  sealedSecret: z.string().min(1).optional(),
 });
 const deliveryReceiptSchema = z.object({
   key: z.string().min(1),
@@ -184,6 +187,9 @@ function secretMatches(secret: string, expectedHex: string): boolean {
   const expected = Buffer.from(expectedHex, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
+
+/** The key that seals kept secrets: a 0600 file of its own that no backup carries, so webhooks.json alone never reveals one. */
+export const WEBHOOK_KEY_FILE = "webhook-key";
 
 function newEndpointId(): string {
   return `wh_${randomBytes(12).toString("base64url")}`;
@@ -234,7 +240,7 @@ function parseTriggerPatch(value: JsonValue): Partial<WebhookTriggerInput> {
 }
 
 function publicTrigger(trigger: StoredWebhookTrigger): WebhookTrigger {
-  const { secretHash: _secretHash, ...safe } = trigger;
+  const { secretHash: _secretHash, sealedSecret: _sealedSecret, ...safe } = trigger;
   return { ...safe };
 }
 
@@ -338,6 +344,41 @@ export class WebhookManager {
     return this.webhooks.map(publicTrigger);
   }
 
+  private sealKey(create: boolean): Buffer | null {
+    const path = join(dirname(this.file), WEBHOOK_KEY_FILE);
+    try {
+      const key = readFileSync(path, "utf8").trim();
+      if (/^[a-f0-9]{64}$/u.test(key)) return Buffer.from(key, "hex");
+    } catch {}
+    if (!create) return null;
+    const key = randomBytes(32);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileAtomic(path, `${key.toString("hex")}\n`, { mode: 0o600 });
+    return key;
+  }
+
+  private seal(secret: string): { sealedSecret: string } {
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.sealKey(true)!, nonce);
+    const body = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+    return { sealedSecret: Buffer.concat([nonce, body, cipher.getAuthTag()]).toString("base64") };
+  }
+
+  /** Null when nothing is kept, the key is gone, or the seal no longer matches the secret the address carries. */
+  private unseal(trigger: StoredWebhookTrigger): string | null {
+    const key = trigger.sealedSecret ? this.sealKey(false) : null;
+    if (!key || !trigger.sealedSecret) return null;
+    try {
+      const data = Buffer.from(trigger.sealedSecret, "base64");
+      const decipher = createDecipheriv("aes-256-gcm", key, data.subarray(0, 12));
+      decipher.setAuthTag(data.subarray(data.length - 16));
+      const secret = Buffer.concat([decipher.update(data.subarray(12, data.length - 16)), decipher.final()]).toString("utf8");
+      return secretMatches(secret, trigger.secretHash) ? secret : null;
+    } catch {
+      return null;
+    }
+  }
+
   listAttempts(): WebhookAttempt[] {
     return this.attempts.map((attempt) => ({ ...attempt }));
   }
@@ -353,6 +394,7 @@ export class WebhookManager {
       endpointId: newEndpointId(),
       ...clean,
       secretHash: hashSecret(secret),
+      ...this.seal(secret),
       createdAt: now,
       updatedAt: now,
       deliveryCount: 0,
@@ -428,10 +470,23 @@ export class WebhookManager {
     if (!trigger) return null;
     const secret = newSecret();
     trigger.secretHash = hashSecret(secret);
+    Object.assign(trigger, this.seal(secret));
     trigger.updatedAt = this.now();
     this.save();
     this.emit(trigger);
     return { webhook: publicTrigger(trigger), secret };
+  }
+
+  /** The secret its address carries now, without replacing it; null for a webhook from before secrets were kept. With
+   * `mintIfUnreached`, such a webhook that nothing has ever reached gets a new one: no app can hold its old address. */
+  currentSecret(id: string, mintIfUnreached: boolean): { webhook: WebhookTrigger; secret: string | null } | null {
+    const trigger = this.webhooks.find((candidate) => candidate.id === id);
+    if (!trigger) return null;
+    const kept = this.unseal(trigger);
+    if (kept) return { webhook: publicTrigger(trigger), secret: kept };
+    const reached = trigger.deliveryCount > 0 || trigger.lastReceivedAt !== undefined || trigger.verifiedAt !== undefined
+      || this.attempts.some((attempt) => attempt.webhookId === id);
+    return mintIfUnreached && !reached ? this.rotateSecret(id) : { webhook: publicTrigger(trigger), secret: null };
   }
 
   /** A deleted bot's webhooks go with it, for good: the bot cannot come back, so no Undo keeps them. */
