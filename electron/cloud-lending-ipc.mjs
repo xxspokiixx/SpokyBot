@@ -3,12 +3,34 @@
 // to leave My Cloud to change it. Turned on with nothing chosen, it lends the usual folders, read only.
 
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 /** The usual folders, read only (Electron app.getPath names): what most people mean by "use my computer", and nothing
  * that can change a file. */
 export const DEFAULT_FOLDERS = Object.freeze(["desktop", "documents", "downloads"]);
+/** Each usual folder's usual name in the home folder: where to look when the system names the home folder itself. */
+const USUAL_NAMES = Object.freeze({ desktop: "Desktop", documents: "Documents", downloads: "Downloads" });
 
 const GONE = new Set(["ENOENT", "ENOTDIR"]);
+
+/** A refusal the person can act on, which trying again never fixes: main throws it as `lending-refused:<code>` and the
+ * page says it in plain words, without Try again. */
+export const LENDING_REFUSED = "lending-refused:";
+const FOLDER_REFUSALS = Object.freeze({ HOME_OR_ROOT: "home-or-root", NOT_FOLDER: "not-folder", TOO_MANY: "too-many" });
+const refused = (code) => Object.assign(new Error(`${LENDING_REFUSED}${code}`), { code: `lending-${code}` });
+/** The same handler, with a folder check's own refusal passed on as one the page can say plainly. */
+const plainly = (handler) => async (...args) => {
+  try { return await handler(...args); } catch (error) {
+    const code = FOLDER_REFUSALS[error?.code];
+    throw code ? refused(code) : error;
+  }
+};
+
+/** Where the system keeps each usual folder, and the folder of that name in the home folder. On Linux without
+ * user-dirs.dirs (no xdg-user-dirs), Electron names the home folder itself for Documents and Downloads. */
+export function usualFolderPaths(getPath, home) {
+  return DEFAULT_FOLDERS.map((name) => ({ path: getPath(name), named: path.join(home, USUAL_NAMES[name]) }));
+}
 
 /** The folders that still exist and pass the checks a folder chosen by hand passes. One moved or deleted since is left
  * out, instead of failing the whole switch; any other refusal (the whole home folder, a file) still fails it. */
@@ -20,8 +42,22 @@ export async function existingFolders(folders, validate) {
   return found.filter(Boolean);
 }
 
-/** Each usual folder that exists, read only. */
-export const usualFolders = (paths, validate) => existingFolders(paths.map((path) => ({ id: randomUUID(), path, write: false })), validate);
+/** Each usual folder that exists, read only. One the system places at the home folder or a whole disk is looked for by
+ * its usual name in the home folder instead (~/Documents); one that still can't be lent is left out, never failing the
+ * switch. Folders a person picks by hand are checked as before. */
+export async function usualFolders(entries, validate) {
+  const check = async (folder) => {
+    try { return (await validate([{ id: randomUUID(), path: folder, write: false }]))[0] ?? null; } catch (error) { return { refused: error?.code ?? "unknown" }; }
+  };
+  const found = [];
+  for (const entry of entries) {
+    const { path: where, named } = typeof entry === "string" ? { path: entry, named: null } : entry;
+    let folder = await check(where);
+    if (folder?.refused === "HOME_OR_ROOT" && named && named !== where) folder = await check(named);
+    if (folder && !folder.refused && !found.some((known) => known.path === folder.path)) found.push(folder);
+  }
+  return found;
+}
 
 /** The native confirmation's words for exactly what goes: what bots may read, what they may also change, and the screen. */
 export function grantSentence({ folders, screen }) {
@@ -73,22 +109,25 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     if (!current) throw new Error("Open My Cloud first.");
     return current;
   };
-  /** What was chosen (an off switch keeps its choice), without folders that are gone since; else the usual folders. */
+  /** What was chosen (an off switch keeps its choice), without folders that are gone since; else the usual folders. With
+   * none of those either, nothing can be lent: said plainly, never a "try again". */
   const choice = async (input) => {
     const folders = Array.isArray(input?.folders) && input.folders.length ? await existingFolders(input.folders, validate) : [];
     if (folders.length || input?.screen === true) return { folders, screen: input?.screen === true };
-    return { folders: await defaults(), screen: false };
+    const usual = await defaults();
+    if (!usual.length) throw refused("nothing-to-lend");
+    return { folders: usual, screen: false };
   };
   ipcMain.handle("lending:state", localOnly("lending:state", () => snapshot()));
-  ipcMain.handle("lending:folder", localOnly("lending:folder", async () => { env(); return chooseFolder(); }));
-  ipcMain.handle("lending:save", localOnly("lending:save", async (_event, input) => {
+  ipcMain.handle("lending:folder", localOnly("lending:folder", plainly(async () => { env(); return chooseFolder(); })));
+  ipcMain.handle("lending:save", localOnly("lending:save", plainly(async (_event, input) => {
     await save(env(), await choice(input));
     return snapshot();
-  }));
+  })));
   ipcMain.handle("lending:stop", localOnly("lending:stop", async () => { stop(); return snapshot(); }));
 
   ipcMain.handle("cloud-lending:state", cloudPage("cloud-lending:state", async () => pageLending(await snapshot())));
-  ipcMain.handle("cloud-lending:set", cloudPage("cloud-lending:set", async (_event, on) => {
+  ipcMain.handle("cloud-lending:set", cloudPage("cloud-lending:set", plainly(async (_event, on) => {
     if (on !== true) { stop(); return pageLending(await snapshot()); }
     const current = await snapshot();
     if (current.state?.enabled) return pageLending(current);
@@ -98,5 +137,5 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     if (!(await confirm(grant))) return pageLending(current);
     await save(env(), next);
     return pageLending(await snapshot());
-  }));
+  })));
 }

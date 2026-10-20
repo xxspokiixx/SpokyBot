@@ -56,14 +56,14 @@ async function volumeRoot(canonical) {
 }
 
 export async function validateSharedFolders(folders) {
-  if (!Array.isArray(folders) || folders.length > 20) throw new Error("Choose at most 20 shared folders");
+  if (!Array.isArray(folders) || folders.length > 20) throw Object.assign(new Error("Choose at most 20 shared folders"), { code: "TOO_MANY" });
   const result = [];
   const enclosing = await enclosingHomeIdentities();
   for (const folder of folders) {
-    if (!uuid(folder?.id) || typeof folder.path !== "string" || !path.isAbsolute(folder.path) || typeof folder.write !== "boolean") throw new Error("Choose folders using the desktop folder picker");
+    if (!uuid(folder?.id) || typeof folder.path !== "string" || !path.isAbsolute(folder.path) || typeof folder.write !== "boolean") throw Object.assign(new Error("Choose folders using the desktop folder picker"), { code: "NOT_PICKED" });
     const canonical = await fsp.realpath(folder.path);
-    if (!(await fsp.stat(canonical)).isDirectory()) throw new Error("Choose a folder, not a file");
-    if (enclosing.has(await identify(canonical)) || (await volumeRoot(canonical))) throw new Error("Choose specific folders, not the entire computer or home folder");
+    if (!(await fsp.stat(canonical)).isDirectory()) throw Object.assign(new Error("Choose a folder, not a file"), { code: "NOT_FOLDER" });
+    if (enclosing.has(await identify(canonical)) || (await volumeRoot(canonical))) throw Object.assign(new Error("Choose specific folders, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
     if (result.some(entry => entry.id === folder.id || entry.path === canonical)) continue;
     result.push({ id: folder.id, path: canonical, name: path.basename(canonical).slice(0, 120), write: folder.write });
   }

@@ -15,7 +15,6 @@ import {
   LocalComputerSection,
   LocalVmIdleTimeoutSetting,
   LocalVmInventoryCard,
-  VpsComputersCard,
   cloudComputerActionPlan,
   cloudComputerInventoryState,
   computerInventoryRequest,
@@ -32,6 +31,7 @@ import {
   type LocalVmInventoryInstance,
   type VpsComputerInventoryInstance,
 } from "./LocalComputerSection";
+import { VpsComputersCard } from "./VpsComputersCard";
 
 const cloudVm: LocalVmInventoryInstance = {
   botId: "cloud-bot",
@@ -97,6 +97,7 @@ describe("computer inventory request wiring", () => {
     const vps = confirmComputerAction(vpsComputerRemovePlan({
       name: vpsName,
       state: "running",
+      vpsAlias: "alpha-vps",
       ownerBotId: "current-owner",
       ownerName: "Research",
       orphaned: false,
@@ -132,7 +133,7 @@ describe("computer inventory request wiring", () => {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ confirmName: vpsName }),
+        body: JSON.stringify({ confirmName: vpsName, alias: "alpha-vps" }),
       },
     ]);
     expect(confirm).toHaveBeenCalledTimes(3);
@@ -439,6 +440,7 @@ describe("VPS computer inventory UI", () => {
   const ownedVps: VpsComputerInventoryInstance = {
     name: "openmausbot-vps-current-123456abcdef",
     state: "running",
+    vpsAlias: "production-vps",
     ownerBotId: "current-owner",
     ownerName: "Research",
     orphaned: false,
@@ -448,7 +450,7 @@ describe("VPS computer inventory UI", () => {
     renderToStaticMarkup(createElement(VpsComputersCard, {
       instances: [],
       configured: true,
-      sshAlias: "production-vps",
+      aliases: ["production-vps"],
       loading: false,
       removingName: null,
       error: null,
@@ -466,6 +468,7 @@ describe("VPS computer inventory UI", () => {
         {
           name: orphanName,
           state: "exited",
+          vpsAlias: "production-vps",
           ownerBotId: null,
           ownerName: null,
           orphaned: true,
@@ -504,9 +507,32 @@ describe("VPS computer inventory UI", () => {
   });
 
   it("keeps disconnected, unavailable, and empty states distinct", () => {
-    expect(renderCard({ configured: false, sshAlias: null })).toContain("VPS is not configured");
+    expect(renderCard({ configured: false, aliases: [] })).toContain("VPS is not configured");
     expect(renderCard({ unavailableReason: "SSH host cannot be reached" })).toContain("SSH host cannot be reached");
     expect(renderCard()).toContain("No OpenMaus-managed VPS computers found");
+  });
+
+  it("tags computers on more than one server and keeps reachable rows beside the warning", () => {
+    const second = {
+      ...ownedVps,
+      name: "openmausbot-vps-second-123456abcdef",
+      vpsAlias: "alpha-vps",
+      ownerName: "Ops",
+    };
+    const multi = renderCard({ aliases: ["production-vps", "alpha-vps"], instances: [ownedVps, second] });
+    expect(multi).toContain("SSH host: production-vps, alpha-vps");
+    expect(multi).toContain("alpha-vps");
+    expect(multi).not.toMatch(new RegExp(`${second.name}|containerId|VNC_PW`));
+
+    // One unreachable server must not hide the computers it could still list.
+    const partial = renderCard({
+      aliases: ["production-vps", "alpha-vps"],
+      instances: [ownedVps, second],
+      unavailableReason: "Docker over SSH could not list managed computers on alpha-vps",
+    });
+    expect(partial).toContain("Docker over SSH could not list managed computers on alpha-vps");
+    expect(partial).toContain("Research");
+    expect(partial).toContain("Ops");
   });
 
   it("uses honest status labels", () => {

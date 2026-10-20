@@ -7,6 +7,7 @@ import {
   frameForMember,
   memberBody,
   memberBot,
+  memberFramePayload,
   noteSeen,
   parseVisibility,
   pathSubject,
@@ -280,5 +281,35 @@ describe("live frames for a member", () => {
   it("strips nothing for someone who sees everything", () => {
     const bot = { id: "hr", visibility: "admins", peers: ["x"] };
     expect(memberBot(bot, new VisibleSet(bots, groups, SEES_EVERYTHING))).toBe(bot);
+  });
+
+  it("keeps a bot's own server alias from every member, whether or not they can see every bot", () => {
+    const open = new VisibleSet(bots.map(({ visibility: _v, ...bot }) => bot), [{ ...groups[0]!, audienceFloor: "everyone" }], BOB);
+    const narrowed = new VisibleSet(bots, groups, ADA);
+    expect(open.everything).toBe(true);
+    expect(narrowed.everything).toBe(false);
+    const bot = { id: "pub", cloudBackend: "vps", vpsAlias: "alpha-vps" };
+    expect(memberBot(bot, open)).toEqual({ id: "pub", cloudBackend: "vps" });
+    expect(memberBot(bot, narrowed)).toEqual({ id: "pub", cloudBackend: "vps" });
+    // The owner and admins share the same everything-visible path and keep it.
+    const admin = new VisibleSet(bots, groups, SEES_EVERYTHING);
+    expect(memberBot(bot, admin)).toBe(bot);
+    expect(memberBody({ bots: [bot] }, admin)).toEqual({ bots: [bot] });
+
+    const room = { id: "room-pub", audienceFloor: "everyone" };
+    const body = { bots: [bot, { id: "hr" }], group: room, result: { bot } };
+    const shown = memberBody(body, open) as typeof body;
+    expect(JSON.stringify(shown)).not.toContain("alpha-vps");
+    expect(shown.bots[1]).toBe(body.bots[1]);
+    // A member who sees every room gets it as it is; only a narrowed member loses the audience floor.
+    expect(shown.group).toBe(room);
+    expect((memberBody(body, narrowed) as typeof body).group).toEqual({ id: "room-pub" });
+
+    // The live frame every member shares, and an untouched frame kept as the same object for the shared bytes.
+    expect(memberFramePayload({ kind: "bot", bot })).toEqual({ kind: "bot", bot: { id: "pub", cloudBackend: "vps" } });
+    const plain = { kind: "bot", bot: { id: "pub" } };
+    expect(memberFramePayload(plain)).toBe(plain);
+    const config = { kind: "config", vpsAlias: "not a bot" };
+    expect(memberFramePayload(config)).toBe(config);
   });
 });

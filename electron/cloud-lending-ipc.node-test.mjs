@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
-import { existingFolders, grantSentence, installCloudLending, pageLending, usualFolders } from "./cloud-lending-ipc.mjs";
+import { existingFolders, grantSentence, installCloudLending, pageLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs";
 
 const usual = ["Desktop", "Documents", "Downloads"].map((name, i) => ({ id: `id-${i}`, path: `/Users/me/${name}`, name, write: false }));
 
@@ -99,4 +100,78 @@ test("only a folder that is gone is left out; any other refusal still fails the 
   };
   assert.deepEqual(await existingFolders([{ path: "/Users/me/Gone" }, { path: "/Users/me/Plans" }], refuse), [{ path: "/Users/me/Plans" }]);
   await assert.rejects(existingFolders([{ path: "/Users/me" }], refuse), /not the entire computer/);
+});
+
+test("a usual folder the system places at the home folder or a whole disk is looked for by its usual name instead, and else left out", async () => {
+  // This platform's own paths, as main builds them: /home/me/Documents here, C:\home\me\Documents on Windows.
+  const ROOT = path.parse(process.cwd()).root;
+  const HOME = path.join(ROOT, "home", "me");
+  const at = (name) => path.join(HOME, name);
+  const exists = new Set([at("Desktop"), at("Documents")]);
+  const validate = async ([folder]) => {
+    if (folder.path === HOME || folder.path === ROOT) throw Object.assign(new Error("Choose specific folders, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
+    if (!exists.has(folder.path)) throw Object.assign(new Error("no such file or directory"), { code: "ENOENT" });
+    return [{ ...folder, name: path.basename(folder.path) }];
+  };
+  // Linux without user-dirs.dirs: Documents and Downloads are the home folder itself.
+  const linux = await usualFolders(usualFolderPaths((name) => name === "desktop" ? at("Desktop") : HOME, HOME), validate);
+  assert.deepEqual(linux.map((folder) => folder.path), [at("Desktop"), at("Documents")], "Documents by its usual name; no Downloads anywhere, so none");
+  // A usual folder placed at a whole disk.
+  const root = await usualFolders(usualFolderPaths((name) => name === "documents" ? ROOT : path.join(ROOT, "nowhere", name), HOME), validate);
+  assert.deepEqual(root.map((folder) => folder.path), [at("Documents")]);
+  // Both names the same folder: lent once.
+  const twice = await usualFolders([{ path: HOME, named: at("Documents") }, { path: at("Documents"), named: at("Documents") }], validate);
+  assert.deepEqual(twice.map((folder) => folder.path), [at("Documents")]);
+  // The usual name is never tried for a folder that is merely gone, and a usual folder that is a file is left out.
+  const tried = [], elsewhere = path.join(ROOT, "elsewhere", "Docs");
+  await usualFolders([{ path: elsewhere, named: at("Documents") }], async ([folder]) => { tried.push(folder.path); throw Object.assign(new Error("gone"), { code: "ENOENT" }); });
+  assert.deepEqual(tried, [elsewhere]);
+  assert.deepEqual(await usualFolders([at("notes.txt")], async () => { throw Object.assign(new Error("Choose a folder, not a file"), { code: "NOT_FOLDER" }); }), []);
+});
+
+test("with the real folder checks and a home folder with Documents only, the usual folders are Documents, never the home folder", async () => {
+  const { mkdtempSync, mkdirSync, realpathSync, rmSync } = await import("node:fs");
+  const { homedir, tmpdir } = await import("node:os");
+  const { validateSharedFolders } = await import("./computer-sharing.mjs");
+  // The folder checks' own spelling (fsp.realpath is the native one): on Windows the long name, never 8.3 (RUNNER~1).
+  const home = realpathSync.native(mkdtempSync(path.join(tmpdir(), "omb-lend-home-")));
+  // The home folder the checks guard is os.homedir(): HOME on macOS and Linux, USERPROFILE on Windows.
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  try {
+    mkdirSync(path.join(home, "Documents"));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    assert.equal(realpathSync.native(homedir()), home, "the folder checks take this temporary folder for the home folder");
+    const found = await usualFolders(usualFolderPaths((name) => name === "desktop" ? path.join(home, "Desktop") : home, home), validateSharedFolders);
+    assert.deepEqual(found.map((folder) => [folder.path, folder.name, folder.write]), [[path.join(home, "Documents"), "Documents", false]]);
+    await assert.rejects(validateSharedFolders([{ id: "8b0c8d3e-1f2a-4b5c-8d6e-7f8091a2b3c4", path: home, write: false }]), { code: "HOME_OR_ROOT" }, "a folder picked by hand still refuses the home folder");
+  } finally {
+    // Assigning undefined would set the text "undefined", so a variable that was unset is removed again.
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("nothing to lend, or a refused folder, is said plainly (no Try again); anything else is passed on as it was", async () => {
+  const handlers = new Map(), calls = [];
+  let fail = null, chosen = null;
+  installCloudLending({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: (_channel, handler) => handler, cloudPage: (_channel, handler) => handler,
+    snapshot: async () => ({ available: true, screenAvailable: false, state: { enabled: false, folders: chosen ?? [], screen: false } }),
+    environment: () => ({ id: "cloud" }),
+    save: async (_env, choice) => { calls.push(["save", choice]); if (fail) throw fail; },
+    stop: () => {}, confirm: async () => true,
+    chooseFolder: async () => { throw Object.assign(new Error("Choose specific folders, not the entire computer or home folder"), { code: "HOME_OR_ROOT" }); },
+    defaults: async () => [],
+    validate: async ([folder]) => { throw Object.assign(new Error(`refused ${folder.path}`), { code: "NOT_FOLDER" }); },
+  });
+  await assert.rejects(handlers.get("cloud-lending:set")({ page: "cloud" }, true), { message: "lending-refused:nothing-to-lend" });
+  await assert.rejects(handlers.get("lending:save")({ page: "local" }, { folders: [], screen: false }), { message: "lending-refused:nothing-to-lend" });
+  assert.deepEqual(calls, [], "nothing to lend saves nothing");
+  await assert.rejects(handlers.get("lending:folder")({ page: "local" }), { message: "lending-refused:home-or-root" });
+  chosen = [{ id: "f", path: "/Users/me/notes.txt", name: "notes.txt", write: false }];
+  await assert.rejects(handlers.get("cloud-lending:set")({ page: "cloud" }, true), { message: "lending-refused:not-folder" });
+  fail = new Error("My Cloud didn't answer");
+  await assert.rejects(handlers.get("lending:save")({ page: "local" }, { folders: [], screen: true }), { message: "My Cloud didn't answer" });
 });

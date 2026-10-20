@@ -61,3 +61,20 @@ it("says how lending is going in plain words", () => {
   expect(pageLendingLine({ ...lent, status: "starting" })).toBe("Starting…");
   expect(pageLendingLine({ ...lent, folders: [], screen: true })).toBe("My Cloud can use apps and screen on this computer.");
 });
+
+it("when nothing can be lent it says why plainly, with no Try again; only a failure trying again can fix says Try again", async () => {
+  const set = vi.fn().mockRejectedValueOnce(new Error("Error invoking remote method 'cloud-lending:set': Error: lending-refused:nothing-to-lend"))
+    .mockRejectedValueOnce(new Error("Error invoking remote method 'cloud-lending:set': Error: My Cloud didn't answer"));
+  (window as { ogb?: unknown }).ogb = { cloudLending: { open: vi.fn(), state: vi.fn().mockResolvedValue(off), set } };
+  await render();
+  const flip = async () => {
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  };
+  await flip();
+  const said = host.querySelector('[role="alert"]')!.textContent!;
+  expect(said).toBe("Nothing is lent yet: this computer has no Desktop, Documents or Downloads folder to lend. Pick a folder under Choose what's lent in this computer's Settings → MausBot Cloud.");
+  expect(said).not.toContain("Try again");
+  await flip();
+  expect(host.querySelector('[role="alert"]')!.textContent).toBe("Could not change what is lent. Try again.");
+});

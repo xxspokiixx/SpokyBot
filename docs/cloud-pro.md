@@ -658,7 +658,12 @@ folder names, never a path; turning it on needs the person's click and a
 native confirmation naming what goes. Turned on with nothing chosen (here or
 on this computer), lending lends Desktop, Documents and Downloads, read only;
 other folders, editing and the screen wait under **Choose what's lent** on
-this computer.
+this computer. Where the system names the home folder itself for one of them
+(Linux without user-dirs.dirs), the folder of that name in the home folder is
+lent instead; one that can't be found is left out. With none of the three,
+nothing is lent and the line says so plainly. A refusal a person can act on
+(the whole home folder or a disk, a file, more than 20 folders) is said in
+plain words; only a failure that trying again can fix says Try again.
 
 While lending is on, a menu-bar item shows it (**In use** while the Cloud is
 running something on this Mac) with **Stop lending**. Turning the switch off or

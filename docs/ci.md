@@ -108,6 +108,17 @@ to it, the page's cursor and copied text).
   Testing, with `OMB_BROWSER_SANDBOX=0` because the image has no setuid
   sandbox helper yet.
 - It is advisory, outside the `CI` gate, until it has run green for a while.
+- The latency targets hold wherever Chrome itself can meet them. The suite
+  also times Chrome alone in the same run (the same binary started bare and
+  showing a page; a frame and the same mouse events with none of the driver's
+  checks), and where Chrome alone is slower, as on GitHub's macOS VM (0.7-1.5
+  s to start, 60-75 ms to click, against 0.3 s and 33 ms on a Mac), the driver
+  may add only its budget to that.
+- On macOS the job locks the runner's Google Chrome app before the suites and
+  fails if its version changed: the image's Chrome is older than Google's
+  release, and the GoogleUpdater it starts swaps the new version into the app
+  about a minute and a half after Chrome first runs, in the middle of the
+  suites.
 - Locally: `OMB_CDP_CHROME=<chrome executable> pnpm exec vitest run
   server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e
   server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e` (or
