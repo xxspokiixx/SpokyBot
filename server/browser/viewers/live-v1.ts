@@ -4,7 +4,7 @@
 import type { ServerResponse } from "node:http";
 
 import { BROWSER_HELD_ELSEWHERE } from "../../../shared/browser-held.ts";
-import { BrowserLiveError, parseBrowserLiveAction } from "../../browser-live.ts";
+import { BROWSER_ASLEEP_ERROR, BrowserLiveError, parseBrowserLiveAction } from "../../browser-live.ts";
 import type { BrowserService, BrowserTarget } from "../service.ts";
 import type { Viewer, ViewerOutput } from "./core.ts";
 
@@ -51,7 +51,8 @@ interface V1Viewer {
   restarting: boolean;
 }
 
-function displayUrl(value: unknown): string {
+/** An address a viewer may show: a web page's, never its credentials. */
+export function displayUrl(value: unknown): string {
   if (typeof value !== "string" || value.length > 8192) return "";
   try {
     const url = new URL(value);
@@ -164,6 +165,10 @@ export class LiveV1 {
           this.#close(viewer);
         }
         return;
+      case "asleep":
+        this.#send(viewer, BROWSER_ASLEEP_ERROR);
+        this.#close(viewer);
+        return;
       default:
         return;
     }
@@ -187,7 +192,7 @@ export class LiveV1 {
     }, WAITING_AFTER_MS);
     waiting.unref?.();
     try {
-      const core = await this.#service.attachViewer(target, { owner: options.owner, canOperate: true, ...LO_TIER, pace: "lo" }, (output) => this.#output(viewer, output));
+      const core = await this.#service.attachViewer(target, { owner: options.owner, canOperate: true, ...LO_TIER, pace: "lo", pointer: false }, (output) => this.#output(viewer, output));
       (viewer as { id: string }).id = core.id;
       viewer.core = core;
       if (!this.#current(viewer)) { this.#close(viewer); return; }

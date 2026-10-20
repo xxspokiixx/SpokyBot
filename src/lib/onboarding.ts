@@ -1,3 +1,5 @@
+import { ONBOARDING_CLOUD_HINT, WELCOME_VERSION } from "../../electron/onboarding-record.mjs";
+
 export interface OnboardingStatus {
   completedAt: string;
   version: number;
@@ -6,7 +8,7 @@ export interface OnboardingStatus {
   firstTurnAt?: string;
 }
 
-export const WELCOME_VERSION = 1;
+export { ONBOARDING_CLOUD_HINT, WELCOME_VERSION };
 
 export const EMPTY_ONBOARDING: OnboardingStatus = {
   completedAt: "",
@@ -71,12 +73,16 @@ export function hintSeenPatch(
 }
 
 
-export type BeatId = "hello" | "reel" | "engines" | "permissions" | "phone" | "bot";
+export type BeatId = "hello" | "reel" | "engines" | "import" | "permissions" | "phone" | "cloud" | "bot";
 
 export interface BeatOptions {
   dictation: boolean;
   reel: boolean;
   hosted?: boolean;
+  /** This computer has skills or MCP servers from another AI tool to bring in. */
+  setupImport?: boolean;
+  /** MausBot Cloud can be bought from this desktop now (cloudBeatWanted); the first bot stays the last beat. */
+  cloud?: boolean;
 }
 
 export function beatsFor(options: BeatOptions): BeatId[] {
@@ -84,9 +90,39 @@ export function beatsFor(options: BeatOptions): BeatId[] {
   const beats: BeatId[] = ["hello"];
   if (options.reel) beats.push("reel");
   beats.push("engines");
+  if (options.setupImport) beats.push("import");
   if (options.dictation) beats.push("permissions");
-  beats.push("phone", "bot");
+  beats.push("phone");
+  if (options.cloud) beats.push("cloud");
+  beats.push("bot");
   return beats;
+}
+
+export function onboardingCloudOffered(record: OnboardingStatus | undefined): boolean {
+  return hintSeen(record, ONBOARDING_CLOUD_HINT);
+}
+
+/** Where the welcome may offer MausBot Cloud at all: this computer's own page with the Cloud bridge, not a branded
+ * build, not a hosted or remote viewer. */
+export function cloudBeatPossible(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean }): boolean {
+  return input.bridge && !input.branded && !input.hosted && !input.remote;
+}
+
+/** ...and whether it does: as the buy sheet decides, an account that may buy (buyOfferAllowed) and the Admin's offer
+ * loaded. Anything unknown is no beat: onboarding never waits for it. */
+export function cloudBeatWanted(input: { bridge: boolean; branded: boolean; hosted: boolean; remote: boolean; mayBuy: boolean | null; offer: unknown }): boolean {
+  return cloudBeatPossible(input) && input.mayBuy === true && Boolean(input.offer);
+}
+
+let welcomeShown = 0;
+/** The welcome flow is on screen (WelcomeFlow, until it closes): a Cloud sheet over it never switches the window away. */
+export function showWelcome(): () => void {
+  welcomeShown++;
+  let gone = false;
+  return () => { if (!gone) { gone = true; welcomeShown--; } };
+}
+export function welcomeOnScreen(): boolean {
+  return welcomeShown > 0;
 }
 
 export function nextBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
@@ -107,9 +143,12 @@ export function beatWidth(beat: BeatId): number {
       return 680;
     case "phone":
       return 620;
+    case "import":
+      return 540;
     case "reel":
       return 720;
     case "bot":
+    case "cloud":
       return 520;
     default:
       return 460;

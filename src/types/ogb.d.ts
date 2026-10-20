@@ -123,8 +123,16 @@ const __APP_VERSION__: string;
       /** The Cloud's setup checklist: shows the lending switch in this app's
        * own Settings → OMB Cloud (leaving the Cloud's page). */
       cloudLending?: { open(): Promise<void> };
+      /** This computer's Settings → Logins only: what of Logins My Cloud has, and Also use on My Cloud. */
+      cloudLogins?: import("../../electron/cloud-logins.mjs").CloudLoginsBridge;
+      /** This computer's Settings → MausBot Cloud: what each side has, Send everything, and the switches. */
+      cloudSend?: import("../../electron/cloud-send.mjs").CloudSendBridge;
+      /** My Cloud's own page in this app: what this computer has that My Cloud lacks, and Bring them over. */
+      cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
+      desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
+      desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
       companyBackups?: {
         state(): Promise<CompanyBackupState>;
         list(): Promise<{ backups: CompanyBackupEntry[]; usedBytes: number; limits: { ownerQuotaBytes: number; retainedSnapshots: number } }>;
@@ -137,7 +145,8 @@ const __APP_VERSION__: string;
         onState(callback: (state: CompanyBackupState) => void): () => void;
       };
       workspaces?: {
-        state: () => Promise<{ local: boolean; name: string; origin?: string }>;
+        /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up). */
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
       };
@@ -157,6 +166,10 @@ const __APP_VERSION__: string;
             origin?: string;
             dataDir?: string;
             missing?: boolean;
+            /** One of the six Cloud colours (environments.cjs ENTRY_COLORS). */
+            color?: string;
+            /** The person's own My Cloud. */
+            home?: boolean;
           }>;
         }>;
         /** Local targets answer {ok, error?} (error strings are an open set); remote ones answer nothing. */
@@ -326,9 +339,11 @@ const __APP_VERSION__: string;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
+      /** Opens this app's logs folder in Explorer or Finder and says where it is. */
+      openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates

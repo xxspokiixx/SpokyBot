@@ -30,14 +30,17 @@ describe("reading a Chrome's own identity", () => {
   it.skipIf(process.platform === "win32")("starts the binary headless over a pipe, off the keychain, on the account's real home, and says when it exits", async () => {
     const dir = folder();
     const chrome = join(dir, "chrome");
-    writeFileSync(chrome, `#!/bin/sh\nprintf '%s' "$HOME" > '${dir}/home'\nprintf '%s\\n' "$@" > '${dir}/args'\nexit 3\n`, { mode: 0o755 });
+    writeFileSync(chrome, `#!/bin/sh\n{ printf '%s\\n' "$HOME" "$@"; echo ::end::; } >> '${dir}/runs'\nexit 3\n`, { mode: 0o755 });
     await expect(calibrateIdentity({ executablePath: chrome, host: "desktop", env: { PATH: "/usr/bin:/bin", HOME: "/tmp/not-a-home" }, tmpRoot: dir, handshakeTimeoutMs: 10_000 })).rejects.toThrow(/exited|closed its DevTools pipe/);
-    expect(readFileSync(join(dir, "home"), "utf8")).toBe(userInfo().homedir);
-    const args = readFileSync(join(dir, "args"), "utf8").split("\n");
+    const runs = readFileSync(join(dir, "runs"), "utf8").split("::end::\n").filter(Boolean).map((run) => run.split("\n").filter(Boolean));
+    expect(runs.map(([home]) => home)).toEqual(runs.map(() => userInfo().homedir));
+    const [launch, ...diagnosis] = runs;
+    const args = launch!.slice(1);
     expect(args).toContain("--headless=new");
     expect(args).toContain(process.platform === "darwin" ? "--use-mock-keychain" : "--password-store=basic");
     expect(args).toContain("--remote-debugging-pipe");
     expect(args.filter((arg) => arg.startsWith("--remote-debugging-port"))).toEqual([]);
+    expect(diagnosis.map((run) => run.slice(1))).toEqual(process.platform === "linux" ? [["--version"]] : []);
   });
 
   it("reads it once per binary, and again after the binary changed in place", async () => {

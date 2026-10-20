@@ -25,6 +25,7 @@ export interface EnvironmentDescriptor {
     remoteSessions: true;
     /** Only while the maintainer flag `features.sharedComputers` is on; otherwise absent, like a build without the feature. */
     sharedComputers?: true;
+    lendingDetails?: true;
     /** A person's own OMB Cloud home. */
     cloudHome?: true;
     /** Who can update the server: the desktop app that runs it, or the operator. */
@@ -99,14 +100,16 @@ export function loadEnvironmentId(dataDir: string): string {
   }
 }
 
-export function serverVersion(): string {
+/** The desktop's own version, else the bundle's package.json (scripts/bundle-server.mjs), else the checkout's. */
+export function serverVersion(root = SERVER_ROOT): string {
   const fromEnv = process.env.OMB_APP_VERSION?.trim();
   if (fromEnv) return fromEnv;
-  try {
-    const pkg: unknown = JSON.parse(readFileSync(join(SERVER_ROOT, "..", "package.json"), "utf8"));
-    const version = Reflect.get(Object(pkg), "version");
-    if (typeof version === "string" && version) return version;
-  } catch {
+  for (const file of [join(root, "package.json"), join(root, "..", "package.json")]) {
+    try {
+      const version = Reflect.get(Object(JSON.parse(readFileSync(file, "utf8"))), "version");
+      if (typeof version === "string" && version) return version;
+    } catch {
+    }
   }
   return "unknown";
 }
@@ -120,7 +123,8 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
     capabilities: {
       remoteSessions: true,
       // Never advertise a protocol this server would refuse.
-      ...(input.sharedComputers === true ? { sharedComputers: true as const } : {}),
+      // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
+      ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
       emailSignIn: input.emailSignIn === true,

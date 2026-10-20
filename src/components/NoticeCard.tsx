@@ -24,7 +24,7 @@ export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel
   </aside>;
 }
 
-export const PRIMARY_BUTTON = "inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+export const PRIMARY_BUTTON = "ui-button ui-button-primary min-h-9 gap-1.5 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 export function LinkButton({ url, label, onOpened }: { url: string; label: string; onOpened?: () => void }) {
   const [failed, setFailed] = useState(false);

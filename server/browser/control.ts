@@ -30,6 +30,8 @@ export class ProfileControl<T extends ControlledTab = ControlledTab> {
   uncertain = false;
   /** The call that never answered; null when only a restart clears the uncertainty. */
   lostCall: string | null = null;
+  /** The bot's call running now, which becomes the lost call if a person's takeover outlasts it. */
+  call: string | null = null;
   closing = false;
   agents = 0;
   humans = 0;
@@ -94,8 +96,10 @@ export class ProfileControl<T extends ControlledTab = ControlledTab> {
     if (this.owner !== owner || this.closing) throw new Error("Browser control request was cancelled.");
     if (!done) {
       this.stale = true;
-      this.uncertain = true;
-      this.lostCall = null;
+      if (!this.uncertain) {
+        this.uncertain = true;
+        this.lostCall = this.call ?? "browser";
+      }
     }
     this.ready = true;
     this.changed();

@@ -27,7 +27,7 @@ const HEADER_BYTES = MAGIC.length + 16 + 12;
 const TAG_BYTES = 16;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const EXCLUDED = new Set([
-  ".backups", "tools", "browser", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
+  ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
   "openmausbot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
@@ -35,6 +35,8 @@ const EXCLUDED = new Set([
   "decider-log",
   "cloud-owner.json",
   "sync",
+  // "Also use my Claude Code skills": a link to the person's own ~/.claude/skills, made again on each turn.
+  "claude-user-skills",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
@@ -295,6 +297,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   const snapshot = join(job.directory, "snapshot");
   folder(join(snapshot, "data"));
   const entries: Entry[] = [];
+  const foldedPaths = new Map<string, string>();
   const warnings = ["Stop external editors and managed desktops before exporting; files written outside this server cannot be frozen by the backup gate.", "Conversation text and user files are not redacted and may contain secrets you pasted. Keep the encrypted backup private.", RESTORE_WARNING];
   let bytes = 0;
   let skippedLinks = 0;
@@ -322,7 +325,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
         if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path)) continue;
         // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
-        if (!validRelative(path)) throw new Error("A workspace filename cannot be safely restored on supported platforms.");
+        if (!validRelative(path)) throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
         const source = join(directory, name);
         const stat = lstatSync(source);
         if (name === "node_modules" && (stat.isDirectory() || stat.isSymbolicLink())) {
@@ -349,6 +352,9 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           continue;
         }
         if (entries.length >= MAX_WORKSPACE_BACKUP_FILES) throw new Error("The workspace exceeds the 100,000-entry backup limit.");
+        const caseTwin = foldedPaths.get(path.toLowerCase());
+        if (caseTwin) throw new Error(`Cannot back up names that differ only by letter case, which collide on Windows and macOS; rename one first: ${caseTwin} and ${path}`);
+        foldedPaths.set(path.toLowerCase(), path);
         const destination = join(snapshot, "data", path);
         if (stat.isDirectory()) {
           folder(destination);
@@ -361,7 +367,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
             if (path === "config.json") writeJson(destination, portableWorkspaceConfig(value));
             else {
               if (!record(value)) throw new Error("Invalid webhook definitions in workspace backup.");
-              if (Array.isArray(value.webhooks)) for (const webhook of value.webhooks) if (record(webhook)) delete webhook.secretHash;
+              if (Array.isArray(value.webhooks)) for (const webhook of value.webhooks) if (record(webhook)) { delete webhook.secretHash; delete webhook.sealedSecret; }
+              if (Array.isArray(value.deleted)) for (const entry of value.deleted) if (record(entry) && record(entry.webhook)) delete entry.webhook.sealedSecret;
               writeJson(destination, value);
             }
             copied = { size: lstatSync(destination).size, mode: 0o600, sha256: hashFile(destination) };
@@ -546,7 +553,9 @@ function validateStaged(directory: string, expected?: Map<string, { type: string
   }
   if (existsSync(join(data, "webhooks.json"))) {
     const value = privateJson(join(data, "webhooks.json"));
-    if (!record(value) || Array.isArray(value.webhooks) && value.webhooks.some((webhook) => record(webhook) && Object.hasOwn(webhook, "secretHash"))) throw new Error("Workspace backup contains webhook credentials.");
+    const carries = (webhook: unknown, fields: string[]) => record(webhook) && fields.some((field) => Object.hasOwn(webhook, field));
+    if (!record(value) || Array.isArray(value.webhooks) && value.webhooks.some((webhook) => carries(webhook, ["secretHash", "sealedSecret"]))
+      || Array.isArray(value.deleted) && value.deleted.some((entry) => record(entry) && carries(entry.webhook, ["sealedSecret"]))) throw new Error("Workspace backup contains webhook credentials.");
   }
   const counts = databaseCounts(join(data, "messages.db"));
   if (counts.messages !== manifest.summary.messages || counts.threads !== manifest.summary.threads) throw new Error("The message database does not match the backup summary.");
@@ -586,6 +595,13 @@ export function readStagedWorkspaceBackup(dataDir: string, id: string): Workspac
   if (!record(ready) || ready.id !== id) throw new Error("This workspace backup is not ready to restore.");
   const manifest = validateManifest(privateJson(join(directory, "staged", "manifest.json")));
   return { id, ...privateMetadata(manifest) };
+}
+
+/** A staged backup's own data folder, and the folder it was made from. */
+export function stagedWorkspaceData(dataDir: string, id: string): { data: string; sourceDataDir: string } {
+  readStagedWorkspaceBackup(dataDir, id);
+  const staged = join(jobPath(dataDir, id), "staged");
+  return { data: join(staged, "data"), sourceDataDir: validateManifest(privateJson(join(staged, "manifest.json"))).sourceDataDir };
 }
 
 export function commitPendingWorkspaceRestore(dataDir: string, id: string) {
@@ -728,7 +744,9 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
       webhook.verificationPending = false;
       const previous = oldHooks.find((old) => record(old) && old.id === webhook.id && old.endpointId === webhook.endpointId);
       // A migrated hook needs a secret rotation: an unknown hash cannot authenticate a caller.
-      webhook.secretHash = record(previous) && typeof previous.secretHash === "string" && /^[a-f0-9]{64}$/.test(previous.secretHash) ? previous.secretHash : randomBytes(32).toString("hex");
+      const kept = record(previous) && typeof previous.secretHash === "string" && /^[a-f0-9]{64}$/.test(previous.secretHash);
+      webhook.secretHash = kept ? previous.secretHash : randomBytes(32).toString("hex");
+      if (kept && typeof previous.sealedSecret === "string" && previous.sealedSecret) webhook.sealedSecret = previous.sealedSecret;
     }
   });
   changeJson("calendar-calls.json", (value) => {

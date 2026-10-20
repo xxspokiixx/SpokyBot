@@ -183,6 +183,18 @@ async function untilDialog(context: ActionContext, action: Promise<void>): Promi
 /** Shown to people watching before the agent's pointer acts there; the action waits for it. */
 export type PointerReporter = (point: Point, phase: "move" | "click") => Promise<void>;
 
+/** Where to act: found, shown to people watching, then found again, since the page may have moved meanwhile. */
+async function pointAfterShowing(context: ActionContext, at: Point | (NodeHandle & { ref?: string }), deadline: number, phase: "move" | "click", pointer: PointerReporter | undefined, options: { wantEnabled?: boolean } = {}): Promise<Point> {
+  if ("x" in at) {
+    await pointer?.(at, phase);
+    return at;
+  }
+  const point = await actionablePoint(context, at, deadline, options);
+  if (!pointer) return point;
+  await pointer(point, phase);
+  return actionablePoint(context, at, deadline, options);
+}
+
 export interface ClickOptions {
   button?: MouseButton;
   clickCount?: number;
@@ -198,16 +210,14 @@ export interface PointerResult extends Point {
 export async function click(context: ActionContext, target: Target, { button = "left", clickCount = 1, timeoutMs = DEFAULT_ACTION_TIMEOUT_MS, pointer }: ClickOptions = {}): Promise<PointerResult> {
   await context.bringToFront();
   refuseErrorPage(context);
-  const point = isPoint(target) ? target : await actionablePoint(context, await element(context, target), Date.now() + timeoutMs);
-  await pointer?.(point, "click");
+  const point = await pointAfterShowing(context, isPoint(target) ? target : await element(context, target), Date.now() + timeoutMs, "click", pointer);
   const dialog = await untilDialog(context, context.mouse.click(point.x, point.y, { button, clickCount }));
   return { x: point.x, y: point.y, dialog };
 }
 
 export async function hover(context: ActionContext, target: Target, { timeoutMs = DEFAULT_ACTION_TIMEOUT_MS, pointer }: { timeoutMs?: number; pointer?: PointerReporter } = {}): Promise<Point> {
   await context.bringToFront();
-  const point = isPoint(target) ? target : await actionablePoint(context, await element(context, target), Date.now() + timeoutMs, { wantEnabled: false });
-  await pointer?.(point, "move");
+  const point = await pointAfterShowing(context, isPoint(target) ? target : await element(context, target), Date.now() + timeoutMs, "move", pointer, { wantEnabled: false });
   await context.mouse.move(point.x, point.y);
   return point;
 }
@@ -383,7 +393,7 @@ export async function drag(context: ActionContext, from: Target, to: Target, { t
   refuseErrorPage(context);
   const deadline = Date.now() + timeoutMs;
   const source = isPoint(from) ? null : await element(context, from);
-  const start = source ? await actionablePoint(context, source, deadline) : (from as Point);
+  const start = await pointAfterShowing(context, source ?? (from as Point), deadline, "move", pointer);
   const end = isPoint(to) ? to : await actionablePoint(context, await element(context, to), deadline, { hitTest: false });
   const sourceFrame = source?.frameId ?? context.frames.mainFrameId;
   const session = context.session;
@@ -391,7 +401,6 @@ export async function drag(context: ActionContext, from: Target, to: Target, { t
   const off = session.on("Input.dragIntercepted", (params) => {
     intercepted.data = params.data as Record<string, unknown>;
   });
-  await pointer?.(start, "move");
   await session.send("Input.setInterceptDrags", { enabled: true });
   try {
     await valueInWorld(context.frames, sourceFrame, DRAG_PROBE);

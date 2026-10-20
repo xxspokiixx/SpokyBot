@@ -17,8 +17,8 @@ function nvmBinDirs(): string[] {
   }
 }
 
-/** A sealed test fixture sees only its own PATH, OMB_EXTRA_PATH, app-managed dirs and its temporary home, never this machine's CLIs. */
-function sealedFixture(): boolean {
+/** A sealed test fixture sees only its own PATH, OMB_EXTRA_PATH, app-managed dirs and its temporary home, never this machine's CLIs or keychain. */
+export function sealedFixture(): boolean {
   return process.env.OMB_TEST_SEALED_PATH === "1";
 }
 
@@ -50,6 +50,7 @@ function windowsKnownDirs(): string[] {
   const home = homedir();
   const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
   const localAppData = process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
+  const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
   return [
     join(appData, "npm"), // npm -g shims: claude, codex
     join(home, ".kimi-code", "bin"), // recover Kimi installs after a GUI launch too
@@ -63,7 +64,8 @@ function windowsKnownDirs(): string[] {
     join(home, ".bun", "bin"),
     join(home, ".deno", "bin"),
     join(home, "go", "bin"),
-    join(process.env.ProgramFiles ?? "C:\\Program Files", "Docker", "Docker", "resources", "bin"), // Docker Desktop installer
+    join(programFiles, "Docker", "Docker", "resources", "bin"), // Docker Desktop installer
+    join(programFiles, "RedHat", "Podman"), // Podman installer, also run by Podman Desktop
   ];
 }
 
