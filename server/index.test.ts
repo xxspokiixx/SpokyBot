@@ -3186,7 +3186,7 @@ describe("harness HTTP API", () => {
       roomId = room.id;
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in the virtual machine" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/fixture-plain-model can't use a Local VM\. Choose a model that can, such as Claude or ChatGPT\. Choose another model in Room VM refusal's settings\./);
+        { timeout: 5_000 }).toMatch(/fixture-plain-model can't use a private desktop\. Choose a model that can, such as Claude or ChatGPT\. Choose another model in Room VM refusal's settings\./);
       expect(JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body)).not.toContain("Works on to Auto");
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
@@ -10407,7 +10407,7 @@ describe("harness HTTP API", () => {
       });
       expect(unavailableCloud.status).toBe(409);
       expect(await unavailableCloud.json()).toMatchObject({
-        error: expect.stringMatching(/^A cloud computer here needs your own Boat key, a paid service\. Add a Boat key in Settings → API keys\./),
+        error: expect.stringMatching(/^A cloud desktop here needs your own Boat key, a paid service\. Add a Boat key in Settings → API keys\./),
       });
 
       const proposed = await fetch(`${BASE}/api/internal/trigger-requests`, {

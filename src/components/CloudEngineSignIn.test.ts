@@ -90,7 +90,7 @@ it("picks the person's own engine, never a local-model or read-only one, and say
   expect(cloudEngine([local, company], "claudeAgent")).toBeUndefined();
   store.instances = [codex];
   choose("claude");
-  expect(render().html).toContain("isn't available in the Cloud yet");
+  expect(render().html).toContain("isn&#x27;t available in the Cloud yet");
 });
 
 it("offers Grok as a third choice when this Cloud computer has the Grok CLI, and opens its code sign-in", () => {

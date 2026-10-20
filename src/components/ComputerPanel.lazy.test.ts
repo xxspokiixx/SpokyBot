@@ -178,7 +178,7 @@ describe("Computer panel on Cloud computer", () => {
     await open(moved(false));
     await vi.advanceTimersByTimeAsync(5_000);
     await settle();
-    expect(text()).toContain("Scout's cloud computer is asleep.");
+    expect(text()).toContain("Scout's cloud desktop is asleep.");
     const looks = fixture.looks;
     await vi.advanceTimersByTimeAsync(30_000);
     await settle();

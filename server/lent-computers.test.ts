@@ -49,7 +49,7 @@ describe("what a server remembers about computers lent to it", () => {
       say: "Their PC ASH-PC is shared with the Cloud but offline (last online 2026-10-07 14:02 UTC): OpenMausBot on it is closed, or the PC is asleep or off. Ask them to open OpenMausBot on that PC; it reconnects by itself.",
     });
     expect(awayNotice([{ ...record, stoppedAt: at }], new Set()).say).toBe("Their PC ASH-PC is no longer shared with the Cloud: sharing was turned off on it. They can turn on Let Cloud bots use this computer under Settings → MausBot Cloud in OpenMausBot on that PC.");
-    expect(awayNotice([{ ...record, platform: "darwin" }], new Set()).say).toMatch(/^Their Mac ASH-PC is lent/u);
+    expect(awayNotice([{ ...record, platform: "darwin" }], new Set()).say).toMatch(/^Their Mac ASH-PC is shared with the Cloud/u);
     expect(awayNotice([record], new Set([record.id]))).toEqual({});
     for (const sentence of [awayNotice([record], new Set()).say!, awayNotice([{ ...record, stoppedAt: at }], new Set()).say!]) expect(sentence).not.toMatch(/this Mac|OMB Cloud|OpenMausBot Cloud/u);
   });
@@ -90,7 +90,7 @@ describe("the shared-computer registry with that memory", () => {
     live = true;
     broker.disconnect(pc.id, "s1", secret);
     expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ lent: false, online: false })]);
-    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is no longer lent to My Cloud/u);
+    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is no longer shared with the Cloud/u);
     expect(broker.away(null)).toEqual({});
     broker.close();
   });

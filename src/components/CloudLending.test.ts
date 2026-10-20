@@ -135,7 +135,7 @@ it("says how it is lent when Computer access lent it, terminal included, and whe
   expect(html).toContain("Shared through Computer access in Settings → Servers, terminal included.");
   expect(html).toContain("Cloud bots last used this computer 3 minutes ago.");
   await ready({ ...lent, activity: [] });
-  expect(render().html).toContain("My Cloud hasn&#x27;t used this computer yet.");
+  expect(render().html).toContain("Cloud bots haven&#x27;t used this computer yet.");
 });
 
 it("names a refusal main explains in plain words, and keeps Try again for the rest", () => {

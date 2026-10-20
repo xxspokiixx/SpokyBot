@@ -170,7 +170,7 @@ describe("a failed place, by where it came from", () => {
     expect(placeRowText(row("routine"))).toBe("Cloud desktops can't start right now. It isn't anything you did. Change where this routine runs.");
     expect(placeRowText(row("room"))).toBe("Cloud desktops can't start right now. It isn't anything you did.");
     expect(placeRowText({ state: "cc-cannot", params: { bot: "Scout", model: "Llama" }, source: "works-on" }))
-      .toBe("Llama can't use a computer. Choose a model that can, such as Claude or ChatGPT. Choose another model in Scout's settings.");
+      .toBe("Llama can't use a desktop. Choose a model that can, such as Claude or ChatGPT. Choose another model in Scout's settings.");
   });
 });
 

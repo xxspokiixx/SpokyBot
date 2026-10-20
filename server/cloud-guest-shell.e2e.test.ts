@@ -380,5 +380,5 @@ it("a room a guest opened with a bot whose engine needs its shell refuses the tu
   await leftBehind({ threadId: room.body.group.threadId });
   expect((await api("POST", `/api/groups/${room.body.group.id}/messages`, { token: owner, body: { text: "Hello." } })).status).toBeLessThan(300);
   await expect.poll(async () => ((await api("GET", `/api/threads/${room.body.group.threadId}/messages`, { token: owner })).body.messages as any[])
-    .some((message) => String(message.tool?.name ?? "").includes("this bot's engine can't work in it")), { timeout: hostTimeout(15_000) }).toBe(true);
+    .some((message) => String(message.tool?.name ?? "").includes("this bot's AI can't work in it")), { timeout: hostTimeout(15_000) }).toBe(true);
 }, hostTimeout(60_000));

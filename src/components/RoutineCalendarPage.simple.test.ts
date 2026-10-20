@@ -232,7 +232,7 @@ describe("routine drawer", () => {
   });
 
   it("describes the Boat runner in plain words", () => {
-    expect(details(routineItem({ ...routine, runOn: "cloud" })).html).toContain("Cloud computer");
+    expect(details(routineItem({ ...routine, runOn: "cloud" })).html).toContain("Cloud desktop");
   });
 
   it("Run now and Pause send the same requests as before", () => {

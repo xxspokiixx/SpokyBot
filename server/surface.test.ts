@@ -234,7 +234,7 @@ describe("cloudPlaceRefusal", () => {
   it("refuses an engine without computer tools as one state, its fix the same whatever the source", () => {
     const refused = cloudPlaceRefusal(engine({ computerMcp: false }), "works-on", "Scout")!;
     expect(refused).toMatchObject({ name: "PlaceUnavailableError", place: "cloud", row: { state: "cc-cannot", params: { bot: "Scout", model: "Llama" }, source: "works-on" } });
-    expect(refused.message).toBe("Llama can't use a computer. Choose a model that can, such as Claude or ChatGPT. Choose another model in Scout's settings.");
+    expect(refused.message).toBe("Llama can't use a desktop. Choose a model that can, such as Claude or ChatGPT. Choose another model in Scout's settings.");
     for (const source of ["pin", "routine", "room"] as const) {
       expect(cloudPlaceRefusal(engine({}), source, "Scout")?.message).toBe(refused.message);
     }
@@ -245,13 +245,13 @@ describe("computerToolsRefusal", () => {
   it("refuses a Tool selection without the computer with one action: the setting that changes it", () => {
     const refused = computerToolsRefusal({ deny: ["mcp:computer:*"] }, "works-on", "Scout")!;
     expect(refused).toMatchObject({ name: "PlaceUnavailableError", place: "cloud", row: { state: "cc-tools-off", params: { bot: "Scout" }, source: "works-on" } });
-    const line = "What Scout can use doesn't include a computer. Change what Scout can use in its settings.";
+    const line = "What Scout can use doesn't include a desktop. Change what Scout can use in its settings.";
     expect(refused.message).toBe(line);
     for (const source of ["pin", "routine", "room"] as const) {
       expect(computerToolsRefusal({ allow: ["native:*"] }, source, "Scout")?.message).toBe(line);
     }
     expect(computerToolsRefusal({ allow: ["native:*"] }, "auto-pin", "Scout")?.message)
-      .toBe("What Scout can use doesn't include a computer. This conversation is back on Auto. Change what Scout can use in its settings.");
+      .toBe("What Scout can use doesn't include a desktop. This conversation is back on Auto. Change what Scout can use in its settings.");
   });
 
   it("lets every selection that keeps a computer tool through", () => {

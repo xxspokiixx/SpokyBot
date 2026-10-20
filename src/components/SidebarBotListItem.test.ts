@@ -375,7 +375,7 @@ describe("archive / delete confirmation", () => {
     expect(copy.body).toMatch(/permanently/i);
     expect(copy.body).toMatch(/any desktop it owns/i);
     expect(copy.body).toMatch(/files and browser sign-ins/i);
-    expect(copy.body).toMatch(/shared team computers remain/i);
+    expect(copy.body).toMatch(/shared team desktops stay/i);
     expect(copy.tone).toBe("danger");
   });
 

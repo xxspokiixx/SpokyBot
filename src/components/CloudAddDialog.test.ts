@@ -394,7 +394,7 @@ describe("the sheet", () => {
     expect(await settle()).toContain("Opening in 3…");
     listeners.get("blur")!();
     const away = await settle();
-    expect(away).not.toContain("Opening in"); expect(away).toContain("Open the Cloud");
+    expect(away).not.toContain("Opening in"); expect(away).toContain("Open My Cloud");
     vi.advanceTimersByTime(5000); await settle();
     expect(bridge.connectHome).not.toHaveBeenCalled();
     expect(listeners.has("blur"), "not listening once it stopped").toBe(false);
@@ -419,7 +419,7 @@ describe("the sheet", () => {
     account = paid({ trial: trial(), credit, machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
     expect(await settle()).toContain("Opening in 3…");
     expect(bridge.look).toHaveBeenCalled();
-    expect(await settle()).toContain("Open the Cloud");
+    expect(await settle()).toContain("Open My Cloud");
     vi.advanceTimersByTime(1000); expect(await settle()).toContain("Opening in 2…");
     vi.advanceTimersByTime(1000); await settle(); vi.advanceTimersByTime(1000); await settle();
     expect(bridge.connectHome).toHaveBeenCalledOnce();
@@ -443,7 +443,7 @@ describe("the sheet", () => {
     expect(await settle()).toContain("Setting up your new Cloud");
     push(paid({ trial: trial(), machine: ready }));
     const html = await settle();
-    expect(html).toContain("The Cloud is ready"); expect(html).not.toContain("One Cloud per account");
+    expect(html).toContain("My Cloud is ready"); expect(html).not.toContain("One Cloud per account");
   });
 
   it("over the welcome flow a ready Cloud never switches the window: no countdown, main hears no sheet in front, Open {name} stays", async () => {
@@ -453,11 +453,11 @@ describe("the sheet", () => {
       f.state = { cloudAdd: { source: "app_onboarding" }, config: {} };
       account = paid({ trial: trial(), credit, machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
       const html = await settle();
-      expect(html).toContain("The Cloud is ready"); expect(html).toContain("Open the Cloud"); expect(html).not.toContain("Opening in");
+      expect(html).toContain("My Cloud is ready"); expect(html).toContain("Open My Cloud"); expect(html).not.toContain("Opening in");
       vi.advanceTimersByTime(10_000); await settle();
       expect(bridge.connectHome).not.toHaveBeenCalled();
       expect(bridge.sheet, "main notifies instead, as for a closed sheet").not.toHaveBeenCalledWith(true);
-      await press("Open the Cloud");
+      await press("Open My Cloud");
       expect(bridge.connectHome, "only when the person asks").toHaveBeenCalledOnce();
     } finally { hide(); }
   });
@@ -476,7 +476,7 @@ describe("the sheet", () => {
     vi.advanceTimersByTime(400); await flush();
     expect(bridge.setLook).toHaveBeenCalledWith("Studio", "purple");
     tree().find(node => node.props.id === "cloud-add-name")!.props.onChange({ target: { value: "   " } });
-    expect(await settle()).toContain("Starting the Cloud");
+    expect(await settle()).toContain("Starting My Cloud");
     account = paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000 } }); focused = false;
     await settle();
     tree().find(node => node.props.id === "cloud-add-name")!.props.onChange({ target: { value: "Lab" } }); await settle();
@@ -522,7 +522,7 @@ describe("the sheet", () => {
     tree().filter(node => node.type === "input")[0]!.props.onChange({ target: { value: "48201937" }, currentTarget: { parentElement: { querySelectorAll: () => [] } } });
     await flush(); await flush();
     account = paid({ machine: ready }); focused = false;
-    expect(await settle()).toContain("The Cloud is ready");
+    expect(await settle()).toContain("My Cloud is ready");
     expect(bridge.checkout).not.toHaveBeenCalled();
   });
 

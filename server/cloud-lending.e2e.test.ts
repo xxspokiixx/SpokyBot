@@ -472,7 +472,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known, { timeout: 5000 })
     .toEqual([expect.objectContaining({ online: false, lent: false, scopes: { folders: 0, terminal: false, screen: true } })]);
   call = await ask();
-  expect(JSON.parse((await call("list_shared_computers")).content[0].text).say).toMatch(new RegExp(`^Their ${device} .+ is no longer lent to My Cloud`, "u"));
+  expect(JSON.parse((await call("list_shared_computers")).content[0].text).say).toMatch(new RegExp(`^Their ${device} .+ is no longer shared with the Cloud`, "u"));
   rmSync(folderPath, { recursive: true, force: true });
 }, hostTimeout(60_000));
 

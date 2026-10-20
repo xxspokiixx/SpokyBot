@@ -206,18 +206,18 @@ describe("Computer panel tabs", () => {
     }
   });
 
-  it("shows Computer, Browser, Data and Files in Simple mode", () => {
+  it("shows Screen, Browser, Data and Files in Simple mode", () => {
     fixture.android = true;
-    expect(tabs(render(makeBot()))).toEqual(["Computer", "Browser", "Data", "Files"]);
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Browser", "Data", "Files"]);
   });
 
   it("keeps the Advanced tabs unchanged", () => {
     fixture.advanced = true;
     fixture.android = true;
-    expect(tabs(render(makeBot()))).toEqual(["Computer", "Routines", "Android", "Browser", "Data"]);
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Android", "Browser", "Data"]);
     fixture.config = {};
     fixture.android = false;
-    expect(tabs(render(makeBot()))).toEqual(["Computer", "Routines", "Browser", "Data"]);
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Browser", "Data"]);
   });
 
   it("reads a Routines view stored by Advanced as the Computer tab in Simple", () => {
@@ -362,7 +362,7 @@ describe("Where the bot works", () => {
     const card = rendered.nodes.find((node) => node.props["data-testid"] === "where-works")!;
     expect(rendered.html).toContain("Where Scout works");
     expect(nodes(card.props.children).find((node) => node.props.role === "group")!.props.className).toContain("grid-cols-3");
-    expect(grid(rendered).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud computer", "Local VM", "This Mac", "Browser", "Off"]);
+    expect(grid(rendered).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud desktop", "Private desktop", "This Mac", "Browser", "Off"]);
     expect(placeLine(rendered)).toBe("Uses the built-in browser, a private desktop on this computer, or this computer's screen, whichever the task needs.");
   });
 
@@ -381,10 +381,10 @@ describe("Where the bot works", () => {
   it("J11: the Advanced cards and the Simple grid name the same problem in the same words", () => {
     fixture.instances = [{ ...engine(), displayName: "Plain", capabilities: { computerMcp: false, browserMcp: true } } as InstanceInfo];
     const simple = render(makeBot());
-    const tile = grid(simple).find((node) => text(node.props.children).startsWith("Cloud computer"))!;
+    const tile = grid(simple).find((node) => text(node.props.children).startsWith("Cloud desktop"))!;
     expect(tile.props.disabled).toBe(true);
-    expect(text(tile.props.children)).toBe("Cloud computerNot with this model");
-    expect(tile.props.title).toBe("M can't use a computer. Choose a model that can, such as Claude or ChatGPT.");
+    expect(text(tile.props.children)).toBe("Cloud desktopNot with this model");
+    expect(tile.props.title).toBe("M can't use a desktop. Choose a model that can, such as Claude or ChatGPT.");
 
     fixture.advanced = true;
     fixture.values = [];
@@ -393,7 +393,7 @@ describe("Where the bot works", () => {
     const group = advanced.nodes.find((node) => node.props.role === "group" && node.props["aria-label"] === "Computer destination")!;
     const card = nodes(group.props.children).filter((node) => node.type === "button")[1]!;
     expect(card.props.disabled).toBe(true);
-    expect(text(card.props.children)).toBe("Cloud computerNot with this model");
+    expect(text(card.props.children)).toBe("Cloud desktopNot with this model");
     expect(card.props.title).toBe(tile.props.title);
   });
 
@@ -481,12 +481,12 @@ describe("A chat pinned to a place", () => {
     text(rendered.nodes.find((node) => node.props["data-testid"] === "place-pinned-note")!.props.children);
 
   it("names the place in the grid's words, without pointing Simple at a composer chip it no longer has", () => {
-    expect(note(render(pinned()))).toBe("This chat is pinned to “Cloud computer”.");
+    expect(note(render(pinned()))).toBe("This chat is pinned to “Cloud desktop”.");
 
     fixture.advanced = true;
     fixture.values = [];
     phaseIndex = -1;
-    expect(note(render(pinned()))).toBe("This conversation is pinned to Cloud computer. Change it from the composer.");
+    expect(note(render(pinned()))).toBe("This conversation is pinned to Cloud desktop. Change it from the composer.");
   });
 
   const pinnedOn = (computer: Bot["computer"], task: Partial<Task> = {}) =>
@@ -545,10 +545,10 @@ describe("Technical controls", () => {
   });
 
   it("hides the VM settings link in Simple", () => {
-    expect(render(makeBot({ computer: "vm" })).html).not.toContain("VM settings");
+    expect(render(makeBot({ computer: "vm" })).html).not.toContain("Private desktop settings");
     fixture.advanced = true;
     fixture.values = [];
-    expect(render(makeBot({ computer: "vm" })).html).toContain("VM settings");
+    expect(render(makeBot({ computer: "vm" })).html).toContain("Private desktop settings");
   });
 
   it("shows Take control, Full screen and Sleep under a ready cloud screen", () => {

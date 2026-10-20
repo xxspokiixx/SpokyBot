@@ -367,8 +367,8 @@ describe("removing the Computer engine", () => {
     expect(moved.modelSelection).toEqual({ instanceId: "chat", model: "chat-model" });
     expect(moved.computer).toBeUndefined();
     expect(await server.moveLines(starter.threadId)).toEqual([
-      `${starter.name} now uses Chat Only. ${REMOVED} Chat Only can't use a computer, so ${starter.name} no longer works ` +
-      "on its cloud computer. To use it again, choose a model that can use a computer.",
+      `${starter.name} now uses Chat Only. ${REMOVED} Chat Only can't use a desktop, so ${starter.name} no longer works ` +
+      "on its cloud desktop. To use it again, choose a model that can use a desktop.",
     ]);
     await server.stop();
   }, 120_000);

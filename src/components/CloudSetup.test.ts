@@ -140,7 +140,7 @@ it("when the person steps away from the welcome, it is the welcome's steps in sh
   expect(html).toContain("1 of 4 done");
   expect(html).toContain("Bring your stuff");
   expect(html).toContain("Bring your bots, chats and memory, or start fresh.");
-  for (const title of ["Create My Cloud", "Connect your AI", "Files and apps"]) expect(html).toContain(title);
+  for (const title of ["Create the Cloud", "Connect your AI", "Files and apps"]) expect(html).toContain(title);
   expect(html).not.toContain("Give it a first job");
   expect(statuses()).toEqual({ cloud: "done", move: "todo", engine: "todo", files: "todo" });
   button("Continue setup")!.props.onClick!();
@@ -189,7 +189,7 @@ it("on a Cloud set up before the welcome, starts one step in and leads with a fi
   expect(html).toContain("Set up MausBot Cloud");
   expect(html).toContain("1 of 4 done");
   expect(html).toContain("Give it a first job");
-  for (const title of ["Create My Cloud", "Connect your AI", "Bring your bots from this computer"]) expect(html).toContain(title);
+  for (const title of ["Create the Cloud", "Connect your AI", "Bring your bots from this computer"]) expect(html).toContain(title);
   expect(statuses()).toEqual({ cloud: "done", job: "todo", engine: "todo", move: "todo" });
   expect(bridge.state).toHaveBeenCalledOnce();
   expect(html).not.toMatch(/workspace|organis/i);
@@ -246,9 +246,9 @@ it("bringing bots opens the copy in place; Copy starts it, and Not now is kept a
   setUpBeforeWelcome();
   await mount();
   expect(render().html).not.toContain("Copy 4 bots and 37 chats");
-  expect(button("Copy to My Cloud")).toBeUndefined();
+  expect(button("Copy to the Cloud")).toBeUndefined();
   expand("Bring your bots from this computer");
-  button("Copy to My Cloud")!.props.onClick!();
+  button("Copy to the Cloud")!.props.onClick!();
   let { html } = render();
   expect(html).toContain("My Cloud is empty. Copy 4 bots and 37 chats here (about 1.5 GB).");
   expect(html).toContain("API keys and sign-ins stay on this computer");
@@ -262,7 +262,7 @@ it("bringing bots opens the copy in place; Copy starts it, and Not now is kept a
   f.values = []; f.effects = [];
   await mount();
   expand("Bring your bots from this computer");
-  button("Copy to My Cloud")!.props.onClick!();
+  button("Copy to the Cloud")!.props.onClick!();
   button("Not now")!.props.onClick!(); await flush();
   expect(bridge.dismiss).toHaveBeenCalledOnce();
   expect(api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen: [CLOUD_INTENT_ASKED, CLOUD_SETUP_MOVE_SKIPPED] } }) });

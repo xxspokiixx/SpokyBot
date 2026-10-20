@@ -26,7 +26,7 @@ describe("where a routine runs", () => {
     expect(routineRunsOn({ roomGoal: false, runOn: "cloud", cloudHome: false })).toEqual({
       label: "Cloud desktop", hint: "Runs the whole job on the bot's cloud desktop while OpenMausBot is open.",
     });
-    expect(routineRunsOn({ roomGoal: false, computer: "vm", cloudHome: false }).label).toBe("The bot's virtual machine");
+    expect(routineRunsOn({ roomGoal: false, computer: "vm", cloudHome: false }).label).toBe("The bot's private desktop");
     expect(routineRunsOn({ roomGoal: true, cloudHome: false }).label).toBe("This computer, with the whole group");
   });
 

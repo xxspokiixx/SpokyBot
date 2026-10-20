@@ -244,7 +244,7 @@ describe("the bot panel in Simple mode", () => {
     expect(hero.props.bot).toBe(bot);
     expect(hero.props.patch).toBe(patch);
     const tabs = [...rendered.html.matchAll(/data-panel-tab="(\w+)"[^>]*>([^<]+)<\/button>/g)].map((match) => [match[1], match[2]]);
-    expect(tabs).toEqual([["details", "Details"], ["library", "Library"], ["computer", "Computer"], ["settings", "Settings"]]);
+    expect(tabs).toEqual([["details", "Details"], ["library", "Library"], ["computer", "Screen"], ["settings", "Settings"]]);
     expect(shown(rendered)).toEqual({ tab: "details", page: undefined });
     expect(ofType(rendered, DetailsTab)!.props.bot).toBe(bot);
     expect(rendered.html).toContain('id="bot-settings-title"');
@@ -741,14 +741,14 @@ describe("the Computer tab", () => {
   const places = (rendered: { nodes: Node[] }) => rendered.nodes.filter((node) => node.props["data-place-choice"] !== undefined);
   const placeOf = (rendered: { nodes: Node[] }, value: string) => find(rendered, "data-place-choice", value);
 
-  it("offers Auto, this computer and a Cloud computer, with the rarer places under More places", () => {
+  it("offers Auto, this computer and a Cloud desktop, with the rarer places under More places", () => {
     const rendered = computer(makeBot());
     expect(rendered.html).toContain("Where Scout works");
     expect(rendered.html).toContain("More places");
     expect(rendered.html).toMatch(/data-place-choice="auto" aria-pressed="true"[^>]*>Auto</);
-    expect(rendered.html).toMatch(/data-place-choice="cloud" aria-pressed="false"[^>]*>Cloud computer</);
+    expect(rendered.html).toMatch(/data-place-choice="cloud" aria-pressed="false"[^>]*>Cloud desktop</);
     expect(places(rendered).map((node) => [node.props["data-place-choice"], node.props.children])).toEqual([
-      ["vm", "Local VM"], ["browser", "Browser only"], ["off", "Off"],
+      ["vm", "Private desktop"], ["browser", "Browser only"], ["off", "Off"],
     ]);
     expect(rendered.html).toContain("Picks the right place for each task");
   });
@@ -900,7 +900,7 @@ describe("the Settings tab", () => {
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const text of ["What Scout does", "Voice", "Notifications", "Team", "Chief of Staff", "Ask me before contacting other bots",
-      "MCP servers", "Tool selection", "Webhooks", "Always allowed", "Get it on your phone", "Phone and email", "Overview",
+      "Custom tools", "Tool selection", "Webhooks", "Always allowed", "Get it on your phone", "Phone and email", "Overview",
       "What Scout sees", "History", "Usage for all bots", "Pin to top", "Duplicate", "Copy conversation ID",
       "Mark all conversations as read", "Archive Scout", "Delete Scout"]) expect(html).toContain(text);
     expect(html).not.toContain("Who can see it");

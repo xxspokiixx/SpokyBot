@@ -274,22 +274,22 @@ describe("the line a moved conversation shows", () => {
 
   it("says the cloud computer is out of reach on Auto when the new engine can't use a computer", () => {
     expect(computerEngineMoveText({ scope: "bot", cloud: false, noComputer: "auto", askNow: false }, "Scout", "Mistral")).toBe(
-      "Scout now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a computer, " +
-      "so Scout no longer works on its cloud desktop. To use it again, choose a model that can use a computer.");
+      "Scout now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a desktop, " +
+      "so Scout no longer works on its cloud desktop. To use it again, choose a model that can use a desktop.");
     expect(computerEngineMoveText({ scope: "conversation", cloud: false, noComputer: "auto", askNow: true }, "Scout", "Mistral")).toBe(
-      "This conversation now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a computer, " +
-      "so it no longer works on Scout's cloud desktop. To use it again, choose a model that can use a computer. " +
+      "This conversation now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a desktop, " +
+      "so it no longer works on Scout's cloud desktop. To use it again, choose a model that can use a desktop. " +
       "Its permissions are now Ask.");
   });
 
   it("says turns stop, and the one setting to change, where the person chose Cloud", () => {
     expect(computerEngineMoveText({ scope: "bot", cloud: false, noComputer: "works-on", askNow: false }, "Scout", "Mistral")).toBe(
-      "Scout now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a computer, " +
-      "so Scout can't reply on Mistral while its Works on is Cloud desktop. Choose a model that can use a computer, or set Works on to Auto.");
+      "Scout now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a desktop, " +
+      "so Scout can't reply on Mistral while its Works on is Cloud desktop. Choose a model that can use a desktop, or set Works on to Auto.");
     expect(computerEngineMoveText({ scope: "conversation", cloud: false, noComputer: "pin", askNow: false }, "Scout", "Mistral")).toBe(
-      "This conversation now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a computer, " +
+      "This conversation now uses Mistral. The Computer choice in the model list was removed. Mistral can't use a desktop, " +
       "so Scout can't reply here while this conversation is pinned to its cloud desktop. " +
-      "Choose a model that can use a computer, or clear this conversation's place in the composer.");
+      "Choose a model that can use a desktop, or clear this conversation's place in the composer.");
   });
 
   it("tells the bot's open conversation on its own engine about the bot, not about itself", () => {
