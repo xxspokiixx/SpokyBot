@@ -516,7 +516,8 @@ export function threadRowsAfter(threadId: string, after: number, afterId: string
     .all(threadId, from, limit + 1) as Array<{ at: number; id: string; json: string }>;
   // A page holds at most `limit` rows and, past its first row, at most `maxBytes` of them.
   let kept = 0, bytes = 0;
-  while (kept < Math.min(found.length, limit) && (kept === 0 || bytes + found[kept]!.json.length <= maxBytes)) bytes += found[kept++]!.json.length;
+  const size = (row: { json: string }) => Buffer.byteLength(row.json, "utf8");
+  while (kept < Math.min(found.length, limit) && (kept === 0 || bytes + size(found[kept]!) <= maxBytes)) bytes += size(found[kept++]!);
   const more = found.length > kept;
   found.length = kept;
   let previous = from ? (database.prepare("SELECT id FROM messages WHERE thread_id = ? AND rowid <= ? ORDER BY rowid DESC LIMIT 1").get(threadId, from) as { id: string } | undefined)?.id ?? null : null;

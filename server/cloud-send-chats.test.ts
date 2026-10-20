@@ -42,6 +42,11 @@ describe("this computer's chats, by row", () => {
     expect(fitted).toMatchObject({ id: huge.id, role: "user", kind: "text" });
     expect(fitted.text).toMatch(/^y+\n\n\[Shortened: this message was too long to copy to My Cloud\.\]$/u);
     expect(fittedRow(lines[0]!)).toBe(lines[0]);
+    // Sizes are UTF-8 bytes: a row of three-byte characters under the limit in characters is still shortened.
+    const wide = say(store, bot.threadId, "語".repeat(CHAT_ROW_MAX / 2), 100);
+    expect(Buffer.byteLength(JSON.stringify(fittedRow(wide)), "utf8")).toBeLessThan(CHAT_ROW_MAX);
+    const wideRows = threadRowsAfter(bot.threadId, 0, null, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES).rows;
+    expect(Buffer.byteLength(JSON.stringify(wideRows.slice(1)), "utf8")).toBeLessThanOrEqual(CHAT_PAGE_BYTES);
   });
 
   it("starts a conversation over when the row it stopped at is gone, since that row's number can be given out again", () => {

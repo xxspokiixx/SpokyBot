@@ -355,7 +355,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         const page = await localJson(`/api/cloud-send/chats/rows?thread=${head.threadId}&after=${cursor?.after ?? 0}&id=${encodeURIComponent(cursor?.id ?? "")}`);
         if (!record(page) || !Array.isArray(page.rows)) break;
         if (page.rows.length) {
-          const size = JSON.stringify(page.rows).length;
+          const size = Buffer.byteLength(JSON.stringify(page.rows), "utf8");
           if (bytes + size > CHATS_BATCH_BYTES || batch.length >= CHATS_BATCH_PAGES) await flush();
           batch.push({ bot: head.bot, threadId: head.threadId, task: record(page.task) ? page.task : null, rows: page.rows, leaf: typeof page.leaf === "string" ? page.leaf : null,
             sent: Boolean(record(start)) && !page.restarted, last: page.last, lastId: page.lastId,
