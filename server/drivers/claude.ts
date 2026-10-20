@@ -1970,14 +1970,20 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (version !== cliHelpVersion) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
-      if (config.requireApiKey) {
-        if (!input.environment.ANTHROPIC_API_KEY) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };
-        return { state: "available", version, authenticated: true, account: { method: "api-key" }, ...(update ? { update } : {}), ...(warning ? { warning } : {}), billing: "metered" };
+      if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };
+      let auth: typeof lastAuth = { authenticated: true };
+      if (!config.requireApiKey) {
+        const probed = await claudeAuthStatus(config.cli, env);
+        auth = probed.authenticated === undefined ? lastAuth : (lastAuth = probed);
       }
-      const probed = await claudeAuthStatus(config.cli, env);
-      const auth = probed.authenticated === undefined ? lastAuth : (lastAuth = probed);
-      // Turns run on the CLI's own login, so its reported cost is what the call would bill.
-      return { state: "available", version, ...auth, ...(update ? { update } : {}), ...(warning ? { warning } : {}), billing: "subscription" };
+      // `claude -p` runs on an ANTHROPIC_API_KEY in its environment ahead of any login, billed per token (2.1.303).
+      const onApiKey = Boolean(env.ANTHROPIC_API_KEY) || auth.account?.method === "api-key";
+      return {
+        state: "available", version, ...auth,
+        ...(onApiKey ? { account: { ...auth.account, method: "api-key" as const } } : {}),
+        ...(update ? { update } : {}), ...(warning ? { warning } : {}),
+        billing: onApiKey ? "metered" : "subscription",
+      };
     };
 
     /** One-shot call, prompt on stdin (approval summaries can hold secrets), no tools or MCP servers. */
