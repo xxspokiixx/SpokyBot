@@ -66,6 +66,7 @@ export function SettingsTab({ bot, derived, slackUrl, query, onQuery, onOpen, on
   const advanced = useAdvancedMode();
   const [phoneAppOpen, setPhoneAppOpen] = useState(false);
   const { patch, canCoordinate, sectionName } = derived;
+  const displaySectionName = sectionName === "General" ? t("botAccess.teams.general") : sectionName;
   const visibilityShown = !window.ogb && ownerOrAdmin === true;
   const webhooks = state.webhooks.filter((webhook) => webhook.botId === bot.id).length;
   const alwaysAllowed = bot.alwaysAllow?.length ?? 0;
@@ -104,13 +105,13 @@ export function SettingsTab({ bot, derived, slackUrl, query, onQuery, onOpen, on
       )),
     ] },
     { label: t("botPanel.card.teamwork"), anchor: "teamwork", rows: [
-      page("team", Users, undefined, sectionName),
+      page("team", Users, undefined, displaySectionName),
       inline("chief", `${t("sidebar.bot.chiefOfStaff")} chief of staff`, (
         <SwitchRow
           key="chief"
           data-panel-row="chief"
           title={t("sidebar.bot.chiefOfStaff")}
-          hint={t("botPanel.chiefHint", { team: sectionName })}
+          hint={t("botPanel.chiefHint", { team: displaySectionName })}
           color={bot.color}
           checked={Boolean(bot.chiefOfStaff)}
           disabled={!bot.chiefOfStaff && !canCoordinate}

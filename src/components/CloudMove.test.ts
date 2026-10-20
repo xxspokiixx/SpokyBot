@@ -10,7 +10,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
 const dispatch = vi.hoisted(() => vi.fn());
-vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch, state: { bots: [] } }) }));
 import { broughtView, CloudHomeNote, CloudMoveImport, CloudMoveSettings, CloudMoveSuggestion, leftBehindToShare, moveNextSteps, moveView } from "./CloudMove";
 import { OpenFilesButton } from "./OpenFilesButton";
 
@@ -60,6 +60,8 @@ it("Settings → MausBot Cloud: what comes and its size, that sign-ins stay here
   expect(html).toContain("Copy this computer's bots and chats");
   expect(html).toContain("from this computer to My Cloud. This computer keeps its own copy.");
   expect(html).toContain("About 1.5 GB: 4 bots, 37 chats, 1 rooms.");
+  // What lives where is said once, by This computer and My Cloud above this card.
+  expect(html).not.toContain("live on each side");
   expect(html).toContain("API keys and sign-ins stay on this computer. On My Cloud you sign in to Claude or ChatGPT");
   expect(html).not.toContain("replaces them");
   button(settings(), "Copy to My Cloud")!.props.onClick!(); await flush();

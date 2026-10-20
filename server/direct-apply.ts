@@ -2,7 +2,7 @@
 // every level, with an Undo notice where undoing means something: OpenMausBot adds no card of its own on top of the level
 // the person chose. The one exception is a Cloud home turn its owner did not drive (a guest's, or one a webhook started):
 // that turn runs at Ask and nothing in it may reach the owner's turns, so its changes wait for the owner.
-// Routine requests keep their own rule below (directApply) until Triggers v2 replaces the routine tools.
+// Trigger (routine) changes apply in every turn, a guest's included, where they run confined; directApply only names why.
 
 /** Why a change applied without a person: the conversation's Full access, any other level, or (routines only) the bot's
  * own routine. Also the decision log's source. */
@@ -19,11 +19,8 @@ export function appliesNow(args: { fullAccess: boolean; ownerMustConfirm: boolea
   return args.fullAccess ? "full-access" : "level";
 }
 
-/** Routine requests only: a bot applying its own routines directly keeps at most this many
- * enabled; past it, a create or resume shows today's card instead. */
-export const SELF_ROUTINE_CAP = 20;
-
-/** Routine requests only: Full access applies everything; otherwise a bot's own routine applies and another bot's keeps its card. */
+/** Trigger (routine) requests only: why a change applied, for the decision log. Every trigger change applies since
+ * Triggers v2; this no longer decides whether a card waits. */
 export function directApply(args: {
   fullAccess: boolean;
   botId: string;

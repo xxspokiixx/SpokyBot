@@ -2,7 +2,8 @@ import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-
 import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudSetupStep, CloudTrial, CloudTrialState } from "../../electron/cloud-home.mjs";
 import { activeLocale, t } from "@/lib/i18n";
 
-const PLAN_LABEL: Record<string, string> = { personal: "Personal", pro: "Pro", max: "Max" };
+const PLAN_LABEL: Record<string, string> = { starter: "Starter", personal: "Personal", pro: "Pro", max: "Max" };
+const ABOVE_PERSONAL: ReadonlySet<string> = new Set(["pro", "max"]);
 export function cloudPlanLabel(tier?: string): string {
   return tier === undefined ? "Pro" : Object.hasOwn(PLAN_LABEL, tier) ? PLAN_LABEL[tier] : "Cloud";
 }
@@ -40,6 +41,16 @@ export function cloudPlanView(account: CloudAccountState | null | undefined): Cl
 
 export function buyOfferAllowed(view: CloudPlanView): boolean {
   return view.kind === "signed-out" || view.kind === "free";
+}
+
+/** What the X research card offers someone whose server has no plan credential yet: a paying desktop is still connecting
+ * it; signed out (or a sign-in that ended), sign in; verified free, get a plan. Nothing where the state is unknown or
+ * someone may already pay, and without a desktop bridge. */
+export function xResearchAction(view: CloudPlanView | null): "connecting" | "sign-in" | "get-pro" | null {
+  if (!view) return null;
+  if (view.kind === "paid") return "connecting";
+  if (view.kind === "signed-out" || view.kind === "reauth") return "sign-in";
+  return view.kind === "free" ? "get-pro" : null;
 }
 
 export function cloudPlanLine(view: CloudPlanView): string | null {
@@ -86,7 +97,7 @@ export function cloudTrialView(trial: CloudTrial, credit?: CloudCredit, { person
       body: trial.amount === null ? t("cloudTrial.activeNoPrice", { plan, date: shortDate(trial.chargeAt ?? trial.endsAt) })
         : t("cloudTrial.active", { plan, price: usd(trial.amount / 100), date: shortDate(trial.chargeAt ?? trial.endsAt) }),
       ...(credit?.state === "active" ? { credit: t("cloudTrial.credit", { granted: usd(credit.grantedUsd), left: usd(credit.remainingUsd) }) } : {}),
-      ...(trial.tier && trial.tier !== "personal" && Object.hasOwn(PLAN_LABEL, trial.tier) ? { switchPlan: personal
+      ...(trial.tier && ABOVE_PERSONAL.has(trial.tier) ? { switchPlan: personal
         ? t("cloudTrial.preferPersonal", { price: usd(personal / 100), date: ends })
         : t("cloudTrial.preferPersonalNoPrice", { date: ends }) } : {}),
       action: { kind: "manage", label: t("cloudTrial.manage") },
@@ -158,8 +169,9 @@ export function planDetails(plan: CloudOfferPlan): { main: string; machine: stri
   return { main: `${computers} · ${storage}`, machine: t("cloudAdd.machine", { cpus: a.cpus, memory, hours: a.computerHours }) };
 }
 
-/** One plan card: its name, the Admin's price, what differs (cloud computers at once) and three allowance chips. */
-export interface CloudPlanRow { tier: string; name: string; price: string; popular: boolean; line: string | null; chips: string[] }
+/** One plan card: its name, the Admin's price, what differs (cloud computers at once), whether it sleeps when idle and
+ * three allowance chips. */
+export interface CloudPlanRow { tier: string; name: string; price: string; popular: boolean; line: string | null; sleeps: string | null; chips: string[] }
 export function planRow(plan: CloudOfferPlan, recommended?: string): CloudPlanRow {
   const a = plan.allowances;
   const chips = a ? [
@@ -168,7 +180,8 @@ export function planRow(plan: CloudOfferPlan, recommended?: string): CloudPlanRo
     t("cloudBuy.chip.hours", { hours: a.computerHours }),
   ] : [];
   return { tier: plan.tier, name: offerPlanLabel(plan), price: usd(plan.amount / 100), popular: plan.tier === recommended,
-    line: a ? (a.computers === 1 ? t("cloudAdd.oneComputer") : t("cloudAdd.computers", { count: a.computers })) : null, chips };
+    line: a ? (a.computers === 1 ? t("cloudAdd.oneComputer") : t("cloudAdd.computers", { count: a.computers })) : null,
+    sleeps: a?.sleeps ? t("cloudBuy.sleeps") : null, chips };
 }
 
 const DAY_MS = 86_400_000;
@@ -237,7 +250,14 @@ export type CloudSignInPhase =
   | { step: "done"; intent: boolean };
 
 /** What the setup screen says about the plan that started: its tier, the running trial and the trial's credit. */
-export interface CloudStarted { tier: string | null; trial: CloudTrial | null; credit: CloudCredit | null }
+/** `sleeps`: the Admin says this Cloud's plan sleeps when idle. */
+export interface CloudStarted { tier: string | null; trial: CloudTrial | null; credit: CloudCredit | null; sleeps?: true }
+
+/** The Cloud being set up sleeps when idle: its own power, or the plan the offer showed for it says so. */
+export function startedSleeps(started: CloudStarted, offer: CloudOffer | null | undefined): boolean {
+  const tier = started.tier ?? started.trial?.tier;
+  return started.sleeps === true || Boolean(tier && offer?.plans.find(plan => plan.tier === tier)?.allowances?.sleeps);
+}
 
 export type CloudAddView =
   | { kind: "checking" }
@@ -263,7 +283,8 @@ export function cloudAddView(account: CloudAccountState | null | undefined, offe
   }): CloudAddView {
   const view = cloudPlanView(account);
   const started = (): CloudStarted => ({ tier: account?.entitlement?.tier ?? account?.purchase?.tier ?? null,
-    trial: account?.trial && trialRunning(account.trial) ? account.trial : null, credit: account?.credit?.state === "active" ? account.credit : null });
+    trial: account?.trial && trialRunning(account.trial) ? account.trial : null, credit: account?.credit?.state === "active" ? account.credit : null,
+    ...(account?.machine?.power?.sleeps ? { sleeps: true as const } : {}) });
   // Asked to sign in (Settings, the card, Already have a plan?): that needs no offer, and is the way back for a saved
   // sign-in that could not be read and was removed.
   if (signIn && !error && (view.kind === "signed-out" || view.kind === "removed")) return { kind: "sign-in", phase: signIn };

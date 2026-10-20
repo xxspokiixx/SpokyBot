@@ -37,6 +37,8 @@ import type {
 import { movesThreadToTop } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
+import { initialGreetingMessage } from "./initial-greeting.ts";
+import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -431,18 +433,14 @@ function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }
   return Boolean(task.unread) && !task.routineRunId;
 }
 
-interface ThreadState {
-  messages: Message[];
-  activeLeafId: string | null;
-}
-
 export class Store {
   bots: BotRecord[] = [];
   groups: GroupRecord[] = [];
-  private threads = new Map<string, ThreadState>();
+  private threads = new ThreadCache(() => this.busyThreadIds());
   private defaultSelection: () => ModelSelection;
   private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
   private driverKindOf: (instanceId: string) => string | undefined;
+  private initialLanguage: string | (() => string);
   private listeners = new Set<(change: StoreChange) => void>();
   private registeringInitialSections = true;
   /** Clearing this slot must not clear a concurrently running task's activity. */
@@ -453,10 +451,12 @@ export class Store {
     completeNewBotSelection: (selection: ModelSelection) => ModelSelection = (selection) => selection,
     /** Unknown counts as another driver, so Full and Custom fall back to Ask. */
     driverKindOf: (instanceId: string) => string | undefined = () => undefined,
+    initialLanguage: string | (() => string) = Intl.DateTimeFormat().resolvedOptions().locale,
   ) {
     this.defaultSelection = defaultSelection;
     this.completeNewBotSelection = completeNewBotSelection;
     this.driverKindOf = driverKindOf;
+    this.initialLanguage = initialLanguage;
     mkdirSync(DATA_DIR, { recursive: true });
     for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     // An unreadable bots.json must never read as "every member was deleted".
@@ -1260,23 +1260,19 @@ export class Store {
   }
 
   private thread(threadId: string): ThreadState {
-    const t = this.threads.get(threadId);
-    if (t) return t;
-    return this.cacheThread(threadId, mdb.readThread(threadId, messagesFile(threadId)));
+    return this.threads.get(threadId) ?? this.threads.load(threadId, mdb.readThread(threadId, messagesFile(threadId)));
   }
 
-  private cacheThread(threadId: string, rows: mdb.ThreadRows): ThreadState {
-    const { messages, activeLeafId: storedLeaf } = rows;
-    let activeLeafId = storedLeaf;
-    let prev: string | null = null;
-    for (const m of messages) {
-      if (m.parentId === undefined) m.parentId = prev;
-      prev = m.id;
+  private busyThreadIds(): Set<string> {
+    const busy = new Set<string>();
+    for (const bot of this.bots) {
+      if (bot.busy) busy.add(bot.threadId);
+      for (const task of bot.tasks ?? []) if (task.busy) busy.add(task.threadId);
     }
-    if (!activeLeafId) activeLeafId = messages.at(-1)?.id ?? null;
-    const t = { messages, activeLeafId };
-    this.threads.set(threadId, t);
-    return t;
+    for (const group of this.groups) {
+      if (group.busyBotId) for (const threadId of [group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]) busy.add(threadId);
+    }
+    return busy;
   }
 
   messagesFor(threadId: string): Message[] {
@@ -1290,7 +1286,7 @@ export class Store {
       const tail = mdb.readThreadTail(threadId, messagesFile(threadId), limit);
       const legacyRows = tail.hasMore !== undefined && tail.messages.some((m) => m.parentId === undefined);
       if (tail.hasMore !== true || legacyRows) {
-        state = this.cacheThread(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
+        state = this.threads.load(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
       } else {
         return {
           messages: tail.messages,
@@ -1483,7 +1479,7 @@ export class Store {
       >
     > = {},
     opts: {
-      seedMessages?: boolean;
+      seedMessages?: boolean; id?: string; threadId?: string;
     } = {},
   ): BotRecord {
     const toolScope = parseToolScope(profile.toolScope);
@@ -1492,8 +1488,8 @@ export class Store {
     const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
     const section = sectionKey(profile.section);
     const bot: BotRecord = {
-      id: newId(),
-      threadId: newId(),
+      id: opts.id ?? newId(),
+      threadId: opts.threadId ?? newId(),
       name,
       title: profile.title ?? "",
       description: profile.description ?? "",
@@ -1534,11 +1530,7 @@ export class Store {
     // Before its transcript: clients need the bot/thread mapping to place either message.
     this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
-      this.appendMessage(bot.threadId, {
-        role: "bot",
-        kind: "text",
-        text: `Hi, I'm ${name}. What would you like me to do?`,
-      });
+      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage));
     }
     return bot;
   }

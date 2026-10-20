@@ -30,7 +30,7 @@ import { deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKe
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
-import type { LocalVmIdleTimer } from "../local-vm-idle.ts";
+import type { ComputerIdleTimer } from "../computer-idle.ts";
 import { PROVIDER_KEY_KINDS } from "../provider-key-check.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { SharedComputerControl } from "../shared-computer-control.ts";
@@ -72,7 +72,7 @@ export interface ConfigRouteDeps {
   lendingEnabled(): boolean;
   providerConfigs(): InstanceConfigMap;
   localVmIdleMs(): number;
-  localVmIdles: { values(): Iterable<Pick<LocalVmIdleTimer, "setIdleMs">> };
+  localVmIdles: { values(): Iterable<Pick<ComputerIdleTimer, "setIdleMs">> };
   localVmActiveThreads: { readonly size: number };
   localVmLifecycleBusy: { readonly size: number };
   localVmImageBusy: Pick<BusyFlag, "get">;
@@ -511,6 +511,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
+          if (persisted.treg?.key !== undefined) persisted.treg.key = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);

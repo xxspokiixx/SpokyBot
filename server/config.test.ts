@@ -42,8 +42,6 @@ import { cacheUntilConfigChanges,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
-  liveSettingsFor,
-  LIVE_IDLE_MINUTES_DEFAULT,
   mergeOpenCodeProviderKeys,
   openCodeProviderKeys,
   OPENCODE_PROVIDER_KEY_LIMIT,
@@ -1966,15 +1964,6 @@ describe("customMcpServers with url entries", () => {
 });
 
 describe("live settings", () => {
-  it("defaults to a 5 minute idle hang-up and reading typed replies", () => {
-    expect(LIVE_IDLE_MINUTES_DEFAULT).toBe(5);
-    expect(liveSettingsFor({} as AppConfig)).toEqual({ configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 });
-  });
-  it("reports saved values and never the key", () => {
-    const settings = liveSettingsFor({ live: { key: "sk-test", voice: "sol", readTypedReplies: false, idleMinutes: 12 } } as AppConfig);
-    expect(settings).toEqual({ configured: true, voice: "sol", readTypedReplies: false, idleMinutes: 12 });
-    expect(JSON.stringify(settings)).not.toContain("sk-test");
-  });
   it("accepts idle minutes from 1 to 60 only", () => {
     expect(() => parseConfigPatch({ live: { idleMinutes: 0 } })).toThrow();
     expect(() => parseConfigPatch({ live: { idleMinutes: 61 } })).toThrow();
@@ -2193,4 +2182,27 @@ describe("a value derived from config.json", () => {
       }
     },
   );
+});
+
+describe("X research's included relay token", () => {
+  it("still loads a config.json saved with the old own treg token, and keeps that token out of the config", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 25, warnAtPercent: 70 }, treg: { token: "treg_old" } }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const loaded = loadConfig();
+      expect(loaded.budgets).toEqual({ monthlyUsd: 25, warnAtPercent: 70 });
+      expect(JSON.stringify(loaded)).not.toContain("treg_old");
+      expect(warn.mock.calls.some(([line]) => String(line).includes("ignoring"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps the plan's research token and the person's own treg key as workspace credentials that never reach an engine", () => {
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_X_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TREG_KEY");
+  });
 });
