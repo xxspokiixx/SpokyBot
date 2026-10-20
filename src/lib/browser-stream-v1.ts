@@ -72,6 +72,7 @@ export function liveAction(input: PreviewStreamInput): Body | Body[] | null {
     case "tabClose": return { type: "tab-close", tabId: input.tabId };
     case "tabNew": return input.url ? { type: "tab-new", url: input.url } : { type: "tab-new" };
     case "restart": return { type: "restart" };
+    case "dialog": return { type: "dialog", accept: input.accept, ...(input.promptText !== undefined ? { promptText: input.promptText.slice(0, 4_096) } : {}) };
     default: return null;
   }
 }
@@ -154,10 +155,13 @@ export function createLiveInputQueue(send: (body: Body) => Promise<unknown>, onE
   };
 }
 
-/** v1's {held, owned, controlling} in v2's words. */
-export function liveControl(value: { held?: unknown; owned?: unknown; controlling?: unknown }, generation: number): PreviewStreamControl {
+/** v1's {held, owned, controlling, dialog} in v2's words. */
+export function liveControl(value: { held?: unknown; owned?: unknown; controlling?: unknown; dialog?: unknown }, generation: number): PreviewStreamControl {
   const controller = value.owned === true ? (value.controlling === true ? "you" : "agent") : value.held === true ? "another-viewer" : "unclaimed";
-  return { canOperate: true, controller, generation, dialog: null };
+  const dialog = value.dialog as { type?: unknown; message?: unknown; defaultValue?: unknown } | null | undefined;
+  const shown = dialog && typeof dialog.type === "string" && typeof dialog.message === "string" && typeof dialog.defaultValue === "string"
+    ? { type: dialog.type, message: dialog.message, defaultValue: dialog.defaultValue } : null;
+  return { canOperate: true, controller, generation, dialog: shown };
 }
 
 /**
@@ -207,8 +211,14 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     return true;
   };
   const postTo = (body: Body, sentTo: string) => post(body, sentTo).catch((cause: unknown) => { viewGone(cause, sentTo); throw cause; });
-  const queue = createLiveInputQueue((body) => (viewerId ? postTo(body, viewerId) : Promise.reject(new Error("Open the browser connection first."))), (cause) => {
-    events.onMessage?.({ type: "notice", message: cause instanceof Error ? cause.message : String(cause) });
+  const notice = (message: string) => events.onMessage?.({ type: "notice", message });
+  /** A reply's notice: input the page did not take, which needs no reconnect. */
+  const noticed = (reply: unknown) => {
+    const message = (reply as { notice?: unknown } | null)?.notice;
+    if (typeof message === "string" && message) notice(message);
+  };
+  const queue = createLiveInputQueue((body) => (viewerId ? postTo(body, viewerId).then(noticed) : Promise.reject(new Error("Open the browser connection first."))), (cause) => {
+    notice(cause instanceof Error ? cause.message : String(cause));
   }, () => inputBatch);
 
   const connect = () => {
@@ -258,8 +268,8 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     });
     listen("control", (data) => {
       const next = liveControl(data, generation);
-      if (control && next.controller === control.controller) return;
-      control = liveControl(data, ++generation);
+      if (control && next.controller === control.controller && JSON.stringify(next.dialog) === JSON.stringify(control.dialog)) return;
+      control = next.controller === control?.controller ? next : liveControl(data, ++generation);
       events.onControl?.(control);
     });
     live.addEventListener("error", (event) => {
@@ -301,6 +311,11 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     if (!["takeControl", "resize", "restart"].includes(input.type) && control.controller !== "you") return false;
     const action = liveAction(input);
     if (!action) return input.type === "resize";
+    // The page's question holds the input queued behind it, so its answer goes straight to the server.
+    if (input.type === "dialog" && !Array.isArray(action)) {
+      void postTo(action, viewerId).catch((cause: unknown) => notice(cause instanceof Error ? cause.message : String(cause)));
+      return true;
+    }
     for (const body of Array.isArray(action) ? action : [action]) queue.enqueue(body);
     return true;
   };

@@ -2,8 +2,10 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { promisify } from "node:util";
-import { BROWSER_VIEWPORT_ARGS, browserRuntimeEnv, ownsBrowserViewport, type BrowserRuntime } from "./browser-runtime.ts";
+import { BROWSER_VIEWPORT_ARGS, attachesToChrome, browserRuntimeEnv, ownsBrowserViewport, type BrowserRuntime } from "./browser-runtime.ts";
 import { closeBrowserSession } from "./browser-engine.ts";
+import { DialogWatch, localDevToolsUrl } from "./browser-dialogs.ts";
+import type { Cdp, CdpListeners } from "./browser-sites.ts";
 import { relay } from "./browser-relay.ts";
 import { BROWSER_HELD_ELSEWHERE } from "../shared/browser-held.ts";
 
@@ -19,6 +21,7 @@ const BUSY_LIMIT_MS = 10 * 60_000;
 // agent-browser's native press resolver supplies the virtual key codes and Enter/Tab text its raw input_keyboard relay omits.
 const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 const RESTART_NEEDED = "A browser action was interrupted. Choose Restart browser… in the browser menu before continuing.";
+const restartedNote = (keepsSignIns: boolean) => `The page stopped responding, so the browser was restarted. ${keepsSignIns ? "Your sign-ins are kept; open" : "It is a temporary browser, so its sign-ins are gone; open"} the page again.`;
 const INPUT_RELAY = { timeoutMs: 30_000, maxBytes: 65_536 };
 /** Frames a view may have on its way without acknowledging them: over a slow link one acknowledgement round trip per frame
  * held a Cloud's panel to a few frames a second. */
@@ -56,6 +59,15 @@ export class BrowserBusyError extends BrowserLiveError {
 export class BrowserSlowActionError extends BrowserLiveError {
   readonly settled = true;
   constructor() { super("The browser was slow to take that. Check the page before you repeat it.", 409); this.name = "BrowserSlowActionError"; }
+}
+
+/** The browser answered that it did not take an input, which therefore had no effect. */
+class BrowserInputRefusedError extends Error {}
+const INPUT_REFUSED = "The page did not take some of your input. Check the page, then try again.";
+
+/** An input, or the release of a key or button, the browser never confirmed: its state in the page is unknown. */
+class BrowserInputUnconfirmedError extends BrowserLiveError {
+  constructor() { super("The browser could not confirm this input. Choose Restart browser… in the browser menu before continuing.", 503); this.name = "BrowserInputUnconfirmedError"; }
 }
 
 /** execFile's own timeout killed a command that had not exited (not a missing binary, a failure, an abort or an overflow). */
@@ -150,7 +162,8 @@ export function browserRestartRefusal(interrupted: boolean, busyBots: ReadonlyAr
 }
 
 type Action = { type: "take" | "release" | "restart" } | { type: "ack"; seq: number }
-  | { type: "command"; args: string[] } | { type: "input"; message: ObjectValue } | { type: "inputs"; messages: ObjectValue[] };
+  | { type: "command"; args: string[] } | { type: "input"; message: ObjectValue } | { type: "inputs"; messages: ObjectValue[] }
+  | { type: "dialog"; accept: boolean; promptText?: string };
 
 /** A move the next one replaces changes nothing the page keeps. */
 function withoutReplacedMoves(messages: ObjectValue[]): ObjectValue[] {
@@ -167,6 +180,10 @@ export function parseBrowserLiveAction(value: unknown): Action {
   if (!body) throw invalid();
   if (body.type === "take" || body.type === "release" || body.type === "restart") return { type: body.type };
   if (body.type === "ack" && integer(body.seq, 1, Number.MAX_SAFE_INTEGER)) return { type: "ack", seq: body.seq };
+  if (body.type === "dialog") {
+    if (typeof body.accept !== "boolean" || (body.promptText !== undefined && !text(body.promptText, 4096))) throw invalid();
+    return { type: "dialog", accept: body.accept, ...(body.promptText === undefined ? {} : { promptText: body.promptText }) };
+  }
   if (body.type === "input_batch") {
     if (!Array.isArray(body.events) || !body.events.length || body.events.length > INPUT_BATCH_LIMIT) throw invalid();
     const messages = body.events.map((event: unknown) => {
@@ -260,13 +277,24 @@ interface Parked {
   done: boolean;
 }
 
+/** How a view reaches its browser's DevTools, to watch the page's own dialogs: without it, they are not watched. */
+export interface BrowserLiveDevTools {
+  /** The browser's DevTools address, from its daemon's stream port. */
+  url(port: number): Promise<unknown>;
+  connect?: (url: string, timeoutMs: number, listeners: CdpListeners) => Promise<Cdp>;
+}
+
 export class BrowserLive {
   private readonly runtime: BrowserRuntime;
   private readonly viewers = new Map<string, Viewer>();
   private readonly parked = new Map<string, Parked>();
   private readonly sessionResets = new Map<string, Promise<boolean>>();
-  constructor({ runtime }: { runtime: BrowserRuntime }) {
+  /** Each watched browser's page dialogs, and the views that watch them. */
+  private readonly dialogs = new Map<string, { watch: DialogWatch; views: Set<string> }>();
+  private readonly devTools?: BrowserLiveDevTools;
+  constructor({ runtime, devTools }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools }) {
     this.runtime = runtime;
+    this.devTools = devTools;
     runtime.onIdleClose((session) => this.asleep(session));
   }
 
@@ -309,7 +337,10 @@ export class BrowserLive {
         const pending = viewer.pendingFrame; viewer.pendingFrame = undefined;
         this.frame(viewer, pending);
       }
-      this.send(viewer, { type: "control", held, owned: this.runtime.heldBy(session) === viewer.id, controlling: this.runtime.canControl(session, viewer.id) });
+      const owned = this.runtime.heldBy(session) === viewer.id;
+      // Like its frames, the page's question is withheld from views while another view holds the browser.
+      const dialog = !held || owned ? this.dialogs.get(session)?.watch.dialog ?? null : null;
+      this.send(viewer, { type: "control", held, owned, controlling: this.runtime.canControl(session, viewer.id), ...(dialog ? { dialog } : {}) });
       if (!held && viewer.hiddenFrame) {
         const frame = viewer.hiddenFrame; viewer.hiddenFrame = undefined;
         this.frame(viewer, frame);
@@ -369,6 +400,7 @@ export class BrowserLive {
     clearTimeout(viewer.heartbeat); clearTimeout(viewer.drainTimer);
     viewer.socket?.close();
     viewer.hiddenFrame = undefined; viewer.pendingFrame = undefined; viewer.unacked.clear();
+    this.unwatchDialogs(viewer);
     if (!viewer.restarting) {
       if (dropped && this.holds(viewer)) this.park(viewer);
       else {
@@ -410,14 +442,14 @@ export class BrowserLive {
     const port = viewer.port;
     if (!port || !this.runtime.canControl(viewer.session, viewer.id)) { this.abandonPressedInput(viewer); return; }
     await this.runtime.withHumanAction(viewer.session, viewer.id, async () => {
-      const unconfirmed = () => new BrowserLiveError("The browser could not confirm this input. Restart the browser before continuing.", 503);
+      const unconfirmed = () => new BrowserInputUnconfirmedError();
       for (const [code, key] of viewer.pressedKeys) {
-        if (!await this.sendInput(port, { action: "input_keyboard", type: "keyUp", key, ...(code === key ? {} : { code }) }, true)) throw unconfirmed();
+        if (!await this.sendInput(viewer, port, { action: "input_keyboard", type: "keyUp", key, ...(code === key ? {} : { code }) }, true)) throw unconfirmed();
         viewer.pressedKeys.delete(code);
       }
       for (const button of viewer.pressedButtons) {
         const release = { action: "input_mouse", type: "mouseReleased", ...viewer.pointer, button, clickCount: 1, modifiers: 0, deltaX: 0, deltaY: 0 };
-        if (!await this.sendInput(port, release, true)) throw unconfirmed();
+        if (!await this.sendInput(viewer, port, release, true)) throw unconfirmed();
         viewer.pressedButtons.delete(button);
       }
     }).catch(() => undefined);
@@ -574,24 +606,85 @@ export class BrowserLive {
     if (type === "input_mouse") viewer.pointer = { x: fields.x as number, y: fields.y as number };
     if (type === "input_mouse" && eventType === "mousePressed") viewer.pressedButtons.add(String(fields.button));
     const releases = (command.action === "input_keyboard" && eventType === "keyUp") || (type === "input_mouse" && eventType === "mouseReleased");
-    if (!await this.sendInput(viewer.port, command, releases)) {
-      throw new BrowserLiveError("The browser could not confirm this input. Restart the browser before continuing.", 503);
+    let confirmed: boolean;
+    try { confirmed = await this.sendInput(viewer, viewer.port, command, releases); }
+    catch (error) {
+      if (error instanceof BrowserInputRefusedError) {
+        if (command.action === "input_keyboard" && eventType === "keyDown") viewer.pressedKeys.delete(key);
+        if (type === "input_mouse" && eventType === "mousePressed") viewer.pressedButtons.delete(String(fields.button));
+      }
+      throw error;
     }
+    if (!confirmed) throw new BrowserInputUnconfirmedError();
     if (command.action === "press" || (command.action === "input_keyboard" && eventType === "keyUp")) viewer.pressedKeys.delete(key);
     if (type === "input_mouse" && eventType === "mouseReleased") viewer.pressedButtons.delete(String(fields.button));
   }
 
   /** The relay awaits the daemon's CDP reply; a WS send is only an enqueue and cannot serve as the hand-back barrier. A single CDP
-   * event the daemon refused had no effect, and a release may repeat, so each is sent once more; a press is two events. */
-  private async sendInput(port: number, command: ObjectValue, releases: boolean): Promise<boolean> {
+   * event the daemon refused had no effect, and a release may repeat, so each is sent once more; a press is two events. Chrome
+   * holds an input that opened the page's own question until it is answered, then delivers it. */
+  private async sendInput(viewer: Viewer, port: number, command: ObjectValue, releases: boolean): Promise<boolean> {
     const send = () => relay(port, command, INPUT_RELAY).then((answer) => answer.success);
+    const watch = this.dialogs.get(viewer.session)?.watch;
+    const before = watch?.opened ?? 0;
+    const asked = () => !!watch && (watch.dialog !== null || watch.opened !== before);
+    const answered = async () => { await watch!.settled(viewer.abort.signal); return !viewer.abort.signal.aborted; };
     try {
-      return await send() || (command.action !== "press" && await send());
+      if (await send()) return true;
+      if (asked()) return await answered();
+      if (command.action !== "press" && await send()) return true;
     } catch {
+      if (asked()) return await answered();
       if (!await this.ended(port)) return false;
       if (!releases) throw new BrowserSlowActionError();
       return send().catch(() => false);
     }
+    // A press is a key-down and key-up in one command: refused, its key may still be down.
+    if (releases || command.action === "press") return false;
+    throw new BrowserInputRefusedError();
+  }
+
+  private async watchDialogs(viewer: Viewer): Promise<void> {
+    if (!this.devTools || !viewer.port || attachesToChrome(viewer.spec.env ?? {})) return;
+    const devTools = this.devTools;
+    const port = viewer.port;
+    const join = () => {
+      const entry = this.dialogs.get(viewer.session);
+      if (!entry || entry.watch.closed) return false;
+      if (this.current(viewer)) entry.views.add(viewer.id);
+      return true;
+    };
+    if (join()) return;
+    const url = localDevToolsUrl(await devTools.url(port).catch(() => null));
+    if (join() || !url || !this.current(viewer)) return;
+    const session = viewer.session;
+    const watch = new DialogWatch(() => this.control(session));
+    this.dialogs.set(session, { watch, views: new Set([viewer.id]) });
+    await watch.start(url, devTools.connect).catch(() => watch.close());
+  }
+
+  private unwatchDialogs(viewer: Viewer): void {
+    const entry = this.dialogs.get(viewer.session);
+    if (!entry?.views.delete(viewer.id) || entry.views.size) return;
+    entry.watch.close();
+    this.dialogs.delete(viewer.session);
+  }
+
+  /** The person's browser stopped answering an input: restarted for them, on the same profile, and every view reconnects. */
+  private async restartUnresponsive(viewer: Viewer): Promise<boolean> {
+    if (viewer.restarting) return false;
+    viewer.restarting = true;
+    try {
+      await this.runtime.restart(viewer.session, viewer.id, async () => {
+        const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
+        if (!await closeBrowserSession(viewer.spec.command, env)) throw new Error("browser close failed");
+      });
+      const note = { type: "error", retryable: true, message: restartedNote(viewer.spec.env?.AGENT_BROWSER_RESTORE_SAVE !== "never") };
+      for (const other of this.viewers.values()) if (other.session === viewer.session) this.send(other, note);
+      this.closeForSession(viewer.session);
+      return true;
+    } catch { return false; }
+    finally { viewer.restarting = false; if (viewer.closed) this.runtime.release(viewer.session, viewer.id); this.control(viewer.session); }
   }
 
   /** The daemon runs one command per session at a time, so an answer to a read sent after an unanswered command proves it ended. */
@@ -617,6 +710,8 @@ export class BrowserLive {
       if (parked && viewer.resume === parked.viewer.id) await this.claim(viewer, parked);
       if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
       viewer.port = port;
+      await this.watchDialogs(viewer);
+      if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
       const socket = new WebSocket(`ws://127.0.0.1:${port}/?pacing=ack&maxFps=15`);
       viewer.socket = socket;
       this.startEvents(viewer);
@@ -718,19 +813,35 @@ export class BrowserLive {
       finally { this.control(viewer.session); }
     }
     if (!this.runtime.canControl(viewer.session, viewer.id)) throw this.refusal(viewer, "Browser control changed. Try again.");
+    if (action.type === "dialog") {
+      const watch = this.dialogs.get(viewer.session)?.watch;
+      if (!watch?.dialog) throw new BrowserLiveError("The page's question is no longer open.", 409);
+      if (!await watch.answer(action.accept, action.promptText)) throw new BrowserLiveError("The page did not take that answer. Try again.", 503);
+      return { ok: true };
+    }
     if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429);
     viewer.pendingActions += 1;
+    let refused = false;
     try {
       await this.runtime.withHumanAction(viewer.session, viewer.id, async () => {
         if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409);
-        if (action.type === "input") await this.input(viewer, action.message);
-        else if (action.type === "inputs") { for (const message of action.messages) await this.input(viewer, message); }
+        const take = async (message: ObjectValue) => {
+          try { await this.input(viewer, message); }
+          catch (error) { if (!(error instanceof BrowserInputRefusedError)) throw error; refused = true; }
+        };
+        if (action.type === "input") await take(action.message);
+        else if (action.type === "inputs") { for (const message of action.messages) await take(message); }
         else if (action.type === "command") await this.command(viewer, action.args, COMMAND_TIMEOUT_MS, true).catch(async (error: unknown) => {
           throw error instanceof BrowserBusyError && viewer.port && await this.ended(viewer.port) ? new BrowserSlowActionError() : error;
         });
       });
-      return { ok: true };
-    } catch (error) { throw error instanceof BrowserLiveError ? error : this.refusal(viewer, "Browser control changed. Try again."); }
+      return refused ? { ok: true, notice: INPUT_REFUSED } : { ok: true };
+    } catch (error) {
+      if (error instanceof BrowserInputUnconfirmedError && viewer.pendingActions === 1 && await this.restartUnresponsive(viewer)) {
+        throw new BrowserLiveError(restartedNote(viewer.spec.env?.AGENT_BROWSER_RESTORE_SAVE !== "never"), 503);
+      }
+      throw error instanceof BrowserLiveError ? error : this.refusal(viewer, "Browser control changed. Try again.");
+    }
     finally {
       viewer.pendingActions -= 1;
       if (viewer.closed && viewer.pendingActions === 0) viewer.idle?.();
