@@ -38,8 +38,10 @@ it("completes a cadence-replayed turn with a result frame and a clean exit", asy
     let stderr = "";
     child.stdout!.on("data", (chunk) => { out += chunk; });
     child.stderr!.on("data", (chunk) => { stderr += chunk; });
+    const closed = new Promise<number | null>((resolve) => child!.once("close", (code) => resolve(code)));
     child.stdin!.end(JSON.stringify({ type: "user", message: { role: "user", content: "omb cadence probe" } }) + "\n");
     await expect.poll(() => child!.exitCode, { timeout: 10_000 }).not.toBeNull();
+    await closed;
     expect(child.exitCode, stderr).toBe(0);
     expect(stderr).not.toContain("Error:");
     const frames: Array<{ type: unknown; event?: unknown }> = out.split("\n").filter(Boolean).map((line) => JSON.parse(line));
