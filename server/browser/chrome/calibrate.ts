@@ -34,7 +34,7 @@ export function identityFile(dataDir: string, executablePath: string): string {
 }
 
 /** A blank page on an ephemeral loopback port: loopback is a secure context, where navigator.userAgentData exists. */
-async function loopbackPage(): Promise<{ url: string; close: () => void }> {
+export async function loopbackPage(): Promise<{ url: string; close: () => void }> {
   const server = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     response.end("<!doctype html><title>calibration</title>");
@@ -45,12 +45,13 @@ async function loopbackPage(): Promise<{ url: string; close: () => void }> {
 }
 
 /**
- * Chrome for Testing 155 on Windows cancels a fresh profile's first navigation now and then: net::ERR_ABORTED a moment
- * after the request starts, with nothing else navigating (35 of 110 starts on GitHub's Windows runner; none of 30 for
- * its Google Chrome, none of 30 for the same build on macOS). The second request went through every time, and the page
- * is our own with no side effects, so it is opened once more.
+ * Chrome for Testing 155 on Windows now and then cancels the first network navigation of a profile that never navigated:
+ * net::ERR_ABORTED a moment after the request starts, with nothing else navigating. On GitHub's Windows runner that was
+ * 35 of 150 fresh starts, none of 90 second starts, none for its Google Chrome or the same build on macOS, and a data:
+ * page first did not prevent it. A second request went through every time, so a page of our own, which has no side
+ * effects, is opened once more.
  */
-export async function openCalibrationPage(tab: CdpPage, url: string, timeoutMs: number): Promise<void> {
+export async function openOwnPage(tab: CdpPage, url: string, timeoutMs: number): Promise<void> {
   try {
     await tab.navigate(url, { timeoutMs });
   } catch (error) {
@@ -97,7 +98,7 @@ export async function calibrateIdentity(options: CalibrateOptions): Promise<Cali
   try {
     const browser = await CdpBrowser.connect(chrome.transport, { identity: null, headless: true, permissions: false });
     const tab = await browser.waitForPage(() => true, options.timeoutMs ?? 15_000);
-    await openCalibrationPage(tab, page.url, options.timeoutMs ?? 15_000);
+    await openOwnPage(tab, page.url, options.timeoutMs ?? 15_000);
     const probe = await tab.evaluate(IDENTITY_PROBE) as IdentityProbe;
     const identity = headedIdentity({ userAgent: probe.userAgent, hints: probe.high });
     await browser.close();

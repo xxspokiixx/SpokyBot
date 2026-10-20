@@ -1,10 +1,11 @@
 // Where a profile's browser runs. Everything above the CDP connection (tools, control, viewers) is the same on every
 // backend; a backend only decides how that connection is made and what the browser it reaches can do.
 import { CdpBrowser, type BrowserOptions } from "./cdp/browser.ts";
+import { loopbackPage, openOwnPage } from "./chrome/calibrate.ts";
 import type { Identity } from "./cdp/identity.ts";
 import { webSocketTransport } from "./cdp/transport.ts";
 import { fitPage, pageLimit, type BrowserMode, type HostKind, type ScreenSpec } from "./chrome/flags.ts";
-import { launchChrome, type ChromeProcess } from "./chrome/launch.ts";
+import { launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
 import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chrome/processes.ts";
 import { languageList } from "./chrome/wrapper.ts";
 import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
@@ -73,6 +74,8 @@ export interface LocalBackendOptions {
   acceptLanguages?: () => string;
   handshakeTimeoutMs?: number;
   log?: (line: string) => void;
+  /** Starts Chrome; tests pass a fake. */
+  launch?: (options: LaunchOptions) => Promise<ChromeProcess>;
 }
 
 const LOCAL_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: true, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: true };
@@ -104,7 +107,7 @@ export class LocalBackend implements Backend {
     const screen = headless ? await options.screen() : null;
     const limit = screen ? pageLimit(screen, platform) : null;
     const viewport = fitPage(request.viewport, limit);
-    const chrome: ChromeProcess = await launchChrome({
+    const chrome: ChromeProcess = await (options.launch ?? launchChrome)({
       executablePath: binary.path,
       userDataDir: dir,
       mode: request.mode,
@@ -138,6 +141,7 @@ export class LocalBackend implements Backend {
         handleAuth: true,
       };
       const browser = await CdpBrowser.connect(chrome.transport, browserOptions);
+      if (created && platform === "win32") await takeFirstNavigation(browser).catch(() => undefined);
       return {
         browser,
         pageLimit: limit,
@@ -153,6 +157,28 @@ export class LocalBackend implements Backend {
       await chrome.kill();
       throw error;
     }
+  }
+}
+
+/** A page of our own, in a tab of its own, takes the cancel `openOwnPage` describes before a bot's first page can: none of
+ * 60 fresh starts on GitHub's Windows runner cancelled the bot's first navigation after it. */
+async function takeFirstNavigation(browser: CdpBrowser): Promise<void> {
+  const first = browser.activePage;
+  const page = await loopbackPage();
+  try {
+    const tab = await browser.newPage();
+    const gone = new Promise<void>((resolve) => {
+      const off = browser.onPageClosed((closed) => { if (closed === tab) { off(); resolve(); } });
+    });
+    try {
+      await openOwnPage(tab, page.url, 15_000);
+    } finally {
+      await browser.closePage(tab);
+      await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    }
+  } finally {
+    page.close();
+    if (first && !first.closed) await browser.bringToFront(first);
   }
 }
 
