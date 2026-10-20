@@ -328,3 +328,33 @@ describe("a server's result size limit", () => {
     expect(parsed).toMatchObject({ ok: true, servers: { motion: { resultBudget: 40_000 } } });
   });
 });
+
+describe("a server of another computer's", () => {
+  const MAC = { environmentId: "env-desktop-1", label: "Milind's MacBook" };
+
+  it("keeps the computer it runs on, which an edit keeps unless it says null, and lists it", () => {
+    const stored = parseStoredMcpServer("notes", { command: "/usr/local/bin/notes-mcp", runsOn: MAC });
+    expect(stored).toEqual({ ok: true, server: { command: "/usr/local/bin/notes-mcp", args: [], env: {}, enabled: true, runsOn: MAC } });
+    if (!stored.ok) throw new Error("unreachable");
+    expect(parseMcpServerMutation("notes", { command: "/usr/local/bin/notes-mcp", args: ["--quiet"] }, stored.server)).toMatchObject({ ok: true, server: { runsOn: MAC } });
+    expect(parseMcpServerMutation("notes", { command: "notes-mcp", runsOn: null }, stored.server)).toMatchObject({ ok: true, server: expect.not.objectContaining({ runsOn: expect.anything() }) });
+    expect(parseMcpServerMutation("docs", { type: "http", url: "http://127.0.0.1:9/mcp", runsOn: MAC })).toMatchObject({ ok: true, server: { runsOn: MAC } });
+    expect(parseStoredMcpServer("notes", { command: "notes-mcp", runsOn: { environmentId: "../x", label: "Mac" } }).ok).toBe(false);
+    expect(parseStoredMcpServer("notes", { command: "notes-mcp", runsOn: { environmentId: "e", label: "Mac", extra: 1 } }).ok).toBe(false);
+    expect(listMcpServers({ notes: { command: "notes-mcp", runsOn: MAC }, docs: { type: "http", url: "http://127.0.0.1:9/mcp", runsOn: MAC } }))
+      .toEqual([expect.objectContaining({ name: "notes", runsOn: MAC }), expect.objectContaining({ name: "docs", runsOn: MAC })]);
+  });
+
+  it("is never set by a bot or a pasted config block", () => {
+    const added = addDisabledMcpServer({}, { name: "notes", command: "notes-mcp", runsOn: MAC });
+    expect(added).toMatchObject({ ok: true, server: expect.not.objectContaining({ runsOn: expect.anything() }) });
+    const pasted = parseMcpServersImport(JSON.stringify({ mcpServers: { notes: { command: "notes-mcp", runsOn: MAC } } }));
+    expect(pasted).toMatchObject({ ok: true, servers: { notes: expect.not.objectContaining({ runsOn: expect.anything() }) } });
+  });
+
+  it("is never started here", async () => {
+    const { customMcpServers } = await import("./config.ts");
+    const servers = customMcpServers({ mcpServers: { notes: { command: "notes-mcp", runsOn: MAC }, dodo: { command: "npx", args: ["dodo"] } } } as never);
+    expect(Object.keys(servers)).toEqual(["dodo"]);
+  });
+});

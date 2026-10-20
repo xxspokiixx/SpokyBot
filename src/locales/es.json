@@ -4216,6 +4216,7 @@
   "mcp.probe.connected": "Conectado",
   "mcp.auth.signedIn": "Sesión iniciada",
   "mcp.auth.needsSignIn": "Requiere iniciar sesión",
+  "mcp.runsOn": "Se ejecuta en {computer}, así que no se inicia aquí.",
   "mcp.auth.signIn": "Iniciar sesión",
   "mcp.auth.signOut": "Cerrar sesión",
   "mcp.auth.cancel": "Cancelar",

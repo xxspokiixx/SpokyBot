@@ -3,7 +3,7 @@ import type { AppConfig } from "../config.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin, withMcpSignIn, type McpOAuthManager } from "../mcp-oauth.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
-import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer } from "../mcp-registry.ts";
+import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn } from "../mcp-registry.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { BusyFlag } from "./config.ts";
@@ -23,6 +23,9 @@ export interface McpServerRouteDeps {
   savedCustomDomain(): string | null;
 }
 
+/** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
+const runsElsewhere = (runsOn: McpRunsOn) => `This server runs on ${runsOn.label}, so it isn't started here.`;
+
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   const {
     cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
@@ -41,6 +44,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (raw === undefined) return json(res, 404, { error: "MCP server not found." });
       const parsed = parseStoredMcpServer(mcpTest[1], raw);
       if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      if (parsed.server.runsOn) return json(res, 409, { error: runsElsewhere(parsed.server.runsOn) });
       if (mcpProbesInFlight >= MAX_CONCURRENT_MCP_PROBES) {
         return json(res, 429, { error: "Two MCP connection tests are already running." });
       }
@@ -73,6 +77,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       const parsed = raw === undefined ? null : parseStoredMcpServer(name!, raw);
       if (!parsed?.ok) return json(res, 404, { error: "MCP server not found." });
       if (!isRemoteMcpServer(parsed.server)) return json(res, 400, { error: "Only servers reached by URL can be signed in to." });
+      if (parsed.server.runsOn) return json(res, 409, { error: runsElsewhere(parsed.server.runsOn) });
       const url = parsed.server.url;
       if (action === "sign-out" && method === "POST" && !flowId) {
         await mcpOAuth.signOut(name!, url);

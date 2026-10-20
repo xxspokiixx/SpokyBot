@@ -4726,6 +4726,7 @@
   "mcp.probe.connected": "Connected",
   "mcp.auth.signedIn": "Signed in",
   "mcp.auth.needsSignIn": "Needs sign-in",
+  "mcp.runsOn": "Runs on {computer}, so it isn't started here.",
   "mcp.auth.signIn": "Sign in",
   "mcp.auth.signOut": "Sign out",
   "mcp.auth.cancel": "Cancel",

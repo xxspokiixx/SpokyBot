@@ -4439,6 +4439,7 @@
   "mcp.probe.connected": "接続しました",
   "mcp.auth.signedIn": "サインイン済み",
   "mcp.auth.needsSignIn": "サインインが必要",
+  "mcp.runsOn": "{computer}で動くため、ここでは起動しません。",
   "mcp.auth.signIn": "サインイン",
   "mcp.auth.signOut": "サインアウト",
   "mcp.auth.cancel": "キャンセル",
