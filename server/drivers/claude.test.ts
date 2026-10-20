@@ -1282,6 +1282,61 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.systemPrompt).toContain("Tagged: @Testy");
   });
 
+  it("relaunches a resumed session with the same prompt file and the current volatile half in its first message", async () => {
+    await create();
+    const dump = join(scratch, "relaunch.json");
+    const prompts = join(scratch, "relaunch-prompts.jsonl");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+    const halves = (memory: string) => ({ system: `You are Testy.\n\nYour memory:\n${memory}`, systemStable: "You are Testy.", systemVolatile: `Your memory:\n${memory}` });
+
+    await instance.adapter.sendTurn({ threadId: "t-relaunch", text: "one", ...halves("likes tea") });
+    await recorder.until((e) => e.type === "turn.completed");
+    const first = JSON.parse(readFileSync(dump, "utf8"));
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+
+    recorder.events.length = 0;
+    // A new spawn contract closes the warm process; the next one resumes the conversation.
+    await instance.adapter.sendTurn({ threadId: "t-relaunch", text: "two", effort: "high", resumeCursor: announced, ...halves("likes tea, dislikes cloud kitchens") });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const second = JSON.parse(readFileSync(dump, "utf8"));
+    expect(second.pid).not.toBe(first.pid);
+    expect(second.argv[second.argv.indexOf("--resume") + 1]).toBe(announced);
+    expect(first.systemPromptFile).toBe("You are Testy.");
+    expect(second.systemPromptFile).toBe(first.systemPromptFile);
+    const sent = readFileSync(prompts, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(sent[1].message.content).toMatch(/^<system-reminder>\nThis part of your instructions changes from turn to turn/);
+    expect(sent[1].message.content).toContain("likes tea, dislikes cloud kitchens");
+    expect(sent[1].message.content.endsWith("two")).toBe(true);
+  });
+
+  it("re-sends an unchanged volatile half after the CLI compacts the conversation", async () => {
+    await create();
+    const prompts = join(scratch, "compact-prompts.jsonl");
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+    process.env.FAKE_CLAUDE_COMPACT = "1";
+    try {
+      for (const text of ["one", "two", "three"]) {
+        recorder.events.length = 0;
+        await instance.adapter.sendTurn({
+          threadId: "t-compact", text,
+          system: "You are Testy.\n\nYour memory:\nlikes tea", systemStable: "You are Testy.", systemVolatile: "Your memory:\nlikes tea",
+        });
+        await recorder.until((e) => e.type === "turn.completed");
+      }
+    } finally {
+      delete process.env.FAKE_CLAUDE_COMPACT;
+    }
+    const sent = readFileSync(prompts, "utf8").trim().split("\n").map((line) => JSON.parse(line).message.content);
+    expect(sent).toHaveLength(3);
+    expect(sent[0]).toContain("likes tea");
+    // The second turn compacts; until then the conversation still holds the launch copy.
+    expect(sent[1]).toBe("two");
+    expect(sent[2]).toContain("likes tea");
+    expect(sent[2].endsWith("three")).toBe(true);
+  });
+
   it("still relaunches when the stable half of the prompt changes", async () => {
     await create();
     const dump = join(scratch, "stable.json");

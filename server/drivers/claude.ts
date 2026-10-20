@@ -909,7 +909,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       mcpConfigPath: string | null;
       systemPromptPath: string | null;
       argsKey: string;
-      volatile: string;
+      /** the volatile half the conversation holds; null once a compaction may have summarized it away */
+      volatile: string | null;
       sessionId: string | null;
       /** `init` arrived; before it the CLI took nothing, so a resume retry is safe */
       sawInit: boolean;
@@ -1268,9 +1269,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }, turnId, broker: live.broker });
         emit({ ...base(threadId, turnId), type: "turn.started" });
         const volatile = turn.systemVolatile ?? "";
-        const message = volatile === live.volatile && !turn.mentionTurn
+        const message = !turn.mentionTurn && (volatile === live.volatile || (live.volatile === null && !volatile.trim()))
           ? promptMsg
-          : claudeUserMessage(withVolatileNote(turn.text, volatile), turn.images);
+          : claudeUserMessage(withVolatileNote(turn.text, volatile, live.volatile === null), turn.images);
         live.volatile = volatile;
         const running = live.turn;
         // A warm process can exit just as the next turn is written; its close resumes this turn.
@@ -1539,6 +1540,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(retry.rebuilt ? { rebuilt: true } : {}) });
               if (retry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
               retry.rebuilt = false;
+            } else if (o.subtype === "compact_boundary") {
+              session.volatile = null; // only the system prompt survives a compaction: the next turn re-sends the volatile half
             } else if (o.subtype === "thinking_tokens") {
               emit({ ...base(threadId, currentTurnId()), type: "item.updated", itemType: "reasoning", tokens: o.estimated_tokens });
             }
