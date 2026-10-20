@@ -56,7 +56,7 @@ async function cloud(options: { sleeping?: () => boolean; sleep?: AbortControlle
     expect(response.status, await response.clone().text()).toBe(200);
     return id;
   };
-  return { base, links, computers, live, register, sleep };
+  return { base, links, computers, lent, live, register, sleep };
 }
 
 /** A web server standing in for the public internet, reached only through the computer's own connect. */
@@ -126,6 +126,25 @@ describe("the device link", () => {
     expect(await home.links.route(PERSON)!.open({ host: "router.example.net", port: 443 })).toEqual({ refused: "home-network" });
     expect(await home.links.route(PERSON)!.open({ host: "www.instagram.example", port: 25 })).toEqual({ refused: "port" });
     expect(home.computers.known(PERSON)[0]!.scopes.internet).toBe(true);
+  });
+
+  it("marks the computer used when a page opens through it, at most once a minute, and not for a refusal", async () => {
+    const home = await cloud();
+    const site = await website();
+    const id = await home.register();
+    link(home.base, id, site.port);
+    await until(() => home.links.route(PERSON) !== null, "the link to be offered as a way out");
+    let marks = 0;
+    const used = home.lent.used.bind(home.lent);
+    home.lent.used = (person, computer) => { marks++; used(person, computer); };
+    expect(await home.links.route(PERSON)!.open({ host: "router.example.net", port: 443 })).toEqual({ refused: "home-network" });
+    expect(marks, "a refusal is not a use").toBe(0);
+    expect(home.computers.known(PERSON)[0]!.lastUsedAt).toBeNull();
+    await fetchThrough(home.links.route(PERSON)!, "www.instagram.example");
+    expect(marks).toBe(1);
+    expect(home.computers.known(PERSON)[0]!.lastUsedAt).toEqual(expect.any(Number));
+    await fetchThrough(home.links.route(PERSON)!, "www.youtube.example");
+    expect(marks, "a page's many connections are one use a minute").toBe(1);
   });
 
   it("opens only for the session and secret that registered the computer, and never for one that does not lend its connection", async () => {

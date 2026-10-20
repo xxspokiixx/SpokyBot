@@ -174,6 +174,20 @@ test("each side sends only what the other has room for: a reader that stops neve
   near.destroy();
 });
 
+test("a sender never goes past the room it has, whatever size the page's writes come in", async (t) => {
+  const slow = slowSocket();
+  const { cloud, device } = linked({ accept: async () => ({ socket: slow }) });
+  t.after(() => { cloud.close(); device.close(); });
+  const opened = await cloud.open({ host: "example.test", port: 443 });
+  // Writes of an odd size, so the window runs out in the middle of one.
+  const page = new Duplex({ read() {}, write(_chunk, _encoding, done) { done(); } });
+  opened.join(page, []);
+  for (let sent = 0; sent < 2 * STREAM_WINDOW; sent += 7000) page.push(Buffer.alloc(7000, 2));
+  await delay(300);
+  assert.equal(slow.taken, STREAM_WINDOW, "exactly a window went across, not a byte more");
+  page.destroy();
+});
+
 test("a peer that ignores flow control loses the stream, and a credit for bytes never sent does too", async (t) => {
   const port = await echoServer(t);
   const sent = [];

@@ -121,6 +121,20 @@ it("while lent, says so, shows this computer's activity, and removing the last c
   expect(bridge.save).not.toHaveBeenCalled();
 });
 
+it("a site opened through this computer's internet connection is activity too, and counts as My Cloud using it", async () => {
+  await ready({ ...lent, state: { ...lent.state!, internet: true }, activity: [
+    { at: Date.now() - 60_000, server: "My Cloud", origin: "https://c.test", action: "internet", detail: "www.instagram.com", ok: true },
+    { at: Date.now() - 2 * 60_000, server: "My Cloud", origin: "https://c.test", action: "internet", detail: "router.home.test", ok: false, error: "home-network" },
+  ] });
+  more();
+  const html = render().html;
+  expect(html).toContain("Opened a website");
+  expect(html).toContain("www.instagram.com");
+  expect(html).toContain("Opened a website · refused");
+  expect(html).not.toContain("Other request");
+  expect(html).toContain("My Cloud last used this computer 1 minute ago.");
+});
+
 it("turning the switch off stops lending at once", async () => {
   await ready(lent);
   toggle().props.onClick!();

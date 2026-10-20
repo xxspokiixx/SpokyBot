@@ -19,9 +19,10 @@ export function linkUrl(origin, path) {
 
 /**
  * Runs one link connection until it ends, then resolves with its close code and reason; `signal` aborting ends it.
- * `egress`: what the computer's own check takes (resolve, connect, interfaces), for tests.
+ * `egress`: what the computer's own check takes (resolve, connect, interfaces), for tests. `onStream(target, result)`:
+ * each connection My Cloud asked for, with what this computer's check answered.
  */
-export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, openMs = OPEN_MS, onOpen = () => {}, traffic = () => {}, now = Date.now }) {
+export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, openMs = OPEN_MS, onOpen = () => {}, onStream = () => {}, traffic = () => {}, now = Date.now }) {
   return new Promise((done) => {
     let seenAs = null;
     let heard = now();
@@ -32,7 +33,11 @@ export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocke
     ws.binaryType = "arraybuffer";
     const send = (frame) => { try { ws.send(frame); } catch {} };
     const deviceEgress = createDeviceEgress({ ...egress, seenAs: () => seenAs });
-    const mux = createLinkMux({ send, accept: (target) => deviceEgress.open(target), traffic });
+    const mux = createLinkMux({ send, traffic, accept: async (target) => {
+      const result = await deviceEgress.open(target);
+      try { onStream(target, result); } catch {}
+      return result;
+    } });
     let pinger = null;
     const opening = setTimeout(() => finish(1006, "timeout"), openMs);
     opening.unref?.();

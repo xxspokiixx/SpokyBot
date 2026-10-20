@@ -31,7 +31,8 @@ export function lentComputerLines(computer: KnownLentComputer, now = Date.now())
     : t("lending.cloudSide.offline", { when: localizedRelativeTime(computer.lastSeenAt, activeLocale(), now) });
   const what = [
     ...(computer.scopes.internet ? [t("lending.cloudSide.internet")] : []),
-    ...(computer.scopes.folders ? [t("lending.cloudSide.folders", { count: String(computer.scopes.folders) })] : []),
+    ...(computer.scopes.folders === 1 ? [t("lending.cloudSide.folderOne")]
+      : computer.scopes.folders ? [t("lending.cloudSide.folders", { count: String(computer.scopes.folders) })] : []),
     ...(computer.scopes.screen ? [t("lending.cloudSide.screen")] : []),
     ...(computer.scopes.terminal ? [t("lending.cloudSide.terminal")] : []),
   ];

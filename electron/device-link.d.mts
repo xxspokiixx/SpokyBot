@@ -11,6 +11,7 @@ export declare function runDeviceLink(options: {
   silentMs?: number;
   openMs?: number;
   onOpen?: () => void;
+  onStream?: (target: { host: string; port: number }, result: Awaited<ReturnType<ReturnType<typeof createDeviceEgress>["open"]>>) => void;
   traffic?: () => void;
   now?: () => number;
 }): Promise<{ code: number; reason: string }>;

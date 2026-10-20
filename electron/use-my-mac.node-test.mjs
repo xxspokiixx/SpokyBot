@@ -75,7 +75,7 @@ async function fixture(t, { link = true, adminWord = null } = {}) {
     power, WebSocket: sockets.FakeSocket, linkHeaders: () => ({ cookie: "omb_session_fixture=token" }), onChange: (summary) => summaries.push(summary),
     egress: {
       interfaces: () => ({}),
-      resolve: async () => [{ address: "93.184.215.14", family: 4 }],
+      resolve: async (host) => [{ address: host.startsWith("lan.") ? "192.168.1.1" : "93.184.215.14", family: 4 }],
       connect: (options) => { connects.push(options); const socket = new Duplex({ read() {}, write(_chunk, _encoding, done) { done(); } }); setImmediate(() => socket.emit("connect")); return socket; },
     },
   });
@@ -152,6 +152,24 @@ test("the tray reads In use while My Cloud's browsing goes through this computer
   socket.deliver(frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.length));
   await until(() => summaries.at(-1)?.busy?.action === "internet", "In use");
   assert.equal(summaries.at(-1).busy.env, env.id);
+});
+
+test("each site opened through this computer is in its activity, refused ones too, once per site and outcome every 10 minutes", async (t) => {
+  const { sockets, sharing } = await fixture(t);
+  await sharing.saveCloud(env, { folders: [], screen: false, internet: true });
+  await until(() => sockets.open().length === 1, "the device link to open");
+  const socket = sockets.made[0];
+  let id = 0;
+  const answered = (n) => socket.sent.some((frame) => typeof frame === "string" && JSON.parse(frame).id === n && ["opened", "refused", "failed"].includes(JSON.parse(frame).t));
+  for (const host of ["www.instagram.com", "www.instagram.com", "lan.home.test", "lan.home.test", "www.youtube.com"]) {
+    const n = ++id;
+    socket.deliver(JSON.stringify({ t: "open", id: n, host, port: 443 }));
+    await until(() => answered(n), `an answer for ${host}`);
+  }
+  const browsed = sharing.activity(env.id, 30).filter((entry) => entry.action === "internet").reverse();
+  assert.deepEqual(browsed.map((entry) => [entry.detail, entry.ok, entry.error]),
+    [["www.instagram.com", true, undefined], ["lan.home.test", false, "home-network"], ["www.youtube.com", true, undefined]]);
+  assert.equal(browsed[0].origin, ORIGIN);
 });
 
 test("a lent folder deleted since is left out, and the rest, the internet connection with it, keeps working", async (t) => {

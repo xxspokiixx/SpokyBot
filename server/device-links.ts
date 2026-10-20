@@ -7,6 +7,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { createLinkMux, LINK_ASLEEP, LINK_ENDED, MAX_CHUNK, type LinkMux, type LinkOpened } from "../electron/device-link-protocol.mjs";
 
 const PING_MS = 10_000;
+/** A page opens many connections: the computer is marked used at most this often. */
+const USED_EVERY_MS = 60_000;
 
 /** A lent computer's internet connection, as one connection's way out. */
 export interface DeviceRoute { open(target: { host: string; port: number }): Promise<LinkOpened> }
@@ -18,9 +20,11 @@ export interface LinkedComputer {
   internet: boolean;
   /** The address My Cloud sees the computer connect from: its home's public address, which it never connects to. */
   seenAs: string | null;
+  /** A page opened through it: its "Last used" moves. */
+  used?: () => void;
 }
 
-interface Link { ws: WebSocket; mux: LinkMux; computer: LinkedComputer; since: number; heard: boolean; ping: NodeJS.Timeout }
+interface Link { ws: WebSocket; mux: LinkMux; computer: LinkedComputer; since: number; heard: boolean; ping: NodeJS.Timeout; usedAt: number }
 
 export class DeviceLinks {
   readonly #server = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_CHUNK + 4 });
@@ -40,7 +44,7 @@ export class DeviceLinks {
       if (power?.sleeping()) { ws.close(LINK_ASLEEP, "asleep"); return; }
       this.drop(computer.key, 1000);
       const mux = createLinkMux({ send: (frame) => { if (ws.readyState === ws.OPEN) ws.send(frame); } });
-      const link: Link = { ws, mux, computer: { ...computer, seenAs: computer.seenAs && isIP(computer.seenAs) ? computer.seenAs : null }, since: Date.now(), heard: true, ping: setInterval(() => {
+      const link: Link = { ws, mux, computer: { ...computer, seenAs: computer.seenAs && isIP(computer.seenAs) ? computer.seenAs : null }, since: Date.now(), heard: true, usedAt: 0, ping: setInterval(() => {
         if (!link.heard) { ws.terminate(); return; }
         link.heard = false;
         try { ws.ping(); } catch {}
@@ -76,7 +80,11 @@ export class DeviceLinks {
       if (!newest || link.since > newest.since) newest = link;
     }
     const chosen = newest;
-    return chosen ? { open: (target) => chosen.mux.open(target) } : null;
+    return chosen ? { open: async (target) => {
+      const opened = await chosen.mux.open(target);
+      if ("join" in opened && Date.now() - chosen.usedAt >= USED_EVERY_MS) { chosen.usedAt = Date.now(); chosen.computer.used?.(); }
+      return opened;
+    } } : null;
   }
 
   /** Lending from that computer ended or changed: its link ends with it. */

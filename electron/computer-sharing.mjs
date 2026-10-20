@@ -108,6 +108,9 @@ const RECONNECT_EVERY_MS = 15 * 60_000;
 const LINK_RETRY_MS = [2_000, 5_000, 15_000, 60_000];
 /** The link carried bytes this recently: the tray says the computer is in use. */
 const IN_USE_MS = 5_000;
+/** A site opened through this computer goes into its activity once per outcome in this long, so a page's many
+ * connections are one line. */
+const BROWSE_NOTE_MS = 10 * 60_000;
 
 /** Outbound HTTPS only: no local listening port, and pairing cookies and the connector secret stay in Electron. */
 /** `reconnect(origin)`: signs this app back in to the person's own Cloud when its session there has ended, so lending
@@ -138,6 +141,16 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       lending: environments().filter(env => records[env.id]?.cloud && records[env.id]?.enabled === true).map(env => env.id),
       busy: executing ?? (browsing ? { env: browsing, action: "internet" } : null),
     };
+  };
+  /** Each site My Cloud's browsers opened through this computer, or that its check refused, as activity. */
+  const noted = new Map();
+  const browsed = env => (target, result) => {
+    if (!result?.socket && !result?.refused) return;
+    const key = `${env.id}\n${target.host}\n${result.refused ?? "ok"}`;
+    if (now() - (noted.get(key) ?? -Infinity) < BROWSE_NOTE_MS) return;
+    if (noted.size >= 1000) for (const [old, at] of noted) if (now() - at >= BROWSE_NOTE_MS) noted.delete(old);
+    noted.set(key, now());
+    activity.record({ env, action: "internet", detail: String(target.host), ok: Boolean(result.socket), ...(result.refused ? { error: String(result.refused) } : {}) });
   };
   const traffic = id => () => {
     const was = inUse.get(id);
@@ -238,7 +251,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       let opened = false;
       const signIn = await Promise.resolve().then(() => linkHeaders(env)).catch(() => ({}));
       const ended = await runDeviceLink({
-        url: linkUrl(env.origin, linkPath(grant.id)), signal, WebSocket: linkSocket, egress, traffic: traffic(env.id),
+        url: linkUrl(env.origin, linkPath(grant.id)), signal, WebSocket: linkSocket, egress, traffic: traffic(env.id), onStream: browsed(env),
         headers: { ...signIn, origin: env.origin, ...BACKGROUND_HEADERS, "x-omb-computer-secret": grant.secret },
         onOpen: () => { opened = true; failures = 0; linked.add(env.id); changed(); },
       });

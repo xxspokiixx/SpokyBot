@@ -85,6 +85,7 @@ it("on the phone or in a browser, a computer that lends its internet connection 
   const computer = { id: "c", name: "Ash's MacBook", platform: "darwin" as const, online: true, busy: false, lent: true, lastSeenAt: Date.now(), lastUsedAt: null,
     scopes: { folders: 3, terminal: false, screen: false, internet: true } };
   expect(lentComputerLines(computer)).toEqual(["Online now", "Lends: internet connection, 3 folders", "Not used yet"]);
+  expect(lentComputerLines({ ...computer, scopes: { ...computer.scopes, folders: 1 } })).toContain("Lends: internet connection, 1 folder");
   const away = lentComputerLines({ ...computer, online: false, lastSeenAt: Date.now() - 5 * 60_000 });
   expect(away).toContain("While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own connection and may turn your bots away.");
   expect(lentComputerLines({ ...computer, online: false, scopes: { ...computer.scopes, internet: false } }).join(" ")).not.toContain("My Cloud's own connection");

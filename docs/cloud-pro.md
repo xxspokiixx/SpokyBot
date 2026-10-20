@@ -632,7 +632,10 @@ The switch can be turned on before the first **Open My Cloud**; lending
 starts once this Mac is signed in to the Cloud. Lending runs while the app is
 open: quitting it (or the Mac sleeping) only pauses lending, and it resumes
 when the app runs again with the switch still on. Below the choices, **Activity
-on this computer** lists every request the Cloud made, refused ones included.
+on this computer** lists every request the Cloud made, refused ones included,
+and each website opened through this computer's internet connection
+(**Opened a website** with its name, once per site and outcome every 10
+minutes, so a page's many connections are one line).
 
 The switch always says where lending stands, whichever way it got there:
 
@@ -650,7 +653,7 @@ The switch always says where lending stands, whichever way it got there:
   included, and when it cannot run (that panel follows the maintainer flag) it
   says so. Stopping or choosing here replaces it.
 - **Last used.** "My Cloud last used this computer 3 minutes ago", from the
-  activity log.
+  activity log, so a website opened through it counts too.
 - **Reconnects by itself.** Lending already resumed after sleep, a lost
   network or a Cloud restart. When this app's session on the Cloud has ended
   (unused for a month, or signed out there), main now signs the window back in
@@ -790,8 +793,8 @@ On the Mac (the authority; `electron/computer-sharing.mjs`,
   cursor image cannot be read from a path. Any other argument is refused, and
   the tool list the Cloud sees shows only what is accepted.
 - **Activity log**: `lending-activity.jsonl` in the app's data folder, owner
-  only: time, action, folder and relative path or tool name, and whether it
-  ran. Never contents, output or typed text. The app only ever appends to it
+  only: time, action, folder and relative path, tool name or website name, and
+  whether it ran (a refused website keeps the computer's reason). Never contents, output or typed text. The app only ever appends to it
   (never through a link); a full file of 500 entries is moved to
   `lending-activity.jsonl.1` intact. No folder or screen argument reaches it.
 
@@ -804,7 +807,8 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   for each computer lent to it, by name, its platform (sent by desktops once
   the Cloud advertises `lendingDetails`), how many folders it lends and whether
   apps and screen or a terminal, when it was last online (written at most once
-  a minute) and last used, and whether its owner turned lending off. Never a
+  a minute) and last used (a page opened through its internet connection
+  counts, at most once a minute), and whether its owner turned lending off. Never a
   folder name or path, a secret or anything a job carried; kept 90 days.
 - **What bots are told.** `list_shared_computers` lists online computers with
   their `device` ("PC", "Mac" or "computer"). When none is online it adds
