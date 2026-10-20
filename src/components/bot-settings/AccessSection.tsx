@@ -613,6 +613,7 @@ export function VpsAliasField({ bot }: { bot: Bot }) {
 
 export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"] }) {
   const { state } = useStore();
+  const { draft } = useBotEditor();
   if (!cloudPreferenceShown(bot, state.config)) return null;
   return (
     <>
@@ -626,7 +627,8 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
         value={bot.cloudBackend ?? "box"}
         onChange={(backend) => patch({ cloudBackend: backend })}
       />
-      {bot.cloudBackend === "vps" && <VpsAliasField bot={bot} />}
+      {/* A saved bot only: a new bot starts on the default server, and new-bot defaults never name one. */}
+      {bot.cloudBackend === "vps" && !draft && <VpsAliasField bot={bot} />}
       {!bot.computer && bot.cloudBackend === "vps" && (
         <div className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-inset px-3 py-2.5">
           <div className="min-w-0">

@@ -58,15 +58,15 @@ function fixture() {
     routines: () => null,
   } as unknown as BotPatchRouteDeps;
   const handler = createBotPatchRoutes(deps);
-  const patch = async (botId: string, body: Record<string, unknown>) => {
+  const patch = async (botId: string, body: Record<string, unknown>, as: { auth?: RequestAuth; headers?: Record<string, string> } = {}) => {
     const sent: Array<{ status: number; body: any }> = [];
     const out = await handler({
-      req: { headers: {} } as IncomingMessage,
+      req: { headers: as.headers ?? {} } as unknown as IncomingMessage,
       res: {} as ServerResponse,
       url: new URL(`http://localhost/api/bots/${botId}`),
       path: `/api/bots/${botId}`,
       method: "PATCH",
-      auth: { kind: "loopback", scopes: ["admin"] } as RequestAuth,
+      auth: as.auth ?? ({ kind: "loopback", scopes: ["admin"] } as RequestAuth),
       json: ((_res: ServerResponse, status: number, response: unknown) => {
         sent.push({ status, body: response });
       }) as RouteContext["json"],
@@ -118,6 +118,36 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
     expect(refused.body.error).toBe(VPS_BOT_ALIAS_CHANGE_ERROR);
     expect(scan).toHaveBeenCalledTimes(1);
     expect(store.bot(bot.id)?.vpsAlias).toBe("gamma-vps");
+  });
+
+  it("refuses a move it cannot check: the old server is unreachable, so nothing is guessed", async () => {
+    const { store, bot, patch } = fixture();
+    scan.mockResolvedValue({
+      ...emptyInventory(),
+      available: false,
+      problem: "Docker over SSH could not list managed computers on production-vps: ssh: connect timed out",
+    });
+
+    const refused = await patch(bot.id, { vpsAlias: "gamma-vps" });
+
+    expect(refused.status).toBe(503);
+    expect(refused.body.error).toMatch(/could not list managed computers on production-vps.*Keep the current SSH config alias and retry/);
+    expect(store.bot(bot.id)?.vpsAlias).toBeUndefined();
+  });
+
+  it("never lets a member's session or a paired phone choose a bot's server", async () => {
+    const { store, bot, patch } = fixture();
+    const member = { kind: "session", via: "bearer", scopes: ["client"], session: { id: "s", label: "Laptop", scopes: ["client"] } } as unknown as RequestAuth;
+
+    const fromMember = await patch(bot.id, { vpsAlias: "gamma-vps" }, { auth: member });
+    const fromPhone = await patch(bot.id, { vpsAlias: "gamma-vps" }, { headers: { "x-openmausbot-companion": "1" } });
+
+    expect(fromMember.status).toBe(403);
+    expect(fromMember.body.error).toMatch(/not "vpsAlias"/);
+    expect(fromPhone.status).toBe(403);
+    expect(fromPhone.body.error).toMatch(/not "vpsAlias"/);
+    expect(scan).not.toHaveBeenCalled();
+    expect(store.bot(bot.id)?.vpsAlias).toBeUndefined();
   });
 
   it("still refuses the move while the bot's computer lives on the old server", async () => {
