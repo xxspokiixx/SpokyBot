@@ -94,7 +94,7 @@ describe("webhook-only ingress", () => {
 
   it("awaits a room delivery and answers 202 only after the post lands; a failing sink is not 2xx", async () => {
     let finish: () => void = () => {};
-    const gate = new Promise<void>((resolve) => (finish = resolve));
+    let gate = new Promise<void>((resolve) => (finish = resolve));
     const roomDir = mkdtempSync(join(tmpdir(), "omb-webhook-room-"));
     const roomQueued: unknown[] = [];
     const posts: Array<{ payload: Record<string, unknown> }> = [];
@@ -130,7 +130,10 @@ describe("webhook-only ingress", () => {
       expect(rooms.listAttempts().at(-1)).toMatchObject({ outcome: "rejected", statusCode: 503 });
 
       sinkFails = false;
+      gate = new Promise<void>((resolve) => (finish = resolve));
       const accepted = send("room-evt-2");
+      const early = await Promise.race([accepted.then(() => "answered"), new Promise((resolve) => setTimeout(() => resolve("pending"), 50))]);
+      expect(early).toBe("pending");
       expect(posts).toHaveLength(0);
       finish();
       const response = await accepted;

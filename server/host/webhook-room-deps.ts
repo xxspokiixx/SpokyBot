@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+
 import { IMAGE_MAX_BYTES, saveAudio, saveImage } from "../attachments.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { AppConfig } from "../config.ts";
@@ -59,10 +61,13 @@ export function createWebhookRoomPost(deps: WebhookRoomDeps): Pick<WebhookManage
       },
       saveAudio,
       saveImage,
+      removeStaged: (path) => rmSync(path, { force: true }),
       appendRoomPost: (_trigger, botId, room, content) => {
         const bot = botRoom(botId);
         const group = store.group(room.id);
         if (!bot || !group) throw Object.assign(new Error("the bot or room disappeared mid-delivery"), { status: 404 });
+        const talks = deps.roomTalks(bot, group);
+        if (!talks.ok) throw Object.assign(new Error(roomPostProblem(bot, talks)), { status: 403 });
         const appended = store.appendMessage(group.threadId, {
           role: "bot",
           kind: "text",

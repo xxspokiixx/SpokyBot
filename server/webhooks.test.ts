@@ -312,6 +312,32 @@ describe("WebhookManager", () => {
       expect(h.roomPosts).toHaveLength(1);
     });
 
+    it("treats a retry that arrives while a room post is still in flight as a duplicate", async () => {
+      const h = harness();
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const manager = new WebhookManager({
+        ...h.options,
+        roomPost: async (trigger) => {
+          await gate;
+          h.roomPosts.push({ webhookId: trigger.id, payload: null });
+          return { posted: true as const, attachments: 0, threadId: `${trigger.groupId}-thread` };
+        },
+      });
+      const { webhook, secret } = manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "room-inflight" };
+      const first = manager.receive(webhook.endpointId, secret, event);
+      const retry = await manager.receive(webhook.endpointId, secret, event);
+
+      expect(retry).toMatchObject({ duplicate: true, runId: "post" });
+      expect(h.roomPosts).toHaveLength(0);
+      release();
+      expect(await first).toMatchObject({ duplicate: false, threadId: "room-1-thread" });
+      expect(h.roomPosts).toHaveLength(1);
+      expect(manager.list()[0]?.deliveryCount).toBe(1);
+      expect(manager.listAttempts().slice(-2).map((attempt) => attempt.outcome)).toEqual(["duplicate", "accepted"]);
+    });
+
     it("fails a room delivery with 503 instead of downgrading to a thread post when there is no room sink", async () => {
       const h = harness();
       const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });

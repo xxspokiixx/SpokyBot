@@ -316,6 +316,8 @@ export class WebhookManager {
   private readonly options: WebhookManagerOptions;
   private webhooks: StoredWebhookTrigger[] = [];
   private deliveries: DeliveryReceipt[] = [];
+  /** Room deliveries between admit() and their receipt; a concurrent retry of the same id must not post again. */
+  private roomInFlight = new Set<string>();
   private attempts: WebhookAttempt[] = [];
   private deleted: Array<z.output<typeof deletedWebhookSchema>> = [];
   private rate = new Map<string, number[]>();
@@ -549,7 +551,8 @@ export class WebhookManager {
       const committed = this.options.findRun?.(trigger.id, requestedDeliveryId);
       const duplicate = committed
         ? { runId: committed.id }
-        : this.deliveries.find((delivery) => delivery.key === key);
+        : this.deliveries.find((delivery) => delivery.key === key)
+          ?? (this.roomInFlight.has(key) ? { runId: "post" } : undefined);
       if (duplicate) {
         this.appendAttempt(trigger, event, {
           outcome: "duplicate",
@@ -585,8 +588,15 @@ export class WebhookManager {
     const deliveryId = this.admit(trigger, event, byPerson, now);
     if (deliveryId === null) return this.ignoredReceipt(trigger, event);
     if (!this.options.roomPost) fail(503, "This server cannot post webhook messages to rooms");
-    const outcome = await this.options.roomPost({ ...trigger }, event.payload);
-    this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: "post", threadId: outcome.threadId, at: now });
+    const key = `${trigger.endpointId}:${deliveryId}`;
+    this.roomInFlight.add(key);
+    let outcome: Awaited<ReturnType<NonNullable<WebhookManagerOptions["roomPost"]>>>;
+    try {
+      outcome = await this.options.roomPost({ ...trigger }, event.payload);
+    } finally {
+      this.roomInFlight.delete(key);
+    }
+    this.deliveries.push({ key, runId: "post", threadId: outcome.threadId, at: now });
     if (this.deliveries.length > MAX_DELIVERIES) this.deliveries.splice(0, this.deliveries.length - MAX_DELIVERIES);
     trigger.lastReceivedAt = now;
     trigger.deliveryCount += 1;

@@ -35,6 +35,8 @@ export interface RoomPostDeps {
   synthesize(botId: string, text: string): Promise<{ bytes: Buffer; mime: string }>;
   saveAudio(bytes: Buffer, mime: string): { path: string; mime: string };
   saveImage(bytes: Buffer, mime: string): { path: string; mime: string };
+  /** Undo a staged save so a failed delivery leaves no orphaned bytes. */
+  removeStaged(path: string): void;
   appendRoomPost(trigger: WebhookTrigger, botId: string, room: RoomPostRoom, content: RoomPostContent): void;
 }
 
@@ -50,6 +52,14 @@ export const WEBHOOK_IMAGE_MIMES: ReadonlySet<string> = new Set(["image/png", "i
 function fail(status: number, message: string): never {
   throw Object.assign(new Error(message), { status });
 }
+
+/** A caller holds the webhook secret, so a declared mime is a preference, not proof: the bytes themselves decide. */
+const IMAGE_SIGNATURES: Record<string, (bytes: Buffer) => boolean> = {
+  "image/png": (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  "image/jpeg": (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  "image/gif": (b) => b.subarray(0, 6).toString("ascii") === "GIF87a" || b.subarray(0, 6).toString("ascii") === "GIF89a",
+  "image/webp": (b) => b.subarray(0, 4).toString("ascii") === "RIFF" && b.subarray(8, 12).toString("ascii") === "WEBP",
+};
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -94,6 +104,7 @@ export function parseRoomPostPayload(raw: unknown, limits: RoomPostDeps["limits"
       }
       if (!bytes || bytes.byteLength === 0) fail(400, "image \"data\" decoded to nothing");
       if (bytes.byteLength > limits.maxImageBytes) fail(413, `an image is limited to ${limits.maxImageBytes} bytes`);
+      if (!IMAGE_SIGNATURES[image.mime]!(bytes)) fail(400, `image "data" is not a valid ${image.mime} file`);
       imageBytes.push(bytes);
       imageMimes.push(image.mime);
     }
@@ -122,19 +133,23 @@ export async function postWebhookToRoom(
   const eligibility = deps.checkBotRoom(trigger.botId, room);
   if (!eligibility.ok) fail(eligibility.status, eligibility.error);
 
-  const audio = payload.voiceNoteText ? await stageVoiceNote(deps, trigger.botId, payload.voiceNoteText) : null;
-  const stagedImages: Array<{ path: string; mime: string }> = [];
-  for (let index = 0; index < payload.imageBytes.length; index += 1) {
-    const saved = deps.saveImage(payload.imageBytes[index]!, payload.imageMimes[index]!);
-    stagedImages.push({ path: saved.path, mime: saved.mime });
-  }
   const attachments: RoomPostAttachment[] = [];
-  if (audio) attachments.push({ kind: "audio", path: audio.path, mime: audio.mime });
-  for (const image of stagedImages) attachments.push({ kind: "image", path: image.path, mime: image.mime });
-
-  deps.appendRoomPost(trigger, trigger.botId, room, {
-    text: payload.text,
-    ...(attachments.length ? { attachments } : {}),
-  });
+  try {
+    if (payload.voiceNoteText) {
+      const audio = await stageVoiceNote(deps, trigger.botId, payload.voiceNoteText);
+      attachments.push({ kind: "audio", path: audio.path, mime: audio.mime });
+    }
+    for (let index = 0; index < payload.imageBytes.length; index += 1) {
+      const saved = deps.saveImage(payload.imageBytes[index]!, payload.imageMimes[index]!);
+      attachments.push({ kind: "image", path: saved.path, mime: saved.mime });
+    }
+    deps.appendRoomPost(trigger, trigger.botId, room, {
+      text: payload.text,
+      ...(attachments.length ? { attachments } : {}),
+    });
+  } catch (error) {
+    for (const attachment of attachments) deps.removeStaged(attachment.path);
+    throw error;
+  }
   return { posted: true, attachments: attachments.length, threadId: room.threadId };
 }
