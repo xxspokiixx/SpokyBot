@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { splitTranscriptAttachments } from "../src/lib/composer-attachments.ts";
 import { movesThreadToTop } from "../shared/wire.ts";
 import { cleanupStaleAttachmentPartials } from "./attachments.ts";
-import type { BotRecord, GroupRecord, GroupTaskRecord, Message, Store, TaskRecord } from "./store.ts";
+import type { BotRecord, GroupDefaultResponder, GroupRecord, GroupTaskRecord, Message, Store, TaskRecord } from "./store.ts";
 import { restorePaths } from "./workspace-backup-paths.ts";
 
 export interface ThreadRows { rows: Message[]; leaf: string | null }
@@ -23,7 +23,7 @@ export interface ThreadMerge { owner: Owner; threadId: string; task?: TaskRecord
 /** `messages`: text lines (what a person reads as messages); `intoExisting`: of those, the ones added to conversations it already had. */
 export interface ChatMergeResult { conversations: number; messages: number; intoExisting: number; skippedBots: number; skippedRooms: number; deleted: number }
 export interface ChatMergePlan extends ChatMergeResult { threads: ThreadMerge[] }
-export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messagesFor" | "activeLeaf" | "importTranscript" | "patchBot" | "patchGroup">;
+export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messagesFor" | "activeLeaf" | "importTranscript" | "patchBot" | "patchGroup" | "createGroup">;
 
 const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
   "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt"] as const;
@@ -271,26 +271,83 @@ export function mergeStagedChats(store: ChatStore, dataDir: string, staged: { da
   } finally { from.close(); }
 }
 
-/** One bot conversation's rows another computer stored since it last sent it (server/cloud-send-chats.ts). */
+/** One bot or room conversation's rows another computer stored since it last sent it (server/cloud-send-chats.ts). */
 export interface SentConversation {
-  bot: string;
+  /** Whose conversation it is: a bot's, or a room's (`room`). */
+  bot?: string;
+  room?: string;
+  /** The room as the sender has it, so this server can make it when it lacks it. */
+  roomInfo?: SentRoom;
   threadId: string;
-  /** The conversation's entry in the bot's list; null for the bot's main conversation. */
-  task: TaskRecord | null;
+  /** The conversation's entry in the bot's or room's list; null for a bot's main conversation. */
+  task: TaskRecord | GroupTaskRecord | null;
   rows: Message[];
   leaf: string | null;
   /** Rows of it went before: a conversation this server lacks now was removed here, and is not brought back. */
   sent: boolean;
+}
+/** A room as the sender has it: what the room is, never that computer's folders or turn state. */
+export interface SentRoom {
+  name: string;
+  memberIds: string[];
+  defaultResponder?: GroupDefaultResponder;
+  bulletin: string;
+  section?: string;
+  setupCompletedAt?: number | null;
+  setupSkippedAt?: number | null;
 }
 export interface SentChatsResult {
   conversations: number;
   messages: number;
   /** Taken (rows added, or nothing new): the sender's cursor moves past what it sent. */
   accepted: string[];
-  /** Its bot is not here, or is answering in it now: sent again later. */
+  /** Its bot is not here, or is answering in it now, or its room's bots are not here yet: sent again later. */
   waiting: string[];
   /** Removed here since: never sent again. */
   removed: string[];
+}
+
+const listedIn = (owner: { threadId: string; tasks?: ReadonlyArray<{ threadId: string }> }, threadId: string) =>
+  owner.threadId === threadId || (owner.tasks ?? []).some((task) => task.threadId === threadId);
+/** Only the sender knows what it sent before, so only its `sent` makes a conversation this server lacks one removed here. */
+const removedHere = (store: ChatStore, conversation: SentConversation, listed: boolean) =>
+  conversation.sent && !listed && !store.messagesFor(conversation.threadId).length;
+const sentThread = (conversation: SentConversation): ChatsSide["thread"] => (threadId) =>
+  threadId === conversation.threadId ? { rows: conversation.rows, leaf: conversation.leaf } : { rows: [], leaf: null };
+
+function botSide(store: ChatStore, conversation: SentConversation): ChatsSide | "waiting" | "removed" {
+  const bot = store.bot(conversation.bot!);
+  if (!bot) return "waiting";
+  if (removedHere(store, conversation, listedIn(bot, conversation.threadId))) return "removed";
+  const tasks = conversation.task ? [conversation.task as TaskRecord] : [];
+  return { bots: [{ id: bot.id, threadId: conversation.task ? bot.threadId : conversation.threadId, tasks }], groups: [], thread: sentThread(conversation) };
+}
+
+function roomSide(store: ChatStore, conversation: SentConversation): ChatsSide | "waiting" | "removed" {
+  let room = store.group(conversation.room!);
+  if (room?.dm) return "waiting";
+  if (!room) {
+    if (conversation.sent) return "removed";
+    room = openRoom(store, conversation);
+    if (!room) return "waiting";
+  } else if (removedHere(store, conversation, listedIn(room, conversation.threadId))) return "removed";
+  const tasks = conversation.task ? [conversation.task as GroupTaskRecord] : [];
+  return { bots: [], groups: [{ id: room.id, threadId: conversation.task ? room.threadId : conversation.threadId, tasks, dm: false }], thread: sentThread(conversation) };
+}
+
+/** A room this server lacks and never had from the sender, made under the sender's ids with the members this server
+ * has; its first thread is the conversation being sent. None while none of its bots is here. */
+function openRoom(store: ChatStore, conversation: SentConversation): GroupRecord | undefined {
+  const info = conversation.roomInfo;
+  const members = (info?.memberIds ?? []).filter((id) => store.bot(id));
+  if (!info || !members.length || [...conversations(liveChats(store))].some((entry) => entry.threadId === conversation.threadId)) return undefined;
+  const room = store.createGroup(info.name, members, false, typeof info.section === "string" ? info.section.slice(0, 60) || undefined : undefined,
+    { bulletin: info.bulletin, defaultResponder: info.defaultResponder, completed: info.setupCompletedAt != null, id: conversation.room, threadId: conversation.threadId });
+  const first = room.tasks?.find((task) => task.threadId === conversation.threadId);
+  if (first && conversation.task) Object.assign(first, Object.fromEntries(GROUP_TASK_KEYS.filter((key) => (conversation.task as GroupTaskRecord)[key] !== undefined)
+    .map((key) => [key, structuredClone((conversation.task as GroupTaskRecord)[key])])));
+  store.patchGroup(room.id, {});
+  return room;
 }
 
 /**
@@ -302,15 +359,9 @@ export function addSentChats(store: ChatStore, dataDir: string, sourceDataDir: s
   { busy }: { busy(threadId: string): boolean }): SentChatsResult {
   const result: SentChatsResult = { conversations: 0, messages: 0, accepted: [], waiting: [], removed: [] };
   for (const conversation of sent) {
-    const bot = store.bot(conversation.bot);
-    if (!bot || busy(conversation.threadId)) { result.waiting.push(conversation.threadId); continue; }
-    const listed = bot.threadId === conversation.threadId || (bot.tasks ?? []).some((task) => task.threadId === conversation.threadId);
-    if (conversation.sent && !listed && !store.messagesFor(conversation.threadId).length) { result.removed.push(conversation.threadId); continue; }
-    const from: ChatsSide = {
-      bots: [{ id: bot.id, threadId: conversation.task ? bot.threadId : conversation.threadId, tasks: conversation.task ? [conversation.task] : [] }],
-      groups: [],
-      thread: (threadId) => threadId === conversation.threadId ? { rows: conversation.rows, leaf: conversation.leaf } : { rows: [], leaf: null },
-    };
+    if (busy(conversation.threadId)) { result.waiting.push(conversation.threadId); continue; }
+    const from = conversation.room === undefined ? botSide(store, conversation) : roomSide(store, conversation);
+    if (from === "waiting" || from === "removed") { result[from].push(conversation.threadId); continue; }
     const plan = planChatMerge(from, liveChats(store), Number.NEGATIVE_INFINITY, { keepSummaries: true });
     applyFrom(store, dataDir, plan, sourceDataDir);
     result.conversations += plan.conversations;

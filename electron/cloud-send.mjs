@@ -344,16 +344,18 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     }
   }
 
-  /** The bot conversations whose newest row My Cloud has not taken: of bots My Cloud has, not kept here, not answering now. */
+  /** The conversations whose newest row My Cloud has not taken, not answered in now: of bots My Cloud has and that are
+   * not kept here, and of rooms, which My Cloud makes once one of their bots is there. */
   async function chatsWaiting(origin, theirs) {
     const listed = await localJson("/api/cloud-send/chats");
     const kept = entry(origin);
     const cloudBots = new Set(theirs.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id));
+    const id = (value) => typeof value === "string" && /^[\w-]{1,128}$/u.test(value);
     const conversations = (Array.isArray(listed?.conversations) ? listed.conversations : []).filter((head) => record(head)
-      && typeof head.bot === "string" && typeof head.threadId === "string" && /^[\w-]{1,200}$/u.test(head.threadId) && Number.isSafeInteger(head.last) && typeof head.lastId === "string");
+      && (id(head.bot) !== id(head.room)) && typeof head.threadId === "string" && /^[\w-]{1,200}$/u.test(head.threadId) && Number.isSafeInteger(head.last) && typeof head.lastId === "string");
     const waiting = conversations.filter((head) => {
       const cursor = kept.chats[head.threadId];
-      if (cursor === "removed" || !cloudBots.has(head.bot) || kept.off[itemKey.bot(head.bot)]) return false;
+      if (cursor === "removed" || (head.bot && (!cloudBots.has(head.bot) || kept.off[itemKey.bot(head.bot)]))) return false;
       return !cursor || cursor.after !== head.last || cursor.id !== head.lastId;
     });
     return { dataDir: typeof listed?.dataDir === "string" ? listed.dataDir : "", ready: waiting.filter((head) => !head.busy), busy: waiting.filter((head) => head.busy).length };
@@ -387,7 +389,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         }
       }
       const answer = await session.call("POST", "/api/cloud-send/chats", { v: 1, dataDir,
-        conversations: batch.map(({ bot, threadId, task, rows, leaf, sent }) => ({ bot, threadId, task, rows, leaf, sent })) });
+        conversations: batch.map(({ owner, threadId, task, rows, leaf, sent }) => ({ ...owner, threadId, task, rows, leaf, sent })) });
       if (!answer.ok) throw new CloudSendError("refused", refusal(answer, "My Cloud could not add the chats."));
       const accepted = new Set(Array.isArray(answer.body?.accepted) ? answer.body.accepted : []);
       const removed = new Set(Array.isArray(answer.body?.removed) ? answer.body.removed : []);
@@ -414,7 +416,8 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
           const size = Buffer.byteLength(JSON.stringify(page.rows), "utf8");
           if (bytes + size > CHATS_BATCH_BYTES || batch.length >= CHATS_BATCH_PAGES) await flush();
           if (held.has(head.threadId)) break;
-          batch.push({ bot: head.bot, threadId: head.threadId, task: record(page.task) ? page.task : null, rows: page.rows, leaf: typeof page.leaf === "string" ? page.leaf : null,
+          const owner = head.room ? { room: head.room, ...(record(page.roomInfo) ? { roomInfo: page.roomInfo } : {}) } : { bot: head.bot };
+          batch.push({ owner, threadId: head.threadId, task: record(page.task) ? page.task : null, rows: page.rows, leaf: typeof page.leaf === "string" ? page.leaf : null,
             sent: record(kept.chats[head.threadId]), last: page.last, lastId: page.lastId,
             attachments: Array.isArray(page.attachments) ? page.attachments.filter((name) => typeof name === "string" && /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/u.test(name)) : [] });
           bytes += size;

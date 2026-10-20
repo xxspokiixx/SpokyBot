@@ -377,6 +377,20 @@ describe("a long conversation, sent in pages by the real send", () => {
     await sameOnBoth(bea);
   }, hostTimeout(240_000));
 
+  it("a room goes with its chats: My Cloud makes it under the same ids, and a thread of three pages and more arrives whole", async () => {
+    // Ro has nothing but its greeting: a bot in a room still goes, since the room's chats need it.
+    const ro = await newBot("Ro");
+    const room = (await heavy.local("POST", "/api/groups", { name: "Launch", memberIds: [ro.id], setup: { bulletin: "Ship on Friday.", defaultResponder: { kind: "mentions" } } })).body.group as { id: string; threadId: string };
+    for (let i = 0; i < 2 * 300 + 10; i++) {
+      expect((await heavy.local("POST", `/api/groups/${room.id}/messages`, { text: `Note ${i} for the launch.`, threadId: room.threadId })).status).toBeLessThan(300);
+    }
+    expect((await history(heavy.local, room.threadId)).stored).toBeGreaterThan(2 * 300);
+    expect((await sendAll()).result.failed).toEqual([]);
+    expect((await heavy.onCloud("GET", "/api/bots?messages=0")).body.groups.find((entry: { id: string }) => entry.id === room.id))
+      .toMatchObject({ id: room.id, threadId: room.threadId, name: "Launch", memberIds: [ro.id], bulletin: "Ship on Friday." });
+    await sameOnBoth(room);
+  }, hostTimeout(240_000));
+
   it("a context summary that ends a send reaches My Cloud, and what follows it in the next send shows after it", async () => {
     const cleo = await newBot("Cleo");
     await turn(cleo, "Read the report.");

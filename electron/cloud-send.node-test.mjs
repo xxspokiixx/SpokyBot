@@ -804,3 +804,30 @@ test("a send that failed before My Cloud went away is tried again as soon as it 
   await tick(2 * 60_000);
   assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-2"], sent: true }]);
 });
+
+test("a room's chats go with the room, whatever bots My Cloud has, and never as a bot's", async () => {
+  const { sides, posted } = chatSides({ threads: { "t-a": 1 } });
+  const local = sides.deps.local;
+  const room = { name: "Launch", memberIds: ["ember"], bulletin: "Ship it." };
+  sides.deps.local = async (route) => {
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: [
+      { bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }, { room: "r-launch", threadId: "t-room", last: 1, lastId: "t-room-1", busy: false },
+      { room: "r-busy", threadId: "t-busy", last: 1, lastId: "t-busy-1", busy: true }, { bot: "ember", room: "r-both", threadId: "t-both", last: 1, lastId: "t-both-1", busy: false },
+    ] }), { status: 200 });
+    if (route.startsWith("/api/cloud-send/chats/rows?thread=t-room&")) return new Response(JSON.stringify({ room: "r-launch", roomInfo: room, task: { threadId: "t-room", title: "Plan", createdAt: 1 },
+      rows: [{ id: "t-room-1", at: 1 }], leaf: "t-room-1", last: 1, lastId: "t-room-1", more: false, restarted: false, attachments: [] }), { status: 200 });
+    return local(route);
+  };
+  let bodies = [];
+  const open = sides.deps.cloud.open;
+  sides.deps.cloud.open = async () => {
+    const session = await open();
+    const call = session.call;
+    session.call = async (method, route, body) => { if (route === "/api/cloud-send/chats") bodies.push(body.conversations); return call(method, route, body); };
+    return session;
+  };
+  await createCloudSend(sides.deps).send();
+  assert.deepEqual(posted.flat().map((entry) => entry.threadId), ["t-a", "t-room"]);
+  const sent = bodies.flat().find((entry) => entry.threadId === "t-room");
+  assert.deepEqual({ room: sent.room, roomInfo: sent.roomInfo, bot: sent.bot, task: sent.task.title }, { room: "r-launch", roomInfo: room, bot: undefined, task: "Plan" });
+});

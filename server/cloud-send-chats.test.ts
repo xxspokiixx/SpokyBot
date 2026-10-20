@@ -19,7 +19,8 @@ function pagesOf(store: Store, threadId: string, cursor: Cursor = { after: 0, id
   const pages: SentConversation[] = [];
   for (let asked = 0; asked < 100; asked++) {
     const page = chatPage({ store, dataDir: DATA_DIR }, threadId, cursor.after, cursor.id)!;
-    if (page.rows.length) pages.push({ bot: page.bot, threadId, task: page.task, rows: page.rows, leaf: page.leaf, sent: cursor.after > 0 });
+    const owner = "room" in page ? { room: page.room, roomInfo: page.roomInfo } : { bot: page.bot };
+    if (page.rows.length) pages.push({ ...owner, threadId, task: page.task, rows: page.rows, leaf: page.leaf, sent: cursor.after > 0 });
     cursor = { after: page.last, id: page.lastId };
     if (!page.more || !page.lastId) return { pages, cursor };
   }
@@ -277,6 +278,21 @@ describe("POST /api/cloud-send/chats", () => {
     return { store, answered: answered! };
   };
 
+  it("a room's thread waits while a bot answers in the room", async () => {
+    let answered: any;
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const room = store.createGroup("Busy", [ava.id]);
+    store.patchGroup(room.id, { busyBotId: ava.id });
+    await cloudSendChatsRoute({ store, dataDir: DATA_DIR }, {
+      req: {} as never, res: { setHeader() {} } as never, url: new URL("http://127.0.0.1/api/cloud-send/chats"), path: "/api/cloud-send/chats", method: "POST", auth: {} as never,
+      json: ((_res: unknown, _status: number, value: unknown) => { answered = value; }) as never,
+      readBody: (async () => ({ v: 1, dataDir: "/x", conversations: [{ room: room.id, roomInfo: { name: "Busy", memberIds: [ava.id], bulletin: "" }, threadId: room.threadId,
+        task: { threadId: room.threadId, title: "Untitled", createdAt: 1 }, rows: [{ id: "r1", at: 1, parentId: null, role: "user", kind: "text", text: "hi" }], leaf: "r1", sent: false }] })) as never,
+    });
+    expect(answered).toMatchObject({ accepted: [], waiting: [room.threadId] });
+  });
+
   it("adds a conversation it never had though its rows are older than this server's last Copy from another computer", async () => {
     const owner = fresh().createBot({ name: "Ledger" }, { seedMessages: false });
     mkdirSync(join(DATA_DIR, ".backups"), { recursive: true });
@@ -289,5 +305,61 @@ describe("POST /api/cloud-send/chats", () => {
     expect(answered).toEqual({ status: 200, body: { conversations: 1, messages: 1, accepted: ["t-sept"], waiting: [], removed: [] } });
     expect(store.bot(owner.id)!.tasks!.map((task) => task.threadId)).toContain("t-sept");
     expect(ids(store.activePath("t-sept"))).toEqual(["s1"]);
+  });
+});
+
+describe("a room's chats", () => {
+  it("are listed with the bots' conversations, every thread of a room, a bot answering in it included; bot-to-bot channels are not", () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const room = store.createGroup("Launch", [ava.id]);
+    const pricing = store.createGroupTask(room.id, "Pricing", false)!;
+    const channel = store.createGroup("Ava and Bo", [ava.id], true);
+    for (const threadId of [ava.threadId, room.threadId, pricing.threadId, channel.threadId]) say(store, threadId, "hello", 1);
+    store.patchGroup(room.id, { busyBotId: ava.id });
+    const listed = chatHeads(store.bots, store.groups).map(({ bot, room: owner, threadId, busy }) => ({ owner: bot ?? owner, threadId, busy }));
+    expect(listed.filter((entry) => entry.owner !== ava.id)).toEqual(expect.arrayContaining([
+      { owner: room.id, threadId: room.threadId, busy: true }, { owner: room.id, threadId: pricing.threadId, busy: true }]));
+    expect(listed.some((entry) => entry.threadId === channel.threadId)).toBe(false);
+  });
+
+  it("make the room on My Cloud under this computer's ids, with each thread whole, three pages and more included", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    const bo = here.createBot({ name: "Bo" }, { seedMessages: false });
+    const room = here.createGroup("Launch", [ava.id, bo.id], false, "Work", { bulletin: "Ship on Friday.", defaultResponder: { kind: "mentions" }, completed: true });
+    here.patchGroupTask(room.id, room.threadId, { title: "Plan", pinned: true });
+    const pricing = here.createGroupTask(room.id, "Pricing", false)!;
+    for (let i = 0; i < 2 * CHAT_ROWS_PAGE + 5; i++) (i % 2 ? answer : say)(here, room.threadId, `plan ${i}`, 10 + i);
+    for (let i = 0; i < 4; i++) say(here, pricing.threadId, `price ${i}`, 10 + i);
+    const plan = pagesOf(here, room.threadId), prices = pagesOf(here, pricing.threadId);
+    expect(plan.pages.length).toBeGreaterThanOrEqual(3);
+    const want = { plan: shown(here, room.threadId), prices: shown(here, pricing.threadId) };
+    const cloud = cloudOf([room.threadId, pricing.threadId]);
+    cloud.deleteGroup(room.id);
+    cloud.deleteBot(bo.id);
+    for (const page of [...plan.pages, ...prices.pages]) expect(take(cloud, [page]).accepted).toEqual([page.threadId]);
+    const made = cloud.group(room.id)!;
+    expect(made).toMatchObject({ name: "Launch", memberIds: [ava.id], bulletin: "Ship on Friday.", section: "Work", defaultResponder: { kind: "mentions" } });
+    expect(made.tasks!.map((task) => [task.threadId, task.title, Boolean(task.pinned)]).sort()).toEqual([[pricing.threadId, "Pricing", false], [room.threadId, "Plan", true]].sort());
+    expect(shown(cloud, room.threadId)).toEqual(want.plan);
+    expect(shown(cloud, pricing.threadId)).toEqual(want.prices);
+  });
+
+  it("never make again a room removed on My Cloud, nor a thread of it, and wait while none of its bots is there or one is answering", () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const room = store.createGroup("Ops", [ava.id]);
+    const row = (id: string): Message => ({ id, at: 1, parentId: null, role: "user", kind: "text", text: id });
+    const info = { name: "Gone", memberIds: [ava.id], bulletin: "" };
+    const answered = addSentChats(store, DATA_DIR, "/elsewhere/.openmausbot", [
+      { room: "room-gone", roomInfo: info, threadId: "t-room-gone", task: { threadId: "t-room-gone", title: "Gone", createdAt: 1 } as never, rows: [row("g1")], leaf: "g1", sent: true },
+      { room: room.id, roomInfo: info, threadId: "t-thread-gone", task: { threadId: "t-thread-gone", title: "Old", createdAt: 1 } as never, rows: [row("o1")], leaf: "o1", sent: true },
+      { room: "room-lonely", roomInfo: { ...info, memberIds: ["not-here"] }, threadId: "t-lonely", task: { threadId: "t-lonely", title: "Hi", createdAt: 1 } as never, rows: [row("l1")], leaf: "l1", sent: false },
+      { room: room.id, roomInfo: info, threadId: room.threadId, task: { threadId: room.threadId, title: "Untitled", createdAt: 1 } as never, rows: [row("b1")], leaf: "b1", sent: false },
+    ], { busy: (threadId) => threadId === room.threadId });
+    expect(answered).toMatchObject({ accepted: [], removed: ["t-room-gone", "t-thread-gone"], waiting: ["t-lonely", room.threadId] });
+    expect([store.group("room-gone"), store.group("room-lonely")]).toEqual([undefined, undefined]);
+    expect(store.group(room.id)!.tasks!.map((task) => task.threadId)).toEqual([room.threadId]);
   });
 });

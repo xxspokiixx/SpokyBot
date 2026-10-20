@@ -10,10 +10,10 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES } from "./attachments.ts";
-import { activePath, addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation } from "./cloud-chat-merge.ts";
+import { activePath, addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation, type SentRoom } from "./cloud-chat-merge.ts";
 import { threadHeads, threadRowNumbers, threadRowsFrom } from "./message-db.ts";
 import type { RouteContext } from "./routes/table.ts";
-import type { BotRecord, Message, TaskRecord } from "./store.ts";
+import type { BotRecord, GroupRecord, GroupTaskRecord, Message, TaskRecord } from "./store.ts";
 
 export const CHAT_ROWS_PAGE = 300;
 /** A page's rows past its first, by their stored size: main sends a few pages per request, under CHATS_BODY_MAX. */
@@ -24,21 +24,28 @@ export const CHATS_BODY_MAX = 8 * 1024 * 1024;
 const SHORTENED = "\n\n[Shortened: this message was too long to copy to My Cloud.]";
 const PREFIX = "/api/cloud-send/chats";
 
-export interface ChatHead { bot: string; threadId: string; last: number; lastId: string; busy: boolean }
+/** A bot's conversation (`bot`) or a room's (`room`). */
+export type ChatHead = ({ bot: string; room?: never } | { room: string; bot?: never }) & { threadId: string; last: number; lastId: string; busy: boolean };
+type Room = Pick<GroupRecord, "id" | "threadId" | "tasks" | "dm" | "busyBotId">;
 
-/** Every bot conversation with stored rows: its newest row, and whether its bot is answering in it now. */
-export function chatHeads(bots: readonly BotRecord[], heads = threadHeads()): ChatHead[] {
+/** A room's conversations: its threads, or its one conversation when it has none. Bot-to-bot channels are not rooms. */
+const roomThreads = (room: Room): string[] => room.dm ? [] : room.tasks?.length ? room.tasks.map((task) => task.threadId) : [room.threadId];
+
+/** Every bot and room conversation with stored rows: its newest row, and whether a bot is answering in it now. */
+export function chatHeads(bots: readonly BotRecord[], rooms: readonly Room[] = [], heads = threadHeads()): ChatHead[] {
   const out: ChatHead[] = [];
+  const seen = new Set<string>();
+  const add = (owner: { bot: string } | { room: string }, threadId: string, busy: boolean) => {
+    const head = heads.get(threadId);
+    if (!head || seen.has(threadId)) return;
+    seen.add(threadId);
+    out.push({ ...owner, threadId, last: head.last, lastId: head.lastId, busy });
+  };
   for (const bot of bots) {
-    const conversations = [{ threadId: bot.threadId, busy: Boolean(bot.busy) }, ...(bot.tasks ?? []).map((task) => ({ threadId: task.threadId, busy: Boolean(task.busy) }))];
-    const seen = new Set<string>();
-    for (const { threadId, busy } of conversations) {
-      const head = heads.get(threadId);
-      if (!head || seen.has(threadId)) continue;
-      seen.add(threadId);
-      out.push({ bot: bot.id, threadId, last: head.last, lastId: head.lastId, busy });
-    }
+    add({ bot: bot.id }, bot.threadId, Boolean(bot.busy));
+    for (const task of bot.tasks ?? []) add({ bot: bot.id }, task.threadId, Boolean(task.busy));
   }
+  for (const room of rooms) for (const threadId of roomThreads(room)) add({ room: room.id }, threadId, Boolean(room.busyBotId));
   return out;
 }
 
@@ -110,19 +117,26 @@ function sentTask(task: TaskRecord): TaskRecord {
   const { busy: _busy, activity: _activity, turnStartedAt: _started, resumeCursors: _cursors, ...kept } = task as TaskRecord & Record<string, unknown>;
   return kept as unknown as TaskRecord;
 }
+const pick = <T extends object>(source: T, keys: readonly string[]) => Object.fromEntries(keys.filter((key) => (source as Record<string, unknown>)[key] !== undefined)
+  .map((key) => [key, (source as Record<string, unknown>)[key]]));
+/** What a room's thread carries to My Cloud: never this computer's folders. */
+const sentRoomTask = (task: GroupTaskRecord) => pick(task, ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId"]) as unknown as GroupTaskRecord;
+const sentRoom = (room: GroupRecord) => pick(room, ["name", "memberIds", "defaultResponder", "bulletin", "section", "setupCompletedAt", "setupSkippedAt"]) as unknown as SentRoom;
 
 const messageSchema = z.object({ id: z.string().min(1).max(200), at: z.number().finite() }).passthrough();
 const sentSchema = z.object({
   v: z.literal(1),
   dataDir: z.string().min(1).max(4096),
   conversations: z.array(z.object({
-    bot: z.string().regex(/^[\w-]{1,128}$/u),
+    bot: z.string().regex(/^[\w-]{1,128}$/u).optional(),
+    room: z.string().regex(/^[\w-]{1,128}$/u).optional(),
+    roomInfo: z.object({ name: z.string().min(1).max(100), memberIds: z.array(z.string().max(128)).max(200), bulletin: z.string().max(12_000) }).passthrough().optional(),
     threadId: z.string().regex(/^[\w-]{1,200}$/u),
     task: z.object({ threadId: z.string(), createdAt: z.number().finite() }).passthrough().nullable(),
     rows: z.array(messageSchema).max(CHAT_ROWS_PAGE * 4),
     leaf: z.string().max(200).nullable(),
     sent: z.boolean(),
-  })).max(200),
+  }).refine((entry) => (entry.bot === undefined) !== (entry.room === undefined))).max(200),
 });
 
 /** The request's bytes, or null past `limit` (read to the end either way, so the answer still reaches the sender). */
@@ -141,14 +155,17 @@ export interface CloudSendChatsDeps {
   dataDir: string;
 }
 
-/** A conversation's rows after a point, a page at a time, as main sends them on; null when no bot here has it. */
+/** A conversation's rows after a point, a page at a time, as main sends them on; null when no bot or room here has it. */
 export function chatPage({ store, dataDir }: CloudSendChatsDeps, threadId: string, after: number, afterId: string | null) {
   const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
-  if (!bot || !Number.isSafeInteger(after) || after < 0) return null;
+  const room = bot ? undefined : store.groups.find((candidate) => roomThreads(candidate).includes(threadId));
+  if ((!bot && !room) || !Number.isSafeInteger(after) || after < 0) return null;
   const path = activePath(store.messagesFor(threadId), store.activeLeaf(threadId)).map((row) => row.id);
   const page = threadRowsAfter(threadId, after, afterId, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES, path);
-  const task = taskOf(bot, threadId);
-  return { v: 1, bot: bot.id, threadId, task: task ? sentTask(task) : null, ...page, rows: page.rows.map(fittedRow),
+  const task = bot ? taskOf(bot, threadId) : room!.tasks?.find((candidate) => candidate.threadId === threadId) ?? null;
+  const owner = bot ? { bot: bot.id, task: task ? sentTask(task as TaskRecord) : null }
+    : { room: room!.id, roomInfo: sentRoom(room!), task: task ? sentRoomTask(task as GroupTaskRecord) : null };
+  return { v: 1, ...owner, threadId, ...page, rows: page.rows.map(fittedRow),
     attachments: [...new Set(page.rows.flatMap((row) => attachmentNames(row as Message, dataDir)))] };
 }
 
@@ -159,7 +176,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
   const { store } = deps;
   // This computer's side: what each conversation has, and its rows after a point.
   if (path === PREFIX && method === "GET") {
-    json(res, 200, { v: 1, dataDir: deps.dataDir, conversations: chatHeads(store.bots) });
+    json(res, 200, { v: 1, dataDir: deps.dataDir, conversations: chatHeads(store.bots, store.groups) });
     return true;
   }
   if (path === `${PREFIX}/rows` && method === "GET") {
@@ -219,6 +236,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
       if (bot.busy) busy.add(bot.threadId);
       for (const task of bot.tasks ?? []) if (task.busy) busy.add(task.threadId);
     }
+    for (const room of store.groups) if (room.busyBotId) for (const threadId of [room.threadId, ...(room.tasks ?? []).map((task) => task.threadId)]) busy.add(threadId);
     const result = addSentChats(store, deps.dataDir, parsed.data.dataDir, parsed.data.conversations as unknown as SentConversation[],
       { busy: (threadId) => busy.has(threadId) });
     json(res, 200, result);
