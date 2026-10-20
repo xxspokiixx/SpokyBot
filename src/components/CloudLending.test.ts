@@ -25,7 +25,7 @@ async function ready(snapshot: CloudLendingSnapshot) {
   vi.mocked(bridge.state).mockResolvedValue(snapshot);
   render(); const cleanup = f.effects[0]!(); await flush(); return cleanup;
 }
-const toggle = () => render().nodes.find(node => node.props.role === "switch" || node.props["aria-label"] === "Let My Cloud use this computer")!;
+const toggle = () => render().nodes.find(node => node.props.role === "switch" || node.props["aria-label"] === "Let Cloud bots use this computer")!;
 beforeEach(() => {
   f.values = []; f.index = 0; f.effects = [];
   bridge = { state: vi.fn(), chooseFolder: vi.fn().mockResolvedValue(folder), save: vi.fn().mockResolvedValue(lent), stop: vi.fn().mockResolvedValue(off) };
@@ -54,7 +54,7 @@ const more = () => render().nodes.find(node => node.props["data-lending-more"])!
 it("is one switch, off by default; turning it on lends at once (main picks the usual folders when none were chosen) and says what is lent", async () => {
   await ready(off);
   let view = render();
-  expect(view.html).toContain("Let My Cloud use this computer");
+  expect(view.html).toContain("Let Cloud bots use this computer");
   expect(view.html).not.toContain("Apps and screen");
   toggle().props.onClick!();
   await flush();
@@ -62,7 +62,7 @@ it("is one switch, off by default; turning it on lends at once (main picks the u
   const usual = ["Desktop", "Documents", "Downloads"].map((name, i) => ({ ...folder, id: `${i}1111111-1111-4111-8111-111111111111`, name, path: `/Users/me/${name}` }));
   await ready({ ...lent, state: { ...lent.state!, folders: usual } });
   view = render();
-  expect(view.html).toContain("My Cloud can use Desktop, Documents, and Downloads (read only) on this computer.");
+  expect(view.html).toContain("Cloud bots can use Desktop, Documents, and Downloads (read only) on this computer.");
   // The choices wait behind Choose what's lent.
   expect(view.html).not.toContain("Add folder");
   more();
@@ -81,7 +81,7 @@ it("while lent, says so, shows this computer's activity, and removing the last c
   await ready({ ...lent, state: { ...lent.state!, busy: true }, activity: [{ at: 1_790_000_000_000, server: "My Cloud", origin: "https://c.test", action: "read_file", detail: "Plans/todo.md", ok: true }] });
   more();
   const view = render();
-  expect(view.html).toContain("My Cloud is using this computer now.");
+  expect(view.html).toContain("Cloud bots are using this computer now.");
   expect(view.html).toContain("Plans/todo.md");
   expect(view.html).toContain("Read a file");
   view.nodes.find(node => node.props["aria-label"] === "Remove Plans")!.props.onClick!();
@@ -132,8 +132,8 @@ it("says how it is lent when Computer access lent it, terminal included, and whe
   expect(lendingStatusKey(viaAccess, true)).toBe("lending.status.accessOff");
   await ready(viaAccess);
   const html = render().html;
-  expect(html).toContain("Lent through Computer access in Settings → Servers, terminal included.");
-  expect(html).toContain("My Cloud last used this computer 3 minutes ago.");
+  expect(html).toContain("Shared through Computer access in Settings → Servers, terminal included.");
+  expect(html).toContain("Cloud bots last used this computer 3 minutes ago.");
   await ready({ ...lent, activity: [] });
   expect(render().html).toContain("My Cloud hasn&#x27;t used this computer yet.");
 });

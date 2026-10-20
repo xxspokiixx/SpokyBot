@@ -113,7 +113,7 @@ describe("reviewed Chief team setup", () => {
       codex: { driverKind: "codex", agentsMcp: false },
     });
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "codex", model: "gpt-fixture" } } }]);
-    expect(card.detail).toContain("Default engine/model");
+    expect(card.detail).toContain("Default AI and model");
     expect(card.detail).toContain("Loses peer coordination and every team tool");
     expect(card.detail).toContain("coordinate_bots");
     expect(card.detail).toContain("Loses approval levels: edits.");
@@ -122,7 +122,7 @@ describe("reviewed Chief team setup", () => {
   it("renders nothing extra for a model-only change on the same engine", () => {
     const h = harness({ claude: { driverKind: "claudeAgent", agentsMcp: true } });
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "claude", model: "opus" } } }]);
-    expect(card.detail).toContain("Default engine/model");
+    expect(card.detail).toContain("Default AI and model");
     expect(card.detail).not.toContain("peer coordination");
     expect(card.detail).not.toContain("approval levels");
   });
@@ -198,7 +198,7 @@ describe("reviewed Chief team setup", () => {
   it("carries a model variant through the plan instead of dropping it", () => {
     const h = harness();
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "claude", model: "sonnet", variant: "stable" } } }]);
-    expect(card.detail).toContain("Default engine/model:");
+    expect(card.detail).toContain("Default AI and model:");
     expect(card.detail).toContain("claude/sonnet (no variant) → claude/sonnet (variant stable)");
   });
   it("coalesces each bot's fields into one review and applies once with a durable receipt", async () => {
@@ -351,7 +351,7 @@ describe("reviewed Chief team setup", () => {
     } }]);
     expect(card.detail).toContain('Title: "Researcher" → "Research lead"');
     expect(card.detail).toContain('Section: "Work" → "Engineering"');
-    expect(card.detail).toContain("Default engine/model: claude/sonnet (no variant) → codex/gpt-fixture (no variant)");
+    expect(card.detail).toContain("Default AI and model: claude/sonnet (no variant) → codex/gpt-fixture (no variant)");
   });
   it("shows the model variant on the current selection and its absence on the proposed one", () => {
     const h = harness();
@@ -359,7 +359,7 @@ describe("reviewed Chief team setup", () => {
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: {
       modelSelection: { instanceId: "codex", model: "gpt-fixture" },
     } }]);
-    expect(card.detail).toContain("Default engine/model: claude/sonnet (variant high) → codex/gpt-fixture (no variant)");
+    expect(card.detail).toContain("Default AI and model: claude/sonnet (variant high) → codex/gpt-fixture (no variant)");
   });
 });
 

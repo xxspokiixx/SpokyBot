@@ -192,13 +192,13 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
     await apiOk("PATCH", `/api/bots/${fenced.id}`, { computer: "cloud" });
     await control(["send", "--bot", fenced.id, "--task", fenced.activeTaskId, "--text", "Use the hosted desktop."]);
     expect((await control(["wait", "--bot", fenced.id, "--task", fenced.activeTaskId, "--timeout", "30"])).status).toBe("failed");
-    expect((await lastRows(fenced.activeTaskId)).at(-1)).toBe("error: Fenced fixture's cloud computer didn't start. Try again.");
+    expect((await lastRows(fenced.activeTaskId)).at(-1)).toBe("error: Fenced fixture's cloud desktop didn't start. Try again.");
     const failedRow = (await apiOk("GET", `/api/threads/${fenced.activeTaskId}/messages?limit=30`)).messages
       .filter((message: any) => message.kind !== "digest").at(-1);
     expect(failedRow.tool.place).toEqual({ state: "cc-no-start", params: { bot: "Fenced fixture" }, source: "works-on" });
     await control(["send", "--bot", fenced.id, "--task", fenced.activeTaskId, "--text", "Try the hosted desktop again."]);
     expect((await control(["wait", "--bot", fenced.id, "--task", fenced.activeTaskId, "--timeout", "30"])).status).toBe("failed");
-    expect((await lastRows(fenced.activeTaskId)).at(-1)).toBe("error: Fenced fixture's previous cloud computer is still being removed. Try again.");
+    expect((await lastRows(fenced.activeTaskId)).at(-1)).toBe("error: Fenced fixture's previous cloud desktop is still being removed. Try again.");
     await apiOk("PATCH", `/api/bots/${fenced.id}`, { computer: null });
     const callsBeforeFencedAuto = boatCalls;
     await control(["send", "--bot", fenced.id, "--task", fenced.activeTaskId, "--text", "what is 2+2?"]);

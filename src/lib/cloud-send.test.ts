@@ -44,7 +44,7 @@ describe("This computer and My Cloud, in words", () => {
       notes: [{ kind: "model", bot: "Ember" }, { kind: "narrowed", login: "crm" }] } });
     expect(sent.text).toBe("Sent to My Cloud: Ember, changes to Juno, 2 skills, 1 login, 1Password, and your settings.");
     expect(sent.notes).toEqual([
-      "Ember uses My Cloud's own engine: the one it uses here isn't set up on My Cloud.",
+      "Ember uses My Cloud's own AI: the one it uses here isn't set up on My Cloud.",
       "A login kept to bots that stay on this computer reaches no bot on My Cloud yet. Choose Who can use it in My Cloud's Settings → Logins.",
     ]);
     expect(resultLines({ at: 1, reason: "button", result: { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, failed: [], notes: [] } }).text)

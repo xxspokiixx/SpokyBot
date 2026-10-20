@@ -313,8 +313,8 @@ test("the menu-bar indicator exists only while lending, says when the Cloud is u
   assert.equal(trays.length, 1);
   assert.equal(trays[0].title, "In use");
   assert.match(trays[0].menu[0].label, /using this computer now/);
-  trays[0].menu.find(item => item.label === "Stop lending").click();
-  trays[0].menu.find(item => item.label === "Lending settings…").click();
+  trays[0].menu.find(item => item.label === "Stop sharing").click();
+  trays[0].menu.find(item => item.label === "Sharing settings…").click();
   assert.deepEqual([stops, opens], [1, 1]);
   indicator.update({ lending: false, busy: true });
   assert.equal(trays[0].destroyed, true, "gone as soon as lending ends");

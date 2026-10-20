@@ -2682,6 +2682,7 @@
   "place.view.localUnavailable.short": "尚未就绪",
   "place.view.autoTeam.short": "共享",
   "pro.name": "MausBot Cloud",
+  "call.live.disclosure": "实时通话会把你的语音发送给 OpenAI，连同对话的近期消息、机器人的回答，以及它所请求的任何批准的详细内容。OpenAI 密钥会保留在你的电脑上。",
   "call.live.disclosureCloud": "实时通话会把你的语音发送给 OpenAI，连同对话的近期消息、机器人的回答，以及它所请求的任何批准的详细内容。OpenAI 密钥会保留在 Cloud 上。",
   "call.capability.turnsOnThisComputer": "轮流说话的通话适用于这台 Mac 上的机器人",
   "call.capability.turnsOnThisComputerReason": "这类通话使用 Mac 自身的语音识别，只有这台 Mac 上的机器人能使用。",

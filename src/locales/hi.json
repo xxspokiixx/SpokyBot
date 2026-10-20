@@ -1778,6 +1778,7 @@
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "संदेश भेजने की कुंजी",
   "settings.sendKey.subtitle": "Shift+Enter या {key} चुनें ताकि Enter नई पंक्ति शुरू करे — यह तब काम आता है जब आपकी इनपुट विधि Enter से टेक्स्ट पक्का करती है, जैसे जापानी इनपुट में। {key} हर विकल्प में भेजता है। सिर्फ़ इस डिवाइस पर।",
+  "call.live.disclosure": "Live कॉल आपकी आवाज़ OpenAI को भेजती है, साथ में चैट के हाल के संदेश, बॉट के जवाब और उसकी माँगी हर मंज़ूरी का विवरण भी। OpenAI कुंजी आपके कंप्यूटर पर ही रहती है।",
   "call.live.disclosureCloud": "Live कॉल आपकी आवाज़ OpenAI को भेजती है, साथ में चैट के हाल के संदेश, बॉट के जवाब और उसकी माँगी हर मंज़ूरी का विवरण भी। OpenAI कुंजी Cloud में ही रहती है।",
   "call.capability.turnsOnThisComputer": "बारी-बारी से बात करने वाली कॉल इस Mac के बॉट के साथ काम करती हैं",
   "call.capability.turnsOnThisComputerReason": "ये आपके Mac की अपनी आवाज़ पहचान से सुनती हैं, जिसे सिर्फ़ इस Mac के बॉट इस्तेमाल कर सकते हैं।",

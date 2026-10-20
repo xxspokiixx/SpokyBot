@@ -457,7 +457,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   const away = JSON.parse((await call("list_shared_computers")).content[0].text);
   expect(away.computers).toEqual([]);
   expect(away.offline).toEqual([expect.objectContaining({ device, lent: true })]);
-  expect(away.say).toMatch(new RegExp(`^Their ${device} .+ is lent to My Cloud but offline \\(last online \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d UTC\\)`, "u"));
+  expect(away.say).toMatch(new RegExp(`^Their ${device} .+ is shared with the Cloud but offline \\(last online \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d UTC\\)`, "u"));
   expect(away.say).toContain(`Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`);
   const refused = await call("shared_computer", { computer_id: id, action: "list_files", folder_id: randomUUID(), path: "." });
   expect(refused.isError).toBe(true);

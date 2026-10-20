@@ -724,7 +724,7 @@ describe("the browser logins", () => {
     expect(ofType(logins(makeBot({ browserProfile: "team" })), SignedInSites)!.props.sharedBy).toEqual(["Scout", "Nova"]);
     const temporary = logins(makeBot({ browserProfile: "guest" }));
     expect(ofType(temporary, SignedInSites)).toBeUndefined();
-    expect(temporary.html).toContain("Temporary sessions keep logins only while this server is running");
+    expect(temporary.html).toContain("Temporary sessions keep logins only while the app is running");
     const off = logins(makeBot(), vi.fn(), false);
     expect(ofType(off, SignedInSites)).toBeUndefined();
     expect(off.html).toContain("Scout&#x27;s browser is off.");

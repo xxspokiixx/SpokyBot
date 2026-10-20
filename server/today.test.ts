@@ -172,7 +172,7 @@ describe("needs you", () => {
     w.fail(kai.threadId, at(8, 30), TRIAL_CREDIT_REFUSED.paused);
     w.fail(w.pepper.threadId, at(9, 30), "You've hit your usage limit. Try again at 3pm.");
     w.fail(rex.threadId, at(10), TRIAL_CREDIT_REFUSED.used_up);
-    w.fail(rex.threadId, at(10, 5), "This month's cloud computer hours are used up.", { place: { state: "cc-no-hours", params: { bot: "Rex" }, source: "works-on" } });
+    w.fail(rex.threadId, at(10, 5), "This month's cloud desktop hours are used up.", { place: { state: "cc-no-hours", params: { bot: "Rex" }, source: "works-on" } });
     w.fail(zed.threadId, at(10, 6), "Cloud computers can't start right now.", { place: { state: "cc-unavailable", params: { bot: "Zed" }, source: "works-on" } });
     w.fail(zed.threadId, at(10, 7), "turn interrupted — OpenMausBot restarted");
     w.tool(w.atlas.threadId, at(11), "mcp__composio__GMAIL_SEND_EMAIL", false, { output: "Error: 401 Unauthorized. The connected account's token has expired; reconnect Gmail." });

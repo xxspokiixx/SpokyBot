@@ -201,7 +201,7 @@ describe("Computer panel tabs", () => {
       const row = rendered.nodes.find((node) => Children.toArray(node.props.children)
         .some((child) => isValidElement(child) && (child as Node).props["data-testid"] === "computer-tabs"))!;
       expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining(["relative", "flex", "justify-center"]));
-      const close = rendered.nodes.find((node) => node.props["aria-label"] === "Close computer panel")!;
+      const close = rendered.nodes.find((node) => node.props["aria-label"] === "Close the Screen panel")!;
       expect(String(close.props.className).split(" ")).toEqual(expect.arrayContaining(["absolute", "right-0"]));
     }
   });
@@ -375,7 +375,7 @@ describe("Where the bot works", () => {
 
   it("says what Auto does on My Cloud, where it starts a cloud computer by itself", () => {
     fixture.config = { ...fixture.config, cloudHome: true };
-    expect(placeLine(render(makeBot()))).toBe("Uses the built-in browser. In a chat, it starts its cloud computer by itself when a task needs desktop apps.");
+    expect(placeLine(render(makeBot()))).toBe("Uses the built-in browser. In a chat, it starts its cloud desktop by itself when a task needs desktop apps.");
   });
 
   it("J11: the Advanced cards and the Simple grid name the same problem in the same words", () => {
@@ -404,10 +404,10 @@ describe("Where the bot works", () => {
       error: "Your Personal plan includes 1 cloud computer at once. Delete one to start another.",
     };
     const rendered = render(makeBot({ computer: "cloud" }));
-    expect(rendered.html).toContain("All the cloud computers your plan includes are in use.");
+    expect(rendered.html).toContain("All the cloud desktops your plan includes are in use.");
     expect(rendered.html).not.toContain("Delete one to start another");
     const actions = rendered.nodes.filter((node) => node.props["data-testid"] === "place-action").map((node) => text(node.props.children));
-    expect(actions).toContain("Manage cloud computers");
+    expect(actions).toContain("Manage cloud desktops");
     (rendered.nodes.find((node) => node.props["data-testid"] === "place-action")!.props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "computer" });
   });
@@ -415,7 +415,7 @@ describe("Where the bot works", () => {
   it("offers the one next action for the chosen place, and a User is told to ask an Admin", () => {
     fixture.config = { ...fixture.config, box: { configured: false } };
     const rendered = render(makeBot({ computer: "cloud" }));
-    expect(placeLine(rendered)).toBe("A cloud computer here needs your own Boat key, a paid service.Add Boat key");
+    expect(placeLine(rendered)).toBe("A cloud desktop here needs your own Boat key, a paid service.Add Boat key");
     (rendered.nodes.find((node) => node.props["data-testid"] === "place-action")!.props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
 
@@ -423,7 +423,7 @@ describe("Where the bot works", () => {
     fixture.values = [];
     phaseIndex = -1;
     const user = render(makeBot({ computer: "cloud" }));
-    expect(placeLine(user)).toBe("A cloud computer here needs your own Boat key, a paid service. Ask an Admin to change it.");
+    expect(placeLine(user)).toBe("A cloud desktop here needs your own Boat key, a paid service. Ask an Admin to change it.");
     expect(user.nodes.some((node) => node.props["data-testid"] === "place-action")).toBe(false);
   });
 
@@ -596,7 +596,7 @@ describe("Technical controls", () => {
     fixture.seed = { phase: "vps-stopped", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "vps" } };
     const vps = () => makeBot({ computer: "cloud", cloudBackend: "vps" });
     const simple = render(vps());
-    expect(simple.html).toContain("Scout&#x27;s computer needs a setup step first.");
+    expect(simple.html).toContain("Scout&#x27;s desktop needs a setup step first.");
     expect(simple.buttons.some((node) => /VPS/.test(text(node.props.children)))).toBe(false);
     (simple.button("Show advanced controls")!.props.onClick as () => void)();
     expect(fixture.setAdvancedMode).toHaveBeenCalledWith(true);

@@ -1796,6 +1796,7 @@
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "Nachrichten senden mit",
   "settings.sendKey.subtitle": "Wähle Shift+Enter oder {key}, damit Enter stattdessen eine neue Zeile beginnt – praktisch, wenn deine Eingabemethode Text mit Enter bestätigt, wie bei japanischer Eingabe. {key} sendet bei jeder Wahl. Nur auf diesem Gerät.",
+  "call.live.disclosure": "Ein Live-Anruf schickt deine Stimme an OpenAI, zusammen mit den letzten Nachrichten des Chats, den Antworten des Bots und den Details jeder Freigabe, um die er bittet. Der OpenAI-Schlüssel bleibt auf deinem Computer.",
   "call.live.disclosureCloud": "Ein Live-Anruf schickt deine Stimme an OpenAI, zusammen mit den letzten Nachrichten des Chats, den Antworten des Bots und den Details jeder Freigabe, um die er bittet. Der OpenAI-Schlüssel bleibt in der Cloud.",
   "call.capability.turnsOnThisComputer": "Anrufe, bei denen ihr abwechselnd sprecht, funktionieren mit den Bots auf diesem Mac",
   "call.capability.turnsOnThisComputerReason": "Sie hören mit der eigenen Spracherkennung deines Macs zu, die nur die Bots auf diesem Mac nutzen können.",

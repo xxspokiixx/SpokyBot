@@ -193,7 +193,7 @@ describe("the phone entries", () => {
   it("on this computer with a paid Cloud that is Ready: both, the Cloud first", () => {
     for (const tier of ["personal", "pro", "max"]) {
       expect(shown("computer", null, paid(tier, ready))).toEqual([
-        ["Connect your phone", "to My Cloud (always on)"],
+        ["Connect your phone", "to the Cloud (always on)"],
         ["Connect your phone", "to this computer"],
         APP,
       ]);
@@ -213,7 +213,7 @@ describe("the phone entries", () => {
   it("on this computer with a paid Cloud that is not Ready: only this computer, and a hint", () => {
     for (const machine of [undefined, { status: "provisioning" }, { status: "stopped", origin: ready.origin }, { status: "failed", origin: ready.origin }] as Array<CloudMachine | undefined>) {
       expect(shown("computer", null, paid("pro", machine))).toEqual([
-        ["Connect your phone", "to this computer", "My Cloud shows here once it is ready."],
+        ["Connect your phone", "to this computer", "The Cloud shows here once it's ready."],
         APP,
       ]);
     }
@@ -264,7 +264,7 @@ describe("choosing where the phone connects", () => {
   const readyCloud: CloudAccountState = { status: "connected", entitlement: { plan: "pro", status: "active", expiresAt: null, version: 1 }, machine: { status: "ready", origin: "https://home-7f3k2.fly.dev" } };
   const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 
-  it("to My Cloud opens the Cloud on its phone pairing, as Use My Cloud on your phone does, sending nothing", async () => {
+  it("to My Cloud opens the Cloud on its phone pairing, as Use the Cloud on your phone does, sending nothing", async () => {
     const bridge = { connectHomeForPhone: vi.fn().mockResolvedValue({ status: "connected" }) };
     const dispatch = vi.fn();
     selectPhoneDestination(destinations(readyCloud)[0]!, { bridge, dispatch });
@@ -321,7 +321,7 @@ describe("Get the phone app", () => {
   });
 
   it("offers every destination the menu does, in the same order", () => {
-    const html = render([to("cloud", "to My Cloud (always on)"), to("here", "to this computer")]);
+    const html = render([to("cloud", "to the Cloud (always on)"), to("here", "to this computer")]);
     expect(html.indexOf('data-phone-app-connect="cloud"')).toBeGreaterThan(-1);
     expect(html.indexOf('data-phone-app-connect="cloud"')).toBeLessThan(html.indexOf('data-phone-app-connect="here"'));
   });

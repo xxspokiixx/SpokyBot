@@ -1778,6 +1778,7 @@
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "Envoyer les messages avec",
   "settings.sendKey.subtitle": "Choisissez Shift+Enter ou {key} pour qu'Enter passe plutôt à la ligne, pratique si votre méthode de saisie valide le texte avec Enter, comme pour le japonais. {key} envoie quel que soit votre choix. Sur cet appareil uniquement.",
+  "call.live.disclosure": "Un appel Live envoie votre voix à OpenAI, avec les messages récents du chat, les réponses du bot et le détail de toute autorisation qu'il demande. La clé OpenAI reste sur votre ordinateur.",
   "call.live.disclosureCloud": "Un appel Live envoie votre voix à OpenAI, avec les messages récents du chat, les réponses du bot et le détail de toute autorisation qu'il demande. La clé OpenAI reste dans le Cloud.",
   "call.capability.turnsOnThisComputer": "Les appels où vous parlez à tour de rôle fonctionnent avec les bots de ce Mac",
   "call.capability.turnsOnThisComputerReason": "Ils écoutent avec la reconnaissance vocale de votre Mac, que seuls les bots de ce Mac peuvent utiliser.",

@@ -18,8 +18,8 @@ export function codexNotSignedIn(): string {
 export function codexLimitMessage(said: string, timeZone = hostTimeZone()): string {
   const resets = /\btry again at ([^.]+)/i.exec(said)?.[1]?.trim();
   return `${CODEX_USAGE_LIMIT_REACHED} This is OpenAI's limit, not your MausBot plan. ${resets
-    ? `It resets at ${resets} (${timeZone}). Until then, manage your Codex usage in ChatGPT or switch this bot to another engine.`
-    : "Manage your Codex usage in ChatGPT, or switch this bot to another engine until it resets."}`;
+    ? `It resets at ${resets} (${timeZone}). Until then, manage your Codex usage in ChatGPT or switch this bot to another AI.`
+    : "Manage your Codex usage in ChatGPT, or switch this bot to another AI until it resets."}`;
 }
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];

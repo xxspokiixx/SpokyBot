@@ -73,10 +73,10 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); setLocale("en"); })
 describe("each screen of the sheet says one thing and offers one next step", () => {
   it("Choose: what Cloud is, the Admin's plans with its recommended one preselected and Most popular, the money in one line, Start free trial", () => {
     const { html, tree, handlers } = panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null });
-    inOrder(text(html), ["MausBot Cloud", "Your bots, always on.", "A private computer in the cloud that runs your bots 24/7, even when this computer is off.",
+    inOrder(text(html), ["MausBot Cloud", "Your bots, always on.", "Runs your bots 24/7 in the cloud, even when this computer is off.",
       "Works while you're away", "Private to you", "Reach it from anywhere", "A real browser and desktop", "Bring everything over",
-      "Choose your plan", "Personal", "$29", "per month", "1 cloud computer at once", "2 CPU · 2 GB", "20 GB storage", "50 h cloud computers",
-      "Pro", "Most popular", "$49", "Up to 2 cloud computers at once", "Max", "$99", "100–200 GB storage",
+      "Choose your plan", "Personal", "$29", "per month", "1 cloud desktop at once", "2 CPU · 2 GB", "20 GB storage", "50 h cloud desktops",
+      "Pro", "Most popular", "$49", "Up to 2 cloud desktops at once", "Max", "$99", "100–200 GB storage",
       "Due today", "$0.00", "Card needed, nothing charged for 7 days. Then $49/month + tax. Cancel in the app any time.",
       "Today", "Trial starts, with $5 of Claude credit", "Oct 13", "Reminder email", "Oct 15", "$49/month begins",
       "Start free trial", "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "14-day money-back", "Already have a plan? Sign in"]);
@@ -394,7 +394,7 @@ describe("the sheet", () => {
     expect(await settle()).toContain("Opening in 3…");
     listeners.get("blur")!();
     const away = await settle();
-    expect(away).not.toContain("Opening in"); expect(away).toContain("Open My Cloud");
+    expect(away).not.toContain("Opening in"); expect(away).toContain("Open the Cloud");
     vi.advanceTimersByTime(5000); await settle();
     expect(bridge.connectHome).not.toHaveBeenCalled();
     expect(listeners.has("blur"), "not listening once it stopped").toBe(false);
@@ -419,7 +419,7 @@ describe("the sheet", () => {
     account = paid({ trial: trial(), credit, machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
     expect(await settle()).toContain("Opening in 3…");
     expect(bridge.look).toHaveBeenCalled();
-    expect(await settle()).toContain("Open My Cloud");
+    expect(await settle()).toContain("Open the Cloud");
     vi.advanceTimersByTime(1000); expect(await settle()).toContain("Opening in 2…");
     vi.advanceTimersByTime(1000); await settle(); vi.advanceTimersByTime(1000); await settle();
     expect(bridge.connectHome).toHaveBeenCalledOnce();
@@ -443,7 +443,7 @@ describe("the sheet", () => {
     expect(await settle()).toContain("Setting up your new Cloud");
     push(paid({ trial: trial(), machine: ready }));
     const html = await settle();
-    expect(html).toContain("My Cloud is ready"); expect(html).not.toContain("One Cloud per account");
+    expect(html).toContain("The Cloud is ready"); expect(html).not.toContain("One Cloud per account");
   });
 
   it("over the welcome flow a ready Cloud never switches the window: no countdown, main hears no sheet in front, Open {name} stays", async () => {
@@ -453,11 +453,11 @@ describe("the sheet", () => {
       f.state = { cloudAdd: { source: "app_onboarding" }, config: {} };
       account = paid({ trial: trial(), credit, machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000, link: true } });
       const html = await settle();
-      expect(html).toContain("My Cloud is ready"); expect(html).toContain("Open My Cloud"); expect(html).not.toContain("Opening in");
+      expect(html).toContain("The Cloud is ready"); expect(html).toContain("Open the Cloud"); expect(html).not.toContain("Opening in");
       vi.advanceTimersByTime(10_000); await settle();
       expect(bridge.connectHome).not.toHaveBeenCalled();
       expect(bridge.sheet, "main notifies instead, as for a closed sheet").not.toHaveBeenCalledWith(true);
-      await press("Open My Cloud");
+      await press("Open the Cloud");
       expect(bridge.connectHome, "only when the person asks").toHaveBeenCalledOnce();
     } finally { hide(); }
   });
@@ -476,7 +476,7 @@ describe("the sheet", () => {
     vi.advanceTimersByTime(400); await flush();
     expect(bridge.setLook).toHaveBeenCalledWith("Studio", "purple");
     tree().find(node => node.props.id === "cloud-add-name")!.props.onChange({ target: { value: "   " } });
-    expect(await settle()).toContain("Starting My Cloud");
+    expect(await settle()).toContain("Starting the Cloud");
     account = paid({ machine: ready, checkout: { plan: "pro", startedAt: NOW - 120_000 } }); focused = false;
     await settle();
     tree().find(node => node.props.id === "cloud-add-name")!.props.onChange({ target: { value: "Lab" } }); await settle();
@@ -522,7 +522,7 @@ describe("the sheet", () => {
     tree().filter(node => node.type === "input")[0]!.props.onChange({ target: { value: "48201937" }, currentTarget: { parentElement: { querySelectorAll: () => [] } } });
     await flush(); await flush();
     account = paid({ machine: ready }); focused = false;
-    expect(await settle()).toContain("My Cloud is ready");
+    expect(await settle()).toContain("The Cloud is ready");
     expect(bridge.checkout).not.toHaveBeenCalled();
   });
 
