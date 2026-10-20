@@ -247,7 +247,7 @@ describe("additive portable team backups", () => {
     const restoredGroup = result.groups[0];
     const restoredChannel = restoredGroup.tasks!.find((task) => task.title === "Plan the launch review")!;
     expect(restoredChannel.titleFromFirstMessage).toBe(true);
-    store.renameGroupTask(restoredGroup.id, restoredChannel.threadId, UNTITLED_TASK);
+    store.patchGroupTask(restoredGroup.id, restoredChannel.threadId, { title: UNTITLED_TASK });
     expect(store.titleGroupTaskFromFirstMessage(restoredGroup.id, "A later message", restoredChannel.threadId)).toBeNull();
     expect(restoredBot.tasks!.find((task) => task.title === "First conversation")).not.toHaveProperty("titleFromFirstMessage");
   });
@@ -255,7 +255,7 @@ describe("additive portable team backups", () => {
   it("keeps a conversation's longer turn limit through backup and restore", () => {
     const { store, routines, chief, scout, group } = fixture();
     const threadId = group.tasks!.find((task) => task.title === "Second room task")!.threadId;
-    store.setGroupTaskTurnTimeout(group.id, threadId, 30);
+    store.patchGroupTask(group.id, threadId, { turnTimeoutMinutes: 30 });
     const dm = store.createGroup("Direct", [chief.id, scout.id], true);
     store.patchGroup(dm.id, { turnTimeoutMinutes: 45 });
 

@@ -218,7 +218,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
             : responder });
       const threads = source.tasks.map((task, i) => {
         if (i === 0) {
-          if (!source.dm) store.renameGroupTask(group.id, group.threadId, task.title);
+          if (!source.dm) store.patchGroupTask(group.id, group.threadId, { title: task.title });
           return group.threadId;
         }
         return store.createGroupTask(group.id, task.title, false)!.threadId;
