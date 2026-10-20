@@ -598,6 +598,16 @@ jobs:
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Keep the runner's Google Chrome as it is for the whole run
+        # The macOS image's Chrome is older than Google's release, and its
+        # updater replaced the app during the suites (155.0.8059.40 to .82 in
+        # October 2026): a launch inside the swap fails at once, and a profile
+        # the new version opened is refused by the identity read from the old
+        # one. The locked bundle keeps the binary under test fixed.
+        if: runner.os == 'macOS'
+        run: |
+          chflags -R uchg "/Applications/Google Chrome.app"
+          defaults read "/Applications/Google Chrome.app/Contents/Info.plist" CFBundleShortVersionString | tee "$RUNNER_TEMP/chrome-version"
       - name: S4 on the runner's Google Chrome
         # The headed-identity case needs a display, which Linux runners get from Xvfb.
         env:
@@ -606,6 +616,9 @@ jobs:
         run: |
           run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e --reporter=verbose --silent=false --reporter=github-actions)
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "${run[@]}"; else "${run[@]}"; fi
+      - name: The runner's Google Chrome did not change during the run
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        run: test "$(defaults read "/Applications/Google Chrome.app/Contents/Info.plist" CFBundleShortVersionString)" = "$(cat "$RUNNER_TEMP/chrome-version")"
       - name: S4 inside the server image's runtime, as its own user
         # maus, with its real home, as the server runs there. The image's
         # Chrome for Testing has no setuid sandbox helper yet, so this leg
