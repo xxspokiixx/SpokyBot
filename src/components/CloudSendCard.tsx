@@ -77,6 +77,8 @@ export function CloudSendCard() {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSend;
   const send = useCloudSend(bridge);
   const [more, setMore] = useState(false);
+  // One send per click: main shows it running only once its state arrives, and each send is one sign-in at My Cloud.
+  const [retrying, setRetrying] = useState(false);
   const { snapshot } = send;
   if (!bridge || !snapshot || snapshot.cloud === "none") return null;
   const ready = snapshot.cloud === "ready";
@@ -97,7 +99,8 @@ export function CloudSendCard() {
         <p role={line.kind === "failed" ? "alert" : "status"} className={`inline-flex items-center gap-2 text-[13px] ${line.kind === "failed" ? "text-danger" : "text-ink"}`}>
           {line.kind === "sending" && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{line.text}
         </p>
-        {line.kind === "failed" && <button type="button" data-cloud-send-retry className="text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" onClick={() => void send.sendAll()}>{t("cloudSend.strip.retry")}</button>}
+        {line.kind === "failed" && <button type="button" data-cloud-send-retry disabled={retrying} className="text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink disabled:opacity-50"
+          onClick={() => { setRetrying(true); void send.sendAll().finally(() => setRetrying(false)); }}>{t("cloudSend.strip.retry")}</button>}
         {line.kind !== "sending" && shown?.notes.map((note) => <p key={note} className="text-[12px] text-ink-secondary">{note}</p>)}
         {line.kind !== "sending" && last && <p className="text-[12px] text-ink-tertiary">{t(last.reason === "auto" || last.reason === "first" ? "cloudSend.result.auto" : "cloudSend.result.when", { when: localizedRelativeTime(last.at, activeLocale()) })}</p>}
         {send.error && send.error !== last?.error && <p role="alert" className="text-[13px] text-danger">{send.error}</p>}

@@ -278,3 +278,15 @@ it("Keep My Cloud up to date: the first time it sends everything with no click, 
     expect(await ids(onCloud, wren.threadId)).toEqual(there);
   } finally { await auto.close(); }
 }, hostTimeout(180_000));
+
+it("My Cloud keeps an attachment a sent row names under its own name, once, and says which it lacks", async () => {
+  const name = `${randomBytes(8).toString("hex")}.png`;
+  const post = (body: Uint8Array) => fetch(`${fx.cloudBase}/api/cloud-send/chats/attachment/${name}`, { method: "POST", body,
+    headers: { ...fx.edge, authorization: `Bearer ${fx.owner}`, "content-type": "application/octet-stream" } });
+  expect((await fx.onCloud("POST", "/api/cloud-send/chats/attachments", { names: [name, "../escape.png"] })).body).toEqual({ missing: [name] });
+  expect((await post(DOT)).status).toBe(201);
+  expect((await post(Buffer.from("something else"))).status, "one already here is the same upload").toBe(200);
+  expect((await fx.onCloud("POST", "/api/cloud-send/chats/attachments", { names: [name] })).body).toEqual({ missing: [] });
+  expect(Buffer.from(await (await fetch(`${fx.cloudBase}/api/attachments/${name}`, { headers: { ...fx.edge, authorization: `Bearer ${fx.owner}` } })).arrayBuffer())).toEqual(DOT);
+  expect((await fetch(`${fx.cloudBase}/api/cloud-send/chats/attachment/..%2Fescape.png`, { method: "POST", body: DOT, headers: { ...fx.edge, authorization: `Bearer ${fx.owner}` } })).status).toBe(404);
+});

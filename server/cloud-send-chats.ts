@@ -3,7 +3,8 @@
 // /api/cloud-send/chats/rows); My Cloud adds them as Bring newer chats adds a copy's (cloud-chat-merge.ts): only what it
 // lacks, never replacing or deleting anything. A conversation's history therefore goes once, and then only what is new.
 // Admin scope (request-auth's default) on both sides.
-import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { link, lstat, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
@@ -16,8 +17,12 @@ import type { RouteContext } from "./routes/table.ts";
 import type { BotRecord, Message, TaskRecord } from "./store.ts";
 
 export const CHAT_ROWS_PAGE = 300;
-/** A batch main sends at once: rows of a few conversations, well under the body limit. */
+/** A page's rows past its first, by their stored size: main sends a few pages per request, under CHATS_BODY_MAX. */
+export const CHAT_PAGE_BYTES = 2 * 1024 * 1024;
+/** One row bigger than this goes shortened, so no single message can keep a conversation from going. */
+export const CHAT_ROW_MAX = 1024 * 1024;
 export const CHATS_BODY_MAX = 8 * 1024 * 1024;
+const SHORTENED = "\n\n[Shortened: this message was too long to copy to My Cloud.]";
 const PREFIX = "/api/cloud-send/chats";
 
 export interface ChatHead { bot: string; threadId: string; last: number; lastId: string; busy: boolean }
@@ -36,6 +41,14 @@ export function chatHeads(bots: readonly BotRecord[], heads = threadHeads()): Ch
     }
   }
   return out;
+}
+
+/** A row as it goes: whole, or past CHAT_ROW_MAX its text cut and only what a message is kept. */
+export function fittedRow(row: Message): Message {
+  if (JSON.stringify(row).length <= CHAT_ROW_MAX) return row;
+  const { id, at, role, kind, parentId, turnId, turnCompletedAt } = row as Message & { turnId?: string; turnCompletedAt?: number };
+  return { id, at, role, kind, parentId, ...(turnId ? { turnId } : {}), ...(turnCompletedAt ? { turnCompletedAt } : {}),
+    text: `${(row.text ?? "").slice(0, CHAT_ROW_MAX / 4)}${SHORTENED}` } as Message;
 }
 
 const taskOf = (bot: BotRecord, threadId: string): TaskRecord | null => (bot.tasks ?? []).find((task) => task.threadId === threadId) ?? null;
@@ -90,9 +103,9 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     const after = Number(url.searchParams.get("after") ?? 0);
     const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
     if (!bot || !Number.isSafeInteger(after) || after < 0) { json(res, 404, { error: "no such conversation" }); return true; }
-    const page = threadRowsAfter(threadId, after, url.searchParams.get("id"), CHAT_ROWS_PAGE);
+    const page = threadRowsAfter(threadId, after, url.searchParams.get("id"), CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
     const task = taskOf(bot, threadId);
-    json(res, 200, { v: 1, bot: bot.id, threadId, task: task ? sentTask(task) : null, ...page,
+    json(res, 200, { v: 1, bot: bot.id, threadId, task: task ? sentTask(task) : null, ...page, rows: page.rows.map(fittedRow),
       attachments: [...new Set(page.rows.flatMap((row) => attachmentNames(row as Message, deps.dataDir)))] });
     return true;
   }
@@ -112,12 +125,15 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
       const bytes = await rawBody(req, FILE_MAX_BYTES);
       if (!bytes) { json(res, 413, { error: `attachments are limited to ${FILE_MAX_BYTES} bytes` }); return true; }
       await mkdir(ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
-      try { await writeFile(file, bytes, { flag: "wx", mode: 0o600 }); }
+      // Written whole under a name of its own, then linked: the attachment's name never shows a partial file.
+      const partial = join(ATTACHMENTS_DIR, `.sent-${randomUUID()}.partial`);
+      await writeFile(partial, bytes, { flag: "wx", mode: 0o600 });
+      try { await link(partial, file); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         json(res, 200, { stored: false });
         return true;
-      }
+      } finally { await unlink(partial).catch(() => {}); }
       json(res, 201, { stored: true });
       return true;
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addSentChats } from "./cloud-chat-merge.ts";
-import { chatHeads, CHAT_ROWS_PAGE } from "./cloud-send-chats.ts";
+import { chatHeads, CHAT_PAGE_BYTES, CHAT_ROW_MAX, CHAT_ROWS_PAGE, fittedRow } from "./cloud-send-chats.ts";
 import { DATA_DIR } from "./config.ts";
 import { deleteThread, threadHeads, threadRowsAfter } from "./message-db.ts";
 import { Store, type Message } from "./store.ts";
@@ -24,6 +24,24 @@ describe("this computer's chats, by row", () => {
     expect(second).toMatchObject({ more: false, last: head.last, lastId: head.lastId });
     // Caught up: nothing, and the same point back.
     expect(threadRowsAfter(bot.threadId, head.last, head.lastId, CHAT_ROWS_PAGE)).toMatchObject({ rows: [], last: head.last, lastId: head.lastId, more: false });
+  });
+
+  it("keeps a page under its size by stored bytes, never under one row, and shortens one row too big to go whole", () => {
+    const store = fresh();
+    const bot = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const big = "x".repeat(CHAT_PAGE_BYTES / 3);
+    const lines = Array.from({ length: 5 }, (_, i) => say(store, bot.threadId, `${i} ${big}`, 10 + i));
+    const first = threadRowsAfter(bot.threadId, 0, null, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
+    expect(first.rows.map((row) => row.id)).toEqual(lines.slice(0, 2).map((row) => row.id));
+    expect(first.more).toBe(true);
+    const huge = say(store, bot.threadId, "y".repeat(CHAT_PAGE_BYTES * 2), 99);
+    const alone = threadRowsAfter(bot.threadId, threadHeads().get(bot.threadId)!.last - 1, lines.at(-1)!.id, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
+    expect(alone.rows.map((row) => row.id)).toEqual([huge.id]);
+    const fitted = fittedRow(alone.rows[0]!);
+    expect(JSON.stringify(fitted).length).toBeLessThan(CHAT_ROW_MAX);
+    expect(fitted).toMatchObject({ id: huge.id, role: "user", kind: "text" });
+    expect(fitted.text).toMatch(/^y+\n\n\[Shortened: this message was too long to copy to My Cloud\.\]$/u);
+    expect(fittedRow(lines[0]!)).toBe(lines[0]);
   });
 
   it("starts a conversation over when the row it stopped at is gone, since that row's number can be given out again", () => {

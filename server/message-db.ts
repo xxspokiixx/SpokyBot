@@ -507,15 +507,18 @@ export function threadHeads(): Map<string, { last: number; lastId: string }> {
  * deleted row's number can be given out again, so otherwise the conversation starts over (`restarted`), which adding by
  * id makes harmless. A legacy row without a parent takes the row before it.
  */
-export function threadRowsAfter(threadId: string, after: number, afterId: string | null, limit: number):
+export function threadRowsAfter(threadId: string, after: number, afterId: string | null, limit: number, maxBytes = Number.POSITIVE_INFINITY):
   { rows: Message[]; leaf: string | null; last: number; lastId: string | null; more: boolean; restarted: boolean } {
   const database = db();
   const held = after > 0 && afterId !== null && (database.prepare("SELECT rowid AS at FROM messages WHERE thread_id = ? AND id = ?").get(threadId, afterId) as { at: number } | undefined)?.at === after;
   const from = held ? after : 0;
   const found = database.prepare("SELECT rowid AS at, id, json FROM messages WHERE thread_id = ? AND rowid > ? ORDER BY rowid LIMIT ?")
     .all(threadId, from, limit + 1) as Array<{ at: number; id: string; json: string }>;
-  const more = found.length > limit;
-  if (more) found.length = limit;
+  // A page holds at most `limit` rows and, past its first row, at most `maxBytes` of them.
+  let kept = 0, bytes = 0;
+  while (kept < Math.min(found.length, limit) && (kept === 0 || bytes + found[kept]!.json.length <= maxBytes)) bytes += found[kept++]!.json.length;
+  const more = found.length > kept;
+  found.length = kept;
   let previous = from ? (database.prepare("SELECT id FROM messages WHERE thread_id = ? AND rowid <= ? ORDER BY rowid DESC LIMIT 1").get(threadId, from) as { id: string } | undefined)?.id ?? null : null;
   const rows = found.map((row) => {
     const message = rowToMessage(row);
