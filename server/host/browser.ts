@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import type { AppConfig } from "../config.ts";
 import { browserEngineAttachCdpUrl, browserProfilePartitionTarget, builtInBrowserEnabled, DATA_DIR } from "../config.ts";
 import { BrowserRuntime, TransportError, attachesToChrome, browserRuntimeEnv, formatBrowserTiming } from "../browser-runtime.ts";
-import { RelayTimeout, relayCommand, relayInput } from "../browser-relay.ts";
+import { RelayTimeout, relay, relayCommand, relayInput } from "../browser-relay.ts";
 import { browserSteps } from "../browser-steps.ts";
 import { BrowserLive } from "../browser-live.ts";
 import { browserEgress } from "../browser/egress/registry.ts";
@@ -69,7 +69,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     steps: browserSteps,
     onTiming: process.env.OMB_BROWSER_TIMING === "1" ? (timing) => console.info(formatBrowserTiming(timing)) : undefined,
   });
-  const agentBrowserLive = new BrowserLive({ runtime: agentBrowserRuntime });
+  const agentBrowserLive = new BrowserLive({ runtime: agentBrowserRuntime, devTools: {
+    url: (port) => relay(port, { action: "cdp_url" }, { timeoutMs: 5_000, maxBytes: 65_536 }).then((answer) => answer.data?.cdpUrl),
+  } });
   const host: HostKind = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME || existsSync("/.dockerenv") ? "container" : "server";
   const idleMs = () => browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
   const chromeEngine = new ChromeEngine({

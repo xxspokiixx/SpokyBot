@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
-import { browserDaemonFile, closeBrowserSession, runningBrowserSessionNames } from "./browser-engine.ts";
+import { browserDaemonFile, browserProfilesRoot, closeBrowserSession, runningBrowserSessionNames } from "./browser-engine.ts";
 import { orphanedBrowsers, stopBrowserProcesses } from "./browser-processes.ts";
 import { browserRuntimeEnv } from "./browser-runtime.ts";
 
@@ -444,7 +444,7 @@ export class BrowserSweep {
     if (!binaryPath) return;
     const owned = await this.#owned(binaryPath);
     if (boot || owned || this.#hadDaemons) {
-      for (const { session, tree } of await orphanedBrowsers(browserRuntimeEnv({}).HOME)) {
+      for (const { session, tree } of await orphanedBrowsers(browserRuntimeEnv({}).HOME, browserProfilesRoot())) {
         if (!this.#owns(session)) continue;
         if (await stopBrowserProcesses(tree)) console.info(`browser ${session}: stopped a browser whose engine had been killed under it`);
         else console.warn(`browser ${session}: could not stop a browser whose engine had been killed under it`);

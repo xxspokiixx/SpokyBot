@@ -152,6 +152,8 @@ describe("redactSecretsInText", () => {
       [`stripe ${"sk_" + "live_"}${alpha}`, /sk_live_[a-z]/],
       [`stripe test ${"sk_" + "test_"}${alpha}`, /sk_test_[a-z]/],
       [`stripe restricted ${"rk_" + "live_"}${alpha}`, /rk_live_[a-z]/],
+      [`webhook secret ${"whsec" + "_"}${alpha}`, /whsec_[a-z]/],
+      [`automation address http://127.0.0.1:8800/hooks/wh_abc/${"whsec" + "_"}${alpha}-_x`, /whsec_[a-z]/],
     ];
     for (const [input, leak] of cases) {
       const out = redactSecretsInText(input);

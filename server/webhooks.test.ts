@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
+import { WEBHOOK_KEY_FILE, WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
 
 const dirs: string[] = [];
 
@@ -127,6 +127,49 @@ describe("WebhookManager", () => {
     expect(JSON.stringify(h.manager.list())).not.toContain("secretHash");
     expect(readFileSync(h.file, "utf8")).not.toContain(created.secret);
     if (process.platform !== "win32") expect(statSync(h.file).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps the current secret sealed beside its hash, so the same address can be given again, and never in a public trigger", () => {
+    const h = harness();
+    const created = create(h.manager);
+    const disk = () => JSON.parse(readFileSync(h.file, "utf8")) as { webhooks: Array<Record<string, unknown>> };
+    expect(disk().webhooks[0]!.sealedSecret).toEqual(expect.any(String));
+    expect(readFileSync(h.file, "utf8")).not.toContain(created.secret);
+    const keyFile = join(h.file, "..", WEBHOOK_KEY_FILE);
+    if (process.platform !== "win32") expect(statSync(keyFile).mode & 0o777).toBe(0o600);
+    expect(JSON.stringify(h.manager.list())).not.toMatch(/sealedSecret|secretHash/);
+    // Reading it back never replaces it, after a restart too.
+    expect(h.manager.currentSecret(created.webhook.id, true)?.secret).toBe(created.secret);
+    expect(new WebhookManager(h.options).currentSecret(created.webhook.id, true)?.secret).toBe(created.secret);
+    expect(h.manager.authorize(created.webhook.endpointId, created.secret)).toBe(true);
+    // Replace address keeps the new one; a seal that no longer matches the hash, or a lost key, reads as not kept.
+    const rotated = h.manager.rotateSecret(created.webhook.id)!;
+    expect(h.manager.currentSecret(created.webhook.id, false)?.secret).toBe(rotated.secret);
+    const stale = disk();
+    stale.webhooks[0]!.secretHash = "0".repeat(64);
+    writeFileSync(h.file, JSON.stringify(stale));
+    expect(new WebhookManager(h.options).currentSecret(created.webhook.id, false)?.secret).toBeNull();
+    rmSync(keyFile);
+    expect(h.manager.currentSecret(created.webhook.id, false)?.secret).toBeNull();
+    expect(h.manager.currentSecret("missing", true)).toBeNull();
+  });
+
+  it("gives a webhook from before secrets were kept a new address only while nothing has ever reached it", () => {
+    const h = harness();
+    const untouched = create(h.manager);
+    const used = h.manager.create({ name: "Used", prompt: "Review it", botId: "maus-sales" });
+    h.manager.receive(used.webhook.endpointId, used.secret, { payload: { lead: "Ada" } });
+    const legacy = JSON.parse(readFileSync(h.file, "utf8")) as { webhooks: Array<Record<string, unknown>> };
+    for (const webhook of legacy.webhooks) delete webhook.sealedSecret;
+    writeFileSync(h.file, JSON.stringify(legacy));
+    const manager = new WebhookManager(h.options);
+    expect(manager.currentSecret(untouched.webhook.id, false)?.secret).toBeNull();
+    const minted = manager.currentSecret(untouched.webhook.id, true)!.secret!;
+    expect(minted).not.toBe(untouched.secret);
+    expect(manager.authorize(untouched.webhook.endpointId, minted)).toBe(true);
+    // An app already sends to this one: its old address keeps working and is never replaced from here.
+    expect(manager.currentSecret(used.webhook.id, true)?.secret).toBeNull();
+    expect(manager.authorize(used.webhook.endpointId, used.secret)).toBe(true);
   });
 
   it("removes duration metadata saved by an earlier webhook build", () => {
