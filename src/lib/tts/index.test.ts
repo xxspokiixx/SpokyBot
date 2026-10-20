@@ -199,6 +199,7 @@ function deferredResponse(): { promise: Promise<Response>; resolve: (response: R
 
 interface SynthGate {
   settled: boolean;
+  signal: AbortSignal | undefined;
   respond: (response: Response) => void;
 }
 
@@ -244,6 +245,7 @@ describe("prefetch window", () => {
         const deferred = deferredResponse();
         const gate: SynthGate = {
           settled: false,
+          signal: init?.signal ?? undefined,
           respond: (response: Response) => {
             gate.settled = true;
             synthesizing -= 1;
@@ -372,6 +374,43 @@ describe("prefetch window", () => {
     FakeAudio.latest!.onended?.();
     await expect(speaking).resolves.toBeUndefined();
     expect(speaker.state).toEqual({ status: "idle", error: "voice exploded" });
+    expect(playedUrls).toEqual(["blob:block-1"]);
+  });
+
+  it("aborts the prefetched syntheses left in flight when a block fails to render", async () => {
+    installTts(["B0", "B1", "B2"]);
+    const speaker = new Speaker();
+    const speaking = speaker.speak("fails on the first block");
+    await vi.waitFor(() => expect(synthOrder).toEqual(["B0", "B1", "B2"]));
+
+    gates[0]!.respond(
+      new Response(JSON.stringify({ error: "voice exploded" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(speaking).resolves.toBeUndefined();
+
+    expect(speaker.state).toEqual({ status: "idle", error: "voice exploded" });
+    expect(gates[1]!.signal?.aborted).toBe(true);
+    expect(gates[2]!.signal?.aborted).toBe(true);
+    expect(playedUrls).toEqual([]);
+  });
+
+  it("aborts the prefetched syntheses left in flight when playback fails", async () => {
+    installTts(["B0", "B1", "B2"]);
+    const speaker = new Speaker();
+    const speaking = speaker.speak("fails to play");
+    await vi.waitFor(() => expect(synthOrder).toEqual(["B0", "B1", "B2"]));
+
+    gates[0]!.respond(clip());
+    await vi.waitFor(() => expect(playedUrls).toEqual(["blob:block-1"]));
+    FakeAudio.latest!.onerror?.();
+    await expect(speaking).resolves.toBeUndefined();
+
+    expect(speaker.state).toEqual({ status: "idle", error: "The generated voice clip couldn't be played." });
+    expect(gates[1]!.signal?.aborted).toBe(true);
+    expect(gates[2]!.signal?.aborted).toBe(true);
     expect(playedUrls).toEqual(["blob:block-1"]);
   });
 });

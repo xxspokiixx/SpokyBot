@@ -156,6 +156,7 @@ export class Speaker {
             error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error),
           });
         }
+        controller.abort();
         if (this.request === controller) this.request = null;
         return;
       }
@@ -164,6 +165,7 @@ export class Speaker {
       const finished = await this.play(rendered.blob, live, opts.messageId, i);
       if (!finished || !live()) {
         if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
+        controller.abort();
         if (this.request === controller) this.request = null;
         return;
       }
