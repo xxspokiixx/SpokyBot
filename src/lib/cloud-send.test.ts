@@ -64,6 +64,8 @@ describe("This computer and My Cloud, in words", () => {
     expect(partly.text).toBe("Sent to My Cloud: Ember and 48 chats. 2 logins and 1Password couldn't be sent: OpenMausBot on this computer did not answer. Try again.");
     expect(partly.text).not.toContain("a.test");
     expect(resultLines({ at: 1, reason: "button", result: { ...none, chats: { conversations: 0, messages: 7 }, failed: [] } }).text).toBe("Sent to My Cloud: 7 new messages.");
+    expect(resultLines({ at: 1, reason: "button", result: { ...none, bots: Array.from({ length: 12 }, (_, i) => `Bot ${i}`), skills: 3, chats: { conversations: 48, messages: 900 }, failed: [] } }).text)
+      .toBe("Sent to My Cloud: 12 bots, 3 skills, and 48 chats.");
     expect(resultLines({ at: 1, reason: "button", error: "This app could not sign in to My Cloud. Try again.", result: { ...none, failed: [] } }))
       .toMatchObject({ failed: true, text: "Send to My Cloud stopped: This app could not sign in to My Cloud. Try again." });
     expect(failedLine({ what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: true }, error: "My Cloud is busy." })).toBe("The chats couldn't be sent: My Cloud is busy.");

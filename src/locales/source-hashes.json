@@ -6697,7 +6697,8 @@
       "cloudSend.list.theChats": "59559398ac8b00659135200b70233f7f50b4c25909e9e7a000bb96533e1c5b98",
       "cloudSend.failedWhat": "5d39e161c7e0c194a361c67de195c294fdc8628aeaf65d9ee3165ea0344f618d",
       "cloudSend.failedSend": "050325e83ab6f98022cdd31041a1faf29452179fd4272dd2c42bcad1b8e7ef7c",
-      "cloudSend.strip.retry": "d8b8392e2c542950ca64867168e4ef87d4ad606882d5898f826b51c6d553988f"
+      "cloudSend.strip.retry": "d8b8392e2c542950ca64867168e4ef87d4ad606882d5898f826b51c6d553988f",
+      "cloudSend.list.bots": "fc1da572d3f0b2c7e2cdfa7f85a2c1f6b2aceb1969b9cac6ec4391422887a64b"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -21425,7 +21426,8 @@
       "cloudSend.list.theChats": "59559398ac8b00659135200b70233f7f50b4c25909e9e7a000bb96533e1c5b98",
       "cloudSend.failedWhat": "5d39e161c7e0c194a361c67de195c294fdc8628aeaf65d9ee3165ea0344f618d",
       "cloudSend.failedSend": "050325e83ab6f98022cdd31041a1faf29452179fd4272dd2c42bcad1b8e7ef7c",
-      "cloudSend.strip.retry": "d8b8392e2c542950ca64867168e4ef87d4ad606882d5898f826b51c6d553988f"
+      "cloudSend.strip.retry": "d8b8392e2c542950ca64867168e4ef87d4ad606882d5898f826b51c6d553988f",
+      "cloudSend.list.bots": "fc1da572d3f0b2c7e2cdfa7f85a2c1f6b2aceb1969b9cac6ec4391422887a64b"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

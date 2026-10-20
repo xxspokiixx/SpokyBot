@@ -682,6 +682,7 @@
   "cloudSend.list.logins": "{count} logins",
   "cloudSend.list.onePassword": "1Password",
   "cloudSend.list.settings": "your settings",
+  "cloudSend.list.bots": "{count} bots",
   "cloudSend.list.chatOne": "1 chat",
   "cloudSend.list.chats": "{count} chats",
   "cloudSend.list.messageOne": "1 new message",

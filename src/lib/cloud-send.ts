@@ -66,7 +66,7 @@ export function sideLines(snapshot: Pick<CloudSendSnapshot, "rows" | "cloudOnly"
 export function sentList(result: CloudSendOutcome["result"]): string[] {
   const chats = result.chats;
   return [
-    ...result.bots,
+    ...(result.bots.length > 3 ? [t("cloudSend.list.bots", { count: result.bots.length })] : result.bots),
     ...(result.updatedBots.length ? [t("cloudSend.list.changesTo", { names: names(result.updatedBots) })] : []),
     ...(result.skills ? [counted(result.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
     ...(result.logins ? [counted(result.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
