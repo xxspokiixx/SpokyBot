@@ -6695,7 +6695,8 @@
       "lending.page.lends": "cba774fa9f18f10b1c1264863e3360fd8621b895251c98ebde51dc478f31d66d",
       "lending.page.readOnly": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
       "lending.page.canEdit": "42d0a9e07daa0b7ac883394b465dbdb9d8aa28b521e7b731274701169cba4438",
-      "cloudMove.more": "197e7a14ac0f95b90c383fb8680bd9dd4699f1318ee703c61c896d609f977288"
+      "cloudMove.more": "197e7a14ac0f95b90c383fb8680bd9dd4699f1318ee703c61c896d609f977288",
+      "cloudSend.state.stopped": "c731929da8e08529978329e92ec4f033773bbbbfcab4719edbeae8557d6a0dbe"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -21435,7 +21436,8 @@
       "lending.page.lends": "cba774fa9f18f10b1c1264863e3360fd8621b895251c98ebde51dc478f31d66d",
       "lending.page.readOnly": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
       "lending.page.canEdit": "42d0a9e07daa0b7ac883394b465dbdb9d8aa28b521e7b731274701169cba4438",
-      "cloudMove.more": "197e7a14ac0f95b90c383fb8680bd9dd4699f1318ee703c61c896d609f977288"
+      "cloudMove.more": "197e7a14ac0f95b90c383fb8680bd9dd4699f1318ee703c61c896d609f977288",
+      "cloudSend.state.stopped": "c731929da8e08529978329e92ec4f033773bbbbfcab4719edbeae8557d6a0dbe"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

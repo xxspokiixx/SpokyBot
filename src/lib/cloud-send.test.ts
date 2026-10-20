@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PlanRow } from "../../electron/cloud-send-parts.mjs";
 import type { CloudSendNotice, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import { setLocale } from "@/lib/i18n";
-import { detailRows, failedLine, resultLines, sideLines, statusLine, stripLine } from "./cloud-send";
+import { detailRows, failedLine, resultLines, sendStateLine, sideLines, statusLine, stripLine } from "./cloud-send";
 
 const row = (key: string, kind: PlanRow["kind"], label: string, state: PlanRow["state"], extra: Partial<PlanRow> = {}): PlanRow => ({ key, kind, label, state, ...extra });
 const snapshot = (extra: Partial<CloudSendSnapshot> = {}): CloudSendSnapshot => ({
@@ -105,5 +105,22 @@ describe("My Cloud's strip", () => {
     expect(stripLine(notice({ last: { at: 1, reason: "auto", failed: 0, seen: false, sent: { ...counts, bots: 2 } } }), false, null)).toBeNull();
     expect(stripLine(notice(), true, null)?.kind).toBe("sending");
     expect(stripLine(notice(), false, "My Cloud is asleep.")).toEqual({ kind: "failed", text: "Send to My Cloud stopped: My Cloud is asleep." });
+  });
+});
+
+describe("a send the switch stopped", () => {
+  const result = { bots: ["Ember"], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: { conversations: 0, messages: 4 }, failed: [], notes: [] };
+  it("Settings says it stopped because Keep My Cloud up to date was turned off", () => {
+    const last = { at: 5, reason: "first", result, stopped: "off" as const };
+    expect(sendStateLine(snapshot({ auto: false, last }), last)).toEqual({ kind: "off",
+      text: "Sending stopped because you turned off Keep My Cloud up to date. What hadn't gone yet stays on this computer." });
+    expect(sendStateLine(snapshot({ auto: false, last: { ...last, stopped: undefined } }), { ...last, stopped: undefined }).text)
+      .toBe("Keep My Cloud up to date is off: what you add on this computer stays here.");
+  });
+  it("My Cloud's strip says what came, and never that everything is here", () => {
+    const sent = { bots: 0, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null };
+    expect(stripLine(notice({ last: { at: 5, reason: "first", failed: 0, seen: false, sent, stopped: "off" } }), false, null)).toBeNull();
+    expect(stripLine(notice({ last: { at: 5, reason: "first", failed: 0, seen: false, sent: { ...sent, bots: 2 }, stopped: "off" } }), false, null))
+      .toEqual({ kind: "done", text: "2 bots came over from This computer." });
   });
 });

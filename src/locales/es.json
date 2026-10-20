@@ -5043,6 +5043,7 @@
   "cloudSend.state.done": "Todo lo de este equipo está en My Cloud.",
   "cloudSend.state.soon": "Lo nuevo de este equipo llega a My Cloud en un minuto o dos.",
   "cloudSend.state.off": "Mantener My Cloud al día está desactivado: lo que añades en este equipo se queda aquí.",
+  "cloudSend.state.stopped": "El envío se detuvo porque desactivaste Mantener My Cloud al día. Lo que aún no había llegado se queda en este equipo.",
   "cloudSend.moreLink": "Más",
   "cloudSend.progress": "{done} de {total}",
   "cloudSend.auto": "Mantener My Cloud al día con este equipo",

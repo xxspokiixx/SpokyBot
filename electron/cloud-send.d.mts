@@ -18,8 +18,9 @@ export interface CloudSendResult {
   /** model: kept My Cloud's engine; settings: a setting My Cloud refused; narrowed: a login kept to bots My Cloud lacks; memory: notes not copied. */
   notes: Array<{ kind: "model" | "settings" | "narrowed" | "memory"; bot?: string; login?: string }>;
 }
-/** `error`: the send failed as a whole (nothing after that point went), in words for the person. */
-export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult; error?: string }
+/** `error`: the send failed as a whole (nothing after that point went), in words for the person. `stopped: "off"`:
+ * Keep My Cloud up to date was turned off while it sent, so the rest stayed on this computer. */
+export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult; error?: string; stopped?: "off" }
 /** What did not go, grouped by reason (bots by name, logins only counted, at most three reasons), and `error`: why the
  * send stopped as a whole. */
 export interface CloudSendFailure {
@@ -61,7 +62,7 @@ export interface CloudSendNotice {
   phase?: "chats";
   /** `sent`: counts only; `seen`: the person closed this result on the strip. */
   /** `final`: every failure is one trying again can't fix (1Password refused the token), so no Try again. */
-  last: ({ at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean } & CloudSendFailure) | null;
+  last: ({ at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean; stopped?: "off" } & CloudSendFailure) | null;
 }
 export interface CloudSendCounts {
   bots: number; updatedBots: number; skills: number; logins: number; onePassword: boolean; settings: number;

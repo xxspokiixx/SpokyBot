@@ -664,6 +664,7 @@
   "cloudSend.state.done": "Everything from this computer is on My Cloud.",
   "cloudSend.state.soon": "New things on this computer go to My Cloud in a minute or two.",
   "cloudSend.state.off": "Keep My Cloud up to date is off: what you add on this computer stays here.",
+  "cloudSend.state.stopped": "Sending stopped because you turned off Keep My Cloud up to date. What hadn't gone yet stays on this computer.",
   "cloudSend.moreLink": "More",
   "cloudSend.progress": "{done} of {total}",
   "cloudSend.auto": "Keep My Cloud up to date with this computer",

@@ -5790,6 +5790,7 @@
   "cloudSend.state.done": "Tudo deste computador está no My Cloud.",
   "cloudSend.state.soon": "O que é novo neste computador vai para o My Cloud em um ou dois minutos.",
   "cloudSend.state.off": "Manter o My Cloud atualizado está desligado: o que você adiciona neste computador fica aqui.",
+  "cloudSend.state.stopped": "O envio parou porque você desligou Manter o My Cloud atualizado. O que ainda não tinha ido fica neste computador.",
   "cloudSend.moreLink": "Mais",
   "cloudSend.progress": "{done} de {total}",
   "cloudSend.auto": "Manter o My Cloud em dia com este computador",

@@ -30,6 +30,8 @@ const VAULT_ID = /^[\w-]{1,128}$/u;
 const CHAT_REASONS = new Set(["button", "my-cloud", "menu", "auto", "first"]);
 /** Bring newer chats' copy of the whole workspace: never for the background send. */
 const BRING_REASONS = new Set(["button", "my-cloud", "menu", "first"]);
+/** Sends Keep My Cloud up to date makes: turning it off stops one already under way. */
+const BACKGROUND_REASONS = new Set(["auto", "first"]);
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, 300) : null);
@@ -108,6 +110,7 @@ export function sendNotice(snapshot) {
     ...(snapshot.running ? { runningReason: snapshot.running.reason, ...(snapshot.running.progress ? { progress: snapshot.running.progress } : {}),
       ...(snapshot.running.phase ? { phase: snapshot.running.phase } : {}) } : {}),
     last: snapshot.last ? { at: snapshot.last.at, reason: snapshot.last.reason, failed: snapshot.last.result.failed.length, sent: sentCounts(snapshot.last.result),
+      ...(snapshot.last.stopped ? { stopped: snapshot.last.stopped } : {}),
       // Every failure is one trying again can't fix (1Password refused the token): no Try again.
       final: !snapshot.last.error && snapshot.last.result.failed.length > 0 && snapshot.last.result.failed.every((entry) => entry.final === true),
       seen: snapshot.dismissed === resultKey(snapshot.last), ...failedSummary(snapshot.last) } : null,
@@ -153,6 +156,9 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   function safeRead(source) { try { return source.read(); } catch { return null; } }
   function persist() { try { store.write(saved); } catch {} }
   const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, chats: {} });
+  /** Keep My Cloud up to date was turned off, or stopped: a send it started stops where it is. */
+  const halted = (job) => BACKGROUND_REASONS.has(job.reason) && (!saved.auto || job.cancelled === true);
+  const halt = (job) => { if (!halted(job)) return; job.halted = true; throw new CloudSendError("off", "Keep My Cloud up to date was turned off."); };
 
   function snapshot() {
     const origin = cloud.origin();
@@ -223,7 +229,8 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     while (running) await running.promise.catch(() => {});
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
-    const job = { reason, promise: null, chats: false };
+    const job = { reason, promise: null, chats: false, halted: false, cancelled: false };
+    if (halted(job)) return { at: now(), reason, result: emptyResult(), stopped: "off" };
     running = job;
     progress = null;
     publish();
@@ -245,17 +252,17 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     const mine = parseSendSummary(await localJson("/api/cloud-send"));
     if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
     const withChats = !keys && CHAT_REASONS.has(reason);
-    const latest = await sendItems(origin, mine, result, { keys, force, chatsFor: withChats ? job : null });
+    const latest = await sendItems(origin, mine, result, { keys, force, job, withChats });
     // A Cloud too old to take rows: Bring newer chats, after the items' session is signed out, since it opens its own
     // for as long as the upload takes.
-    if (withChats && !latest.chats && bringChats && BRING_REASONS.has(reason)) {
+    if (withChats && !latest.chats && bringChats && BRING_REASONS.has(reason) && !job.halted) {
       job.chats = true;
       publish();
       try { result.chats = await bringChats(); }
       catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
     }
     if (withChats) chatsAt = now();
-    const outcome = { at: now(), reason, result };
+    const outcome = { at: now(), reason, result, ...(job.halted ? { stopped: "off" } : {}) };
     entry(origin).last = outcome;
     persist();
     view = { cloud: "ready", plan: plan(origin, mine, latest), local: mine, theirs: latest };
@@ -263,7 +270,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   }
 
   /** Every item that waits, and then the chats, over one owner session, always signed out; what My Cloud holds after. */
-  async function sendItems(origin, mine, result, { keys, force, chatsFor }) {
+  async function sendItems(origin, mine, result, { keys, force, job, withChats }) {
     const session = await cloud.open().catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again."); });
     try {
       const before = await session.call("GET", "/api/cloud-send");
@@ -282,6 +289,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const ctx = { session, result, cloudBots, localItems, cloudItems, planned: new Map(planned.rows.map((row) => [row.key, row])), bots: null, skillLists: new Map(), sentKeys: new Set(), sentParts: {} };
       const order = { bot: 0, skill: 1, setting: 2, login: 3, "1password": 4 };
       for (const row of [...rows].sort((a, b) => order[a.kind] - order[b.kind])) {
+        if (halted(job)) { job.halted = true; break; }
         try { await sendRow(ctx, row); }
         catch (error) { result.failed.push({ key: row.key, kind: row.kind, label: row.label, error: sentence(error?.message) ?? "It could not be sent.", ...(error?.final === true ? { final: true } : {}) }); }
         if (progress) progress = { done: progress.done + 1, total };
@@ -290,12 +298,12 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const after = parseSendSummary((await session.call("GET", "/api/cloud-send")).body);
       if (after) remember(origin, ctx, after);
       const latest = after ?? theirs;
-      if (chatsFor && latest.chats) {
-        chatsFor.chats = true;
+      if (withChats && latest.chats && !job.halted) {
+        job.chats = true;
         progress = null;
         publish();
-        try { await sendChatRows(origin, session, latest, result); }
-        catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
+        try { await sendChatRows(origin, session, latest, result, job); }
+        catch (error) { if (!job.halted) result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
       }
       return latest;
     } finally {
@@ -321,7 +329,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   /** Each waiting conversation's new rows, page by page, a few conversations per request; the cursor moves only past
    * what My Cloud took, and once My Cloud did not take a page, the conversation's later pages wait for the next send too.
    * The attachments those rows name go first, unless My Cloud has them. */
-  async function sendChatRows(origin, session, theirs, result) {
+  async function sendChatRows(origin, session, theirs, result, job) {
     const { dataDir, ready } = await chatsWaiting(origin, theirs);
     const kept = entry(origin);
     const total = ready.length;
@@ -332,6 +340,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     publish();
     const flush = async () => {
       if (!batch.length) return;
+      halt(job);
       const names = [...new Set(batch.flatMap((page) => page.attachments))];
       for (let i = 0; i < names.length; i += ATTACHMENT_NAMES) {
         const asked = names.slice(i, i + ATTACHMENT_NAMES);
@@ -362,6 +371,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       batch = []; bytes = 0;
     };
     for (const head of ready) {
+      halt(job);
       let cursor = record(kept.chats[head.threadId]) ? kept.chats[head.threadId] : null;
       for (let pages = 0; pages < 10_000 && !held.has(head.threadId); pages++) {
         const page = await localJson(`/api/cloud-send/chats/rows?thread=${head.threadId}&after=${cursor?.after ?? 0}&id=${encodeURIComponent(cursor?.id ?? "")}`);
@@ -608,14 +618,16 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       if (saved.auto && origin && !running && !cloud.asleep()) {
         const mine = parseSendSummary(await localJson("/api/cloud-send"));
         const digest = mine ? createHash("sha256").update(JSON.stringify(mine.items)).digest("hex") : "";
-        const first = !entry(origin).last;
+        const last = entry(origin).last;
+        // A first send the switch stopped is still the first one when it goes on.
+        const first = !last || (last.reason === "first" && last.stopped === "off");
         const backoff = digest === autoFailedDigest && now() - autoFailedAt < AUTO_FULL_MS;
         const itemsDue = digest && (digest !== autoDigest || now() - autoAt >= AUTO_FULL_MS);
         const chatsDue = view.cloud === "ready" && view.theirs?.chats && now() - chatsAt >= CHATS_EVERY_MS
           && (await chatsWaiting(origin, view.theirs)).ready.length > 0;
         if (digest && !backoff && (first || itemsDue || chatsDue)) {
           await compare();
-          if (view.cloud === "ready") {
+          if (view.cloud === "ready" && saved.auto) {
             const chats = view.theirs.chats && now() - chatsAt >= CHATS_EVERY_MS ? (await chatsWaiting(origin, view.theirs)).ready.length : 0;
             if (first || pendingRows(view.plan).length || chats) {
               const outcome = await send({ reason: first ? "first" : "auto" });
@@ -665,7 +677,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       return publish();
     },
     start() { if (!stopped) return; stopped = false; schedule(AUTO_FIRST_MS); },
-    stop() { stopped = true; if (timer !== null) clearTimer(timer); timer = null; },
+    stop() { stopped = true; if (running) running.cancelled = true; if (timer !== null) clearTimer(timer); timer = null; },
     /** For the native menu: what is waiting, from the last comparison, without asking anyone; nothing while it goes by
      * itself. */
     waiting() {

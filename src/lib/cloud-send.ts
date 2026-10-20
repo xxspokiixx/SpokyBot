@@ -132,6 +132,7 @@ export function sendStateLine(snapshot: CloudSendSnapshot, last: CloudSendOutcom
     const key = running.phase === "chats" ? "cloudSend.sendingChats" : "cloudSend.sending";
     return { kind: "sending", text: running.progress ? `${t(key)} ${t("cloudSend.progress", running.progress)}` : t(key) };
   }
+  if (!snapshot.auto && last?.stopped === "off") return { kind: "off", text: t("cloudSend.state.stopped") };
   const failure = last ? failedLine(failedSummary(last)) : null;
   if (failure) return { kind: "failed", text: failure };
   if (!snapshot.auto) return { kind: "off", text: t("cloudSend.state.off") };
@@ -191,7 +192,8 @@ export function stripLine(notice: CloudSendNotice, sending: boolean, unanswered:
   if (failure) return { kind: "failed", text: failure };
   if (last.reason !== "first") return null;
   const list = countedList(last.sent);
-  return { kind: "done", text: list.length ? t("cloudSend.strip.arrived", { list: listOf(list) }) : t("cloudSend.strip.allHere") };
+  if (list.length) return { kind: "done", text: t("cloudSend.strip.arrived", { list: listOf(list) }) };
+  return last.stopped ? null : { kind: "done", text: t("cloudSend.strip.allHere") };
 }
 
 /** The rows the details list shows, grouped: bots with their skills under them, then logins, then settings. */

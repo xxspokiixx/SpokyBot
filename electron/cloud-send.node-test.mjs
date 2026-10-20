@@ -508,6 +508,14 @@ function chatSides({ threads, page = 300, answer = () => "accepted", onPost = ()
   return { sides, rows, posted, checked };
 }
 const stored = () => { let value = null; return { read: () => value, write: (next) => { value = structuredClone(next); }, get value() { return value; } }; };
+/** Keep My Cloud up to date's own timer, run by hand: `tick(ms)` moves the clock on and runs the check that is due. */
+function clocked(deps) {
+  const clock = { now: 1_000, fire: null, waits: [] };
+  const send = createCloudSend({ ...deps, now: () => clock.now, setTimer: (callback, ms) => { clock.fire = callback; clock.waits.push(ms); return clock.waits.length; }, clearTimer() { clock.fire = null; } });
+  const settle = async () => { for (let i = 0; i < 200; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  const tick = async (ms = 0) => { clock.now += ms; const run = clock.fire; clock.fire = null; run?.(); await settle(); };
+  return { send, clock, tick, settle };
+}
 const fortyOnePages = () => ({ ...Object.fromEntries(Array.from({ length: 39 }, (_, i) => [`t${i}`, 1])), long: 4 });
 
 test("a conversation split over two requests: its later page says it went before, so one removed on My Cloud in between stays removed", async () => {
@@ -540,6 +548,61 @@ test("a conversation this computer never sent is never kept as removed, so it go
   await send.send();
   assert.deepEqual(posted.at(-1).map((entry) => entry.threadId), ["kept"]);
   assert.deepEqual(store.value.clouds[CLOUD].chats.kept, { after: 1, id: "kept-1" });
+});
+
+test("turning off Keep My Cloud up to date stops a send under way before the next conversation, and says it was turned off", async () => {
+  const threads = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`c${i}`, 1]));
+  let off = () => {}, readAfterOff = 0;
+  const { sides, posted } = chatSides({ threads, onPost: (post) => { if (post === 1) off(); }, onRead: () => { if (posted.length) readAfterOff++; } });
+  const store = stored();
+  const { send, tick } = clocked({ ...sides.deps, store });
+  off = () => send.setAuto(false);
+  send.start();
+  await tick(20_000);
+  assert.equal(posted.length, 1, "nothing went after the switch was turned off");
+  assert.equal(readAfterOff, 0, "no conversation is read once the switch is off");
+  assert.deepEqual(posted[0].map((entry) => entry.threadId), Object.keys(threads).slice(0, 40));
+  const last = send.snapshot().last;
+  assert.deepEqual([last.reason, last.stopped, last.result.failed], ["first", "off", []]);
+  assert.equal(Object.keys(store.value.clouds[CLOUD].chats).length, 40, "what My Cloud took is kept");
+  // Turned on again: the first send goes on from where it stopped, still the first one.
+  send.setAuto(true);
+  await tick(1_000);
+  assert.deepEqual(posted.at(-1).map((entry) => entry.threadId), Object.keys(threads).slice(40));
+  assert.equal(send.snapshot().last.reason, "first");
+  assert.equal(send.snapshot().last.stopped, undefined);
+});
+
+test("turned off while the last conversation is read, a send stops before its request; turned off between bots, the rest stay here", async () => {
+  let off = () => {};
+  const late = chatSides({ threads: { a: 1, b: 1, c: 1 }, onRead: (threadId) => { if (threadId === "c") off(); } });
+  const first = clocked({ ...late.sides.deps, store: stored() });
+  off = () => first.send.setAuto(false);
+  first.send.start();
+  await first.tick(20_000);
+  assert.deepEqual(late.posted, []);
+  assert.equal(first.send.snapshot().last.stopped, "off");
+
+  const three = [bot("ember", { soul: "s" }), bot("juno", { soul: "j" }), bot("kit", { soul: "k" })];
+  const items = fakeSides({ localItems: three });
+  const local = items.deps.local;
+  items.deps.local = async (route) => route === "/api/bots?messages=0"
+    ? new Response(JSON.stringify({ bots: three.map((entry) => ({ id: entry.id, threadId: `t-${entry.id}`, name: entry.label })) }), { status: 200 }) : local(route);
+  const open = items.deps.cloud.open;
+  let between = () => {};
+  items.deps.cloud.open = async () => {
+    const session = await open();
+    const call = session.call;
+    session.call = async (method, route, body) => { const answered = await call(method, route, body); if (method === "POST" && route === "/api/bots") between(); return answered; };
+    return session;
+  };
+  const second = clocked(items.deps);
+  between = () => second.send.setAuto(false);
+  second.send.start();
+  await second.tick(20_000);
+  assert.equal(items.calls.filter((entry) => entry === "POST /api/bots").length, 1);
+  assert.deepEqual(second.send.snapshot().last.result.bots, ["ember"]);
+  assert.equal(second.send.snapshot().last.stopped, "off");
 });
 
 test("more attachments than My Cloud checks at once go in several checks, so the chats still go", async () => {
