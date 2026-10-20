@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudMoveBridge, CloudMoveOverview, CloudMoveState } from "../../../electron/cloud-move.mjs";
+import type { CloudSendNotice } from "../../../electron/cloud-send.mjs";
 import { EMPTY_ONBOARDING } from "@/lib/onboarding";
 import { setLocale } from "@/lib/i18n";
 
@@ -31,7 +32,7 @@ vi.mock("@/components/TeamLibraryPanel", async () => {
   const { createElement: h } = await import("react");
   return { TeamLibraryPanel: ({ onImported }: { onImported: () => void }) => { fixture.imported = onImported; return h("div", { "data-team-library": "" }); } };
 });
-import { CloudWelcome } from "./CloudWelcome";
+import { CloudWelcome, sentHere } from "./CloudWelcome";
 import { CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN as SHOWN, welcomeStepHint } from "@/lib/cloud-setup";
 import { resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
 
@@ -115,7 +116,7 @@ describe("CloudWelcome", () => {
     await vi.waitFor(() => expect(text()).toContain("Welcome to Studio Cloud"));
     await vi.waitFor(() => expect(text()).toContain("142 chats"));
     expect(text()).toContain("What should Studio Cloud start with?");
-    for (const line of ["Everything from this Mac", "6 bots", "4 routines", "1.2 GB", "Sign-ins and keys stay on this Mac. Routines arrive paused so nothing runs twice."]) {
+    for (const line of ["Everything from this Mac", "6 bots", "4 routines", "1.2 GB", "Your Claude or ChatGPT sign-in and API keys stay on this Mac. Routines arrive paused so nothing runs twice."]) {
       expect(text()).toContain(line);
     }
     expect(host.querySelector('[data-bring-choice="copy"]')!.getAttribute("aria-checked")).toBe("true");
@@ -178,7 +179,7 @@ describe("CloudWelcome", () => {
   it("on a Cloud that already has bots or chats, says they are already here instead of offering a copy or a fresh start", async () => {
     vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: false, cloud: { ...emptyCloud, contents: { bots: 6, rooms: 1, chats: 142 }, empty: false } }));
     render();
-    await vi.waitFor(() => expect(text()).toContain("Studio Cloud already has bots or chats of its own, so nothing is copied over them from here."));
+    await vi.waitFor(() => expect(text()).toContain("Studio Cloud already has bots or chats, so nothing is copied over them from here."));
     expect(text()).toContain("Your bots are already here");
     expect(host.querySelector("[data-bring-choice]")).toBeNull();
     expect(button("Choose a team")).toBeUndefined();
@@ -320,5 +321,108 @@ describe("CloudWelcome", () => {
     click("Skip setup");
     expect(hintsPut().at(-1)).toEqual([SHOWN, CLOUD_WELCOME_DONE]);
     expect(welcome.current!.ended).toBe(true);
+  });
+  describe("when this computer's things come over by themselves (Keep My Cloud up to date)", () => {
+    const counts = { bots: 4, updatedBots: 0, skills: 2, logins: 2, onePassword: true, settings: 1, chats: { conversations: 3, messages: 10 } };
+    const sentLast = (extra: Record<string, unknown> = {}) => ({ at: 1, reason: "first", failed: 0, seen: false, sent: counts, ...extra }) as NonNullable<CloudSendNotice["last"]>;
+    const notice = (extra: Partial<CloudSendNotice> = {}): CloudSendNotice => ({
+      ready: true, auto: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false,
+      running: false, last: null, ...extra,
+    });
+    let pushNotice: (value: CloudSendNotice) => void = () => {};
+    const withSend = (value: CloudSendNotice | null) => {
+      const page = { notice: vi.fn().mockResolvedValue(value), send: vi.fn(), dismiss: vi.fn(),
+        onNotice: vi.fn((listener: (next: CloudSendNotice) => void) => { pushNotice = listener; return () => {}; }) };
+      window.ogb = { ...window.ogb!, cloudSendPage: page } as unknown as typeof window.ogb;
+      return page;
+    };
+    const rail = () => host.querySelector('[data-welcome-rail="bring"]')!;
+
+    it("says what came over only after a whole send went through, and keeps the choice when nothing comes by itself", () => {
+      const state = (value: CloudSendNotice | null) => sentHere(value)?.state ?? null;
+      expect(state(null)).toBeNull();
+      expect(state({ ...notice(), auto: undefined } as unknown as CloudSendNotice), "a desktop too old to say keeps its choice").toBeNull();
+      expect(state(notice({ auto: false }))).toBeNull();
+      expect(state(notice()), "switched on, nothing gone yet: on its way").toBe("sending");
+      expect(state(notice({ running: true, runningReason: "first" }))).toBe("sending");
+      expect(state(notice({ last: sentLast() }))).toBe("sent");
+      expect(state(notice({ auto: false, last: sentLast({ reason: "button" }) }))).toBe("sent");
+      expect(state(notice({ last: sentLast({ error: "This app could not sign in to My Cloud. Try again." }) })), "a send that failed as a whole").toBeNull();
+      expect(state(notice({ auto: false, last: sentLast({ reason: "logins" }) })), "one login sent by hand").toBeNull();
+      expect(state(notice({ auto: false, running: true, runningReason: "logins" }))).toBeNull();
+      expect(state(notice({ last: sentLast({ reason: "logins" }) })), "switched on: the whole send is still to come").toBe("sending");
+    });
+
+    it("moves straight on to the AI while they come over, ticking Bring your stuff only once they arrived, never taking focus", async () => {
+      withSend(notice({ running: true, runningReason: "first" }));
+      render();
+      await vi.waitFor(() => expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull());
+      expect(rail().hasAttribute("data-finished")).toBe(false);
+      expect(rail().hasAttribute("data-bringing")).toBe(true);
+      expect(hintsPut()).toEqual([[SHOWN]]);
+      expect(text()).not.toContain("What should Studio Cloud start with?");
+      expect(button("Copy to Studio Cloud")).toBeUndefined();
+      expect(bridge.start).not.toHaveBeenCalled();
+      expect(document.activeElement?.id, "moving on by itself takes no focus").not.toBe("cloud-welcome-step");
+      flushSync(() => pushNotice(notice({ last: sentLast() })));
+      await vi.waitFor(() => expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]));
+      expect(rail().hasAttribute("data-finished")).toBe(true);
+      expect(host.querySelector('[data-welcome-step="engine"]'), "the person stays where they are").not.toBeNull();
+    });
+
+    it("back on its step it says in one line what is happening, with a fresh start only behind More", async () => {
+      withSend(notice({ running: true, runningReason: "first" }));
+      render();
+      await vi.waitFor(() => expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull());
+      flushSync(() => (rail() as HTMLButtonElement).click());
+      expect(text()).toContain("Your bots come over by themselves");
+      expect(text()).toContain("Bringing this computer's bots, chats and logins here…");
+      expect(host.querySelector("[data-bring-choice]")).toBeNull();
+      for (const label of ["Copy to Studio Cloud", "Continue", "Choose a team", "Skip for now"]) expect(button(label)).toBeUndefined();
+      flushSync(() => pushNotice(notice({ last: sentLast() })));
+      await vi.waitFor(() => expect(text()).toContain("4 bots, 2 skills, 2 logins, 1Password, your settings, and 3 chats came over from This computer. New ones keep coming by themselves."));
+      expect(host.querySelector('[data-welcome-step="bring"]'), "never moved off a step the person opened").not.toBeNull();
+      click("More");
+      expect(text()).toContain("Start fresh");
+      click("Choose a team");
+      expect(host.querySelector("[data-team-library]")).not.toBeNull();
+    });
+
+    it("with the switch off, a whole send it made says what arrived and nothing about more coming", async () => {
+      withSend(notice({ auto: false, last: sentLast({ reason: "button", sent: { ...counts, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null } }) }));
+      fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [SHOWN, welcomeStepHint("bring")] };
+      render();
+      flushSync(() => (rail() as HTMLButtonElement).click());
+      await vi.waitFor(() => expect(text()).toContain("4 bots came over from This computer."));
+      expect(text()).toContain("Your bots are already here");
+      expect(text()).not.toContain("by themselves");
+    });
+
+    it("a whole send that failed, a single login sent by hand, or an older desktop keep the choice to copy or start fresh", async () => {
+      for (const value of [notice({ last: sentLast({ error: "This app could not sign in to My Cloud. Try again." }) }), notice({ auto: false, last: sentLast({ reason: "logins" }) }),
+        { ...notice({ last: sentLast() }), auto: undefined } as unknown as CloudSendNotice]) {
+        flushSync(() => root.unmount());
+        root = createRoot(host);
+        resetCloudWelcome();
+        fixture.api.mockClear();
+        withSend(value);
+        render();
+        await vi.waitFor(() => expect(text()).toContain("142 chats"));
+        expect(button("Copy to Studio Cloud")).toBeDefined();
+        expect(hintsPut()).toEqual([[SHOWN]]);
+      }
+    });
+
+    it("shows no choice while main has not answered yet, and the choice if it never does", async () => {
+      vi.useFakeTimers();
+      try {
+        const page = withSend(null);
+        page.notice.mockReturnValue(new Promise(() => {}));
+        render();
+        expect(host.querySelector('[data-welcome-step="bring"]')).toBeNull();
+        await vi.advanceTimersByTimeAsync(1600);
+        expect(host.querySelector('[data-welcome-step="bring"]')).not.toBeNull();
+      } finally { vi.useRealTimers(); }
+    });
   });
 });

@@ -1,4 +1,5 @@
-// The private ask for one login's secrets, which Send to My Cloud (cloud-send.mjs) carries to the person's own Cloud.
+// The private ask for one login's secrets, which Send to My Cloud (cloud-send.mjs) carries to the person's own Cloud, or
+// for one connection's, which a move carries (cloud-connections.mjs).
 //
 // The secret leaves this computer's server only over Electron's private utility-process port (server/login-handoff.ts)
 // and is answered only to the process it was asked of; nothing here keeps or logs it.
@@ -46,7 +47,7 @@ export function createLoginHandoffClient({ timeoutMs = 10_000, randomId = random
       const waiting = typeof message.requestId === "string" ? pending.get(message.requestId) : undefined;
       if (!waiting || waiting.proc !== proc) return true;
       settle(message.requestId, ({ resolve, reject }) => {
-        if (message.ok === true && (record(message.onePassword) || record(message.login))) resolve(message);
+        if (message.ok === true && [message.onePassword, message.login, message.connection, message.share, message.release].some(record)) resolve(message);
         else reject(new Error(sentence(message.error) ?? "OpenMausBot on this computer could not read that login."));
       });
       return true;

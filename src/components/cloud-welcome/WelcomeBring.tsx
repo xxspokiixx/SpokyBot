@@ -1,10 +1,11 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { Check, CloudUpload, Laptop, Sparkles, Users } from "lucide-react";
+import { Check, CloudUpload, Laptop, Loader2, Sparkles, Users } from "lucide-react";
 import type { CloudMoveState } from "../../../electron/cloud-move.mjs";
 import { formatMoveBytes, moveView, type CloudMoveHandle } from "@/components/CloudMove";
 import { TeamLibraryPanel } from "@/components/TeamLibraryPanel";
 import { suggestedChoice, type BringChoice } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
+import { listOf } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Chip, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
@@ -29,12 +30,15 @@ function MoveProgress({ done, total, label }: { done: number; total: number; lab
   </div>;
 }
 
-export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onFinish }: {
+export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef, onTeam, onFinish }: {
   name: string;
   /** Null outside the desktop app, where nothing can be copied from this computer. */
   move: CloudMoveHandle | null;
   /** The Cloud has bots or chats of its own (a copy from before, a chat from a phone): nothing is copied over them. */
   cloudHasWork: boolean;
+  /** This computer's things come (or came) over by themselves: one line, nothing to choose or press, a fresh start only
+   * behind More. `arrived`: what the last whole send brought, as countedList names it; `auto`: more keep coming. */
+  sent?: { state: "sending" | "sent"; auto: boolean; arrived: string[] | null } | null;
   headingRef: Ref<HTMLHeadingElement>;
   /** Before the team library selects the bots it adds, so that is not read as the person leaving. */
   onTeam: () => void;
@@ -44,6 +48,7 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onF
   const overview = move?.overview ?? null;
   const [chosen, setChosen] = useState<BringChoice | null>(null);
   const [teams, setTeams] = useState(false);
+  const [more, setMore] = useState(false);
   const teamButton = useRef<HTMLButtonElement>(null);
   const mac = window.ogb?.platform === "darwin";
   const state: CloudMoveState = move?.state ?? { phase: "idle" };
@@ -135,6 +140,26 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onF
     </>;
   }
 
+  const library = teams && <TeamLibraryPanel returnFocusRef={teamButton} onClose={() => setTeams(false)}
+    onImported={() => { onTeam(); setTeams(false); onFinish("team"); }} />;
+  if (sent) {
+    const arrived = sent.arrived?.length ? t("cloudSend.strip.arrived", { list: listOf(sent.arrived) }) : t("cloudSend.strip.allHere");
+    const line = sent.state === "sending" ? t("cloudWelcome.bring.sending") : sent.auto ? `${arrived} ${t("cloudWelcome.bring.keepsComing")}` : arrived;
+    return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" data-bring-sent={sent.state} className="flex flex-col gap-5">
+      <StepHeading headingRef={headingRef} title={t(sent.auto ? "cloudWelcome.bring.sentTitle" : "cloudWelcome.bring.hereTitle")}
+        sub={<span role="status" className="inline-flex items-start gap-2">
+          {sent.state === "sending" ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin" /> : <Check size={15} strokeWidth={2.5} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />}
+          <span>{line}</span>
+        </span>} />
+      {more
+        ? <div data-bring-choice="fresh" className={cn(CARD, CARD_IDLE)}>{freshBody}<Footer>
+            <button ref={teamButton} type="button" className={SECONDARY} onClick={() => setTeams(true)}>{t("cloudWelcome.bring.chooseTeam")}</button>
+          </Footer></div>
+        : <Footer><button type="button" data-bring-more className={QUIET} onClick={() => setMore(true)}>{t("cloudWelcome.bring.more")}</button></Footer>}
+      {library}
+    </section>;
+  }
+
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" className="flex flex-col gap-5">
     <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.title", { name })} sub={t("cloudWelcome.bring.sub")} />
     {here
@@ -158,7 +183,6 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onF
         </div>}
     {status}
     <Footer>{actions}</Footer>
-    {teams && <TeamLibraryPanel returnFocusRef={teamButton} onClose={() => setTeams(false)}
-      onImported={() => { onTeam(); setTeams(false); onFinish("team"); }} />}
+    {library}
   </section>;
 }

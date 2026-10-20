@@ -1,5 +1,5 @@
 // Main's side of Send to My Cloud (cloud-send.mjs): its IPC, the Cloud sessions it uses, and where its state lives.
-// A send the person asks for brings the chats too, through Bring newer chats (cloud-move.mjs), which only adds.
+// Chats go by row; a Cloud too old for that gets Bring newer chats' copy (cloud-move.mjs), which only adds.
 // This computer's Settings may ask for everything; My Cloud's own page, verified as the person's Cloud, learns only
 // what waits (sendNotice) and may start a send from the person's click. Settings → Logins' "Also use on My Cloud" is the
 // same send for one login.
@@ -29,13 +29,13 @@ async function answer(response) {
  * a Cloud that sleeps awake. */
 export async function openOwnerSession(target, fetchImpl, label = SESSION_LABEL) {
   let grant;
-  try { grant = await target.grant(); } catch (error) { throw new Error(sentence(error?.message) ?? "My Cloud is not ready. Check it in Settings → MausBot Cloud, then try again."); }
+  try { grant = await target.grant(); } catch (error) { throw new Error(sentence(error?.message) ?? "My Cloud is not ready. Check it in Settings → MausBot Cloud, then try again.", { cause: error }); }
   if (!record(grant) || grant.origin !== target.origin || typeof grant.code !== "string") throw new Error("My Cloud is not ready. Check it in Settings → MausBot Cloud, then try again.");
   const paired = await answer(await fetchImpl(`${target.origin}/api/auth/pair`, {
     method: "POST", redirect: "error", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(30_000),
     headers: { accept: "application/json", "content-type": "application/json", ...BACKGROUND_HEADERS }, body: JSON.stringify({ code: grant.code, label }),
   }));
-  if (!paired.ok || typeof paired.body?.token !== "string" || !paired.body.token.startsWith("omb_sess_")) throw new Error("This app could not sign in to My Cloud. Try again.");
+  if (!paired.ok || typeof paired.body?.token !== "string" || !paired.body.token.startsWith("omb_sess_")) throw Object.assign(new Error("This app could not sign in to My Cloud. Try again."), { status: paired.status });
   const token = paired.body.token;
   const request = (method, route, init) => fetchImpl(`${target.origin}${route}`, {
     method, redirect: "error", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(120_000), ...init,
@@ -78,11 +78,12 @@ export function loginsView(snapshot) {
  *   fetch?: typeof fetch,
  *   bringChats?: () => Promise<{ phase: string, action?: string, brought?: { conversations: number, messages: number }, error?: { message?: string } }>,
  *   keepUpToDate?: boolean,
+ *   clock?: { now(): number, setTimer: typeof setTimeout, clearTimer: typeof clearTimeout },
  * }} deps `keepUpToDate`: false leaves the switch's background sends unstarted (fixtures that show a comparison).
- * `bringChats`: Bring newer chats to My Cloud, as cloud-move.mjs's bring answers it.
+ * `bringChats`: Bring newer chats to My Cloud, as cloud-move.mjs's bring answers it. `clock`: a fixture's own timers.
  */
 export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin, openSettings,
-  fetch: fetchImpl = globalThis.fetch, bringChats = null, keepUpToDate = true }) {
+  fetch: fetchImpl = globalThis.fetch, bringChats = null, keepUpToDate = true, clock = null }) {
   const handoff = createLoginHandoffClient();
   const pageOf = () => {
     const win = window();
@@ -115,7 +116,7 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
       open: () => { const target = home(); return target ? openOwnerSession(target, fetchImpl) : Promise.reject(new Error("This computer has no My Cloud yet.")); },
     },
     handoff: (what) => handoff.request(server(), what),
-    chats: bringChats && (async () => {
+    bringChats: bringChats && (async () => {
       const state = await bringChats();
       if (state?.phase === "done" && state.action === "bring" && record(state.brought)) return { conversations: state.brought.conversations, messages: state.brought.messages };
       throw new Error(sentence(state?.error?.message) ?? "Another copy to My Cloud is running. Send again when it has finished.");
@@ -125,6 +126,7 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
       write: (value) => { const target = file(); writeFileSync(`${target}.tmp`, JSON.stringify(value), { mode: 0o600 }); renameSync(`${target}.tmp`, target); },
     },
     onChange: deliver,
+    ...(clock ? { now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer } : {}),
   });
   const fresh = () => send.compare().catch(() => send.snapshot());
   const options = (input) => ({
@@ -170,6 +172,8 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
   if (keepUpToDate) send.start();
   return {
     receive: handoff.receive,
+    /** The account changed (a Cloud became ready, say): a Cloud this computer has not sent to yet gets its first send now. */
+    kick: () => send.kick(),
     /** The switcher: what waits, from the last comparison (refreshed in the background), and its Send. */
     menu: () => {
       void fresh();
