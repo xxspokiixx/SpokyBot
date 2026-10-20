@@ -299,6 +299,27 @@ describe("WebhookManager", () => {
       expect(h.manager.list()[0]).toMatchObject({ groupId: "room-1" });
     });
 
+    it("takes the room off an edit given null, and hands the room sink no secret", async () => {
+      const h = harness();
+      const seen: unknown[] = [];
+      const manager = new WebhookManager({ ...h.options, roomPost: async (trigger) => {
+        seen.push(trigger);
+        return { posted: true as const, attachments: 0, threadId: `${trigger.groupId}-thread` };
+      } });
+      const { webhook, secret } = manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      await manager.receive(webhook.endpointId, secret, { payload: { text: "to the room" }, deliveryId: "room-a" });
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).not.toHaveProperty("secretHash");
+      expect(seen[0]).not.toHaveProperty("sealedSecret");
+
+      expect(manager.update(webhook.id, { groupId: null })).not.toHaveProperty("groupId");
+      expect(await manager.receive(webhook.endpointId, secret, { payload: { text: "to the thread" }, deliveryId: "room-b" }))
+        .toMatchObject({ duplicate: false });
+      expect(seen).toHaveLength(1);
+      expect(h.posted).toEqual([{ botId: "maus-1", threadId: "post-thread-1", text: "to the thread" }]);
+      expect(() => manager.update(webhook.id, { delivery: "run", groupId: "room-1" })).toThrow(/only for delivery "post"/);
+    });
+
     it("posts a delivery straight to the room and enqueues no run", async () => {
       const h = harness();
       const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });

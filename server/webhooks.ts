@@ -109,7 +109,7 @@ const triggerInputSchema = z.object({
   botId: z.string(),
   runOn: runOnSchema.optional(),
   delivery: deliverySchema.optional(),
-  groupId: z.string().min(1).optional(),
+  groupId: z.string().min(1).nullable().optional(),
   enabled: z.boolean().optional(),
   verificationPending: z.boolean().optional(),
   eventTypes: eventTypesSchema,
@@ -582,8 +582,8 @@ export class WebhookManager {
   }
 
   /** Everything a delivery must clear before it can touch anything: pause, bot, event type, duplicates, queue depth, rate.
-   *  Returns null with the receipt already recorded when the event is ignored or a duplicate, and the chosen delivery id otherwise. */
-  private admit(trigger: StoredWebhookTrigger, event: WebhookEvent, byPerson: boolean, now: number): string | null {
+   *  An ignored or duplicate event comes back as its finished receipt. */
+  private admit(trigger: StoredWebhookTrigger, event: WebhookEvent, byPerson: boolean, now: number): { deliveryId: string } | { receipt: WebhookReceiveResult } {
     if (!trigger.enabled && !byPerson) fail(409, "This webhook is paused");
     if (this.options.botState(trigger.botId) === "missing") fail(410, "The assigned MAUS no longer exists");
 
@@ -597,7 +597,7 @@ export class WebhookManager {
         reason: event.eventName ? `Event type “${event.eventName}” is not enabled` : "Event type is missing",
       });
       this.save();
-      return null;
+      return { receipt: { deliveryId, duplicate: false, ignored: true } };
     }
 
     const requestedDeliveryId = String(event.deliveryId ?? "").trim().slice(0, 200);
@@ -617,7 +617,7 @@ export class WebhookManager {
           reason: "Duplicate delivery ignored",
         });
         this.save();
-        return null;
+        return { receipt: { runId: duplicate.runId, deliveryId: requestedDeliveryId, duplicate: true } };
       }
     }
 
@@ -633,21 +633,22 @@ export class WebhookManager {
     if (recent.length >= RATE_LIMIT) fail(429, "Webhook rate limit exceeded");
     recent.push(now);
     this.rate.set(trigger.endpointId, recent);
-    return requestedDeliveryId || randomUUID();
+    return { deliveryId: requestedDeliveryId || randomUUID() };
   }
 
   /** A room post never starts a turn: it stages the whole message — voice note and images included — and only then
    *  appends once. The receipt is written after the append, so a failed synthesis retries cleanly. */
   private async deliverRoom(trigger: StoredWebhookTrigger, event: WebhookEvent, byPerson: boolean): Promise<WebhookReceiveResult> {
     const now = this.now();
-    const deliveryId = this.admit(trigger, event, byPerson, now);
-    if (deliveryId === null) return this.ignoredReceipt(trigger, event);
+    const admitted = this.admit(trigger, event, byPerson, now);
+    if ("receipt" in admitted) return admitted.receipt;
+    const { deliveryId } = admitted;
     if (!this.options.roomPost) fail(503, "This server cannot post webhook messages to rooms");
     const key = `${trigger.endpointId}:${deliveryId}`;
     this.roomInFlight.add(key);
     let outcome: Awaited<ReturnType<NonNullable<WebhookManagerOptions["roomPost"]>>>;
     try {
-      outcome = await this.options.roomPost({ ...trigger }, event.payload);
+      outcome = await this.options.roomPost(publicTrigger(trigger), event.payload);
     } finally {
       this.roomInFlight.delete(key);
     }
@@ -666,14 +667,6 @@ export class WebhookManager {
     this.save();
     this.emit(trigger);
     return { threadId: outcome.threadId, deliveryId, duplicate: false };
-  }
-
-  /** The last attempt already holds the ignored/duplicate receipt admit() just wrote. */
-  private ignoredReceipt(trigger: StoredWebhookTrigger, event: WebhookEvent): WebhookReceiveResult {
-    const attempt = this.attempts.findLast((candidate) => candidate.webhookId === trigger.id);
-    const deliveryId = String(event.deliveryId ?? "").trim().slice(0, 200) || attempt?.deliveryId || "";
-    if (attempt?.outcome === "duplicate") return { runId: attempt.runId, deliveryId, duplicate: true };
-    return { deliveryId, duplicate: false, ignored: true };
   }
 
   private assertRoomMember(botId: string, groupId: string): void {
@@ -701,57 +694,10 @@ export class WebhookManager {
 
   /** run and thread-post deliveries: synchronous, one receipt, no awaits. Room triggers go through deliverRoom. */
   private dispatch(trigger: StoredWebhookTrigger, event: WebhookEvent, byPerson = false): WebhookReceiveResult {
-    if (!trigger.enabled && !byPerson) fail(409, "This webhook is paused");
-    if (this.options.botState(trigger.botId) === "missing") fail(410, "The assigned MAUS no longer exists");
-
-    const allowed = trigger.eventTypes ?? [];
-    if (allowed.length > 0 && (!event.eventName || !allowed.includes(event.eventName))) {
-      const deliveryId = String(event.deliveryId ?? "").trim().slice(0, 200) || randomUUID();
-      this.appendAttempt(trigger, event, {
-        outcome: "ignored",
-        statusCode: 202,
-        deliveryId,
-        reason: event.eventName ? `Event type “${event.eventName}” is not enabled` : "Event type is missing",
-      });
-      this.save();
-      return { deliveryId, duplicate: false, ignored: true };
-    }
-
     const now = this.now();
-    const requestedDeliveryId = String(event.deliveryId ?? "").trim().slice(0, 200);
-    if (requestedDeliveryId) {
-      const key = `${trigger.endpointId}:${requestedDeliveryId}`;
-      const committed = this.options.findRun?.(trigger.id, requestedDeliveryId);
-      const duplicate = committed
-        ? { runId: committed.id }
-        : this.deliveries.find((delivery) => delivery.key === key);
-      if (duplicate) {
-        this.appendAttempt(trigger, event, {
-          outcome: "duplicate",
-          statusCode: 202,
-          deliveryId: requestedDeliveryId,
-          runId: duplicate.runId,
-          reason: "Duplicate delivery ignored",
-        });
-        this.save();
-        return { runId: duplicate.runId, deliveryId: requestedDeliveryId, duplicate: true };
-      }
-    }
-
-    // A retry of an accepted delivery stays idempotent even while the queue is full.
-    const maxPendingRuns = trigger.maxPendingRuns ?? DEFAULT_MAX_PENDING_RUNS;
-    const pendingRuns = this.options.pendingRuns?.(trigger.id) ?? 0;
-    if (pendingRuns >= maxPendingRuns) {
-      fail(429, `This webhook already has ${pendingRuns} unfinished ${pendingRuns === 1 ? "task" : "tasks"} (its limit is ${maxPendingRuns}). `
-        + "Retry after one finishes, or raise \"Unfinished tasks at once\" in the webhook's settings.");
-    }
-
-    const recent = (this.rate.get(trigger.endpointId) ?? []).filter((at) => now - at < RATE_WINDOW_MS);
-    if (recent.length >= RATE_LIMIT) fail(429, "Webhook rate limit exceeded");
-    recent.push(now);
-    this.rate.set(trigger.endpointId, recent);
-
-    const deliveryId = requestedDeliveryId || randomUUID();
+    const admitted = this.admit(trigger, event, byPerson, now);
+    if ("receipt" in admitted) return admitted.receipt;
+    const { deliveryId } = admitted;
     if (trigger.delivery === "post") {
       // Never fall through to a task run.
       if (!this.options.post) fail(503, "This server cannot post webhook messages to chat");

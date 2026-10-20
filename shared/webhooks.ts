@@ -40,8 +40,9 @@ export interface WebhookTriggerInput {
   prompt: string;
   botId: string;
   runOn?: RoutineRunOn;
-  /** Requires `delivery: "post"`; a room webhook with any other delivery is refused. */
-  groupId?: string;
+  /** Requires `delivery: "post"`; a room webhook with any other delivery is refused. `null` on an edit
+   *  takes the room off, so deliveries go back to the webhook's own thread. */
+  groupId?: string | null;
   enabled?: boolean;
   verificationPending?: boolean;
   eventTypes?: string[];
