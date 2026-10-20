@@ -844,6 +844,7 @@
   "lending.status.signedOut": "MausBot Cloud からサインアウトしたため、貸し出しを停止しました。",
   "lending.status.accountChanged": "別の Cloud アカウントでサインインしたため、貸し出しを停止しました。",
   "lending.status.machineChanged": "My Cloud が新しいマシンに移ったため、貸し出しを停止しました。貸し出すには、もう一度オンにしてください。",
+  "lending.more": "貸し出す内容を選ぶ",
   "cloudSignIn.title": "My Cloud に AI を接続",
   "cloudSignIn.intro": "My Cloud はご自身の AI アカウントでボットを動かします。下から選んでください。サインイン情報は My Cloud に保存されます。",
   "cloudSignIn.limits": "24 時間働くボットには、お使いの AI プランの上限が適用されます。使用量が多い場合は、Anthropic の Claude Max プランか API キーが最適です。",

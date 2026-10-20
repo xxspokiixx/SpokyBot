@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CloudLendingBridge, CloudLendingSnapshot } from "../../electron/computer-sharing.mjs";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
+import { localeChoices, locales } from "@/locales";
 const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[] }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = initial; return [f.values[index], (next: unknown) => { f.values[index] = next; }]; },
@@ -146,4 +147,17 @@ it("names a refusal main explains in plain words, and keeps Try again for the re
   expect(lendingFailureKey(ipc("lending-refused:something-new"))).toBe("lending.failed");
   expect(lendingFailureKey(ipc("socket hang up"))).toBe("lending.failed");
   expect(lendingFailureKey("not an error")).toBe("lending.failed");
+});
+
+// A Japanese message once sent people to a 「貸し出す内容を選ぶ」 button that showed in English.
+it("nothing to lend names the button the person sees, in every language, and Settings → MausBot Cloud where it is translated", () => {
+  const unseen = localeChoices.flatMap(({ code }) => {
+    setLocale(code);
+    const said = t("lending.refused.nothingToLend");
+    const translated = Object.hasOwn(locales[code]!, "lending.refused.nothingToLend");
+    return [t("lending.more"), ...(translated ? [t("settings.title"), t("settings.section.cloudAccount")] : [])]
+      .filter((label) => !said.includes(label)).map((label) => `${code}: ${label}`);
+  });
+  setLocale("en");
+  expect(unseen).toEqual([]);
 });
