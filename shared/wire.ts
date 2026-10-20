@@ -12,6 +12,8 @@ import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
+import type { WebhookRequestCardData } from "./webhook-request.ts";
+import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
@@ -309,6 +311,10 @@ export interface WireBot {
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
   voiceNotes?: boolean;
+  /** Whether this bot may use the X research tools (x_search, x_user_posts,
+   * x_post, x_profile), which spend the workspace's treg balance.
+   * Absent/false = off: the person turns it on per bot. */
+  xResearch?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
@@ -443,6 +449,8 @@ export interface WireMessage {
     claudeUpdate?: boolean;
   /** error rows: the place this turn could not use. */
     place?: PlaceRow;
+    /** error rows: epoch ms when the usage limit that stopped the turn resets. */
+    limitResetsAt?: number;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private
@@ -579,6 +587,10 @@ export interface OptionCardData {
   undone?: boolean;
   /** A durable chat-created routine proposal. */
   routineRequest?: RoutineRequestCardData;
+  /** A webhook trigger a bot made or changed from chat. */
+  webhookRequest?: WebhookRequestCardData;
+  /** An app-event automation a bot made or changed from chat. */
+  appTriggerRequest?: AppTriggerRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
   /** A durable default-model proposal (propose_model). */
@@ -645,9 +657,14 @@ export interface LiveCallRecord {
   title?: string;
 }
 
+/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key. */
+export type LiveKeySource = "live" | "openai";
+
 /** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
 export interface LiveSettings {
+  /** A Live call has a key to use (`keySource` says which); never the key itself. */
   configured: boolean;
+  keySource?: LiveKeySource;
   voice: string;
   readTypedReplies: boolean;
   idleMinutes: number;
@@ -893,8 +910,13 @@ export type ServerFrame =
   | { kind: "webhook"; webhook: WebhookTrigger }
   | { kind: "webhook.attempt"; attempt: WebhookAttempt }
   | { kind: "webhook.deleted"; webhookId: string }
+  | { kind: "app-trigger"; botId: string; trigger: AppTrigger }
+  | { kind: "app-trigger.attempt"; botId: string; attempt: AppEventAttempt }
+  | { kind: "app-trigger.deleted"; triggerId: string }
+  | { kind: "app-trigger.service"; service: AppTriggerService }
   | { kind: "runtime"; event: RuntimeEvent }
-  | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string }
+  /** `surface` names what the frame shows: the bot's desktop (`computer`) or its built-in browser. */
+  | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string; surface?: "browser" | "computer" }
   /** A bot's computer is being set up or woken for a turn; the chat shows
    * one progress line until its first screen frame. `place` names a cloud
    * computer (absent: a Local VM). */

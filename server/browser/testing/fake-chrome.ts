@@ -87,13 +87,17 @@ export class FakeChrome implements CdpTransport {
     this.sent.push({ method, params, sessionId });
     if (this.hang(method)) return;
     let result: unknown;
+    const restore = this.#clippedCapture(sessionId, method, params);
     try {
       result = sessionId === null ? this.#browser(method, params) : this.#page(sessionId, method, params);
     } catch (error) {
       queueMicrotask(() => this.#emit({ id, error: { message: error instanceof Error ? error.message : String(error) } }));
       return;
     }
-    const answer = () => this.#emit({ id, result: result ?? {}, ...(sessionId ? { sessionId } : {}) });
+    const answer = () => {
+      restore?.();
+      this.#emit({ id, result: result ?? {}, ...(sessionId ? { sessionId } : {}) });
+    };
     const wait = this.delay(method);
     if (wait > 0) setTimeout(answer, wait);
     else queueMicrotask(answer);
@@ -246,6 +250,15 @@ export class FakeChrome implements CdpTransport {
     if (expression.startsWith("[Math.round(scrollX)")) return [0, 600, 3000];
     if (expression.includes(".includes(")) return page.text.includes(JSON.parse(/includes\((".*")\)/u.exec(expression)?.[1] ?? "\"\"") as string);
     return undefined;
+  }
+
+  /** Chrome draws a clipped capture by changing the page's emulation, then restores what it found when it began (155). */
+  #clippedCapture(sessionId: string | null, method: string, params: Record<string, unknown>): (() => void) | null {
+    const entry = sessionId === null ? undefined : this.#sessions.get(sessionId);
+    const page = entry ? this.pages.get(entry.targetId) : undefined;
+    if (method !== "Page.captureScreenshot" || !params.clip || !page) return null;
+    const found = page.emulated ?? null;
+    return () => { page.emulated = found; };
   }
 
   #page(sessionId: string, method: string, params: Record<string, unknown>): unknown {

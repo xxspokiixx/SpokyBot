@@ -24,6 +24,12 @@ On **Auto**, a conversation works on the Boat only after the bot moves it there
 (it asks to switch with `select_computer`). Auto by itself never reads, wakes or
 creates a Boat, so it adds no cloud computer calls to an ordinary message.
 
+Browsers that run in the cloud don't open Reddit: a Boat's browser won't open a
+Reddit link a bot asks for, and a MausBot Cloud's built-in browser doesn't open
+Reddit at all. Reddit blocks bots that browse from cloud computers and can ban
+the account, so the bot is told to use the Reddit connected app or ask you to do
+it on your own computer.
+
 ## Bring your own VPS
 
 OpenMausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.

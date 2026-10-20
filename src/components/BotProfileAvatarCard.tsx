@@ -13,7 +13,8 @@ import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
-import { AvatarFraming, CROP_LABEL, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
+import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
+import { t } from "@/lib/i18n";
 
 export function BotProfileAvatarCard({
   bot,
@@ -31,13 +32,13 @@ export function BotProfileAvatarCard({
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
       <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-2.5">
-        <span className="rounded-lg bg-control px-3 py-1.5 text-[14px] font-medium text-ink">Avatar</span>
+        <span className="rounded-lg bg-control px-3 py-1.5 text-[14px] font-medium text-ink">{t("botIdentity.avatar")}</span>
         <button
           disabled={busy}
           onClick={() => onPatch(RESET_MASCOT_PATCH)}
           className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
         >
-          Reset mascot
+          {t("botIdentity.resetMascot")}
         </button>
       </div>
 
@@ -72,25 +73,25 @@ export function BotProfileAvatarCard({
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
           >
             {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-            Upload image
+            {t("botIdentity.uploadImage")}
           </button>
           {bot.avatarUrl && (
             <button
               type="button"
               onClick={removeImage}
               disabled={busy}
-              aria-label="Remove custom avatar image"
-              title="Remove custom image"
+              aria-label={t("botIdentity.removeAvatar")}
+              title={t("botIdentity.removeImage")}
               className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
             >
               <Trash2 size={14} />
             </button>
           )}
         </div>
-        <div className="mt-1.5 text-[11.5px] text-ink-secondary">PNG, JPEG, GIF, or WebP · up to 10 MB</div>
+        <div className="mt-1.5 text-[11.5px] text-ink-secondary">{t("botIdentity.imageTypes")}</div>
 
         <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-          Shape
+          {t("botIdentity.shape")}
         </div>
         <div className="grid grid-cols-4 overflow-hidden rounded-lg border border-hairline/40">
           {BOT_AVATAR_CROPS.map((candidate, index) => (
@@ -106,7 +107,7 @@ export function BotProfileAvatarCard({
                 crop === candidate ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60 hover:text-ink",
               )}
             >
-              {CROP_LABEL[candidate]}
+              {t(`botIdentity.crop.${candidate}` as never)}
             </button>
           ))}
         </div>
@@ -114,7 +115,7 @@ export function BotProfileAvatarCard({
         {crop === "mascot" && (
           <>
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Expression
+              {t("botIdentity.expression")}
             </div>
             <div className="grid grid-cols-5 gap-2">
               {PICKABLE_STATES.map((expression) => (
@@ -137,7 +138,7 @@ export function BotProfileAvatarCard({
             </div>
 
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Color
+              {t("botIdentity.color")}
             </div>
             <div className="flex flex-wrap gap-2.5">
               {MAUS_COLOR_NAMES.map((color) => (
@@ -159,7 +160,7 @@ export function BotProfileAvatarCard({
             </div>
 
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Body
+              {t("botIdentity.body")}
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {MASCOT_BODY_IDS.map((id) => (

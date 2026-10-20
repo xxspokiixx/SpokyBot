@@ -42,6 +42,10 @@ The receiver exposes only health and secret hook routes. It does not expose the 
 
 Bearer authentication is preferred because it keeps the secret out of URLs and most access logs. A capability URL is available for senders that cannot set headers.
 
+### A bot that sets up its own webhook
+
+When a bot creates a webhook automation from chat, it gets the private address in the result, and it can ask for it again later, so it can paste the address into the other app's setup itself instead of asking you to use **Copy address**. Only the bot the automation belongs to gets it, or a Chief of Staff that can reach that bot (bots with a different audience on a shared workspace cannot), and only in a conversation you drive: never in a run that a webhook or app event started, and never in a My Cloud conversation a guest drives. The address stays in that tool result; chat transcripts, step details and logs show it masked, and the Automations page keeps the secret hidden until you press **Show**. **Copy address** copies the same address the bot has, so copying never breaks a setup; **Replace address** makes a new one and the old one stops working.
+
 ## Reaching a local webhook
 
 On My Cloud there is nothing to set up: webhooks use the workspace's own address. The Webhooks panel shows `https://` plus the workspace's hostname followed by `/hooks/` and the endpoint, and only those hook paths are passed to the receiver. The same is true of a hosted workspace.
