@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { calibrateIdentity, identityFile, loadOrCalibrateIdentity, type CalibratedIdentity } from "./calibrate.ts";
+import { CdpBrowser } from "../cdp/browser.ts";
+import { FakeChrome } from "../testing/fake-chrome.ts";
+import { calibrateIdentity, identityFile, loadOrCalibrateIdentity, openOwnPage, type CalibratedIdentity } from "./calibrate.ts";
 
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders) await removeTempDir(folder); });
@@ -25,6 +27,33 @@ const READ: CalibratedIdentity = {
   fingerprint: "",
   calibratedAt: "2026-10-16T00:00:00.000Z",
 };
+
+async function firstTab(chrome: FakeChrome) {
+  const browser = await CdpBrowser.connect(chrome, { identity: null, headless: true, permissions: false });
+  return browser.waitForPage();
+}
+
+describe("opening a page of our own", () => {
+  const url = "http://127.0.0.1:9/";
+  const navigations = (chrome: FakeChrome) => chrome.sent.filter((sent) => sent.method === "Page.navigate").length;
+
+  it("opens it again when Chrome cancels the first navigation", async () => {
+    const chrome = new FakeChrome({ navigationErrors: ["net::ERR_ABORTED"] });
+    const tab = await firstTab(chrome);
+    await openOwnPage(tab, url, 5_000);
+    expect(tab.url()).toBe(url);
+    expect(navigations(chrome)).toBe(2);
+  });
+
+  it("gives up when the second navigation is cancelled too, and never repeats another failure", async () => {
+    const twice = new FakeChrome({ navigationErrors: ["net::ERR_ABORTED", "net::ERR_ABORTED"] });
+    await expect(openOwnPage(await firstTab(twice), url, 5_000)).rejects.toThrow(/failed: ERR_ABORTED/);
+    expect(navigations(twice)).toBe(2);
+    const refused = new FakeChrome({ navigationErrors: ["net::ERR_CONNECTION_REFUSED"] });
+    await expect(openOwnPage(await firstTab(refused), url, 5_000)).rejects.toThrow(/failed: ERR_CONNECTION_REFUSED/);
+    expect(navigations(refused)).toBe(1);
+  });
+});
 
 describe("reading a Chrome's own identity", () => {
   it.skipIf(process.platform === "win32")("starts the binary headless over a pipe, off the keychain, on the account's real home, and says when it exits", async () => {

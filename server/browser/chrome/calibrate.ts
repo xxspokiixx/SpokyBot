@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CdpBrowser } from "../cdp/browser.ts";
+import { DriverError } from "../cdp/errors.ts";
 import { IDENTITY_PROBE, type Identity, type IdentityProbe } from "../cdp/identity.ts";
+import type { CdpPage } from "../cdp/page.ts";
 import type { HostKind } from "./flags.ts";
 import { headedIdentity, isChromeIdentity } from "./identity.ts";
 import { launchChrome } from "./launch.ts";
@@ -32,7 +34,7 @@ export function identityFile(dataDir: string, executablePath: string): string {
 }
 
 /** A blank page on an ephemeral loopback port: loopback is a secure context, where navigator.userAgentData exists. */
-async function loopbackPage(): Promise<{ url: string; close: () => void }> {
+export async function loopbackPage(): Promise<{ url: string; close: () => void }> {
   const server = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     response.end("<!doctype html><title>calibration</title>");
@@ -40,6 +42,22 @@ async function loopbackPage(): Promise<{ url: string; close: () => void }> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return { url: `http://127.0.0.1:${port}/`, close: () => server.close() };
+}
+
+/**
+ * Chrome for Testing 155 on Windows now and then cancels the first network navigation of a profile that never navigated:
+ * net::ERR_ABORTED a moment after the request starts, with nothing else navigating. On GitHub's Windows runner that was
+ * 35 of 150 fresh starts, none of 90 second starts, none for its Google Chrome or the same build on macOS, and a data:
+ * page first did not prevent it. A second request went through every time, so a page of our own, which has no side
+ * effects, is opened once more.
+ */
+export async function openOwnPage(tab: CdpPage, url: string, timeoutMs: number): Promise<void> {
+  try {
+    await tab.navigate(url, { timeoutMs });
+  } catch (error) {
+    if (!(error instanceof DriverError) || error.detail?.netError !== "ERR_ABORTED") throw error;
+    await tab.navigate(url, { timeoutMs });
+  }
 }
 
 export interface CalibrateOptions {
@@ -80,7 +98,7 @@ export async function calibrateIdentity(options: CalibrateOptions): Promise<Cali
   try {
     const browser = await CdpBrowser.connect(chrome.transport, { identity: null, headless: true, permissions: false });
     const tab = await browser.waitForPage(() => true, options.timeoutMs ?? 15_000);
-    await tab.navigate(page.url, { timeoutMs: options.timeoutMs ?? 15_000 });
+    await openOwnPage(tab, page.url, options.timeoutMs ?? 15_000);
     const probe = await tab.evaluate(IDENTITY_PROBE) as IdentityProbe;
     const identity = headedIdentity({ userAgent: probe.userAgent, hints: probe.high });
     await browser.close();

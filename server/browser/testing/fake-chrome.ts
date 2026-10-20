@@ -63,6 +63,8 @@ export class FakeChrome implements CdpTransport {
   hang: (method: string) => boolean = () => false;
   /** Milliseconds before a command answers, to stand for a slow page. */
   delay: (method: string) => number = () => 0;
+  /** What the next navigations fail with, in order, such as net::ERR_ABORTED. */
+  readonly navigationErrors: string[];
   readonly #documents: (url: string) => FakeDocument;
   readonly #messages = new Set<(message: string) => void>();
   readonly #closes = new Set<(reason: string) => void>();
@@ -71,8 +73,9 @@ export class FakeChrome implements CdpTransport {
   #next = 1;
   #closed: string | null = null;
 
-  constructor({ documents, startUrls = ["about:blank"] }: { documents?: (url: string) => FakeDocument; startUrls?: string[] } = {}) {
+  constructor({ documents, startUrls = ["about:blank"], navigationErrors = [] }: { documents?: (url: string) => FakeDocument; startUrls?: string[]; navigationErrors?: string[] } = {}) {
     this.#documents = documents ?? (() => ({ title: "", text: "", elements: [] }));
+    this.navigationErrors = [...navigationErrors];
     for (const url of startUrls) this.#createPage(url);
   }
 
@@ -278,6 +281,8 @@ export class FakeChrome implements CdpTransport {
       case "Page.createIsolatedWorld":
         return { executionContextId: this.#next++ };
       case "Page.navigate": {
+        const errorText = this.navigationErrors.shift();
+        if (errorText) return { frameId: page.targetId, loaderId: `L${this.#next++}`, errorText };
         const url = String(params.url);
         setTimeout(() => this.#load(page, url), 1);
         return { frameId: page.targetId, loaderId: `L${this.#next}` };
