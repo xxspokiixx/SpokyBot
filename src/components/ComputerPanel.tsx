@@ -57,7 +57,7 @@ import {
   resolveBoatPanelAction,
   shouldPollCloudPreview,
 } from "@/lib/local-computer";
-import { moveBetweenTabs, PANEL_TABS, panelTabProps, TAB_PANEL_FOCUS, tabPanelProps, useAndroidTabFallback } from "./computer-panel-tabs";
+import { moveBetweenTabs, PANEL_TABS, panelTabProps, scrollTabsWithWheel, TAB_PANEL_FOCUS, tabPanelProps, useAndroidTabFallback } from "./computer-panel-tabs";
 import {
   computerPanelTabs,
   readComputerPanelView,
@@ -1306,20 +1306,7 @@ export function ComputerPanel({
               <Settings size={18} />
             </button>
           )}
-          <div
-            className="mx-9 flex min-w-0 touch-pan-x gap-0.5 overflow-x-auto rounded-full bg-inset p-1 whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            data-tour="computer-tabs"
-            data-testid="computer-tabs"
-            role="tablist"
-            aria-label={t("computer.tabsAria")}
-            onWheel={(event) => {
-              if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-                event.currentTarget.scrollLeft += event.deltaY;
-                event.preventDefault();
-              }
-            }}
-            onKeyDown={(event) => moveBetweenTabs(event, panelTabs, chooseTab)}
-          >
+          <div className="mx-9 flex min-w-0 touch-pan-x gap-0.5 overflow-x-auto whitespace-nowrap rounded-full bg-inset p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-tour="computer-tabs" data-testid="computer-tabs" role="tablist" aria-label={t("computer.tabsAria")} onWheel={scrollTabsWithWheel} onKeyDown={(event) => moveBetweenTabs(event, panelTabs, chooseTab)}>
             {panelTabs.map((view) => {
               const { Icon, label, tour } = PANEL_TABS[view];
               const live = !placeLive ? undefined
