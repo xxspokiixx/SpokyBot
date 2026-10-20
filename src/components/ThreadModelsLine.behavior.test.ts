@@ -69,4 +69,17 @@ describe("ThreadModelsLine's Switch them too", () => {
     await act(async () => (fixture.dispatch.mock.lastCall![0] as { onSettled: Settled }).onSettled({ busy: 0 }));
     expect(note()).toBeNull();
   });
+
+  it("ignores a slower earlier click that settles after the retry", async () => {
+    await act(async () => root.render(createElement(ThreadModelsLine, { bot: ada(2) })));
+    const click = async () => {
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-switch-them-too]")!.click());
+      return fixture.dispatch.mock.lastCall![0] as { onSettled: Settled };
+    };
+    const first = await click();
+    const retry = await click();
+    await act(async () => retry.onSettled({ busy: 0 }));
+    await act(async () => first.onSettled({ busy: 1 }));
+    expect(note()).toBeNull();
+  });
 });
