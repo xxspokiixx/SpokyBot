@@ -766,6 +766,15 @@ On the Workspaces screen, creating a client workspace shows the same kind of
 link for that workspace's admin, so a client gets one address, one workspace
 and one link.
 
+## Attachment storage
+
+Files people attach, and pictures a bot shows inline, live in the
+`attachments` folder of the data directory. Nothing there is deleted, since
+old messages still point at it, so the server stops taking new files once the
+folder holds 512 MB. A team fills that sooner: set
+`OMB_ATTACHMENTS_MAX_BYTES` in the server's environment and restart, for
+example `OMB_ATTACHMENTS_MAX_BYTES=4294967296` for 4 GB.
+
 ## Putting a proxy in front
 
 Any reverse proxy works, given three things:
