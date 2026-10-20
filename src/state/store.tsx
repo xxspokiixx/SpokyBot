@@ -3332,7 +3332,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            recordBotTextMessage(frame.message as { id: string; text?: string | null });
+            recordBotTextMessage(frame.message as { id: string; text?: string | null }, frame.threadId);
             const owner = stateRef.current.bots.find((b) => b.threadId === frame.threadId || b.tasks?.some((task) => task.threadId === frame.threadId));
             const live = stateRef.current.liveCall;
             const onLiveCall = Boolean(live && live.status !== "ended" && live.botId === owner?.id);

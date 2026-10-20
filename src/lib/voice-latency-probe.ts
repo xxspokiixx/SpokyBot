@@ -1,7 +1,7 @@
 // Inert voice-latency recorder. Every exported function is a no-op unless the
 // measurement harness installed a sink array at `window.__ombVoiceProbe` — with
 // the probe off, the speak path runs exactly as it did before the probe existed.
-import type { RuntimeEvent } from "../../shared/runtime-events";
+import type { RuntimeEvent, ThreadId } from "../../shared/runtime-events";
 import type { VoiceProbeSample } from "../../shared/voice-latency-probe";
 
 const PROBE_KEY = "__ombVoiceProbe";
@@ -24,28 +24,30 @@ const sampleFor = (probe: VoiceProbeSample[], messageId: string): VoiceProbeSamp
   return created;
 };
 
-/** t0 candidate for the next completed message: the first assistant_text delta
- * of the turn. `turn.started` clears it, matching how turns own replies. */
-let pendingFirstDeltaAt: number | undefined;
+/** t0 candidates for each thread's next completed message: the first
+ * assistant_text delta of that thread's turn. `turn.started` clears only its
+ * own thread's entry, matching how turns own replies. */
+const pendingFirstDeltaAt = new Map<ThreadId, number>();
 
 export function recordRuntimeEvent(event: RuntimeEvent): void {
   if (event.type === "turn.started") {
-    pendingFirstDeltaAt = undefined;
+    pendingFirstDeltaAt.delete(event.threadId);
     return;
   }
   if (event.type !== "content.delta" || event.streamKind !== "assistant_text") return;
-  if (pendingFirstDeltaAt === undefined) pendingFirstDeltaAt = now();
+  if (!pendingFirstDeltaAt.has(event.threadId)) pendingFirstDeltaAt.set(event.threadId, now());
 }
 
-export function recordBotTextMessage(message: { id: string; text?: string | null }): void {
+export function recordBotTextMessage(message: { id: string; text?: string | null }, threadId: ThreadId): void {
   const probe = sink();
   if (!probe) return;
+  const pending = pendingFirstDeltaAt.get(threadId);
+  pendingFirstDeltaAt.delete(threadId);
   const sample = sampleFor(probe, message.id);
   if (sample.messageFrameAt === undefined) sample.messageFrameAt = now();
-  if (sample.firstDeltaAt === undefined && pendingFirstDeltaAt !== undefined) {
-    sample.firstDeltaAt = pendingFirstDeltaAt;
+  if (sample.firstDeltaAt === undefined && pending !== undefined) {
+    sample.firstDeltaAt = pending;
   }
-  pendingFirstDeltaAt = undefined;
   if (sample.textChars === undefined && typeof message.text === "string") sample.textChars = [...message.text].length;
 }
 

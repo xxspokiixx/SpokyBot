@@ -7,7 +7,7 @@ import {
   type VoiceProbeSample,
 } from "../../shared/voice-latency-probe";
 
-const sample = (blocks: Array<{ startAt: number; endAt: number }>, firstDeltaAt?: number): VoiceProbeSample => ({
+const sample = (blocks: Array<{ startAt: number; endAt?: number }>, firstDeltaAt?: number): VoiceProbeSample => ({
   messageId: "m1",
   ...(firstDeltaAt !== undefined ? { firstDeltaAt } : {}),
   blocks: blocks.map((block) => ({ ...block })),
@@ -48,6 +48,12 @@ describe("summarizeVoiceReply", () => {
     };
     const summary = summarizeVoiceReply(partial);
     expect(summary.t0ToFirstAudioMs).toBeNull();
+    expect(summary.gapCount).toBe(0);
+  });
+
+  it("keeps first audio from a block that started but never finished; gaps still need both bounds", () => {
+    const summary = summarizeVoiceReply(sample([{ startAt: 400 }, { startAt: 2_600, endAt: 3_000 }], 250));
+    expect(summary.t0ToFirstAudioMs).toBe(150);
     expect(summary.gapCount).toBe(0);
   });
 

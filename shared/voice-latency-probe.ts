@@ -48,17 +48,20 @@ export interface VoiceGapSummary {
 const finiteOrUndefined = (value: number | undefined): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
-/** Gap accounting for one reply. Only blocks with both a start and an end on
- * the page clock participate: a block the probe never saw finish cannot bound
- * a silence, and counting it would understate dead air. */
+/** Accounting for one reply. First audio needs only a playback start; a
+ * silence needs both bounds on the page clock: a block the probe never saw
+ * finish cannot bound one, and counting it would understate dead air. */
 export function summarizeVoiceReply(sample: VoiceProbeSample): VoiceGapSummary {
   const firstDeltaAt = finiteOrUndefined(sample.firstDeltaAt);
+  const starts = sample.blocks
+    .map((block) => finiteOrUndefined(block.startAt))
+    .filter((value): value is number => value !== undefined);
+  const firstAudio = starts.length ? Math.min(...starts) : undefined;
   const played = sample.blocks
     .map((block) => ({ startAt: finiteOrUndefined(block.startAt), endAt: finiteOrUndefined(block.endAt) }))
     .filter((block): block is { startAt: number; endAt: number } =>
       block.startAt !== undefined && block.endAt !== undefined && block.endAt >= block.startAt)
     .sort((a, b) => a.startAt - b.startAt);
-  const firstAudio = played[0]?.startAt;
   const gaps: number[] = [];
   for (let i = 1; i < played.length; i += 1) {
     const silence = played[i]!.startAt - played[i - 1]!.endAt;
