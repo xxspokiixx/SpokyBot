@@ -716,7 +716,16 @@ describe("server-authoritative bot deletion", () => {
     await Promise.all([first, second]);
 
     expect(onConfirmed).toHaveBeenCalledTimes(1);
-    expect(onConfirmed).toHaveBeenCalledWith(bot.id);
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, undefined);
+  });
+
+  it("hands the server's answer on, so a deletion that left something behind can say so", async () => {
+    const onConfirmed = vi.fn();
+    const answer = { ok: true, notice: "Deleted. gone-vps could not be reached." };
+
+    await requestConfirmedBotDeletion(bot.id, async () => answer, onConfirmed);
+
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, answer);
   });
 
   it("keeps a visible pending marker until deletion settles or fails", () => {
@@ -1529,6 +1538,24 @@ describe("computer destination announcements", () => {
       bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : bot.threadId },
     });
     expect(next.bots[0]?.computer).toBeUndefined();
+    expect(next.bots[0]?.messages).toEqual(bot.messages);
+  });
+});
+
+describe("VPS alias announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the bot's own server when the frame omits it via %s", (kind) => {
+    const bot: Bot = {
+      id: "vps-bot", threadId: "vps-thread", name: "Ziggy", title: "", description: "",
+      notifications: true, color: "green", unread: false,
+      modelSelection: { instanceId: "codex", model: "default" }, vpsAlias: "alpha-vps",
+      messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+    };
+    const { vpsAlias: _oldAlias, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : bot.threadId },
+    });
+    expect(next.bots[0]?.vpsAlias).toBeUndefined();
     expect(next.bots[0]?.messages).toEqual(bot.messages);
   });
 });

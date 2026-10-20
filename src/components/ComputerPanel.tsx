@@ -601,7 +601,7 @@ export function ComputerPanel({
     bot.threadId,
     bot.computer,
     bot.section,
-    bot.autoStartVps,
+    bot.autoStartVps, bot.vpsAlias,
     cloudBackend,
     retry,
     capabilitiesReady,
