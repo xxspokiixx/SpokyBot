@@ -562,12 +562,16 @@ export function VpsAliasField({ bot }: { bot: Bot }) {
   const defaultAlias = state.config?.vps?.sshAlias ?? "";
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set when the old server could not be reached: the move went ahead, and this says what may be left there.
+  const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const save = async (alias: string | null) => {
     setSaving(true);
     setError(null);
+    setNotice(null);
     try {
-      await api(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ vpsAlias: alias }) });
+      const saved = await api<{ notice?: string }>(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ vpsAlias: alias }) });
+      setNotice(saved?.notice ?? null);
       setDraft(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -607,6 +611,7 @@ export function VpsAliasField({ bot }: { bot: Bot }) {
         </button>
       </form>
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+      {notice && <div role="status" className="mt-2 break-words text-[12px] text-ink-secondary">{notice}</div>}
     </div>
   );
 }

@@ -74,9 +74,11 @@ computer with the alias that holds it.
 A bot cannot be moved to another server while its computer still lives on the old one, and the default alias
 cannot change while any computer it manages still exists: remove the computer first from Settings → Local VM →
 Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f openmausbot-vps-<bot>-<hash>`). A server
-that cannot be reached is never guessed about: the move waits until its computers can be listed. Any alias from
-your `~/.ssh/config`, host key already verified by hand, is all it takes. The field is in a saved bot's settings;
-a new bot starts on the default server.
+that cannot be reached never traps a bot: moving the bot to another server, switching its computer, or deleting
+it goes ahead, and the app says what may be left on that server and the command that removes it once the server
+is back. (Changing the default alias still waits until its server can be listed.) Any alias from your
+`~/.ssh/config`, host key already verified by hand, is all it takes. The field is in a saved bot's settings; a new
+bot starts on the default server.
 
 **Host key first, by hand.** Connect once manually before pointing OpenMausBot at the alias:
 
@@ -96,8 +98,9 @@ host is unknown simply fails until you have done this once.
   port open, so anything else open is pure attack surface.
 - **Nothing sensitive is stored.** The only thing OpenMausBot persists is the alias name itself
   (`~/.openmausbot/config.json`, plus a bot's own alias in `bots.json` when it has one); keys, passphrases,
-  and agent state stay with SSH. Aliases are also kept off paired phones and off members' sessions on a
-  shared workspace — they get configured-or-not, never the name.
+  and agent state stay with SSH. Aliases are also kept out of the settings and bot records that paired phones
+  and members of a shared workspace receive — they get configured-or-not, never the name. An SSH or Docker
+  error that a bot reports in its conversation can still quote a server's name.
 - The container itself runs hardened: capabilities dropped, private network/IPC/cgroup namespaces, no host
   mounts or devices, and no automatic removal. Ownership, pinned-image and isolation checks still apply
   when reusing a container; a container that fails them is refused, not repaired.

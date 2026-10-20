@@ -11,7 +11,7 @@ import { parseVisibility } from "../bot-visibility.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { CacheKeepWarm } from "../cache-keepwarm.ts";
-import { cloudBackendChangeError, vpsBotAliasChangeError, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
+import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import { isValidSshAlias, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -367,6 +367,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       // Moving a bot to another server is refused while its own computer still lives on the old one.
       // Resolved hosts, not raw text: pinning a bot to the server it already uses moves nothing.
+      let vpsLeftOn: string | null = null;
       if (body.vpsAlias !== undefined && existingBot &&
           vpsSshAliasForBot(cfg, { ...existingBot, vpsAlias: patch.vpsAlias as string | undefined }) !== vpsSshAliasForBot(cfg, existingBot)) {
         // The scan awaits on SSH; a turn can start or another PATCH can land mid-scan, so every attempt
@@ -399,12 +400,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
             continue;
           }
           if (!inventory) break;
-          if (!inventory.available) {
-            return json(res, 503, {
-              error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
-            });
-          }
-          if (inventory.instances.some((instance) => instance.name === vps.vpsContainerName(current.id))) {
+          // A server that cannot answer never keeps the bot: it moves, and the answer says what may be left there.
+          if (!inventory.available) vpsLeftOn = currentAlias;
+          else if (inventory.instances.some((instance) => instance.name === vps.vpsContainerName(current.id))) {
             return json(res, 409, { error: VPS_BOT_ALIAS_RESOURCES_ERROR });
           }
           break;
@@ -722,7 +720,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         broadcast({ kind: "sections", sections: store.sections });
         audienceChanged();
       }
-      return json(res, 200, { bot: wireBot(store.bot(bot.id)!) });
+      return json(res, 200, { bot: wireBot(store.bot(bot.id)!),
+        ...(vpsLeftOn ? { notice: vpsLeftBehindNotice("Moved", vpsLeftOn, vps.vpsContainerName(bot.id)) } : {}) });
     }
     return PASS;
   };

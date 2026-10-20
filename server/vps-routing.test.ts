@@ -103,6 +103,8 @@ function containerInspectTemplate(): string {
 
 const FAKE_DOCKER = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+server=$(printf '%s' "$2" | sed 's|ssh://||')
+if [ -f "$FAKE_DOCKER_DIR/unreachable.$server" ]; then echo "ssh: Could not resolve hostname $server: nodename nor servname provided, or not known" >&2; exit 255; fi
 if [ -f "$FAKE_DOCKER_DIR/hold" ]; then
   : > "$FAKE_DOCKER_DIR/started"
   while [ -f "$FAKE_DOCKER_DIR/hold" ]; do sleep 0.05; done
@@ -838,4 +840,34 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     },
     60_000,
   );
+
+  it("never keeps a bot on a server that is gone: it moves off, switches computer and is deleted", async () => {
+    expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+    const leaving = (await api("POST", "/api/bots")).body.bot;
+    const switching = (await api("POST", "/api/bots")).body.bot;
+    for (const bot of [leaving, switching]) {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { vpsAlias: "gone-vps" })).status).toBe(200);
+    }
+    // The provider cancelled the server, or the alias left ~/.ssh/config: nothing answers for gone-vps any more.
+    const gone = join(dirname(dockerLog), "unreachable.gone-vps");
+    writeFileSync(gone, "");
+    try {
+      const moved = await api("PATCH", `/api/bots/${leaving.id}`, { vpsAlias: null });
+      expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+      expect(moved.body.bot.vpsAlias).toBeUndefined();
+      expect(moved.body.notice).toContain("gone-vps could not be reached");
+      expect(moved.body.notice).toContain(`docker -H ssh://gone-vps rm -f ${vpsContainerName(leaving.id)}`);
+
+      expect((await api("PATCH", `/api/bots/${switching.id}`, { cloudBackend: "box" })).status).toBe(200);
+      const deleted = await api("DELETE", `/api/bots/${switching.id}`);
+      expect(deleted.status, JSON.stringify(deleted.body)).toBe(200);
+      expect(deleted.body.notice).toContain("gone-vps could not be reached");
+      expect(deleted.body.notice).toContain(vpsContainerName(switching.id));
+      expect(await botById(switching.id)).toBeUndefined();
+    } finally {
+      rmSync(gone, { force: true });
+      await api("DELETE", `/api/bots/${leaving.id}`);
+    }
+  }, 30_000);
 });

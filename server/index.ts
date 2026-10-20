@@ -113,8 +113,7 @@ import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
 import { liveCardKind, liveDecisionRefusal } from "../shared/live-approval.ts";
-import {
-} from "./cloud-backend.ts";
+import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { connectorCardText } from "./connector-card-text.ts";
@@ -9644,7 +9643,7 @@ const routineRequests = new RoutineRequestService({
   },
 });
 async function deleteBotWithLifecycle(botId: string, revalidate: () => void = () => {}, setupRequest?: TeamSetupRequest) {
-  const deletionResponse = (status: number, body: { error?: string; ok?: boolean }) => ({ status, body });
+  const deletionResponse = (status: number, body: { error?: string; ok?: boolean; notice?: string }) => ({ status, body });
       revalidate();
       const bot = store.bot(botId);
       if (!bot) return deletionResponse( 404, { error: "no such bot" });
@@ -9718,11 +9717,8 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         }
 
         const vpsInventory = await vps.listManagedVpsComputers(vpsConfigForBot(cfg, bot), managedBoatOwners());
-        if (vpsInventory.configured && !vpsInventory.available) {
-          return deletionResponse( 503, {
-            error: `${vpsInventory.problem ?? "VPS computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
-          });
-        }
+        // A server that cannot answer never keeps the bot: it is deleted, and the answer says what may be left there.
+        const vpsLeftOn = vpsInventory.configured && !vpsInventory.available ? vpsSshAliasForBot(cfg, bot) : null;
         const ownedVpsComputers = vpsInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
 
         if ((botBoatRecovery.length > 0 || botBoatDeletions.length > 0) && !boat.boatConfigured(cfg)) {
@@ -9806,7 +9802,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           const acknowledged = await browserCleanup.ensure(committedCleanup);
           requireBrowserCleanupAcknowledged(acknowledged, `Browser data for ${bot.name}`);
         }
-        return deletionResponse( 200, { ok: true });
+        return deletionResponse(200, { ok: true, ...(vpsLeftOn ? { notice: vpsLeftBehindNotice("Deleted", vpsLeftOn, vps.vpsContainerName(bot.id)) } : {}) });
       } finally {
         if (claimedLocalVmTarget) localVmLifecycleBusy.delete(claimedLocalVmTarget.key);
         releaseComputerLifecycle();

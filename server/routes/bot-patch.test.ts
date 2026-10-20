@@ -108,6 +108,7 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
 
     expect(moved.status).toBe(200);
     expect(moved.body.bot.vpsAlias).toBe("gamma-vps");
+    expect(moved.body.notice).toBeUndefined();
     expect(scan).toHaveBeenCalledTimes(1);
     expect(scan.mock.calls[0]?.[0]).toEqual({ vps: { sshAlias: "production-vps" } });
 
@@ -120,19 +121,20 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
     expect(store.bot(bot.id)?.vpsAlias).toBe("gamma-vps");
   });
 
-  it("refuses a move it cannot check: the old server is unreachable, so nothing is guessed", async () => {
+  it("moves a bot off a server that cannot be reached, and says what may be left there", async () => {
     const { store, bot, patch } = fixture();
     scan.mockResolvedValue({
       ...emptyInventory(),
       available: false,
-      problem: "Docker over SSH could not list managed computers on production-vps: ssh: connect timed out",
+      problem: "Docker over SSH could not list managed computers on production-vps: ssh: Could not resolve hostname production-vps",
     });
 
-    const refused = await patch(bot.id, { vpsAlias: "gamma-vps" });
+    const moved = await patch(bot.id, { vpsAlias: "gamma-vps" });
 
-    expect(refused.status).toBe(503);
-    expect(refused.body.error).toMatch(/could not list managed computers on production-vps.*Keep the current SSH config alias and retry/);
-    expect(store.bot(bot.id)?.vpsAlias).toBeUndefined();
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    expect(store.bot(bot.id)?.vpsAlias).toBe("gamma-vps");
+    expect(moved.body.notice).toContain("production-vps could not be reached");
+    expect(moved.body.notice).toContain(`docker -H ssh://production-vps rm -f ${vps.vpsContainerName(bot.id)}`);
   });
 
   it("never lets a member's session or a paired phone choose a bot's server", async () => {

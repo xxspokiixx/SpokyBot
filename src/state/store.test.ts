@@ -716,7 +716,16 @@ describe("server-authoritative bot deletion", () => {
     await Promise.all([first, second]);
 
     expect(onConfirmed).toHaveBeenCalledTimes(1);
-    expect(onConfirmed).toHaveBeenCalledWith(bot.id);
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, undefined);
+  });
+
+  it("hands the server's answer on, so a deletion that left something behind can say so", async () => {
+    const onConfirmed = vi.fn();
+    const answer = { ok: true, notice: "Deleted. gone-vps could not be reached." };
+
+    await requestConfirmedBotDeletion(bot.id, async () => answer, onConfirmed);
+
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, answer);
   });
 
   it("keeps a visible pending marker until deletion settles or fails", () => {
