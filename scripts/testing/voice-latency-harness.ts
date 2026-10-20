@@ -8,7 +8,6 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runControlOmb, launchVerificationServer, type VerificationServer } from "../control-omb.ts";
@@ -172,6 +171,9 @@ async function main(): Promise<void> {
     const stop = new AbortController();
     process.once("SIGINT", () => stop.abort());
     process.once("SIGTERM", () => stop.abort());
+    // The signal feeds launchVerificationServer only; polling it here is what
+    // unwinds an interrupt to the finally teardown.
+    const throwIfAborted = (): void => stop.signal.throwIfAborted();
     const serverEnv: NodeJS.ProcessEnv = { ...process.env, ...fakeEnv };
     // Keyless record run: an exported live key would otherwise ride the
     // parent env into measurement, even though nothing reads it here.
@@ -217,6 +219,7 @@ async function main(): Promise<void> {
     // The app must render (and hydrate its event stream) before the first
     // turn, or the warmup's frames never reach the page's recorder.
     for (let i = 0; i < 60; i += 1) {
+      throwIfAborted();
       const booted = await evalInPage(binary, browserEnv, "(document.getElementById('root')?.children.length ?? 0) > 0");
       if (booted === true) break;
       if (i === 59) throw new Error("app never rendered: page stayed empty for 30s");
@@ -242,6 +245,7 @@ async function main(): Promise<void> {
       let quiet = 0;
       let lastCount = -1;
       for (;;) {
+        throwIfAborted();
         const samples = await pullSamples();
         const fresh = samples.filter((sample) => !seen.has(sample.messageId));
         if (samples.length !== lastCount) {
@@ -279,6 +283,7 @@ async function main(): Promise<void> {
       const deadline = Date.now() + timeoutMs;
       let idleStreak = 0;
       for (;;) {
+        throwIfAborted();
         const raw = await api("GET", "/api/bots");
         const bots = Array.isArray(raw.bots) ? raw.bots as Array<{ id?: string; tasks?: Array<{ busy?: boolean }> }> : [];
         const mine = bots.find((bot) => bot.id === botId);
@@ -306,6 +311,7 @@ async function main(): Promise<void> {
     console.error("warmup complete=true");
 
     for (const reply of selected) {
+      throwIfAborted();
       const expected = manifest.replies.find((row) => row.id === reply.id)?.blocks;
       if (!expected) throw new Error(`manifest has no block count for ${reply.id}`);
       const timeout = 45_000 + expected * 8_000;
@@ -347,7 +353,7 @@ async function main(): Promise<void> {
       baseCommit: BASE_COMMIT,
       measuredBuildCommit: process.env.OMB_MEASURED_COMMIT ?? "(unset: worktree HEAD)",
       date: new Date().toISOString(),
-      machine: { hostname: hostname(), platform: process.platform, arch: process.arch },
+      machine: { platform: process.platform, arch: process.arch },
       configSummary: { provider: "elevenlabs (record stub)", model: STUB_MODEL, voice: STUB_VOICE },
       synthesis: {
         protocol: "elevenlabs-wire stub on loopback; no live engine call, no engine key",
