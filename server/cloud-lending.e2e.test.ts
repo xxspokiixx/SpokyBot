@@ -520,7 +520,7 @@ it("My Cloud's own page turns this computer's lending on in place, with the usua
     environment: () => env, save: (target: typeof env, choice: { folders: unknown; screen: boolean }) => lending.saveCloud(target, choice as never), stop: () => lending.revoke(env),
     chooseFolder: async () => null,
     defaults: () => usualFolders([...usual, join(root, "Missing")], validateSharedFolders), validate: validateSharedFolders,
-    confirm: async (folders: string[]) => { confirmed.push(folders); return true; },
+    confirm: async (grant: { folders: Array<{ name: string }> }) => { confirmed.push(grant.folders.map((folder) => folder.name)); return true; },
   });
   expect((await handlers.get("cloud-lending:state")!({})).on).toBe(false);
   await handlers.get("cloud-lending:set")!({}, true);

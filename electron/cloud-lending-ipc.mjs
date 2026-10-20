@@ -8,15 +8,35 @@ import { randomUUID } from "node:crypto";
  * that can change a file. */
 export const DEFAULT_FOLDERS = Object.freeze(["desktop", "documents", "downloads"]);
 
-/** The folders that still exist and pass the checks a folder chosen by hand passes; one moved or deleted since is left
- * out, instead of failing the whole switch. */
+const GONE = new Set(["ENOENT", "ENOTDIR"]);
+
+/** The folders that still exist and pass the checks a folder chosen by hand passes. One moved or deleted since is left
+ * out, instead of failing the whole switch; any other refusal (the whole home folder, a file) still fails it. */
 export async function existingFolders(folders, validate) {
-  const found = await Promise.all(folders.map((folder) => validate([folder]).then((list) => list[0] ?? null, () => null)));
+  const found = await Promise.all(folders.map((folder) => validate([folder]).then((list) => list[0] ?? null, (error) => {
+    if (GONE.has(error?.code)) return null;
+    throw error;
+  })));
   return found.filter(Boolean);
 }
 
 /** Each usual folder that exists, read only. */
 export const usualFolders = (paths, validate) => existingFolders(paths.map((path) => ({ id: randomUUID(), path, write: false })), validate);
+
+/** The native confirmation's words for exactly what goes: what bots may read, what they may also change, and the screen. */
+export function grantSentence({ folders, screen }) {
+  const list = (names) => names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  const read = folders.filter((folder) => !folder.write).map((folder) => folder.name);
+  const edit = folders.filter((folder) => folder.write).map((folder) => folder.name);
+  const parts = [
+    ...(read.length ? [`read ${list(read)}`] : []),
+    ...(edit.length ? [`read and change files in ${list(edit)}`] : []),
+    ...(screen ? ["see your screen and use your apps as you"] : []),
+  ];
+  const what = parts.length ? list(parts) : "use nothing yet";
+  const safe = !edit.length && !screen ? ", without changing anything" : "";
+  return `Bots on My Cloud can ${what} on this computer${safe}, in your own conversations and while this app is open. Turn it off at any time.`;
+}
 
 /** My Cloud's page learns whether it is on, how it is going, and what is lent by folder name, never a path. */
 export function pageLending(snapshot) {
@@ -43,9 +63,9 @@ export function pageLending(snapshot) {
  *   chooseFolder: () => Promise<{ id: string, path: string, name: string, write: boolean } | null>,
  *   defaults: () => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
  *   validate: (folders: unknown[]) => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
- *   confirm: (folders: string[]) => Promise<boolean>,
+ *   confirm: (grant: { folders: Array<{ name: string, write: boolean }>, screen: boolean }) => Promise<boolean>,
  * }} deps `cloudPage` lets only My Cloud's verified page through; `confirm` asks in a native dialog, which no page can
- * draw or answer.
+ * draw or answer, and is told the exact grant: each folder with whether bots may edit it, and the screen.
  */
 export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirm }) {
   const env = () => {
@@ -74,7 +94,8 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     if (current.state?.enabled) return pageLending(current);
     const kept = current.state ?? {};
     const next = await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true });
-    if (!(await confirm(next.folders.map((folder) => String(folder.name ?? ""))))) return pageLending(current);
+    const grant = { folders: next.folders.map((folder) => ({ name: String(folder.name ?? ""), write: folder.write === true })), screen: next.screen === true };
+    if (!(await confirm(grant))) return pageLending(current);
     await save(env(), next);
     return pageLending(await snapshot());
   }));

@@ -93,7 +93,7 @@ import { createDesktopIncludedX } from "./included-x.mjs";
 import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
-import { DEFAULT_FOLDERS, installCloudLending, usualFolders } from "./cloud-lending-ipc.mjs";
+import { DEFAULT_FOLDERS, grantSentence, installCloudLending, usualFolders } from "./cloud-lending-ipc.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
 import { installCloudSend } from "./cloud-send-main.mjs";
 import { cloudMoveChoices } from "./cloud-move-choices.mjs";
@@ -2941,7 +2941,7 @@ installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingS
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
   chooseFolder: async () => { const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder My Cloud can use", properties: ["openDirectory"] }); return picked.canceled || !picked.filePaths[0] ? null : (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0]; },
   defaults: () => usualFolders(DEFAULT_FOLDERS.map(name => app.getPath(name)), validateSharedFolders), validate: validateSharedFolders,
-  confirm: async folders => (await dialog.showMessageBox(mainWindow, { type: "question", message: "Let My Cloud use this computer?", detail: `Bots on My Cloud can read ${folders.length ? folders.join(", ") : "nothing yet"} on this computer, without changing anything, in your own conversations and while this app is open. Turn it off at any time.`, buttons: ["Let My Cloud use it", "Cancel"], defaultId: 0, cancelId: 1 })).response === 0 });
+  confirm: async grant => (await dialog.showMessageBox(mainWindow, { type: "question", message: "Let My Cloud use this computer?", detail: grantSentence(grant), buttons: ["Let My Cloud use it", "Cancel"], defaultId: 0, cancelId: 1 })).response === 0 });
 const cloudSync = installCloudFiles({
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
   fetch: (...args) => session.defaultSession.fetch(...args),
