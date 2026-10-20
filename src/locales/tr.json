@@ -509,7 +509,7 @@
   "cloudMove.error.ownerNeeded": "Bu uygulama {server} sunucusunda sahibi olarak oturum açmamış. Bir sahip koduyla (openmausbot pair) yeniden eşleştirin, ardından kopyalayın.",
   "cloudMove.error.sharedWorkspace": "{server} sunucusu başka kişilerle paylaşılıyor, bu nedenle bu bilgisayarın botlarını ve sohbetlerini alamaz. Yalnızca sizin kullandığınız bir sunucuya kopyalayın.",
   "cloudMove.error.sameComputer": "{server}, bu bilgisayarın kendi sunucusu.",
-  "cloudMove.error.notEmpty": "{server} sunucusunda zaten kendine ait botlar ve sohbetler var, bu nedenle hiçbir şey kopyalanmadı. Bunları değiştirmek için bu bilgisayarın penceresinde Ayarlar → Sunucular bölümünü açın ve Bu bilgisayarı buraya kopyala seçeneğini belirleyin.",
+  "cloudMove.error.notEmpty": "{server} sunucusunda zaten botlar ve sohbetler var, bu nedenle üzerlerine hiçbir şey kopyalanmadı.",
   "cloudMove.error.busyElsewhere": "{other} sunucusuna bir kopyalama sürüyor. Bitmesini bekleyin.",
   "cloudMove.error.serverOutdated": "{server} sunucusu {dest} sürümünü, bu bilgisayar ise {local} sürümünü çalıştırıyor. {server} sunucusunu güncelleyin, ardından tekrar kopyalayın.",
   "cloudMove.error.serverOutdatedPlain": "{server} sunucusundaki OpenMausBot'u güncelleyin, ardından tekrar kopyalayın.",

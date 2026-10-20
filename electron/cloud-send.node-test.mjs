@@ -137,7 +137,8 @@ test("My Cloud's page is told names of bots and counts, with an opaque signature
   });
   const snapshot = await createCloudSend(sides.deps).compare();
   const notice = sendNotice(snapshot);
-  assert.deepEqual({ ...notice, signature: notice.signature.length }, { ready: true, bots: ["ember"], updatedBots: [], skills: 0, logins: 1, onePassword: false, settings: 0, signature: 32, dismissed: false, running: false, last: null });
+  assert.deepEqual({ ...notice, signature: notice.signature.length }, { ready: true, auto: true, bots: ["ember"], updatedBots: [], skills: 0, logins: 1, onePassword: false, settings: 0, signature: 32, dismissed: false, running: false, last: null });
+  assert.equal(sendNotice({ ...snapshot, auto: false }).auto, false, "with Keep My Cloud up to date off, My Cloud's welcome still offers its choice");
   assert.ok(!JSON.stringify(notice).includes("bank.example"));
   assert.deepEqual(loginsView(snapshot), { cloud: { reachable: true, logins: [{ site: "crm.example", username: "ops" }], onePassword: { connected: true, vaults: [] } } });
   assert.deepEqual(loginsView({ ...snapshot, cloud: "unreachable" }), { cloud: { reachable: false } });
@@ -170,7 +171,7 @@ test("this computer's Settings asks for everything; My Cloud's page only for its
     assert.throws(() => handlers.get(channel)(cloudPage), /only available/, channel);
   }
   for (const channel of ["cloud-send:notice", "cloud-send:page-send", "cloud-send:dismiss"]) assert.throws(() => handlers.get(channel)(elsewhere), /only available/, channel);
-  assert.deepEqual(await handlers.get("cloud-send:notice")(cloudPage), { ready: false, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null });
+  assert.deepEqual(await handlers.get("cloud-send:notice")(cloudPage), { ready: false, auto: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null });
   assert.deepEqual(await handlers.get("cloud-logins:state")({ page: "local" }), { cloud: null });
   await assert.rejects(handlers.get("cloud-logins:send")({ page: "local" }, { kind: "1password" }), /no My Cloud yet/);
 });

@@ -47,6 +47,14 @@ rest of the reasons a person reads: a send that stops as a whole, logins this
 computer's server did not hand over, and a 1Password token 1Password already
 refused here.
 
+My Cloud's welcome (`src/components/cloud-welcome/CloudWelcome.test.ts`): while
+Keep My Cloud up to date is on, or once a send has run, **Bring your stuff** is
+done by itself, so the welcome goes straight on to the AI with no Copy, fresh
+start or button; back on that step it says so in one line, with a fresh start
+only behind **More**. With the switch off, the old choice is offered. Found by a
+real-user run on a packaged desktop and a test Cloud, where the welcome kept
+offering **Copy to My Cloud** after everything had already arrived.
+
 ## The real utility port
 
 ```sh

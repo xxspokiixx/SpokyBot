@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { useCloudMove } from "@/components/CloudMove";
+import { useCloudSendNotice } from "@/components/CloudSendStrip";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
 import { track } from "@/lib/analytics";
 import { reopenCloudIntent } from "@/lib/cloud-intent";
@@ -14,6 +15,7 @@ import { t } from "@/lib/i18n";
 import { hintSeen } from "@/lib/onboarding";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
+import type { CloudSendNotice } from "../../../electron/cloud-send.mjs";
 import { openBot, useStore } from "@/state/store";
 import { useCloudName } from "./parts";
 import { WelcomeBring, type BringOutcome } from "./WelcomeBring";
@@ -24,6 +26,14 @@ const STEP_TEXT: Record<WelcomeStep, { title: LocaleKey; hint: LocaleKey }> = {
   engine: { title: "cloudSetup.engine.title", hint: "cloudWelcome.step.engineHint" },
   files: { title: "cloudWelcome.step.files", hint: "cloudWelcome.step.filesHint" },
 };
+
+/** "sending" while this computer's first send runs, "sent" once one has gone, also "sent" when Keep My Cloud up to date is
+ * on (it brings everything by itself within moments); null when nothing comes by itself (it was turned off). */
+export function sentHere(notice: CloudSendNotice | null): "sending" | "sent" | null {
+  if (!notice) return null;
+  if (notice.running) return "sending";
+  return notice.last || notice.auto ? "sent" : null;
+}
 
 const requestedView = (value: string | null): WelcomeView | null =>
   value === "done" || WELCOME_STEPS.includes(value as WelcomeStep) ? value as WelcomeView : null;
@@ -43,6 +53,17 @@ export function CloudWelcome() {
   const visible = state.bots.filter((bot) => !bot.hidden);
   const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
   const cloudHasWork = move.overview?.cloud ? !move.overview.cloud.empty : visible.length > 1 || state.groups.length > 0;
+  const sendBridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSendPage;
+  const [notice] = useCloudSendNotice(sendBridge);
+  const sent = sentHere(notice);
+  // Main answers at once; until it does, no choice is shown that it may take back a moment later.
+  const [noticeLate, setNoticeLate] = useState(false);
+  useEffect(() => {
+    if (!sendBridge) return;
+    const timer = setTimeout(() => setNoticeLate(true), 1500);
+    return () => clearTimeout(timer);
+  }, [sendBridge]);
+  const asking = Boolean(sendBridge) && notice === null && !noticeLate;
 
   useEffect(() => {
     markWelcomeSeen();
@@ -65,6 +86,12 @@ export function CloudWelcome() {
       reanchor.current = false;
     } else if (state.selectedId !== anchor.current) stepAsideWelcome();
   }, [state.selectedId]);
+
+  // This computer's things come over by themselves: bringing them is done, with nothing to choose or press.
+  useEffect(() => {
+    if (sent && view === "bring" && !welcomeStepFinished(record, "bring")) finish("bring");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sent]);
 
   const remember = (ids: string[]) => { void saveWelcomeHints(state.config?.onboarding, ids, dispatch); };
   const go = (next: WelcomeView) => {
@@ -100,8 +127,9 @@ export function CloudWelcome() {
   };
 
   let content;
-  if (view === "bring") {
-    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} headingRef={heading}
+  if (view === "bring" && asking) content = null;
+  else if (view === "bring") {
+    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} sent={sent} headingRef={heading}
       onTeam={() => { reanchor.current = true; }}
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;
@@ -117,7 +145,7 @@ export function CloudWelcome() {
         <div className="mt-3 flex items-center justify-between gap-2 @2xl/welcome:mt-4 @2xl/welcome:flex-1 @2xl/welcome:flex-col @2xl/welcome:items-stretch @2xl/welcome:justify-start">
           <ol className="flex min-w-0 gap-1 @2xl/welcome:flex-col @2xl/welcome:gap-1.5">
             {WELCOME_STEPS.map((step, index) => {
-              const finished = welcomeStepFinished(record, step) || (step === "bring" && copied);
+              const finished = welcomeStepFinished(record, step) || (step === "bring" && (copied || sent !== null));
               const current = view === step;
               return <li key={step} className="min-w-0">
                 <button type="button" data-welcome-rail={step} data-finished={finished || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}

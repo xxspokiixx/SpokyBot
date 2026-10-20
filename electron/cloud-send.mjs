@@ -94,6 +94,8 @@ export function sendNotice(snapshot) {
   const count = (kind) => rows.filter((row) => row.kind === kind).length;
   return {
     ready: snapshot.cloud === "ready",
+    // Keep My Cloud up to date: everything comes over by itself, so My Cloud's welcome has nothing to offer for it.
+    auto: snapshot.auto !== false,
     bots: rows.filter((row) => row.kind === "bot" && row.state === "only-here").map((row) => row.label),
     updatedBots: rows.filter((row) => row.kind === "bot" && row.state === "to-update").map((row) => row.label),
     skills: count("skill"), logins: count("login"), onePassword: count("1password") > 0, settings: count("setting"),

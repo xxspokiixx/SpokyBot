@@ -21,7 +21,7 @@ const snapshot = (extra: Partial<CloudSendSnapshot> = {}): CloudSendSnapshot => 
   ...extra,
 });
 const notice = (extra: Partial<CloudSendNotice> = {}): CloudSendNotice => ({
-  ready: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "s", dismissed: false, running: false, last: null, ...extra,
+  ready: true, auto: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "s", dismissed: false, running: false, last: null, ...extra,
 });
 
 beforeEach(() => { setLocale("en"); });

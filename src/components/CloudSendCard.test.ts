@@ -116,7 +116,7 @@ it("is absent without My Cloud, in a browser and on a paired remote client", asy
   expect(render(card).html).toBe("");
 });
 
-const notice: CloudSendNotice = { ready: true, bots: ["Ember"], updatedBots: [], skills: 2, logins: 0, onePassword: true, settings: 0, signature: "sig-1", dismissed: false, running: false, last: null };
+const notice: CloudSendNotice = { ready: true, auto: true, bots: ["Ember"], updatedBots: [], skills: 2, logins: 0, onePassword: true, settings: 0, signature: "sig-1", dismissed: false, running: false, last: null };
 let page: CloudSendPageBridge;
 const strip = (cloudHome = true) => () => CloudSendStrip({ cloudHome });
 async function onCloud(value: CloudSendNotice = notice, cloudHome = true) {
