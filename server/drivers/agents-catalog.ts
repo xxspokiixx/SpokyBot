@@ -396,7 +396,6 @@ const TOOL_DEFINITIONS = [
           maxLength: 1024,
           description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
         },
-        suggestion: { type: "boolean", description: "True if the user did not ask for this bot." },
       },
       required: ["name", "role", "instructions"],
     },
