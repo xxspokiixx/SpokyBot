@@ -1,15 +1,15 @@
 # Send to My Cloud
 
 What it covers: Settings → MausBot Cloud's **This computer and My Cloud**
-(Send everything, Keep My Cloud up to date, Choose what goes), My Cloud's
-strip (**Bring them over**) and the switcher's send line. Settings → Logins
-shows where each login is; it no longer sends one by hand.
+(where things stand, and Send everything), My Cloud's strip, the switcher's
+send line, and the one-time move to My Cloud with its check. Settings → Logins
+shows where each login is.
 
 ## Two real servers
 
 ```sh
-pnpm exec vitest run server/cloud-send.e2e.test.ts server/cloud-send.test.ts
-node --test electron/cloud-send.node-test.mjs
+pnpm exec vitest run server/cloud-send.e2e.test.ts server/cloud-send-move.e2e.test.ts server/cloud-send.test.ts
+node --test electron/cloud-send.node-test.mjs electron/cloud-send-move.node-test.mjs electron/cloud-send-check.node-test.mjs
 ```
 
 `scripts/testing/cloud-send-fixture.ts` starts this computer's server as the
@@ -33,19 +33,27 @@ checks:
 - **Send everything** brings the chats too, by row, under the same bot and
   conversation ids; a second send adds only the new messages, nothing twice; a
   send of one item never carries chats;
-- **Keep My Cloud up to date**: the first check sends everything with no click,
-  chats included; a new message goes on a later check (chats alone at most
-  every five minutes), and only its rows; nothing goes once the switch is off;
 - when My Cloud's 1Password refuses this computer's token, everything else
   arrives and the strip's notice says *1Password* and why, never a login's site;
 - **a long conversation, sent in pages by the real send** (tool-heavy turns, so
   a few turns make several 300-row pages): a new bot's conversation of three
-  pages and more with the first send by itself, one My Cloud got from a Bring
+  pages and more with the move, one My Cloud got from a Bring
   and then sent from its first row, a later send of two pages and more, a
   context summary that ends a send, and a room of three pages and more (made on
   My Cloud under the same ids). Each is read back on both servers the way the
   chat view pages it, and the path from each server's own leaf, which is what
   its bot reads, must match row for row, summaries included.
+
+`server/cloud-send-move.e2e.test.ts` runs the move as main runs it (`move`, then
+`move({ final: true })`, then `check`): a 1,599-row conversation with 22
+context summaries, a 610-message room and a conversation both sides added to
+pass the path check; MCP servers with their keys and header tokens, an MCP
+sign-in of its own (left here by the first pass, carried by the final one and
+let go of here), an AI key, HighLevel by its token and the connected-apps
+account (a fake broker) arrive, with equal credential fingerprints; the move's
+session counts as someone using My Cloud; a moved conversation may use a lent
+Mac and feeds its bot's memory on My Cloud; and a move run again changes
+nothing there.
 
 `server/cloud-send-chats.test.ts` covers the row cursor (pages, a deleted row
 starting a conversation over, each page's own leaf, a page never ending between
@@ -61,10 +69,10 @@ computer's server did not hand over, and a 1Password token 1Password already
 refused here.
 
 My Cloud's welcome (`src/components/cloud-welcome/CloudWelcome.test.ts`): while
-Keep My Cloud up to date is on, or once a send has run, **Bring your stuff** is
-done by itself, so the welcome goes straight on to the AI with no Copy, fresh
-start or button; back on that step it says so in one line, with a fresh start
-only behind **More**. With the switch off, the old choice is offered. Found by a
+a move or a whole send runs, or once one has gone, **Bring your stuff** is done
+by itself, so the welcome goes straight on to the AI with no Copy, fresh start
+or button; back on that step it says so in one line, with a fresh start only
+behind **More**. Before anything has come, the old choice is offered. Found by a
 real-user run on a packaged desktop and a test Cloud, where the welcome kept
 offering **Copy to My Cloud** after everything had already arrived.
 

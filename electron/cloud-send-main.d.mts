@@ -1,9 +1,9 @@
 import type { CloudLoginsState } from "./cloud-logins.mjs";
-import type { CloudSendSession, CloudSendSnapshot } from "./cloud-send.mjs";
+import type { CloudMoveCheck, CloudSendOutcome, CloudSendSession, CloudSendSnapshot } from "./cloud-send.mjs";
 
 interface CloudTarget { origin: string; grant(): Promise<{ origin: string; code: string }> }
 
-export function openOwnerSession(target: CloudTarget, fetchImpl: typeof fetch, label?: string): Promise<CloudSendSession>;
+export function openOwnerSession(target: CloudTarget, fetchImpl: typeof fetch, options?: { label?: string; background?: boolean }): Promise<CloudSendSession>;
 export function loginsView(snapshot: CloudSendSnapshot): CloudLoginsState;
 
 export function installCloudSend(deps: {
@@ -22,10 +22,10 @@ export function installCloudSend(deps: {
   openSettings(): void;
   fetch?: typeof fetch;
   bringChats?: (() => Promise<{ phase: string; action?: string; brought?: { conversations: number; messages: number }; error?: { message?: string } }>) | null;
-  keepUpToDate?: boolean;
-  clock?: { now(): number; setTimer: typeof setTimeout; clearTimer: typeof clearTimeout };
+  engineWaitMs?: number;
 }): {
   receive(proc: unknown, message: unknown): boolean;
-  kick(): void;
+  move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
+  check(): Promise<CloudMoveCheck>;
   menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
 };

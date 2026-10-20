@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLoginHandoffClient, type ConnectionAsk } from "../../electron/cloud-logins.mjs";
 import { createCloudMove } from "../../electron/cloud-move.mjs";
 import { installCloudSend } from "../../electron/cloud-send-main.mjs";
+import type { CloudMoveCheck, CloudSendOutcome } from "../../electron/cloud-send.mjs";
 import { cloudPairingSignature } from "../../server/cloud-home.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
 import { freePortBlock } from "../../server/testing/ports.ts";
@@ -37,14 +38,18 @@ export interface CloudSendFixture {
   picture(bytes: Uint8Array): Promise<string>;
   /** Main's IPC handlers, as this computer's page (or My Cloud's, with page "cloud") calls them. */
   call<T>(channel: string, page: "local" | "cloud", ...args: unknown[]): Promise<T>;
-  /** The labels of the sessions each send made on My Cloud. */
+  /** The labels of the sessions each send made on My Cloud, as main asked for them. */
   labels: string[];
   /** The Admin's one-time code for this Cloud, as pairHome() gives it. */
   grant(label: string): Promise<{ origin: string; code: string; expiresAt: number }>;
   /** The switcher's send line, as main builds it. */
   menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
-  /** With `auto`: moves main's clock on, runs Keep My Cloud up to date's next check and waits for any send it starts. */
-  tick(advanceMs?: number): Promise<void>;
+  /** A pass of the one-time move, through main's own wiring; `final`: the one after this computer stopped. */
+  move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
+  /** The move's check of what arrived, through main's own wiring. */
+  check(): Promise<CloudMoveCheck>;
+  /** The labels of the sessions each send made, and whether each counted as someone using My Cloud. */
+  sessions: Array<{ label: string; background: boolean }>;
   /** Each request main sent My Cloud's chats route: the rows of each conversation it carried. */
   chatRequests: Array<Array<{ threadId: string; rows: number }>>;
   /** With `broker`: this computer's installation on the connected-apps service. */
@@ -74,11 +79,13 @@ exports.createClient = async ({ auth }) => {
  * refuse this computer's token on My Cloud. `toolCalls`: each turn on this computer makes that many tool calls first, so a
  * few turns make a conversation of several pages. `broker`: the connected-apps service both servers use, this computer
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
- * `env`: more of both servers' environment (a fake HighLevel and its relay). */
-export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, auto = false, toolCalls = 0, broker, env = {} }: {
-  onePasswordToken: string; cloudOnePasswordToken?: string; auto?: boolean; toolCalls?: number;
+ * `env`: more of both servers' environment (a fake HighLevel and its relay). `cloudEngine`: lines run at the start of My
+ * Cloud's synthetic Claude CLI, to script its turns (fake-claude-cli.ts). */
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEngine = "" }: {
+  onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
   broker?: { url: string; install(): Promise<{ id: string; token: string; userId: string }> };
   env?: NodeJS.ProcessEnv;
+  cloudEngine?: string;
 }): Promise<CloudSendFixture> {
   const root = mkdtempSync(join(tmpdir(), "omb-cloud-send-"));
   const secret = randomBytes(32).toString("base64url");
@@ -89,7 +96,7 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
   const children: ChildProcess[] = [];
   const remember = async (response: Response) => { answers.push(await response.clone().text()); return response; };
 
-  async function start(name: string, own: NodeJS.ProcessEnv, port: number, extra: string[] = [], ipc = false, acceptedToken = onePasswordToken, calls = 0): Promise<ChildProcess> {
+  async function start(name: string, own: NodeJS.ProcessEnv, port: number, extra: string[] = [], ipc = false, acceptedToken = onePasswordToken, calls = 0, engine = ""): Promise<ChildProcess> {
     const home = join(root, name);
     const dataDir = join(home, ".openmausbot");
     mkdirSync(dataDir, { recursive: true });
@@ -99,6 +106,7 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
 if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" })); process.exit(0); }
 process.env.FAKE_CLAUDE_VERSION = "2.1.284";
 ${tools ? `process.env.FAKE_CLAUDE_TOOL_CALLS = ${JSON.stringify(tools)};` : ""}
+${engine}
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ instances: {
@@ -142,7 +150,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const cloudPort = await freePortBlock([0, 1]);
   const cloudBase = `http://127.0.0.1:${cloudPort}`;
   await start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
-    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}) }, cloudPort, [], false, cloudOnePasswordToken);
+    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}) }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine);
 
   const mintCode = async (label: string) => {
     const body = JSON.stringify({ label, ttlSeconds: 300 });
@@ -170,15 +178,18 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const port = { postMessage: (message: unknown) => { desktop.send(message as object); } };
   const chatRequests: CloudSendFixture["chatRequests"] = [];
+  const sessions: CloudSendFixture["sessions"] = [];
   const throughEdge = (bearer: string | null) => async (url: string | URL | Request, init: RequestInit = {}) => {
     if (String(url).endsWith("/api/cloud-send/chats") && init.method === "POST" && typeof init.body === "string") {
       chatRequests.push((JSON.parse(init.body) as { conversations: Array<{ threadId: string; rows: unknown[] }> }).conversations.map((entry) => ({ threadId: entry.threadId, rows: entry.rows.length })));
     }
+    if (String(url).endsWith("/api/auth/pair") && typeof init.body === "string") {
+      const { label } = JSON.parse(init.body) as { label: string };
+      labels.push(label);
+      sessions.push({ label, background: (init.headers as Record<string, string>)["x-omb-background"] === "1" });
+    }
     return remember(await fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...EDGE, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } }));
   };
-  // Keep My Cloud up to date's timer, run by hand.
-  let clockAt = Date.now(), timer: (() => void) | null = null;
-  const clock = { now: () => clockAt, setTimer: ((callback: () => void) => { timer = callback; return 1; }) as unknown as typeof setTimeout, clearTimer: (() => { timer = null; }) as typeof clearTimeout };
   // Bring newer chats, as main.mjs gives it to Send to My Cloud.
   const move = createCloudMove({
     localRequest: (route, init) => fetch(`${desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": ownerCapability } }),
@@ -194,7 +205,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     cloudPage: (event) => (event as { page?: "local" | "cloud" })?.page ?? null,
     server: () => port,
     local: async (route) => remember(await fetch(`${desktopBase}${route}`, { headers: { "x-openmausbot-desktop-owner": ownerCapability } })),
-    home: () => ({ origin: cloudBase, grant: async () => { const label = "Send to My Cloud"; labels.push(label); return { origin: cloudBase, code: await mintCode(label) }; } }),
+    home: () => ({ origin: cloudBase, grant: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)") }) }),
     cookieFetch: throughEdge(owner) as typeof fetch,
     reconnect: async () => false,
     power: { asleep: () => false },
@@ -204,8 +215,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     openSettings: () => {},
     fetch: throughEdge(null) as typeof fetch,
     bringChats: () => move.bring({ id: "cloud", name: "My Cloud", origin: cloudBase, kind: "cloud", grant: async () => ({ origin: cloudBase, code: await mintCode("Copy from desktop") }) }),
-    keepUpToDate: auto,
-    clock,
+    engineWaitMs: 2_000,
   });
   desktop.on("message", (message) => main.receive(port, message));
   const asks = createLoginHandoffClient();
@@ -220,15 +230,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     },
     call: <T>(channel: string, page: "local" | "cloud", ...args: unknown[]) => Promise.resolve(handlers.get(channel)!({ page }, ...args)) as Promise<T>,
     menu: () => main.menu(),
+    move: (options) => main.move(options),
+    check: () => main.check(),
+    sessions,
     chatRequests,
-    async tick(advanceMs = 0) {
-      clockAt += advanceMs;
-      const run = timer;
-      timer = null;
-      run?.();
-      // The check sets its next timer only once it, and any send it started, is done.
-      for (let tries = 0; !timer && tries < 1200; tries++) await new Promise((resolve) => setTimeout(resolve, 50));
-    },
     grant: async (label) => ({ origin: cloudBase, code: await mintCode(label), expiresAt: Date.now() + 300_000 }),
     async close() {
       await move.close();

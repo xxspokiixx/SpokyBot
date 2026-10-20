@@ -39,6 +39,8 @@ export interface ConnectionsMoved {
   missing: Array<{ slug: string }>;
   failed: Array<{ id: string; label: string; message: string; final: boolean }>;
   release: HeldSignIn[];
+  /** Sign-ins that refresh themselves, left here for a later pass (`signIns: false`). */
+  later: Array<{ id: string; label: string }>;
 }
 
 export class ConnectionMoveError extends Error {
@@ -54,6 +56,7 @@ export function adoptComposioId(target: ConnectionsTarget, options: { local: Con
 export function sendConnections(collected: CollectedConnections, target: ConnectionsTarget, options: {
   local: ConnectionsLocal;
   release?: boolean;
+  signIns?: boolean;
   waitMs?: number;
   onProgress?: (progress: { done: number; total: number; label: string }) => void;
 }): Promise<ConnectionsMoved>;

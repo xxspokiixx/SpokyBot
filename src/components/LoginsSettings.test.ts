@@ -203,12 +203,12 @@ describe("Settings → Logins with My Cloud", () => {
   afterEach(() => { delete (window as { ogb?: unknown }).ogb; });
   const where = (site: string) => host.querySelector(`[data-login-row="${site}"] [data-login-where]`)?.textContent;
 
-  it("says where each login and 1Password are, with nothing to press: they go to My Cloud by themselves", async () => {
+  it("says where each login and 1Password are, and that Send everything sends them; nothing to press here", async () => {
     const send = vi.fn();
     (window as { ogb?: unknown }).ogb = { cloudLogins: { state: vi.fn().mockResolvedValue(cloudWith([{ site: "example.org", username: "TEAM" }])), send } };
     fixture.api.mockResolvedValueOnce({ logins: [CARD_LOGIN, SHARED_LOGIN, VAULT_LOGIN], onePassword: VAULTS });
     await render();
-    expect(host.querySelector("[data-logins-sides]")!.textContent).toContain("Logins are kept on each side: this computer has its own, and My Cloud has its own. Settings → MausBot Cloud sends this computer's to My Cloud and keeps them up to date");
+    expect(host.querySelector("[data-logins-sides]")!.textContent).toContain("Logins are kept on each side: this computer has its own, and My Cloud has its own. Send everything in Settings → MausBot Cloud sends this computer's to My Cloud.");
     expect(where("example.org")).toBe("On this computer and My Cloud");
     expect(where("example.com")).toBe("On this computer only");
     expect(host.querySelector('[data-onepassword-where]')!.textContent).toBe("On this computer only");

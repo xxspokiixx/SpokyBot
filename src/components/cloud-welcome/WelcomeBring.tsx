@@ -36,9 +36,9 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
   move: CloudMoveHandle | null;
   /** The Cloud has bots or chats of its own (a copy from before, a chat from a phone): nothing is copied over them. */
   cloudHasWork: boolean;
-  /** This computer's things come (or came) over by themselves: one line, nothing to choose or press, a fresh start only
-   * behind More. `arrived`: what the last whole send brought, as countedList names it; `auto`: more keep coming. */
-  sent?: { state: "sending" | "sent"; auto: boolean; arrived: string[] | null } | null;
+  /** This computer's things come (or came) over: one line, nothing to choose or press, a fresh start only behind More.
+   * `arrived`: what the last whole send brought, as countedList names it. */
+  sent?: { state: "sending" | "sent"; arrived: string[] | null } | null;
   headingRef: Ref<HTMLHeadingElement>;
   /** Before the team library selects the bots it adds, so that is not read as the person leaving. */
   onTeam: () => void;
@@ -144,9 +144,9 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
     onImported={() => { onTeam(); setTeams(false); onFinish("team"); }} />;
   if (sent) {
     const arrived = sent.arrived?.length ? t("cloudSend.strip.arrived", { list: listOf(sent.arrived) }) : t("cloudSend.strip.allHere");
-    const line = sent.state === "sending" ? t("cloudWelcome.bring.sending") : sent.auto ? `${arrived} ${t("cloudWelcome.bring.keepsComing")}` : arrived;
+    const line = sent.state === "sending" ? t("cloudWelcome.bring.sending") : arrived;
     return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" data-bring-sent={sent.state} className="flex flex-col gap-5">
-      <StepHeading headingRef={headingRef} title={t(sent.auto ? "cloudWelcome.bring.sentTitle" : "cloudWelcome.bring.hereTitle")}
+      <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.hereTitle")}
         sub={<span role="status" className="inline-flex items-start gap-2">
           {sent.state === "sending" ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin" /> : <Check size={15} strokeWidth={2.5} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />}
           <span>{line}</span>

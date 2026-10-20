@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PlanRow } from "../../electron/cloud-send-parts.mjs";
 import type { CloudSendNotice, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import { setLocale } from "@/lib/i18n";
-import { detailRows, failedLine, resultLines, sendStateLine, sideLines, statusLine, stripLine } from "./cloud-send";
+import { failedLine, resultLines, sendStateLine, statusLine, stripLine } from "./cloud-send";
 
 const row = (key: string, kind: PlanRow["kind"], label: string, state: PlanRow["state"], extra: Partial<PlanRow> = {}): PlanRow => ({ key, kind, label, state, ...extra });
 const noneArrived = { bots: 0, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: { conversations: 0, messages: 0 } };
 const snapshot = (extra: Partial<CloudSendSnapshot> = {}): CloudSendSnapshot => ({
-  cloud: "ready", auto: true, running: null, pending: 0, signature: "", dismissed: "", last: null, whole: null, arrived: noneArrived, cloudVersion: "0.1.117", localVersion: "0.1.117",
+  cloud: "ready", running: null, pending: 0, chats: null, signature: "", dismissed: "", last: null, whole: null, arrived: noneArrived, cloudVersion: "0.1.117", localVersion: "0.1.117",
   rows: [
     row("bot:ember", "bot", "Ember", "only-here", { id: "ember" }),
     row("skill:ember:notes", "skill", "notes", "only-here", { bot: "ember" }),
@@ -22,22 +22,20 @@ const snapshot = (extra: Partial<CloudSendSnapshot> = {}): CloudSendSnapshot => 
   ...extra,
 });
 const notice = (extra: Partial<CloudSendNotice> = {}): CloudSendNotice => ({
-  ready: true, auto: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "s", dismissed: false, running: false, last: null, ...extra,
+  ready: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "s", dismissed: false, running: false, last: null, whole: null, ...extra,
 });
 
 beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
 
 describe("This computer and My Cloud, in words", () => {
-  it("counts each kind on both sides and says how they differ: bots by name, logins by count, 1Password named", () => {
-    const lines = Object.fromEntries(sideLines(snapshot()).map((line) => [line.kind, line]));
-    expect(lines.bots).toMatchObject({ here: 2, cloud: 11, waiting: true, difference: "Ember only here · Juno newer here · Miso and 9 more only on My Cloud" });
-    expect(lines.skills).toMatchObject({ here: 1, cloud: 0, difference: "notes only here" });
-    expect(lines.logins).toMatchObject({ here: 3, cloud: 1, difference: "1 login and 1Password only here" });
-    expect(lines.settings).toMatchObject({ waiting: true, difference: "Your name and About me newer here" });
-    const same = sideLines(snapshot({ rows: [row("bot:ember", "bot", "Ember", "on-both")], cloudOnly: [] }));
-    expect(same.map((line) => line.difference)).toEqual(["Same on both", "Same on both", "Same on both", "Same on both"]);
-    expect(sideLines(snapshot({ rows: [row("bot:ember", "bot", "Ember", "differs")], cloudOnly: [] }))[0]!.difference).toBe("1 different on My Cloud");
+  it("says what is not on My Cloud yet, by kind and with the chats still to go; that all is there; or what is sending", () => {
+    expect(sendStateLine(snapshot({ chats: { waiting: 12 } }), null)).toEqual({ kind: "waiting",
+      text: "Not on My Cloud yet: 1 bot, changes to 1 bot, 1 login, 1Password, your settings, and 12 chats." });
+    const done = snapshot({ rows: [row("bot:ember", "bot", "Ember", "on-both")], chats: { waiting: 0 } });
+    expect(sendStateLine(done, null)).toEqual({ kind: "done", text: "Everything from this computer is on My Cloud." });
+    expect(sendStateLine({ ...done, chats: { waiting: 1 } }, null).text).toBe("Not on My Cloud yet: 1 chat.");
+    expect(sendStateLine(snapshot({ running: { reason: "move", progress: { done: 2, total: 9 } } }), null)).toEqual({ kind: "sending", text: "Sending to My Cloud… 2 of 9" });
   });
 
   it("says what a send did in one sentence, then what is worth knowing", () => {
@@ -85,43 +83,27 @@ describe("This computer and My Cloud, in words", () => {
     expect(statusLine(snapshot({ cloud: "unreachable" }), true)?.text).toBe("Comparing this computer and My Cloud…");
     expect(statusLine(snapshot({ cloud: "none" }), false)).toBeNull();
   });
-
-  it("puts each bot's skills under it, then logins, then settings", () => {
-    expect(detailRows(snapshot().rows).map((entry) => entry.key)).toEqual([
-      "bot:ember", "skill:ember:notes", "bot:juno", "login:github.com|amit", "login:bank.test|amit", "1password", "setting:profile", "setting:language",
-    ]);
-  });
 });
 
 describe("My Cloud's strip", () => {
   const counts = { bots: 0, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null };
-  it("shows the first send arriving, then what came; nothing for a background send that went well", () => {
-    expect(stripLine(notice({ running: true, runningReason: "first", progress: { done: 2, total: 9 }, phase: "chats" }), false, null))
+  it("shows the move arriving, then what came; nothing for a send from this computer's Settings that went well", () => {
+    expect(stripLine(notice({ running: true, runningReason: "move", progress: { done: 2, total: 9 }, phase: "chats" }), false, null))
       .toEqual({ kind: "sending", text: "Bringing this computer's chats here… 2 of 9" });
-    expect(stripLine(notice({ running: true, runningReason: "auto" }), false, null)).toBeNull();
-    expect(stripLine(notice({ last: { at: 1, reason: "first", failed: 0, seen: false, sent: { ...counts, bots: 1, chats: { conversations: 0, messages: 7 } } } }), false, null))
+    expect(stripLine(notice({ running: true, runningReason: "button" }), false, null)).toBeNull();
+    expect(stripLine(notice({ last: { at: 1, reason: "move", failed: 0, seen: false, sent: { ...counts, bots: 1, chats: { conversations: 0, messages: 7 } } } }), false, null))
       .toEqual({ kind: "done", text: "1 bot and 7 new messages came over from This computer." });
-    expect(stripLine(notice({ last: { at: 1, reason: "first", failed: 0, seen: false, sent: counts } }), false, null)?.text).toBe("Everything from This computer is here.");
-    expect(stripLine(notice({ last: { at: 1, reason: "first", failed: 0, seen: true, sent: counts } }), false, null)).toBeNull();
-    expect(stripLine(notice({ last: { at: 1, reason: "auto", failed: 0, seen: false, sent: { ...counts, bots: 2 } } }), false, null)).toBeNull();
+    expect(stripLine(notice({ last: { at: 1, reason: "move", failed: 0, seen: false, sent: counts } }), false, null)?.text).toBe("Everything from This computer is here.");
+    expect(stripLine(notice({ last: { at: 1, reason: "move", failed: 0, seen: true, sent: counts } }), false, null)).toBeNull();
+    expect(stripLine(notice({ last: { at: 1, reason: "button", failed: 0, seen: false, sent: { ...counts, bots: 2 } } }), false, null)).toBeNull();
     expect(stripLine(notice(), true, null)?.kind).toBe("sending");
     expect(stripLine(notice(), false, "My Cloud is asleep.")).toEqual({ kind: "failed", text: "Send to My Cloud stopped: My Cloud is asleep." });
   });
-});
 
-describe("a send the switch stopped", () => {
-  const result = { bots: ["Ember"], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: { conversations: 0, messages: 4 }, failed: [], notes: [] };
-  it("Settings says it stopped because Keep My Cloud up to date was turned off", () => {
-    const last = { at: 5, reason: "first", result, stopped: "off" as const };
-    expect(sendStateLine(snapshot({ auto: false, last }), last)).toEqual({ kind: "off",
-      text: "Sending stopped because you turned off Keep My Cloud up to date. What hadn't gone yet stays on this computer." });
-    expect(sendStateLine(snapshot({ auto: false, last: { ...last, stopped: undefined } }), { ...last, stopped: undefined }).text)
-      .toBe("Keep My Cloud up to date is off: what you add on this computer stays here.");
-  });
-  it("My Cloud's strip says what came, and never that everything is here", () => {
-    const sent = { bots: 0, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null };
-    expect(stripLine(notice({ last: { at: 5, reason: "first", failed: 0, seen: false, sent, stopped: "off" } }), false, null)).toBeNull();
-    expect(stripLine(notice({ last: { at: 5, reason: "first", failed: 0, seen: false, sent: { ...sent, bots: 2 }, stopped: "off" } }), false, null))
-      .toEqual({ kind: "done", text: "2 bots came over from This computer." });
+  it("names apps and keys a move could not carry, by count", () => {
+    const nothing = { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: false };
+    expect(failedLine({ reasons: [{ what: { ...nothing, connections: 2 }, error: "My Cloud said: no such engine" }] })).toBe("2 apps and keys couldn't be sent: My Cloud said: no such engine");
+    expect(resultLines({ at: 1, reason: "move", result: { bots: ["Ember"], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], connections: 1, chats: null, failed: [], notes: [] } }).text)
+      .toBe("Sent to My Cloud: Ember and 1 app or key.");
   });
 });

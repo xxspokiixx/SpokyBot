@@ -349,7 +349,7 @@ const bridge = {
     state: () => ipcRenderer.invoke("cloud-logins:state"),
     send: what => ipcRenderer.invoke("cloud-logins:send", what?.kind === "login" ? { kind: "login", id: String(what.id) } : { kind: "1password" }),
   } : undefined,
-  // This computer's Settings → MausBot Cloud: the comparison, Send everything and the switches.
+  // This computer's Settings → MausBot Cloud: the comparison and Send everything.
   cloudSend: process.argv.includes("--omb-company-desktop=1") && isLocalPage ? {
     state: () => ipcRenderer.invoke("cloud-send:state"),
     refresh: () => ipcRenderer.invoke("cloud-send:refresh"),
@@ -357,7 +357,6 @@ const bridge = {
       keys: Array.isArray(options?.keys) ? options.keys.map(String) : undefined,
       force: Array.isArray(options?.force) ? options.force.map(String) : undefined,
     }),
-    setAuto: on => ipcRenderer.invoke("cloud-send:auto", on === true),
     setItem: (key, on) => ipcRenderer.invoke("cloud-send:item", String(key), on === true),
     onState: cb => {
       const handler = (_event, state) => cb(state);

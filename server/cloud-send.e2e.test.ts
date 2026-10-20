@@ -151,13 +151,13 @@ it("Send everything brings this computer's chats under the same bots; a second s
   await chat(lark, "Also, invoice 42 is overdue.");
   const added = (await textIds(fx.local, lark.threadId)).length - firstIds.length;
   const second = await send();
-  expect(second.result.chats).toEqual({ conversations: 0, messages: added });
+  expect(second.result.chats).toEqual({ conversations: 0, messages: added, left: 0 });
   const there = await textIds(fx.onCloud, lark.threadId);
   expect(there).toEqual(await textIds(fx.local, lark.threadId));
   expect(new Set(there).size).toBe(there.length);
 
   const third = await send();
-  expect(third.result.chats).toEqual({ conversations: 0, messages: 0 });
+  expect(third.result.chats).toEqual({ conversations: 0, messages: 0, left: 0 });
   expect(await textIds(fx.onCloud, lark.threadId)).toEqual(there);
   // One item asked for (Use this computer's, or one login) never carries chats.
   await chat(lark, "One more thing.");
@@ -215,70 +215,6 @@ it("when My Cloud refuses this computer's 1Password token, the strip and Setting
   } finally { await refusing.close(); }
 }, hostTimeout(120_000));
 
-it("Keep My Cloud up to date: the first time it sends everything with no click, chats included; then only what is new, and nothing once it is off", async () => {
-  const auto = await launchCloudSendFixture({ onePasswordToken: TOKEN, auto: true });
-  try {
-    const { local, onCloud } = auto;
-    const ids = async (side: CloudSendFixture["local"], threadId: string) => ((await side("GET", `/api/threads/${threadId}/messages?limit=500`)).body?.messages ?? [])
-      .filter((message: { kind: string }) => message.kind === "text").map((message: { id: string }) => message.id) as string[];
-    const talk = async (bot: { id: string; threadId: string }, text: string) => {
-      const before = (await ids(local, bot.threadId)).length;
-      expect((await local("POST", `/api/bots/${bot.id}/messages`, { text, threadId: bot.threadId })).status).toBe(202);
-      for (let tries = 0; tries < 300; tries++) {
-        const idle = (await local("GET", "/api/bots")).body.bots.every((entry: { activity?: string; busy?: boolean }) => entry.activity !== "working" && !entry.busy);
-        if (idle && (await ids(local, bot.threadId)).length >= before + 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    };
-    const wren = (await local("POST", "/api/bots", { name: "Wren", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-    await local("PATCH", `/api/bots/${wren.id}`, { soul: "You are Wren." });
-    expect((await local("POST", "/api/logins", { site: "accounts.example.test", username: "wren", password: PASSWORD, bots: [wren.id] })).status).toBe(201);
-    for (let i = 0; i < 5; i++) await talk(wren, `Note ${i}: the Acme invoice is due on the ${i + 1}th.`);
-    const history = await ids(local, wren.threadId);
-    const stored = async () => ((await local("GET", `/api/threads/${wren.threadId}/messages?limit=500`)).body?.messages ?? []).length as number;
-    const rowsBefore = await stored();
-    // Its greeting and five exchanges.
-    expect(history.length).toBe(11);
-
-    // Nobody presses anything: the app's first check sends everything.
-    await auto.tick();
-    const first = (await auto.call<CloudSendSnapshot>("cloud-send:state", "local")).last!;
-    expect(first.reason).toBe("first");
-    expect(first.result).toMatchObject({ bots: ["Wren"], logins: 1, failed: [] });
-    expect(first.result.chats?.messages).toBe(11);
-    expect(await ids(onCloud, wren.threadId)).toEqual(history);
-    expect((await onCloud("GET", "/api/logins")).body.logins).toEqual([expect.objectContaining({ username: "wren", bots: [wren.id] })]);
-    expect(auto.chatRequests.flat()).toEqual([{ threadId: wren.threadId, rows: rowsBefore }]);
-    const strip = await auto.call<CloudSendNotice>("cloud-send:notice", "cloud");
-    expect(strip.last).toMatchObject({ reason: "first", failed: 0, seen: false, sent: { bots: 1, logins: 1, chats: { conversations: 0, messages: 11 } } });
-
-    // A new message goes on the next check after a few minutes, alone: the history is not sent again.
-    await talk(wren, "Also: the meeting moved to Thursday.");
-    const added = (await stored()) - rowsBefore;
-    await auto.tick(2 * 60_000);
-    expect(auto.chatRequests.length, "chats alone wait a few minutes").toBe(1);
-    await auto.tick(4 * 60_000);
-    expect(auto.chatRequests.at(-1)).toEqual([{ threadId: wren.threadId, rows: added }]);
-    expect(added).toBeLessThan(rowsBefore);
-    const there = await ids(onCloud, wren.threadId);
-    expect(there).toEqual(await ids(local, wren.threadId));
-    expect(new Set(there).size).toBe(13);
-    expect((await auto.call<CloudSendSnapshot>("cloud-send:state", "local")).last?.reason).toBe("auto");
-
-    // Nothing new: nothing is sent.
-    const sent = auto.chatRequests.length;
-    await auto.tick(6 * 60_000);
-    expect(auto.chatRequests.length).toBe(sent);
-
-    // Off: what is new stays here.
-    await auto.call("cloud-send:auto", "local", false);
-    await talk(wren, "This one stays on this computer.");
-    await auto.tick(10 * 60_000);
-    expect(auto.chatRequests.length).toBe(sent);
-    expect(await ids(onCloud, wren.threadId)).toEqual(there);
-  } finally { await auto.close(); }
-}, hostTimeout(180_000));
-
 it("My Cloud keeps an attachment a sent row names under its own name, once, and says which it lacks", async () => {
   const name = `${randomBytes(8).toString("hex")}.png`;
   const post = (body: Uint8Array) => fetch(`${fx.cloudBase}/api/cloud-send/chats/attachment/${name}`, { method: "POST", body,
@@ -311,7 +247,7 @@ async function history(side: CloudSendFixture["local"], threadId: string) {
 
 describe("a long conversation, sent in pages by the real send", () => {
   let heavy: CloudSendFixture;
-  beforeAll(async () => { heavy = await launchCloudSendFixture({ onePasswordToken: TOKEN, auto: true, toolCalls: 150 }); }, hostTimeout(60_000));
+  beforeAll(async () => { heavy = await launchCloudSendFixture({ onePasswordToken: TOKEN, toolCalls: 150 }); }, hostTimeout(60_000));
   afterAll(async () => { await heavy?.close(); });
   const turn = async (bot: { id: string; threadId: string }, text: string) => {
     const before = (await history(heavy.local, bot.threadId)).stored;
@@ -331,13 +267,12 @@ describe("a long conversation, sent in pages by the real send", () => {
     return here;
   };
 
-  it("a new bot's conversation of three pages and more arrives whole with the first send by itself", async () => {
+  it("a new bot's conversation of three pages and more arrives whole with the move", async () => {
     const archie = await newBot("Archie");
     for (let i = 0; i < 5; i++) await turn(archie, `Step ${i}: check the next server.`);
     expect((await history(heavy.local, archie.threadId)).stored).toBeGreaterThan(2 * 300);
-    await heavy.tick();
-    const first = (await heavy.call<CloudSendSnapshot>("cloud-send:state", "local")).last!;
-    expect([first.reason, first.result.failed]).toEqual(["first", []]);
+    const first = await heavy.move();
+    expect([first.reason, first.result.failed]).toEqual(["move", []]);
     expect(heavy.chatRequests.flat().filter((entry) => entry.threadId === archie.threadId).length).toBeGreaterThanOrEqual(3);
     await sameOnBoth(archie);
   }, hostTimeout(240_000));

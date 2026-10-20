@@ -131,9 +131,10 @@ const FAILURE_REASONS = 3;
 export function failedSummary(outcome) {
   const reasons = new Map();
   for (const entry of outcome.result.failed) {
-    const reason = reasons.get(entry.error) ?? { what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: false }, error: entry.error };
+    const reason = reasons.get(entry.error) ?? { what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, connections: 0, chats: false }, error: entry.error };
     const what = reason.what;
     if (entry.kind === "bot") what.bots.push(entry.label);
+    else if (entry.kind === "connection") what.connections++;
     else if (entry.kind === "skill") what.skills++;
     else if (entry.kind === "login") what.logins++;
     else if (entry.kind === "setting") what.settings++;
