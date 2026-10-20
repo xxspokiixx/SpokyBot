@@ -26,8 +26,10 @@ export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   const [notice, setNotice] = useCloudSendNotice(bridge);
   const [sending, setSending] = useState(false);
   const [unanswered, setUnanswered] = useState<string | null>(null);
+  // A desktop from before Close was kept never marks a result seen, so Close is remembered here too.
+  const [closedAt, setClosedAt] = useState<number | null>(null);
   if (!bridge || !notice) return null;
-  const last = notice.last;
+  const last = notice.last && notice.last.at === closedAt ? { ...notice.last, seen: true } : notice.last;
   const retry = () => {
     setSending(true);
     setUnanswered(null);
@@ -36,9 +38,11 @@ export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   };
   const close = () => {
     setUnanswered(null);
-    if (last) void bridge.dismiss(resultKey(last)).then(setNotice).catch(() => {});
+    if (!last) return;
+    setClosedAt(last.at);
+    void bridge.dismiss(resultKey(last)).then(setNotice).catch(() => {});
   };
-  const shown = stripLine(notice, sending, unanswered);
+  const shown = stripLine({ ...notice, last }, sending, unanswered);
   if (!shown) return null;
   return <div role="status" data-cloud-send-strip={shown.kind} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[12.5px] text-ink-secondary">
     {shown.kind === "sending" ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <CloudUpload size={14} aria-hidden="true" />}

@@ -74,7 +74,7 @@ test("a bot's fields reach My Cloud without Custom approval and without naming b
   assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], peers: ["juno"], modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
   assert.ok(!Object.values(BOT_PARTS).flat().includes("cwd"), "a working folder is this computer's");
   assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" } } } }).clouds,
-    { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, chats: {} } });
+    { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } }, chats: {} } });
   assert.equal(parseSendState(null).auto, true, "Keep My Cloud up to date is on unless the person turned it off");
 });
 
@@ -137,7 +137,8 @@ test("My Cloud's page is told names of bots and counts, with an opaque signature
   });
   const snapshot = await createCloudSend(sides.deps).compare();
   const notice = sendNotice(snapshot);
-  assert.deepEqual({ ...notice, signature: notice.signature.length }, { ready: true, auto: true, bots: ["ember"], updatedBots: [], skills: 0, logins: 1, onePassword: false, settings: 0, signature: 32, dismissed: false, running: false, last: null });
+  assert.deepEqual({ ...notice, signature: notice.signature.length }, { ready: true, auto: true, bots: ["ember"], updatedBots: [], skills: 0, logins: 1, onePassword: false, settings: 0, signature: 32, dismissed: false, running: false, last: null,
+    whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } } });
   assert.equal(sendNotice({ ...snapshot, auto: false }).auto, false, "with Keep My Cloud up to date off, My Cloud's welcome still offers its choice");
   assert.ok(!JSON.stringify(notice).includes("bank.example"));
   assert.deepEqual(loginsView(snapshot), { cloud: { reachable: true, logins: [{ site: "crm.example", username: "ops" }], onePassword: { connected: true, vaults: [] } } });
@@ -171,7 +172,8 @@ test("this computer's Settings asks for everything; My Cloud's page only for its
     assert.throws(() => handlers.get(channel)(cloudPage), /only available/, channel);
   }
   for (const channel of ["cloud-send:notice", "cloud-send:page-send", "cloud-send:dismiss"]) assert.throws(() => handlers.get(channel)(elsewhere), /only available/, channel);
-  assert.deepEqual(await handlers.get("cloud-send:notice")(cloudPage), { ready: false, auto: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null });
+  assert.deepEqual(await handlers.get("cloud-send:notice")(cloudPage), { ready: false, auto: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null,
+    whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } } });
   assert.deepEqual(await handlers.get("cloud-logins:state")({ page: "local" }), { cloud: null });
   await assert.rejects(handlers.get("cloud-logins:send")({ page: "local" }, { kind: "1password" }), /no My Cloud yet/);
 });
@@ -693,4 +695,26 @@ test("main's kick, on the account's changes, brings a new Cloud's first send for
   home = { origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) };
   main.kick();
   assert.deepEqual(waits, [20_000, 2 * 60_000, 1_000]);
+});
+
+test("My Cloud's page is told the latest whole send, which a later one-login send never replaces, and all that ever arrived", async () => {
+  const login = { key: itemKey.login("bank.example", "amit"), kind: "login", label: "bank.example", detail: "amit", id: "l1", parts: { saved: "1" } };
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" }), login] });
+  sides.deps.handoff = async () => ({ login: { site: "bank.example", username: "amit", password: "fake-pass", bots: [] } });
+  const store = stored();
+  const send = createCloudSend({ ...sides.deps, store });
+  await send.send({ keys: [login.key], force: [login.key], reason: "logins" });
+  assert.equal(sendNotice(send.snapshot()).whole, null, "one login is not a whole send");
+  await send.send({ reason: "first" });
+  await send.send({ keys: [login.key], force: [login.key], reason: "logins" });
+  const notice = sendNotice(send.snapshot());
+  assert.deepEqual([notice.last.reason, notice.whole.reason, notice.whole.sent.bots], ["logins", "first", 1]);
+  assert.deepEqual(notice.arrived, { bots: 1, updatedBots: 0, skills: 0, logins: 3, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } });
+  sides.deps.cloud.open = async () => { throw new Error("This app could not sign in to My Cloud. Try again."); };
+  await assert.rejects(send.send({ reason: "auto" }));
+  assert.equal(sendNotice(send.snapshot()).whole.error, "This app could not sign in to My Cloud. Try again.");
+  const kept = parseSendState(store.value).clouds[CLOUD];
+  assert.deepEqual([kept.whole.reason, kept.arrived.logins], ["auto", 3]);
+  assert.deepEqual(parseSendState({ clouds: { [CLOUD]: { whole: { at: "x" }, arrived: { bots: -2, logins: 1.5, chats: "lots" } } } }).clouds[CLOUD].arrived,
+    { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } });
 });

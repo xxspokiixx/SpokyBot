@@ -76,6 +76,18 @@ export function botPatch(bot, parts, cloudBots) {
   return body;
 }
 
+const outcomeOf = (value) => record(value) && Number.isSafeInteger(value.at) && record(value.result) ? value : null;
+const COUNTED = ["bots", "updatedBots", "skills", "logins", "settings"];
+/** What reached My Cloud from this computer, all sends together. */
+function countsOf(value) {
+  const chats = record(value?.chats) ? value.chats : {};
+  const whole = (count) => Number.isSafeInteger(count) && count > 0 ? count : 0;
+  return { ...Object.fromEntries(COUNTED.map((key) => [key, whole(value?.[key])])), onePassword: value?.onePassword === true,
+    chats: { conversations: whole(chats.conversations), messages: whole(chats.messages) } };
+}
+const addCounts = (total, sent) => countsOf({ ...Object.fromEntries(COUNTED.map((key) => [key, total[key] + sent[key]])), onePassword: total.onePassword || sent.onePassword,
+  chats: { conversations: total.chats.conversations + (sent.chats?.conversations ?? 0), messages: total.chats.messages + (sent.chats?.messages ?? 0) } });
+
 /** The state main keeps in its own folder: the switch, and per Cloud what was sent and what the person kept here. */
 export function parseSendState(value) {
   const clouds = {};
@@ -86,7 +98,9 @@ export function parseSendState(value) {
         sent: record(entry.sent) ? entry.sent : {},
         off: record(entry.off) ? Object.fromEntries(Object.entries(entry.off).filter(([, why]) => why === "you" || why === "removed")) : {},
         dismissed: typeof entry.dismissed === "string" ? entry.dismissed : "",
-        last: record(entry.last) && Number.isSafeInteger(entry.last.at) && record(entry.last.result) ? entry.last : null,
+        last: outcomeOf(entry.last),
+        whole: outcomeOf(entry.whole),
+        arrived: countsOf(entry.arrived),
         chats: record(entry.chats) ? Object.fromEntries(Object.entries(entry.chats).filter(([threadId, cursor]) => /^[\w-]{1,200}$/u.test(threadId)
           && (cursor === "removed" || (record(cursor) && Number.isSafeInteger(cursor.after) && typeof cursor.id === "string")))) : {},
       };
@@ -111,12 +125,19 @@ export function sendNotice(snapshot) {
     running: Boolean(snapshot.running),
     ...(snapshot.running ? { runningReason: snapshot.running.reason, ...(snapshot.running.progress ? { progress: snapshot.running.progress } : {}),
       ...(snapshot.running.phase ? { phase: snapshot.running.phase } : {}) } : {}),
-    last: snapshot.last ? { at: snapshot.last.at, reason: snapshot.last.reason, failed: snapshot.last.result.failed.length, sent: sentCounts(snapshot.last.result),
-      ...(snapshot.last.stopped ? { stopped: snapshot.last.stopped } : {}),
-      // Every failure is one trying again can't fix (1Password refused the token): no Try again.
-      final: !snapshot.last.error && snapshot.last.result.failed.length > 0 && snapshot.last.result.failed.every((entry) => entry.final === true),
-      seen: snapshot.dismissed === resultKey(snapshot.last), ...failedSummary(snapshot.last) } : null,
+    last: snapshot.last ? told(snapshot.last, snapshot.dismissed) : null,
+    whole: snapshot.whole ? told(snapshot.whole, snapshot.dismissed) : null,
+    arrived: countsOf(snapshot.arrived),
   };
+}
+
+/** A send's outcome as My Cloud's page is told it: counts and reasons only. */
+function told(outcome, dismissed) {
+  return { at: outcome.at, reason: outcome.reason, failed: outcome.result.failed.length, sent: sentCounts(outcome.result),
+    ...(outcome.stopped ? { stopped: outcome.stopped } : {}),
+    // Every failure is one trying again can't fix (1Password refused the token): no Try again.
+    final: !outcome.error && outcome.result.failed.length > 0 && outcome.result.failed.every((entry) => entry.final === true),
+    seen: dismissed === resultKey(outcome), ...failedSummary(outcome) };
 }
 
 /** What a send got across, in counts only: My Cloud's page names nothing of this computer's but its bots. */
@@ -157,7 +178,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
   function persist() { try { store.write(saved); } catch {} }
-  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, chats: {} });
+  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {} });
   /** Keep My Cloud up to date was turned off, or stopped: a send it started stops where it is. */
   const halted = (job) => BACKGROUND_REASONS.has(job.reason) && (!saved.auto || job.cancelled === true);
   const halt = (job) => { if (!halted(job)) return; job.halted = true; throw new CloudSendError("off", "Keep My Cloud up to date was turned off."); };
@@ -176,6 +197,8 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       signature: plan && pendingRows(plan).length ? createHash("sha256").update(differenceSignature(plan)).digest("hex").slice(0, 32) : "",
       dismissed: mine?.dismissed ?? "",
       last: mine?.last ?? null,
+      whole: mine?.whole ?? null,
+      arrived: mine?.arrived ?? countsOf(null),
       cloudVersion: view.theirs?.appVersion ?? null,
       localVersion: view.local?.appVersion ?? null,
     };
@@ -240,7 +263,9 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       try { return await sendTo(origin, job, { keys, force: Array.isArray(force) ? force.filter((key) => typeof key === "string") : [], reason }); }
       catch (error) {
         // Kept as this send's outcome, so the strip and Settings say why, instead of an earlier send's result.
-        entry(origin).last = { at: now(), reason, result: emptyResult(), error: sentence(error?.message) ?? "Nothing could be sent to My Cloud. Try again." };
+        const kept = entry(origin);
+        kept.last = { at: now(), reason, result: emptyResult(), error: sentence(error?.message) ?? "Nothing could be sent to My Cloud. Try again." };
+        if (!keys && CHAT_REASONS.has(reason)) kept.whole = kept.last;
         persist();
         throw error;
       }
@@ -265,7 +290,10 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     }
     if (withChats) chatsAt = now();
     const outcome = { at: now(), reason, result, ...(job.halted ? { stopped: "off" } : {}) };
-    entry(origin).last = outcome;
+    const kept = entry(origin);
+    kept.last = outcome;
+    if (withChats) kept.whole = outcome;
+    kept.arrived = addCounts(kept.arrived, sentCounts(result));
     persist();
     view = { cloud: "ready", plan: plan(origin, mine, latest), local: mine, theirs: latest };
     return outcome;

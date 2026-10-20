@@ -38,6 +38,10 @@ export interface CloudSendSnapshot {
   signature: string;
   dismissed: string;
   last: CloudSendOutcome | null;
+  /** The latest send of everything (first, auto, Send everything), which a later send of one login or item never replaces. */
+  whole: CloudSendOutcome | null;
+  /** What reached My Cloud from this computer, all sends together. */
+  arrived: CloudSendArrived;
   cloudVersion: string | null;
   localVersion: string | null;
 }
@@ -62,8 +66,14 @@ export interface CloudSendNotice {
   phase?: "chats";
   /** `sent`: counts only; `seen`: the person closed this result on the strip. */
   /** `final`: every failure is one trying again can't fix (1Password refused the token), so no Try again. */
-  last: ({ at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean; stopped?: "off" } & CloudSendFailure) | null;
+  last: CloudSendTold | null;
+  /** The latest send of everything, which a send of one login or item never replaces; absent from an older desktop. */
+  whole?: CloudSendTold | null;
+  /** What reached My Cloud from this computer, all sends together; absent from an older desktop. */
+  arrived?: CloudSendArrived;
 }
+export type CloudSendTold = { at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean; stopped?: "off" } & CloudSendFailure;
+export interface CloudSendArrived extends CloudSendCounts { chats: { conversations: number; messages: number } }
 export interface CloudSendCounts {
   bots: number; updatedBots: number; skills: number; logins: number; onePassword: boolean; settings: number;
   chats: { conversations: number; messages: number } | null;

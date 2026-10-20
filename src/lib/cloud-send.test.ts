@@ -5,8 +5,9 @@ import { setLocale } from "@/lib/i18n";
 import { detailRows, failedLine, resultLines, sendStateLine, sideLines, statusLine, stripLine } from "./cloud-send";
 
 const row = (key: string, kind: PlanRow["kind"], label: string, state: PlanRow["state"], extra: Partial<PlanRow> = {}): PlanRow => ({ key, kind, label, state, ...extra });
+const noneArrived = { bots: 0, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: { conversations: 0, messages: 0 } };
 const snapshot = (extra: Partial<CloudSendSnapshot> = {}): CloudSendSnapshot => ({
-  cloud: "ready", auto: true, running: null, pending: 0, signature: "", dismissed: "", last: null, cloudVersion: "0.1.117", localVersion: "0.1.117",
+  cloud: "ready", auto: true, running: null, pending: 0, signature: "", dismissed: "", last: null, whole: null, arrived: noneArrived, cloudVersion: "0.1.117", localVersion: "0.1.117",
   rows: [
     row("bot:ember", "bot", "Ember", "only-here", { id: "ember" }),
     row("skill:ember:notes", "skill", "notes", "only-here", { bot: "ember" }),

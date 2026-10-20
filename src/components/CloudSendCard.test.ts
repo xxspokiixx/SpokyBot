@@ -31,7 +31,8 @@ const tree = (component: () => ReactNode) => { f.index = 0; f.effects = []; retu
 const text = (node: Node): string => Children.toArray(node.props.children).map((child) => isValidElement(child) ? text(child as Node) : String(child)).join("");
 
 const snapshot: CloudSendSnapshot = {
-  cloud: "ready", auto: true, running: null, pending: 2, signature: "sig", dismissed: "", last: null, cloudVersion: "0.1.117", localVersion: "0.1.117",
+  cloud: "ready", auto: true, running: null, pending: 2, signature: "sig", dismissed: "", last: null, whole: null, cloudVersion: "0.1.117", localVersion: "0.1.117",
+  arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: { conversations: 0, messages: 0 } },
   rows: [
     { key: "bot:ember", kind: "bot", label: "Ember", id: "ember", state: "only-here" },
     { key: "bot:juno", kind: "bot", label: "Juno", id: "juno", state: "differs", differs: ["title"] },
@@ -192,3 +193,14 @@ it("a refusal trying again can't fix is said plainly with no Try again, in Setti
   expect(tree(strip()).filter((node) => node.type === "button" && text(node) === "Close")).toHaveLength(1);
 });
 
+
+it("Close on My Cloud's strip works with a desktop from before it was kept there", async () => {
+  const older = { ready: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false,
+    last: { at: 9, failed: 1, reasons: [{ what: { bots: [], skills: 0, logins: 1, onePassword: false, settings: 0, chats: false }, error: "My Cloud refused the login." }] } } as unknown as CloudSendNotice;
+  await onCloud(older);
+  vi.mocked(page.dismiss).mockResolvedValue(older);
+  expect(render(strip()).html).toContain("1 login couldn't be sent: My Cloud refused the login.");
+  tree(strip()).find((node) => node.type === "button" && text(node) === "Close")!.props.onClick!(); await flush();
+  expect(page.dismiss).toHaveBeenCalledWith("result:9");
+  expect(render(strip()).html).toBe("");
+});
