@@ -39,6 +39,11 @@ it("opening a conversation reads its notifications in the feed and tells every o
     await api("PATCH", `/api/bots/${other.botId}`, { name: "Sales desk" });
     await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.name === "Sales desk", 10_000);
     expect(stream.frames.filter((candidate) => candidate.kind === "notifications.read")).toHaveLength(1);
+
+    // switching to a conversation opens it too
+    await api("POST", `/api/bots/${other.botId}/tasks/${other.threadId}?messages=0`);
+    await stream.until((candidate) => candidate.kind === "notifications.read" && candidate.threadId === other.threadId, 10_000);
+    expect((await notifications()).every((entry) => entry.read)).toBe(true);
   } finally {
     stream.close();
     await fixture.close();

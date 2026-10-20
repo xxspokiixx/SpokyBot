@@ -13445,6 +13445,7 @@ ROUTES.push(createTaskRoutes({
   sharedWorkspaceFullAccessEnabled,
   supportsApprovalMode,
   threadBusy,
+  broadcast,
   publicBot,
   wireBot,
   wireTask,

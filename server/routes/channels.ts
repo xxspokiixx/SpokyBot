@@ -177,6 +177,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       const switched = store.switchGroupTask(group.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such channel task" });
+      readThreadNotifications(switched.threadId, broadcast);
       const switchedSettings = publicGroupState(switched);
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
       const responseGroup = requestedMessages === "0"
