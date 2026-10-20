@@ -591,6 +591,7 @@
   "cloudSignIn.limits": "AI planınızın limitleri, gece gündüz çalışan botlar için de geçerlidir. Yoğun kullanım için Anthropic'in Claude Max planı veya bir API anahtarı en iyi sonucu verir.",
   "cloudSignIn.claude": "Claude",
   "cloudSignIn.claudeHint": "Claude aboneliğinizi kullanın.",
+  "cloudSignIn.keyHint": "API anahtarınızla çalışır.",
   "cloudSignIn.codex": "ChatGPT",
   "cloudSignIn.codexHint": "ChatGPT planınızı Codex ile kullanın.",
   "cloudSignIn.grok": "Grok",

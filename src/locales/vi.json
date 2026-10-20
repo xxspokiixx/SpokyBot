@@ -591,6 +591,7 @@
   "cloudSignIn.limits": "Giới hạn trong gói AI của bạn áp dụng cho các bot chạy liên tục 24/7. Nếu có nhu cầu sử dụng nhiều, gói Claude Max của Anthropic hoặc khóa API sẽ là lựa chọn tối ưu nhất.",
   "cloudSignIn.claude": "Claude",
   "cloudSignIn.claudeHint": "Sử dụng gói đăng ký Claude của bạn.",
+  "cloudSignIn.keyHint": "Chạy bằng khóa API của bạn.",
   "cloudSignIn.codex": "ChatGPT",
   "cloudSignIn.codexHint": "Sử dụng gói ChatGPT của bạn với Codex.",
   "cloudSignIn.grok": "Grok",

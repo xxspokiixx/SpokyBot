@@ -6,7 +6,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DATA_DIR, ensureDirs, instanceConfigs, NATIVE_DIR } from "../config.ts";
+import { DATA_DIR, ensureDirs, instanceConfigs, NATIVE_DIR, type AppConfig } from "../config.ts";
 import { TurnAuthenticationRefusedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs } from "./claude-background.ts";
@@ -3955,5 +3955,61 @@ describe("ClaudeDriver snapshot auth (fake CLI)", () => {
     process.env.FAKE_CLAUDE_AUTH = "inherited-api-key";
     process.env.ANTHROPIC_API_KEY = "sk-should-not-leak";
     expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: false });
+  });
+});
+
+describe("ClaudeDriver billing (fake CLI)", () => {
+  const instances: ProviderInstance[] = [];
+  const KEY = { billing: "metered", method: "api-key" };
+  const LOGIN = { billing: "subscription", method: null };
+  const NO_KEY = { unavailable: "No Anthropic API key — open Settings → API keys." };
+
+  const billed = async (id: "claude" | "claudeApi", anthropic: AppConfig["anthropic"]) => {
+    const entry = instanceConfigs({ anthropic })[id]!;
+    const instance = await ClaudeDriver.create({
+      instanceId: id,
+      displayName: id,
+      enabled: true,
+      config: ClaudeDriver.decodeConfig({ ...(entry.config as object | undefined), cli: FAKE_CLI }),
+      environment: entry.environment as Record<string, string>,
+    });
+    instances.push(instance);
+    const snapshot = await instance.snapshot();
+    return snapshot.state === "available"
+      ? { billing: snapshot.billing, method: snapshot.account?.method ?? null }
+      : { unavailable: snapshot.reason };
+  };
+
+  beforeEach(() => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+  });
+
+  afterEach(async () => {
+    delete process.env.FAKE_CLAUDE_AUTH;
+    vi.unstubAllEnvs();
+    await Promise.all(instances.splice(0).map((instance) => instance.dispose()));
+  });
+
+  it.each([
+    { every: "on", anthropic: { key: "sk-ant-fixture", everyClaudeBot: true }, claude: KEY, claudeApi: KEY },
+    { every: "unset", anthropic: { key: "sk-ant-fixture" }, claude: KEY, claudeApi: KEY },
+    { every: "off", anthropic: { key: "sk-ant-fixture", everyClaudeBot: false }, claude: LOGIN, claudeApi: KEY },
+    { every: "on, no key", anthropic: { everyClaudeBot: true }, claude: LOGIN, claudeApi: NO_KEY },
+    { every: "unset, no key", anthropic: {}, claude: LOGIN, claudeApi: NO_KEY },
+    { every: "off, no key", anthropic: { everyClaudeBot: false }, claude: LOGIN, claudeApi: NO_KEY },
+  ])("bills each Claude bot on what its turns run on, signed in to claude.ai with every Claude bot $every", async ({ anthropic, claude, claudeApi }) => {
+    expect(await billed("claude", anthropic), "plain Claude").toEqual(claude);
+    expect(await billed("claudeApi", anthropic), "Claude (API key)").toEqual(claudeApi);
+  });
+
+  it("bills a CLI signed in on its own API key per token", async () => {
+    process.env.FAKE_CLAUDE_AUTH = "api-key";
+    expect(await billed("claude", {})).toEqual(KEY);
+  });
+
+  it("never bills on a key the server inherited, which turns strip", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-inherited");
+    expect(await billed("claude", {})).toEqual(LOGIN);
   });
 });

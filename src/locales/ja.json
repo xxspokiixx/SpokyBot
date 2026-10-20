@@ -850,6 +850,7 @@
   "cloudSignIn.limits": "24 時間働くボットには、お使いの AI プランの上限が適用されます。使用量が多い場合は、Anthropic の Claude Max プランか API キーが最適です。",
   "cloudSignIn.claude": "Claude",
   "cloudSignIn.claudeHint": "Claude のサブスクリプションを使います。",
+  "cloudSignIn.keyHint": "API キーで動作しています。",
   "cloudSignIn.codex": "ChatGPT",
   "cloudSignIn.codexHint": "ChatGPT のプランを Codex で使います。",
   "cloudSignIn.grok": "Grok",

@@ -966,6 +966,7 @@
   "cloudSignIn.limits": "Your AI plan's limits apply to bots that work around the clock. For heavy use, Anthropic's Claude Max plan or an API key works best.",
   "cloudSignIn.claude": "Claude",
   "cloudSignIn.claudeHint": "Use your Claude subscription.",
+  "cloudSignIn.keyHint": "Runs on your API key.",
   "cloudSignIn.codex": "ChatGPT",
   "cloudSignIn.codexHint": "Use your ChatGPT plan with Codex.",
   "cloudSignIn.grok": "Grok",

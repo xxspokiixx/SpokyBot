@@ -879,6 +879,7 @@
   "cloudSignIn.limits": "Os limites do seu plano de IA valem para bots que trabalham 24 horas por dia. Para uso intenso, o plano Claude Max da Anthropic ou uma chave de API funciona melhor.",
   "cloudSignIn.claude": "Claude",
   "cloudSignIn.claudeHint": "Use sua assinatura do Claude.",
+  "cloudSignIn.keyHint": "Funciona com a sua chave de API.",
   "cloudSignIn.codex": "ChatGPT",
   "cloudSignIn.codexHint": "Use seu plano do ChatGPT com o Codex.",
   "cloudSignIn.grok": "Grok",
