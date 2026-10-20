@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudMoveBridge, CloudMoveOverview, CloudMoveState } from "../../../electron/cloud-move.mjs";
 import { EMPTY_ONBOARDING } from "@/lib/onboarding";
 import { setLocale } from "@/lib/i18n";
+import { ADVANCED_MODE_KEY } from "@/lib/interface-mode";
 
 const fixture = vi.hoisted(() => ({
   state: {} as any,
@@ -197,7 +198,8 @@ describe("CloudWelcome", () => {
     expect(text()).not.toContain("Open the desktop app to bring your bots from your computer.");
   });
 
-  it("starting fresh opens the team library, and skipping keeps the copy's card from coming back", async () => {
+  it("in Advanced mode, starting fresh opens the team library, and skipping keeps the copy's card from coming back", async () => {
+    localStorage.setItem(ADVANCED_MODE_KEY, "1");
     render();
     await vi.waitFor(() => expect(text()).toContain("142 chats"));
     flushSync(() => (host.querySelector('[data-bring-choice="fresh"]') as HTMLButtonElement).click());
@@ -218,6 +220,19 @@ describe("CloudWelcome", () => {
     expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
   });
 
+  it("in Simple mode, starting fresh starts with the assistant: no team to choose, one Continue", async () => {
+    render();
+    await vi.waitFor(() => expect(text()).toContain("142 chats"));
+    flushSync(() => (host.querySelector('[data-bring-choice="fresh"]') as HTMLButtonElement).click());
+    expect(text()).toContain("Start with your assistant. It brings in specialists when a job needs them.");
+    expect(text()).not.toContain("ready-made team");
+    expect(button("Choose a team")).toBeUndefined();
+    click("Continue");
+    expect(host.querySelector("[data-team-library]")).toBeNull();
+    expect(bridge.dismiss).toHaveBeenCalledOnce();
+    expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED]);
+  });
+
   it("in a desktop app connected to another server as its client, offers no copy from here either", () => {
     window.ogb = { ...window.ogb!, remoteClient: { active: true } } as unknown as typeof window.ogb;
     fixture.state.bots = [fixture.state.bots[0]];
@@ -234,7 +249,8 @@ describe("CloudWelcome", () => {
     expect(text()).toContain("Welcome to My Cloud");
     expect(text()).toContain("Open the desktop app to bring your bots from your computer.");
     expect(host.querySelector('[role="radiogroup"]')).toBeNull();
-    expect(button("Choose a team")).toBeDefined();
+    expect(button("Choose a team")).toBeUndefined();
+    expect(button("Continue")).toBeDefined();
     expect([...host.querySelectorAll("button")].some((node) => node.textContent?.startsWith("Copy to"))).toBe(false);
   });
 

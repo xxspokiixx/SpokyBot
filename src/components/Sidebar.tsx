@@ -136,6 +136,7 @@ import { ShortcutHint } from "./ShortcutHint";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { addBot } from "@/lib/add-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
 import { ArchivedBotsPanel, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel";
@@ -1716,10 +1717,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             {t("sidebar.newChat.title")}
           </button>
           <button
-            onClick={() => {
-              setPlusOpen(false);
-              dispatch({ type: "toggleNewBot", open: true });
-            }}
+            onClick={() => { setPlusOpen(false); addBot(dispatch, state.bots, showThreads, advanced); }}
             className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
           >
             <BotIcon size={16} className="text-ink-secondary" />
@@ -1736,23 +1734,20 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             <Users size={16} className="text-ink-secondary" />
             {t("sidebar.newChannel.title")}
           </button>
-          {!remoteClient && <button
+          {advanced && !remoteClient && <button
             onClick={() => { setPlusOpen(false); setNewTeam(true); }}
             className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
           >
             <FolderPlus size={16} className="text-ink-secondary" /> {t("team.create")}
           </button>}
           {!remoteClient && <>
-          <button
-            onClick={() => {
-              setPlusOpen(false);
-              setTeamLibraryOpen(true);
-            }}
+          {advanced && <button
+            onClick={() => { setPlusOpen(false); setTeamLibraryOpen(true); }}
             className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
           >
             <Library size={16} className="text-ink-secondary" />
             {t("sidebar.teamLibrary")}
-          </button>
+          </button>}
           {archivedBots.length > 0 && (
             <button
               onClick={() => {
@@ -2274,7 +2269,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           anchor={sidebarRef.current}
           style={windowNoDragStyle}
           onClose={() => setNewChatOpen(false)}
-          onNewBot={() => { setNewChatOpen(false); dispatch({ type: "toggleNewBot", open: true }); }}
+          onNewBot={() => { setNewChatOpen(false); addBot(dispatch, state.bots, showThreads, advanced); }}
           onNewGroup={() => { setNewChatOpen(false); setNewRoom(true); }}
         />,
         document.body,

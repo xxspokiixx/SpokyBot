@@ -6,6 +6,7 @@ import { TeamLibraryPanel } from "@/components/TeamLibraryPanel";
 import { suggestedChoice, type BringChoice } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import type { LocaleKey } from "@/locales";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Chip, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
@@ -41,6 +42,7 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onF
   onFinish: (outcome: BringOutcome) => void;
 }) {
   const desktop = move !== null;
+  const advanced = useAdvancedMode();
   const overview = move?.overview ?? null;
   const [chosen, setChosen] = useState<BringChoice | null>(null);
   const [teams, setTeams] = useState(false);
@@ -88,7 +90,7 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onF
   const freshBody = <>
     <CardIcon icon={Sparkles} />
     <span className="text-[14.5px] font-semibold text-ink">{t("cloudWelcome.bring.fresh")}</span>
-    <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.freshHint")}</span>
+    <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t(advanced ? "cloudWelcome.bring.freshHint" : "cloudWelcome.bring.freshChief")}</span>
   </>;
 
   const moved = copied ? state.moved : undefined;
@@ -112,6 +114,8 @@ export function WelcomeBring({ name, move, cloudHasWork, headingRef, onTeam, onF
   let actions: ReactNode;
   if (here) {
     actions = <button type="button" className={PRIMARY} onClick={() => onFinish("here")}>{t("onboarding.continue")}</button>;
+  } else if (!copying && !advanced) {
+    actions = <button type="button" className={PRIMARY} onClick={() => onFinish("skipped")}>{t("onboarding.continue")}</button>;
   } else if (!copying) {
     actions = <>
       <button ref={teamButton} type="button" className={PRIMARY} onClick={() => setTeams(true)}>{t("cloudWelcome.bring.chooseTeam")}</button>
