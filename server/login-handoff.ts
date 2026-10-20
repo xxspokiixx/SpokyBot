@@ -4,6 +4,7 @@
 // Nothing here is an HTTP answer, a log line or a chat message, and nothing is kept.
 import type { LoginBots } from "../shared/logins.ts";
 import type { LoginStore } from "./login-store.ts";
+import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import type { TotpKey } from "./totp.ts";
 
 export const LOGIN_HANDOFF_REQUEST = "openmausbot:login-handoff";
@@ -46,11 +47,19 @@ function parse(raw: unknown): { requestId: string; what: LoginHandoffWhat } | nu
 }
 
 type HandoffStore = Pick<LoginStore, "get" | "onePasswordToken" | "onePasswordGrants">;
+/** This computer's own 1Password problem, from its last read of the vaults (OnePasswordLogins.status().error). */
+type OnePasswordProblem = () => string | undefined;
 
-export function answerLoginHandoff(store: HandoffStore, what: LoginHandoffWhat): LoginHandoffAnswer {
+export const ONE_PASSWORD_DEAD_HERE = "1Password did not accept this computer's token, so it was not sent to My Cloud. Connect 1Password again in Settings → Logins with a new service account token, then send again.";
+
+export function answerLoginHandoff(store: HandoffStore, what: LoginHandoffWhat, onePasswordProblem: OnePasswordProblem = () => undefined): LoginHandoffAnswer {
   if (what.kind === "1password") {
     const token = store.onePasswordToken();
-    return token ? { ok: true, onePassword: { token, grants: store.onePasswordGrants() } } : { ok: false, error: "1Password is not connected on this computer." };
+    if (!token) return { ok: false, error: "1Password is not connected on this computer." };
+    // 1Password itself refused this token here: My Cloud would only refuse it too, in words meant for its own page.
+    const problem = onePasswordProblem();
+    if (problem === ONE_PASSWORD_REFUSED || problem === ONE_PASSWORD_MALFORMED) return { ok: false, error: ONE_PASSWORD_DEAD_HERE };
+    return { ok: true, onePassword: { token, grants: store.onePasswordGrants() } };
   }
   const login = store.get(what.id);
   if (!login) return { ok: false, error: "This login is no longer saved on this computer." };
@@ -59,9 +68,9 @@ export function answerLoginHandoff(store: HandoffStore, what: LoginHandoffWhat):
 }
 
 /** True when the message was a handoff ask, answered or refused; anything else is left for the next handler. */
-export function receiveLoginHandoff(raw: unknown, store: HandoffStore, post: (message: LoginHandoffResult) => boolean): boolean {
+export function receiveLoginHandoff(raw: unknown, store: HandoffStore, post: (message: LoginHandoffResult) => boolean, onePasswordProblem?: OnePasswordProblem): boolean {
   if ((raw as { type?: unknown } | null)?.type !== LOGIN_HANDOFF_REQUEST) return false;
   const ask = parse(raw);
-  if (ask) post({ type: LOGIN_HANDOFF_RESULT, requestId: ask.requestId, ...answerLoginHandoff(store, ask.what) });
+  if (ask) post({ type: LOGIN_HANDOFF_RESULT, requestId: ask.requestId, ...answerLoginHandoff(store, ask.what, onePasswordProblem) });
   return true;
 }

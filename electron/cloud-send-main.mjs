@@ -1,4 +1,5 @@
 // Main's side of Send to My Cloud (cloud-send.mjs): its IPC, the Cloud sessions it uses, and where its state lives.
+// A send the person asks for brings the chats too, through Bring newer chats (cloud-move.mjs), which only adds.
 // This computer's Settings may ask for everything; My Cloud's own page, verified as the person's Cloud, learns only
 // what waits (sendNotice) and may start a send from the person's click. Settings → Logins' "Also use on My Cloud" is the
 // same send for one login.
@@ -75,11 +76,13 @@ export function loginsView(snapshot) {
  *   localOrigin: () => string,
  *   openSettings: () => void,
  *   fetch?: typeof fetch,
+ *   bringChats?: () => Promise<{ phase: string, action?: string, brought?: { conversations: number, messages: number }, error?: { message?: string } }>,
  *   keepUpToDate?: boolean,
  * }} deps `keepUpToDate`: false leaves the switch's background sends unstarted (fixtures that show a comparison).
+ * `bringChats`: Bring newer chats to My Cloud, as cloud-move.mjs's bring answers it.
  */
 export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin, openSettings,
-  fetch: fetchImpl = globalThis.fetch, keepUpToDate = true }) {
+  fetch: fetchImpl = globalThis.fetch, bringChats = null, keepUpToDate = true }) {
   const handoff = createLoginHandoffClient();
   const pageOf = () => {
     const win = window();
@@ -112,6 +115,11 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
       open: () => { const target = home(); return target ? openOwnerSession(target, fetchImpl) : Promise.reject(new Error("This computer has no My Cloud yet.")); },
     },
     handoff: (what) => handoff.request(server(), what),
+    chats: bringChats && (async () => {
+      const state = await bringChats();
+      if (state?.phase === "done" && state.action === "bring" && record(state.brought)) return { conversations: state.brought.conversations, messages: state.brought.messages };
+      throw new Error(sentence(state?.error?.message) ?? "Another copy to My Cloud is running. Send again when it has finished.");
+    }),
     store: {
       read: () => { try { return JSON.parse(readFileSync(file(), "utf8")); } catch { return null; } },
       write: (value) => { const target = file(); writeFileSync(`${target}.tmp`, JSON.stringify(value), { mode: 0o600 }); renameSync(`${target}.tmp`, target); },
@@ -135,8 +143,9 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
   ipcMain.handle("cloud-send:auto", localOnly("cloud-send:auto", (_event, on) => send.setAuto(on === true)));
   ipcMain.handle("cloud-send:item", localOnly("cloud-send:item", (_event, key, on) => send.setItem(String(key), on === true)));
   ipcMain.handle("cloud-send:notice", onPage("cloud-send:notice", async () => sendNotice(await fresh())));
+  // A send that fails as a whole is this send's outcome too: the notice carries why.
   ipcMain.handle("cloud-send:page-send", onPage("cloud-send:page-send", async (asking) => {
-    await send.send({ reason: asking === "cloud" ? "my-cloud" : "button" });
+    await send.send({ reason: asking === "cloud" ? "my-cloud" : "button" }).catch(() => {});
     return sendNotice(send.snapshot());
   }));
   ipcMain.handle("cloud-send:dismiss", onPage("cloud-send:dismiss", (_event, signature) => sendNotice(send.dismiss(String(signature)))));

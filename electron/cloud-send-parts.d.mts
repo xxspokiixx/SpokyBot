@@ -48,3 +48,4 @@ export declare function parseSendSummary(value: unknown): SendSummary | null;
 export declare function planSend(input: { local: SendSummary | null; cloud: SendSummary | null; sent?: SentRecord; off?: Record<string, OffReason>; force?: string[] }): SendPlan;
 export declare function pendingRows(plan: SendPlan): PlanRow[];
 export declare function differenceSignature(plan: SendPlan): string;
+export function failedSummary(outcome: import("./cloud-send.mjs").CloudSendOutcome): import("./cloud-send.mjs").CloudSendFailure;

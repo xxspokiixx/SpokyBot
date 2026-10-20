@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { LOGIN_HANDOFF_REQUEST, LOGIN_HANDOFF_RESULT, receiveLoginHandoff, totpAddress, type LoginHandoffResult } from "./login-handoff.ts";
+import { LOGIN_HANDOFF_REQUEST, LOGIN_HANDOFF_RESULT, ONE_PASSWORD_DEAD_HERE, receiveLoginHandoff, totpAddress, type LoginHandoffResult } from "./login-handoff.ts";
 import { LoginStore } from "./login-store.ts";
+import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import { parseTotpKey } from "./totp.ts";
 
 // Obvious fakes only.
@@ -13,12 +14,12 @@ const TOKEN = "ops_fake-handoff-token";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function setup() {
+function setup(onePasswordProblem?: () => string | undefined) {
   const dir = mkdtempSync(join(tmpdir(), "omb-login-handoff-"));
   dirs.push(dir);
   const store = new LoginStore({ dataDir: dir });
   const posted: LoginHandoffResult[] = [];
-  const ask = (message: unknown) => receiveLoginHandoff(message, store, (reply) => { posted.push(reply); return true; });
+  const ask = (message: unknown) => receiveLoginHandoff(message, store, (reply) => { posted.push(reply); return true; }, onePasswordProblem);
   return { store, posted, ask };
 }
 
@@ -45,6 +46,24 @@ describe("the private login handoff to the desktop's main process", () => {
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0003", ok: true, onePassword: { token: TOKEN, grants: { v1: ["pepper"] } } },
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0004", ok: false, error: "This login is no longer saved on this computer." },
     ]);
+  });
+
+  it("does not hand over a 1Password token that 1Password refused on this computer, and says how to fix it here", () => {
+    let problem: string | undefined = ONE_PASSWORD_REFUSED;
+    const { store, posted, ask } = setup(() => problem);
+    store.setOnePasswordToken(TOKEN);
+    ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0101", what: { kind: "1password" } });
+    problem = ONE_PASSWORD_MALFORMED;
+    ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0102", what: { kind: "1password" } });
+    // Not reaching 1Password says nothing about the token: My Cloud checks it for itself.
+    problem = "Could not reach 1Password. Check the internet connection and try again.";
+    ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0103", what: { kind: "1password" } });
+    expect(posted).toEqual([
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0101", ok: false, error: ONE_PASSWORD_DEAD_HERE },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0102", ok: false, error: ONE_PASSWORD_DEAD_HERE },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0103", ok: true, onePassword: { token: TOKEN, grants: {} } },
+    ]);
+    expect(JSON.stringify(posted.slice(0, 2))).not.toContain(TOKEN);
   });
 
   it("answers nothing to a malformed ask, and leaves every other private message to its own handler", () => {

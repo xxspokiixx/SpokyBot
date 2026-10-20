@@ -3,7 +3,7 @@ import { ChevronRight, Cloud, Laptop, Loader2, RefreshCw } from "lucide-react";
 import type { PlanRow, RowState } from "../../electron/cloud-send-parts.mjs";
 import type { CloudSendBridge, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
 import type { LocaleKey } from "@/locales";
-import { detailRows, resultLines, rowName, sideLines, statusLine, type SideKind } from "@/lib/cloud-send";
+import { detailRows, ipcErrorText, resultLines, rowName, sideLines, statusLine, type SideKind } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { Card, Switch } from "./SettingsPrimitives";
@@ -16,8 +16,7 @@ const ROW_STATE: Record<RowState, LocaleKey> = {
   differs: "cloudSend.row.differs", removed: "cloudSend.row.removed", off: "cloudSend.row.off",
 };
 
-const cleanError = (cause: unknown) => cause instanceof Error && cause.message
-  ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/u, "") : t("cloudSend.status.unreachable");
+const cleanError = (cause: unknown) => ipcErrorText(cause) ?? t("cloudSend.status.unreachable");
 
 /** This computer's side of Send to My Cloud: main's snapshot, a fresh comparison on open, and the actions. */
 export function useCloudSend(bridge: CloudSendBridge | undefined) {
@@ -100,7 +99,8 @@ export function CloudSendCard() {
   const ready = snapshot.cloud === "ready";
   const running = Boolean(snapshot.running);
   const status = statusLine(snapshot, send.comparing);
-  const last = send.outcome ?? snapshot.last;
+  // The newer of this page's own send and main's record: a send that failed as a whole is only in main's.
+  const last = send.outcome && (!snapshot.last || send.outcome.at >= snapshot.last.at) ? send.outcome : snapshot.last;
   const shown = last ? resultLines(last) : null;
   const progress = snapshot.running?.progress;
   const rows = detailRows(snapshot.rows);
@@ -115,10 +115,10 @@ export function CloudSendCard() {
       <div className="flex flex-col items-start gap-2">
         <button type="button" data-cloud-send-all className="ui-button ui-button-primary inline-flex items-center gap-2" disabled={!ready || running} onClick={() => void send.sendAll()}>
           {running && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
-          {running ? t("cloudSend.sending") : t("cloudSend.send")}
-          {running && progress && <span className="tabular-nums opacity-80">{t("cloudSend.progress", progress)}</span>}
+          {running ? t(snapshot.running?.phase === "chats" ? "cloudSend.sendingChats" : "cloudSend.sending") : t("cloudSend.send")}
+          {running && progress && snapshot.running?.phase !== "chats" && <span className="tabular-nums opacity-80">{t("cloudSend.progress", progress)}</span>}
         </button>
-        {send.error && <p role="alert" className="text-[13px] text-danger">{send.error}</p>}
+        {send.error && send.error !== last?.error && <p role="alert" className="text-[13px] text-danger">{send.error}</p>}
         {shown && !running && <div data-cloud-send-result className="flex flex-col gap-1">
           <p role={shown.failed ? "alert" : "status"} className={shown.failed ? "text-[13px] text-danger" : "text-[13px] text-ink"}>{shown.text}</p>
           {shown.notes.map((note) => <p key={note} className="text-[12px] text-ink-secondary">{note}</p>)}
