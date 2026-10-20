@@ -338,6 +338,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/webhooks$/ },
   // app-event automations: the list carries no credential; creating or changing one is the owner's
   { methods: ["GET"], path: /^\/api\/app-triggers$/ },
+  // counts and lines from the threads this viewer can see; engine and app fixes only for an admin
+  { methods: ["GET"], path: /^\/api\/today$/ },
   // configured-or-not booleans; the handler strips the few identifying fields for clients
   { methods: ["GET"], path: /^\/api\/config$/ },
 ];

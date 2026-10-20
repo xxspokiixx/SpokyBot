@@ -9,9 +9,9 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useRef: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current: initial }; return f.values[index]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-import { CloudLending, lendingStatusKey, lendingStoppedLine } from "./CloudLending";
+import { CloudLending, lendingStatusKey, lendingStoppedLine, lentWhat } from "./CloudLending";
 
-type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean }>;
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean; "data-lending-more"?: boolean }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 let bridge: CloudLendingBridge;
 function render() { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudLending({ bridge }); return tree; }
@@ -38,7 +38,7 @@ it("says where lending stands in one line", () => {
   expect(lendingStatusKey({ ...lent, state: { ...lent.state!, busy: true } }, true)).toBe("lending.status.busy");
   expect(lendingStatusKey({ ...lent, state: { ...lent.state!, connected: false, problem: "connect-first" } }, true)).toBe("lending.status.connectFirst");
   expect(lendingStatusKey({ ...lent, state: { ...lent.state!, connected: false } }, true)).toBe("lending.status.starting");
-  expect(lendingStatusKey(off, true)).toBe("lending.status.chooseSomething");
+  expect(lendingStatusKey(off, true)).toBe("lending.status.starting");
   expect(lendingStatusKey(off, false)).toBeNull();
   expect(lendingStatusKey({ ...off, state: { ...off.state!, problem: "signed-out" } }, false)).toBe("lending.status.signedOut");
 });
@@ -48,25 +48,37 @@ it("shows nothing until the person is signed in to a known Cloud", async () => {
   expect(render().html).toBe("");
 });
 
-it("is a switch, off by default; turning it on shows the choices and lends nothing until one is chosen", async () => {
+const more = () => render().nodes.find(node => node.props["data-lending-more"])!.props.onClick!();
+
+it("is one switch, off by default; turning it on lends at once (main picks the usual folders when none were chosen) and says what is lent", async () => {
   await ready(off);
   let view = render();
   expect(view.html).toContain("Let My Cloud use this computer");
   expect(view.html).not.toContain("Apps and screen");
   toggle().props.onClick!();
   await flush();
+  expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [], screen: false });
+  const usual = ["Desktop", "Documents", "Downloads"].map((name, i) => ({ ...folder, id: `${i}1111111-1111-4111-8111-111111111111`, name, path: `/Users/me/${name}` }));
+  await ready({ ...lent, state: { ...lent.state!, folders: usual } });
   view = render();
-  expect(view.html).toContain("Choose what My Cloud can use.");
+  expect(view.html).toContain("My Cloud can use Desktop, Documents, and Downloads (read only) on this computer.");
+  // The choices wait behind Choose what's lent.
+  expect(view.html).not.toContain("Add folder");
+  more();
+  view = render();
+  expect(view.html).toContain("Add folder");
   expect(view.html).toContain("If someone else writes in a conversation, it can no longer use your computer.");
-  expect(view.html).toContain("Apps and screen");
-  expect(bridge.save).not.toHaveBeenCalled();
-  view.nodes.find(node => node.type === "button" && Children.toArray(node.props.children).includes("Add folder"))!.props.onClick!();
-  await flush();
-  expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder], screen: false });
+});
+
+it("names what is lent in one phrase", () => {
+  expect(lentWhat([{ name: "Plans", write: false }], false)).toBe("Plans (read only)");
+  expect(lentWhat([{ name: "Plans", write: true }, { name: "Notes", write: false }], true)).toBe("Plans (can edit), Notes, and apps and screen");
+  expect(lentWhat([], true)).toBe("apps and screen");
 });
 
 it("while lent, says so, shows this computer's activity, and removing the last choice stops lending instead of saving nothing", async () => {
   await ready({ ...lent, state: { ...lent.state!, busy: true }, activity: [{ at: 1_790_000_000_000, server: "My Cloud", origin: "https://c.test", action: "read_file", detail: "Plans/todo.md", ok: true }] });
+  more();
   const view = render();
   expect(view.html).toContain("My Cloud is using this computer now.");
   expect(view.html).toContain("Plans/todo.md");
@@ -86,6 +98,7 @@ it("turning the switch off stops lending at once", async () => {
 
 it("apps and screen cannot be chosen until this app's computer control is ready", async () => {
   await ready({ ...lent, screenAvailable: false });
+  more();
   const view = render();
   const checkbox = view.nodes.find(node => node.type === "input" && node.props.checked === false && node.props.disabled === true);
   expect(checkbox).toBeTruthy();
@@ -93,7 +106,7 @@ it("apps and screen cannot be chosen until this app's computer control is ready"
 });
 
 // A customer saw the switch off while his computer still showed apps and screen lent, with no reason given.
-it("an off switch says why and since when, keeps the choices, and lends the same again in one click", async () => {
+it("an off switch says why and since when, keeps the choices, and the switch lends the same again", async () => {
   const at = new Date(2026, 9, 7, 14, 2).getTime();
   const stopped: CloudLendingSnapshot = { available: true, screenAvailable: true, activity: [],
     state: { enabled: false, folders: [folder], screen: true, busy: false, stopped: { reason: "signed-out", at } } };
@@ -105,7 +118,8 @@ it("an off switch says why and since when, keeps the choices, and lends the same
   const view = render();
   expect(view.html).toContain('data-lending-stopped="signed-out"');
   expect(view.html).not.toContain("Apps and screen<");
-  view.nodes.find(node => node.type === "button" && Children.toArray(node.props.children).join("") === "Lend the same again")!.props.onClick!();
+  expect(view.html).not.toContain("Lend the same again");
+  toggle().props.onClick!();
   await flush();
   expect(vi.mocked(bridge.save).mock.calls).toEqual([[{ folders: [folder], screen: true }]]);
 });

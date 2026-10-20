@@ -1803,7 +1803,7 @@ describe("Store change stream", () => {
     const titled = store.titleGroupTaskFromFirstMessage(group.id, "Audit the payroll", task.threadId);
     expect(titled?.threadId).toBe(task.threadId);
     expect(titled?.title).toBe("Audit the payroll");
-    store.renameGroupTask(group.id, task.threadId, "Payroll audit");
+    store.patchGroupTask(group.id, task.threadId, { title: "Payroll audit" });
     expect(store.retitleGroupTask(group.id, task.threadId, "Audit the payroll", "Payroll checks")).toBeNull();
     expect(store.activeGroupTask(group.id)!.title).toBe("Payroll audit");
     const fresh = store.createGroupTask(group.id)!.threadId;

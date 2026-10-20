@@ -262,11 +262,18 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
 
 export function InitialsAvatar({
   initials,
+  avatarUrl,
   size = 32,
 }: {
   initials: string;
+  avatarUrl?: string;
   size?: number;
 }) {
+  // A picture that is gone (a restored backup carries the address, not the file) falls back to the initials.
+  const [failed, setFailed] = useState<string | null>(null);
+  if (avatarUrl && failed !== avatarUrl) {
+    return <img src={avatarUrl} alt="" onError={() => setFailed(avatarUrl)} className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />;
+  }
   return (
     <div
       className="flex shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary font-medium"

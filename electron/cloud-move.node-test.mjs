@@ -885,7 +885,14 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
   assert.deepEqual(local.invoked, [["cloud-lending:open"]]);
   const page = preload({ remote: true });
   assert.ok(page.bridge.cloudLending);
-  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open"]);
+  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open", "state", "set"]);
+  // My Cloud's page turns lending on only from the person's own click (main then asks in a native dialog); off any time.
+  await assert.rejects(page.bridge.cloudLending.set(true), /Turn on the switch/);
+  await page.bridge.cloudLending.set(false);
+  assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-lending")), [["cloud-lending:set", false]]);
+  const clicked = preload({ remote: true, activation: true });
+  await clicked.bridge.cloudLending.set(true);
+  assert.deepEqual(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-lending")), [["cloud-lending:set", true]]);
   const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf(IPC_START), end = source.indexOf(IPC_END, start);
   const handlers = new Map(), opened = [];
