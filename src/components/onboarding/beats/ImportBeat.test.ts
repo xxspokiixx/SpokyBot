@@ -81,7 +81,7 @@ describe("the import step", () => {
     expect(html).toContain("Bring them in");
     expect(html).toContain("Skip");
     expect(html).toContain("2 from Claude Code and Codex");
-    expect(html).toContain("1 tool from Cursor");
+    expect(html).toContain("1 MCP server from Cursor");
     expect(html).toContain("Added switched off.");
     expect(html.match(/type="checkbox"/g)).toHaveLength(2);
     expect(html).not.toMatch(/About me|CLAUDE\.md|AGENTS\.md|pdf|notion/);

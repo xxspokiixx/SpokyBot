@@ -79,10 +79,10 @@ describe("looking for another AI tool's setup without holding up the welcome flo
 describe("what the step says", () => {
   it("counts each kind and names where it came from", () => {
     expect(skillsSummary(FOUND)).toBe("2 from Claude Code and Codex");
-    expect(toolsSummary(FOUND)).toBe("1 tool from Cursor");
+    expect(toolsSummary(FOUND)).toBe("1 MCP server from Cursor");
     expect(toolsSummary({ ...FOUND, tools: [
       { name: "a", source: "claudeCode" }, { name: "b", source: "claudeCode" }, { name: "c", source: "claudeDesktop" }, { name: "d", source: "gemini" },
-    ] })).toBe("4 tools from Claude Code, Claude Desktop, and Gemini CLI");
+    ] })).toBe("4 MCP servers from Claude Code, Claude Desktop, and Gemini CLI");
   });
 
   it("sums up in one line, with a note only for what was left out", () => {
@@ -104,12 +104,12 @@ describe("what the step says", () => {
       notes: [
         "deploy: switched off until you check what the scan found, in a bot's Skills settings.",
         "Skipped review: a different skill with that name is already here.",
-        "Skipped github: a different tool with that name is already here.",
+        "Skipped github: a different MCP server with that name is already here.",
         "Couldn't bring in lint and sentry. Try again later from Settings → Replay welcome tour.",
         "Large or non-text files in skill folders were left out.",
-        "e and f didn't fit: your list of tools is full.",
+        "e and f didn't fit: your list of MCP servers is full.",
         "Your organization doesn't allow g.",
-        "Your tools were being changed. Add h later in Apps.",
+        "Your MCP servers were being changed. Add h later in Apps → MCP servers.",
       ],
     });
   });
