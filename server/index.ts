@@ -6777,7 +6777,7 @@ async function localVmInventoryPayload() {
     noteLocalVmSeen(target, status);
     const inUse = localVmActiveThreads.has(target.key) ||
       localVmLeaseFor(target).current(localVmOwnerBusy) !== null;
-    const entry = localVmInventoryEntry(bot, status, inUse);
+    const entry = localVmInventoryEntry(bot, localVmUpdates.describe(target, status), inUse);
     return entry ? [entry] : [];
   });
   return { instances, maxInstances: localVmMaxInstances(cfg), available: true, problem: null };
