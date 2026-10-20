@@ -49,6 +49,16 @@ describe("this computer's chats, by row", () => {
     expect(Buffer.byteLength(JSON.stringify(wideRows.slice(1)), "utf8")).toBeLessThanOrEqual(CHAT_PAGE_BYTES);
   });
 
+  it("counts a page's size in UTF-8 bytes, as My Cloud's body limit does", () => {
+    const store = fresh();
+    const bot = store.createBot({ name: "Ava" }, { seedMessages: false });
+    // About 0.9 MB each in UTF-8, a third of that in characters: two fit in a page by bytes, six would by characters.
+    const lines = Array.from({ length: 6 }, (_, i) => say(store, bot.threadId, "語".repeat(300_000) + i, 10 + i));
+    const page = threadRowsAfter(bot.threadId, 0, null, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
+    expect(page.rows.map((row) => row.id)).toEqual(lines.slice(0, 2).map((row) => row.id));
+    expect(page.more).toBe(true);
+  });
+
   it("starts a conversation over when the row it stopped at is gone, since that row's number can be given out again", () => {
     const store = fresh();
     const bot = store.createBot({ name: "Ava" }, { seedMessages: false });
