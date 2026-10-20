@@ -35,7 +35,25 @@ describe("textOnlyErrorResult", () => {
       ],
     });
     expect(result.content).toEqual([{ type: "text", text: omittedFromErrorNote(3) }]);
-    expect(omittedFromErrorNote(3)).toMatch(/^\[3 images or other non-text items came with this error and were left out/);
+    expect(omittedFromErrorNote(3)).toMatch(/^\[The 3 screenshots or other attachments this error mentions were removed: /);
+  });
+
+  it("tells the model plainly that the screenshot is gone and what to do before any pixel action", () => {
+    expect(omittedFromErrorNote(1)).toBe("[The screenshot this error mentions was removed: an error result can carry only text. " +
+      "Call get_window_state for that window and take x,y from its new screenshot before any pixel action.]");
+  });
+
+  it("rewrites run_steps' promise of a screenshot it no longer carries, and only when one was removed", () => {
+    // Verbatim shape of cua-driver 0.37.0's run_steps recovery read (batch_tools.rs Recovery::after).
+    const promise = "run_steps: step 1 of 1 failed; 0 step(s) ran before it, 0 not run\n1. click ERROR (action): No screenshot of window 29360131 " +
+      "in this session: it has not been read yet.\nrecovery read: window 29360131 had no screenshot; one follows, take x,y from it";
+    const stripped = textOnlyErrorResult({ isError: true, content: [{ type: "text", text: promise }, { type: "image", data: PNG, mimeType: "image/png" }] });
+    const texts = stripped.content.map((item: { text?: string }) => item.text ?? "");
+    expect(texts.join("\n")).not.toContain("one follows, take x,y from it");
+    expect(texts[0]).toContain("recovery read: window 29360131 had no screenshot; that screenshot was removed from this error");
+    expect(texts.at(-1)).toBe(omittedFromErrorNote(1));
+    const textOnly = { isError: true, content: [{ type: "text", text: promise }] };
+    expect(textOnlyErrorResult(textOnly)).toBe(textOnly);
   });
 
   it("returns successes, text-only errors and malformed values as the same object", () => {
