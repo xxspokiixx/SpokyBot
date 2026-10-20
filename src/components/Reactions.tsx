@@ -3,7 +3,7 @@ import { SmilePlus } from "lucide-react";
 import { REACTIONS, type Reaction } from "../../shared/reactions";
 import { ACTION_ICON, messageActionClass } from "@/components/MessageActions";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
-import { useReactor } from "@/lib/cloud-guest";
+import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -20,22 +20,33 @@ const LABEL: Record<Reaction, LocaleKey> = {
 
 const labelOf = (emoji: string) => (Object.hasOwn(LABEL, emoji) ? t(LABEL[emoji as Reaction]) : emoji);
 
+type Entry = NonNullable<Message["reactions"]>[number];
+const sameEntry = (a: Entry | null | undefined, b: Entry | null | undefined) => a?.emoji === b?.emoji && a?.at === b?.at;
+
+function withOwn(message: Message, by: string, entry: Entry | null | undefined): Message {
+  const reactions = [...(message.reactions ?? []).filter((reaction) => reaction.by !== by), ...(entry ? [entry] : [])];
+  return { ...message, reactions: reactions.length ? reactions : undefined };
+}
+
 function useReaction(threadId: string, message: Message) {
   const { dispatch } = useStore();
   const me = useReactor();
-  const mine = message.reactions?.find((reaction) => reaction.by === me)?.emoji ?? null;
+  const latest = useRef(message);
+  latest.current = message;
+  const own = message.reactions?.find((reaction) => reaction.by === me);
+  const mine = own?.emoji ?? null;
   const react = (emoji: Reaction) => {
     const on = mine !== emoji;
-    const others = (message.reactions ?? []).filter((reaction) => reaction.by !== me);
-    const reactions = on ? [...others, { emoji, by: me, at: Date.now() }] : others;
-    dispatch({ type: "messagePatched", threadId, message: { ...message, reactions: reactions.length ? reactions : undefined } });
+    const shown = on ? { emoji, by: me, at: Date.now() } : null;
+    dispatch({ type: "messagePatched", threadId, message: withOwn(message, me, shown) });
     api<{ message?: Message }>(`/api/threads/${threadId}/messages/${message.id}/reactions`, {
       method: "POST",
       body: JSON.stringify({ emoji, on }),
     })
       .then((body) => { if (body.message) dispatch({ type: "messagePatched", threadId, message: body.message }); })
       .catch((error: unknown) => {
-        dispatch({ type: "messagePatched", threadId, message });
+        const now = latest.current.reactions?.find((reaction) => reaction.by === me);
+        if (sameEntry(now, shown) || sameEntry(now, own)) dispatch({ type: "messagePatched", threadId, message: withOwn(latest.current, me, own) });
         dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
       });
   };
@@ -138,6 +149,8 @@ export function ReactAction({ threadId, message }: { threadId: string; message: 
     </div>
   );
 }
+
+export const useCanReact = (threadId: string) => useCanWriteIn(threadId) !== false;
 
 type ChipProps = { threadId: string; message: Message; bots?: readonly Bot[]; align?: "start" | "end"; canReact?: boolean };
 

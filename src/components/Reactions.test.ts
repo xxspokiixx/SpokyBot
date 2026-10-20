@@ -127,6 +127,29 @@ describe("the react button on a bot's message", () => {
     expect(patched().at(-1)).toEqual({ type: "messagePatched", threadId: "t1", message: ASKED });
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "error", message: "this workspace has reached its monthly spend limit" });
   });
+
+  it("takes back only its own tap when refused: a reaction that came in meanwhile stays, and a later tap of theirs too", async () => {
+    let refuse!: (error: Error) => void;
+    fixture.api.mockReturnValueOnce(new Promise((_resolve, reject) => { refuse = reject; }));
+    await render(createElement(ReactAction, { threadId: "t1", message: ASKED }));
+    await click(button());
+    await click(choices()[0]!);
+    const mine = patched()[0]!.message.reactions![0]!;
+    const bob = { emoji: "❤️", by: "p_bob", name: "Bob", at: 5 };
+    await render(createElement(ReactAction, { threadId: "t1", message: { ...ASKED, reactions: [mine, bob] } }));
+    await act(async () => refuse(new Error("engine unavailable")));
+    expect(patched().at(-1)?.message.reactions).toEqual([bob]);
+
+    fixture.api.mockReturnValueOnce(new Promise((_resolve, reject) => { refuse = reject; }));
+    await render(createElement(ReactAction, { threadId: "t1", message: ASKED }));
+    await click(button());
+    await click(choices()[0]!);
+    const later = { emoji: "👎", by: "user", at: Date.now() + 1_000 };
+    await render(createElement(ReactAction, { threadId: "t1", message: { ...ASKED, reactions: [later] } }));
+    const before = patched().length;
+    await act(async () => refuse(new Error("engine unavailable")));
+    expect(patched()).toHaveLength(before);
+  });
 });
 
 describe("reaction chips under a message", () => {

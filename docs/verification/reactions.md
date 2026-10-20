@@ -21,12 +21,12 @@ user line `{ text: "👍", reaction: "👍", replyToId }` that the bot's next tu
 answers ("Sent it to Sam."). The engine's prompt for that turn says the person
 reacted 👍 to its earlier message, that 👍 means yes, and quotes the message
 as untrusted data. A second 👍 with `on: true`, or taking the 👍 back and
-setting it again, delivers nothing: a person's 👍 on a message reaches the bot
-once. A ❤️ on the
-reply answers `delivery: "noted"`, starts no turn, and opens the next typed
-turn's prompt with `(User reacted ❤️ to your message “Sent it to Sam.”.)`. The
-system prompt tells the bot to ask a plain yes or no in one sentence instead
-of a widget.
+setting it again, delivers nothing: the bot already has that answer. A ❤️ on
+the reply answers `delivery: "noted"`, starts no turn, and opens the next typed
+turn's prompt with `(User reacted ❤️ to your message “Sent it to Sam.”.)`.
+Changing the question's 👍 to 👎 and back to 👍 starts a turn for each change,
+whose prompts read the 👎 as no and the 👍 as yes. The system prompt tells the
+bot to ask a plain yes or no in one sentence instead of a widget.
 
 Another test reacts 👍 to a new bot's greeting: the bot answers, and the
 conversation keeps its untitled name instead of being named "👍".

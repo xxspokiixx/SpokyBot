@@ -5,6 +5,7 @@ import { NO, YES } from "../shared/call-consent.ts";
 import { liveCardKind } from "../shared/live-approval.ts";
 import { reactionAnswer, type Reaction, type ReactionDelivery } from "../shared/reactions.ts";
 import type { OptionCardData } from "../shared/wire.ts";
+import { peerName } from "./peer-roster.ts";
 import { replyExcerpt, type ReplyTarget } from "./replies.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
@@ -26,9 +27,8 @@ export interface ReactionDeps {
   withdraw(threadId: string, owner: BotRecord, sendId: string): void;
 }
 
-export function reactionSendId(threadId: string, messageId: string, reaction: Pick<Entry, "by" | "emoji">): string {
-  const basis = JSON.stringify([threadId, messageId, reaction.by, reaction.emoji]);
-  return `reaction-${createHash("sha256").update(basis).digest("hex").slice(0, 32)}`;
+export function reactionSendPrefix(threadId: string, messageId: string, by: string): string {
+  return `reaction-${createHash("sha256").update(JSON.stringify([threadId, messageId, by])).digest("hex").slice(0, 32)}-`;
 }
 
 export function cardReply(card: OptionCardData, answer: "yes" | "no"): CardReply | null {
@@ -47,7 +47,9 @@ export function cardReply(card: OptionCardData, answer: "yes" | "no"): CardReply
   return label ? { behavior: "answer", message: formatQuestionAnswers(questions, [[label]]) } : null;
 }
 
-const reactorName = (reaction: Entry, userName: string) => reaction.by === "user" ? userName : reaction.name ?? "Someone";
+/** One line with no brackets or parentheses: a person's name cannot close the note or start a line of its own. */
+const reactorName = (reaction: Entry, userName: string) =>
+  peerName((reaction.by === "user" ? userName : reaction.name ?? "Someone").replace(/[()]/g, " "));
 const feelings = (message: Message) => (message.reactions ?? []).filter((reaction) => !reactionAnswer(reaction.emoji));
 
 /** `turnIds`: the lines this turn carries. */
@@ -76,7 +78,15 @@ export function createReactions(deps: ReactionDeps) {
     return message.from ? store.bot(message.from.botId) : null;
   }
 
-  async function deliver(auth: RequestAuth, threadId: string, target: Message, owner: BotRecord, entry: Entry): Promise<ReactionDelivery> {
+  function answersSent(threadId: string, messageId: string, by: string) {
+    const prefix = reactionSendPrefix(threadId, messageId, by);
+    const sent = store.messagesFor(threadId).filter((line) => line.sendId?.startsWith(prefix));
+    return { latest: sent.at(-1)?.reaction, sendId: (emoji: string) => `${prefix}${sent.length}${reactionAnswer(emoji) === "yes" ? "y" : "n"}` };
+  }
+
+  async function deliver(
+    auth: RequestAuth, threadId: string, target: Message, owner: BotRecord, entry: Entry, sent: ReturnType<typeof answersSent>,
+  ): Promise<ReactionDelivery> {
     const answer = reactionAnswer(entry.emoji);
     if (!answer) return "noted";
     if (liveCardKind(target.card)) {
@@ -86,10 +96,9 @@ export function createReactions(deps: ReactionDeps) {
       if (!result.ok) throw Object.assign(new Error(result.error), { status: result.status });
       return "answered";
     }
-    if ((target.kind !== "text" && target.kind !== "widget") || !target.text?.trim()) return "none";
+    if ((target.kind !== "text" && target.kind !== "widget") || !target.text?.trim() || sent.latest === entry.emoji) return "none";
     const receipt = await deps.reply({
-      auth, threadId, owner, target: { ...target, reactedWith: entry.emoji }, answer: entry.emoji,
-      sendId: reactionSendId(threadId, target.id, entry),
+      auth, threadId, owner, target: { ...target, reactedWith: entry.emoji }, answer: entry.emoji, sendId: sent.sendId(entry.emoji),
     });
     return receipt.queued ? "queued" : receipt.repeated ? "none" : "started";
   }
@@ -107,13 +116,21 @@ export function createReactions(deps: ReactionDeps) {
     if (next === (previous?.emoji ?? null)) return { message: target, delivery: "none" };
 
     const owner = recipient(target, threadId);
-    if (owner && previous && reactionAnswer(previous.emoji)) deps.withdraw(threadId, owner, reactionSendId(threadId, messageId, previous));
     const entry: Entry | null = next ? { emoji: next, by: reactor.by, ...(reactor.name ? { name: reactor.name } : {}), at: Date.now() } : null;
     const message = store.setReaction(threadId, messageId, reactor.by, entry) ?? target;
-    if (!entry || !owner) return { message, delivery: "none" };
+    if (!owner) return { message, delivery: "none" };
+    const sent = answersSent(threadId, messageId, reactor.by);
+    const withdrawPrevious = () => {
+      if (previous && reactionAnswer(previous.emoji)) deps.withdraw(threadId, owner, sent.sendId(previous.emoji));
+    };
+    if (!entry) {
+      withdrawPrevious();
+      return { message, delivery: "none" };
+    }
     const latest = () => store.messagesFor(threadId).find((candidate) => candidate.id === messageId) ?? message;
     try {
-      const delivery = await deliver(auth, threadId, message, owner, entry);
+      const delivery = await deliver(auth, threadId, message, owner, entry, sent);
+      withdrawPrevious();
       return { message: latest(), delivery };
     } catch (error) {
       const current = latest().reactions?.find((reaction) => reaction.by === reactor.by);

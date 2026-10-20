@@ -1083,16 +1083,16 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     },
     [bot.id, bot.threadId, dispatch],
   );
-  const lastUserMessage = useMemo(
-    () => [...messages].reverse().find((m) => m.role === "user" && m.kind === "text" && !peerLine(m)),
-    [messages],
-  );
-  const lastUserMessageHasAttachments = useMemo(() => {
-    if (!lastUserMessage?.text) return false;
-    const cited = splitTranscriptCitations(lastUserMessage.text);
+  const [lastUserMessage, lastTypedMessage] = useMemo(() => {
+    const said = messages.filter((m) => m.role === "user" && m.kind === "text" && !peerLine(m));
+    return [said.at(-1), said.findLast((m) => !m.reaction)];
+  }, [messages]);
+  const lastTypedMessageHasAttachments = useMemo(() => {
+    if (!lastTypedMessage?.text) return false;
+    const cited = splitTranscriptCitations(lastTypedMessage.text);
     const attached = splitTranscriptAttachments(cited.display);
     return cited.citations.length > 0 || attached.images.length > 0 || attached.files.length > 0;
-  }, [lastUserMessage]);
+  }, [lastTypedMessage]);
 
   const lastMessage = lastNonReceipt(messages);
   const toolInFlight = lastMessage?.kind === "activity" && lastMessage.tool?.ok === undefined;
@@ -1425,8 +1425,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         onClearReply={clearReply}
         onConsumeReply={consumeReply}
         onRestoreReply={restoreReply}
-        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")
-          ? () => setEditingId(lastUserMessage.id)
+        onEditLast={lastTypedMessage && !lastTypedMessageHasAttachments && !bot.busy && !lastTypedMessage.id.startsWith("optimistic-")
+          ? () => setEditingId(lastTypedMessage.id)
           : undefined}
       />
       )}

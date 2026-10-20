@@ -11,7 +11,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
   const scratch = mkdtempSync(join(tmpdir(), "omb-reactions-"));
   const promptLog = join(scratch, "prompts.jsonl");
   const fixture = await launchVerificationServer({
-    FAKE_CLAUDE_REPLIES: JSON.stringify(["I drafted the email to Sam. Shall I send it?", "Sent it to Sam.", "Glad it helped."]),
+    FAKE_CLAUDE_REPLIES: JSON.stringify(["I drafted the email to Sam. Shall I send it?", "Sent it to Sam.", "Glad it helped.", "Understood: I'll recall it.", "Then it stays sent."]),
     FAKE_CLAUDE_REPLY_STATE: join(scratch, "reply-state"),
     FAKE_CLAUDE_TOOL_CALLS: "[]",
     FAKE_CLAUDE_PROMPTS: promptLog,
@@ -51,7 +51,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     await settled("Sent it to Sam.");
     const afterYes = await transcript();
     const line = afterYes.find((message) => message.role === "user" && message.replyToId === asked.id);
-    expect(line).toMatchObject({ kind: "text", text: "👍", reaction: "👍", sendId: expect.stringMatching(/^reaction-[0-9a-f]{32}$/) });
+    expect(line).toMatchObject({ kind: "text", text: "👍", reaction: "👍", sendId: expect.stringMatching(/^reaction-[0-9a-f]{32}-0y$/) });
     const said = afterYes.filter((message) => message.kind === "text").map((message) => [message.role, message.text]);
     expect(said.slice(said.findIndex(([role]) => role === "user"))).toEqual([
       ["user", "Draft an email to Sam about Friday."],
@@ -61,7 +61,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     ]);
     expect(prompts()).toHaveLength(2);
     expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).systemPrompt).toContain(
-      "A plain yes or no, such as whether to go ahead, needs no widget: ask it in one short sentence and end your turn; the person answers with 👍 or 👎 on your message, and that comes back to you as their reply.");
+      "A plain yes or no, such as whether to go ahead, needs no widget: ask it in one short sentence and end your turn; the person answers in a word or with 👍 or 👎 on your message, and either comes back to you as their reply.");
     const reactionPrompt = prompts()[1]!;
     evidence.push({ reactionPrompt });
     expect(reactionPrompt).toContain("The current message is the person's reaction: they reacted 👍 to your earlier message instead of typing a reply.");
@@ -85,6 +85,15 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     evidence.push({ thanks });
     expect(thanks).toMatch(/\(\S+ reacted ❤️ to your message “Sent it to Sam\.”\.\)\n\nThanks!/);
     expect(thanks).not.toContain("reacted 👍");
+
+    expect(await react(asked.id, "👎", true)).toMatchObject({ delivery: "started", message: { reactions: [{ emoji: "👎", by: "user" }] } });
+    await settled("Understood: I'll recall it.");
+    expect(prompts()[3]).toContain("they reacted 👎 to your earlier message instead of typing a reply.\n👎 means no, not that.");
+    expect(await react(asked.id, "👍", true)).toMatchObject({ delivery: "started" });
+    await settled("Then it stays sent.");
+    expect(prompts()[4]).toContain("they reacted 👍 to your earlier message instead of typing a reply.\n👍 means yes, go ahead.");
+    expect((await transcript()).filter((message) => message.reaction).map((message) => [message.reaction, message.sendId.slice(-3)]))
+      .toEqual([["👍", "-0y"], ["👎", "-1n"], ["👍", "-2y"]]);
 
     const session = await api("GET", "/api/auth/session");
     expect(session).not.toHaveProperty("reactor");
