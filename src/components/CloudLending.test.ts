@@ -9,7 +9,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useRef: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current: initial }; return f.values[index]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-import { CloudLending, lendingStatusKey, lendingStoppedLine, lentWhat } from "./CloudLending";
+import { CloudLending, lendingFailureKey, lendingStatusKey, lendingStoppedLine, lentWhat } from "./CloudLending";
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean; "data-lending-more"?: boolean }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
@@ -135,4 +135,15 @@ it("says how it is lent when Computer access lent it, terminal included, and whe
   expect(html).toContain("My Cloud last used this computer 3 minutes ago.");
   await ready({ ...lent, activity: [] });
   expect(render().html).toContain("My Cloud hasn&#x27;t used this computer yet.");
+});
+
+it("names a refusal main explains in plain words, and keeps Try again for the rest", () => {
+  const ipc = (message: string) => new Error(`Error invoking remote method 'lending:save': Error: ${message}`);
+  expect(lendingFailureKey(ipc("lending-refused:home-or-root"))).toBe("lending.refused.homeOrRoot");
+  expect(lendingFailureKey(ipc("lending-refused:not-folder"))).toBe("lending.refused.notFolder");
+  expect(lendingFailureKey(ipc("lending-refused:too-many"))).toBe("lending.refused.tooMany");
+  expect(lendingFailureKey(ipc("lending-refused:nothing-to-lend"))).toBe("lending.refused.nothingToLend");
+  expect(lendingFailureKey(ipc("lending-refused:something-new"))).toBe("lending.failed");
+  expect(lendingFailureKey(ipc("socket hang up"))).toBe("lending.failed");
+  expect(lendingFailureKey("not an error")).toBe("lending.failed");
 });
