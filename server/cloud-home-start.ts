@@ -10,6 +10,7 @@ import {
   CLOUD_SECRETS_FD_ENV, cloudHomeConfiguration, cloudHomeHost, cloudHomeSecrets, prepareCloudHomeVolume,
   withoutCloudSecrets, withoutIgnoredCloudKeys, type CloudHomeConfig,
 } from "./cloud-home.ts";
+import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
 import { restartPolicy } from "./restart.ts";
 
 const SERVICE_USER = "maus";
@@ -149,15 +150,15 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   };
   const policy = restartPolicy();
   const runServer = () => {
-    watch(spawnWithSecrets(process.execPath, [join(here, "index.js")], server, secrets, ids), (code) => {
+    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [join(here, "index.js")], server, secrets, ids)), (code) => {
       if (!policy.again(code, stopping)) return false;
       runServer();
       return true;
     });
   };
   runServer();
-  watch(spawn(edgeBin, ["run", "--config", edgeConfig, "--adapter", "caddyfile"],
-    { env: edge, stdio: "inherit", ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) }));
+  watch(spawnWithOomScore(OOM_SCORE.edge, () => spawn(edgeBin, ["run", "--config", edgeConfig, "--adapter", "caddyfile"],
+    { env: edge, stdio: "inherit", ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) })));
   process.once("SIGTERM", () => stop(false));
   process.once("SIGINT", () => stop(false));
 }
