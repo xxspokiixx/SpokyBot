@@ -1265,8 +1265,10 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
+  // "Claude (API key)" always runs on the key; "every Claude bot" adds every other Claude instance, never takes it away
+  // from bots already set to Claude (API key), such as a starter bot made before any Claude sign-in.
   const anthropicHere = driver === "claudeAgent" && Boolean(cfg.anthropic?.key)
-    && (cfg.anthropic?.everyClaudeBot === false ? instanceId === CLAUDE_API_INSTANCE : instanceId !== CLAUDE_API_INSTANCE);
+    && (instanceId === CLAUDE_API_INSTANCE || cfg.anthropic?.everyClaudeBot !== false);
   if (anthropicHere) environment.set("ANTHROPIC_API_KEY", cfg.anthropic!.key!);
   if (anthropicHere && cfg.anthropic!.url) environment.set("ANTHROPIC_BASE_URL", cfg.anthropic!.url);
   if (driver === "openai-compat" && instanceId === OPENAI_API_INSTANCE) {

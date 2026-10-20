@@ -546,6 +546,7 @@
   "cloudSignIn.creditEnded": "My Cloud 上已無法再使用試用 Claude 額度。請在下方選擇你自己的 AI，讓機器人繼續工作。",
   "cloudSignIn.claude": "Claude",
   "cloudSignIn.claudeHint": "使用你的 Claude 訂閱。",
+  "cloudSignIn.keyHint": "使用你的 API 金鑰運作。",
   "cloudSignIn.codex": "ChatGPT",
   "cloudSignIn.codexHint": "透過 Codex 使用你的 ChatGPT 方案。",
   "cloudSignIn.grok": "Grok",
