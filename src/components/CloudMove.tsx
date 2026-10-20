@@ -243,7 +243,8 @@ function moveButton(view: MoveView, move: CloudMoveHandle, onStart?: () => void)
     onClick={() => { if (action.kind === "start") onStart?.(); move.run(action.kind); }}>{action.label}</button>;
 }
 
-export function CloudMoveSettings({ destination, onClose }: { destination: string; onClose?: () => void }) {
+/** `bring`: offer Bring newer chats; My Cloud gets its chats by itself (cloud-send.mjs), so not there. */
+export function CloudMoveSettings({ destination, onClose, bring: offerBring = true }: { destination: string; onClose?: () => void; bring?: boolean }) {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudMove;
   const move = useCloudMove(bridge, destination);
   if (!bridge) return null;
@@ -253,7 +254,7 @@ export function CloudMoveSettings({ destination, onClose }: { destination: strin
   const idle = !view.running && state.phase !== "done";
   const date = previous ? savedAt(previous.createdAt) : "";
   const ready = idle && !overview?.blocked;
-  const bring = ready && cloud && !cloud.empty && view.action?.kind !== "bring";
+  const bring = offerBring && ready && cloud && !cloud.empty && view.action?.kind !== "bring";
   return <Card title={t("cloudMove.title")} subtitle={t("cloudMove.intro", { server: view.server })}>
     <div data-cloud-move={state.phase} className="flex flex-col items-start gap-3">
       <p className="text-[13px] text-ink">{local

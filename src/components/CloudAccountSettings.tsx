@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import type { CloudAccountBridge, CloudAccountState, CloudPlanBridge, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudMachine, CloudTrial } from "../../electron/cloud-home.mjs";
 import { CloudMoveSettings } from "./CloudMove";
@@ -177,6 +178,8 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(false), [confirm, setConfirm] = useState(false);
   const [homeFailed, setHomeFailed] = useState(false), [phoneFailed, setPhoneFailed] = useState(false);
+  // Copy this computer's bots and chats over My Cloud's: rare, and it replaces everything there, so it waits behind a link.
+  const [startOver, setStartOver] = useState(false);
   const generation = useRef(0), revision = useRef(0), pending = useRef(false);
   const link = useRef({ request: 0, arrived: false, connected: false });
   useEffect(() => {
@@ -293,6 +296,10 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
     </Card>
     {machine && cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: connectHome, lending: bridge.lending, trial: Boolean(account?.trial), waking: account?.waking === true })}
     {signed && view.kind === "paid" && cloudPhoneCard({ ready: machine?.status === "ready", busy, failed: phoneFailed, onUse: openOnPhone })}
-    {machine?.status === "ready" && <CloudMoveSettings destination="cloud" />}
+    {machine?.status === "ready" && (startOver
+      ? <CloudMoveSettings destination="cloud" bring={false} onClose={() => setStartOver(false)} />
+      : <button type="button" data-cloud-start-over className="inline-flex w-fit items-center gap-1 text-[12.5px] text-ink-secondary hover:text-ink" onClick={() => setStartOver(true)}>
+        <ChevronRight size={13} aria-hidden="true" />{t("cloudMove.more")}
+      </button>)}
   </>;
 }

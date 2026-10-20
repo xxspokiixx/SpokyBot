@@ -13,7 +13,7 @@ vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capab
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [{ name: "Ember" }] }, dispatch: vi.fn() }) }));
 import { CloudAccountSettings, CloudPlanOnCloud, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
 import { LentComputersCard } from "./LentComputers";
-type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; "data-cloud-start-over"?: boolean }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 function render(props?: { linkRequest?: number; cloudHome?: boolean; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
   const html = renderToStaticMarkup(createElement(Capture)); return { html, nodes: nodes(tree) }; }
@@ -423,7 +423,8 @@ it("on the Cloud itself, opens this Cloud's phone pairing directly; never where 
 });
 
 it("once the Cloud is ready, offers Copy this computer here for the Cloud itself", async () => {
-  const move = { state: vi.fn().mockResolvedValue({ phase: "idle", local: null, cloud: null, suggest: false, destination: { id: "cloud", name: "My Cloud", origin, kind: "cloud" }, blocked: null }),
+  const move = { state: vi.fn().mockResolvedValue({ phase: "idle", local: null, suggest: false, destination: { id: "cloud", name: "My Cloud", origin, kind: "cloud" }, blocked: null,
+    cloud: { contents: { bots: 3, rooms: 0, chats: 9 }, empty: false, freeBytes: 10 ** 10, previous: null, heldBytes: 0 } }),
     start: vi.fn(), cancel: vi.fn(), restorePrevious: vi.fn(), dismiss: vi.fn(), onState: vi.fn(() => () => {}) };
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge, cloudMove: move } });
   vi.mocked(bridge.state).mockResolvedValue(readyCloud);
@@ -431,8 +432,15 @@ it("once the Cloud is ready, offers Copy this computer here for the Cloud itself
   render();
   for (const effect of f.effects) effect();
   await flush();
+  // Rare, and it replaces everything on My Cloud: behind a link, and no Bring newer chats, which happens by itself.
+  expect(render().html).not.toContain("Copy this computer&#x27;s bots and chats");
+  render().nodes.find(node => node.type === "button" && node.props["data-cloud-start-over"])!.props.onClick!();
+  render();
+  for (const effect of f.effects) effect();
+  await flush();
   expect(move.state.mock.calls).toContainEqual(["cloud"]);
   expect(render().html).toContain("Copy this computer&#x27;s bots and chats");
+  expect(render().html).not.toContain("Bring newer chats");
   // What lives where is said once, by This computer and My Cloud at the top of the page.
   expect(render().html).not.toContain("live on each side");
 });

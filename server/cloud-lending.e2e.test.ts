@@ -8,7 +8,8 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { createComputerSharing } from "../electron/computer-sharing.mjs";
+import { installCloudLending, usualFolders } from "../electron/cloud-lending-ipc.mjs";
+import { createComputerSharing, validateSharedFolders } from "../electron/computer-sharing.mjs";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { WATCHER_OPTIONS_CARD_BOT_ID } from "../shared/options-card.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
@@ -500,4 +501,37 @@ it("a computer lending while My Cloud restarts waits for it, never asks to open 
   expect(signIns).toBe(0);
   connector.revoke(env);
   rmSync(folderPath, { recursive: true, force: true });
+}, hostTimeout(60_000));
+
+// The person used to press Change what's lent on My Cloud's page and land back on This computer. The switch is on My
+// Cloud's page now, through main's own handlers, and turning it on with nothing chosen lends the usual folders, read only.
+it("My Cloud's own page turns this computer's lending on in place, with the usual folders read only, and off again", async () => {
+  const env = { id: "my-cloud", name: "My Cloud", origin: base };
+  connector?.close();
+  connector = lend(env);
+  const lending = connector;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-usual-folders-")));
+  const usual = ["Desktop", "Documents", "Downloads"].map((name) => { mkdirSync(join(root, name)); return join(root, name); });
+  const handlers = new Map<string, (...args: unknown[]) => Promise<any>>(), confirmed: string[][] = [];
+  installCloudLending({
+    ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => Promise<any>) => handlers.set(channel, handler) },
+    localOnly: (_channel: string, handler: unknown) => handler, cloudPage: (_channel: string, handler: unknown) => handler,
+    snapshot: async () => ({ available: true, screenAvailable: false, state: lending.cloudState(env) }),
+    environment: () => env, save: (target: typeof env, choice: { folders: unknown; screen: boolean }) => lending.saveCloud(target, choice as never), stop: () => lending.revoke(env),
+    chooseFolder: async () => null,
+    defaults: () => usualFolders([...usual, join(root, "Missing")], validateSharedFolders), validate: validateSharedFolders,
+    confirm: async (grant: { folders: Array<{ name: string }> }) => { confirmed.push(grant.folders.map((folder) => folder.name)); return true; },
+  });
+  expect((await handlers.get("cloud-lending:state")!({})).on).toBe(false);
+  await handlers.get("cloud-lending:set")!({}, true);
+  expect(confirmed).toEqual([["Desktop", "Documents", "Downloads"]]);
+  await expect.poll(() => lending.cloudState(env).connected, { timeout: 8000 }).toBe(true);
+  expect(await handlers.get("cloud-lending:state")!({})).toEqual({ available: true, on: true, status: "lent", screen: false,
+    folders: [{ name: "Desktop", write: false }, { name: "Documents", write: false }, { name: "Downloads", write: false }] });
+  await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.find((computer: { lent: boolean }) => computer.lent), { timeout: 5000 })
+    .toEqual(expect.objectContaining({ online: true, scopes: { folders: 3, terminal: false, screen: false } }));
+  await handlers.get("cloud-lending:set")!({}, false);
+  expect(lending.cloudState(env).enabled).toBe(false);
+  await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.every((computer: { lent: boolean }) => !computer.lent), { timeout: 5000 }).toBe(true);
+  rmSync(root, { recursive: true, force: true });
 }, hostTimeout(60_000));
