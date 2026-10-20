@@ -66,6 +66,9 @@ describe("the v1 view in the stream's words", () => {
     expect(liveControl({ held: true, owned: true, controlling: false }, 1).controller).toBe("agent");
     expect(liveControl({ held: true, owned: false }, 1).controller).toBe("another-viewer");
     expect(liveControl({ held: false }, 1).controller).toBe("unclaimed");
+    expect(liveControl({ held: true, owned: true, controlling: true, dialog: { type: "confirm", message: "Leave?", defaultValue: "" } }, 1).dialog)
+      .toEqual({ type: "confirm", message: "Leave?", defaultValue: "" });
+    expect(liveControl({ held: true, owned: true, dialog: { type: "confirm", message: 7 } }, 1).dialog).toBeNull();
   });
 
   it("reads a frame's size from its JPEG, and the page's from the metadata unless that describes the window", () => {
@@ -115,6 +118,56 @@ describe("the v1 live client", () => {
     expect(post.mock.calls.slice(1).map(([body]) => body.type)).toEqual(["input_mouse", "input_keyboard"]);
     await client.transport.release();
     expect(post).toHaveBeenLastCalledWith({ type: "release" }, "v1");
+  });
+
+  it("batches the input queued behind a request only for a server that said it takes batches", async () => {
+    for (const [ready, batched] of [[{ viewerId: "v1", inputBatch: 64 }, true], [{ viewerId: "v1" }, false]] as const) {
+      const { client, post, source } = open();
+      source.emit("ready", ready);
+      source.emit("control", { held: true, owned: true, controlling: true });
+      const first = deferred();
+      post.mockImplementationOnce(() => first.promise.then(() => ({ ok: true })));
+      for (const key of ["a", "b", "c"]) {
+        client.transport.send({ type: "key", action: "down", key, code: `Key${key.toUpperCase()}`, keyCode: 65, text: key, modifiers: 0 });
+        client.transport.send({ type: "key", action: "up", key, code: `Key${key.toUpperCase()}`, keyCode: 65, modifiers: 0 });
+      }
+      first.resolve();
+      await client.transport.settle();
+      expect(post.mock.calls.map(([body]) => body.type)).toEqual(batched ? ["input_keyboard", "input_batch"] : Array(6).fill("input_keyboard"));
+      client.stop();
+    }
+  });
+
+  it("shows the page's question as it opens and closes, and sends the answer past input the question holds", async () => {
+    const { client, post, handlers, source } = open();
+    source.emit("ready", { viewerId: "v1", inputBatch: 64 });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    const dialog = { type: "confirm", message: "Leave this page?", defaultValue: "" };
+    source.emit("control", { held: true, owned: true, controlling: true, dialog });
+    expect(handlers.onControl).toHaveBeenLastCalledWith(expect.objectContaining({ controller: "you", dialog }));
+    const held = deferred();
+    post.mockImplementationOnce(() => held.promise.then(() => ({ ok: true })));
+    client.transport.send({ type: "mouse", action: "up", x: 1, y: 2, button: "left", buttons: 0, clickCount: 1, modifiers: 0 });
+    client.transport.send({ type: "text", text: "after" });
+    expect(client.send({ type: "dialog", accept: true })).toBe(true);
+    expect(post).toHaveBeenLastCalledWith({ type: "dialog", accept: true }, "v1");
+    held.resolve();
+    await client.transport.settle();
+    source.emit("control", { held: true, owned: true, controlling: true });
+    expect(handlers.onControl).toHaveBeenLastCalledWith(expect.objectContaining({ controller: "you", dialog: null }));
+  });
+
+  it("shows a reply's notice for input the page did not take, and keeps sending", async () => {
+    const { client, post, handlers, source } = open();
+    source.emit("ready", { viewerId: "v1" });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    post.mockResolvedValueOnce({ ok: true, notice: "The page did not take some of your input." });
+    client.transport.send({ type: "text", text: "a" });
+    client.transport.send({ type: "text", text: "b" });
+    await client.transport.settle();
+    expect(handlers.onMessage).toHaveBeenCalledWith({ type: "notice", message: "The page did not take some of your input." });
+    expect(post.mock.calls.map(([body]) => body.text)).toEqual(["a", "b"]);
+    expect(client.transport.stopped()).toBe(false);
   });
 
   it("reconnects a dropped view a few times without replaying input, then stops", () => {
@@ -222,6 +275,18 @@ describe("a v1 live view whose stream dropped", () => {
     expect(FixtureEventSource.instances).toHaveLength(2);
     vi.advanceTimersByTime(1_000);
     expect(FixtureEventSource.instances).toHaveLength(2);
+    client.stop();
+  });
+
+  it("stops for good when its browser closed unused, without a notice, and does not start it again on focus", () => {
+    const { client, handlers } = open();
+    latest().emit("ready", { viewerId: "v1" });
+    latest().fail({ type: "error", retryable: false, asleep: true, message: "This browser closed after it sat unused, to save memory." });
+    vi.advanceTimersByTime(30_000);
+    page.dispatchEvent(new Event("focus"));
+    expect(FixtureEventSource.instances).toHaveLength(1);
+    expect(handlers.onMessage).toHaveBeenCalledExactlyOnceWith({ type: "asleep" });
+    expect(handlers.onGone).toHaveBeenCalledOnce();
     client.stop();
   });
 
@@ -370,6 +435,54 @@ describe("the v1 input queue", () => {
     expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown", "held"), key("keyUp", "held"), up, { type: "reload" }]);
     queue.clear(); queue.enqueue(key("keyDown", "after reconnect")); await queue.drain();
     expect(send).toHaveBeenLastCalledWith(key("keyDown", "after reconnect"));
+  });
+
+  it("sends every input queued behind a request in the next one where the server takes batches, and commands alone", async () => {
+    const first = deferred();
+    const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockResolvedValue();
+    send.mockImplementationOnce(() => first.promise);
+    const queue = createLiveInputQueue(send, vi.fn(), () => 64);
+    queue.enqueue(key("keyDown", "a"));
+    queue.enqueue(key("keyUp", "a")); queue.enqueue(key("keyDown", "b")); queue.enqueue(move(1)); queue.enqueue(move(2)); queue.enqueue(key("keyUp", "b"));
+    queue.enqueue({ type: "reload" });
+    queue.enqueue(key("keyDown", "c"));
+    first.resolve(); await queue.settle();
+    expect(send.mock.calls.map(([body]) => body)).toEqual([
+      key("keyDown", "a"),
+      { type: "input_batch", events: [key("keyUp", "a"), key("keyDown", "b"), move(2), key("keyUp", "b")] },
+      { type: "reload" },
+      key("keyDown", "c"),
+    ]);
+  });
+
+  it("keeps a batch to the limit the server gave and under the size it reads", async () => {
+    const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockResolvedValue();
+    for (const [limit, inputs] of [[3, Array.from({ length: 6 }, (_, n) => key("keyDown", String(n)))], [64, Array.from({ length: 10 }, () => ({ type: "input_keyboard", eventType: "char", text: "x".repeat(4_000) }))]] as const) {
+      send.mockClear();
+      const first = deferred();
+      send.mockImplementationOnce(() => first.promise);
+      const queue = createLiveInputQueue(send, vi.fn(), () => limit);
+      queue.enqueue(key("keyDown", "first"));
+      for (const input of inputs) queue.enqueue(input);
+      first.resolve(); await queue.settle();
+      const sizes = send.mock.calls.slice(1).map(([body]) => (body.events as unknown[] | undefined)?.length ?? 1);
+      expect(Math.max(...sizes)).toBeLessThanOrEqual(limit);
+      expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(inputs.length);
+      expect(Math.max(...send.mock.calls.map(([body]) => JSON.stringify(body).length))).toBeLessThan(32_768);
+    }
+  });
+
+  it("still sends the releases of a batch that failed, so nothing stays held, and no presses", async () => {
+    const onError = vi.fn();
+    const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockResolvedValue();
+    const first = deferred();
+    send.mockImplementationOnce(() => first.promise).mockRejectedValueOnce(new Error("could not confirm"));
+    const queue = createLiveInputQueue(send, onError, () => 64);
+    queue.enqueue(key("keyDown", "a"));
+    queue.enqueue(key("keyDown", "shift")); queue.enqueue(key("keyDown", "b")); queue.enqueue(key("keyUp", "b")); queue.enqueue(up); queue.enqueue(key("keyUp", "shift"));
+    first.resolve(); await queue.settle();
+    expect(send.mock.calls.slice(2).map(([body]) => body)).toEqual([key("keyUp", "b"), up, key("keyUp", "shift")]);
+    expect(onError).toHaveBeenCalledOnce();
   });
 
   it("does not replay queued presses after a transport failure", async () => {

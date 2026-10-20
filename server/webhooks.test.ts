@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
+import { WEBHOOK_KEY_FILE, WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
 
 const dirs: string[] = [];
 
@@ -127,6 +127,49 @@ describe("WebhookManager", () => {
     expect(JSON.stringify(h.manager.list())).not.toContain("secretHash");
     expect(readFileSync(h.file, "utf8")).not.toContain(created.secret);
     if (process.platform !== "win32") expect(statSync(h.file).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps the current secret sealed beside its hash, so the same address can be given again, and never in a public trigger", () => {
+    const h = harness();
+    const created = create(h.manager);
+    const disk = () => JSON.parse(readFileSync(h.file, "utf8")) as { webhooks: Array<Record<string, unknown>> };
+    expect(disk().webhooks[0]!.sealedSecret).toEqual(expect.any(String));
+    expect(readFileSync(h.file, "utf8")).not.toContain(created.secret);
+    const keyFile = join(h.file, "..", WEBHOOK_KEY_FILE);
+    if (process.platform !== "win32") expect(statSync(keyFile).mode & 0o777).toBe(0o600);
+    expect(JSON.stringify(h.manager.list())).not.toMatch(/sealedSecret|secretHash/);
+    // Reading it back never replaces it, after a restart too.
+    expect(h.manager.currentSecret(created.webhook.id, true)?.secret).toBe(created.secret);
+    expect(new WebhookManager(h.options).currentSecret(created.webhook.id, true)?.secret).toBe(created.secret);
+    expect(h.manager.authorize(created.webhook.endpointId, created.secret)).toBe(true);
+    // Replace address keeps the new one; a seal that no longer matches the hash, or a lost key, reads as not kept.
+    const rotated = h.manager.rotateSecret(created.webhook.id)!;
+    expect(h.manager.currentSecret(created.webhook.id, false)?.secret).toBe(rotated.secret);
+    const stale = disk();
+    stale.webhooks[0]!.secretHash = "0".repeat(64);
+    writeFileSync(h.file, JSON.stringify(stale));
+    expect(new WebhookManager(h.options).currentSecret(created.webhook.id, false)?.secret).toBeNull();
+    rmSync(keyFile);
+    expect(h.manager.currentSecret(created.webhook.id, false)?.secret).toBeNull();
+    expect(h.manager.currentSecret("missing", true)).toBeNull();
+  });
+
+  it("gives a webhook from before secrets were kept a new address only while nothing has ever reached it", () => {
+    const h = harness();
+    const untouched = create(h.manager);
+    const used = h.manager.create({ name: "Used", prompt: "Review it", botId: "maus-sales" });
+    h.manager.receive(used.webhook.endpointId, used.secret, { payload: { lead: "Ada" } });
+    const legacy = JSON.parse(readFileSync(h.file, "utf8")) as { webhooks: Array<Record<string, unknown>> };
+    for (const webhook of legacy.webhooks) delete webhook.sealedSecret;
+    writeFileSync(h.file, JSON.stringify(legacy));
+    const manager = new WebhookManager(h.options);
+    expect(manager.currentSecret(untouched.webhook.id, false)?.secret).toBeNull();
+    const minted = manager.currentSecret(untouched.webhook.id, true)!.secret!;
+    expect(minted).not.toBe(untouched.secret);
+    expect(manager.authorize(untouched.webhook.endpointId, minted)).toBe(true);
+    // An app already sends to this one: its old address keeps working and is never replaced from here.
+    expect(manager.currentSecret(used.webhook.id, true)?.secret).toBeNull();
+    expect(manager.authorize(used.webhook.endpointId, used.secret)).toBe(true);
   });
 
   it("removes duration metadata saved by an earlier webhook build", () => {
@@ -336,5 +379,75 @@ describe("WebhookManager", () => {
       h.manager.receive(webhook.endpointId, secret, { payload: { index }, eventName: "push", deliveryId: `delivery-${index}` });
     }
     expect(() => h.manager.receive(webhook.endpointId, secret, { payload: { overflow: true }, eventName: "push" })).toThrow("rate limit");
+  });
+});
+
+describe("turning a webhook back on, Run now, and a deleted bot's webhooks", () => {
+  it("turns a paused webhook back on, and Run now works while it is paused, like a schedule's", () => {
+    const h = harness();
+    const { webhook } = create(h.manager);
+    expect(h.manager.update(webhook.id, { enabled: false, verificationPending: false })).toMatchObject({ enabled: false });
+    expect(h.manager.test(webhook.id)).toMatchObject({ runId: "run-1", duplicate: false });
+    expect(h.manager.update(webhook.id, { enabled: true, verificationPending: false })).toMatchObject({ enabled: true });
+  });
+
+  it("removes a deleted bot's webhooks for good, with their calls, and cancels their queued work", () => {
+    const h = harness();
+    const { webhook, secret } = create(h.manager);
+    const other = h.manager.create({ name: "Other", prompt: "Other work", botId: "maus-other" });
+    h.manager.receive(webhook.endpointId, secret, { payload: { lead: "Ada" }, deliveryId: "lead-1" });
+    h.manager.remove(h.manager.create({ name: "Deleted earlier", prompt: "x", botId: "maus-sales" }).webhook.id);
+
+    h.manager.removeForBot("maus-sales");
+
+    expect(h.manager.list().map((trigger) => trigger.id)).toEqual([other.webhook.id]);
+    expect(h.manager.listAttempts()).toEqual([]);
+    expect(h.cancelled).toContainEqual({ id: webhook.id, message: "The assigned MAUS was deleted" });
+    expect(h.emitted).toContainEqual({ kind: "webhook.deleted", webhookId: webhook.id });
+    expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {} })).toThrow("Invalid webhook URL or secret");
+    const saved = JSON.parse(readFileSync(h.file, "utf8"));
+    expect(saved.webhooks.map((trigger: { id: string }) => trigger.id)).toEqual([other.webhook.id]);
+    expect(saved.deleted).toEqual([]);
+  });
+});
+
+describe("wrong-secret calls, counted", () => {
+  const wrong = (manager: WebhookManager, endpointId: string) => manager.recordUnauthorized(endpointId);
+  const refusals = (manager: WebhookManager) => manager.listAttempts().filter((attempt) => attempt.statusCode === 401).map((attempt) => [attempt.receivedAt, attempt.reason]);
+
+  it("never counts an older refusal from before a restart into today's", () => {
+    const h = harness();
+    const { webhook } = create(h.manager);
+    const start = new Date("2026-08-16T10:00:00.000Z").getTime();
+    wrong(h.manager, webhook.endpointId);
+    h.manager.update(webhook.id, { name: "Renamed" });
+    const later = start + 2 * 24 * 60 * 60_000;
+    h.setNow(later);
+    const restarted = new WebhookManager(h.options);
+    wrong(restarted, webhook.endpointId);
+    h.setNow(later + 30_000);
+    wrong(restarted, webhook.endpointId);
+    expect(refusals(restarted)).toEqual([[start, "Invalid webhook URL or secret"], [later + 30_000, "Invalid webhook URL or secret (2 requests)"]]);
+  });
+
+  it("starts a new count after a call that got in, or after a pause, and keeps one burst's count across a restart", () => {
+    const h = harness();
+    const { webhook, secret } = create(h.manager);
+    const start = new Date("2026-08-16T10:00:00.000Z").getTime();
+    wrong(h.manager, webhook.endpointId);
+    h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "real" });
+    h.setNow(start + 60_000);
+    wrong(h.manager, webhook.endpointId);
+    h.setNow(start + 60 * 60_000);
+    wrong(h.manager, webhook.endpointId);
+    h.manager.update(webhook.id, { name: "Renamed" });
+    h.setNow(start + 61 * 60_000);
+    const restarted = new WebhookManager(h.options);
+    wrong(restarted, webhook.endpointId);
+    expect(refusals(restarted)).toEqual([
+      [start, "Invalid webhook URL or secret"],
+      [start + 60_000, "Invalid webhook URL or secret"],
+      [start + 61 * 60_000, "Invalid webhook URL or secret (2 requests)"],
+    ]);
   });
 });
