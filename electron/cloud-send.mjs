@@ -705,7 +705,9 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       }
     } catch { /* the next tick tries again */ }
     finally { ticking = false; }
-    schedule(kicked ? KICK_MS : AUTO_EVERY_MS);
+    // While a send waits after a failure, the next check comes when the wait ends, if that is sooner.
+    const waitEnds = autoFailedDigest && failedUntil > now() ? Math.max(KICK_MS, failedUntil - now()) : AUTO_EVERY_MS;
+    schedule(kicked ? KICK_MS : Math.min(AUTO_EVERY_MS, waitEnds));
   }
   function schedule(ms) {
     if (stopped) return;

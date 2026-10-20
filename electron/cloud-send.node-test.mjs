@@ -892,3 +892,24 @@ test("a whole send that went through, whoever asked for it, ends the wait an ear
   await tick(6 * 60_000);
   assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-3"], sent: true }], "the next chats go at their usual pace");
 });
+
+test("a kick while a send waits after a blip never puts the retry off: the next check comes when the wait ends", async () => {
+  const { sides, rows, posted, state } = awaySides({ a: 1 });
+  const { send, clock, tick } = clocked({ ...sides.deps, store: stored() });
+  send.start();
+  await tick(20_000);
+  rows.a.push({ id: "a-2", at: 2 });
+  let blip = true;
+  const open = sides.deps.cloud.open;
+  sides.deps.cloud.open = async () => { if (blip) { state.opened++; throw Object.assign(new Error("Cloud request failed."), { status: 502 }); } return open(); };
+  await tick(6 * 60_000);
+  assert.equal(clock.waits.at(-1), 2 * 60_000);
+  clock.now += 40_000;
+  send.kick();
+  assert.equal(clock.waits.at(-1), 1_000, "the account changed: look at My Cloud, which the failure marked away");
+  await tick(1_000);
+  assert.equal(clock.waits.at(-1), 79_000, "the look found it there; the retry stays at two minutes after the failure");
+  blip = false;
+  await tick(79_000);
+  assert.deepEqual(posted.at(-1), [{ threadId: "a", rows: ["a-2"], sent: true }]);
+});
