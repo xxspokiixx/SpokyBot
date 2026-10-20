@@ -46,6 +46,22 @@ export class TurnNotStartedError extends Error {
   }
 }
 
+/** The CLI refused sign-in before any model or tool activity, and its process stopped. */
+export class TurnAuthenticationRefusedError extends TurnNotStartedError {
+  override readonly name = "TurnAuthenticationRefusedError";
+}
+
+/** The engine's usage limit refused the turn before any model or tool activity (or is known to be refusing until
+ * `resetsAt`), and no process of it is running the turn. */
+export class TurnUsageLimitRefusedError extends TurnNotStartedError {
+  override readonly name = "TurnUsageLimitRefusedError";
+  readonly resetsAt: number | undefined;
+
+  constructor(turnId: TurnId, message: string, resetsAt?: number) {
+    super(turnId, message);
+    this.resetsAt = resetsAt;
+  }
+}
 
 /** Variants are opaque provider IDs, not the cross-engine effort enum. */
 export function isModelVariant(value: unknown): value is string {
@@ -103,8 +119,12 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Start without the previous native context or retained process; wins over resumeCursor. */
   sessionReset?: boolean;
-  /** Hold the startup ACK until prompt dispatch; a retired transient setup failure may reject with TurnNotStartedError. */
+  /** Hold the startup ACK until prompt dispatch (Claude: first model activity); a retired transient setup failure or sign-in refusal may reject with TurnNotStartedError. */
   startupRecovery?: boolean;
+  /** Given to a driver with `capabilities.engineAdmission`: awaited right before it starts an engine process ("process") or
+   * adds this thread's session to the running one whose pid is `joining` ("session"); rejects with TurnNotStartedError when
+   * the turn is stopped first. */
+  engineAdmission?: (start: "process" | "session", joining?: number) => Promise<void>;
   /** The turn with the conversation replayed inline, sent once on a fresh session when the provider refuses resumeCursor before reading the prompt. */
   recoveryText?: string;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
@@ -225,6 +245,8 @@ export interface ProviderAdapter {
     guestTurns?: "confined";
     /** "meter": `contextTokens` / `contextWindow` are the engine's own report, shown on the context meter but never used to time compaction. */
     contextReading?: "meter";
+    /** sendTurn calls `engineAdmission` itself before it starts an engine process or joins one. */
+    engineAdmission?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;

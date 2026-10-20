@@ -10353,7 +10353,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("applies a bot's own chat-created routine at once and keeps a teammate's behind its card", async () => {
+  it("applies a bot's own chat-created trigger and a teammate's at once, each with its card", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     let routineId = "";
     let orphanRoutineId = "";
@@ -10383,19 +10383,20 @@ describe("harness HTTP API", () => {
       };
 
       const before = await fetch(
-        `${BASE}/api/internal/routines?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
+        `${BASE}/api/internal/triggers?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
         { headers: internalHeaders },
       );
       expect(before.status).toBe(200);
-      expect(z.object({ routines: z.array(z.unknown()) }).parse(await before.json()).routines).toEqual([]);
+      expect(z.object({ triggers: z.array(z.unknown()) }).parse(await before.json()).triggers).toEqual([]);
 
-      const unavailableCloud = await fetch(`${BASE}/api/internal/routine-requests`, {
+      const unavailableCloud = await fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: internalHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: bot.threadId,
           action: "create",
+          kind: "schedule",
           routine: {
             name: "Cloud brief",
             instructions: "Summarize today's priorities in the Cloud VM.",
@@ -10409,13 +10410,14 @@ describe("harness HTTP API", () => {
         error: expect.stringMatching(/^A cloud computer here needs your own Boat key, a paid service\. Add a Boat key in Settings → API keys\./),
       });
 
-      const proposed = await fetch(`${BASE}/api/internal/routine-requests`, {
+      const proposed = await fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: internalHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: bot.threadId,
           action: "create",
+          kind: "schedule",
           routine: {
             name: "Weekday brief",
             instructions: "Summarize the priorities for today.",
@@ -10465,13 +10467,14 @@ describe("harness HTTP API", () => {
       expect((await api("GET", "/api/routines")).body.routines
         .filter((routine: { botId: string }) => routine.botId === bot.id)).toHaveLength(1);
 
-      const badTarget = await fetch(`${BASE}/api/internal/routine-requests`, {
+      const badTarget = await fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: internalHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: bot.threadId,
           action: "create",
+          kind: "schedule",
           forBotId: "bot-that-does-not-exist",
           routine: {
             name: "Nowhere brief",
@@ -10485,13 +10488,14 @@ describe("harness HTTP API", () => {
       expect(z.object({ error: z.string() }).parse(await badTarget.json()).error).toMatch(/list_bots/);
 
       const teammate = (await api("POST", "/api/bots", {})).body.bot;
-      const crossProposed = await fetch(`${BASE}/api/internal/routine-requests`, {
+      const crossProposed = await fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: internalHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: bot.threadId,
           action: "create",
+          kind: "schedule",
           forBotId: teammate.id,
           routine: {
             name: "Teammate brief",
@@ -10503,19 +10507,15 @@ describe("harness HTTP API", () => {
         }),
       });
       expect(crossProposed.status).toBe(201);
-      const crossProposal = z.object({ requestId: z.string() }).passthrough().parse(await crossProposed.json());
+      // Applied at once for a teammate too (Triggers v2): no card waits on the person.
+      const crossProposal = z.object({ requestId: z.string(), state: z.literal("applied"), result: z.object({ resultId: z.string() }).passthrough() }).passthrough().parse(await crossProposed.json());
       const crossState = (await api("GET", "/api/bots")).body;
       const crossCard = crossState.bots
         .find((candidate: { id: string }) => candidate.id === bot.id)
         ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === crossProposal.requestId);
       expect(crossCard?.card.title).toContain(`for @${teammate.name}`);
-      const crossConfirmed = await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: crossProposal.requestId,
-        behavior: "allow",
-      });
-      expect(crossConfirmed).toMatchObject({ status: 200, body: { routineAction: "create" } });
       const crossRoutine = (await api("GET", "/api/routines")).body.routines
-        .find((routine: { id: string }) => routine.id === crossConfirmed.body.resultId);
+        .find((routine: { id: string }) => routine.id === crossProposal.result.resultId);
       expect(crossRoutine).toMatchObject({ botId: teammate.id, sourceThreadId: bot.threadId, enabled: true });
       expect((await api("PATCH", `/api/bots/${teammate.id}`, {
         modelSelection: { instanceId: "ghost", model: "unavailable-fixture" },
@@ -10587,29 +10587,21 @@ describe("harness HTTP API", () => {
         );
         expect(failedNotice.notification.threadId).toBe(bot.threadId);
 
-        await expect.poll(async () => {
-          const source = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body;
-          return source.messages.filter(
-            (message: { kind?: string; routineRun?: { runId?: string } }) =>
-              message.kind === "routine.run" && message.routineRun?.runId === queued.body.run.id,
-          ) ?? [];
-        }, { timeout: 5_000 }).toHaveLength(1);
+        await expect.poll(async () => (await api("GET", "/api/routines")).body.runs
+          .find((run: { id: string }) => run.id === queued.body.run.id)?.status, { timeout: 5_000 }).toBe("failed");
         const current = (await api("GET", "/api/bots")).body.bots
           .find((candidate: { id: string }) => candidate.id === bot.id);
         expect(current.tasks.find((task: { threadId: string }) => task.threadId === bot.threadId)?.unread).toBe(true);
         expect(current.tasks.find((task: { threadId: string }) => task.threadId === sibling.body.task.threadId)?.unread).toBeFalsy();
+        // Made in this chat, so the run shows on its live trigger card: no card per run, the chat still marked unread.
         const runCards = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.filter(
           (message: { kind?: string; routineRun?: { runId?: string } }) =>
             message.kind === "routine.run" && message.routineRun?.runId === queued.body.run.id,
         );
-        expect(runCards).toHaveLength(1);
-        expect(runCards[0].routineRun).toMatchObject({
-          runId: queued.body.run.id,
-          routineId,
-          routineName: "Weekday brief",
-          status: "failed",
-        });
-        expect(runCards[0].routineRun.executionThreadId).not.toBe(bot.threadId);
+        expect(runCards).toHaveLength(0);
+        const failedRun = (await api("GET", "/api/routines")).body.runs.find((run: { id: string }) => run.id === queued.body.run.id);
+        expect(failedRun).toMatchObject({ routineId, routineName: "Weekday brief", status: "failed" });
+        expect(failedRun.threadId).not.toBe(bot.threadId);
 
         expect((await api("POST", `/api/bots/${bot.id}/read`, { threadId: bot.threadId })).status).toBe(200);
         expect((await api("POST", `/api/routine-runs/${queued.body.run.id}/seen`)).status).toBe(200);
@@ -10623,11 +10615,11 @@ describe("harness HTTP API", () => {
           "content-type": "application/json",
         };
         const grounded = await fetch(
-          `${BASE}/api/internal/routines?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
+          `${BASE}/api/internal/triggers?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
           { headers: refreshedHeaders },
         );
         const groundedBody = z.object({
-          routines: z.array(z.object({
+          triggers: z.array(z.object({
             id: z.string(),
             latestRun: z.object({
               status: z.string(),
@@ -10640,12 +10632,12 @@ describe("harness HTTP API", () => {
             }).nullable(),
           }).passthrough()),
         }).parse(await grounded.json());
-        expect(groundedBody.routines.find((routine) => routine.id === routineId)?.latestRun).toMatchObject({
+        expect(groundedBody.triggers.find((routine) => routine.id === routineId)?.latestRun).toMatchObject({
           status: "failed",
           startedAt: expect.any(String),
           finishedAt: expect.any(String),
           error: expect.stringMatching(/provider instance "ghost" is unavailable/i),
-          executionThreadId: runCards[0].routineRun.executionThreadId,
+          executionThreadId: failedRun.threadId,
         });
       } finally {
         routineEvents.close();
@@ -10661,13 +10653,14 @@ describe("harness HTTP API", () => {
         authorization: `Bearer ${orphanToken}`,
         "content-type": "application/json",
       };
-      const orphanProposalResponse = await fetch(`${BASE}/api/internal/routine-requests`, {
+      const orphanProposalResponse = await fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: orphanHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: orphanThreadId,
           action: "create",
+          kind: "schedule",
           routine: {
             name: "Orphan-safe brief",
             instructions: "Summarize without recreating the deleted source.",
@@ -10717,18 +10710,18 @@ describe("harness HTTP API", () => {
         "content-type": "application/json",
       };
       const listed = await fetch(
-        `${BASE}/api/internal/routines?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
+        `${BASE}/api/internal/triggers?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
         { headers: finalHeaders },
       );
       expect(listed.status).toBe(200);
       const listedBody = z.object({
-        routines: z.array(z.object({
+        triggers: z.array(z.object({
           id: z.string(),
           instructions: z.string(),
           instructionsTruncated: z.boolean(),
         }).passthrough()),
       }).parse(await listed.json());
-      const legacyResult = listedBody.routines.find((routine) => routine.id === legacyRoutineId)!;
+      const legacyResult = listedBody.triggers.find((routine) => routine.id === legacyRoutineId)!;
       expect(legacyResult.continuity).toBe(true);
       expect(legacyResult.runOnStartup).toBe(true);
       expect(legacyResult.instructions).not.toContain(fakeSecret);
@@ -10744,14 +10737,14 @@ describe("harness HTTP API", () => {
         endsAt: "2026-09-30T18:00:00.000Z",
       });
 
-      const wrongThread = await fetch(`${BASE}/api/internal/routine-requests`, {
+      const wrongThread = await fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: finalHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: "not-this-bots-thread",
           action: "pause",
-          routineId,
+          triggerId: routineId,
         }),
       });
       expect(wrongThread.status).toBe(403);
@@ -10764,7 +10757,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("gates targeted routine actions like creation and re-checks the target at confirm", async () => {
+  it("acts on a teammate's trigger at once, and only while that teammate is in the section", async () => {
     const chief = (await api("POST", "/api/bots", { name: "Acting chief" })).body.bot;
     let teammateId = "";
     let outsiderId = "";
@@ -10795,7 +10788,7 @@ describe("harness HTTP API", () => {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
       };
-      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/routine-requests`, {
+      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: internalHeaders,
         body: JSON.stringify(body),
@@ -10805,7 +10798,7 @@ describe("harness HTTP API", () => {
         fromBotId: chief.id,
         fromThreadId: chief.threadId,
         action: "pause",
-        routineId: teammateRoutine.id,
+        triggerId: teammateRoutine.id,
         forBotId: outsider.id,
       });
       expect(outOfSection.status).toBe(403);
@@ -10815,7 +10808,7 @@ describe("harness HTTP API", () => {
         fromBotId: chief.id,
         fromThreadId: chief.threadId,
         action: "pause",
-        routineId: teammateRoutine.id,
+        triggerId: teammateRoutine.id,
         forBotId: "bot-that-does-not-exist",
       });
       expect(unknown.status).toBe(404);
@@ -10824,7 +10817,7 @@ describe("harness HTTP API", () => {
         fromBotId: chief.id,
         fromThreadId: chief.threadId,
         action: "pause",
-        routineId: ownRoutine.id,
+        triggerId: ownRoutine.id,
         forBotId: teammate.id,
       });
       expect(wrongOwner.status).toBe(404);
@@ -10833,41 +10826,30 @@ describe("harness HTTP API", () => {
         fromBotId: chief.id,
         fromThreadId: chief.threadId,
         action: "pause",
-        routineId: teammateRoutine.id,
+        triggerId: teammateRoutine.id,
         forBotId: teammate.id,
       });
       expect(proposed.status).toBe(201);
-      const proposal = z.object({ requestId: z.string() }).parse(await proposed.json());
+      const proposal = z.object({ requestId: z.string(), state: z.literal("applied") }).passthrough().parse(await proposed.json());
       const proposerState = (await api("GET", "/api/bots")).body;
       const card = proposerState.bots
         .find((candidate: { id: string }) => candidate.id === chief.id)
         ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposal.requestId);
       expect(card?.card.title).toContain(`for @${teammate.name}`);
 
-      const confirmed = await api("POST", `/api/threads/${chief.threadId}/respond`, {
-        requestId: proposal.requestId,
-        behavior: "allow",
-      });
-      expect(confirmed).toMatchObject({ status: 200, body: { routineAction: "pause" } });
       const paused = (await api("GET", "/api/routines")).body.routines
         .find((routine: { id: string }) => routine.id === teammateRoutine.id);
       expect(paused).toMatchObject({ botId: teammate.id, enabled: false });
 
-      const resume = await post({
+      expect((await api("PATCH", `/api/bots/${teammate.id}`, { section: "Moved away" })).status).toBe(200);
+      const refused = await post({
         fromBotId: chief.id,
         fromThreadId: chief.threadId,
         action: "resume",
-        routineId: teammateRoutine.id,
+        triggerId: teammateRoutine.id,
         forBotId: teammate.id,
       });
-      expect(resume.status).toBe(201);
-      const resumeProposal = z.object({ requestId: z.string() }).parse(await resume.json());
-      expect((await api("PATCH", `/api/bots/${teammate.id}`, { section: "Moved away" })).status).toBe(200);
-      const refused = await api("POST", `/api/threads/${chief.threadId}/respond`, {
-        requestId: resumeProposal.requestId,
-        behavior: "allow",
-      });
-      expect(refused.status).toBe(404);
+      expect(refused.status).toBe(403);
       const stillPaused = (await api("GET", "/api/routines")).body.routines
         .find((routine: { id: string }) => routine.id === teammateRoutine.id);
       expect(stillPaused).toMatchObject({ enabled: false });
@@ -10878,31 +10860,33 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("lets a bot change its own routines while 8 cards for a teammate are open", async () => {
+  it("applies a teammate's triggers at once, with no open-card budget to run out of", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     const teammate = (await api("POST", "/api/bots", {})).body.bot;
     try {
       expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
       const token = await mintTestCapability(BASE, bot.id, bot.threadId);
-      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/routine-requests`, {
+      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/trigger-requests`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
       });
       const routine = (name: string) => ({ name, instructions: `Run ${name}.`, schedule: { type: "weekly", time: "09:00", weekdays: ["monday"] }, runOn: "maus" });
-      for (let index = 0; index < 8; index += 1) {
-        expect((await post({ action: "create", forBotId: teammate.id, routine: routine(`Teammate ${index}`) })).status).toBe(201);
+      for (let index = 0; index < 9; index += 1) {
+        const teammates = await post({ action: "create", kind: "schedule", forBotId: teammate.id, routine: routine(`Teammate ${index}`) });
+        expect(teammates.status).toBe(201);
+        expect(await teammates.json()).toMatchObject({ state: "applied" });
       }
-      expect((await post({ action: "create", forBotId: teammate.id, routine: routine("Teammate 8") })).status).toBe(429);
-      const own = await post({ action: "create", routine: routine("Own brief") });
+      expect((await api("GET", "/api/routines")).body.routines.filter((candidate: { botId: string }) => candidate.botId === teammate.id)).toHaveLength(9);
+      const own = await post({ action: "create", kind: "schedule", routine: routine("Own brief") });
       expect(own.status).toBe(201);
       const applied = z.object({ state: z.literal("applied"), result: z.object({ resultId: z.string() }).passthrough() }).passthrough().parse(await own.json());
-      const paused = await post({ action: "pause", routineId: applied.result.resultId });
+      const paused = await post({ action: "pause", triggerId: applied.result.resultId });
       expect(paused.status).toBe(201);
       expect(await paused.json()).toMatchObject({ state: "applied", appliedBy: "self" });
     } finally {
       const routines = (await api("GET", "/api/routines")).body.routines as Array<{ id: string; botId: string }>;
-      for (const routine of routines.filter((candidate) => candidate.botId === bot.id)) await api("DELETE", `/api/routines/${routine.id}`);
+      for (const routine of routines.filter((candidate) => candidate.botId === bot.id || candidate.botId === teammate.id)) await api("DELETE", `/api/routines/${routine.id}`);
       await api("DELETE", `/api/bots/${bot.id}`);
       await api("DELETE", `/api/bots/${teammate.id}`);
     }

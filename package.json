@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.114",
+  "version": "0.1.118",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -44,6 +44,7 @@
     "test:electron": "node --test \"electron/*.node-test.mjs\"",
     "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
     "bench:persistence": "node --experimental-strip-types scripts/bench-persistence.ts",
+    "bench:browser-stream": "node --experimental-strip-types scripts/bench-browser-stream.ts",
     "test:watch": "vitest",
     "test:cua": "pnpm build:cua && node scripts/smoke-cua.mjs",
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
@@ -129,6 +130,7 @@
     "vega-embed": "7.3.0",
     "vega-lite": "6.5.0",
     "vega-themes": "3.0.0",
+    "ws": "8.22.0",
     "yaml": "^2.9.0",
     "zod": "4.4.3"
   },
@@ -153,7 +155,6 @@
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
     "vitest": "^4.1.11",
-    "wrangler": "4.123.0",
-    "ws": "8.22.0"
+    "wrangler": "4.123.0"
   }
 }

@@ -7,6 +7,7 @@ import en from "./en.json";
 const ALLOWED = new Set([
   "engines.account.apiKey", // the Anthropic Console's "workspace API key"
   "engineSetup.device.enableHint", // a ChatGPT "workspace admin"
+  "botOverview.line.privateWorkspace", // shows server/bot-overview.ts's own "Works in its private workspace." line
 ]);
 
 it("English copy says Organization and installation, not Organisation or workspace", () => {
