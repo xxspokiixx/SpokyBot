@@ -139,10 +139,13 @@ export function countedList(sent: CloudSendCounts): string[] {
   ];
 }
 
+/** The move, or an older desktop's first send by itself: the strip shows it arriving and what it brought. */
+const ARRIVING = new Set(["move", "first"]);
+
 /** My Cloud's strip, or null when all is well: this computer's things on their way (the move, or Try again), what the
  * move brought, or what couldn't come and why. */
 export function stripLine(notice: CloudSendNotice, sending: boolean, unanswered: string | null): { kind: "sending" | "failed" | "done"; text: string } | null {
-  if (sending || (notice.running && notice.runningReason === "move")) {
+  if (sending || (notice.running && ARRIVING.has(notice.runningReason ?? ""))) {
     const progress = notice.progress;
     const key = notice.phase === "chats" ? "cloudSend.strip.bringingChats" : "cloudSend.strip.bringing";
     return { kind: "sending", text: progress ? `${t(key)} ${t("cloudSend.progress", progress)}` : t(key) };
@@ -152,7 +155,7 @@ export function stripLine(notice: CloudSendNotice, sending: boolean, unanswered:
   if (!last || last.seen) return null;
   const failure = failedLine(last);
   if (failure) return { kind: "failed", text: failure };
-  if (last.reason !== "move") return null;
+  if (!ARRIVING.has(last.reason)) return null;
   const list = countedList(last.sent);
   return { kind: "done", text: list.length ? t("cloudSend.strip.arrived", { list: listOf(list) }) : t("cloudSend.strip.allHere") };
 }

@@ -28,17 +28,21 @@ const STEP_TEXT: Record<WelcomeStep, { title: LocaleKey; hint: LocaleKey }> = {
   files: { title: "cloudWelcome.step.files", hint: "cloudWelcome.step.filesHint" },
 };
 
-/** Sends that carry everything (bots, skills, logins, settings and chats); one login or one item is not one. */
-const WHOLE_SENDS = new Set(["button", "my-cloud", "menu", "move"]);
+/** Sends that carry everything (bots, skills, logins, settings and chats); one login or one item is not one. "first"
+ * and "auto": an older desktop's sends by itself. */
+const WHOLE_SENDS = new Set(["button", "my-cloud", "menu", "move", "first", "auto"]);
 
 /** What came over from this computer, for the Bring step: "sent" once a whole send went through (`last` says what
- * arrived); "sending" while one runs; null otherwise (none yet, a whole send failed, or a desktop too old to say, which
- * sends no `whole`), which keeps the choice to copy or start fresh. */
+ * arrived); "sending" while one runs, or while an older desktop that sends by itself has not sent yet; null otherwise
+ * (none yet, a whole send failed, or a desktop too old to say, which sends no `whole`), which keeps the choice to copy
+ * or start fresh. */
 export function sentHere(notice: CloudSendNotice | null): { state: "sending" | "sent"; last: CloudSendNotice["last"] } | null {
   if (!notice || notice.whole === undefined) return null;
   const last = notice.last;
+  const whole = Boolean(last && WHOLE_SENDS.has(last.reason));
   if (notice.running && WHOLE_SENDS.has(notice.runningReason ?? "")) return { state: "sending", last };
-  if (last && WHOLE_SENDS.has(last.reason) && !last.error) return { state: "sent", last };
+  if (whole && !last!.error) return { state: "sent", last };
+  if (notice.auto === true && !whole) return { state: "sending", last };
   return null;
 }
 

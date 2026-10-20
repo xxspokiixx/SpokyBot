@@ -91,6 +91,8 @@ describe("My Cloud's strip", () => {
     expect(stripLine(notice({ running: true, runningReason: "move", progress: { done: 2, total: 9 }, phase: "chats" }), false, null))
       .toEqual({ kind: "sending", text: "Bringing this computer's chats here… 2 of 9" });
     expect(stripLine(notice({ running: true, runningReason: "button" }), false, null)).toBeNull();
+    expect(stripLine(notice({ running: true, runningReason: "first" }), false, null)?.kind, "an older desktop's first send by itself").toBe("sending");
+    expect(stripLine(notice({ last: { at: 1, reason: "first", failed: 0, seen: false, sent: { ...counts, bots: 2 } } }), false, null)?.text).toBe("2 bots came over from This computer.");
     expect(stripLine(notice({ last: { at: 1, reason: "move", failed: 0, seen: false, sent: { ...counts, bots: 1, chats: { conversations: 0, messages: 7 } } } }), false, null))
       .toEqual({ kind: "done", text: "1 bot and 7 new messages came over from This computer." });
     expect(stripLine(notice({ last: { at: 1, reason: "move", failed: 0, seen: false, sent: counts } }), false, null)?.text).toBe("Everything from This computer is here.");

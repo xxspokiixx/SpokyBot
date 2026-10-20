@@ -350,7 +350,11 @@ describe("CloudWelcome", () => {
       expect(state(notice({ last: sentLast({ error: "This app could not sign in to My Cloud. Try again." }) })), "a send that failed as a whole").toBeNull();
       expect(state(notice({ last: sentLast({ reason: "logins" }) })), "one login sent by hand").toBeNull();
       expect(state(notice({ running: true, runningReason: "logins" }))).toBeNull();
-      for (const gone of ["first", "auto"]) expect(state(notice({ last: sentLast({ reason: gone }) })), gone).toBeNull();
+      // An older desktop that sends by itself: its first send, its later ones, and nothing gone yet while its switch is on.
+      for (const older of ["first", "auto"]) expect(state(notice({ last: sentLast({ reason: older }) })), older).toBe("sent");
+      expect(state(notice({ running: true, runningReason: "first" }))).toBe("sending");
+      expect(state({ ...notice(), auto: true }), "its switch on, nothing gone yet: on its way").toBe("sending");
+      expect(state({ ...notice({ last: sentLast({ reason: "logins" }) }), auto: true })).toBe("sending");
     });
 
     it("moves straight on to the AI while they come over, ticking Bring your stuff only once they arrived, never taking focus", async () => {

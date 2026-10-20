@@ -53,6 +53,8 @@ export interface CloudSendSnapshot {
 /** What My Cloud's own page is told: names of this computer's bots that wait, and counts, never logins' sites. */
 export interface CloudSendNotice {
   ready: boolean;
+  /** Sent only by an older desktop whose Keep My Cloud up to date was on: its things come over by themselves. */
+  auto?: boolean;
   bots: string[];
   updatedBots: string[];
   skills: number;
