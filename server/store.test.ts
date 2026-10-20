@@ -1743,10 +1743,33 @@ describe("Store change stream", () => {
     store.patchMessage(bot.threadId, first.id, { text: "a2" });
     store.branchMessage(bot.threadId, first.id, "b");
     store.setActiveLeaf(bot.threadId, first.id);
-    store.toggleReaction(bot.threadId, first.id, "👍", "user");
+    store.setReaction(bot.threadId, first.id, "user", { emoji: "👍", at: 1 });
     expect(events.map((e) => e.type)).toEqual(["message.patch", "message", "thread", "thread", "message.patch"]);
     expect(events[2]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: (events[1] as any).message.id });
     expect(events[3]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: first.id });
+  });
+
+  it("keeps a reaction line a reaction when it is retried unchanged, and makes it words when edited", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const asked = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Shall I send it?" });
+    const line = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "👍", replyToId: asked.id, reaction: "👍" });
+    expect(store.branchMessage(bot.threadId, line.id, "👍")).toMatchObject({ text: "👍", replyToId: asked.id, reaction: "👍" });
+    expect(store.branchMessage(bot.threadId, line.id, "Yes, but tomorrow")).not.toHaveProperty("reaction");
+  });
+
+  it("keeps one reaction per person: a new one replaces theirs, and nobody else's", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Shall I send it?" });
+    const react = (by: string, emoji: string | null) =>
+      store.setReaction(bot.threadId, reply.id, by, emoji ? { emoji, at: 1 } : null)?.reactions;
+    expect(react("p_alice", "👍")).toEqual([{ emoji: "👍", by: "p_alice", at: 1 }]);
+    expect(react("p_bob", "👍")).toEqual([{ emoji: "👍", by: "p_alice", at: 1 }, { emoji: "👍", by: "p_bob", at: 1 }]);
+    expect(react("p_alice", "👎")).toEqual([{ emoji: "👍", by: "p_bob", at: 1 }, { emoji: "👎", by: "p_alice", at: 1 }]);
+    expect(react("p_bob", null)).toEqual([{ emoji: "👎", by: "p_alice", at: 1 }]);
+    expect(react("p_alice", null)).toBeUndefined();
+    expect(store.setReaction(bot.threadId, "no-such-message", "p_alice", null)).toBeNull();
   });
 
   it("announces screen frames whose pixels are pruned", () => {

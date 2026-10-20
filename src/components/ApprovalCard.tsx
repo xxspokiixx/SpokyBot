@@ -408,7 +408,8 @@ export function ApprovalCard({
   if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
   const settled = card.answered;
   const expired = card.expired === true || staleRoutineCard(card);
-  const byVoice = card.answeredBy?.via === "call" ? <span className="text-ink-tertiary">· {t("approval.status.byVoice")}</span> : null;
+  const via = card.answeredBy?.via;
+  const byVoice = via ? <span className="text-ink-tertiary">· {t(via === "call" ? "approval.status.byVoice" : "approval.status.byReaction")}</span> : null;
   const isRoutineRequest = Boolean(card.routineRequest);
   const isSkillRequest = Boolean(card.skillRequest);
   const isProfileRequest = Boolean(card.profileRequest);

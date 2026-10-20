@@ -27,7 +27,7 @@ const createRoutineOperation = {
 };
 
 describe("ApprovalCard decided by voice", () => {
-  const bash = (answered: string, via?: "call"): Message => ({
+  const bash = (answered: string, via?: "call" | "reaction"): Message => ({
     id: "bash-card",
     role: "bot",
     kind: "options",
@@ -48,8 +48,16 @@ describe("ApprovalCard decided by voice", () => {
     expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("deny", "call") }))).toMatch(/Denied.*by voice/);
   });
 
+  it("says a card was decided by a 👍 or 👎 on it", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow", "reaction") }))).toMatch(/Allowed.*by reaction/);
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("deny", "reaction") }))).toMatch(/Denied.*by reaction/);
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow", "reaction") }))).not.toContain("by voice");
+  });
+
   it("says nothing extra for a tap", () => {
-    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow") }))).not.toContain("by voice");
+    const tapped = renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow") }));
+    expect(tapped).not.toContain("by voice");
+    expect(tapped).not.toContain("by reaction");
   });
 });
 

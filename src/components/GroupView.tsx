@@ -28,10 +28,11 @@ import { MAUS_COLOR_NAMES, normalizeState, type MausColor } from "@/lib/mascot";
 import { botTextShowsSpeaker, laterTextOwns, runShowsSpeaker } from "@/lib/room-speaker";
 import { defaultResponderName, effectiveDefaultResponder, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { CopyButton, FailedTurnRow, MessageBoundary, ReplyAction, SIMPLE_BUBBLE } from "./ChatView";
+import { FailedTurnRow, MessageBoundary, SIMPLE_BUBBLE } from "./ChatView";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { MESSAGE_ROW, MessageActions, messageActionClass } from "./MessageActions";
-import { useBotMessageMenu, userMessageMenu, type PinAction } from "./message-menu";
+import { CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "./MessageActions";
+import { ReactAction, ReactionChips } from "./Reactions";
+import { roomPin, useBotMessageMenu, userMessageMenu } from "./message-menu";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { SpeakButton } from "./SpeakButton";
 import { useSpeech } from "@/lib/tts/useSpeech";
@@ -165,16 +166,6 @@ function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: st
       >{name}</span>
     </div>
   );
-}
-
-function roomPin(group: Group, message: Message, dispatch: ReturnType<typeof useStore>["dispatch"]): PinAction | undefined {
-  if (window.ogb?.remoteClient?.active) return undefined;
-  const pinned = group.pinnedMessageId === message.id;
-  return {
-    pinned,
-    hint: t("room.pinHint"),
-    onToggle: () => dispatch({ type: "patchGroup", groupId: group.id, patch: { pinnedMessageId: pinned ? "" : message.id } }),
-  };
 }
 
 const USER_COLLAPSE_CHARS = 600;
@@ -319,6 +310,7 @@ function RoomTextMessage({
         {!user && (
           <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={botMenu}>
             <ReplyAction onReply={() => onReply(m)} />
+            {m.from && <ReactAction threadId={group.threadId} message={m} />}
             {botText && <CopyButton text={botText} className={messageActionClass} />}
             {botText && viewRaw && <RawToggleAction active onToggle={() => setViewRaw(false)} className={messageActionClass} />}
             {botText && speaking && (
@@ -330,6 +322,7 @@ function RoomTextMessage({
           {formatTime(m.at)}
         </span>
       </div>
+      <ReactionChips threadId={group.threadId} message={m} bots={members} align={user ? "end" : "start"} />
       {!user && m.routedBy && <RoutedByLine routedBy={m.routedBy} />}
     </div>
   );

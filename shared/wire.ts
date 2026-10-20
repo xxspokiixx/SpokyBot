@@ -404,8 +404,9 @@ export type CardAnswerer = (
   | { kind: "loopback" }
   | { kind: "worker" }
 ) & {
-  /** "call": decided by voice on a Live call, not tapped. */
-  via?: "call";
+  /** "call": decided by voice on a Live call; "reaction": by a 👍 or 👎 on the
+   * card. Absent: tapped. */
+  via?: "call" | "reaction";
 };
 
 /** One transcript line, serialized as stored. */
@@ -526,8 +527,15 @@ export interface WireMessage {
    * Team incidents report or Team escalations notice about that bot's thread
    * in `threadId`, not its words; `notified`: the person was already buzzed. */
   peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean } };
-  /** emoji reactions; by = "user" or a member botId. */
-  reactions?: Array<{ emoji: string; by: string }>;
+  /** One reaction per person (shared/reactions.ts REACTIONS). `by` is "user"
+   * on a workspace one person uses, otherwise that person's opaque key, the
+   * one GET /api/auth/session returns as `reactor`. `name` is attribution
+   * only; `at` is when they chose it. */
+  reactions?: Array<{ emoji: string; by: string; name?: string; at?: number }>;
+  /** user lines a 👍 or 👎 made: the person reacted with this emoji to
+   * `replyToId` instead of typing. Clients show the reaction on that message
+   * and draw no bubble for this line. */
+  reaction?: string;
   /** comm chips: "Messaged @X", linking to the bot-bot channel. */
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
   /** thread chips: "Opened thread #Title on @X". */

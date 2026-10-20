@@ -1236,12 +1236,10 @@ export class Store {
     return { group, deleted, missing };
   }
 
-  toggleReaction(threadId: string, messageId: string, emoji: string, by: string): Message | null {
+  setReaction(threadId: string, messageId: string, by: string, reaction: Omit<NonNullable<Message["reactions"]>[number], "by"> | null): Message | null {
     const existing = this.messagesFor(threadId).find((m) => m.id === messageId);
     if (!existing) return null;
-    const reactions = existing.reactions ?? [];
-    const at = reactions.findIndex((r) => r.emoji === emoji && r.by === by);
-    const next = at >= 0 ? reactions.filter((_, i) => i !== at) : [...reactions, { emoji, by }];
+    const next = [...(existing.reactions ?? []).filter((r) => r.by !== by), ...(reaction ? [{ ...reaction, by }] : [])];
     return this.patchMessage(threadId, messageId, { reactions: next.length ? next : undefined });
   }
 
@@ -1400,6 +1398,7 @@ export class Store {
       text,
       parentId: source.parentId ?? null,
       replyToId: source.replyToId,
+      ...(source.reaction && source.text === text ? { reaction: source.reaction } : {}),
       ...(sendId ? { sendId } : {}),
       ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}),

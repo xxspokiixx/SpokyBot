@@ -66,7 +66,7 @@ import {
 import * as checkpoints from "./checkpoints.ts";
 import { commandReceipt } from "./commands.ts";
 import { buildTurnDigest, coverageForDriver, digestPromptLine, renderDigest, toolEvidence } from "./digest.ts";
-import { appendDecision, bindDecisionRetention, decisionRetentionDays, flushDecisionLog, pruneDecisions, withDecisionActor, type DecisionActor } from "./decision-log.ts";
+import { appendDecision, bindDecisionRetention, decisionRetentionDays, flushDecisionLog, pruneDecisions, withDecisionActor, type DecisionActor, type DecisionVia } from "./decision-log.ts";
 import { inMyFolderCwd, validateBotCwd } from "./bot-cwd.ts";
 import {
   ATTACHMENTS_DIR,
@@ -247,7 +247,7 @@ import { needsInputQuestion } from "./runtime-coordinator.ts";
 import { RETRY_BLOCKED } from "./incidents.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
-import { promptWithReply, transcriptText } from "./replies.ts";
+import { promptWithReply, transcriptText, type ReplyTarget } from "./replies.ts";
 import type { DataContext } from "./data-context.ts";
 import { promptWithDataContext } from "../shared/data-context.ts";
 import { admit } from "./admission.ts";
@@ -264,8 +264,6 @@ import {
 } from "./steer-queue.ts";
 import {
   drainChannelMessages,
-  queuedChannelMessage,
-  queueChannelMessage,
   restoreChannelMessages,
   type ChannelQueueItem,
 } from "./channel-queue.ts";
@@ -536,7 +534,7 @@ import {
   serializeSessionCookie,
   sessionCookieName,
 } from "./request-auth.ts";
-import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
+import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope } from "./sessions.ts";
 import { ThreadStarters } from "./thread-starters.ts";
 import {
   appendAdminAction,
@@ -626,6 +624,10 @@ import { createNotificationRoutes } from "./routes/notifications.ts";
 import { createTodayRoutes } from "./routes/today.ts";
 import { createUsageRoutes } from "./routes/usage.ts";
 import { createBotMessageRoutes } from "./routes/bot-messages.ts";
+import { createReactionRoutes } from "./routes/reactions.ts";
+import { createReactions, withReactionNotes, type Reactor } from "./reactions.ts";
+import { createPersonReplies } from "./person-replies.ts";
+import { personKey, relayedPersonKey } from "./person-key.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
 import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
@@ -813,14 +815,16 @@ function messageSender(auth: RequestAuth): ResolvedSender | undefined {
   return name ? { name, id: actorKey(auth) } : undefined;
 }
 
-/** Hashed, so a message or a thread can carry it without handing other members a session id. */
-function personKey(session: Pick<SessionRecord, "id" | "email">): string {
-  const basis = session.email ? `email:${session.email.trim().toLowerCase()}` : `session:${session.id}`;
-  return `p_${createHash("sha256").update(basis).digest("base64url").slice(0, 22)}`;
-}
-
 function sharedMembership(): boolean {
   return hostedWorkspaceConfiguration()?.portalMembership === true || signInAllowList().members.length > 0;
+}
+
+/** Everyone is "user" where one person uses the workspace; where several do, each reacts as their own key. */
+function reactorFor(auth: RequestAuth): Reactor {
+  const shared = auth.kind === "session" && (sharedMembership() || (CLOUD_HOME !== null && !cloudOwnerSession(auth)));
+  if (!shared) return { by: "user" };
+  const name = messageSender(auth)?.name;
+  return { by: actorKey(auth), ...(name ? { name } : {}) };
 }
 
 function linePersonKey(message: Message | undefined): string | undefined {
@@ -1177,7 +1181,7 @@ function cloudCardAnswerer(card: { requestId?: string; answeredBy?: { kind: stri
   return card.requestId ? cloudCardAnswersInFlight.get(card.requestId) : undefined;
 }
 
-async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>, via?: "call"): Promise<void> {
+async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>, via?: DecisionVia): Promise<void> {
   const open = (() => {
     const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
     return Boolean(card && !card.answered && !card.dismissed && !card.expired);
@@ -5364,8 +5368,9 @@ async function respondToCard(input: {
   behavior: "allow" | "deny" | "answer";
   message?: string;
   callId?: string;
+  via: DecisionVia;
 }): Promise<CardRespondResult> {
-  const { auth, threadId, requestId, behavior, message, callId } = input;
+  const { auth, threadId, requestId, behavior, message, callId, via } = input;
   // A call outlives the request that started it: the session must still be valid.
   if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
     return { ok: false, status: 401, error: "The session that started this call has ended." };
@@ -5393,7 +5398,7 @@ async function respondToCard(input: {
         result = { ok: false, status: 401, error: "The session that started this call has ended." };
       } else {
         try {
-          await deliverLateQuestionAnswer(auth, threadId, requestId, answer, cardMessage, bot, "call", callId);
+          await deliverLateQuestionAnswer(auth, threadId, requestId, answer, cardMessage, bot, via === "call" ? via : undefined, callId);
         } catch (error) {
           result = { ok: false, status: 409, error: error instanceof Error ? error.message : "The late answer could not be queued." };
         }
@@ -5403,7 +5408,7 @@ async function respondToCard(input: {
     } else if (behavior === "answer" && outcome !== "answered") {
       result = { ok: false, status: 409, error: "The provider did not accept that answer. Try an offered option." };
     }
-  }, "call");
+  }, via);
   return result;
 }
 
@@ -7716,7 +7721,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId),
     threadBusy: threadBusy(botId, threadId),
@@ -7734,6 +7739,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       trigger,
       via,
       callId,
+      reaction: replyTo?.reactedWith,
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
@@ -7902,87 +7908,11 @@ async function acceptDirectSend(
   );
 }
 
-async function deliverLateQuestionAnswer(
-  auth: RequestAuth,
-  threadId: string,
-  requestId: string,
-  answer: string,
-  cardMessage: Message,
-  owner: BotRecord,
-  via?: "call",
-  callId?: string,
-): Promise<{ queued: boolean }> {
-  const group = store.groupByThread(threadId);
-  const roomTarget = group
-    ? group.dm
-      ? group.threadId === threadId
-      : Boolean(store.groupTaskByThread(group.id, threadId))
-    : false;
-  if (group && (!roomTarget || !group.memberIds.includes(owner.id))) {
-    throw Object.assign(new Error("the bot that asked this question is no longer in this conversation"), { status: 409 });
-  }
-  if (!group && !store.taskByThread(owner.id, threadId)) {
-    throw Object.assign(new Error("the question's conversation no longer exists"), { status: 409 });
-  }
-
-  const text = group ? `@${owner.name}: ${answer}` : answer;
-  const sendId = `late-question-${createHash("sha256").update(`${threadId}:${requestId}`).digest("hex").slice(0, 32)}`;
-  const key = group
-    ? `group:${group.id}:${threadId}:${sendId}`
-    : `bot:${owner.id}:${threadId}:${sendId}`;
-  const receipt = await sendSequencer.run(key, sendFingerprint(text, cardMessage.id, group ? "chat" : undefined), async () => {
-    const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, cardMessage.id, group ? "chat" : undefined);
-    if (accepted.kind === "conflict") throw Object.assign(new Error("this question already has a different recorded answer"), { status: 409 });
-    if (accepted.kind === "match") return { queued: false };
-
-    const queuedDirect = group ? null : queuedSteeredMessage(owner.id, threadId, sendId);
-    if (queuedDirect) {
-      if (queuedDirect.text !== text || queuedDirect.replyToId !== cardMessage.id) {
-        throw Object.assign(new Error("this question already has a different queued answer"), { status: 409 });
-      }
-      return { queued: true };
-    }
-    const queuedRoom = group ? queuedChannelMessage(group.id, threadId, sendId) : null;
-    if (queuedRoom) {
-      if (queuedRoom.text !== text || queuedRoom.replyToId !== cardMessage.id || queuedRoom.mode !== "chat") {
-        throw Object.assign(new Error("this question already has a different queued answer"), { status: 409 });
-      }
-      return { queued: true };
-    }
-
-    const latestCard = store.messagesFor(threadId).find((message) => message.id === cardMessage.id)?.card;
-    if (!latestCard || latestCard.answered || latestCard.dismissed) {
-      throw Object.assign(new Error("this question has already been answered"), { status: 409 });
-    }
-    assertWithinBudget(cfg, DATA_DIR);
-    const sender = messageSender(auth);
-    const trigger = usageTriggerFor(auth);
-    if (group) {
-      const current = store.group(group.id);
-      if (!current || !roomTarget) throw Object.assign(new Error("the room switched tasks before it could receive the answer"), { status: 409 });
-      if (groupThreadIsWorking(current.id, threadId)) {
-        const queued = queueChannelMessage(current.id, threadId, text, {
-          replyToId: cardMessage.id,
-          sendId,
-          mode: "chat",
-          sender,
-          trigger,
-        });
-        return { queued: true, queueId: queued.id };
-      }
-      startGroupTurn(current.id, text, cardMessage, sendId, "chat", undefined, { threadId, sender, trigger });
-      return { queued: false };
-    }
-    const direct = await startOrQueueDirectMessage(owner.id, threadId, text, cardMessage, sendId, sender, trigger, via, callId);
-    return { queued: "queued" in direct && Boolean(direct.queued) };
-  });
-
-  const latest = store.messagesFor(threadId).find((message) => message.id === cardMessage.id)?.card;
-  if (latest && !latest.answered && !latest.dismissed) {
-    store.patchMessage(threadId, cardMessage.id, { card: { ...latest, answered: "answer", answeredText: answer, dismissed: false } });
-  }
-  return receipt;
-}
+const personReplies = createPersonReplies({
+  store, sendSequencer, messageSender, usageTriggerFor, groupThreadIsWorking, startGroupTurn, startOrQueueDirectMessage,
+  assertWithinBudget: () => assertWithinBudget(cfg, DATA_DIR),
+});
+const { deliverLateQuestionAnswer } = personReplies;
 
 const MAX_THREADS_OPENED_PER_TURN = 5;
 
@@ -8189,7 +8119,7 @@ async function startTurn(
     requestMessageId?: string;
     origin?: WorkOrigin;
     computerSelectionContinuation?: boolean;
-    replyTo?: Message;
+    replyTo?: ReplyTarget;
     sendId?: string;
     via?: "call";
     callId?: string;
@@ -8281,7 +8211,7 @@ async function startTurn(
   else clearInternalTurn(threadId);
   if (answer.quiet) quietTurnThreads.add(threadId);
   else quietTurnThreads.delete(threadId);
-  if (resolvedImages.text.trim() && !opts?.cardContinuation) {
+  if (resolvedImages.text.trim() && !opts?.cardContinuation && !opts?.replyTo?.reactedWith) {
     const titled = store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
     const snippet = titled?.title;
     if (titled && snippet && !titled.openedBy?.botId && llmThreadTitlesEnabled(cfg) && instance.generateText) {
@@ -8328,6 +8258,7 @@ async function startTurn(
           kind: "text",
           text,
           replyToId: opts?.replyTo?.id,
+          reaction: opts?.replyTo?.reactedWith,
           sendId: opts?.sendId,
           ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}),
           peerAsk: opts?.peerAsk,
@@ -8486,11 +8417,11 @@ async function startTurn(
         ? skillsHost.expandSkillCommand(bot, providerText, instance)
         : providerText;
       const setupText = agentsMounted ? expandSetupTurnText(skillCommandText) : skillCommandText;
-      const userTurnText = promptWithReply(
+      const userTurnText = withReactionNotes(promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
         cfg.profile?.name?.trim() || "User",
-      );
+      ), personLine ? activeMessages : [], skipTranscript, cfg.profile?.name?.trim() || "User");
       const replay = usesNativeImageInput
         ? extractReplayImages(selection.inline, turnImages)
         : { transcript: selection.inline, images: [] };
@@ -10791,7 +10722,7 @@ async function runClaimedGroupMemberTurn(
     bot.description && `About: ${bot.description}`,
     `Room members: ${roster}, and ${userName} (the human).`,
     readyGroup.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${readyGroup.bulletin.trim()}`,
-    `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.${readyGroup.dm ? "" : ` To get ${userName}'s attention or ask them something blocking, write @you.`}`,
+    `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.${readyGroup.dm ? "" : ` To get ${userName}'s attention or ask them something blocking, write @you.`} A "[reacted 👍 to …]" line is that person's whole reply to the message it names: 👍 means yes, go ahead, and 👎 means no.`,
     outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom),
     integrations.agents && (CREDENTIAL_PROMPT + (orchestration && !orchestration.roomHandoffId ? THREADS_PROMPT : "")).trim(),
     integrations.agents && (!orchestration || orchestration.roomHandoffId) && "For actual OpenMausBot teamwork, discover IDs with list_room_targets and use coordinate_bots for advice or work in this or another room. Do not substitute native coding helpers for these named bots. Consult only when needed to make a decision; no discussion step is mandatory. Give concrete responsibilities, exact accessible paths and acceptance checks. End your turn after assigning; busy teammates queue and results automatically resume you. When they return, finish the requested verification and give the user one final answer. Native helper names are not evidence that an OpenMausBot teammate participated. Plain @mentions are only for conversational replies in this room." + requesterRule,
@@ -11617,7 +11548,7 @@ type StartGroupTurnOptions = {
 function startGroupTurn(
   groupId: string,
   text: string,
-  replyTo?: Message,
+  replyTo?: ReplyTarget,
   sendId?: string,
   channelMode: "chat" | "goal" = "chat",
   queueId?: string,
@@ -11666,6 +11597,7 @@ function startGroupTurn(
             kind: "text",
             text: item.text,
             replyToId: item.replyToId,
+            reaction: item.reaction,
             sendId: item.sendId,
             channelMode: item.mode,
             queueId: item.id,
@@ -11679,6 +11611,7 @@ function startGroupTurn(
           kind: "text",
           text: last.text,
           replyToId: replyTo?.id,
+          reaction: last.reaction,
           sendId: last.sendId,
           channelMode: last.mode,
           queueId: last.id,
@@ -11691,6 +11624,7 @@ function startGroupTurn(
         kind: "text",
         text,
         replyToId: replyTo?.id,
+        reaction: replyTo?.reactedWith,
         sendId,
         channelMode,
         queueId,
@@ -13298,7 +13232,14 @@ ROUTES.push(createBotMessageRoutes({
   resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
   deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome,
+  relayedReaction: (threadId, messageId, person, emoji) => void store.setReaction(threadId, messageId, relayedPersonKey(person),
+    { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
+const { react } = createReactions({
+  store, reply: (input) => personReplies.deliver({ ...input, about: "message" }),
+  answerCard: (input) => respondToCard({ ...input, via: "reaction" }), withdraw: personReplies.withdraw,
+});
+ROUTES.push(createReactionRoutes({ react, reactorFor, cloudGuestSendRefusal }));
 // `let` slots are read per request.
 ROUTES.push(createThreadRoutes({
   store, cfg, sessions, groupUsageReader, lendingEnabled,
@@ -13645,7 +13586,7 @@ const liveCalls = new LiveCallController({
     return { kind: receipt.steered ? "steered" : "started", messageId: receipt.message.id };
   },
   respond: async (input) => {
-    const result = await respondToCard(input);
+    const result = await respondToCard({ ...input, via: "call" });
     if (result.ok) return { ok: true };
     if (result.status === 401) throw new LiveCallSignedOutError();
     return { ok: false, error: result.error };
@@ -13941,6 +13882,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               ...(HOSTED_WORKSPACE ? { hosted: true } : {}),
               ...(CLOUD_HOME ? { cloudHome: true } : {}),
               ...(CLOUD_HOME && !cloudOwnerSession(auth) ? { cloudGuest: true, openedThreads: threadStarters.threadsOf(actorKey(auth), 2_000) } : {}),
+              ...(reactorFor(auth).by !== "user" ? { reactor: reactorFor(auth).by } : {}),
             },
       );
     }
@@ -16191,15 +16133,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return;
     }
 
-    m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/reactions$/);
-    if (m && method === "POST") {
-      const body = await readBody(req);
-      const emoji = String(body.emoji ?? "").slice(0, 8);
-      if (!emoji) return json(res, 400, { error: "emoji required" });
-      const patched = store.toggleReaction(m[1], m[2], emoji, typeof body.by === "string" ? body.by : "user");
-      if (!patched) return json(res, 404, { error: "no such message" });
-      return json(res, 200, { message: patched });
-    }
     if (path === "/api/sidebar-sections" && method === "GET") {
       return json(res, 200, { sections: store.sections });
     }
