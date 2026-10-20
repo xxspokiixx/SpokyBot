@@ -2,7 +2,7 @@ import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlin
 import { join } from "node:path";
 
 import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
-import { commitBotChange, keptRevocation, saveBotsFor } from "./bots-save.ts";
+import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
@@ -20,7 +20,7 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
-import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, type ApprovalMode } from "../shared/approval-mode.ts";
+import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
@@ -105,6 +105,12 @@ const TASK_PATCH_FIELDS = [
   "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
+
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null };
+
+function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
+  Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
+}
 
 function persistedPin<T extends { pinned?: boolean }>(task: T): T {
   if (task.pinned === true) return task;
@@ -828,7 +834,11 @@ export class Store {
   }
 
   private commitBotChange(bot: BotRecord, action: string, change: () => void, onRollback?: () => void) {
-    commitBotChange(bot, action, () => this.saveBots(), change, onRollback);
+    commitRegistryChange(bot, "bots.json", action, () => this.saveBots(), change, onRollback);
+  }
+
+  private commitGroupChange(group: GroupRecord, action: string, change: () => void) {
+    commitRegistryChange(group, "groups.json", action, () => this.saveGroups(), change);
   }
 
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
@@ -1012,8 +1022,8 @@ export class Store {
       group.setupCompletedAt = setup?.completed ? createdAt : null;
       group.setupSkippedAt = null;
     }
+    saveRegistryFor("groups.json", dm ? "the new chat" : "the new room", () => this.saveGroups([group, ...this.groups]));
     this.groups.unshift(group);
-    this.saveGroups();
     this.emit({ type: "group", groupId: group.id });
     return group;
   }
@@ -1030,26 +1040,24 @@ export class Store {
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
       this.rememberSections([patch.section]);
     }
-    const previousBusyBotId = group.busyBotId;
-    Object.assign(group, patch);
+    const { busyBotId, ...stored } = patch;
     if (Object.prototype.hasOwnProperty.call(patch, "busyBotId")) {
-      if (patch.busyBotId && patch.busyBotId !== previousBusyBotId) group.turnStartedAt = Date.now();
-      else if (!patch.busyBotId) delete group.turnStartedAt;
+      if (busyBotId && busyBotId !== group.busyBotId) group.turnStartedAt = Date.now();
+      else if (!busyBotId) delete group.turnStartedAt;
+      group.busyBotId = busyBotId ?? null;
     }
-    if (Object.prototype.hasOwnProperty.call(patch, "turnTimeoutMinutes") && patch.turnTimeoutMinutes == null) {
-      delete group.turnTimeoutMinutes;
-    }
-    if (!group.dm && Object.prototype.hasOwnProperty.call(patch, "pinnedMessageId")) {
-      const active = this.activeGroupTask(group.id);
-      if (active) active.pinnedMessageId = patch.pinnedMessageId;
-    }
-    group.defaultResponder = normalizeGroupDefaultResponder(
-      group.defaultResponder,
-      group.memberIds,
-      Boolean(group.dm),
-    );
-    if (Object.prototype.hasOwnProperty.call(patch, "memberIds")) pruneRoomHolds(group);
-    this.saveGroups();
+    this.commitGroupChange(group, group.dm ? "the chat's settings" : "the room's settings", () => {
+      Object.assign(group, stored);
+      if (Object.prototype.hasOwnProperty.call(stored, "turnTimeoutMinutes") && stored.turnTimeoutMinutes == null) {
+        delete group.turnTimeoutMinutes;
+      }
+      if (!group.dm && Object.prototype.hasOwnProperty.call(stored, "pinnedMessageId")) {
+        const active = this.activeGroupTask(group.id);
+        if (active) active.pinnedMessageId = stored.pinnedMessageId;
+      }
+      group.defaultResponder = normalizeGroupDefaultResponder(group.defaultResponder, group.memberIds, Boolean(group.dm));
+      if (Object.prototype.hasOwnProperty.call(stored, "memberIds")) pruneRoomHolds(group);
+    });
     this.emit({ type: "group", groupId: group.id });
     return group;
   }
@@ -1073,8 +1081,9 @@ export class Store {
   deleteGroup(id: string): boolean {
     const group = this.group(id);
     if (!group) return false;
-    this.groups = this.groups.filter((g) => g.id !== id);
-    this.saveGroups();
+    const remaining = this.groups.filter((g) => g.id !== id);
+    saveRegistryFor("groups.json", group.dm ? "the chat deletion" : "the room deletion", () => this.saveGroups(remaining));
+    this.groups = remaining;
     for (const threadId of new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)])) {
       this.deleteThreadRecord(threadId);
     }
@@ -1152,13 +1161,10 @@ export class Store {
       createdAt,
       updatedAt: createdAt,
     };
-    group.tasks = [task, ...(group.tasks ?? [])];
-    if (activate) {
-      group.threadId = task.threadId;
-      group.pinnedCwd = undefined;
-      group.pinnedMessageId = undefined;
-    }
-    this.saveGroups();
+    this.commitGroupChange(group, "the new thread", () => {
+      group.tasks = [task, ...(group.tasks ?? [])];
+      if (activate) mirrorActiveGroupTask(group, task);
+    });
     this.emit({ type: "group", groupId });
     return task;
   }
@@ -1167,49 +1173,34 @@ export class Store {
     const group = this.group(groupId);
     const task = group?.tasks?.find((candidate) => candidate.threadId === threadId);
     if (!group || group.dm || !task) return null;
-    group.threadId = task.threadId;
-    group.pinnedCwd = task.pinnedCwd;
-    group.pinnedMessageId = task.pinnedMessageId;
-    this.saveGroups();
+    this.commitGroupChange(group, "the thread switch", () => mirrorActiveGroupTask(group, task));
     this.emit({ type: "group", groupId });
     return group;
   }
 
-  setGroupTaskPinned(groupId: string, threadId: string, pinned: boolean): GroupTaskRecord | null {
+  patchGroupTask(groupId: string, threadId: string, patch: GroupTaskPatch): GroupTaskRecord | null {
+    const group = this.group(groupId);
     const task = this.groupTaskByThread(groupId, threadId);
-    if (!task) return null;
-    if (pinned) task.pinned = true;
-    else delete task.pinned;
-    this.saveGroups();
-    this.emit({ type: "group", groupId });
-    return task;
-  }
-
-  setGroupTaskTurnTimeout(groupId: string, threadId: string, minutes: number | null): GroupTaskRecord | null {
-    const task = this.groupTaskByThread(groupId, threadId);
-    if (!task) return null;
-    if (minutes == null) delete task.turnTimeoutMinutes;
-    else task.turnTimeoutMinutes = minutes;
-    this.saveGroups();
-    this.emit({ type: "group", groupId });
-    return task;
-  }
-
-  renameGroupTask(groupId: string, threadId: string, title: string): GroupTaskRecord | null {
-    const task = this.groupTaskByThread(groupId, threadId);
-    if (!task) return null;
-    task.title = title.trim().slice(0, 80) || UNTITLED_TASK;
-    this.saveGroups();
+    if (!group || !task) return null;
+    this.commitGroupChange(group, "the thread change", () => {
+      if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
+      if (patch.pinned) task.pinned = true;
+      else if (patch.pinned === false) delete task.pinned;
+      if (patch.turnTimeoutMinutes === null) delete task.turnTimeoutMinutes;
+      else if (patch.turnTimeoutMinutes !== undefined) task.turnTimeoutMinutes = patch.turnTimeoutMinutes;
+    });
     this.emit({ type: "group", groupId });
     return task;
   }
 
   titleGroupTaskFromFirstMessage(groupId: string, text: string, threadId?: string): GroupTaskRecord | null {
+    const group = this.group(groupId);
     const task = threadId ? this.groupTaskByThread(groupId, threadId) : this.activeGroupTask(groupId);
-    if (!task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK) return null;
-    task.title = titleFromMessage(text);
-    task.titleFromFirstMessage = true;
-    this.saveGroups();
+    if (!group || !task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK) return null;
+    this.commitGroupChange(group, "the thread's title", () => {
+      task.title = titleFromMessage(text);
+      task.titleFromFirstMessage = true;
+    });
     this.emit({ type: "group", groupId });
     return task;
   }
@@ -1217,7 +1208,7 @@ export class Store {
   retitleGroupTask(groupId: string, threadId: string, machineTitle: string, title: string): GroupTaskRecord | null {
     const task = this.groupTaskByThread(groupId, threadId);
     if (!task || task.title !== machineTitle) return null;
-    return this.renameGroupTask(groupId, threadId, threadTitleFrom(title));
+    return this.patchGroupTask(groupId, threadId, { title: threadTitleFrom(title) });
   }
 
   deleteGroupTask(groupId: string, threadId: string): GroupRecord | null {
@@ -1235,17 +1226,12 @@ export class Store {
     const missing = unique.filter((id) => !present.has(id));
     if (deleted.length >= group.tasks.length) return null;
     if (!deleted.length) return { group, deleted, missing };
-    mdb.deleteThreads(deleted);
     const doomed = new Set(deleted);
-    group.tasks = group.tasks.filter((task) => !doomed.has(task.threadId));
+    mdb.deleteThreads(deleted, () => this.commitGroupChange(group, "the thread deletion", () => {
+      group.tasks = group.tasks!.filter((task) => !doomed.has(task.threadId));
+      if (doomed.has(group.threadId)) mirrorActiveGroupTask(group, group.tasks[0]!);
+    }));
     for (const id of deleted) this.deleteThreadRecord(id, true);
-    if (doomed.has(group.threadId)) {
-      const next = group.tasks[0]!;
-      group.threadId = next.threadId;
-      group.pinnedCwd = next.pinnedCwd;
-      group.pinnedMessageId = next.pinnedMessageId;
-    }
-    this.saveGroups();
     this.emit({ type: "group", groupId });
     return { group, deleted, missing };
   }
@@ -2001,7 +1987,7 @@ export class Store {
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
     if (task) task.resumeCursors[instanceId] = cursor;
     if (!threadId || bot.threadId === threadId) bot.resumeCursors[instanceId] = cursor;
-    saveBotsFor("the conversation's engine session", () => this.saveBots());
+    saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBots());
     this.emit({ type: "bot", botId });
   }
 
@@ -2009,7 +1995,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || task.lastInstanceId === instanceId) return;
     task.lastInstanceId = instanceId;
-    saveBotsFor("which engine has this conversation", () => this.saveBots());
+    saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBots());
   }
 
   setHandedMessages(botId: string, threadId: string, instanceId: string, state: HandedState) {
@@ -2018,7 +2004,7 @@ export class Store {
     const live = Object.entries(task.handedMessages ?? {})
       .filter(([id, record]) => id !== instanceId && record.session !== undefined && record.session === task.resumeCursors[id]);
     task.handedMessages = { ...Object.fromEntries(live), [instanceId]: state };
-    saveBotsFor("what this conversation handed its engine", () => this.saveBots());
+    saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBots());
   }
 
   addTaskUsage(
@@ -2055,7 +2041,7 @@ export class Store {
         ? { context: { tokens: contextTokens, ...(contextWindow > 0 ? { window: contextWindow } : {}) } }
         : prev.context ? { context: prev.context } : {}),
     };
-    saveBotsFor("the thread's usage", () => this.saveBots());
+    saveRegistryFor("bots.json", "the thread's usage", () => this.saveBots());
     this.emit({ type: "bot", botId });
     return task.usage;
   }
@@ -2100,20 +2086,20 @@ export class Store {
     const task = threadId ? this.groupTaskByThread(groupId, threadId) : this.activeGroupTask(groupId);
     if (!task) {
       if (!group.dm) return null;
-      if (group.pinnedCwd === undefined) {
-        group.pinnedCwd = group.cwd ?? null;
-        this.saveGroups();
-        this.emit({ type: "group", groupId: group.id });
-      }
-      return group.pinnedCwd;
-    }
-    if (task.pinnedCwd === undefined) {
-      task.pinnedCwd = group.cwd ?? null;
-      if (group.threadId === task.threadId) group.pinnedCwd = task.pinnedCwd;
-      this.saveGroups();
+      if (group.pinnedCwd !== undefined) return group.pinnedCwd;
+      const cwd = group.cwd ?? null;
+      this.commitGroupChange(group, "the chat's folder", () => { group.pinnedCwd = cwd; });
       this.emit({ type: "group", groupId: group.id });
+      return cwd;
     }
-    return task.pinnedCwd;
+    if (task.pinnedCwd !== undefined) return task.pinnedCwd;
+    const cwd = group.cwd ?? null;
+    this.commitGroupChange(group, "the thread's folder", () => {
+      task.pinnedCwd = cwd;
+      if (group.threadId === task.threadId) group.pinnedCwd = cwd;
+    });
+    this.emit({ type: "group", groupId: group.id });
+    return cwd;
   }
 
   project(botId: string, projectId: string): BotProjectRecord | undefined {
@@ -2201,9 +2187,7 @@ export class Store {
       approvalGrant: bot.approvalGrant?.threadOnly && bot.approvalGrant.threadId !== threadId ? undefined : bot.approvalGrant,
       modelSelection: structuredClone(task.modelSelection ?? bot.modelSelection),
       resumeCursors: structuredClone(task.resumeCursors),
-      approvalMode: task.approvalMode ?? (task.autoApprove === undefined ? bot.approvalMode : undefined),
-      autoApprove: task.autoApprove ?? bot.autoApprove,
-      alwaysAllow: structuredClone(task.alwaysAllow ?? bot.alwaysAllow),
+      ...threadApproval(task, bot),
       unread: Boolean(task.unread),
       rewound: task.rewound,
       pinnedMessageId: task.pinnedMessageId,
@@ -2217,7 +2201,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
     if (patch.projectId !== undefined && !this.project(botId, patch.projectId)) return null;
-    const revocation = keptRevocation(task, patch);
+    const revocation = keptRevocation(threadApproval(task, bot), threadApproval({ ...task, ...patch }, bot), patch);
     this.commitBotChange(bot, "the thread change", () => {
       for (const key of TASK_PATCH_FIELDS) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) {
@@ -2379,7 +2363,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || !Number.isFinite(at) || (task.askedAt ?? -1) >= at) return task ?? null;
     task.askedAt = at;
-    saveBotsFor("when you last wrote in this thread", () => this.saveBots());
+    saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBots());
     this.emit({ type: "bot", botId });
     return task;
   }

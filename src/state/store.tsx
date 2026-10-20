@@ -18,6 +18,8 @@ import type { NotificationLogEntry } from "../../shared/notification";
 import { reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
+import { patchGroupTask } from "./thread-edits";
+import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
@@ -1883,49 +1885,12 @@ export function reducer(state: AppState, action: Action): AppState {
         ),
       }));
     case "renameGroupTask":
-      return {
-        ...state,
-        groups: state.groups.map((group) =>
-          group.id === action.groupId
-            ? {
-                ...group,
-                tasks: (group.tasks ?? []).map((task) =>
-                  task.threadId === action.threadId ? { ...task, title: action.title } : task,
-                ),
-              }
-            : group,
-        ),
-      };
+      return patchGroupTask(state, action.groupId, action.threadId, { title: action.title });
     case "pinGroupTask":
-      return {
-        ...state,
-        groups: state.groups.map((group) =>
-          group.id === action.groupId
-            ? {
-                ...group,
-                tasks: (group.tasks ?? []).map((task) =>
-                  task.threadId === action.threadId ? { ...task, pinned: action.pinned ? true : undefined } : task,
-                ),
-              }
-            : group,
-        ),
-      };
+      return patchGroupTask(state, action.groupId, action.threadId, { pinned: action.pinned ? true : undefined });
     case "setConversationTurnLimit":
-      return {
-        ...state,
-        groups: state.groups.map((group) => {
-          if (group.id !== action.groupId) return group;
-          if (action.dm) return { ...group, turnTimeoutMinutes: action.minutes ?? undefined };
-          return {
-            ...group,
-            tasks: (group.tasks ?? []).map((task) =>
-              task.threadId === action.threadId
-                ? { ...task, turnTimeoutMinutes: action.minutes ?? undefined }
-                : task,
-            ),
-          };
-        }),
-      };
+      if (!action.dm) return patchGroupTask(state, action.groupId, action.threadId, { turnTimeoutMinutes: action.minutes ?? undefined });
+      return { ...state, groups: state.groups.map((group) => group.id === action.groupId ? { ...group, turnTimeoutMinutes: action.minutes ?? undefined } : group) };
     case "taskSwitched": {
       let switched = updateBot(bumpTranscriptGeneration(state, action.bot.threadId), action.bot.id, (bot) => ({
         ...bot,
@@ -2368,6 +2333,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let creatingBot = false;
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
+    };
+    const showSavedState = (owner: SavedOwner) => (error: unknown) => {
+      showError(error);
+      void api<SavedSnapshot>("/api/bots?messages=0").then((snapshot) => {
+        const saved = savedStateAction(owner, snapshot);
+        if (saved?.type === "botPatched") rawDispatch({ ...saved, bot: withTaskWrites({ ...saved.bot, ...botPatchQueue.overlayFor(saved.bot.id) }) });
+        else if (saved) rawDispatch(saved);
+      }).catch(() => {});
     };
     const cardTarget = (action: { botId: string; messageId: string; groupId?: string }) => {
       const host = action.groupId
@@ -2959,7 +2932,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}`, {
             method: "PATCH",
             body: JSON.stringify(action.patch),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "deleteGroup":
           api(`/api/groups/${action.groupId}`, { method: "DELETE" }).catch(showError);
@@ -3079,7 +3052,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/bots/${action.botId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ title: action.title }),
-          }).catch(showError);
+          }).catch(showSavedState({ botId: action.botId }));
           break;
         case "regenerateTaskTitle":
           api(`/api/bots/${action.botId}/tasks/${action.threadId}/title`, { method: "POST" })
@@ -3105,19 +3078,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ title: action.title }),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "pinGroupTask":
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ pinned: action.pinned, title: action.title }),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "setConversationTurnLimit":
           api(action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ turnTimeoutMinutes: action.minutes }),
-          }).catch(showError);
+          }).catch(showSavedState({ groupId: action.groupId }));
           break;
         case "deleteGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "DELETE" })
