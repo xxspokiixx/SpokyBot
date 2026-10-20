@@ -35,6 +35,7 @@ describe("announcesAction", () => {
     "I'm in the VM. The user will launch XFCE Terminal first.",
     "The instructions say I will launch XFCE Terminal first.",
     "I'm in the VM and will launch XFCE Terminal first. Is that okay?",
+    "Let me know if you want the full report.",
     "The terminal is open and the task is complete.",
     `I'm in the VM and will launch the terminal. ${"x".repeat(400)}`,
   ])("leaves final replies, questions and long replies alone: %s", text => {

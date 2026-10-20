@@ -11,7 +11,6 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
-import { canonicalJson } from "../../shared/package-format.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
@@ -123,7 +122,8 @@ interface RuntimeOptions<Config> {
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
-  /** Recover unfinished action announcements with at most three nudges per turn, requiring tool progress between them. */
+  /** Smaller models announce a step and end the turn without calling a tool; such a reply gets a nudge, at most three
+   * per turn and each only after tool progress since the last. */
   nudgeAnnouncedAction?: boolean;
 }
 
@@ -200,7 +200,7 @@ export function announcesAction(text: string): boolean {
     return tail.length <= 400 && /^(?:let me|i['\u2019]ll|i will|i(?:['\u2019]m| am) going to)\s+(?:now\s+)?(?:execute|send|type|press|launch|open|check|inspect|read|fetch|run|create|write|verify)\b/i.test(tail);
   }
   return /(?:[:\u2014\u2013]|\.\.\.|\u2026)$/.test(reply) ||
-    /^(?:checking|let me|i'll|i will|i'm going to|i am going to|opening|pulling|looking|searching|navigating|reading|fetching|loading|now (?:i'll|let me|opening|checking|pulling|reading))\b/i.test(reply) ||
+    /^(?:checking|let me(?! know\b)|i'll|i will|i'm going to|i am going to|opening|pulling|looking|searching|navigating|reading|fetching|loading|now (?:i'll|let me|opening|checking|pulling|reading))\b/i.test(reply) ||
     /^i(?:['\u2019]m| am)\b[^.!?\n]*\band (?:i )?will\s+(?:launch|open|check|pull|look|search|navigate|read|fetch|load|run|inspect)\b/i.test(reply);
 }
 
@@ -596,8 +596,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const seenCalls = new Set<string>();
       let nudges = 0;
       let callsAtNudge = -1;
-      const dispatchedMutations = new Set<string>();
-      const protectedMutations = new Set<string>();
       try {
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
@@ -719,11 +717,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
               nudges += 1;
               callsAtNudge = seenCalls.size;
-              for (const signature of dispatchedMutations) protectedMutations.add(signature);
               messages.push({ role: "assistant", content: completion.text }, { role: "user", content: NUDGE_ANNOUNCED_ACTION });
               continue;
             }
-            stopReason = null;
             ok = true;
             break;
           }
@@ -776,10 +772,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               } else {
                 tools.validate(call.function.name, args);
                 const shown = tools.view(call.function.name, args as Record<string, unknown>);
-                const signature = canonicalJson([shown.title, shown.input]);
-                if (!shown.readOnly && protectedMutations.has(signature)) {
-                  throw new ChatToolSessionError("Refusing to repeat an operation from before automatic continuation: it may already have taken effect. Inspect its state and continue only the remaining work.");
-                }
                 const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
                 // This runtime has no provider reviewer, so Full access is honoured here.
                 const floored = approval.floored({ full: turn.approvalMode === "full", threadId: turn.threadId, botId: turn.botId, shown, summary: shownPreview });
@@ -791,7 +783,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 });
                 started = true;
                 if (allowed) {
-                  if (!shown.readOnly) dispatchedMutations.add(signature);
                   result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
                   if (result.images?.length && !seesImages(turn)) {
                     const { images: _dropped, ...rest } = result;

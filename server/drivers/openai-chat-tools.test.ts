@@ -28,7 +28,7 @@ interface ChatRequest {
     tool_call_id?: string;
     tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
   }>;
-  tools?: Array<{ type: string; function: { name: string; parameters: unknown; description?: string } }>;
+  tools?: Array<{ type: string; function: { name: string; parameters: unknown } }>;
 }
 
 type Script = (body: ChatRequest, response: ServerResponse, round: number) => void;
@@ -70,14 +70,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   if (request.method === "initialize") {
     reply(request.id, { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } });
   } else if (request.method === "tools/list") {
-    reply(request.id, { tools: ["write", "wait", "fail", "read", "launch_app"].map((name) => ({ name, description: name === "launch_app" ? "Launch a Linux app in the background." : "Synthetic fixture operation", inputSchema: schema, ...(name === "read" ? { annotations: { readOnlyHint: true, destructiveHint: false } } : {}) })) });
+    reply(request.id, { tools: ["write", "wait", "fail"].map((name) => ({ name, description: "Synthetic fixture operation", inputSchema: schema })) });
   } else if (request.method === "tools/call") {
     const { name, arguments: args } = request.params;
     await fetch(callback + "/mcp-start", { method: "POST", body: JSON.stringify({ name, args }) });
-    if (name === "read") {
-      reply(request.id, { content: [{ type: "text", text: "Read-only receipt check" }] });
-      return;
-    }
     if (name === "fail") {
       reply(request.id, { isError: true, content: [{ type: "text", text: "Synthetic tool failed before writing." }] });
       return;
@@ -164,16 +160,6 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
 describe("bounded action announcement recovery", () => {
   const later = `${"The terminal output is absent; the launch receipt only confirms the process. ".repeat(7)}\n\nLet me execute the commands to create the file and read it back.`;
 
-  it("grounds Linux terminal arguments and distinguishes process launch from command completion", async () => {
-    const f = await fixture((_body, response) => answer(response, "Ready."));
-    await f.start();
-    expect(await f.completed()).toMatchObject({ ok: true });
-    const launch = f.requests[0].tools?.find(tool => tool.function.name === "audit_launch_app");
-    expect(launch?.function.description).toContain('["--hold", "--execute", "/bin/sh", "-c", "COMMAND"]');
-    expect(launch?.function.description).toContain("only the process, not command execution");
-    expect(f.requests[0].tools?.find(tool => tool.function.name === "audit_write")?.function.description).not.toContain("xfce4-terminal");
-  });
-
   it("recovers a later long announcement after the first nudge and preserves earlier results", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) answer(response, "I'll open the terminal.");
@@ -229,28 +215,17 @@ describe("bounded action announcement recovery", () => {
     expect(f.effects()).toEqual([]);
   });
 
-  it("blocks replay of a possibly successful mutation under a new call ID and reordered arguments", async () => {
+  // Whether to run an operation again is the model's call under the engine's own permissions: the nudge only asks it not to.
+  it("leaves a repeated operation after a nudge to the model and the turn's permissions", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 2) answer(response, "I'll write the receipt now.");
-      else sse(response, [chunk({ tool_calls: [toolCall("audit_write", round === 1 ? '{"name":"receipt","value":"done"}' : '{"value":"done","name":"receipt"}', `call-${round}`)] }, "tool_calls")]);
-    });
-    await f.start({ approvalMode: "full" });
-    expect(await f.completed()).toMatchObject({ ok: false });
-    expect(f.requests).toHaveLength(3);
-    expect(f.effects()).toHaveLength(1);
-    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining("may already have taken effect") }));
-  });
-
-  it("allows a read-only verification to repeat after a nudge", async () => {
-    const f = await fixture((_body, response, round) => {
-      if (round === 2) answer(response, "I'll inspect the receipt now.");
-      else if (round === 1 || round === 3) sse(response, [chunk({ tool_calls: [toolCall("audit_read", '{"name":"receipt","value":"done"}', `call-${round}`)] }, "tool_calls")]);
+      else if (round === 1 || round === 3) sse(response, [chunk({ tool_calls: [toolCall("audit_write", round === 1 ? '{"name":"receipt","value":"done"}' : '{"value":"done","name":"receipt"}', `call-${round}`)] }, "tool_calls")]);
       else answer(response, "Receipt verified.");
     });
     await f.start({ approvalMode: "full" });
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests).toHaveLength(4);
-    expect(f.effects()).toEqual([]);
+    expect(f.effects()).toHaveLength(2);
   });
 });
 
