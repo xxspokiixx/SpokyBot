@@ -1,7 +1,7 @@
 import { createServer, request, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BROKER_PROCESS_TTL_MS, BROKER_THREAD_TTL_MS, BROKER_TOKEN_PREFIX, brokerUrl, openCredentialBroker, type CredentialBroker } from "./broker.ts";
@@ -18,6 +18,10 @@ function call(socketPath: string, method: string, path: string, headers: Record<
     req.on("error", reject);
     req.end(body);
   });
+}
+
+function localSocketPath(dir: string, name: string): string {
+  return process.platform === "win32" ? `\\\\.\\pipe\\${basename(dir)}-${name}` : join(dir, name);
 }
 
 describe("the credential broker", () => {
@@ -48,7 +52,7 @@ describe("the credential broker", () => {
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
     dir = mkdtempSync(join(tmpdir(), "omb-broker-"));
-    broker = await openCredentialBroker({ socketPath: join(dir, "b.sock"), now: () => clock });
+    broker = await openCredentialBroker({ socketPath: localSocketPath(dir, "b.sock"), now: () => clock });
     return (upstream.address() as { port: number }).port;
   }
 

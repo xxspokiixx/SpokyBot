@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, request } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
@@ -42,7 +43,10 @@ describe("the box's egress gate", () => {
   async function gate(options: Partial<Parameters<typeof openBoxEgressGate>[0]> = {}): Promise<BoxEgressGate> {
     const dir = mkdtempSync(join(tmpdir(), "omb-egress-"));
     cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
-    const opened = await openBoxEgressGate({ socketPath: join(dir, "e.sock"), ...options });
+    const socketPath = process.platform === "win32"
+      ? `\\\\.\\pipe\\omb-egress-${randomUUID()}`
+      : join(dir, "e.sock");
+    const opened = await openBoxEgressGate({ socketPath, ...options });
     cleanup.push(() => opened.close());
     return opened;
   }

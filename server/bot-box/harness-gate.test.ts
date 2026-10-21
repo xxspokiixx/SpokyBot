@@ -1,7 +1,7 @@
 import { createServer, request, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { harnessPathAllowed, openHarnessGate, type HarnessGate } from "./harness-gate.ts";
@@ -16,6 +16,10 @@ function call(socketPath: string, method: string, path: string, body?: string, h
     req.on("error", reject);
     req.end(body);
   });
+}
+
+function localSocketPath(dir: string, name: string): string {
+  return process.platform === "win32" ? `\\\\.\\pipe\\${basename(dir)}-${name}` : join(dir, name);
 }
 
 describe("the harness gate", () => {
@@ -46,7 +50,7 @@ describe("the harness gate", () => {
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
     dir = mkdtempSync(join(tmpdir(), "omb-harness-"));
-    gate = await openHarnessGate({ socketPath: join(dir, "h.sock"), port: (upstream.address() as { port: number }).port });
+    gate = await openHarnessGate({ socketPath: localSocketPath(dir, "h.sock"), port: (upstream.address() as { port: number }).port });
   }
 
   it("forwards the harness routes with their method, query, body and bearer, and streams an event stream", async () => {

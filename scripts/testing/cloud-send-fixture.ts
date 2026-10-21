@@ -236,10 +236,11 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   if (team) {
     const teamPort = await freePortBlock([0, 1]);
     const teamBase = `http://127.0.0.1:${teamPort}`;
+    const shutdown = `data:text/javascript,${encodeURIComponent('process.on("message", message => { if (message === "openmausbot:fixture-shutdown") process.emit("SIGTERM"); }); process.channel?.unref();')}`;
     const startTeam = (more: NodeJS.ProcessEnv = {}) => start("team", { OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: team.id, OMB_CLOUD_TEAM_NAME: team.name,
       OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
       OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...team.env, ...more },
-      teamPort, [], false, onePasswordToken, 0, team.engine ?? "", true);
+      teamPort, ["--import", shutdown], true, onePasswordToken, 0, team.engine ?? "", true);
     let teamServer = await startTeam();
     const as: CloudTeamFixture["as"] = async (token, method, path, body, headers = {}) => {
       const init: RequestInit = { method, headers: { ...EDGE, authorization: `Bearer ${token}`, ...headers,
@@ -272,7 +273,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         return answer.token as string;
       },
       async relaunch(more = {}) {
-        await waitForExit(teamServer, { signal: "SIGTERM" });
+        teamServer.send("openmausbot:fixture-shutdown");
+        await waitForExit(teamServer);
         teamServer = await startTeam(more);
       },
     };

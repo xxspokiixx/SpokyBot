@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
+import { detectBox } from "./detect.ts";
 import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
@@ -100,7 +101,11 @@ describe("BotBox", () => {
     expect(existsSync(join(dirs[0]!, "box"))).toBe(false);
   });
 
-  it("on: opens the two gates under the data folder, wraps every spawn and counts them", async () => {
+  it("leaves a Cloud home unboxed on non-Linux hosts", () => {
+    expect(detectBox({ env: { OMB_CLOUD_ROLE: "home" }, platform: "win32" })).toEqual({ box: "off", reason: "not-linux", tools: null });
+  });
+
+  it.skipIf(process.platform === "win32")("on: opens the gates under the data folder, wraps every spawn and counts them", async () => {
     const box = new BotBox();
     boxes.push(box);
     const dataDir = temp();
@@ -179,11 +184,12 @@ describe("spawnCli goes through the box", () => {
 
 describe("BoxRunner.lend", () => {
   it("puts a conversation's lent folders (a memory layer) back read-write in its boxes only, until they are taken back", () => {
-    const dataDir = "/data/.openmausbot";
-    const setup = { dataDir, home: "/data", codeRoots: ["/app"], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }] };
+    const home = join(tmpdir(), "omb-box-lend");
+    const dataDir = join(home, ".openmausbot");
+    const setup = { dataDir, home, codeRoots: ["/app"], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }] };
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
     const layer = join(dataDir, "workspaces", "bot-a--member-p_ada");
-    const request = { command: "/usr/bin/x", args: [], cwd: join(dataDir, "task-workspaces", "bot-a", "thread-1"), env: { PATH: "/usr/bin", HOME: "/data" } };
+    const request = { command: "/usr/bin/x", args: [], cwd: join(dataDir, "task-workspaces", "bot-a", "thread-1"), env: { PATH: "/usr/bin", HOME: home } };
     expect(runner.wrap(request).plan.writable).not.toContain(layer);
     runner.lend("bot-a", "thread-1", [layer]);
     expect(runner.wrap(request).plan.writable).toContain(layer);

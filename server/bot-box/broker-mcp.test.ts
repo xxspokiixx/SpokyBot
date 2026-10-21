@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
@@ -12,12 +12,16 @@ const custom = {
   files: { command: "npx", args: ["files-mcp"], env: { FILES_TOKEN: "stdio-secret" } },
 };
 
+function localSocketPath(dir: string, name: string): string {
+  return process.platform === "win32" ? `\\\\.\\pipe\\${basename(dir)}-${name}` : join(dir, name);
+}
+
 describe("remote MCP servers through the broker", () => {
   let dir: string, credentials: CredentialBroker;
   afterEach(async () => { await credentials?.close(); rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
   const broker = async (): Promise<BoxBroker> => {
     dir = mkdtempSync(join(tmpdir(), "omb-bmcp-"));
-    credentials = await openCredentialBroker({ socketPath: join(dir, "b.sock") });
+    credentials = await openCredentialBroker({ socketPath: localSocketPath(dir, "b.sock") });
     return { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup };
   };
 

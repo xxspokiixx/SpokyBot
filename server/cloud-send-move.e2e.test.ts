@@ -149,6 +149,7 @@ it("lines My Cloud already held of this computer's become its owner's when the m
   const lux = await newBot("Lux");
   await turn(local, lux, "Draft the launch memo.");
   expect((await fx.olderSend({ keys: [itemKey.bot(kai.id), itemKey.bot(lux.id)] })).result.bots.sort()).toEqual(["Kai", "Lux"]);
+  expect((await fx.olderSend()).result.chats?.messages).toBeGreaterThan(0);
   await asABringLeftThem([kai.threadId, lux.threadId]);
   for (const bot of [kai, lux]) {
     const brought = (await history(onCloud, bot.threadId)).rows.filter((row) => row.role === "user");
