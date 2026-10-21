@@ -36,7 +36,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       ...(typeof record.reactor === "string" ? { reactor: record.reactor } : {}),
-      ...(teamSessionOf(record.team) ? { team: teamSessionOf(record.team)! } : {}),
+      ...(teamSessionOf(record.team) ? { team: teamSessionOf(record.team)!, openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [] } : {}),
       ...(record.cloudGuest === true ? {
         cloudGuest: true as const,
         openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [],

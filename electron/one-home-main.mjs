@@ -3,12 +3,13 @@
 // Cloud ends (one-home-again.mjs). The Admin's word decides: a move starts only for an account it lets move, to a Cloud
 // that is ready, and a Cloud it holds after it ended is the one signal that brings everything home.
 import { createReadStream, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
 import { createOneHome } from "./one-home.mjs";
+import { installTeamMove } from "./team-move-main.mjs";
 
 const MOVE_LABEL = "Move to My Cloud";
 const HOME_LABEL = "Bring My Cloud home";
@@ -62,16 +63,23 @@ async function answer(response) {
  *   version?: string,
  *   log?(line: string): void,
  *   journal?: { read(): unknown, write(value: unknown): void },
+ *   openTeam?(team: { id: string, name: string }): void,
+ *   teamJournal?: { read(): unknown, write(value: unknown): void },
  * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header). `account`: the MausBot
- * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default. The rest are
- * installCloudSend's.
+ * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default. `openTeam`:
+ * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
+ * `teamJournal`, team-moves.json beside this one by default). The rest are installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, ...sendDeps }) {
+export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, openTeam, teamJournal, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
   const watched = new WeakSet();
-  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home });
+  let teamMove = null;
+  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home, teamMove: () => teamMove });
+  teamMove = installTeamMove({ ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
+    file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
+    onChange: () => send.publish(), log });
   const journal = kept ?? jsonFile(journalFile);
   /** When the person last typed or clicked in the window. */
   const typed = () => {
@@ -79,6 +87,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     if (win && !win.isDestroyed?.() && !watched.has(win.webContents)) {
       watched.add(win.webContents);
       win.webContents.on?.("before-input-event", () => { lastInput = Date.now(); });
+      // A watch set up just now has seen nothing yet: it counts as a key now, never as "typed long ago".
+      lastInput = Math.max(lastInput, Date.now());
     }
     return lastInput;
   };
@@ -118,7 +128,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
 
   home = createOneHome({
     journal,
-    cloud: () => oneHomeCloud(account()?.state()),
+    // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
+    cloud: () => { typed(); return oneHomeCloud(account()?.state()); },
     send,
     local: {
       ...local,
@@ -147,12 +158,14 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
 
   return {
     ...send,
-    /** Goes on with the move: at launch, and whenever the MausBot Cloud sign-in changes. */
-    kick: () => home.kick(),
+    /** Goes on with the move, and with any bot moving into a team: at launch, and whenever the MausBot Cloud sign-in changes. */
+    kick: () => { void teamMove.kick(); return home.kick(); },
     /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */
     away: () => home.away(),
     view: () => home.view(),
-    close: () => home.close(),
+    close: () => { teamMove.close(); home.close(); },
+    /** A bot moving from My Cloud into a team (team-move-main.mjs). */
+    teamMove,
     oneHome: home,
     /** The journal as it is on disk. */
     journal: () => journal.read(),

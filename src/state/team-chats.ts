@@ -1,18 +1,19 @@
-// On a team's Cloud a bot's main chat is the team's; a conversation a person opens with the bot is theirs (T2: private to
+// On a team's Cloud a bot's main chat is the team's; a conversation a person opens with the bot is theirs (private to
 // them and the team's admins, `private: true` on the wire). Clicking a team bot in the sidebar opens that conversation,
 // and makes it the first time through the server's own new-conversation route (POST /api/bots/<id>/tasks), which records
 // the person who opened it. Group chats and every other place open as before.
 //
-// The server tells no one which private chat is theirs: a Member only ever sees their own, but an Admin sees every
-// member's too. So an Admin's is the one this device opened (kept per team in this page's storage), never one merely
-// marked private; on another device an Admin gets a new conversation rather than someone else's.
+// A Member only ever sees their own private chats, but an Admin sees every member's too. So the server tells each person
+// which conversations they opened (`openedThreads` on /api/auth/session), and an Admin's own is one of those, on any
+// device, never one merely marked private.
 import { useEffect } from "react";
 import { api } from "./api";
 import type { Action, Bot } from "./store";
 import { readSessionState } from "@/lib/session";
 
-/** The team on screen and whether this person is a Member (no admin scope): null anywhere but a team's Cloud. */
-export type TeamChats = { teamId: string; member: boolean };
+/** The team on screen, whether this person is a Member (no admin scope), and the conversations the server says they
+ * opened: null anywhere but a team's Cloud. */
+export type TeamChats = { teamId: string; member: boolean; opened?: readonly string[] };
 
 type TaskLike = { threadId: string; createdAt?: number; updatedAt?: number; private?: unknown; routineRunId?: unknown; openedBy?: unknown; archivedAt?: unknown; closedBy?: unknown };
 type BotLike = { id: string; tasks?: TaskLike[] };
@@ -25,33 +26,22 @@ export function teamChats(): TeamChats | null {
   return current;
 }
 
-const KEY = (teamId: string) => `omb.team-own-chats.${teamId}`;
-function storage(): Pick<Storage, "getItem" | "setItem"> | null {
-  try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
-}
-function kept(teamId: string): Record<string, string> {
-  try {
-    const value: unknown = JSON.parse(storage()?.getItem(KEY(teamId)) ?? "{}");
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, string> : {};
-  } catch { return {}; }
-}
-export function rememberOwnChat(teamId: string, botId: string, threadId: string) {
-  try { storage()?.setItem(KEY(teamId), JSON.stringify({ ...kept(teamId), [botId]: threadId })); } catch {}
+/** A conversation this page just made: the person's own, which the session it read before does not list yet. */
+export function rememberOwnChat(teamId: string, threadId: string) {
+  if (current?.teamId === teamId && !current.opened?.includes(threadId)) current = { ...current, opened: [...(current.opened ?? []), threadId] };
 }
 
 /** A person's own conversation: private, open, and opened by a person (not a routine's report or a bot's thread). */
 const ownKind = (task: TaskLike) => task.private === true && !task.routineRunId && !task.openedBy && !task.archivedAt && !task.closedBy;
+const newest = (tasks: TaskLike[]) => [...tasks].sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))[0];
 
-/** The conversation clicking this team bot opens: the one this device opened for this person while it is still theirs,
- * else, for a Member, their newest; null when there is none yet (one is made). Never the main chat, and for an Admin
- * never a chat only marked private. */
+/** The conversation clicking this team bot opens: the person's newest own (for an Admin, of those the server says they
+ * opened); null when there is none yet (one is made). Never the main chat, and for an Admin never a chat only marked
+ * private. */
 export function ownChatOf(bot: BotLike, team: TeamChats): string | null {
   const own = (bot.tasks ?? []).filter(ownKind);
-  const mine = kept(team.teamId)[bot.id];
-  if (mine && own.some((task) => task.threadId === mine)) return mine;
-  if (!team.member) return null;
-  const newest = [...own].sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))[0];
-  return newest?.threadId ?? null;
+  const opened = new Set(team.opened ?? []);
+  return newest(team.member ? own : own.filter((task) => opened.has(task.threadId)))?.threadId ?? null;
 }
 
 const making = new Set<string>();
@@ -66,7 +56,7 @@ export function openOwnTeamChat(dispatch: (action: Action) => void, bot: BotLike
   making.add(bot.id);
   void api<{ bot?: Bot; task?: { threadId?: string } }>(`/api/bots/${bot.id}/tasks`, { method: "POST", body: "{}" })
     .then((response) => {
-      if (typeof response?.task?.threadId === "string") rememberOwnChat(team.teamId, bot.id, response.task.threadId);
+      if (typeof response?.task?.threadId === "string") rememberOwnChat(team.teamId, response.task.threadId);
       if (!response?.bot) return;
       dispatch({ type: "taskSwitched", bot: response.bot });
       dispatch({ type: "select", id: bot.id });
@@ -91,7 +81,7 @@ export function useTeamChats(config: unknown) {
     setTeamChats({ teamId, member: false });
     let alive = true;
     void readSessionState().then((session) => {
-      if (alive && session.kind === "session") setTeamChats({ teamId, member: !session.scopes.includes("admin") });
+      if (alive && session.kind === "session") setTeamChats({ teamId, member: !session.scopes.includes("admin"), opened: session.openedThreads ?? [] });
     }).catch(() => {});
     return () => { alive = false; };
   }, [teamId]);

@@ -343,6 +343,13 @@ const bridge = {
     dismiss: signature => ipcRenderer.invoke("cloud-send:dismiss", String(signature)),
     moveRetry: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:move-retry") : Promise.reject(new Error("Choose Try again to move.")),
+    // My Cloud's page: a bot of its moving into one of its person's teams.
+    teams: () => ipcRenderer.invoke("cloud-send:teams"),
+    moveToTeam: (botId, teamId, name) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-move", String(botId), String(teamId), String(name ?? "")) : Promise.reject(new Error("Choose Move to move the bot.")),
+    teamRetry: () => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
+    openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
     onNotice: cb => {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);

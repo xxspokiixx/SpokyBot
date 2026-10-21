@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
+import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
 import { movesThreadToTop } from "../../shared/wire";
 import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-surface";
 import type { NotificationLogEntry } from "../../shared/notification";
@@ -128,10 +128,10 @@ export interface SecretRequestCardData {
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "routedBy" | "quickModel" | "automation"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "routedBy" | "quickModel" | "automation" | "publishedPage"> {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
   compaction?: import("../../shared/wire").WireMessage["compaction"];
@@ -290,7 +290,7 @@ export interface Bot {
   projects?: BotProject[];
   name: string;
   title: string;
-  description: string;
+  description: string; movedTo?: BotMovedTo;
   soul?: string;
   soulDrift?: boolean;
   notifications: boolean;

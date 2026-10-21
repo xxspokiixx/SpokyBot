@@ -279,6 +279,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/search$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  // an app row's document is transcript data, read under the transcript's rules
+  { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/export$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/evidence(?:\.tar|\/[A-Za-z0-9-]{8,64}\/step-\d{6,12}\.jpg)?$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/ },
@@ -313,6 +315,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/(?:resume|dismiss)$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/always-allow$/ }, // must match a pending card
+  // an app reaches only its own MCP server, under the bot's rules; its context is bounded text
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/(?:rpc|context)$/ },
   { methods: ["POST"], path: /^\/api\/groups$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/messages$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/interrupt$/ },
@@ -348,6 +352,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/config$/ },
   // a person's own "About you" on a Team Cloud
   { methods: ["GET", "PUT"], path: /^\/api\/me$/ },
+  // a Team Cloud's member moving a bot of their own in: it answers with a sign-in for that one bot
+  { methods: ["POST"], path: /^\/api\/team-move-in$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
@@ -393,6 +399,8 @@ export interface ResolveOptions {
   cliOwnerToken?: string;
   /** resolveLoopbackTrust's `localBrowsers`: a development server lets this machine's browsers use loopback trust. */
   trustLocalBrowser?: boolean;
+  /** Why a session made for one task may not make this request (a Team Cloud's sign-in that moves one bot in), else null. */
+  restricted?(session: SessionRecord, method: string, path: string, url: URL): string | null;
 }
 
 const CLI_OWNER_HEADER = "x-openmausbot-cli-owner";
@@ -455,6 +463,8 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     if (via === "cookie" && session.cookieOnly && !["GET", "HEAD", "OPTIONS"].includes(method) && !provesSameOrigin(req)) {
       return deny(403, "forbidden: this browser's session makes changes only from its own page");
     }
+    const narrowed = options.restricted?.(session, method, path, options.url) ?? null;
+    if (narrowed) return deny(403, narrowed);
     const needed = requiredScope(method, path, options.features ?? {});
     if (!session.scopes.includes(needed)) {
       return deny(403, `forbidden: this session lacks the ${needed} scope`);

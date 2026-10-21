@@ -102,7 +102,8 @@ const addCounts = (total, sent) => countsOf({ ...Object.fromEntries(COUNTED.map(
   chats: { conversations: total.chats.conversations + (sent.chats?.conversations ?? 0), messages: total.chats.messages + (sent.chats?.messages ?? 0) } });
 
 /** The state main keeps in its own folder: per Cloud what was sent, what the person kept here, the bots a send made
- * there whose fields still wait to be recorded (`created`), the sign-ins My Cloud took that this computer still holds
+ * there whose fields still wait to be recorded (`created`), the bots a send asked My Cloud to make and has not heard back
+ * about (`creating`), the sign-ins My Cloud took that this computer still holds
  * (`release`), the bot files a move put there (`files`, path to sha256), and whether each automation a move carried was
  * on here (`on`). */
 export function parseSendState(value) {
@@ -120,6 +121,7 @@ export function parseSendState(value) {
         chats: record(entry.chats) ? Object.fromEntries(Object.entries(entry.chats).filter(([threadId, cursor]) => /^[\w-]{1,200}$/u.test(threadId)
           && (cursor === "removed" || (record(cursor) && Number.isSafeInteger(cursor.after) && typeof cursor.id === "string")))) : {},
         created: record(entry.created) ? Object.fromEntries(Object.entries(entry.created).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
+        creating: record(entry.creating) ? Object.fromEntries(Object.entries(entry.creating).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
         release: Array.isArray(entry.release) ? entry.release.filter((held) => record(held) && typeof held.id === "string" && typeof held.digest === "string").slice(0, 200) : [],
         files: record(entry.files) ? Object.fromEntries(Object.entries(entry.files).filter(([path, sha]) => typeof sha === "string" && /^[a-f0-9]{64}$/u.test(sha) && path.length <= 4096)) : {},
         on: record(entry.on) ? Object.fromEntries(Object.entries(entry.on).filter(([key, on]) => /^(?:routine|call|webhook|app-event):[\w-]{1,128}$/u.test(key) && typeof on === "boolean")) : {},
@@ -186,18 +188,25 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  *   now?: () => number,
  *   engineWaitMs?: number,
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
+ *   team?: { bot: string, name: string, label: string },
  * }} deps `open({ move: true })`: the move's session, which counts as someone using My Cloud. `engineWaitMs`: how long a
  * move waits for My Cloud to run the engines whose keys it just took. `local(route, { method })`: a change on this
- * computer's server (an app event My Cloud now collects). `space`: My Cloud's plan disk and the Admin's grow.
+ * computer's server (an app event My Cloud now collects). `space`: My Cloud's plan disk and the Admin's grow. `team`: a
+ * move of this one bot into a team (team-move.mjs): only the bot, its skills, files, chats and routines go, under the
+ * name the team gave it; never apps, keys, logins, settings or its notes about the person. `local` is then the bot's
+ * own Cloud, and `label` names the person beside a file or bot of the same name.
  */
-export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space }) {
+export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space, team = null }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
   let running = null, progress = null;
+  const only = team?.bot ?? null;
+  /** A route as a move of one bot asks it of either side: kept to that bot. */
+  const scoped = (route) => (only ? `${route}${route.includes("?") ? "&" : "?"}bot=${only}` : route);
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
   function persist() { try { store.write(saved); } catch {} }
-  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, release: [], files: {}, on: {} });
+  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, creating: {}, release: [], files: {}, on: {} });
   /** What a move ignores of what the person kept here: everything goes but what was removed on My Cloud. */
   const removedOnly = (off) => Object.fromEntries(Object.entries(off).filter(([, why]) => why === "removed"));
   const connectionLocal = { json: (route) => localJson(route), handoff: (what) => handoff(what) };
@@ -224,14 +233,15 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   }
   const publish = () => { const value = snapshot(); try { onChange(value); } catch {} return value; };
 
+  const allowed = (route) => LOCAL_ROUTE.test(route.replace(/[?&]bot=[\w-]{1,128}$/u, ""));
   async function localJson(route) {
-    if (!LOCAL_ROUTE.test(route)) throw new CloudSendError("invalid", "Unsupported local request.");
+    if (!allowed(route)) throw new CloudSendError("invalid", "Unsupported local request.");
     const response = await local(route);
     if (!response.ok) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
     return response.json();
   }
   async function localBytes(route) {
-    if (!LOCAL_ROUTE.test(route)) throw new CloudSendError("invalid", "Unsupported local request.");
+    if (!allowed(route)) throw new CloudSendError("invalid", "Unsupported local request.");
     const response = await local(route);
     if (!response.ok) return null;
     return new Uint8Array(await response.arrayBuffer());
@@ -242,7 +252,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     await response.body?.cancel();
     return { ok: response.ok, status: response.status };
   }
-  const kinds = createMoveKinds({ localJson, localBytes, localSend, entry, persist, refusal, space,
+  const kinds = createMoveKinds({ localJson, localBytes, localSend, entry, persist, refusal, space, scoped,
     progress: (value) => { progress = value; publish(); } });
 
   async function readCloud() {
@@ -262,6 +272,17 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     let changed = false;
     for (const [key, parts] of Object.entries(planned.baseline)) { kept.sent[key] = { ...kept.sent[key], ...parts }; changed = true; }
     for (const key of planned.removed) { kept.off[key] = "removed"; delete kept.sent[key]; delete kept.created[key]; changed = true; }
+    if (everything) {
+      // A move has nobody to ask: a part both sides hold otherwise is My Cloud's (§2.2), and recorded as settled, so the
+      // move's check (manifestGaps) agrees with this plan instead of calling it missing on every pass.
+      const here = new Map((mine?.items ?? []).map((item) => [item.key, item])), there = new Map((theirs?.items ?? []).map((item) => [item.key, item]));
+      for (const row of planned.rows) {
+        for (const part of row.differs ?? []) {
+          kept.sent[row.key] = { ...kept.sent[row.key], [part]: [here.get(row.key).parts[part], there.get(row.key)?.parts[part] ?? EMPTY] };
+          changed = true;
+        }
+      }
+    }
     if (changed) persist();
     return planned;
   }
@@ -312,7 +333,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
 
   async function sendTo(origin, job, { keys, force, reason }) {
     const result = { ...emptyResult(), ...(reason === "move" ? movedResult() : {}) };
-    const mine = parseSendSummary(await localJson(reason === "move" ? "/api/cloud-send?move=1" : "/api/cloud-send"));
+    const mine = parseSendSummary(await localJson(reason === "move" ? scoped("/api/cloud-send?move=1") : "/api/cloud-send"));
     if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
     const withChats = !keys && CHAT_REASONS.has(reason);
     const latest = await sendItems(origin, mine, result, { keys, force, job, withChats });
@@ -338,18 +359,20 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * app event goes only in the final pass, when this computer lets go of it. */
   async function sendItems(origin, mine, result, { keys, force, job, withChats }) {
     const move = job.reason === "move";
-    const summaryRoute = move ? "/api/cloud-send?move=1" : "/api/cloud-send";
+    const summaryRoute = move ? scoped("/api/cloud-send?move=1") : "/api/cloud-send";
     const session = await cloud.open(move ? { move: true } : undefined).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
     try {
       const before = await session.call("GET", summaryRoute);
       if (before.status === 404) throw new CloudSendError("outdated", move ? OUTDATED_FOR_MOVE : "My Cloud needs an update before it can receive bots from this computer. It updates by itself; try again later.");
       const theirs = before.ok ? parseSendSummary(before.body) : null;
       if (!theirs) throw new CloudSendError("unreachable", refusal(before, "My Cloud did not answer. Try again."));
-      let computer = null;
+      let computer = team ? { label: team.label } : null;
       if (move) {
         await assertTakesMove(session);
-        computer = await moveConnections(origin, session, result, job.final);
+        // A bot moving into a team carries nothing of the person's: their apps and keys stay.
+        if (!team) computer = await moveConnections(origin, session, result, job.final);
       }
+      settleCreating(origin, theirs);
       const planned = plan(origin, mine, theirs, force, { everything: move });
       const wanted = keys ? new Set(keys) : null;
       const rows = pendingRows(planned).filter((row) => !wanted || wanted.has(row.key) || (row.bot && wanted.has(itemKey.bot(row.bot))))
@@ -374,7 +397,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       for (const row of rows.filter((entry) => !automations.has(entry.kind)).sort((a, b) => order[a.kind] - order[b.kind])) await goRow(row);
       const moved = move ? await movedBots(ctx) : [];
       if (move) {
-        await kinds.moveMemory(ctx, moved);
+        // Its notes about the person stay with them when a bot moves into a team.
+        if (!team) await kinds.moveMemory(ctx, moved);
         try { await kinds.moveFiles(ctx, moved, computer?.label); }
         catch (error) { result.failed.push({ key: "files", kind: "files", label: "Files", error: sentence(error?.message) ?? "The files could not be sent." }); }
       }
@@ -393,7 +417,11 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (move) {
         try { result.conversationSettings = await kinds.moveSettings(ctx); }
         catch (error) { result.failed.push({ key: "conversation-settings", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats' settings could not be added." }); }
-        for (const row of rows.filter((entry) => automations.has(entry.kind))) await goRow(row);
+        const last = rows.filter((entry) => automations.has(entry.kind));
+        for (const row of last) await goRow(row);
+        // The pass's closing plan reads My Cloud as it is now: read before the automations went, it would take each one
+        // just carried for one removed there.
+        if (last.length) return parseSendSummary((await session.call("GET", summaryRoute)).body) ?? latest;
       }
       return latest;
     } finally {
@@ -436,7 +464,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * not kept here (`everything`: whatever was kept here), and of rooms, which My Cloud makes once one of their bots is
    * there. */
   async function chatsWaiting(origin, theirs, { everything = false } = {}) {
-    const listed = await localJson("/api/cloud-send/chats");
+    const listed = await localJson(scoped("/api/cloud-send/chats"));
     const kept = entry(origin);
     const cloudBots = new Set(theirs.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id));
     const id = (value) => typeof value === "string" && /^[\w-]{1,128}$/u.test(value);
@@ -448,7 +476,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (cursor === "removed" || (head.bot && (!cloudBots.has(head.bot) || keptHere(head.bot)))) return false;
       return !cursor || cursor.after !== head.last || cursor.id !== head.lastId;
     });
-    return { dataDir: typeof listed?.dataDir === "string" ? listed.dataDir : "", ready: waiting.filter((head) => !head.busy), busy: waiting.filter((head) => head.busy).length };
+    return { dataDir: typeof listed?.dataDir === "string" ? listed.dataDir : "", ready: waiting.filter((head) => !head.busy), busy: waiting.filter((head) => head.busy).length,
+      owner: team && typeof listed?.owner === "string" && /^p_[\w-]{22}$/u.test(listed.owner) ? listed.owner : null };
   }
 
   /** Each waiting conversation's new rows, page by page, a few conversations per request; the cursor moves only past
@@ -456,7 +485,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * The attachments those rows name go first, unless My Cloud has them. `result.chats.left`: the conversations that did
    * not all go (a bot answering in one, or My Cloud not taking a page), for the next send. */
   async function sendChatRows(origin, session, theirs, result, { everything = false } = {}) {
-    const { dataDir, ready, busy } = await chatsWaiting(origin, theirs, { everything });
+    const { dataDir, ready, busy, owner: from } = await chatsWaiting(origin, theirs, { everything });
     const kept = entry(origin);
     const total = ready.length;
     const held = new Set();
@@ -484,7 +513,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
           if (!stored.ok) throw new CloudSendError("refused", refusal(stored, "My Cloud could not take an attachment of the chats."));
         }
       }
-      const answer = await session.call("POST", "/api/cloud-send/chats", { v: 1, dataDir,
+      // Into a team: whose lines on My Cloud become the mover's there.
+      const answer = await session.call("POST", "/api/cloud-send/chats", { v: 1, dataDir, ...(from ? { owner: from } : {}),
         conversations: batch.map(({ owner, threadId, task, rows, leaf, sent }) => ({ ...owner, threadId, task, rows, leaf, sent })) });
       if (!answer.ok) throw new CloudSendError("refused", refusal(answer, "My Cloud could not add the chats."));
       const accepted = new Set(Array.isArray(answer.body?.accepted) ? answer.body.accepted : []);
@@ -530,7 +560,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   /** A move has My Cloud make its owner's lines and answers its owner's among the rows it already held of this computer's
    * bots, which an earlier send or a Bring left naming nobody: this computer's row ids go, never a row. */
   async function stampHeld(origin, session, theirs) {
-    const listed = await localJson("/api/cloud-send/chats");
+    const listed = await localJson(scoped("/api/cloud-send/chats"));
     const kept = entry(origin);
     const cloudBots = new Set(theirs.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id));
     const threads = (Array.isArray(listed?.conversations) ? listed.conversations : []).filter((head) => record(head) && cloudBots.has(head.bot)
@@ -572,10 +602,24 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   async function recordItem(ctx, key) {
     const keys = [...ctx.sentKeys].filter((sent) => !ctx.recorded.has(sent));
     if (!keys.length) return;
-    const answer = await ctx.session.call("GET", `/api/cloud-send?item=${encodeURIComponent(key)}${ctx.move ? "&move=1" : ""}`);
+    const answer = await ctx.session.call("GET", scoped(`/api/cloud-send?item=${encodeURIComponent(key)}${ctx.move ? "&move=1" : ""}`));
     const after = answer.ok ? parseSendSummary(answer.body) : null;
     if (!after) return;
     remember(ctx.origin, ctx, after, keys);
+    persist();
+  }
+
+  /** A bot a send asked My Cloud to make and never heard back about: one My Cloud has is that send's own, so all its
+   * fields go (`created`); one it lacks was never made, and goes as new. */
+  function settleCreating(origin, theirs) {
+    const kept = entry(origin);
+    const waiting = Object.keys(kept.creating ?? {});
+    if (!waiting.length) return;
+    const there = new Set(theirs.items.map((item) => item.key));
+    for (const key of waiting) {
+      if (there.has(key)) { kept.sent[key] ??= {}; kept.created[key] = true; }
+      delete kept.creating[key];
+    }
     persist();
   }
 
@@ -586,6 +630,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const kept = entry(ctx.origin);
     kept.sent[key] ??= {};
     kept.created[key] = true;
+    delete kept.creating[key];
     persist();
   }
 
@@ -640,6 +685,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
 
   /** A move keeps both of two different bots of one name: the one arriving is named after this computer. */
   async function arrivingName(ctx, bot) {
+    if (team) return team.name;
     if (!ctx.move || !ctx.computer) return bot.name;
     ctx.cloudNames ??= ctx.session.call("GET", "/api/bots?messages=0")
       .then((listed) => (Array.isArray(listed.body?.bots) ? listed.body.bots : []).filter(record), () => []);
@@ -652,7 +698,11 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const bot = (await localBots(ctx)).get(row.id);
     if (!bot) throw new CloudSendError("gone", "This bot is no longer on this computer.");
     const model = record(bot.modelSelection) ? pick(bot.modelSelection, ["instanceId", "model", "effort", "variant"]) : null;
-    const base = { id: bot.id, threadId: bot.threadId, name: await arrivingName(ctx, bot), useDefaults: false };
+    // A bot that moves into a team gets a main chat of the team's own there; its chats with the person arrive as theirs.
+    const base = { id: bot.id, ...(team ? {} : { threadId: bot.threadId }), name: await arrivingName(ctx, bot), useDefaults: false };
+    // Kept before asking: a send cut short while My Cloud makes the bot still knows the bot is its own (settleCreating).
+    entry(ctx.origin).creating[row.key] = true;
+    persist();
     let created = await ctx.session.call("POST", "/api/bots", { ...base, ...(model ? { modelSelection: model, requireAvailableModel: true } : {}) });
     let modelKept = Boolean(model) && created.ok;
     if (!created.ok && model && created.status === 400) {
@@ -815,8 +865,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const session = await cloud.open({ move: true }).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
     try {
       await assertTakesMove(session);
-      const here = await localJson("/api/cloud-send/manifest");
-      const answer = await session.call("GET", "/api/cloud-send/manifest");
+      const here = await localJson(scoped("/api/cloud-send/manifest"));
+      const answer = await session.call("GET", scoped("/api/cloud-send/manifest"));
       if (!answer.ok) throw new CloudSendError("unreachable", refusal(answer, "My Cloud did not answer. Try again."));
       const removed = new Set([...Object.entries(kept.off).filter(([, why]) => why === "removed").map(([key]) => key),
         ...Object.entries(kept.chats).filter(([, cursor]) => cursor === "removed").map(([threadId]) => threadId)]);
@@ -827,7 +877,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const threads = (here.conversations ?? []).filter((head) => !removed.has(head.threadId) && (head.room || bots.has(head.bot))).map((head) => head.threadId);
       const chats = await checkChats({ localJson, session, threads });
       const attachments = await missingAttachments(session, Array.isArray(here.attachments) ? here.attachments : []);
-      const secrets = await checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) });
+      const secrets = team ? { equal: [], differs: [], missing: [] } : await checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) });
       return { ok: checkPassed({ gaps, chats, attachments, secrets }), gaps, chats, attachments, secrets };
     } finally {
       try { await session.close(); } catch {}

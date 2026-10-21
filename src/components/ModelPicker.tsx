@@ -16,7 +16,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { repeatedModelLabels, SimpleModelPane } from "./SimpleModelPane";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
+
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { threadsOnOwnModel } from "../../shared/thread-model";
@@ -737,7 +737,7 @@ export function ModelPicker({
   };
   const activeLevels = active?.capabilities?.effortLevels ?? [];
   const simpleEffort = activeLevels.length > 0 ? {
-    levels: simpleEffortLevels(activeLevels, selection.effort),
+    levels: [...activeLevels],
     current: selection.effort,
     onPick: (level: EffortLevel) => dispatch({ type: "setModel", botId: bot.id, threadId,
       ...(threadId && simpleUpdatesBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
@@ -809,7 +809,7 @@ export function ModelPicker({
           <span data-model-variant className="max-w-[120px] truncate text-ink-secondary">· {selectedVariantLabel}</span>
         ) : selection.effort && (
           <span data-model-effort className="shrink-0 text-ink-secondary">
-            · {advanced ? effortLabel(selection.effort) : friendlyEffort(selection.effort)}
+            · {effortLabel(selection.effort)}
           </span>
         )}
       </span>

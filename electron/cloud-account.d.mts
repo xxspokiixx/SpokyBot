@@ -185,6 +185,7 @@ export interface CloudAccountClient {
   growDisk(sizeGb: number): Promise<{ supported: false } | { supported: true; refused: true } | { supported: true; disk: { gb: number; maxGb: number } }>;
   /** This sign-in's own X research relay access while its plan is paid; null without one. */
   xResearchAccess(): Promise<{ url: string; token: string } | null>;
+  pagesAccess(): Promise<{ url: string; token: string } | null>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {
