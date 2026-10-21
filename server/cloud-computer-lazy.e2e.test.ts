@@ -219,6 +219,10 @@ describe("a cloud computer starts only when the bot uses it", () => {
       if (child!.exitCode !== null) throw new Error(`the server exited:\n${output}`);
       try { return (await fetch(`${base}/api/health`)).ok; } catch { return false; }
     }, Boolean, 30_000);
+    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents
+    // turn of its own on Claude: its dump would stand in for the turn under test. Stepped down, each dump is the test's own.
+    const seeded = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
+    await apiOk("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
     events = await openSse(`${base}/api/events`);
     await events.until(frame => frame.kind === "hello");
   }, 60_000);
