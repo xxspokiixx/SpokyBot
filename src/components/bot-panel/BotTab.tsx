@@ -2,7 +2,7 @@ import { AppWindow, Brain, Calendar, ChevronRight, FileText, Folder, Sparkles, Z
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
+import { effortLabel } from "@/components/ModelPicker";
 import { shortPath } from "@/lib/short-path";
 import { firstSentence } from "@/lib/soul";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -89,7 +89,8 @@ export function BotTab({ bot, derived, editingInstructions, onEditInstructions, 
           ...(updatesBotDefault ? { updateBotDefault: true } : {}),
           selection: { ...selection, effort: level },
         })}
-        options={simpleEffortLevels(levels, selection.effort).map((level) => ({ value: level, label: friendlyEffort(level), disabled: Boolean(bot.busy) }))}
+        // The provider's own level names (claude --effort / codex reasoning effort), every one the engine reports: no relabelling.
+        options={levels.map((level) => ({ value: level, label: effortLabel(level), disabled: Boolean(bot.busy) }))}
       />
     </ColRow>
   ) : null;

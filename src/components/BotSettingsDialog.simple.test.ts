@@ -531,11 +531,11 @@ describe("the Bot tab", () => {
   });
 
   it.each([
-    ["Claude", ["low", "medium", "high", "max"], undefined, ["Quick", "Balanced", "Deep", "Max"]],
-    ["Codex", ["low", "medium", "high", "xhigh"], undefined, ["Quick", "Balanced", "Deep", "Deeper"]],
-    ["Pi", ["none", "low", "medium", "high"], undefined, ["Quick", "Balanced", "Deep"]],
-    ["Pi set to Off", ["none", "low", "medium", "high"], "none", ["Off", "Quick", "Balanced", "Deep"]],
-  ] as const)("takes the Thinking steps from the engine's own levels: %s", (_name, levels, effort, labels) => {
+    ["Claude (--effort)", ["low", "medium", "high", "xhigh", "max"], undefined, ["Low", "Medium", "High", "X-High", "Max"]],
+    ["Codex (reasoning effort)", ["low", "medium", "high", "xhigh"], undefined, ["Low", "Medium", "High", "X-High"]],
+    ["Pi", ["none", "low", "medium", "high"], undefined, ["None", "Low", "Medium", "High"]],
+    ["Pi set to none", ["none", "low", "medium", "high"], "none", ["None", "Low", "Medium", "High"]],
+  ] as const)("shows the provider's own effort names, every level the engine reports, with no relabelling: %s", (_name, levels, effort, labels) => {
     fixture.derived.engine = engine({ capabilities: { effortLevels: [...levels] } });
     const rendered = botTab(makeBot({ modelSelection: { instanceId: "claude", model: "m", ...(effort ? { effort } : {}) } }));
     const thinking = segment(rendered, "data-thinking-choice");
