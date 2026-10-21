@@ -9,7 +9,7 @@ export type ConfirmTone = "danger" | "neutral";
 export interface ConfirmDialogProps {
   open: boolean;
   title: string;
-  body: string;
+  body: ReactNode;
   confirmLabel: string;
   tone?: ConfirmTone;
   icon?: ReactNode;

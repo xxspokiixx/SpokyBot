@@ -4,6 +4,7 @@ import { MOVE_LINE } from "../../electron/cloud-send-parts.mjs";
 import type { CloudSendNotice, CloudSendPageBridge } from "../../electron/cloud-send.mjs";
 import { ipcErrorText, moveLine } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
+import { TeamMoveLine } from "./MoveToTeam";
 
 /** My Cloud's notice from main, kept fresh. */
 export function useCloudSendNotice(bridge: CloudSendPageBridge | undefined) {
@@ -19,13 +20,15 @@ export function useCloudSendNotice(bridge: CloudSendPageBridge | undefined) {
 }
 
 /** In the desktop app, never in a browser: the one-time move's line on either page (on its way, what arrived, coming
- * home). Nothing to press while it goes; Try again only after a day of failing. */
+ * home), and on My Cloud's page a bot's move into a team. Nothing to press while it goes; Try again only after a day of
+ * failing (a bot's move into a team: as soon as it fails). */
 export function CloudSendStrip({ cloudHome, onPairPhone }: { cloudHome: boolean; onPairPhone?: () => void }) {
   const bridge = !window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined;
   const [notice, setNotice] = useCloudSendNotice(bridge);
   const [retrying, setRetrying] = useState(false);
   const [unanswered, setUnanswered] = useState<string | null>(null);
   const move = notice?.move ? moveLine(notice.move, cloudHome ? "cloud" : "local") : null;
+  if (bridge && !move && notice?.teamMove && cloudHome) return <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} />;
   if (!bridge || !move) return null;
   const retry = () => {
     setRetrying(true);

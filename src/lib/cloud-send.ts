@@ -1,6 +1,7 @@
 // What either page says about the one-time move to My Cloud (electron/one-home.mjs), and what arrived, in words.
 import type { CloudSendCounts } from "../../electron/cloud-send.mjs";
 import type { OneHomeCounts, OneHomeView } from "../../electron/one-home.mjs";
+import type { TeamMoveView } from "../../electron/team-move.mjs";
 import type { LocaleKey } from "@/locales";
 import { activeLocale, t } from "@/lib/i18n";
 
@@ -62,4 +63,12 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   const chats = move.phase === "copy" ? move.chats : undefined;
   const key = page === "cloud" ? (chats ? "cloudSend.move.bringingChats" : "cloudSend.move.bringing") : (chats ? "cloudSend.move.copyChats" : "cloudSend.move.copy");
   return { kind: "sending", text: t(key, chats ? { done: chats.done, total: chats.total } : {}), extra: [] };
+}
+
+/** A bot moving from My Cloud into a team, on My Cloud's page: on its way, failed (it is still here, unchanged), or done. */
+export function teamMoveLine(move: TeamMoveView): { kind: "sending" | "failed" | "done"; text: string } {
+  const names = { bot: move.bot.name, team: move.team.name };
+  if (move.phase === "done") return { kind: "done", text: t("teamMove.done", names) };
+  if (move.phase === "failed") return { kind: "failed", text: t("teamMove.failed", names) };
+  return { kind: "sending", text: t("teamMove.moving", names) };
 }

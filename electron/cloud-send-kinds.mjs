@@ -64,9 +64,10 @@ const parseFiles = (value) => list(value?.files).filter((file) => record(file) &
  *   progress(value: { done: number, total: number } | null): void,
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  *   refusal(answer: { status: number, body: any }, fallback: string): string,
- * }} deps
+ *   scoped?(route: string): string,
+ * }} deps `scoped`: a route as a move of one bot asks it of either side.
  */
-export function createMoveKinds({ localJson, localBytes, localSend, entry, persist, progress, space, refusal }) {
+export function createMoveKinds({ localJson, localBytes, localSend, entry, persist, progress, space, refusal, scoped = (route) => route }) {
   const failed = (ctx, key, kind, label, error, final = false) => ctx.result.failed.push({ key, kind, label, error: sentence(error) ?? "It did not move.", ...(final ? { final: true } : {}) });
 
   /** One item only a move carries, as this computer holds it; an automation's switch here is kept (`on`) for the switch
@@ -122,8 +123,8 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
   /** Each conversation's own settings My Cloud's copy lacks: its model, approval, snooze and project; a room's time limit
    * and audience floor. */
   async function moveSettings(ctx) {
-    const here = list((await localJson("/api/cloud-send/chats"))?.conversations);
-    const answer = await ctx.session.call("GET", "/api/cloud-send/chats");
+    const here = list((await localJson(scoped("/api/cloud-send/chats")))?.conversations);
+    const answer = await ctx.session.call("GET", scoped("/api/cloud-send/chats"));
     if (!answer.ok) throw new Error(refusal(answer, "My Cloud did not list its conversations."));
     const there = new Map(list(answer.body?.conversations).filter(record).map((head) => [head.threadId, record(head.settings) ? head.settings : {}]));
     const lacking = here.filter((head) => record(head) && record(head.settings) && there.has(head.threadId)
@@ -139,7 +140,7 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
 
   /** The attachments My Cloud lacks of those this computer's chats name, in bytes. */
   async function missingAttachmentBytes(session) {
-    const listed = list((await localJson("/api/cloud-send/chats?attachments=1"))?.attachments).filter((item) => record(item) && typeof item.name === "string" && Number.isSafeInteger(item.size));
+    const listed = list((await localJson(scoped("/api/cloud-send/chats?attachments=1")))?.attachments).filter((item) => record(item) && typeof item.name === "string" && Number.isSafeInteger(item.size));
     let bytes = 0;
     for (let i = 0; i < listed.length; i += ATTACHMENT_NAMES) {
       const asked = listed.slice(i, i + ATTACHMENT_NAMES);
@@ -157,7 +158,7 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
     if (fit.fit === "now") return null;
     if (fit.fit === "never" || !space) return "My Cloud does not have enough space for this computer's files. Delete some there, or choose a bigger plan.";
     const grown = await growToFit(fit, { grow: (sizeGb) => space.grow(sizeGb), free: async () => {
-      const answer = await session.call("GET", "/api/cloud-send/files");
+      const answer = await session.call("GET", scoped("/api/cloud-send/files"));
       return answer.ok && Number.isSafeInteger(answer.body?.space?.freeBytes) ? answer.body.space.freeBytes : null;
     } });
     return grown === "grown" ? null : grown === "full" ? "My Cloud does not have enough space for this computer's files." : "My Cloud could not make room for this computer's files just now. It tries again next time.";
@@ -185,8 +186,8 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
   async function moveFiles(ctx, bots, label) {
     const carried = new Set(bots.map((bot) => bot.id));
     const owner = (path) => /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u.exec(path)?.[1];
-    const here = parseFiles(await localJson("/api/cloud-send/files")).filter((file) => carried.has(owner(file.path)));
-    const listed = await ctx.session.call("GET", "/api/cloud-send/files");
+    const here = parseFiles(await localJson(scoped("/api/cloud-send/files"))).filter((file) => carried.has(owner(file.path)));
+    const listed = await ctx.session.call("GET", scoped("/api/cloud-send/files"));
     if (!listed.ok) throw new Error(refusal(listed, "My Cloud did not list its files."));
     const there = new Map(parseFiles(listed.body).map((file) => [file.path, file]));
     const kept = entry(ctx.origin);
