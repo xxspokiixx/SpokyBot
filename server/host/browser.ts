@@ -53,6 +53,8 @@ export interface BrowserHostDeps {
   DESKTOP_MANAGED: boolean;
   CLOUD_HOME: unknown;
   PORT: number;
+  /** The engine memory guard, told which browsers each thread's turn starts or holds. */
+  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void };
 }
 
 type Spec = { command: string; args?: readonly string[]; env: Record<string, string> };
@@ -288,6 +290,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (browser?.session !== undefined && browser.spec) void closeForMemory(browser.session, browser.spec);
     },
   };
+  deps.engineMemory?.useBrowsers(engineBrowsers);
   /** A deleted bot's or profile's browser on the new engine, whatever the flag says now. */
   function eraseChromeBrowser(request: { type: string; botId?: string; partitionId?: string }): Promise<boolean> {
     if (request.type === "openmausbot:browser-bot-deleted" && request.botId) return chromeEngine.erase({ kind: "bot", id: request.botId, partitionId: "" });

@@ -188,7 +188,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         if (!senderId) {
           return json(res, 403, { error: "the file's bot author could not be verified" });
         }
-        roots = messageFileRootsForThread(senderId, threadId);
+        const runThread = message.automation?.executionThreadId;
+        const fromRun = runThread && store.botByThread(runThread)?.id === senderId ? messageFileRootsForThread(senderId, runThread) : [];
+        roots = [...new Set([...messageFileRootsForThread(senderId, threadId), ...fromRun])];
       }
 
       const folderEntry = method === "POST" && body.entry !== undefined

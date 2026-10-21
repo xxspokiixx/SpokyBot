@@ -11,8 +11,11 @@ import { threadRefUrl } from "@/lib/thread-refs";
 import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { threadLinkLabel } from "../../shared/thread-link";
+import { isSnoozed, orderedThreadList } from "../../shared/wire";
 import { Select } from "./Select";
 import { localizedTaskTitle } from "@/lib/task-title";
+
+export { isSnoozed, orderedThreadList };
 
 type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link"> & {
   queued?: boolean;
@@ -51,19 +54,6 @@ export function threadRecency(task: { updatedAt?: number; createdAt?: number }):
   return 0;
 }
 
-export function orderedThreadList<T extends { pinned?: boolean; lastThreadOrderAt?: number; createdAt?: number }>(tasks: T[]): T[] {
-  return tasks
-    .map((task, index) => ({ task, index }))
-    .sort((a, b) => {
-      const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
-      if (pin) return pin;
-      const recency = (b.task.lastThreadOrderAt ?? b.task.createdAt ?? 0) - (a.task.lastThreadOrderAt ?? a.task.createdAt ?? 0);
-      if (recency) return recency;
-      return a.index - b.index;
-    })
-    .map((entry) => entry.task);
-}
-
 export function threadOpenerLabel(task: Pick<Task, "openedBy">): string | null {
   const name = task.openedBy?.name.trim();
   return name ? t("task.openedBy", { name }) : null;
@@ -78,10 +68,6 @@ export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archive
 
 /** Present, not truthy: a thread stored with archivedAt: 0 is archived. */
 export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.archivedAt !== undefined;
-
-/** 0 is the "until new activity" sentinel. The event stream never drops an expired snooze, so check the clock too. */
-export const isSnoozed = (task: Pick<Task, "snoozedUntil">, now = Date.now()): boolean =>
-  task.snoozedUntil !== undefined && (task.snoozedUntil === 0 || task.snoozedUntil > now);
 
 const nextSixPm = () => {
   const when = new Date();

@@ -112,6 +112,9 @@ const PLANS: CloudOfferPlan[] = [
 const OFFER: CloudOffer = { plans: PLANS, recommended: "pro", creditUsd: 5, reminderDays: 2, refundDays: 14 };
 const noTrial = (offer: CloudOffer): CloudOffer => ({ ...offer, creditUsd: undefined, reminderDays: undefined, plans: offer.plans.map(({ trialDays: _days, ...plan }) => plan) });
 const NOW = new Date(2026, 9, 8, 12).getTime();
+/** Starter as the Admin lists it: it sleeps when idle, with no swap and a fixed disk. */
+const STARTER: CloudOfferPlan = { tier: "starter", label: "Starter", amount: 1500, allowances: { cpus: 2, cpuKind: "shared", memoryMb: 2048, diskGb: 10, maxDiskGb: 10, computers: 15,
+  computerHours: 30, voiceCharacters: 10_000, sleeps: true, snapshotDays: 7 } };
 
 describe("what is for sale, as the Admin says", () => {
   it("the sources the app counts are main's own allow-list", () => {
@@ -119,19 +122,72 @@ describe("what is for sale, as the Admin says", () => {
     expect(CLOUD_SOURCES, "the welcome's Cloud beat").toContain("app_onboarding");
   });
 
-  it("each plan card: its name, the Admin's price, cloud desktops at once and three allowance chips; Most popular is the Admin's recommended plan", () => {
-    expect(PLANS.map(plan => planRow(plan, OFFER.recommended))).toEqual([
-      { tier: "personal", name: "Personal", price: "$29", popular: false, line: "1 cloud desktop at once", sleeps: null, chips: ["1 CPU · 1 GB", "10 GB storage", "50 h cloud desktops"] },
-      { tier: "pro", name: "Pro", price: "$49", popular: true, line: "Up to 4 cloud desktops at once", sleeps: null, chips: ["4 CPU · 4 GB", "40–50 GB storage", "200 h cloud desktops"] },
-      { tier: "max", name: "Max", price: "$99", popular: false, line: "Up to 8 cloud desktops at once", sleeps: null, chips: ["8 CPU · 8 GB", "80–100 GB storage", "400 h cloud desktops"] },
+  it("each plan card: its name, the Admin's price, its promise and cloud desktop hours with the at-once limit as small print; Most popular is the Admin's recommended plan", () => {
+    expect(PLANS.map(plan => planRow(plan, OFFER.recommended)).map(({ benefits: _benefits, ...row }) => row)).toEqual([
+      { tier: "personal", name: "Personal", price: "$29", popular: false, promise: "An always-on cloud for your personal workflows.", line: "50 cloud desktop hours a month", limit: "up to 1 at once",
+        sleeps: null, adds: null },
+      { tier: "pro", name: "Pro", price: "$49", popular: true, promise: "Your bots keep working 24/7, even when your laptop is closed.", line: "200 cloud desktop hours a month", limit: "up to 4 at once",
+        sleeps: null, adds: null },
+      { tier: "max", name: "Max", price: "$99", popular: false, promise: "The biggest cloud machine, for bots that use computers all day.", line: "400 cloud desktop hours a month", limit: "up to 8 at once",
+        sleeps: null, adds: null },
     ]);
     expect(PLANS.map(plan => planRow(plan, "max").popular), "never Pro by itself").toEqual([false, false, true]);
     expect(PLANS.map(plan => planRow(plan).popular)).toEqual([false, false, false]);
-    expect(planRow({ tier: "team", label: "Team", amount: 19900 })).toEqual({ tier: "team", name: "Team", price: "$199", popular: false, line: null, sleeps: null, chips: [] });
+    expect(planRow({ tier: "team", label: "Team", amount: 19900 })).toEqual({ tier: "team", name: "Team", price: "$199", popular: false, promise: null, line: null, limit: null, sleeps: null,
+      benefits: [], adds: null });
     // A plan the Admin says sleeps when idle says so on its card.
-    expect(planRow({ tier: "starter", label: "Starter", amount: 2900, allowances: { cpus: 2, memoryMb: 2048, diskGb: 10, maxDiskGb: 10, computers: 1, computerHours: 10, voiceCharacters: 10_000, sleeps: true } }).sleeps)
-      .toBeTruthy();
+    expect(planRow(STARTER).sleeps).toBe("Sleeps when idle, wakes in about a second");
     expect(planRow({ tier: "pro", amount: 5831 }).price).toBe("$58.31");
+  });
+
+  it("each plan's benefits in the website's words, every number from the Admin's catalog, and what it adds over the plan listed before it", () => {
+    const pro = { tier: "pro", label: "Pro", amount: 4900, allowances: { cpus: 4, cpuKind: "shared" as const, memoryMb: 4096, swapMb: 4096, diskGb: 10, maxDiskGb: 100, computers: 15, computerHours: 300,
+      voiceCharacters: 60_000, snapshotDays: 14 } };
+    const personal = { tier: "personal", label: "Personal", amount: 2900, allowances: { ...pro.allowances, cpus: 2, memoryMb: 2048, swapMb: 3072, maxDiskGb: 20, computerHours: 100,
+      voiceCharacters: 30_000 } };
+    const max = { tier: "max", label: "Max", amount: 9900, allowances: { ...pro.allowances, cpus: 8, memoryMb: 8192, computerHours: 800, voiceCharacters: 180_000 } };
+    expect(planRow(pro, "pro", personal).benefits).toEqual([
+      { text: "Always on: automations run around the clock, even with your laptop off" },
+      { text: "Cloud desktops you can watch or take over: as many as your bots need, 300 hours a month", note: "Fair use: up to 15 at once" },
+      { text: "Voice replies: about an hour of speech a month" },
+      { text: "Gmail, GitHub, Notion and hundreds more apps: sign in once" },
+      { text: "Your bots on your phone, anywhere, with alerts when one finishes or needs you" },
+      { text: "Your own cloud machine for unlimited bots: 4 shared CPUs and 4 GB of memory, plus 4 GB of swap" },
+      { text: "Storage that grows as it fills, up to 100 GB, with daily backups kept 14 days" },
+    ]);
+    expect([planRow(personal, "pro", STARTER).adds, planRow(pro, "pro", personal).adds, planRow(max, "pro", pro).adds, planRow(pro, "pro", STARTER).adds]).toEqual([
+      "Everything in Starter, plus 3.3× the cloud desktop hours and a machine that never sleeps.",
+      "Everything in Personal, plus 3× the cloud desktop hours, a machine twice the size and 2× the voice.",
+      "Everything in Pro, plus 2.7× the cloud desktop hours, a machine twice the size and 3× the voice.",
+      "Everything in Starter, plus 10× the cloud desktop hours and a bigger machine that never sleeps.",
+    ]);
+    expect(planRow(STARTER).benefits.map(item => item.text)).toEqual([
+      "Sleeps when idle, wakes in seconds for you, your schedules, webhooks and app events",
+      "Cloud desktops you can watch or take over: as many as your bots need, 30 hours a month",
+      "Voice replies: about 10 minutes of speech a month", "Gmail, GitHub, Notion and hundreds more apps: sign in once",
+      "Your bots on your phone, anywhere, with alerts when one finishes or needs you", "Your own cloud machine for unlimited bots: 2 shared CPUs and 2 GB of memory",
+      "10 GB of storage, with daily backups kept 7 days",
+    ]);
+    // The numbers are the Admin's: another catalog's 6 at once and 450 hours show as such, and an older Admin without swap, backup days or
+    // the CPU kind leaves them unsaid.
+    const other = planRow({ ...pro, allowances: { ...pro.allowances, computers: 6, computerHours: 450 } });
+    expect([other.line, other.limit, other.benefits[1]!.note]).toEqual(["450 cloud desktop hours a month", "up to 6 at once", "Fair use: up to 6 at once"]);
+    const older = planRow({ tier: "max", amount: 9900, allowances: { cpus: 8, memoryMb: 8192, diskGb: 10, maxDiskGb: 100, computers: 4, computerHours: 500, voiceCharacters: 90_000 } });
+    expect(older.benefits.slice(-3).map(item => item.text)).toEqual(["Your bots on your phone, anywhere, with alerts when one finishes or needs you",
+      "Your own cloud machine for unlimited bots: 8 CPUs and 8 GB of memory", "Storage that grows as it fills, up to 100 GB"]);
+    expect(older.benefits[2]!.text).toBe("Voice replies: about 1.5 hours of speech a month");
+    // No plan is sold on hours a day, AI credit or app events.
+    expect(JSON.stringify([STARTER, personal, pro, max].map(plan => planRow(plan)))).not.toMatch(/a day|credit|events a day/);
+  });
+
+  it("speaks the reader's language, numbers and lists included", () => {
+    setLocale("de");
+    const row = planRow({ tier: "max", amount: 9900, allowances: { cpus: 8, cpuKind: "shared", memoryMb: 8192, diskGb: 10, maxDiskGb: 100, computers: 15, computerHours: 800, voiceCharacters: 90_000,
+      snapshotDays: 14 } }, "pro", { tier: "pro", amount: 4900, allowances: { cpus: 4, cpuKind: "shared", memoryMb: 4096, diskGb: 10, maxDiskGb: 100, computers: 15, computerHours: 300,
+      voiceCharacters: 60_000, snapshotDays: 14 } });
+    expect(row.adds).toContain("2,7×");
+    expect(row.adds).toMatch(/ und /);
+    expect(row.benefits[2]!.text).toContain("1,5");
   });
 
   it("the money in one line: a trial says the card is needed and nothing is charged until it ends; a plan without one is due today", () => {
