@@ -60,6 +60,7 @@ Use only mapped, tested commands:
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Computer panel focus hand-off](computer-panel-focus.md)
+- [Taking control of a bot's computer](take-control.md)
 - [Native dictation retention and send-to-stop](dictation.md)
 - [The Today page](today.md)
 - [Chat widgets](widgets.md)

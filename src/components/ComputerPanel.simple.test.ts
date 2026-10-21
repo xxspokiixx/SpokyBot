@@ -33,7 +33,7 @@ const fixture = vi.hoisted(() => {
 });
 
 // The panel's useState calls in source order, counted from `phase`; keep in step with ComputerPanel.tsx.
-const PHASE_OFFSETS = { phase: 0, resolved: 2, vmViewerUrl: 10, vmStatus: 11, error: 17 } as const;
+const PHASE_OFFSETS = { phase: 0, resolved: 2, vmStatus: 10, error: 16 } as const;
 let phaseIndex = -1;
 
 vi.mock("react", async (original) => ({
@@ -572,8 +572,7 @@ describe("Technical controls", () => {
     fixture.seed = {
       phase: "vm",
       resolved: { botId: "scout", threadId: "thread-scout", computer: "vm", cloudBackend: "box" },
-      vmViewerUrl: "http://127.0.0.1/viewer",
-      vmStatus: { mode: "per-bot", container: "running", ready: true },
+      vmStatus: { mode: "per-bot", container: "running", ready: true, viewer_url: "http://127.0.0.1/viewer", target_key: `bot:${"a".repeat(64)}` },
     };
     const vm = () => makeBot({ computer: "vm" });
     const onOpenVmWorkspace = () => {};

@@ -1280,10 +1280,7 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -1629,7 +1626,8 @@
       "onboarding.reel.terminal.body": "45717037e6999c20bf69c25fb1a5bdeb6ccfadd9f513b7d85878fc85d671040a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -5617,12 +5615,8 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.simple.useFullScreen": "65a44fcf1f6da7b5c34122b540f6f0fe0c566bddbde39b9e60ec65e066415129",
-      "computer.simple.useFullScreenVm": "85e4388a19798e3b2c79d9af7f3210358596b88e99ff088f8446f45d8a4586cf",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -6746,7 +6740,8 @@
       "onboarding.tour.computer-simple": "c7fa600916d3fa88e9903d2ae4550107cf659c3ac008dc2624f23c0767690855",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -8020,10 +8015,7 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -8358,7 +8350,8 @@
       "onboarding.reel.terminal.body": "45717037e6999c20bf69c25fb1a5bdeb6ccfadd9f513b7d85878fc85d671040a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -9632,10 +9625,7 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -9970,7 +9960,8 @@
       "onboarding.reel.terminal.body": "45717037e6999c20bf69c25fb1a5bdeb6ccfadd9f513b7d85878fc85d671040a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -14188,12 +14179,8 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.simple.useFullScreen": "65a44fcf1f6da7b5c34122b540f6f0fe0c566bddbde39b9e60ec65e066415129",
-      "computer.simple.useFullScreenVm": "85e4388a19798e3b2c79d9af7f3210358596b88e99ff088f8446f45d8a4586cf",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -15722,7 +15709,8 @@
       "botPanel.noAi": "6bb0929b2412c5f3075de447c388193535b380014498e1ee598db8fa00e688f7",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -19952,12 +19940,8 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.simple.useFullScreen": "65a44fcf1f6da7b5c34122b540f6f0fe0c566bddbde39b9e60ec65e066415129",
-      "computer.simple.useFullScreenVm": "85e4388a19798e3b2c79d9af7f3210358596b88e99ff088f8446f45d8a4586cf",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -21586,7 +21570,8 @@
       "onboarding.tour.computer-simple": "c7fa600916d3fa88e9903d2ae4550107cf659c3ac008dc2624f23c0767690855",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -23535,10 +23520,7 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -24119,7 +24101,8 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -26979,12 +26962,8 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.simple.useFullScreen": "65a44fcf1f6da7b5c34122b540f6f0fe0c566bddbde39b9e60ec65e066415129",
-      "computer.simple.useFullScreenVm": "85e4388a19798e3b2c79d9af7f3210358596b88e99ff088f8446f45d8a4586cf",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -27885,7 +27864,8 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -29568,10 +29548,7 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -30006,7 +29983,8 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -33401,12 +33379,8 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.simple.useFullScreen": "65a44fcf1f6da7b5c34122b540f6f0fe0c566bddbde39b9e60ec65e066415129",
-      "computer.simple.useFullScreenVm": "85e4388a19798e3b2c79d9af7f3210358596b88e99ff088f8446f45d8a4586cf",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -34435,7 +34409,8 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37830,12 +37805,8 @@
       "computer.takeControl": "fbf728c3c3bbd9166ea4557fb267479b842217ac50573a3d11ed1b2ce6b354cb",
       "computer.youHaveWheel": "9d8961ac22424b864c6bda7df1225175b92d98baa1ee470885ae64681cc1aad0",
       "computer.useOpenDesktop": "fa57a6ba676d42a2e2e5b54ebbc03637c1a9baefefb274abc657c482433c5671",
-      "computer.useOpenDesktopVm": "a42b21320b2ebb6f548fbd485e68ffb4c6df53b70a26b383557de83d9e71f43a",
       "computer.simple.useFullScreen": "65a44fcf1f6da7b5c34122b540f6f0fe0c566bddbde39b9e60ec65e066415129",
-      "computer.simple.useFullScreenVm": "85e4388a19798e3b2c79d9af7f3210358596b88e99ff088f8446f45d8a4586cf",
       "computer.handBack": "68a131f1fb4ed0f8878a2121e4da828b1fb1a6ebcd35fc2af4cdb3eb2bf418c3",
-      "computer.openVmDesktopTitle": "b4cd95ae63beec02853b0dd4537855ff3c03f34f9d56d560835a61aa4a7ec9de",
-      "computer.takeControlVmTitle": "4201df93287719dc556849cd6b53a08d29d2918eae99afdf56aa9174016c8376",
       "computer.deleteVmBlocked": "7bdae2a0c3d8c952d39570ac1aac3dcda8a5d9a7d8d0cae43cfb4415386a2d5c",
       "computer.deleteVmTitle": "4718aa156487522b7e8d5bb64b8b0c1d560edbf518309eb78bf1857148a09c56",
       "computer.deleteVm": "34b22df4d9dafada7b2e4772b34dad2c86eef8ae636c3fc239ccc2ff994911a4",
@@ -38864,7 +38835,8 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "computer.inControl": "e881c5670064e51b2a4c92c8a6c58f4ba2c705a1b9b5329d0a2328ccc16d0984"
     }
   }
 }
