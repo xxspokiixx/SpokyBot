@@ -2445,6 +2445,6 @@ export class Store {
 
   seedIfEmpty() {
     if (!this.needsSeed()) return;
-    this.createBot();
+    this.setChiefOfStaff(this.createBot().id);
   }
 }

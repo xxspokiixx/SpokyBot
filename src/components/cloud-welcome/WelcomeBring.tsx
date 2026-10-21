@@ -7,6 +7,7 @@ import { suggestedChoice, type BringChoice } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { listOf } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import type { LocaleKey } from "@/locales";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Chip, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
@@ -45,6 +46,7 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
   onFinish: (outcome: BringOutcome) => void;
 }) {
   const desktop = move !== null;
+  const advanced = useAdvancedMode();
   const overview = move?.overview ?? null;
   const [chosen, setChosen] = useState<BringChoice | null>(null);
   const [teams, setTeams] = useState(false);
@@ -93,7 +95,7 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
   const freshBody = <>
     <CardIcon icon={Sparkles} />
     <span className="text-[14.5px] font-semibold text-ink">{t("cloudWelcome.bring.fresh")}</span>
-    <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.freshHint")}</span>
+    <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t(advanced ? "cloudWelcome.bring.freshHint" : "cloudWelcome.bring.freshChief")}</span>
   </>;
 
   const moved = copied ? state.moved : undefined;
@@ -117,6 +119,8 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
   let actions: ReactNode;
   if (here) {
     actions = <button type="button" className={PRIMARY} onClick={() => onFinish("here")}>{t("onboarding.continue")}</button>;
+  } else if (!copying && !advanced) {
+    actions = <button type="button" className={PRIMARY} onClick={() => onFinish("skipped")}>{t("onboarding.continue")}</button>;
   } else if (!copying) {
     actions = <>
       <button ref={teamButton} type="button" className={PRIMARY} onClick={() => setTeams(true)}>{t("cloudWelcome.bring.chooseTeam")}</button>
@@ -151,11 +155,11 @@ export function WelcomeBring({ name, move, cloudHasWork, sent = null, headingRef
           {sent.state === "sending" ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin" /> : <Check size={15} strokeWidth={2.5} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />}
           <span>{line}</span>
         </span>} />
-      {more
+      {advanced && (more
         ? <div data-bring-choice="fresh" className={cn(CARD, CARD_IDLE)}>{freshBody}<Footer>
             <button ref={teamButton} type="button" className={SECONDARY} onClick={() => setTeams(true)}>{t("cloudWelcome.bring.chooseTeam")}</button>
           </Footer></div>
-        : <Footer><button type="button" data-bring-more className={QUIET} onClick={() => setMore(true)}>{t("cloudWelcome.bring.more")}</button></Footer>}
+        : <Footer><button type="button" data-bring-more className={QUIET} onClick={() => setMore(true)}>{t("cloudWelcome.bring.more")}</button></Footer>)}
       {library}
     </section>;
   }

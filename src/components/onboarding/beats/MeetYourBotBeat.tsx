@@ -68,7 +68,7 @@ export function MeetYourBotBeat({
   return (
     <div className="stagger flex flex-col">
       <p className="animate-rise mt-1 text-[13.5px] leading-relaxed text-ink-secondary" style={staggerIndex(0)}>
-        {t("onboarding.bot.intro")}
+        {t(bot?.chiefOfStaff ? "onboarding.bot.chiefIntro" : "onboarding.bot.intro")}
       </p>
 
       <div className="animate-rise mt-5 flex items-center gap-4" style={staggerIndex(1)}>

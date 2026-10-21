@@ -100,7 +100,7 @@ it("the beat: what Cloud does, the night shift scene, the Admin's offer in one l
   const beat = () => createElement(CloudBeat, { offer: OFFER, onNext, onSkip, setMascot, bump: vi.fn() });
   await mount(beat());
   const text = host.textContent!;
-  for (const words of ["MausBot Cloud is your own computer in the cloud. Your bots keep going 24/7, even when this computer is off.",
+  for (const words of ["MausBot Cloud runs your bots in the cloud. They keep going 24/7, even when this computer is off.",
     "Routines run on time, day and night", "Talk to your bots from your phone", "Bring everything over in one click",
     "Free for 3 days, then from $29/month + tax. Includes $5 of Claude credit. 14-day money-back.", "Start free trial", "Not now",
     "You can add a Cloud any time from the switcher."]) expect(text).toContain(words);

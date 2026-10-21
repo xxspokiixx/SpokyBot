@@ -1525,16 +1525,28 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
   });
 
-  it("seedIfEmpty creates exactly one starter bot, once", () => {
+  it("seedIfEmpty starts a fresh workspace with one bot, the Chief of Staff, once", () => {
     const store = new Store(selection);
     store.seedIfEmpty();
     expect(store.bots).toHaveLength(1);
+    expect(store.bots[0], "the first bot a new person meets is their Chief of Staff").toMatchObject({ chiefOfStaff: true, hidden: false });
+    expect(store.bots[0], "the role is the flag, so an untouched starter still reads as unused when sending to the Cloud")
+      .toMatchObject({ title: "", description: "", soul: "" });
     store.seedIfEmpty();
     expect(store.bots).toHaveLength(1);
 
     const reloaded = new Store(selection);
     reloaded.seedIfEmpty();
     expect(reloaded.bots).toHaveLength(1);
+    expect(reloaded.bots[0]?.chiefOfStaff).toBe(true);
+  });
+
+  it("seedIfEmpty leaves an existing workspace without a Chief as it is", () => {
+    const store = new Store(selection);
+    const existing = store.createBot();
+    store.seedIfEmpty();
+    expect(store.bots.map((bot) => bot.id)).toEqual([existing.id]);
+    expect(new Store(selection).bot(existing.id)?.chiefOfStaff).toBeFalsy();
   });
 
   it("chains appended messages and keeps the newest as active leaf", () => {
