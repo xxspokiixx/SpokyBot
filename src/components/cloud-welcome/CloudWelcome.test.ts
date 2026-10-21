@@ -280,6 +280,18 @@ describe("CloudWelcome", () => {
     expect(checks).toEqual(["claude", "codex", "codex"]);
   });
 
+  it("on My Cloud once it is home, the folders card names no other app on this computer: My Cloud's own Settings say what is shared", async () => {
+    fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [welcomeStepHint("bring"), welcomeStepHint("engine")] };
+    fixture.plan = { status: "paid", tier: "pro", home: true };
+    render();
+    await vi.waitFor(() => expect(text()).toContain("Welcome to Studio Cloud"));
+    const folders = host.querySelector('[data-welcome-files="folders"]')?.textContent ?? "";
+    expect(folders).toContain("Bots on Studio Cloud can read the folders your computer shares, while it's on. See what it shares in Settings.");
+    expect(folders).not.toMatch(/this computer/iu);
+    click("Open Settings");
+    expect(lending.open).toHaveBeenCalledOnce();
+  });
+
   it("files and apps open this computer's Files and Connected apps, then it is ready and says hi to the Chief of Staff", async () => {
     fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [welcomeStepHint("bring"), welcomeStepHint("engine")] };
     render();
