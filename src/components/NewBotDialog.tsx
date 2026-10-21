@@ -188,7 +188,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
     },
   };
   const title = defaultsMode ? t("newBot.defaults") : t("sidebar.newBot");
-  return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 sm:p-5">
+  return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 sm:p-5" hidden={!defaultsMode && parent.state.appSettingsOpen}>
     <div ref={dialog} role="dialog" aria-modal="true" aria-label={title} aria-busy={saving} tabIndex={-1}
       className="flex h-[min(760px,94dvh)] w-full max-w-[900px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none">
       <div className="flex shrink-0 items-center justify-between border-b border-hairline/40 px-5 py-4">

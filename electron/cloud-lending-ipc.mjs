@@ -132,7 +132,7 @@ export function defaultGrant({ kept, usual, projects, screenAvailable }) {
  *   cloudPage: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   snapshot: () => Promise<{ available: boolean, screenAvailable?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
  *   environment: () => unknown,
- *   save: (env: unknown, choice: { folders: unknown, screen: boolean }) => Promise<unknown>,
+ *   save: (env: unknown, choice: { folders: unknown, screen: boolean, internet?: boolean, terminal?: boolean }) => Promise<unknown>,
  *   stop: () => void,
  *   chooseFolder: () => Promise<{ id: string, path: string, name: string, write: boolean } | null>,
  *   defaults: () => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
@@ -152,7 +152,10 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
    * and the usual folders. The internet connection alone is a choice too. */
   const choice = async (input) => {
     const folders = Array.isArray(input?.folders) && input.folders.length ? await existingFolders(input.folders, validate) : [];
-    if (folders.length || input?.screen === true || input?.internet === true) return { folders, screen: input?.screen === true, internet: input?.internet === true };
+    // The terminal is chosen only here, from this computer's own Settings (`lending:save` is local-only); it is never
+    // carried over from a saved grant, filled in by default, or set from My Cloud's page.
+    const terminal = input?.terminal === true;
+    if (folders.length || input?.screen === true || input?.internet === true || terminal) return { folders, screen: input?.screen === true, internet: input?.internet === true, ...(terminal ? { terminal: true } : {}) };
     return { folders: await defaults(), screen: false, internet: true };
   };
   ipcMain.handle("lending:state", localOnly("lending:state", () => snapshot()));

@@ -8,7 +8,7 @@ import {
   cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, cloudRequestSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, codeTrustProblem, edgeHold, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
+import { cloudHomeChildEnvironments, codeTrustProblem, edgeHold, hardenHost, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
 import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
@@ -289,6 +289,9 @@ it("gives the edge only its routing name and the server the contract, never a ga
   expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
     OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_SECRETS_FD: "3" });
   for (const key of CLOUD_IGNORED_KEYS) expect(server).not.toHaveProperty(key);
+  // The bot box switch reaches the server; an unknown name does not.
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_BOT_BOX: "0", OMB_SOMETHING_ELSE: "x" }, "/data").server).toMatchObject({ OMB_BOT_BOX: "0" });
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_SOMETHING_ELSE: "x" }, "/data").server).not.toHaveProperty("OMB_SOMETHING_ELSE");
   expect(JSON.stringify(server)).not.toContain(token);
   expect(secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, ...relay });
   for (const value of Object.values(secrets)) {
@@ -364,6 +367,10 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
   expect(check).toBeLessThan(image.indexOf("CMD ["));
   expect(image).toContain("COPY deploy/fly/Caddyfile /app/cloud/Caddyfile");
+  // The bot box (server/bot-box) needs bubblewrap and socat in the image; pnpm is what bots' projects ask for.
+  expect(image).toMatch(/apt-get install -y --no-install-recommends [^\n]*\bbubblewrap\b[^\n]*\bsocat\b/);
+  expect(image).toMatch(/npm install -g pnpm@10\.33\.0/);
+  expect(image).toContain("bwrap --version && socat -V");
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);
@@ -451,4 +458,19 @@ it("captures a child's stdout and stderr when asked, and shares this process's o
   const shared = await run(false);
   expect(shared.child.stdout).toBeNull();
   expect(shared.child.stderr).toBeNull();
+});
+
+it("the Cloud supervisor hardens the host before anything runs as maus: hidepid on /proc and Fly's socket folder root-only, each a note, never fatal", () => {
+  const calls: string[] = [];
+  const run = (status: number, exists = true) => ({
+    exec: (command: string, args: string[]) => { calls.push(`${command} ${args.join(" ")}`); return { status, stderr: status ? "mount: permission denied\n" : "" }; },
+    chmod: (path: string, mode: number) => { calls.push(`chmod ${mode.toString(8)} ${path}`); },
+    exists: () => exists,
+  });
+  expect(hardenHost({}, run(0))).toEqual(["/proc: hidepid=invisible", "/.fly: root only"]);
+  expect(calls).toEqual(["mount -o remount,hidepid=invisible /proc", "chmod 700 /.fly"]);
+  expect(hardenHost({}, run(32, false))).toEqual(["/proc: hidepid not applied (mount: permission denied)"]);
+  expect(hardenHost({ OMB_CLOUD_HARDEN: "0" }, run(0))).toEqual(["hardening skipped (OMB_CLOUD_HARDEN=0)"]);
+  const failing = { ...run(0), chmod: () => { throw new Error("read-only"); } };
+  expect(hardenHost({}, failing)).toEqual(["/proc: hidepid=invisible", "/.fly: left as is (read-only)"]);
 });
