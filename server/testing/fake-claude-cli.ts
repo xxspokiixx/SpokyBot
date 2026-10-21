@@ -147,6 +147,9 @@ const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
 let toolUseCount = 0;
 let scriptedReplyIndex = 0;
 const nextScriptedReply = (): string[] => {
+  // A test that wants one long reply puts it in this file for as long as it wants it, read again each turn.
+  const replyFile = process.env.FAKE_CLAUDE_REPLY_FILE;
+  if (replyFile && existsSync(replyFile)) return [readFileSync(replyFile, "utf8")];
   const stateFile = process.env.FAKE_CLAUDE_REPLY_STATE;
   let index = scriptedReplyIndex;
   if (stateFile) {

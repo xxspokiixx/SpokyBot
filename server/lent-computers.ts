@@ -102,6 +102,10 @@ export class LentComputers {
   }
 }
 
+/** Where the person lends apps and screen: in OpenMausBot on the lent computer, on My Cloud's page or in its Settings. */
+export const lendScreenSteps = (device: string) => `To lend them, the person ticks Apps and screen under "Let my bots use this ${device}" `
+  + `on My Cloud's page in OpenMausBot on that ${device}, or in its Settings → MausBot Cloud → Choose what's lent.`;
+
 const dateText = (at: number) => new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 
 /**

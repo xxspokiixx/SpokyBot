@@ -19,12 +19,9 @@ import { StagingMark } from "./cloud-buy/parts";
 import { SetupScreen } from "./cloud-buy/SetupScreen";
 import { BrowserSignInScreen, codeDigits, SignInScreen } from "./cloud-buy/SignInScreen";
 
-export { planFromKey } from "./cloud-buy/ChooseScreen";
-
 export interface CloudAddActions {
-  choose(tier: string): void;
-  /** The offer's one next step: the in-app sign-in when signed out, else the checkout. */
-  start(): void;
+  /** A plan card's button: the in-app sign-in when signed out, then (or else) that plan's checkout. */
+  start(tier: string): void;
   signIn(): void;
   back(): void;
   email(value: string): void;
@@ -48,9 +45,10 @@ export interface CloudAddActions {
   close(): void;
 }
 
-/** What the sheet holds itself: typed words, the chosen plan, the countdown and short notes. Never a code or a token. */
+/** What the sheet holds itself: typed words, the chosen plan, the countdown and short notes. Never a code or a token.
+ * `current` is the tier of the plan this account already has, from its verified entitlement. */
 export interface CloudAddUi {
-  chosen: string | null; offerShown: CloudOffer | null; now: number; busy: boolean; openFailed: boolean;
+  chosen: string | null; current: string | null; offerShown: CloudOffer | null; now: number; busy: boolean; openFailed: boolean;
   email: string; code: string; profileEmail: string | null;
   look: { typed: string; name: string; color: CloudColor };
   counting: number | null; copied: boolean; payFailed: boolean; interest: "sent" | "failed" | null;
@@ -62,10 +60,10 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
     case "unreachable": return <StatusScreen kind="unreachable" line={t("cloudAdd.unreachable")} onRetry={actions.retry} onClose={actions.close} />;
     case "error": return <StatusScreen kind={`error-${view.reason}`} line={t(view.reason === "rate-limited" ? "cloudAdd.rateLimited" : "cloudAdd.failed")}
       onRetry={actions.retry} onClose={actions.close} />;
-    case "offer": return <ChooseScreen offer={view.offer} chosen={ui.chosen} now={ui.now} busy={ui.busy} signedOut={view.signedOut}
+    case "offer": return <ChooseScreen offer={view.offer} current={ui.current} now={ui.now} busy={ui.busy} signedOut={view.signedOut}
       notice={view.notice ? t(view.notice === "code-expired" ? "cloudAdd.codeExpired" : view.notice === "signin-ended" ? "cloudAdd.signInEnded"
         : view.notice === "terms" ? "cloudBuy.termsChanged" : "cloudAdd.preparing") : null}
-      onChoose={actions.choose} onStart={actions.start} onSignIn={actions.signIn} />;
+      onStart={actions.start} onSignIn={actions.signIn} />;
     case "sign-in": return <SignInScreen phase={view.phase} email={ui.email} code={ui.code} profileEmail={ui.profileEmail} busy={ui.busy} now={ui.now}
       onBack={actions.back} onEmail={actions.email} onSend={actions.sendCode} onChangeEmail={actions.changeEmail} onCode={actions.code}
       onResend={actions.resend} onBrowser={actions.browser} />;
@@ -101,6 +99,8 @@ export function CloudAddSheet({ kind, staging, onClose, children }: { kind: Clou
 const OFFER_VIEWS: ReadonlyArray<CloudAddView["kind"]> = ["offer", "checking", "unreachable", "waiting", "sign-in", "signing-in"];
 const FOCUSABLE = "button:not([disabled]):not([tabindex='-1']), input:not([disabled]):not([tabindex='-1']), [href], [tabindex='0']";
 const free = (state: CloudAccountState) => state.status === "connected" && state.entitlement?.plan === "free" && !state.purchase && !state.machine;
+const currentTier = (state: CloudAccountState | null | undefined) =>
+  state?.status === "connected" && state.entitlement?.plan === "pro" && state.entitlement.status === "active" ? state.entitlement.tier ?? "pro" : null;
 type AutoOpen = number | "off" | "done" | null;
 type Note = "copied" | "pay-failed" | "interest-sent" | "interest-failed" | null;
 
@@ -312,10 +312,10 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     })();
   };
   const actions: CloudAddActions = {
-    choose: tier => { setChosen(tier); setChoosing(true); setConflict(false); },
-    start: () => {
+    start: tier => {
+      setChosen(tier); setConflict(false);
       if (view.kind === "offer" && view.signedOut && bridge.signInStart) { enterSignIn(true); return; }
-      run(() => openCheckout(planNow()));
+      run(() => openCheckout(tier));
     },
     signIn: () => enterSignIn(false),
     back: () => { setSignIn(null); void bridge.signInCancel?.().catch(() => {}); },
@@ -358,7 +358,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     },
     close,
   };
-  const ui: CloudAddUi = { chosen, offerShown, now: now(), busy, openFailed, email: form.email, code: form.code, profileEmail, look: shownLook,
+  const ui: CloudAddUi = { chosen, current: currentTier(account), offerShown, now: now(), busy, openFailed, email: form.email, code: form.code, profileEmail, look: shownLook,
     counting: typeof auto === "number" ? auto : null, copied: note === "copied", payFailed: note === "pay-failed",
     interest: note === "interest-sent" ? "sent" : note === "interest-failed" ? "failed" : null };
   return <CloudAddSheet kind={view.kind} staging={account?.staging === true} onClose={close}><CloudAddPanel view={view} ui={ui} actions={actions} /></CloudAddSheet>;

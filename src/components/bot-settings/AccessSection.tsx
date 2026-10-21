@@ -34,17 +34,12 @@ import type { useBotSettingsDerived } from "./useBotSettingsDerived";
  * Claude keeps sessions per project folder, so the server pins each task's folder on its first turn. PATCHed directly,
  * not via updateBot: the server validates the path, and a rejected folder must not stick in local state.
  */
-export function WorkingFolder({ bot }: { bot: Bot }) {
+export function useWorkingFolder(bot: Pick<Bot, "id" | "cwd">) {
   const { request: api } = useBotEditor();
-  const { capabilities } = useDesktopCapabilities();
-  const home = capabilities.host.homeDir;
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const canPick = Boolean(window.ogb?.pickFolder);
-  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
-  const pinned = task?.cwd;
-  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd;
 
   const save = async (cwd: string | null) => {
     setSaving(true);
@@ -62,6 +57,16 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
     const chosen = await window.ogb?.pickFolder?.(bot.cwd);
     if (chosen) void save(chosen);
   };
+  return { draft, setDraft, error, saving, canPick, save, pick };
+}
+
+export function WorkingFolder({ bot }: { bot: Bot }) {
+  const { capabilities } = useDesktopCapabilities();
+  const home = capabilities.host.homeDir;
+  const { draft, setDraft, error, saving, canPick, save, pick } = useWorkingFolder(bot);
+  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
+  const pinned = task?.cwd;
+  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd;
 
   return (
     <div className="rounded-xl bg-card p-4">

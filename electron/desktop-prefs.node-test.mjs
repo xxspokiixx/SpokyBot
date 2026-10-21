@@ -84,25 +84,24 @@ test("shown counts once a day on this desktop, whichever page asks, until the po
 });
 
 const WELCOMED = { onboarding: { completedAt: "2026-10-01T09:00:00.000Z", version: WELCOME_VERSION, hintsSeen: [] } };
-function desktopMain({ offered = true, switches = () => true, page = event => event.page, config = () => WELCOMED } = {}) {
-  const handlers = new Map(), listeners = new Map(), calls = [], landings = [];
+function desktopMain({ offered = true, page = event => event.page, config = () => WELCOMED } = {}) {
+  const handlers = new Map(), listeners = new Map(), calls = [];
   let saved = null, now = NOON;
   registerDesktopPrefs({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: (channel, listener) => listeners.set(channel, listener) },
     read: () => saved, write: value => { saved = structuredClone(value); }, page,
     cloudOffered: async () => { calls.push("offered"); return offered; },
-    thisComputer: async landing => { calls.push("this-computer"); const moved = await switches(); if (moved === true) landings.push(landing); return moved; },
     localConfig: () => config(),
     now: () => now,
   });
   const ask = (channel, page, ...args) => handlers.get(channel)({ page }, ...args);
   const read = page => { const event = { page }; listeners.get("desktop-analytics:read")(event); return event.returnValue; };
-  return { ask, read, calls, landings, channels: [...handlers.keys()], saved: () => saved, later: ms => { now += ms; } };
+  return { ask, read, calls, channels: [...handlers.keys()], saved: () => saved, later: ms => { now += ms; } };
 }
 
 test("every page of this desktop's window reads and records the same notices; nothing else is answered", async () => {
   const main = desktopMain();
-  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-notices:this-computer", "desktop-analytics:set"]);
+  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-analytics:set"]);
   for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true });
   assert.equal(await main.ask("desktop-notices:shown", "server", POPUP), true);
   assert.equal(await main.ask("desktop-notices:shown", "local", POPUP), false, "once a day for the desktop, not per page");
@@ -118,8 +117,6 @@ test("This computer's own record counts on every page before its page loads on t
   for (const hint of [POPUP, ONBOARDING_CLOUD_HINT]) {
     const main = desktopMain({ config: record({ completedAt: "2026-10-01", version: 1, hintsSeen: ["tour-finished", hint] }) });
     for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [POPUP], cloud: true }, `${hint} ${page}`);
-    assert.equal(await main.ask("desktop-notices:this-computer", "server", "cloud-pro"), false, `${hint}: nothing to switch for`);
-    assert.deepEqual(main.calls.filter(call => call === "this-computer"), []);
     assert.equal(main.saved(), null, "read, never written into this desktop's record");
   }
   assert.deepEqual(onboardingHints({ onboarding: { completedAt: "x", version: 2, hintsSeen: ["a", 1, null, "b"] } }), ["a", "b"]);
@@ -130,66 +127,11 @@ test("every desktop gets the popup on whichever page its window opens, whatever 
   const records = [() => ({ onboarding: { completedAt: "", version: 0, hintsSeen: [] } }), () => ({ composio: {} }), () => null, () => "nonsense",
     () => { throw new Error("ENOENT"); }, () => { throw new SyntaxError("Unexpected token"); }, () => ({ onboarding: { hintsSeen: POPUP } }), () => ({ onboarding: { hintsSeen: [{ id: POPUP }] } })];
   for (const config of records) {
-    for (const [page, intent] of [["cloud", "manage"], ["server", "cloud-pro"]]) {
+    for (const page of ["local", "cloud", "server"]) {
       const main = desktopMain({ config }), name = `${String(config)} ${page}`;
       assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true }, name);
-      assert.equal(await main.ask("desktop-notices:this-computer", page, intent), true, `${name}: its click switches`);
-      assert.deepEqual(main.saved().seen, [POPUP], name);
     }
   }
-});
-
-test("main takes only the popup's own click: Continue on this computer from My Cloud's or a saved server's page, Manage plan from My Cloud's own page alone", async () => {
-  const refused = [["server", "manage"], ["server", undefined], ["cloud", undefined], ["cloud", null], ["server", "upgrade"], ["cloud", "Cloud-Pro"],
-    ["server", "__proto__"], ["cloud", "constructor"], ["server", { intent: "cloud-pro" }], ["cloud", ["manage"]]];
-  for (const [page, intent] of refused) {
-    const main = desktopMain(), name = `${page} ${JSON.stringify(intent)}`;
-    await assert.rejects(main.ask("desktop-notices:this-computer", page, intent), /cannot hand that click/, name);
-    assert.deepEqual(main.calls, [], `${name}: nothing is asked, nothing moves`);
-    assert.equal(main.saved(), null, name);
-    assert.equal(await main.ask("desktop-notices:this-computer", page, "cloud-pro"), true, `${name}: its own click still switches`);
-  }
-  for (const page of ["local", null, "elsewhere"]) {
-    for (const intent of ["cloud-pro", "manage"]) assert.throws(() => desktopMain().ask("desktop-notices:this-computer", page, intent), /only available/, `${page} ${intent}`);
-  }
-});
-
-test("the click brings the window to This computer's page on what it opens there, and the popup is seen: Continue on this computer from any server's page, Manage plan from My Cloud's", async () => {
-  const landings = [
-    ["server", "cloud-pro", "?desktop-settings=cloud-add&source=update_popup&via=server"],
-    ["cloud", "cloud-pro", "?desktop-settings=cloud-add&source=update_popup&via=my_cloud"],
-    ["cloud", "manage", "?desktop-settings=cloud-settings&source=update_popup&via=my_cloud"],
-  ];
-  for (const [page, intent, landing] of landings) {
-    const main = desktopMain(), name = `${page} ${intent}`;
-    assert.equal(await main.ask("desktop-notices:this-computer", page, intent), true, name);
-    assert.deepEqual(main.landings, [landing], name);
-    assert.deepEqual(main.saved().seen, [POPUP], `${name}: seen once the window has switched`);
-    for (const other of ["local", "cloud", "server"]) assert.deepEqual((await main.ask("desktop-notices:state", other)).seen, [POPUP], `${name}: no page shows it again`);
-    assert.equal(await main.ask("desktop-notices:this-computer", page, intent), false, `${name}: once`);
-    assert.deepEqual(main.calls.filter(call => call === "this-computer"), ["this-computer"], name);
-  }
-  const seen = desktopMain();
-  await seen.ask("desktop-notices:seen", "local", POPUP);
-  assert.equal(await seen.ask("desktop-notices:this-computer", "server", "cloud-pro"), false, "a seen popup switches nothing");
-  const unsold = desktopMain({ offered: false });
-  assert.equal(await unsold.ask("desktop-notices:this-computer", "server", "cloud-pro"), false);
-  assert.equal(unsold.calls.includes("this-computer"), false);
-});
-
-test("a switch that fails marks nothing, so a later click or launch can try again; two clicks at once switch once", async () => {
-  let switches = false;
-  const main = desktopMain({ switches: () => switches });
-  for (const [page, intent] of [["cloud", "manage"], ["server", "cloud-pro"]]) assert.equal(await main.ask("desktop-notices:this-computer", page, intent), false);
-  assert.equal(main.saved(), null);
-  assert.deepEqual((await main.ask("desktop-notices:state", "server")).seen, []);
-  switches = true;
-  assert.equal(await main.ask("desktop-notices:this-computer", "server", "cloud-pro"), true, "a failed switch is not the one switch");
-  assert.deepEqual(main.landings, ["?desktop-settings=cloud-add&source=update_popup&via=server"]);
-  const both = desktopMain({ switches: async () => { await new Promise(resolve => setTimeout(resolve, 5)); return true; } });
-  const [first, second] = await Promise.all([both.ask("desktop-notices:this-computer", "server", "cloud-pro"), both.ask("desktop-notices:this-computer", "cloud", "manage")]);
-  assert.deepEqual([first, second], [true, false]);
-  assert.deepEqual(both.landings, ["?desktop-settings=cloud-add&source=update_popup&via=server"], "and land on the first");
 });
 
 test("the analytics switch is This computer's page's to set; a server's page in the window is told only that it is off", async () => {
@@ -237,17 +179,10 @@ test("the preload gives every page of the window the notices and the switch's st
     assert.equal(page.bridge.desktopAnalytics.set, undefined, "a server's page cannot change the desktop's switch");
     await page.bridge.desktopNotices.state(); await page.bridge.desktopNotices.seen({ toString: () => POPUP }); await page.bridge.desktopNotices.shown(POPUP);
     assert.deepEqual(page.invoked, [["desktop-notices:state"], ["desktop-notices:seen", POPUP], ["desktop-notices:shown", POPUP]]);
-    await assert.rejects(page.bridge.desktopNotices.thisComputer("cloud-pro"), /Choose Continue on this computer/, "only on a click");
-    const clicked = preload(origin, { activation: true });
-    await clicked.bridge.desktopNotices.thisComputer("cloud-pro"); await clicked.bridge.desktopNotices.thisComputer("manage");
-    for (const intent of [undefined, null, "", "upgrade", "MANAGE", { toString: () => "manage" }, ["cloud-pro"], new String("cloud-pro")]) {
-      await assert.rejects(clicked.bridge.desktopNotices.thisComputer(intent), /only its own click/, String(intent));
-    }
-    assert.deepEqual(clicked.invoked, [["desktop-notices:this-computer", "cloud-pro"], ["desktop-notices:this-computer", "manage"]], "nothing else reaches main");
+    assert.deepEqual(Object.keys(page.bridge.desktopNotices), ["state", "seen", "shown"], "no page moves the window to this computer");
   }
   const local = preload(LOCAL, { activation: true, saved: false });
   assert.equal(typeof local.bridge.desktopNotices.state, "function");
-  await assert.rejects(local.bridge.desktopNotices.thisComputer("cloud-pro"), /Choose Continue/, "This computer's page has nothing to switch to");
   assert.deepEqual(local.synced, [], "nothing is asked until analytics asks");
   assert.equal(local.bridge.desktopAnalytics.enabled(), false, "answered at once, before anything loads");
   assert.equal(local.bridge.desktopAnalytics.enabled(), false);
@@ -267,7 +202,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /for \(const port of DESKTOP_PORTS\)/, "main tries the ports this module names, in order");
   assert.deepEqual([...DESKTOP_PORTS], [8799, 18799, 28799]);
-  const start = main.indexOf("  registerDesktopPrefs({"), end = main.indexOf("\n", main.indexOf("thisComputer:", start));
+  const start = main.indexOf("  registerDesktopPrefs({"), end = main.indexOf("\n", main.indexOf("page:", start));
   assert.ok(start >= 0 && end > start, "main.mjs registers the desktop prefs");
   let options = null;
   const localFrame = { url: `${LOCAL}/` }, serverFrame = { url: `${VPS}/` };
@@ -297,28 +232,8 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   assert.equal(options.page({ sender: {}, senderFrame: serverFrame }), null, "another window");
   const evil = { url: "https://evil.example.test/" };
   assert.equal(options.page({ sender: { mainFrame: evil }, senderFrame: evil }), null, "a page that is not the active server");
-  const landing = "?desktop-settings=cloud-add&source=update_popup&via=server";
-  const [offered, done] = await Promise.all([options.cloudOffered(), options.thisComputer(landing)]);
-  assert.equal(offered, true); assert.equal(done, true);
-  assert.deepEqual(calls, ["restored", ["switch", "local"], "offers", ["navigate", `${LOCAL}/${landing}`]], "the page loads on the click once the window has switched");
-  const navigated = () => calls.filter(call => call[0] === "navigate").length;
-  switched = async () => { throw new Error("could not save the servers list"); };
-  assert.equal(await options.thisComputer(landing), false, "a switch that threw");
-  assert.equal(calls.at(-1), "dialog", "still shows main's dialog");
-  switched = async () => ({ ok: false, error: "switch-failed" });
-  assert.equal(await options.thisComputer(landing), false, "a local environment switch that failed");
-  switched = async () => ({ ok: false, error: "busy" });
-  assert.equal(await options.thisComputer(landing), false, "another environment switch in flight");
-  assert.equal(navigated(), 1, "nothing loads for a switch that failed");
-  switched = async () => ({ ok: true });
-  assert.equal(await options.thisComputer(landing), true);
-  assert.equal(navigated(), 2);
-  loads = false;
-  assert.equal(await options.thisComputer(landing), false, "a page that does not load counts as no switch, so the popup is not seen");
-  assert.equal(navigated(), 3);
-  loads = true; context.serverReady = false;
-  assert.equal(await options.thisComputer(landing), false, "no server to switch to");
-  assert.equal(navigated(), 3);
+  assert.equal(await options.cloudOffered(), true);
+  assert.deepEqual(calls, ["restored", "offers"]);
   const navigate = main.slice(main.indexOf("function navigateMainWindow(url) {"), main.indexOf("\n}\n", main.indexOf("function navigateMainWindow(url) {")) + 3);
   const load = vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: { isDestroyed: () => false, loadURL: async url => { if (url.endsWith("fail")) throw new Error("ERR_CONNECTION_REFUSED"); } } });
   assert.equal(await load(`${LOCAL}/ok`), true); assert.equal(await load(`${LOCAL}/fail`), false, "a failed load answers false, never throws");

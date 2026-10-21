@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { botsOnCloud, createLoginHandoffClient, handoffWhat } from "./cloud-logins.mjs";
+import { botsOnCloud, createLoginHandoffClient } from "./cloud-logins.mjs";
 
 const TOKEN = "ops_fake-node-test-token";
-
-test("a page names only 1Password or one saved login by id: never a destination, a field or a value", () => {
-  assert.deepEqual(handoffWhat({ kind: "1password", origin: "https://evil.example" }), { kind: "1password" });
-  assert.deepEqual(handoffWhat({ kind: "login", id: "abc-123", password: "x" }), { kind: "login", id: "abc-123" });
-  for (const bad of [null, "1password", { kind: "login" }, { kind: "login", id: "../x" }, { kind: "all" }, [{ kind: "1password" }]]) assert.equal(handoffWhat(bad), null);
-});
 
 test("the private ask takes its answer only from the process it asked, and gives up in words", async () => {
   const sent = [];

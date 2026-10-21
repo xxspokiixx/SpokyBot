@@ -14,7 +14,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 vi.mock("./CloudAccountSettings", () => ({ CloudAccountSettings: ({ cloudHome }: { cloudHome?: boolean }) => `CLOUD_PLAN_MARKER${cloudHome ? " home" : ""}` }));
 
-const plan = { state: vi.fn(), manage: vi.fn(), useThisComputer: vi.fn() };
+const plan = { state: vi.fn(), manage: vi.fn() };
 beforeEach(() => {
   fixture.section = "cloudAccount"; fixture.config = undefined;
   vi.stubGlobal("document", { documentElement: { dataset: {} } });

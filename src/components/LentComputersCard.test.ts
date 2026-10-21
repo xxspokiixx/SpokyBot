@@ -12,8 +12,8 @@ const { LentComputersCard, lentComputerLines, pageLendingLine } = await import("
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
 let root: Root;
-const off: PageLending = { available: true, on: false, status: null, folders: [], screen: false, internet: false };
-const lent: PageLending = { available: true, on: true, status: "lent", folders: ["Desktop", "Documents", "Downloads"].map((name) => ({ name, write: false })), screen: false, internet: true };
+const off: PageLending = { available: true, on: false, status: null, folders: [], screen: false, screenAvailable: true, internet: false };
+const lent: PageLending = { available: true, on: true, status: "lent", folders: ["Desktop", "Documents", "Downloads"].map((name) => ({ name, write: false })), screen: false, screenAvailable: true, internet: true };
 
 beforeEach(() => {
   setLocale("en");
@@ -46,6 +46,32 @@ it("on My Cloud's page in the app, lending this computer is one switch and one l
   expect(set).toHaveBeenCalledExactlyOnceWith(true);
   expect(open).not.toHaveBeenCalled();
   expect(host.textContent).toContain("Your bots can use the internet connection and Desktop, Documents, and Downloads (read only) on this Mac.");
+});
+
+it("on My Cloud's page, Apps and screen is a tick under the switch once lending is on: no leaving My Cloud", async () => {
+  const screen = vi.fn().mockResolvedValue({ ...lent, screen: true });
+  const state = vi.fn().mockResolvedValue(off);
+  (window as { ogb?: unknown }).ogb = { platform: "darwin", cloudLending: { open: vi.fn(), state, set: vi.fn(), screen } };
+  await render();
+  expect(host.querySelector("[data-lend-screen]")).toBeNull();
+  state.mockResolvedValue(lent);
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  await render();
+  const tick = host.querySelector<HTMLInputElement>('[data-lend-screen="off"] input')!;
+  expect(host.textContent).toContain("Apps and screen");
+  expect(host.textContent).toContain("Bots can see your screen and use your apps as you.");
+  await act(async () => tick.click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(screen).toHaveBeenCalledExactlyOnceWith(true);
+  expect(host.querySelector<HTMLInputElement>('[data-lend-screen="on"] input')!.checked).toBe(true);
+});
+
+it("says to set up computer control first where Apps and screen can't be lent yet", async () => {
+  (window as { ogb?: unknown }).ogb = { platform: "darwin", cloudLending: { open: vi.fn(), state: vi.fn().mockResolvedValue({ ...lent, screenAvailable: false }), set: vi.fn(), screen: vi.fn() } };
+  await render();
+  expect(host.querySelector<HTMLInputElement>('[data-lend-screen="off"] input')!.disabled).toBe(true);
+  expect(host.textContent).toContain("Set up computer control for this app first");
 });
 
 it("in a browser there is no switch for a computer, only the computers lent", async () => {

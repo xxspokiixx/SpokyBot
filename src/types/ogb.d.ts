@@ -116,21 +116,15 @@ const __APP_VERSION__: string;
       platform: NodeJS.Platform;
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
-      /** Copy this computer here: this computer's page names a saved server (or
-       * "cloud"); a server's own page is answered about itself only, and its
-       * Copy opens this computer's Settings on that copy (the verified Cloud's starts it). */
-      cloudMove?: import("../../electron/cloud-move.mjs").CloudMoveBridge;
       /** "Let my bots use this Mac" (this PC, this computer), on My Cloud's own page in this app: its one switch and
        * what is lent (electron/cloud-lending-ipc.mjs). `open` shows this computer's own Settings, leaving the page. */
-      cloudLending?: { open(): Promise<void>; state?(): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; set?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending> };
-      /** This computer's Settings → Logins only: what of Logins My Cloud has, and Also use on My Cloud. */
-      cloudLogins?: import("../../electron/cloud-logins.mjs").CloudLoginsBridge;
-      /** This computer's Settings → MausBot Cloud: what each side has, Send everything, and the switches. */
-      cloudSend?: import("../../electron/cloud-send.mjs").CloudSendBridge;
-      /** My Cloud's own page in this app: what this computer has that My Cloud lacks, and Bring them over. */
+      cloudLending?: { open(): Promise<void>; state?(): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; set?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; screen?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending> };
+      /** Either page in this app: the one-time move's line (on its way, what arrived, coming home). */
       cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
+      /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
+      home?: import("../../electron/home-window.mjs").HomeBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
       desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
       companyBackups?: {
@@ -145,10 +139,13 @@ const __APP_VERSION__: string;
         onState(callback: (state: CompanyBackupState) => void): () => void;
       };
       workspaces?: {
-        /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up). */
-        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string }>;
+        /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
+         * home is this Cloud, so there is nothing to switch to. */
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
+        /** One plain line for the next page, served once: a team this person is no longer in. */
+        line?: () => Promise<{ kind: "left"; name: string } | null>;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
@@ -183,7 +180,7 @@ const __APP_VERSION__: string;
          * cancelled remote confirm and remote success answer nothing. */
         forget: (id: string, purge?: boolean) => Promise<{ ok: boolean; error?: string } | void>;
         /** `panel` "copy": that server's Copy this computer here panel; otherwise its Computer access. */
-        onOpenSettings?: (callback: (computerId?: string | null, panel?: "copy") => void) => () => void;
+        onOpenSettings?: (callback: (computerId?: string | null) => void) => () => void;
       };
       /** Local main-window only. Hosted renderers cannot grant themselves access. */
       computerSharing?: {

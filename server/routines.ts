@@ -669,6 +669,9 @@ export class RoutineManager {
     return this.routineWithHealth(routine);
   }
 
+  /** Routines and runs another server holds, under their own ids: `apply` edits the lists, which are saved whole or not at all. */
+  adopt(apply: (held: { routines: Routine[]; runs: RoutineRun[] }) => Routine[]): void { this.assertWritable(); let changed: Routine[] = []; this.commitMutation(() => { changed = apply({ routines: this.routines, runs: this.runs }); }); for (const routine of changed) this.emitRoutine(routine); }
+
   update(
     id: string,
     patch: Partial<RoutineInput>,
@@ -1577,11 +1580,8 @@ export class RoutineManager {
       this.routines = before.routines;
       this.runs = before.runs;
       this.routineRequestReceipts = before.receipts;
-      try {
-        rollback?.();
-      } catch (cleanupError) {
-        console.error("routine: could not discard uncommitted results thread", cleanupError);
-      }
+      try { rollback?.(); }
+      catch (cleanupError) { console.error("routine: could not discard uncommitted results thread", cleanupError); }
       throw error;
     }
   }

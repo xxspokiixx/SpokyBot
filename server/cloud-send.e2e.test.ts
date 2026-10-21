@@ -1,200 +1,21 @@
-// Send to My Cloud, end to end: two real servers (this computer's and a Cloud home) with main's own wiring between them
+// The move's transport, end to end: two real servers (this computer's and a Cloud home) with main's own wiring between them
 // (scripts/testing/cloud-send-fixture.ts). Disposable homes; no network.
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { itemKey } from "../electron/cloud-send-parts.mjs";
-import type { CloudSendNotice, CloudSendOutcome, CloudSendSnapshot } from "../electron/cloud-send.mjs";
-import { createCloudMove } from "../electron/cloud-move.mjs";
+import type { CloudSendNotice } from "../electron/cloud-send.mjs";
 import { launchCloudSendFixture, type CloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 // Obvious fakes only.
 const TOKEN = `ops_fake-send-${randomBytes(12).toString("hex")}`;
 const PASSWORD = `fake-send-Passw0rd-${randomBytes(6).toString("hex")}`;
-const SECRETS = [TOKEN, PASSWORD, "JBSWY3DPEHPK3PXP"];
 const DOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
-const SKILL = "---\nname: weekly-summary\ndescription: Summarise the week in five lines.\n---\n\nWrite five lines: wins, misses, next week.\n";
 let fx: CloudSendFixture;
 
 beforeAll(async () => { fx = await launchCloudSendFixture({ onePasswordToken: TOKEN }); }, hostTimeout(60_000));
 afterAll(async () => { await fx?.close(); });
 
-const row = (snapshot: { rows: Array<{ key: string; state: string }> }, key: string) => snapshot.rows.find((entry) => entry.key === key);
-
-it("sends this computer's bot, its skill, picture and notes, a login, 1Password and About me to My Cloud, and keeps My Cloud's own", async () => {
-  const { local, onCloud, cloudBase, edge, owner, labels } = fx;
-  const ember = (await local("POST", "/api/bots", { name: "Ember", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-  expect((await local("PATCH", `/api/bots/${ember.id}`, { soul: "You are Ember. Keep answers short.", approvalMode: "full", notifications: false, replyStyle: "conversational" })).status).toBe(200);
-  expect((await local("PATCH", `/api/bots/${ember.id}`, { avatarUrl: await fx.picture(DOT) })).status).toBe(200);
-  expect((await local("POST", `/api/bots/${ember.id}/skill-template`, { name: "weekly-summary", description: "Summarise the week in five lines.", warnings: [], source: "test", text: SKILL, enabled: true })).status).toBe(201);
-  expect((await local("PUT", `/api/bots/${ember.id}/memory/file`, { path: "memory/clients.md", text: "Acme pays on the 5th.\n" })).status).toBe(200);
-  const alice = (await local("POST", "/api/logins", { site: "accounts.example.test", username: "alice", password: PASSWORD, totp: "JBSWY3DPEHPK3PXP", bots: [ember.id] })).body.login;
-  expect((await local("POST", "/api/logins/1password", { token: TOKEN })).status).toBe(200);
-  expect((await local("PATCH", "/api/logins/1password/vaults/v1", { bots: [ember.id] })).status).toBe(200);
-  expect((await local("PATCH", "/api/config", { profile: { name: "Amit", aboutMe: "Solo developer in Tel Aviv." } })).status).toBe(200);
-  const miso = (await onCloud("POST", "/api/bots", { name: "Miso", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-  await onCloud("PATCH", `/api/bots/${miso.id}`, { soul: "You are Miso, the Chief of Staff." });
-
-  const call = <T>(channel: string, ...args: unknown[]) => fx.call<T>(channel, "local", ...args);
-  const refresh = () => call<CloudSendSnapshot>("cloud-send:refresh");
-  const send = (input?: { keys?: string[]; force?: string[] }) => call<CloudSendOutcome>("cloud-send:send", input);
-  const before = await refresh();
-  expect(before.cloud).toBe("ready");
-  expect(row(before, itemKey.bot(ember.id))?.state).toBe("only-here");
-  expect(row(before, itemKey.skill(ember.id, "weekly-summary"))?.state).toBe("only-here");
-  expect(row(before, itemKey.login("example.test", "alice"))?.state).toBe("only-here");
-  expect(row(before, itemKey.onePassword())?.state).toBe("only-here");
-  expect(row(before, itemKey.setting("profile"))).toMatchObject({ state: "to-update", parts: ["name", "about"] });
-  expect(before.cloudOnly.map((entry) => entry.label)).toContain("Miso");
-  // What My Cloud's own page is told: names of bots and counts, never a login's site.
-  const notice = await fx.call<CloudSendNotice>("cloud-send:notice", "cloud");
-  expect(notice).toMatchObject({ ready: true, bots: ["Ember"], skills: 0, logins: 1, onePassword: true, settings: 1, dismissed: false });
-  expect(JSON.stringify(notice)).not.toContain("example.test");
-
-  // Pepper stays only here: its switch is off.
-  const pepper = (await local("POST", "/api/bots", { name: "Pepper", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-  await local("PATCH", `/api/bots/${pepper.id}`, { soul: "You are Pepper." });
-  const ops = (await local("POST", "/api/logins", { site: "crm.example.test", username: "ops", password: PASSWORD, bots: [pepper.id] })).body.login;
-  await call("cloud-send:item", itemKey.bot(pepper.id), false);
-  await call("cloud-send:item", itemKey.login("example.test", "ops"), false);
-
-  const outcome = await send();
-  expect(outcome.result).toMatchObject({ bots: ["Ember"], skills: 1, logins: 1, onePassword: true, settings: ["profile"], failed: [] });
-
-  const there = (await onCloud("GET", "/api/bots?messages=0")).body.bots as Array<Record<string, unknown>>;
-  const copy = there.find((bot) => bot.id === ember.id)!;
-  expect(copy).toMatchObject({ name: "Ember", threadId: ember.threadId, soul: "You are Ember. Keep answers short.", approvalMode: "full", notifications: false, replyStyle: "conversational" });
-  expect(copy.modelSelection).toMatchObject({ instanceId: "claude", model: "claude-sonnet-5" });
-  expect(typeof copy.avatarUrl).toBe("string");
-  expect(Buffer.from(await (await fetch(`${cloudBase}${copy.avatarUrl}`, { headers: { ...edge, authorization: `Bearer ${owner}` } })).arrayBuffer())).toEqual(DOT);
-  expect(there.find((bot) => bot.id === miso.id)?.name).toBe("Miso");
-  expect(there.some((bot) => bot.id === pepper.id)).toBe(false);
-  const skills = (await onCloud("GET", `/api/bots/${ember.id}/skills`)).body.skills as Array<{ name: string; enabled: boolean }>;
-  expect(skills).toEqual([expect.objectContaining({ name: "weekly-summary", enabled: true })]);
-  expect((await onCloud("GET", `/api/bots/${ember.id}/memory/file?path=memory/clients.md`)).body.text).toBe("Acme pays on the 5th.\n");
-  const logins = (await onCloud("GET", "/api/logins")).body;
-  // Ember is on My Cloud with the same id, so a login kept to Ember stays kept to Ember there.
-  expect(logins.logins.filter((login: { source: string }) => login.source !== "1password")).toEqual([
-    expect.objectContaining({ site: "example.test", username: "alice", hasTotp: true, bots: [ember.id] }),
-  ]);
-  expect(logins.onePassword).toMatchObject({ connected: true, vaults: [{ id: "v1", bots: [ember.id] }] });
-  expect((await onCloud("GET", "/api/config")).body.profile).toMatchObject({ name: "Amit", aboutMe: "Solo developer in Tel Aviv." });
-
-  const after = await refresh();
-  expect(after.pending).toBe(0);
-  expect(row(after, itemKey.bot(ember.id))?.state).toBe("on-both");
-  expect(row(after, itemKey.bot(pepper.id))?.state).toBe("off");
-  // Each send's own session signed out again.
-  const sessions = (await onCloud("GET", "/api/auth/sessions")).body.sessions as Array<{ label?: string }>;
-  expect(sessions.filter((session) => labels.includes(session.label ?? ""))).toEqual([]);
-
-  // Settings → Logins' "Also use on My Cloud" is the same send for one login: Pepper is not on My Cloud, so the login
-  // reaches no bot there, and the page says it narrowed.
-  expect((await call<{ cloud: { logins: Array<{ site: string; username: string }> } }>("cloud-logins:state")).cloud.logins).toEqual([{ site: "example.test", username: "alice" }]);
-  expect(await call("cloud-logins:send", { kind: "login", id: ops.id })).toMatchObject({ sent: true, narrowed: true });
-  expect((await onCloud("GET", "/api/logins")).body.logins.find((login: { username: string }) => login.username === "ops")).toMatchObject({ bots: [] });
-
-  // A change here goes; a change made on My Cloud is never overwritten unless the person chooses this computer's.
-  await local("PATCH", `/api/bots/${ember.id}`, { soul: "You are Ember. Answer in one line." });
-  await local("PATCH", `/api/bots/${ember.id}`, { title: "Research" });
-  await onCloud("PATCH", `/api/bots/${ember.id}`, { title: "Ops" });
-  const changed = await refresh();
-  expect(row(changed, itemKey.bot(ember.id))).toMatchObject({ state: "to-update", parts: ["soul"], differs: ["title"] });
-  expect((await send()).result).toMatchObject({ updatedBots: ["Ember"], failed: [] });
-  expect((await onCloud("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === ember.id)).toMatchObject({ soul: "You are Ember. Answer in one line.", title: "Ops" });
-  await send({ force: [itemKey.bot(ember.id)] });
-  expect((await onCloud("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === ember.id)).toMatchObject({ title: "Research" });
-
-  // Removed on My Cloud stays removed, until the person turns its switch back on.
-  const sent = (await onCloud("GET", "/api/logins")).body.logins.find((login: { username: string }) => login.username === "alice");
-  expect((await onCloud("DELETE", `/api/logins/${sent.id}`)).status).toBe(200);
-  expect(row(await refresh(), itemKey.login("example.test", "alice"))?.state).toBe("removed");
-  expect((await send()).result.logins).toBe(0);
-  expect((await onCloud("GET", "/api/logins")).body.logins.some((login: { username: string }) => login.username === "alice")).toBe(false);
-  expect(row(await call<CloudSendSnapshot>("cloud-send:item", itemKey.login("example.test", "alice"), true), itemKey.login("example.test", "alice"))?.state).toBe("only-here");
-  expect((await send()).result.logins).toBe(1);
-
-  // A password changed here goes on the next send.
-  await local("PATCH", `/api/logins/${alice.id}`, { password: `${PASSWORD}-2` });
-  expect(row(await refresh(), itemKey.login("example.test", "alice"))?.state).toBe("to-update");
-  expect((await send()).result.logins).toBe(1);
-  SECRETS.push(`${PASSWORD}-2`);
-
-  for (const where of [...fx.answers, fx.logs()]) for (const value of SECRETS) expect(where).not.toContain(value);
-}, hostTimeout(120_000));
-
-const textIds = async (side: CloudSendFixture["local"], threadId: string) => ((await side("GET", `/api/threads/${threadId}/messages?limit=500`)).body?.messages ?? [])
-  .filter((message: { kind: string }) => message.kind === "text").map((message: { id: string }) => message.id) as string[];
-async function chat(bot: { id: string; threadId: string }, text: string) {
-  const before = (await textIds(fx.local, bot.threadId)).length;
-  expect((await fx.local("POST", `/api/bots/${bot.id}/messages`, { text, threadId: bot.threadId })).status).toBe(202);
-  const settled = async () => (await textIds(fx.local, bot.threadId)).length >= before + 2
-    && (await fx.local("GET", "/api/bots")).body.bots.every((entry: { activity?: string; busy?: boolean }) => entry.activity !== "working" && !entry.busy);
-  for (let tries = 0; !(await settled()) && tries < 300; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
-}
-
-it("Send everything brings this computer's chats under the same bots; a second send adds only the new messages, and nothing twice", async () => {
-  const send = () => fx.call<CloudSendOutcome>("cloud-send:send", "local");
-  const lark = (await fx.local("POST", "/api/bots", { name: "Lark", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-  await chat(lark, "The Acme deadline is Friday.");
-  const first = await send();
-  expect(first.result.failed).toEqual([]);
-  expect(first.result.bots).toContain("Lark");
-  // Its conversation was made with the bot, so its messages count as added to a conversation My Cloud has.
-  expect(first.result.chats?.messages).toBe((await textIds(fx.local, lark.threadId)).length);
-  // Same bot, same conversation, same messages.
-  expect((await fx.onCloud("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === lark.id)).toMatchObject({ threadId: lark.threadId });
-  const firstIds = await textIds(fx.local, lark.threadId);
-  expect(await textIds(fx.onCloud, lark.threadId)).toEqual(firstIds);
-
-  await chat(lark, "Also, invoice 42 is overdue.");
-  const added = (await textIds(fx.local, lark.threadId)).length - firstIds.length;
-  const second = await send();
-  expect(second.result.chats).toEqual({ conversations: 0, messages: added });
-  const there = await textIds(fx.onCloud, lark.threadId);
-  expect(there).toEqual(await textIds(fx.local, lark.threadId));
-  expect(new Set(there).size).toBe(there.length);
-
-  const third = await send();
-  expect(third.result.chats).toEqual({ conversations: 0, messages: 0 });
-  expect(await textIds(fx.onCloud, lark.threadId)).toEqual(there);
-  // One item asked for (Use this computer's, or one login) never carries chats.
-  await chat(lark, "One more thing.");
-  expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(lark.id)], force: [itemKey.bot(lark.id)] })).result.chats).toBeNull();
-  expect(await textIds(fx.onCloud, lark.threadId)).toEqual(there);
-}, hostTimeout(180_000));
-
-it("a bot sent to My Cloud keeps its conversation's id, so Bring newer chats adds its chats there", async () => {
-  const { local, onCloud } = fx;
-  // Kai has nothing but its chats: My Cloud must still count it as there once it arrives without them.
-  const kai = (await local("POST", "/api/bots", { name: "Kai", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-  expect((await local("POST", `/api/bots/${kai.id}/messages`, { text: "The Acme deadline is Friday.", threadId: kai.threadId })).status).toBe(202);
-  const answered = async () => ((await local("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body?.messages ?? [])
-    .some((message: { role: string; kind: string }) => message.role === "bot" && message.kind === "text");
-  const idle = async () => (await local("GET", "/api/bots")).body.bots.every((bot: { activity?: string; busy?: boolean }) => bot.activity !== "working" && !bot.busy);
-  for (let tries = 0; !(await answered() && await idle()) && tries < 300; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
-  expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(kai.id)] })).result.bots).toEqual(["Kai"]);
-  expect((await onCloud("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body?.messages ?? []).toEqual([]);
-  expect(row(await fx.call<CloudSendSnapshot>("cloud-send:refresh", "local"), itemKey.bot(kai.id))?.state).toBe("on-both");
-
-  const move = createCloudMove({
-    localRequest: (route, init) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": fx.ownerCapability } }),
-    fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...fx.edge } })) as typeof fetch,
-    tempRoot: join(fx.root, "move-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
-  });
-  // A bot's turn can still be wrapping up after its reply; a backup refuses "busy" until it has.
-  let brought = await move.bring({ id: "cloud", name: "My Cloud", origin: fx.cloudBase, kind: "cloud", grant: () => fx.grant("Copy from desktop") });
-  for (let tries = 0; brought.error?.code === "busy" && tries < 40; tries++) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    brought = await move.bring({ id: "cloud", name: "My Cloud", origin: fx.cloudBase, kind: "cloud", grant: () => fx.grant("Copy from desktop") });
-  }
-  expect(brought.phase, JSON.stringify(brought)).toBe("done");
-  const there = (await onCloud("GET", `/api/threads/${kai.threadId}/messages?limit=50`)).body.messages as Array<{ role: string; text?: string }>;
-  expect(there.some((message) => message.role === "user" && message.text?.startsWith("The Acme deadline is Friday."))).toBe(true);
-}, hostTimeout(120_000));
-
-it("when My Cloud refuses this computer's 1Password token, the strip and Settings say what failed and why, in words for this computer", async () => {
+it("when My Cloud refuses this computer's 1Password token, the move says what failed and why, in words for this computer, and everything else arrives", async () => {
   const refusing = await launchCloudSendFixture({ onePasswordToken: TOKEN, cloudOnePasswordToken: `ops_fake-other-${randomBytes(8).toString("hex")}` });
   try {
     const { local, onCloud } = refusing;
@@ -202,8 +23,8 @@ it("when My Cloud refuses this computer's 1Password token, the strip and Setting
     await local("PATCH", `/api/bots/${ember.id}`, { soul: "You are Ember." });
     expect((await local("POST", "/api/logins", { site: "accounts.example.test", username: "alice", password: PASSWORD, bots: [ember.id] })).status).toBe(201);
     expect((await local("POST", "/api/logins/1password", { token: TOKEN })).status).toBe(200);
-    expect((await refusing.call<CloudSendSnapshot>("cloud-send:refresh", "local")).cloud).toBe("ready");
-    const notice = await refusing.call<CloudSendNotice>("cloud-send:page-send", "cloud");
+    await refusing.move();
+    const notice = await refusing.call<CloudSendNotice>("cloud-send:notice", "cloud");
     const why = "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself.";
     expect(notice.last).toMatchObject({ failed: 1, reasons: [{ what: { bots: [], skills: 0, logins: 0, onePassword: true, settings: 0, chats: false }, error: why }] });
     expect(notice.last?.error).toBeUndefined();
@@ -214,70 +35,6 @@ it("when My Cloud refuses this computer's 1Password token, the strip and Setting
     for (const where of [...refusing.answers, refusing.logs()]) for (const value of [TOKEN, PASSWORD]) expect(where).not.toContain(value);
   } finally { await refusing.close(); }
 }, hostTimeout(120_000));
-
-it("Keep My Cloud up to date: the first time it sends everything with no click, chats included; then only what is new, and nothing once it is off", async () => {
-  const auto = await launchCloudSendFixture({ onePasswordToken: TOKEN, auto: true });
-  try {
-    const { local, onCloud } = auto;
-    const ids = async (side: CloudSendFixture["local"], threadId: string) => ((await side("GET", `/api/threads/${threadId}/messages?limit=500`)).body?.messages ?? [])
-      .filter((message: { kind: string }) => message.kind === "text").map((message: { id: string }) => message.id) as string[];
-    const talk = async (bot: { id: string; threadId: string }, text: string) => {
-      const before = (await ids(local, bot.threadId)).length;
-      expect((await local("POST", `/api/bots/${bot.id}/messages`, { text, threadId: bot.threadId })).status).toBe(202);
-      for (let tries = 0; tries < 300; tries++) {
-        const idle = (await local("GET", "/api/bots")).body.bots.every((entry: { activity?: string; busy?: boolean }) => entry.activity !== "working" && !entry.busy);
-        if (idle && (await ids(local, bot.threadId)).length >= before + 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    };
-    const wren = (await local("POST", "/api/bots", { name: "Wren", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
-    await local("PATCH", `/api/bots/${wren.id}`, { soul: "You are Wren." });
-    expect((await local("POST", "/api/logins", { site: "accounts.example.test", username: "wren", password: PASSWORD, bots: [wren.id] })).status).toBe(201);
-    for (let i = 0; i < 5; i++) await talk(wren, `Note ${i}: the Acme invoice is due on the ${i + 1}th.`);
-    const history = await ids(local, wren.threadId);
-    const stored = async () => ((await local("GET", `/api/threads/${wren.threadId}/messages?limit=500`)).body?.messages ?? []).length as number;
-    const rowsBefore = await stored();
-    // Its greeting and five exchanges.
-    expect(history.length).toBe(11);
-
-    // Nobody presses anything: the app's first check sends everything.
-    await auto.tick();
-    const first = (await auto.call<CloudSendSnapshot>("cloud-send:state", "local")).last!;
-    expect(first.reason).toBe("first");
-    expect(first.result).toMatchObject({ bots: ["Wren"], logins: 1, failed: [] });
-    expect(first.result.chats?.messages).toBe(11);
-    expect(await ids(onCloud, wren.threadId)).toEqual(history);
-    expect((await onCloud("GET", "/api/logins")).body.logins).toEqual([expect.objectContaining({ username: "wren", bots: [wren.id] })]);
-    expect(auto.chatRequests.flat()).toEqual([{ threadId: wren.threadId, rows: rowsBefore }]);
-    const strip = await auto.call<CloudSendNotice>("cloud-send:notice", "cloud");
-    expect(strip.last).toMatchObject({ reason: "first", failed: 0, seen: false, sent: { bots: 1, logins: 1, chats: { conversations: 0, messages: 11 } } });
-
-    // A new message goes on the next check after a few minutes, alone: the history is not sent again.
-    await talk(wren, "Also: the meeting moved to Thursday.");
-    const added = (await stored()) - rowsBefore;
-    await auto.tick(2 * 60_000);
-    expect(auto.chatRequests.length, "chats alone wait a few minutes").toBe(1);
-    await auto.tick(4 * 60_000);
-    expect(auto.chatRequests.at(-1)).toEqual([{ threadId: wren.threadId, rows: added }]);
-    expect(added).toBeLessThan(rowsBefore);
-    const there = await ids(onCloud, wren.threadId);
-    expect(there).toEqual(await ids(local, wren.threadId));
-    expect(new Set(there).size).toBe(13);
-    expect((await auto.call<CloudSendSnapshot>("cloud-send:state", "local")).last?.reason).toBe("auto");
-
-    // Nothing new: nothing is sent.
-    const sent = auto.chatRequests.length;
-    await auto.tick(6 * 60_000);
-    expect(auto.chatRequests.length).toBe(sent);
-
-    // Off: what is new stays here.
-    await auto.call("cloud-send:auto", "local", false);
-    await talk(wren, "This one stays on this computer.");
-    await auto.tick(10 * 60_000);
-    expect(auto.chatRequests.length).toBe(sent);
-    expect(await ids(onCloud, wren.threadId)).toEqual(there);
-  } finally { await auto.close(); }
-}, hostTimeout(180_000));
 
 it("My Cloud keeps an attachment a sent row names under its own name, once, and says which it lacks", async () => {
   const name = `${randomBytes(8).toString("hex")}.png`;
@@ -309,9 +66,9 @@ async function history(side: CloudSendFixture["local"], threadId: string) {
   return { stored: rows.length, leaf, path, summaries: rows.filter((row) => row.kind === "compaction").length };
 }
 
-describe("a long conversation, sent in pages by the real send", () => {
+describe("a long conversation, carried in pages by the move", () => {
   let heavy: CloudSendFixture;
-  beforeAll(async () => { heavy = await launchCloudSendFixture({ onePasswordToken: TOKEN, auto: true, toolCalls: 150 }); }, hostTimeout(60_000));
+  beforeAll(async () => { heavy = await launchCloudSendFixture({ onePasswordToken: TOKEN, toolCalls: 150 }); }, hostTimeout(60_000));
   afterAll(async () => { await heavy?.close(); });
   const turn = async (bot: { id: string; threadId: string }, text: string) => {
     const before = (await history(heavy.local, bot.threadId)).stored;
@@ -323,7 +80,7 @@ describe("a long conversation, sent in pages by the real send", () => {
     }
   };
   const newBot = async (name: string) => (await heavy.local("POST", "/api/bots", { name, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot as { id: string; threadId: string };
-  const sendAll = () => heavy.call<CloudSendOutcome>("cloud-send:send", "local");
+  const sendAll = () => heavy.move();
   const sameOnBoth = async (bot: { threadId: string }) => {
     const [here, there] = [await history(heavy.local, bot.threadId), await history(heavy.onCloud, bot.threadId)];
     expect({ path: there.path.length, leaf: there.leaf, summaries: there.summaries }).toEqual({ path: here.path.length, leaf: here.leaf, summaries: here.summaries });
@@ -331,41 +88,17 @@ describe("a long conversation, sent in pages by the real send", () => {
     return here;
   };
 
-  it("a new bot's conversation of three pages and more arrives whole with the first send by itself", async () => {
+  it("a new bot's conversation of three pages and more arrives whole with the move", async () => {
     const archie = await newBot("Archie");
     for (let i = 0; i < 5; i++) await turn(archie, `Step ${i}: check the next server.`);
     expect((await history(heavy.local, archie.threadId)).stored).toBeGreaterThan(2 * 300);
-    await heavy.tick();
-    const first = (await heavy.call<CloudSendSnapshot>("cloud-send:state", "local")).last!;
-    expect([first.reason, first.result.failed]).toEqual(["first", []]);
+    const first = await heavy.move();
+    expect([first.reason, first.result.failed]).toEqual(["move", []]);
     expect(heavy.chatRequests.flat().filter((entry) => entry.threadId === archie.threadId).length).toBeGreaterThanOrEqual(3);
     await sameOnBoth(archie);
   }, hostTimeout(240_000));
 
-  it("a conversation My Cloud got from a Bring goes on from where it was, though the send starts from its first row", async () => {
-    const kai = await newBot("Kai");
-    await turn(kai, "Look through the logs.");
-    expect((await heavy.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(kai.id)] })).result.bots).toEqual(["Kai"]);
-    const move = createCloudMove({
-      localRequest: (route, init) => fetch(`${heavy.desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": heavy.ownerCapability } }),
-      fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...heavy.edge } })) as typeof fetch,
-      tempRoot: join(heavy.root, "move-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
-    });
-    let brought = await move.bring({ id: "cloud", name: "My Cloud", origin: heavy.cloudBase, kind: "cloud", grant: () => heavy.grant("Copy from desktop") });
-    for (let tries = 0; brought.error?.code === "busy" && tries < 40; tries++) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      brought = await move.bring({ id: "cloud", name: "My Cloud", origin: heavy.cloudBase, kind: "cloud", grant: () => heavy.grant("Copy from desktop") });
-    }
-    await move.close();
-    expect(brought.phase, JSON.stringify(brought)).toBe("done");
-    const copied = await sameOnBoth(kai);
-    for (let i = 0; i < 3; i++) await turn(kai, `Step ${i}: and the next folder.`);
-    expect((await history(heavy.local, kai.threadId)).stored).toBeGreaterThan(2 * 300 + 1);
-    expect((await sendAll()).result.failed).toEqual([]);
-    expect((await sameOnBoth(kai)).path.length).toBeGreaterThan(copied.path.length);
-  }, hostTimeout(240_000));
-
-  it("a later send of two pages and more goes on from the earlier one", async () => {
+  it("a later pass of two pages and more goes on from the earlier one", async () => {
     const bea = await newBot("Bea");
     await turn(bea, "First look.");
     expect((await sendAll()).result.failed).toEqual([]);
@@ -391,7 +124,7 @@ describe("a long conversation, sent in pages by the real send", () => {
     await sameOnBoth(room);
   }, hostTimeout(240_000));
 
-  it("a context summary that ends a send reaches My Cloud, and what follows it in the next send shows after it", async () => {
+  it("a context summary that ends a pass reaches My Cloud, and what follows it in the next pass shows after it", async () => {
     const cleo = await newBot("Cleo");
     await turn(cleo, "Read the report.");
     expect((await sendAll()).result.failed).toEqual([]);

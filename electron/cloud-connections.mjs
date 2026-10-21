@@ -146,17 +146,20 @@ export async function adoptComposioId(target, { local, here, there }) {
  * computer lets go of its copy once My Cloud has it (with `release: false`, the result lists it instead, for
  * releaseConnections). One connection failing never stops the others.
  *
- * Returns { moved, runsHere, kept, missing, failed, release }: what My Cloud has now; what went marked as running here
- * (`needs`: a program My Cloud lacks); what My Cloud kept of its own (its own sign-in, its own connected apps); the
- * connected apps of this computer's that My Cloud then lacks; what failed (`final`: trying again can't fix it); and the
- * sign-ins My Cloud took that this computer still holds.
+ * With `signIns: false`, a sign-in that refreshes itself stays here for a later pass (`later`), and the rest goes.
+ *
+ * Returns { moved, runsHere, kept, missing, failed, release, later, held }: what My Cloud has now; what went marked as
+ * running here (`needs`: a program My Cloud lacks); what My Cloud kept of its own (its own sign-in, its own connected
+ * apps); the connected apps of this computer's that My Cloud then lacks; what failed (`final`: trying again can't fix
+ * it); the sign-ins My Cloud took that this computer still holds; the sign-ins left for a later pass; and the keys a
+ * trial's Cloud keeps unused while its Claude credit lasts.
  */
-export async function sendConnections(collected, target, { local, release = true, waitMs = ENGINE_WAIT_MS, onProgress = () => {} } = {}) {
+export async function sendConnections(collected, target, { local, release = true, signIns = true, waitMs = ENGINE_WAIT_MS, onProgress = () => {} } = {}) {
   const answer = await target.call("GET", "/api/cloud-connections").catch(() => null);
   if (answer?.status === 404) throw new ConnectionMoveError("outdated", "My Cloud needs an update before it can take this computer's apps and keys. It updates by itself.");
   let cloud = answer?.ok ? parseConnections(answer.body) : null;
   if (!cloud) throw new ConnectionMoveError("unreachable", "My Cloud did not answer. Try again in a moment.");
-  const result = { moved: [], runsHere: [], kept: [], missing: [], failed: [], release: [] };
+  const result = { moved: [], runsHere: [], kept: [], missing: [], failed: [], release: [], later: [], held: [] };
   const done = (item) => result.moved.push({ id: item.id, label: item.label });
 
   /** A sign-in to My Cloud; one that refreshes itself (`digest`) is then let go of here. My Cloud keeps one of its own. */
@@ -173,9 +176,12 @@ export async function sendConnections(collected, target, { local, release = true
     async key(item) {
       const { connection } = await secrets(local, item);
       if (!record(connection.config)) throw new ConnectionMoveError("local", `${item.label} could not be read on this computer.`);
+      const holding = await target.call("PUT", "/api/cloud-connections/held-keys", { for: item.for ?? [] }).catch(() => null);
       const saved = await target.call("PATCH", "/api/config", connection.config);
       if (!saved.ok) throw refused(saved, `My Cloud did not take the ${item.label} key.`);
+      if (holding?.ok && holding.body?.held === true) result.held.push({ id: item.id, label: item.label });
       done(item);
+      return holding?.ok && holding.body?.held === true;
     },
     async mcp(item) {
       const { connection, digest } = await secrets(local, item);
@@ -196,10 +202,12 @@ export async function sendConnections(collected, target, { local, release = true
       done(item);
       if (record(signIn)) {
         if (!digest) throw new ConnectionMoveError("local", `${item.label}'s sign-in could not be read on this computer.`);
+        if (!signIns) return void result.later.push({ id: item.id, label: item.label });
         await moveSignIn(item, signIn, digest);
       }
     },
     async highlevel(item) {
+      if (item.signIn && !signIns) return void result.later.push({ id: item.id, label: item.label });
       const { connection, digest } = await secrets(local, item);
       const highlevel = connection.highlevel;
       if (!record(highlevel) || (highlevel.kind === "oauth" && !digest)) throw new ConnectionMoveError("local", "HighLevel could not be read on this computer.");
@@ -225,8 +233,8 @@ export async function sendConnections(collected, target, { local, release = true
       engines.clear();
     }
     try {
-      await steps[item.kind](item);
-      if (item.kind === "key") for (const engine of item.for ?? []) if (!cloud.engines.includes(engine)) engines.add(engine);
+      const held = await steps[item.kind](item);
+      if (item.kind === "key" && !held) for (const engine of item.for ?? []) if (!cloud.engines.includes(engine)) engines.add(engine);
     } catch (error) {
       result.failed.push({ id: item.id, label: item.label, message: sentence(error?.message) ?? `${item.label} did not move.`, final: error?.final === true });
     }

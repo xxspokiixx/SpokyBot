@@ -16,10 +16,16 @@ export interface CloudMachine {
   unreachable?: { cause: CloudUnreachableCause; since: number };
   /** Only for a plan that sleeps when idle: whether it is awake now, as the Admin says. */
   power?: import("./cloud-power.mjs").CloudPower;
+  /** The Admin lets this account's computer move to it now (its `moves` gate). */
+  moves?: true;
+  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. */
+  hold?: { until: number };
 }
 /** A payment received but not yet linked to this account: nobody pays twice. */
 export interface CloudPurchase { state: "confirming" | "held"; tier?: string; paidAt?: number }
 export type CloudTrialState = "active" | "ending" | "processing" | "late" | "ended";
+/** The plans this app knows by name. */
+export type CloudPlanTier = "starter" | "personal" | "pro" | "max";
 /** The free trial on the account's Cloud, as the Admin says: display only, never an entitlement. */
 export interface CloudTrial {
   state: CloudTrialState;
@@ -40,8 +46,12 @@ export interface CloudTrial {
    * billing portal (`portal`: turn renewal back on, update the card) or a new
    * subscription (`checkout`, once it has ended). */
   keep: "none" | "portal" | "checkout";
-  /** While it runs on a plan above Personal: Personal's price before tax, in US cents. */
+  /** While it runs on a plan above Personal and Personal is the way down: Personal's price before tax, in US cents. An
+   * older Admin's only word for the way down; `switchTo` wins over it. */
   personalAmount?: number;
+  /** The plan this trial can switch to from its Plan page, and its price before tax in US cents, only while a switch is
+   * the way down. */
+  switchTo?: { tier: CloudPlanTier; amount: number };
 }
 /** The trial's AI credit, in US dollars. */
 export interface CloudCredit { grantedUsd: number; remainingUsd: number; state: "active" | "used_up" }
@@ -90,6 +100,13 @@ export declare const CLOUD_SETUP_STEPS: readonly CloudSetupStep[];
 export declare const CLOUD_UNREACHABLE_CAUSES: readonly CloudUnreachableCause[];
 export declare function parseCloudPower(input: unknown): import("./cloud-power.mjs").CloudPower | null;
 export declare function parseCloudSummary(input: unknown): CloudMachine | null;
+export type CloudTeamRole = "owner" | "admin" | "member";
+/** A team this account is in, from the verified session: its Cloud as the Admin describes it, null while it has none. */
+export interface CloudTeam { id: string; name: string; role: CloudTeamRole; machine: CloudMachine | null }
+export declare const CLOUD_TEAM_ROLES: readonly CloudTeamRole[];
+/** owner → Super admin, admin → Admin, member → User. */
+export declare function teamRoleLabel(role: string | null | undefined): "Super admin" | "Admin" | "User";
+export declare function parseCloudTeams(input: unknown): CloudTeam[];
 export declare function cloudUnreachableText(state: unknown, origin?: string | null): string | null;
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];
@@ -112,4 +129,5 @@ export declare function myCloudOrigin(known: {
 export declare function isCloudHomeEntry(entry: { origin?: string } | null | undefined, known?: { homeOrigin?: string | null; remembered?: RememberedCloudHome | null }): boolean;
 export declare function parsePairingGrant(input: unknown, origin: string, now: number): CloudHomeGrant | null;
 export declare function withCloudHome<T extends { environments: Array<{ id: string; name: string; origin: string; color?: string; home?: true }>; activeId: string }>(state: T, machine: CloudMachine | null | undefined, makeId: () => string, look?: { name?: string | null; color?: string | null } | null): T;
-export declare function cloudHomeConnectUrl(target: CloudHomeTarget, now: number, open?: "phone" | null): string;
+export declare function cloudHomeConnectUrl(target: CloudHomeTarget, now: number, open?: "phone" | null, route?: string | null): string;
+export declare function cloudPageSenderAllowed(event: unknown, context: { contents: unknown; homeOrigin: string | null; activeOrigin: string | null | undefined }): boolean;

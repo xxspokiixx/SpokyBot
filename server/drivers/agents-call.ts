@@ -11,6 +11,7 @@ import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
+import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -178,6 +179,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   }
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
+  if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {

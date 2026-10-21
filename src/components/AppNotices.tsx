@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { Rocket, Star } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
-import type { DesktopHandoffIntent } from "../../electron/desktop-prefs.mjs";
 import { api, useStore } from "@/state/store";
 import { APP_REPOSITORY } from "@/lib/app-links";
 import { track } from "@/lib/analytics";
 import { brandStatus } from "@/lib/brand";
-import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays, personalAmount } from "@/lib/cloud-plan";
+import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits } from "@/lib/corner-popup";
@@ -17,7 +16,7 @@ import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
 import { engineReady } from "./EngineLibrary";
 import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNotice";
-import { CLOUD_PRO_POPUP_SOURCE, CloudProPopup, cloudProCloudPageView, cloudProElsewhereView, cloudProPopupView, reportCloudProPopup, useDesktopNotices, useOtherDialogOpen,
+import { CLOUD_PRO_POPUP_SOURCE, CloudProPopup, cloudProCloudPageView, cloudProPopupView, reportCloudProPopup, useDesktopNotices, useOtherDialogOpen,
   type CloudProPopupAction } from "./CloudProPopup";
 import { CloudTrialIntroCard } from "./CloudTrialIntro";
 import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
@@ -68,8 +67,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [popupShown, setPopupShown] = useState(false);
-  const [switching, setSwitching] = useState(false);
-  const [refused, setRefused] = useState(false);
   const updater = useUpdaterState();
   const intent = useCloudIntent();
   useEffect(() => {
@@ -93,11 +90,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const introAllowed = Boolean(bridge) && brandStatus().source !== "file" && organization !== true && !onboardingCloudOffered(record);
   const stage = introStage(record, now());
   const trialDue = cloudTrialNotice(plan);
-  const popupHere = Boolean(desktop) && (!local || Boolean(bridge)) && brandStatus().source !== "file";
+  const popupHere = Boolean(desktop) && (local ? Boolean(bridge) : viewer?.cloudHome === true) && brandStatus().source !== "file";
   const seenHere = local && (noticeSeen(record, CLOUD_PRO_UPDATE_NOTICE) || onboardingCloudOffered(record));
   const popupPending = popupHere && !seenHere && (!desktopState
     || (desktopState.cloud && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)));
-  const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done") || trialDue?.state === "active"
+  const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done")
     || (popupPending && view !== null && buyOfferAllowed(view)));
   const offerKey = wantOffer ? `${view?.kind}:${JSON.stringify(account?.offer ?? null)}` : null;
   useEffect(() => {
@@ -110,10 +107,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   useEffect(() => {
     if (seenHere && desktopState && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)) void desktop?.seen(CLOUD_PRO_UPDATE_NOTICE).catch(() => {});
   }, [seenHere, desktopState]);
-  const page = local ? "local" : planBridge ? "my_cloud" : "server";
+  const page = local ? "local" : "my_cloud";
   const popupState = !popupPending ? null : !desktopState || !viewer ? "loading"
     : bridge ? cloudProPopupView(account, !bridge.offer ? null : offerFor === offerKey ? offer : undefined)
-    : planBridge ? cloudProCloudPageView(plan) : cloudProElsewhereView();
+    : planBridge ? cloudProCloudPageView(plan) : "loading";
   const popupView = typeof popupState === "object" ? popupState : null;
   const popupBlocked = useOtherDialogOpen(popupPending) || Boolean(state.liveCall && state.liveCall.status !== "ended");
 
@@ -176,18 +173,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     const report = (action: CloudProPopupAction) => reportCloudProPopup(action, popupView, page);
     const end = () => { void desktop.seen(CLOUD_PRO_UPDATE_NOTICE).catch(() => {}); close(); };
     const plans = (action: CloudProPopupAction) => { report(action); end(); dispatch({ type: "openCloudAdd", source: CLOUD_PRO_POPUP_SOURCE }); };
-    const thisComputer = (intent: DesktopHandoffIntent) => {
-      if (switching) return;
-      report("continue"); setSwitching(true); setRefused(false);
-      void desktop.thisComputer(intent).catch(() => false).then(moved => { setSwitching(false); if (moved) close(); else setRefused(true); });
-    };
-    const primary = {
-      "add-cloud": () => plans("upgrade"),
-      settings: () => { report("manage"); end(); dispatch(CLOUD_SETTINGS); },
-      "settings-on-this-computer": () => thisComputer("manage"),
-      "this-computer": () => thisComputer("cloud-pro"),
-    }[popupView.primary.via];
-    return <CloudProPopup view={popupView} switching={switching} refused={refused}
+    const primary = popupView.primary.via === "add-cloud" ? () => plans("upgrade") : () => { report("manage"); end(); dispatch(CLOUD_SETTINGS); };
+    return <CloudProPopup view={popupView}
       onPrimary={primary}
       onSeePlans={() => plans("see_plans")}
       onNotNow={() => { report("not_now"); end(); }}
@@ -204,7 +191,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       onDismiss={() => { done("close"); setToast(t("cloudIntro.later")); }} />;
   }
   if (notice === CLOUD_TRIAL_NOTICE && trial) {
-    const shown = cloudTrialView(trial, plan?.credit, { personal: personalAmount(offer) });
+    const shown = cloudTrialView(trial, plan?.credit);
     const act = () => { setFailed(false); void planBridge?.manage().then(close, () => setFailed(true)); };
     return <CloudTrialNoticeCard view={shown} failed={failed} onAction={act} onClose={close} />;
   }

@@ -65,12 +65,31 @@ test("moves keys first, then MCP servers with their secrets, HighLevel and conne
   const progress = [];
   const result = await sendConnections(await collectConnections(local), target, { local, onProgress: (step) => progress.push(step) });
   assert.deepEqual(result.failed, []);
-  assert.deepEqual(writes(target), ["PATCH /api/config", "POST /api/mcp/servers", "PATCH /api/mcp/servers/dodo", "PUT /api/cloud-connections/highlevel", "POST /api/cloud-connections/connected-apps"]);
+  assert.deepEqual(writes(target), ["PUT /api/cloud-connections/held-keys", "PATCH /api/config", "POST /api/mcp/servers", "PATCH /api/mcp/servers/dodo", "PUT /api/cloud-connections/highlevel", "POST /api/cloud-connections/connected-apps"]);
+  assert.deepEqual(result.held, [], "a Cloud with no trial credit to keep runs the key at once");
   assert.deepEqual(target.calls.find(([, route]) => route === "/api/mcp/servers")[2], { name: "dodo", command: "npx", args: ["-y", "dodo"], env: { KEY: "k" } });
   assert.deepEqual(target.calls.find(([, route]) => route === "/api/cloud-connections/connected-apps")[2], { share: "c".repeat(64), apps: ["gmail"] });
   assert.deepEqual(local.asked.find((what) => what.kind === "composio-share"), { kind: "composio-share", for: INSTALLATION });
   assert.deepEqual(result.moved.map((item) => item.id), ["key:openrouter", "mcp:dodo", "highlevel", "composio"]);
   assert.deepEqual(progress.map((step) => `${step.done}/${step.total} ${step.label}`), ["1/4 OpenRouter", "2/4 dodo", "3/4 HighLevel", "4/4 Connected apps"]);
+});
+
+test("a trial's Cloud keeps a moved key saved but unused while its Claude credit lasts, asked before the key is saved, and the move goes on without waiting for it", async () => {
+  const local = computer({
+    connections: [{ id: "key:openrouter", kind: "key", label: "OpenRouter", for: ["openrouter"] }, { id: "mcp:dodo", kind: "mcp", label: "dodo", launcher: "npx" }],
+    answers: {
+      "key:openrouter": { connection: { config: { openrouter: { key: "sk-or" } } } },
+      "mcp:dodo": { connection: { mcp: { name: "dodo", server: { command: "npx", args: ["-y", "dodo"], env: {}, enabled: true } } } },
+    },
+  });
+  const target = cloud({ engines: [], reply: (method, route) => (route === "/api/cloud-connections/held-keys" ? { status: 200, body: { held: true } } : undefined) });
+  const started = Date.now();
+  const result = await sendConnections(await collectConnections(local), target, { local, waitMs: 5_000 });
+  assert.ok(Date.now() - started < 2_000, "an engine kept unused is never waited for");
+  assert.deepEqual(writes(target).slice(0, 2), ["PUT /api/cloud-connections/held-keys", "PATCH /api/config"]);
+  assert.deepEqual(target.calls.find(([, route]) => route === "/api/cloud-connections/held-keys")[2], { for: ["openrouter"] });
+  assert.deepEqual(result.held, [{ id: "key:openrouter", label: "OpenRouter" }]);
+  assert.deepEqual(result.moved.map((item) => item.id), ["key:openrouter", "mcp:dodo"]);
 });
 
 test("a server that needs this computer goes marked as running on it, and a server already on My Cloud is replaced", async () => {

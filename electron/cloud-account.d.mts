@@ -7,8 +7,8 @@ export interface CloudAccountState {
   expiresAt?: number;
   /** Only a current server-verified session can include an entitlement
    * (verified within the last few minutes; a failed re-check keeps it).
-   * `plan` "pro" means any paid plan; `tier` names it ("personal", "pro",
-   * "max", or one newer than this app) when the Admin sends one. */
+   * `plan` "pro" means any paid plan; `tier` names it ("starter", "personal",
+   * "pro", "max", or one newer than this app) when the Admin sends one. */
   entitlement?: { plan: "free" | "pro"; tier?: string; status: "active" | "inactive"; expiresAt: number | null; version: number };
   verifiedAt?: number;
   verifiedUntil?: number;
@@ -19,6 +19,8 @@ export interface CloudAccountState {
   lastPlan?: { tier?: string; active: boolean };
   /** The person's Cloud home machine, when their plan has one. */
   machine?: import("./cloud-home.mjs").CloudMachine;
+  /** Connected: the teams this account is in, each with its Cloud; absent while it is in none. */
+  teams?: import("./cloud-home.mjs").CloudTeam[];
   /** A payment OMB Cloud received and is still linking to this account. */
   purchase?: import("./cloud-home.mjs").CloudPurchase;
   /** Connected: the free trial on this account's Cloud, when the Admin says (display only). */
@@ -97,7 +99,7 @@ export interface CloudAccountBridge {
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
 /** On the person's own Cloud, open in this app's window: the plan, read
- * only, and two ways out. No account, credential or address. */
+ * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */
 export interface CloudPlanSnapshot {
   status: "paid" | "attention" | "checking" | "signin" | "none";
@@ -109,11 +111,14 @@ export interface CloudPlanSnapshot {
   notice?: import("./cloud-home.mjs").CloudTrialState;
   /** Verified: the plan sleeps when idle. */
   sleeps?: true;
+  /** This window's home is this Cloud: the person's bots moved here (home-window.mjs). */
+  home?: true;
 }
 export interface CloudPlanBridge {
   state(): Promise<CloudPlanSnapshot>;
   manage(): Promise<void>;
-  useThisComputer(): Promise<void>;
+  /** This device's MausBot Cloud sign-in, again, once it has ended: only from the person's click. */
+  signIn?(): Promise<void>;
   /** The trial's popup due now was shown: main shows it no more today. Absent on an older app. */
   noticeSeen?(): Promise<void>;
 }
@@ -172,9 +177,15 @@ export interface CloudAccountClient {
   wakeHome(): Promise<"awake" | "waking" | null>;
   setWaking(on: boolean): void;
   pairHome(): Promise<import("./cloud-home.mjs").CloudHomeGrant>;
+  /** A one-time code for a team's Cloud, signed by the Admin with this person's membership (POST
+   * /api/cloud/desktop/teams/<id>/pairing). Rejects with `gone: true` once they are no longer in the team. */
+  pairTeam(teamId: string): Promise<import("./cloud-home.mjs").CloudHomeGrant>;
+  /** A Cloud that ended and that the Admin still holds, started for its owner's export only. */
+  exportHome(): Promise<{ starting: true } | { notHeld: true } | { deleted: true } | { grant: import("./cloud-home.mjs").CloudHomeGrant }>;
   growDisk(sizeGb: number): Promise<{ supported: false } | { supported: true; refused: true } | { supported: true; disk: { gb: number; maxGb: number } }>;
   /** This sign-in's own X research relay access while its plan is paid; null without one. */
   xResearchAccess(): Promise<{ url: string; token: string } | null>;
+  pagesAccess(): Promise<{ url: string; token: string } | null>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {

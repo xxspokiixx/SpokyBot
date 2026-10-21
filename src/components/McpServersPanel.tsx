@@ -23,6 +23,7 @@ import { updateMcpServers } from "@/lib/mcp-servers";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
 import { api, useStore } from "@/state/store";
 
+import { McpAppsSwitch } from "./McpAppsSwitch";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 import { ClaudeCodeSwitches } from "./ClaudeCodeSwitches";
@@ -54,7 +55,7 @@ interface McpOAuthClientListing {
   clientSecretConfigured: boolean;
   redirectUri: string;
 }
-export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { managedBy?: string; runsOn?: { environmentId: string; label: string } };
+export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { managedBy?: string; runsOn?: { environmentId: string; label: string }; apps?: boolean };
 
 export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {
   return "url" in server;
@@ -962,7 +963,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                       <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id, page: "mcp" }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("whop.botSettings", { name: bot.name })}</button>)}</div>
                     </details>
                   </div>}
-                  {renderSignIn(server)}
+                  <McpAppsSwitch<McpServerListing> server={server} disabled={busy !== null || signingIn !== null} onSaved={(next) => { loadGeneration.current += 1; setServers(next); updateMcpServers(next); }} />{renderSignIn(server)}
                   {result && signingIn !== server.name && (
                     <div role="status" className={cn("mt-3 rounded-lg px-3 py-2 text-[12px]", result.ok ? "bg-success/10 text-success" : result.auth === "required" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger")}>
                       {result.auth === "required" ? t("mcp.auth.required") : result.ok ? (

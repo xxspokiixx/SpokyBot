@@ -1,7 +1,7 @@
 // "Let my bots use this Mac" (this PC, this computer): main's IPC for it. This computer's Settings may choose folders,
 // the screen and the internet connection; My Cloud's own page in this app (verified as the person's Cloud) gets the same
-// one switch and what is lent, so nobody has to leave My Cloud to change it. Turned on with nothing chosen, it lends the
-// internet connection and the usual folders, read only.
+// one switch, Apps and screen, and what is lent, so nobody has to leave My Cloud to change it. Turned on with nothing
+// chosen, it lends the internet connection and the usual folders, read only.
 
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -70,6 +70,7 @@ export function pageLending(snapshot) {
     status: on ? state.busy ? "busy" : state.connected ? "lent" : state.problem ?? "starting" : state?.problem ?? null,
     folders: on ? (state.folders ?? []).map((folder) => ({ name: String(folder.name ?? ""), write: folder.write === true })) : [],
     screen: on && state.screen === true,
+    screenAvailable: snapshot?.screenAvailable === true,
     internet: on && state.internet === true,
     ...(on && state.link ? { link: state.link } : {}),
   };
@@ -131,15 +132,17 @@ export function defaultGrant({ kept, usual, projects, screenAvailable }) {
  *   cloudPage: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   snapshot: () => Promise<{ available: boolean, screenAvailable?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
  *   environment: () => unknown,
- *   save: (env: unknown, choice: { folders: unknown, screen: boolean }) => Promise<unknown>,
+ *   save: (env: unknown, choice: { folders: unknown, screen: boolean, internet?: boolean, terminal?: boolean }) => Promise<unknown>,
  *   stop: () => void,
  *   chooseFolder: () => Promise<{ id: string, path: string, name: string, write: boolean } | null>,
  *   defaults: () => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
  *   validate: (folders: unknown[]) => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
- * }} deps `cloudPage` lets only My Cloud's verified page through; turning lending on from it still takes a real click
- * (the preload bridge's rule), and nothing else asks.
+ *   confirmScreen: () => Promise<boolean>,
+ * }} deps `cloudPage` lets only My Cloud's verified page through; turning lending or Apps and screen on from it still
+ * takes a real click (the preload bridge's rule). Security: Apps and screen lets bots act as the person, and a page
+ * served by the Cloud must never grant that alone, so main also asks in a dialog of its own (`confirmScreen`).
  */
-export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate }) {
+export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen }) {
   const env = () => {
     const current = environment();
     if (!current) throw new Error("Open My Cloud first.");
@@ -149,7 +152,10 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
    * and the usual folders. The internet connection alone is a choice too. */
   const choice = async (input) => {
     const folders = Array.isArray(input?.folders) && input.folders.length ? await existingFolders(input.folders, validate) : [];
-    if (folders.length || input?.screen === true || input?.internet === true) return { folders, screen: input?.screen === true, internet: input?.internet === true };
+    // The terminal is chosen only here, from this computer's own Settings (`lending:save` is local-only); it is never
+    // carried over from a saved grant, filled in by default, or set from My Cloud's page.
+    const terminal = input?.terminal === true;
+    if (folders.length || input?.screen === true || input?.internet === true || terminal) return { folders, screen: input?.screen === true, internet: input?.internet === true, ...(terminal ? { terminal: true } : {}) };
     return { folders: await defaults(), screen: false, internet: true };
   };
   ipcMain.handle("lending:state", localOnly("lending:state", () => snapshot()));
@@ -167,6 +173,14 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     if (current.state?.enabled) return pageLending(current);
     const kept = current.state ?? {};
     await save(env(), await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true, internet: kept.internet === true }));
+    return pageLending(await snapshot());
+  })));
+  ipcMain.handle("cloud-lending:screen", cloudPage("cloud-lending:screen", plainly(async (_event, on) => {
+    const current = await snapshot();
+    const kept = current.state;
+    if (!kept?.enabled || (kept.screen === true) === (on === true)) return pageLending(current);
+    if (on === true && (!current.screenAvailable || !(await confirmScreen()))) return pageLending(current);
+    await save(env(), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true }));
     return pageLending(await snapshot());
   })));
   return {

@@ -1,73 +1,45 @@
 ---
-title: Using the desktop app with My Cloud
-description: What lives on your computer and what lives on My Cloud, how your bots, logins, 1Password and chats get there by themselves, lending your computer, passkey sign-ins, and where the logs are.
+title: One assistant, everywhere
+description: With MausBot Cloud, your bots live on My Cloud and the desktop app is a window onto it, like your phone. How your bots get there by themselves, letting them use your Mac, passkey sign-ins, and where the logs are.
 ---
 
-With MausBot Cloud you have two places in one app:
+With MausBot Cloud, **My Cloud is where your bots live**: their memory, chats, routines, logins and connected apps. It keeps working when your computer is off.
 
-- **This computer**: the OpenMausBot that runs on your Mac or PC.
-- **My Cloud**: the one that keeps running when your computer is off.
+The desktop app and the phone app are two windows onto it. Open the desktop app and it opens My Cloud by itself: there is nothing to switch and nothing to send.
 
-You switch between them with the switcher at the top of the sidebar. Everything about the two lives in one place: **Settings → MausBot Cloud**.
+Without MausBot Cloud, nothing changes: your bots live on this computer, as before.
 
-## What lives where
+## Your bots come to My Cloud by themselves
 
-Each place keeps its own bots, chats and settings. While **Keep My Cloud up to date** is on (it is unless you turn it off), what you have on this computer goes to My Cloud by itself, so you don't need to press anything.
+When My Cloud is ready, the desktop app moves everything from this computer to it, once, by itself:
 
-| | Goes to My Cloud | How |
-|---|---|---|
-| **Bots** (instructions, picture, settings, skills) | Yes | By itself |
-| **A new bot's memory notes** | Yes, once | With the bot, the first time it goes |
-| **Logins and 1Password** | Yes | By itself, over a private connection, never through a chat |
-| **Your name, email, About me and language** | Yes | By itself |
-| **Chats** | Yes | By itself: the conversations and messages My Cloud doesn't have yet |
-| **Routines and automations** | No | Both places would run them, so nothing would run once. Set them up on My Cloud. |
-| **Sign-ins to Claude, ChatGPT and other engines, API keys** | No | They belong to each machine. Sign in on My Cloud itself. |
-| **Connected apps** (Gmail, Calendar, Slack…) | No | Connect them on My Cloud: each side has its own connections. |
-| **MCP tools** | No | Add them on My Cloud. |
-| **Files** | Folders you choose | The **Files** page |
+- **Bots**, with their instructions, pictures, skills, memory and files.
+- **Chats**, in rooms too, with their attachments.
+- **Routines and automations**, switched on there if they were on here, so nothing runs twice.
+- **Logins and 1Password**, and your **API keys, MCP tools and connected apps**, over a private connection, never through a chat.
+- **Your settings**: your name, About me, language and the rest.
 
-Nothing ever goes the other way by itself. What you change on My Cloud stays on My Cloud.
+This computer keeps working while it happens. One line in the sidebar says how far it is, for example *Moving your bots to My Cloud… 34 of 120 chats*. At the first quiet moment, when no bot is answering and you are not typing, it says *Moving to My Cloud… almost done* for a few seconds, then the same window opens My Cloud.
 
-## How your things get to My Cloud
+My Cloud then says once what arrived, for example *Everything from this computer is here: 4 bots, 2 skills, 2 logins, 1Password, 148 chats and 2 routines*. If you paired your phone with this computer, the same line offers **Pair your phone with My Cloud**.
 
-The first time this computer connects to your My Cloud, it sends everything by itself: bots, skills, logins, 1Password, your settings and your chats. After that, while the app is open, new chats go every few minutes and other changes a minute or two after you make them. It waits while My Cloud is asleep and never wakes it. Sending only adds and updates: nothing is ever deleted on either side, and a long chat history goes once, then only what's new.
-
-**Settings → MausBot Cloud** on this computer shows whether My Cloud is online and one line on where things stand: *Everything from this computer is on My Cloud*, *Bringing chats to My Cloud… 3 of 12*, or, if something couldn't go, what and why, with **Try again**.
-
-<ProductScreenshot name="docs-my-cloud-compare" alt="Settings, MausBot Cloud: My Cloud is online, Everything from this computer is on My Cloud, and the Keep My Cloud up to date switch" caption="Nothing to press: this computer's things go to My Cloud by themselves." position="top" />
-
-- **Keep My Cloud up to date with this computer** is the one switch. Turn it off and what you add on this computer stays here. If it's off before this computer first connects, nothing is sent, the first time included.
-- **More** shows both sides next to each other and a manual **Send everything to My Cloud**, for when the switch is off.
-
-A few rules keep this safe:
-
-- **What you change on My Cloud is kept.** If you edit a bot on My Cloud, a later change on this computer never overwrites it.
-- **What you remove on My Cloud stays removed,** a chat included: it isn't sent again.
-- **A bot keeps its logins.** A login or a 1Password vault kept to Ember is kept to Ember on My Cloud too.
-- **Engines.** A bot that uses an engine My Cloud isn't signed in to uses My Cloud's own engine instead, and Settings says so.
-
-### On My Cloud
-
-When you open My Cloud in the desktop app during that first send, a line at the top shows this computer's things arriving, then what came, for example *12 bots, 3 skills, 2 logins, 1Password and 48 chats came over from This computer*. If something can't come over, the line says what and why, for example *1Password couldn't be sent: 1Password did not accept this computer's token on My Cloud…*, with **Try again**. Otherwise it stays out of the way.
-
-<ProductScreenshot name="docs-my-cloud-strip" alt="My Cloud in the desktop app, with a line at the top: Ember, 2 logins, 1Password and 3 chats came over from This computer. Close." position="top" />
-
-### Your chats
-
-Chats go by themselves too: the conversations My Cloud doesn't have, and the newer messages of the ones it has, under the same bots. A conversation you're in the middle of goes once the bot has answered.
-
-**Start My Cloud over from this computer**, a link at the bottom of **Settings → MausBot Cloud**, is different: it replaces everything on My Cloud with this computer's, after backing My Cloud up. Use it only to start My Cloud over.
+If My Cloud already had bots of its own, it keeps them. The same bot on both sides becomes one bot, and two different bots with the same name are both kept.
 
 ## Sign in to Claude or ChatGPT on My Cloud
 
-Sign-ins and API keys never leave the machine they were made on. Open My Cloud in the app, then sign in under **Settings → AI** there, or follow the setup card in its first chat.
+Your Claude, ChatGPT, Gemini and Grok sign-ins stay on the computer where you made them. Sign in once on My Cloud, under **Settings → AI** there, or follow the setup card in its first chat.
+
+## When My Cloud can't be reached
+
+The desktop app wakes My Cloud by itself (*Waking My Cloud…*) and signs in to it again by itself when it needs to. If My Cloud can't be reached, for example with no internet, the window says *Can't reach My Cloud right now. It comes back by itself when it answers.* and keeps trying. The only button is **Sign in**, for when this computer's MausBot Cloud sign-in itself has ended.
 
 ## Let your bots use your Mac
 
-**Let my bots use this Mac** (**this PC** on Windows) is one switch, in **Settings → MausBot Cloud** on this computer and on My Cloud's own Settings page in the desktop app, so you never have to leave My Cloud to change it. Turn it on and your bots on My Cloud open the websites that turn away data centres, such as Instagram, YouTube and Google sign-in, through this computer's internet connection, so those websites see your home connection; every other website loads straight from My Cloud, which is faster. In your own conversations and routines they can also read your Desktop, Documents and Downloads, without changing anything, while this computer is awake and the app is open. The line under the switch says what is lent, for example *Your bots can use the internet connection and Desktop, Documents and Downloads (read only) on this Mac*. While the switch is on, the app opens by itself when you log in, out of sight, and its menu-bar icon reads **In use** while your bots use the computer. When the computer is away, those websites open from My Cloud's own connection and may turn your bots away, and Reddit stays off either way.
+**Let my bots use this Mac** (**this PC** on Windows) is one switch in **Settings → MausBot Cloud**. After the move it is on, with your Desktop, Documents and Downloads lent read only, each bot's own project folder with editing, and this computer's internet connection. Your bots on My Cloud then open the websites that turn away data centres, such as Instagram, YouTube and Google sign-in, through your home connection; every other website loads straight from My Cloud, which is faster. In your own conversations and routines they can read the lent folders while this computer is awake and the app is open. The line under the switch says what is lent.
 
-To lend other folders, let bots edit them, lend apps and screen, or stop lending the internet connection, open **Choose what's lent** under the switch on this computer. With apps and screen turned on, a bot on My Cloud can also open websites in your computer's own browser, where your usual sign-ins and passkeys work. Turn it off at any time, from either switch or from the app's icon in the menu bar or taskbar.
+While the switch is on, the app opens by itself when you log in, out of sight, and its menu-bar icon reads **In use** while your bots use the computer. When the computer is away, those websites open from My Cloud's own connection and may turn your bots away. Reddit stays off either way.
+
+To lend apps and screen, tick **Apps and screen** under the switch. The app asks you to confirm in a window of its own first. To lend other folders, let bots edit them, or stop lending the internet connection, open **Choose what's lent**. With apps and screen turned on, a bot on My Cloud can also open websites in your computer's own browser, where your usual sign-ins and passkeys work. Turn it off at any time, from the switch or from the app's icon in the menu bar or taskbar.
 
 ## Signing in to Google and other passkey sites
 
@@ -79,9 +51,13 @@ A passkey lives on your own phone or computer, so a browser on My Cloud can't us
 
 Step-by-step help, and what to do when a page doesn't respond: [Signing in to Google from a cloud browser](../troubleshooting/google-sign-in-cloud-browser.mdx).
 
+## If My Cloud ends
+
+If your trial ends unpaid or you cancel, your bots come back to this computer by themselves, with what you did on My Cloud while it is still kept.
+
 ## Which version am I on?
 
-My Cloud updates by itself, a little after each desktop release. **Settings → MausBot Cloud** shows its version next to *My Cloud is online*, and says so when it's older than this computer's. To see this computer's version, open the menu under your name at the bottom of the sidebar and choose **About**.
+My Cloud updates by itself, a little after each desktop release, and the window reloads it at a quiet moment. To see the desktop app's version, open the menu under your name at the bottom of the sidebar and choose **About**.
 
 ## Where are the logs?
 

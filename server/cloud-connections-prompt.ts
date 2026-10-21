@@ -1,7 +1,7 @@
 // What a bot on My Cloud is told about the connections it reaches for that need the person, or another computer, read
 // from this Cloud's own state on each turn: an MCP server that needs a sign-in here, HighLevel or connected apps
-// assigned to the bot but not connected here, and an MCP server that runs on the person's computer. So the bot says so
-// in plain words, with the link that connects it.
+// assigned to the bot but not connected here, an MCP server that runs on the person's computer, and what stayed on the
+// computer the bots moved here from. So the bot says so in plain words, with the link that connects it.
 import { HIGHLEVEL_SLUG } from "../shared/highlevel.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { toolkitName } from "./activity.ts";
@@ -17,6 +17,8 @@ export interface ConnectionPromptSources {
   highlevelConnected(): boolean;
   /** Which of these connected apps are connected here now. */
   composioConnected(slugs: string[]): Promise<Record<string, boolean>>;
+  /** The computer the bots moved here from, once a move is done. */
+  movedFrom?(): string | null;
 }
 
 export type ConnectionPromptBot = { mcpServers?: string[]; composio?: boolean; connectorTools?: Record<string, ConnectorToolGrant> };
@@ -59,7 +61,9 @@ export function createConnectionPrompt(sources: ConnectionPromptSources, origin:
     const granted = bot.composio === false ? [] : Object.keys(bot.connectorTools ?? {});
     if (granted.includes(HIGHLEVEL_SLUG) && !sources.highlevelConnected()) toConnect.push(`HighLevel (connect it here: ${link(HIGHLEVEL_SLUG)})`);
     const apps = connected(granted.filter((slug) => slug !== HIGHLEVEL_SLUG && SLUG.test(slug))).filter(([, on]) => !on).map(([slug]) => toolkitName(slug.toUpperCase()));
+    const from = sources.movedFrom?.() ?? null;
     return [
+      from ? ` You moved to My Cloud from the person's computer ${from}, with everything in OpenMausBot. What lives outside OpenMausBot stayed on ${from}: its other folders and files, passkeys, the person's own browser sessions and apps, Local VM disks and model servers on its home network. When a task needs one, use ${from} if it is lent to My Cloud and online; otherwise say in plain words that it stayed there.` : "",
       toConnect.length ? ` Not connected on My Cloud yet: ${toConnect.join("; ")}. When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way.` : "",
       apps.length ? ` Assigned to this bot but not connected on My Cloud yet: ${apps.join(", ")}. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn.` : "",
       ...[...elsewhere].map(([computer, names]) => ` Runs only on the person's computer ${computer}, not on My Cloud: ${names.join(", ")}. If a task needs one, say so in plain words.`),

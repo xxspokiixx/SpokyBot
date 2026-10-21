@@ -7,7 +7,6 @@ import { cloudFilesBridge, useCloudFiles } from "@/lib/cloud-files";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { useStore } from "@/state/store";
-import { formatMoveBytes } from "./CloudMove";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useCaptionChrome } from "./DesktopCapabilities";
 import { Switch } from "./SettingsPrimitives";
@@ -21,11 +20,15 @@ type Run = (action: () => Promise<CloudFilesState | void>) => Promise<void>;
 type Ask = { kind: "share"; check: FolderCheck } | { kind: "stop"; folder: SharedFolder } | { kind: "suggest"; checks: FolderCheck[]; chosen: string[] };
 
 const count = (value: number) => new Intl.NumberFormat(activeLocale()).format(value);
+const formatBytes = (value: number) => {
+  const power = value >= 1024 ** 3 ? 3 : value >= 1024 ** 2 ? 2 : 1;
+  return `${new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: power === 3 ? 1 : 0 }).format(value / 1024 ** power)} ${["", "KB", "MB", "GB"][power]}`;
+};
 
 export function folderSize(check: FolderCheck): string {
   const files = check.partial ? t("files.countMore", { count: count(check.files) })
     : check.files === 1 ? t("files.countOne") : t("files.count", { count: count(check.files) });
-  return `${files} · ${formatMoveBytes(check.bytes)}`;
+  return `${files} · ${formatBytes(check.bytes)}`;
 }
 
 export function refusalText(refusal: string, listed = false): string {
@@ -213,7 +216,7 @@ function FolderMenu({ name, busy, onOpen, onStop }: { name: string; busy: boolea
 function Storage({ disk, busy, onMore }: { disk: CloudFilesDisk; busy: boolean; onMore: () => void }) {
   const percent = disk.totalBytes > 0 ? Math.min(100, Math.round((disk.usedBytes / disk.totalBytes) * 100)) : 0;
   return <div className="flex flex-col gap-1.5">
-    <span className="text-[12px] text-ink-secondary">{t("files.storage", { used: formatMoveBytes(disk.usedBytes), total: formatMoveBytes(disk.totalBytes) })}</span>
+    <span className="text-[12px] text-ink-secondary">{t("files.storage", { used: formatBytes(disk.usedBytes), total: formatBytes(disk.totalBytes) })}</span>
     <div className="h-1 w-full overflow-hidden rounded-full bg-control" aria-hidden="true">
       <div className={cn("h-full rounded-full", disk.warn ? "bg-warning" : "bg-accent")} style={{ width: `${percent}%` }} />
     </div>

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
-import { useCloudMove } from "@/components/CloudMove";
 import { useCloudSendNotice } from "@/components/CloudSendStrip";
 import { countedList } from "@/lib/cloud-send";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -28,19 +27,21 @@ const STEP_TEXT: Record<WelcomeStep, { title: LocaleKey; hint: LocaleKey }> = {
   files: { title: "cloudWelcome.step.files", hint: "cloudWelcome.step.filesHint" },
 };
 
-/** Sends that carry everything (bots, skills, logins, settings and chats); one login or one item is not one. */
-const WHOLE_SENDS = new Set(["first", "auto", "button", "my-cloud", "menu"]);
+/** Sends that carry everything (bots, skills, logins, settings and chats); one login or one item is not one. "first"
+ * and "auto": an older desktop's sends by itself. */
+const WHOLE_SENDS = new Set(["button", "my-cloud", "menu", "move", "first", "auto"]);
 
 /** What came over from this computer, for the Bring step: "sent" once a whole send went through (`last` says what
- * arrived); "sending" while one runs, or while Keep My Cloud up to date is on and none has gone yet; null otherwise
- * (switched off, a whole send failed, or a desktop too old to say), which keeps the choice to copy or start fresh. */
-export function sentHere(notice: CloudSendNotice | null): { state: "sending" | "sent"; auto: boolean; last: CloudSendNotice["last"] } | null {
-  if (!notice || typeof notice.auto !== "boolean") return null;
+ * arrived); "sending" while one runs, or while an older desktop that sends by itself has not sent yet; null otherwise
+ * (none yet, a whole send failed, or a desktop too old to say, which sends no `whole`), which keeps the choice to copy
+ * or start fresh. */
+export function sentHere(notice: CloudSendNotice | null): { state: "sending" | "sent"; last: CloudSendNotice["last"] } | null {
+  if (!notice || notice.whole === undefined) return null;
   const last = notice.last;
   const whole = Boolean(last && WHOLE_SENDS.has(last.reason));
-  if (notice.running && WHOLE_SENDS.has(notice.runningReason ?? "")) return { state: "sending", auto: notice.auto, last };
-  if (whole && !last!.error) return { state: "sent", auto: notice.auto, last };
-  if (notice.auto && !whole) return { state: "sending", auto: true, last };
+  if (notice.running && WHOLE_SENDS.has(notice.runningReason ?? "")) return { state: "sending", last };
+  if (whole && !last!.error) return { state: "sent", last };
+  if (notice.auto === true && !whole) return { state: "sending", last };
   return null;
 }
 
@@ -56,13 +57,12 @@ export function CloudWelcome() {
   const [view, setView] = useState<WelcomeView>(() => requestedView(takeWelcomeRequest()) ?? welcomeView(record));
   const heading = useRef<HTMLHeadingElement>(null);
   const navigated = useRef(false);
-  const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudMove;
-  const move = useCloudMove(bridge);
-  const copied = move.state.phase === "done" && move.state.action !== "restore";
   const visible = state.bots.filter((bot) => !bot.hidden);
   const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
-  const cloudHasWork = move.overview?.cloud ? !move.overview.cloud.empty : visible.length > 1 || state.groups.length > 0;
+  const cloudHasWork = visible.length > 1 || state.groups.length > 0;
   const sendBridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSendPage;
+  // An older app still offers Copy this computer by hand: it moves bots here by itself only once updated.
+  const older = Boolean(sendBridge && window.ogb && "cloudMove" in window.ogb);
   const [notice] = useCloudSendNotice(sendBridge);
   const sent = sentHere(notice);
   // Main answers at once; until it does, no choice is shown that it may take back a moment later.
@@ -121,10 +121,7 @@ export function CloudWelcome() {
     remember(ids);
     go(welcomeViewAfter(withEarlyHints(record, ids), step), focus);
   };
-  const finishBring = (outcome: BringOutcome) => {
-    if (outcome === "copied" || outcome === "skipped") void bridge?.dismiss().catch(() => {});
-    finish("bring", outcome === "skipped" ? [CLOUD_SETUP_MOVE_SKIPPED] : []);
-  };
+  const finishBring = (outcome: BringOutcome) => finish("bring", outcome === "skipped" ? [CLOUD_SETUP_MOVE_SKIPPED] : []);
   const end = (reason: "done" | "skipped") => {
     track("cloud_welcome_ended", { reason, at: view });
     remember([CLOUD_WELCOME_DONE]);
@@ -147,7 +144,7 @@ export function CloudWelcome() {
   let content;
   if (view === "bring" && asking) content = null;
   else if (view === "bring") {
-    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} sent={sent && { state: sent.state, auto: sent.auto, arrived: sent.state === "sent" && sent.last ? countedList(sent.last.sent) : null }} headingRef={heading}
+    content = <WelcomeBring name={name} desktop={Boolean(sendBridge)} older={older} cloudHasWork={cloudHasWork} sent={sent && { state: sent.state, arrived: sent.state === "sent" && sent.last ? countedList(sent.last.sent) : null }} headingRef={heading}
       onTeam={() => { reanchor.current = true; }}
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;
@@ -163,7 +160,7 @@ export function CloudWelcome() {
         <div className="mt-3 flex items-center justify-between gap-2 @2xl/welcome:mt-4 @2xl/welcome:flex-1 @2xl/welcome:flex-col @2xl/welcome:items-stretch @2xl/welcome:justify-start">
           <ol className="flex min-w-0 gap-1 @2xl/welcome:flex-col @2xl/welcome:gap-1.5">
             {WELCOME_STEPS.map((step, index) => {
-              const finished = welcomeStepFinished(record, step) || (step === "bring" && (copied || sent?.state === "sent"));
+              const finished = welcomeStepFinished(record, step) || (step === "bring" && sent?.state === "sent");
               const bringing = step === "bring" && !finished && sent?.state === "sending";
               const current = view === step;
               return <li key={step} className="min-w-0">

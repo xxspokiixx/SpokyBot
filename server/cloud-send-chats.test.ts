@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { addSentChats, type SentConversation } from "./cloud-chat-merge.ts";
-import { chatHeads, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROW_MAX, CHAT_ROWS_PAGE, fittedRow, threadRowsAfter } from "./cloud-send-chats.ts";
+import { chatHeads, chatIds, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROWS_PAGE, CHATS_BODY_MAX, inOrder, threadRowsAfter, verifyChats, VERIFY_IDS } from "./cloud-send-chats.ts";
 import { DATA_DIR } from "./config.ts";
 import { deleteThread, threadHeads } from "./message-db.ts";
 import { Store, type Message } from "./store.ts";
@@ -55,7 +55,7 @@ describe("this computer's chats, by row", () => {
     expect(threadRowsAfter(bot.threadId, head.last, head.lastId, CHAT_ROWS_PAGE)).toMatchObject({ rows: [], last: head.last, lastId: head.lastId, more: false });
   });
 
-  it("keeps a page under its size by stored bytes, never under one row, and shortens one row too big to go whole", () => {
+  it("keeps a page under its size by stored bytes, never under one row, and sends a row over 1 MB whole, alone", () => {
     const store = fresh();
     const bot = store.createBot({ name: "Ava" }, { seedMessages: false });
     const big = "x".repeat(CHAT_PAGE_BYTES / 3);
@@ -63,19 +63,13 @@ describe("this computer's chats, by row", () => {
     const first = threadRowsAfter(bot.threadId, 0, null, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
     expect(first.rows.map((row) => row.id)).toEqual(lines.slice(0, 2).map((row) => row.id));
     expect(first.more).toBe(true);
-    const huge = say(store, bot.threadId, "y".repeat(CHAT_PAGE_BYTES * 2), 99);
+    const text = `${"y".repeat(CHAT_PAGE_BYTES * 2)}語`;
+    const huge = say(store, bot.threadId, text, 99);
     const alone = threadRowsAfter(bot.threadId, threadHeads().get(bot.threadId)!.last - 1, lines.at(-1)!.id, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
     expect(alone.rows.map((row) => row.id)).toEqual([huge.id]);
-    const fitted = fittedRow(alone.rows[0]!);
-    expect(JSON.stringify(fitted).length).toBeLessThan(CHAT_ROW_MAX);
-    expect(fitted).toMatchObject({ id: huge.id, role: "user", kind: "text" });
-    expect(fitted.text).toMatch(/^y+\n\n\[Shortened: this message was too long to copy to My Cloud\.\]$/u);
-    expect(fittedRow(lines[0]!)).toBe(lines[0]);
-    // Sizes are UTF-8 bytes: a row of three-byte characters under the limit in characters is still shortened.
-    const wide = say(store, bot.threadId, "語".repeat(CHAT_ROW_MAX / 2), 100);
-    expect(Buffer.byteLength(JSON.stringify(fittedRow(wide)), "utf8")).toBeLessThan(CHAT_ROW_MAX);
-    const wideRows = threadRowsAfter(bot.threadId, 0, null, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES).rows;
-    expect(Buffer.byteLength(JSON.stringify(wideRows.slice(1)), "utf8")).toBeLessThanOrEqual(CHAT_PAGE_BYTES);
+    const page = chatPage({ store, dataDir: "/data" } as never, bot.threadId, threadHeads().get(bot.threadId)!.last - 1, lines.at(-1)!.id)!;
+    expect(page.rows.map((row) => row.text), "never shortened").toEqual([text]);
+    expect(Buffer.byteLength(JSON.stringify(page), "utf8")).toBeLessThan(CHATS_BODY_MAX);
   });
 
   it("counts a page's size in UTF-8 bytes, as My Cloud's body limit does", () => {
@@ -361,5 +355,134 @@ describe("a room's chats", () => {
     expect(answered).toMatchObject({ accepted: [], removed: ["t-room-gone", "t-thread-gone"], waiting: ["t-lonely", room.threadId] });
     expect([store.group("room-gone"), store.group("room-lonely")]).toEqual([undefined, undefined]);
     expect(store.group(room.id)!.tasks!.map((task) => task.threadId)).toEqual([room.threadId]);
+  });
+});
+
+describe("over the owner's own session", () => {
+  const OWNER = { person: "p_cloudowner00000000000", name: "Amit" };
+  /** `ownerSession`: the request is My Cloud's owner's own session; the route asks its deps whose session it is. */
+  const route = (store: Store, body: unknown, ownerSession: boolean) => {
+    let answered: any;
+    return cloudSendChatsRoute({ store, dataDir: DATA_DIR, owner: (auth) => (auth as { owner?: boolean }).owner ? OWNER : null }, {
+      req: {} as never, res: { setHeader() {} } as never, url: new URL("http://127.0.0.1/api/cloud-send/chats"), path: "/api/cloud-send/chats", method: "POST",
+      auth: { owner: ownerSession } as never, json: ((_res: unknown, _status: number, value: unknown) => { answered = value; }) as never, readBody: (async () => body) as never,
+    }).then(() => answered);
+  };
+  const sent = (bot: string, threadId: string, rows: Message[], extra: Record<string, unknown> = {}) =>
+    ({ v: 1, dataDir: "/desk/.openmausbot", conversations: [{ bot, threadId, task: null, rows, leaf: rows.at(-1)!.id, sent: false, ...extra }] });
+  const typed = (id: string, at: number, parentId: string | null): Message => ({ id, at, parentId, role: "user", kind: "text", text: id });
+
+  it("a bot conversation's lines its owner wrote, and the cards it answered, arrive as My Cloud's owner's", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const card: Message = { id: "c1", at: 2, parentId: "u1", role: "bot", kind: "options", card: { title: "Run it?", subtitle: "", options: ["Allow"], requestId: "q1", answered: "Allow", answeredBy: { kind: "loopback" } } };
+    const peer: Message = { id: "p1", at: 3, parentId: "c1", role: "user", kind: "text", text: "From Chief", peerAsk: { botId: "chief", name: "Chief" } };
+    expect((await route(store, sent(ava.id, ava.threadId, [typed("u1", 1, null), card, peer]), true)).accepted).toEqual([ava.threadId]);
+    const there = new Map(store.messagesFor(ava.threadId).map((row) => [row.id, row]));
+    expect(there.get("u1")!.sender).toEqual({ name: "Amit", id: OWNER.person });
+    expect(there.get("c1")!.card!.answeredBy).toEqual({ kind: "session", name: "Amit", person: OWNER.person });
+    expect(there.get("p1")!.sender, "a peer's ask is never the owner's").toBeUndefined();
+  });
+
+  it("any other session's send, and a room's lines, arrive as they were", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    await route(store, sent(ava.id, ava.threadId, [typed("g1", 1, null)]), false);
+    expect(store.messagesFor(ava.threadId)[0]!.sender).toBeUndefined();
+    const room = store.createGroup("Launch", [ava.id]);
+    await route(store, { v: 1, dataDir: "/desk/.openmausbot", conversations: [{ room: room.id, threadId: room.threadId, task: null, rows: [typed("r1", 1, null)], leaf: "r1", sent: false }] }, true);
+    expect(store.messagesFor(room.threadId).map((row) => [row.id, row.sender])).toEqual([["r1", undefined]]);
+  });
+
+  /** The move's ask for the rows My Cloud already held, by id: `stamped` collects what the route says changed. */
+  const own = (store: Store, body: unknown, ownerSession: boolean, stamped: string[] = []) => {
+    let answered: { status: number; body: any } | undefined;
+    return cloudSendChatsRoute({ store, dataDir: DATA_DIR, owner: (auth) => (auth as { owner?: boolean }).owner ? OWNER : null, stamped: (threadId) => { stamped.push(threadId); } }, {
+      req: {} as never, res: { setHeader() {} } as never, url: new URL("http://127.0.0.1/api/cloud-send/chats/owner"), path: "/api/cloud-send/chats/owner", method: "POST",
+      auth: { owner: ownerSession } as never, json: ((_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }) as never, readBody: (async () => body) as never,
+    }).then(() => answered!);
+  };
+
+  it("lines My Cloud already held from that computer, named by id, become the owner's as arriving ones do; nobody else's, no automation's and no room's ever", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    // As an earlier send or a Bring left them on My Cloud: every line names nobody.
+    const mine = say(store, ava.threadId, "Book the flight.", 1);
+    const peer = store.appendMessage(ava.threadId, { role: "user", kind: "text", text: "From Chief", peerAsk: { botId: "chief", name: "Chief" }, at: 2 });
+    const routine = say(store, ava.threadId, "[Routine \"Inbox\" — do this now:]\nRead my inbox.", 3);
+    const card = store.appendMessage(ava.threadId, { role: "bot", kind: "options", at: 4,
+      card: { title: "Run it?", subtitle: "", options: ["Allow"], requestId: "q1", answered: "Allow", answeredBy: { kind: "loopback" } } });
+    const notNamed = say(store, ava.threadId, "Typed on My Cloud by nobody known.", 5);
+    const room = store.createGroup("Launch", [ava.id]);
+    const roomLine = say(store, room.threadId, "In the room.", 6);
+    const body = { v: 1, conversations: [{ threadId: ava.threadId, ids: [mine.id, peer.id, routine.id, card.id] }, { threadId: room.threadId, ids: [roomLine.id] }] };
+    const stamped: string[] = [];
+    expect((await own(store, body, false, stamped)).status, "only My Cloud's owner's own session may say").toBe(403);
+    expect(store.messagesFor(ava.threadId).map((row) => row.sender ?? null)).toEqual([null, null, null, null, null]);
+
+    expect(await own(store, body, true, stamped)).toEqual({ status: 200, body: { v: 1, stamped: 2 } });
+    const there = new Map(store.messagesFor(ava.threadId).map((row) => [row.id, row]));
+    expect(there.get(mine.id)!.sender).toEqual({ name: "Amit", id: OWNER.person });
+    expect(there.get(card.id)!.card!.answeredBy).toEqual({ kind: "session", name: "Amit", person: OWNER.person });
+    expect([peer, routine, notNamed].map((row) => there.get(row.id)!.sender ?? null)).toEqual([null, null, null]);
+    expect(store.messagesFor(room.threadId).map((row) => row.sender ?? null)).toEqual([null]);
+    expect(stamped, "the conversation whose lines became the owner's").toEqual([ava.threadId]);
+    expect(await own(store, body, true, stamped), "a second ask changes nothing").toEqual({ status: 200, body: { v: 1, stamped: 0 } });
+    expect(stamped).toEqual([ava.threadId]);
+  });
+
+  it("My Cloud takes at most 5,000 of a conversation's row ids, and 10,000 in all, in one ask", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const many = (count: number) => Array.from({ length: count }, (_, i) => `row-${i}`);
+    expect((await own(store, { v: 1, conversations: [{ threadId: ava.threadId, ids: many(VERIFY_IDS) }, { threadId: ava.threadId, ids: many(VERIFY_IDS) }] }, true)).status).toBe(200);
+    expect((await own(store, { v: 1, conversations: [{ threadId: ava.threadId, ids: many(VERIFY_IDS + 1) }] }, true)).status).toBe(400);
+    expect((await own(store, { v: 1, conversations: Array.from({ length: 3 }, () => ({ threadId: ava.threadId, ids: many(VERIFY_IDS) })) }, true)).status).toBe(400);
+  });
+
+  it("My Cloud's chats check counts the owner's lines it holds that do not carry the owner yet", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const rows = [say(store, ava.threadId, "Book the flight.", 1), answer(store, ava.threadId, "Booked.", 2)];
+    const room = store.createGroup("Launch", [ava.id]);
+    const roomLine = say(store, room.threadId, "In the room.", 3);
+    const ask = () => verifyChats(store, [{ threadId: ava.threadId, ids: ids(rows) }, { threadId: room.threadId, ids: [roomLine.id] }]).map((entry) => entry.unstamped);
+    expect(ask()).toEqual([1, 0]);
+    await own(store, { v: 1, conversations: [{ threadId: ava.threadId, ids: ids(rows) }] }, true);
+    expect(ask()).toEqual([0, 0]);
+  });
+});
+
+describe("checking a move's chats", () => {
+  it("this computer hands its row ids and its visible path, a chunk at a time", () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    // One transaction: five thousand appends, each its own, take over 40 s on Windows.
+    const rows: Message[] = Array.from({ length: VERIFY_IDS + 3 }, (_, i) => ({ id: `row-${i}`, parentId: i ? `row-${i - 1}` : null, role: "user", kind: "text", text: `line ${i}`, at: 10 + i }));
+    store.importTranscript(ava.threadId, rows, rows.at(-1)!.id);
+    const first = chatIds({ store, dataDir: DATA_DIR }, ava.threadId, 0)!;
+    expect({ ids: first.ids.length, path: first.path.length, more: first.more, leaf: first.leaf }).toEqual({ ids: VERIFY_IDS, path: VERIFY_IDS, more: true, leaf: rows.at(-1)!.id });
+    const second = chatIds({ store, dataDir: DATA_DIR }, ava.threadId, VERIFY_IDS)!;
+    expect([second.ids, second.path, second.more]).toEqual([rows.slice(VERIFY_IDS).map((row) => row.id), rows.slice(VERIFY_IDS).map((row) => row.id), false]);
+    expect(chatIds({ store, dataDir: DATA_DIR }, "t-nobody", 0)).toBeNull();
+  });
+
+  it("a path holds when it appears in order inside My Cloud's, chunk after chunk; out of order, or a row off the path, it does not", () => {
+    const cloud = ["a", "b", "x", "c", "d", "y", "e"];
+    expect(inOrder(cloud, null, ["a", "b", "c"])).toEqual({ holds: true, at: "c" });
+    expect(inOrder(cloud, "c", ["d", "e"])).toEqual({ holds: true, at: "e" });
+    expect(inOrder(cloud, null, ["a", "c", "b"])).toEqual({ holds: false, at: "c" });
+    expect(inOrder(cloud, null, ["a", "q"])).toEqual({ holds: false, at: "a" });
+    expect(inOrder(cloud, "nope", ["a"])).toEqual({ holds: false, at: null });
+  });
+
+  it("My Cloud names the rows it lacks and whether the path holds, with its own leaf and length on the last chunk", () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const rows = Array.from({ length: 6 }, (_, i) => say(store, ava.threadId, `line ${i}`, 10 + i).id);
+    const [checked] = verifyChats(store, [{ threadId: ava.threadId, ids: [...rows, "missing-1"], path: { after: null, ids: rows, last: true } }]);
+    expect(checked).toEqual({ threadId: ava.threadId, missing: ["missing-1"], unstamped: 6, path: { holds: true, at: rows.at(-1), leaf: rows.at(-1), length: 6 } });
+    const [broken] = verifyChats(store, [{ threadId: ava.threadId, path: { after: null, ids: [rows[0]!, "elsewhere", rows[1]!], last: false } }]);
+    expect(broken).toEqual({ threadId: ava.threadId, missing: [], unstamped: 0, path: { holds: false, at: rows[0] } });
   });
 });

@@ -113,12 +113,14 @@ describe("the profile shown for a signed-in session", () => {
   const owner = { name: "Owner", email: "owner@example.test", avatarUrl: "/owner.png" };
   const ada: Extract<SessionState, { kind: "session" }> = { kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1 };
 
-  it("preserves the verified email separately from the device label", async () => {
+  it("preserves the verified email, device label, and team membership", async () => {
     const answer: typeof fetch = async () => new Response(JSON.stringify({
       kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1,
+      team: { id: "team-1", name: "Shared Team", role: "member" },
     }), { status: 200 });
     expect(await readSessionState(answer)).toEqual({
       kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1,
+      team: { id: "team-1", name: "Shared Team", role: "member" },
     });
   });
 
