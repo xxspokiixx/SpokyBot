@@ -115,6 +115,12 @@ export interface GroupThreadUsage extends TaskUsage {
   lastSpeaker?: { botId: string; name: string };
 }
 
+export interface BotMovedTo {
+  team: { id: string; name: string };
+  state: "moving" | "moved";
+  at: number;
+}
+
 /** One task = one conversation with its own context, thread and provider
  * session. */
 export interface WireTask {
@@ -328,6 +334,9 @@ export interface WireBot {
   rewound?: boolean;
   pinned?: boolean;
   hidden?: boolean;
+  /** On My Cloud, a bot its person moved into one of their teams: `moving` while it goes (no turns, its routines off),
+   * `moved` once it lives there (archived here, shown as a line that opens the team). */
+  movedTo?: BotMovedTo;
   /** Optional labeled divider used to organize this bot in the sidebar. */
   section?: string;
   /** the one message pinned to the top of this bot's active thread */
