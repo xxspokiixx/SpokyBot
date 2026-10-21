@@ -4602,5 +4602,6 @@
   "cloudSend.move.phone": "Ghép đôi điện thoại với Cloud",
   "cloudSend.move.homeAgain": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này. Những gì bạn đã làm trên Cloud cũng đang quay về.",
   "cloudSend.move.back": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này, cùng với những gì bạn đã làm trên Cloud. Thông tin đăng nhập và khóa bạn thêm trên Cloud chưa quay về: hãy thêm lại ở đây nếu cần.",
-  "cloudSend.move.backLost": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này như lúc chuyển đi. Những gì bạn làm trên Cloud từ đó không thể quay về."
+  "cloudSend.move.backLost": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này như lúc chuyển đi. Những gì bạn làm trên Cloud từ đó không thể quay về.",
+  "team.privateChats": "Các cuộc trò chuyện trong {team} được giữ riêng tư với các thành viên khác. Quản trị viên của {team} có thể xem chúng."
 }

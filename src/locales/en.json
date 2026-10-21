@@ -6232,5 +6232,6 @@
   "history.empty": "No changes recorded yet.",
   "history.refreshError": "Couldn’t refresh history.",
   "history.undo": "Undo this change",
-  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone."
+  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone.",
+  "team.privateChats": "Chats in {team} are private from other members. {team}'s admins can see them."
 }

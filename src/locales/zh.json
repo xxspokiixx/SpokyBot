@@ -2848,5 +2848,6 @@
   "cloudSend.move.phone": "将手机与 Cloud 配对",
   "cloudSend.move.homeAgain": "你的 Cloud 已结束，所以你的机器人回到了这台电脑。你在 Cloud 上做的事也在搬回来。",
   "cloudSend.move.back": "你的 Cloud 已结束，所以你的机器人回到了这台电脑，连同你在 Cloud 上做的事。你在 Cloud 上添加的登录信息和密钥没有回来：如有需要，请在这里重新添加。",
-  "cloudSend.move.backLost": "你的 Cloud 已结束，所以你的机器人按搬走时的样子回到了这台电脑。之后你在 Cloud 上做的事无法搬回来。"
+  "cloudSend.move.backLost": "你的 Cloud 已结束，所以你的机器人按搬走时的样子回到了这台电脑。之后你在 Cloud 上做的事无法搬回来。",
+  "team.privateChats": "你在 {team} 中的聊天对其他成员保密。{team} 的管理员可以查看。"
 }

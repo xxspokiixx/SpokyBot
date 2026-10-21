@@ -5197,5 +5197,6 @@
   "cloudSend.move.phone": "Vincular tu teléfono con la Cloud",
   "cloudSend.move.homeAgain": "Tu Cloud terminó, así que tus bots volvieron a este equipo. Lo que hiciste en la Cloud también está volviendo.",
   "cloudSend.move.back": "Tu Cloud terminó, así que tus bots volvieron a este equipo, con lo que hiciste en la Cloud. Los inicios de sesión y las claves que agregaste en la Cloud no volvieron: agrégalos aquí de nuevo si los necesitas.",
-  "cloudSend.move.backLost": "Tu Cloud terminó, así que tus bots volvieron a este equipo tal como estaban cuando se fueron. Lo que hiciste en la Cloud desde entonces no pudo volver."
+  "cloudSend.move.backLost": "Tu Cloud terminó, así que tus bots volvieron a este equipo tal como estaban cuando se fueron. Lo que hiciste en la Cloud desde entonces no pudo volver.",
+  "team.privateChats": "Los chats en {team} son privados para los demás miembros. Los administradores de {team} pueden verlos."
 }

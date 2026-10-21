@@ -1947,5 +1947,6 @@
   "cloudSend.move.phone": "Associer ton téléphone au Cloud",
   "cloudSend.move.homeAgain": "Ton Cloud a pris fin, donc tes bots sont de retour sur cet ordinateur. Ce que tu as fait dans le Cloud revient aussi.",
   "cloudSend.move.back": "Ton Cloud a pris fin, donc tes bots sont de retour sur cet ordinateur, avec ce que tu as fait dans le Cloud. Les identifiants et les clés ajoutés dans le Cloud ne sont pas revenus : ajoute-les ici à nouveau si tu en as besoin.",
-  "cloudSend.move.backLost": "Ton Cloud a pris fin, donc tes bots sont de retour sur cet ordinateur tels qu'ils étaient au moment du déménagement. Ce que tu as fait dans le Cloud depuis n'a pas pu revenir."
+  "cloudSend.move.backLost": "Ton Cloud a pris fin, donc tes bots sont de retour sur cet ordinateur tels qu'ils étaient au moment du déménagement. Ce que tu as fait dans le Cloud depuis n'a pas pu revenir.",
+  "team.privateChats": "Les discussions dans {team} sont privées pour les autres membres. Les administrateurs de {team} peuvent les voir."
 }

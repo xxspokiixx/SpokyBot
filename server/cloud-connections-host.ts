@@ -13,11 +13,12 @@ import type { HighLevelService } from "./highlevel/service.ts";
 import type { ConnectionHandoffAnswer, ConnectionHandoffWhat } from "./login-handoff.ts";
 import type { McpOAuthManager } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type McpRunsOn } from "./mcp-registry.ts";
+import { personalConnectionRefusal, type CloudTeam } from "./cloud-team.ts";
 import { createCloudConnectionRoutes } from "./routes/cloud-connections.ts";
 
 export interface CloudConnectionsHostDeps {
   /** This server is the person's Cloud home, reached at this public origin. */
-  cloudHome: { publicOrigin: string } | null;
+  cloudHome: { publicOrigin: string; team?: CloudTeam | null } | null;
   config(): AppConfig;
   /** This server's own environment id: the computer a server that needs it is marked as running on. */
   environmentId: string;
@@ -51,6 +52,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
     fingerprints: (nonce: string) => connectionFingerprints(nonce, sources()),
     routes: createCloudConnectionRoutes({
       cloudHome: deps.cloudHome !== null,
+      ...(deps.cloudHome?.team ? { personalRefusal: (what: string) => personalConnectionRefusal(deps.cloudHome!.team!, what) } : {}),
       async list() {
         return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: commands ??= launchersOnPath() };
       },

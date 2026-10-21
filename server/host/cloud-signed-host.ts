@@ -20,7 +20,7 @@ export interface CloudSignedHostDeps {
 export function createCloudSignedHost(deps: CloudSignedHostDeps): { cloudHealth: CloudHealth | null; cloudSigned: ReturnType<typeof createCloudSignedRoutes> | null } {
   const cloudHealth = deps.cloudHome ? createCloudHealth({ ...deps.health, box: deps.box }) : null;
   const cloudSigned = deps.cloudHome && cloudHealth
-    ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, health: cloudHealth, power: deps.power, box: deps.box })
+    ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, team: deps.cloudHome.team, health: cloudHealth, power: deps.power, box: deps.box })
     : null;
   return { cloudHealth, cloudSigned };
 }

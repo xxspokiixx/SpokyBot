@@ -5,8 +5,15 @@
 import { z } from "zod";
 
 import type { BotVisibility } from "../shared/wire.ts";
+import { audienceIncludes, type Audience } from "./audience.ts";
 
 export type { BotVisibility };
+
+/** A Team Cloud's audiences (audience.ts): each conversation's, and the viewing person's key. */
+export interface ThreadAudiences {
+  of(threadId: string): Audience | undefined;
+  person: string | null;
+}
 
 export type Viewer = { kind: "all" } | { kind: "member"; email?: string };
 
@@ -135,6 +142,7 @@ export class VisibleSet {
   private readonly groups = new Map<string, VisibilityGroup>();
   private readonly viewer: Viewer;
   private readonly ownerOf: (threadId: string) => ThreadOwner | undefined;
+  private readonly audiences: ThreadAudiences | null;
   private threads: Map<string, ThreadOwner> | null = null;
   private readonly botMemo = new Map<string, boolean>();
 
@@ -143,10 +151,13 @@ export class VisibleSet {
     groups: readonly VisibilityGroup[],
     viewer: Viewer,
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
+    audiences?: ThreadAudiences,
   ) {
     this.viewer = viewer;
+    this.audiences = viewer.kind === "member" && audiences ? audiences : null;
+    // On a Team Cloud a member's view is never everything: each conversation has its own audience.
     this.everything = viewer.kind === "all" ||
-      (!bots.some((bot) => isRestricted(bot.visibility)) && !groups.some((group) => isRestricted(group.audienceFloor)));
+      (this.audiences === null && !bots.some((bot) => isRestricted(bot.visibility)) && !groups.some((group) => isRestricted(group.audienceFloor)));
     this.ownerOf = ownerOf ?? ((threadId) => this.indexedOwner(threadId));
     if (this.everything) return;
     for (const bot of bots) this.bots.set(bot.id, bot);
@@ -177,12 +188,20 @@ export class VisibleSet {
     return members.length > 0 && members.every((member) => this.bot(member)) && viewerSees(this.viewer, group.audienceFloor);
   }
 
-  /** An unknown thread is not visible. */
+  /** Conversations have audiences of their own (a Team Cloud): a bot's tasks are then filtered one by one. */
+  get filtersThreads(): boolean {
+    return this.audiences !== null;
+  }
+
+  /** An unknown thread is not visible; on a Team Cloud neither is another person's conversation. */
   thread(threadId: string): boolean {
     if (this.everything) return true;
     const owner = this.ownerOf(threadId);
     if (!owner) return false;
-    return owner.bot !== undefined ? this.bot(owner.bot) : this.group(owner.group);
+    const seen = owner.bot !== undefined ? this.bot(owner.bot) : this.group(owner.group);
+    if (!seen || !this.audiences) return seen;
+    const audience = this.audiences.of(threadId);
+    return audience === undefined || audienceIncludes(audience, { admin: false, person: this.audiences.person, seesRoom: (groupId) => this.group(groupId) });
   }
 
   private indexedOwner(threadId: string): ThreadOwner | undefined {
@@ -282,9 +301,13 @@ export interface FrameContext {
  * server alias: a member learns the default VPS alias only as configured-or-not, and a bot's own alias the same way. */
 export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
   if (visible.everything) return visible.member ? withoutServerAlias(bot) : bot;
-  const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = bot as T & { visibility?: unknown; peers?: unknown; vpsAlias?: unknown };
+  const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = bot as T & { visibility?: unknown; peers?: unknown; vpsAlias?: unknown; tasks?: unknown };
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
-  return { ...rest, ...(peers ? { peers } : {}) } as T;
+  // On a Team Cloud a member is sent only their own conversations with the bot, and the team's.
+  const tasks = visible.filtersThreads && Array.isArray(rest.tasks)
+    ? (rest.tasks as unknown[]).filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId))
+    : undefined;
+  return { ...rest, ...(peers ? { peers } : {}), ...(tasks ? { tasks } : {}) } as T;
 }
 
 /** The SSH alias of the server a bot's VPS computer lives on: an admin's, like the default alias in config. */

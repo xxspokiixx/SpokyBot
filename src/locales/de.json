@@ -1965,5 +1965,6 @@
   "cloudSend.move.phone": "Dein Handy mit der Cloud koppeln",
   "cloudSend.move.homeAgain": "Deine Cloud ist beendet, deshalb sind deine Bots wieder auf diesem Computer. Was du in der Cloud gemacht hast, kommt auch zurück.",
   "cloudSend.move.back": "Deine Cloud ist beendet, deshalb sind deine Bots wieder auf diesem Computer, mit allem, was du in der Cloud gemacht hast. Logins und Schlüssel, die du in der Cloud hinzugefügt hast, sind nicht zurückgekommen: Füge sie hier wieder hinzu, wenn du sie brauchst.",
-  "cloudSend.move.backLost": "Deine Cloud ist beendet, deshalb sind deine Bots wieder auf diesem Computer, so wie sie beim Umzug waren. Was du seitdem in der Cloud gemacht hast, konnte nicht zurückkommen."
+  "cloudSend.move.backLost": "Deine Cloud ist beendet, deshalb sind deine Bots wieder auf diesem Computer, so wie sie beim Umzug waren. Was du seitdem in der Cloud gemacht hast, konnte nicht zurückkommen.",
+  "team.privateChats": "Chats in {team} sind für andere Mitglieder privat. Die Admins von {team} können sie sehen."
 }

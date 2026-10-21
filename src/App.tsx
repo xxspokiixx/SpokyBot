@@ -27,6 +27,7 @@ import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
+import { TeamPrivateChatsLine } from "@/components/TeamPrivateChatsLine";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { finishCloudProHandoff, takeCloudProHandoff } from "@/components/CloudProPopup";
@@ -276,6 +277,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
       <CloudAsleepStrip />
       <CloudSendStrip cloudHome={state.config?.cloudHome === true} onPairPhone={() => dispatch(phonePairingSettingsAction())} />
+      <TeamPrivateChatsLine team={state.config?.team} />
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId) || handedOver} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button

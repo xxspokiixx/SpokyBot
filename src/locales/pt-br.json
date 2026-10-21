@@ -5903,5 +5903,6 @@
   "cloudSend.move.phone": "Parear seu celular com o Cloud",
   "cloudSend.move.homeAgain": "Seu Cloud terminou, então seus bots voltaram para este computador. O que você fez no Cloud também está voltando.",
   "cloudSend.move.back": "Seu Cloud terminou, então seus bots voltaram para este computador, com o que você fez no Cloud. Os logins e as chaves que você adicionou no Cloud não voltaram: adicione-os aqui de novo se precisar.",
-  "cloudSend.move.backLost": "Seu Cloud terminou, então seus bots voltaram para este computador como estavam quando foram. O que você fez no Cloud desde então não pôde voltar."
+  "cloudSend.move.backLost": "Seu Cloud terminou, então seus bots voltaram para este computador como estavam quando foram. O que você fez no Cloud desde então não pôde voltar.",
+  "team.privateChats": "As conversas em {team} são privadas para os outros membros. Os administradores de {team} podem vê-las."
 }

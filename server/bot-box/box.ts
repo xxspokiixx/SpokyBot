@@ -64,12 +64,26 @@ export interface RunnerOptions {
 /** Wraps spawns for one setup (the server's, or a self-check fixture's). */
 export class BoxRunner {
   private readonly options: RunnerOptions;
+  /** Paths a conversation's turns may write besides the bot's own folder (a member's or a room's memory layer on a Team Cloud). */
+  private readonly lent = new Map<string, readonly string[]>();
 
   constructor(options: RunnerOptions) { this.options = options; }
 
   get setup(): BoxSetup { return this.options.setup; }
 
-  wrap(request: BoxRequest): WrappedSpawn {
+  /** Lends `rw` paths to every box of this conversation until `lend` is called again with none. */
+  lend(botId: string, threadId: string, rw: readonly string[]): void {
+    if (rw.length) this.lent.set(`${botId}/${threadId}`, [...rw]); else this.lent.delete(`${botId}/${threadId}`);
+  }
+
+  lentTo(botId: string, threadId: string): readonly string[] {
+    return this.lent.get(`${botId}/${threadId}`) ?? [];
+  }
+
+  wrap(given: BoxRequest): WrappedSpawn {
+    const ids = given.cwd ? taskWorkspaceIds(given.cwd, this.options.setup.dataDir) : null;
+    const lent = ids ? this.lentTo(ids.botId, ids.threadId) : [];
+    const request: BoxRequest = lent.length ? { ...given, rw: [...(given.rw ?? []), ...lent] } : given;
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
     if (seccomp) extraFds.push(openSync(seccomp, "r"));
@@ -229,6 +243,9 @@ export class BotBox {
   }
 
   enabled(): boolean { return this.runner !== null; }
+
+  /** More read-write folders for one conversation's boxes (a memory layer); nothing without a runner. */
+  lend(botId: string, threadId: string, rw: readonly string[]): void { this.runner?.lend(botId, threadId, rw); }
 
   tools(): { bwrap: string; socat: string | null } | null { return this.detection.tools; }
 

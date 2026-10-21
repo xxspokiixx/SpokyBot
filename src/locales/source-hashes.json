@@ -1968,7 +1968,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -7169,7 +7170,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -9120,7 +9122,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -11071,7 +11074,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -16919,7 +16923,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -22826,7 +22831,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -25678,7 +25684,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -29637,7 +29644,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -32086,7 +32094,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36692,7 +36701,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -41298,7 +41308,8 @@
       "cloudSend.move.phone": "01787b6960958d31b2b89ea6fa7fb15a541bdfd3b27ac5f571a223c7e41e2e60",
       "cloudSend.move.homeAgain": "8c403fcb2967e846f995e23e2bc822f88876107a6f7c0441b6f1b7a0b5ce36fa",
       "cloudSend.move.back": "29a45f7871b6b7affc0b599081ae34691f1166b02c36dee9add56c9fff2ca21c",
-      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9"
+      "cloudSend.move.backLost": "622cbfa601118736ea527a06153d3c4d69ced24aa1e7f9fd6f4e2457750631f9",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d"
     }
   }
 }
