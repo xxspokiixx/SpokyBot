@@ -1947,7 +1947,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -6990,7 +6992,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -8920,7 +8924,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -10850,7 +10856,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -16574,7 +16582,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -22323,7 +22333,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -25154,7 +25166,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -29030,7 +29044,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -31458,7 +31474,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -35978,7 +35996,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -40498,7 +40518,9 @@
       "homeScreen.signInEnded": "06f7e8ba54d24ed607dea28e4f9fe6dd79fe2046df7631301562e92b1b77a53c",
       "homeScreen.signInOther": "2244f72e3772381ad49f34d779d3a2eb3943350c5e39763ab5e271ca2993ca17",
       "homeScreen.signInButton": "bfd402b2f6f3812529b55596136d3a11c51616317e3b1cd999928e2d4eae7d3f",
-      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c"
+      "homeScreen.plan": "3dfbca4352d2403e84a046ab3ae5159a16dd669719484ff91400a87f50a7f21c",
+      "team.privateChats": "4477af25ee81a4e9b44b96ca93c22155ec9b135110443b3c407f467d2412dc5d",
+      "team.privateHeader": "d837a61fd3793f1db0cb4271c6db1b3ecede8531a7cb56659a8dbaa70b9f946f"
     }
   }
 }

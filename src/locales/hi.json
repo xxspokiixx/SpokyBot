@@ -1926,5 +1926,7 @@
   "cloudBuy.row.storageGrows": "{gb} GB स्टोरेज, {max} GB तक बढ़ता है",
   "cloudBuy.row.backups": "रोज़ाना बैकअप, {days} दिन तक रखे जाते हैं",
   "cloudBuy.trialTerms": "कार्ड ज़रूरी है, पर ट्रायल खत्म होने तक कुछ चार्ज नहीं होता। ऐप में कभी भी रद्द करें।",
-  "cloudBuy.timeline.firstPayment": "पहला भुगतान"
+  "cloudBuy.timeline.firstPayment": "पहला भुगतान",
+  "team.privateChats": "{team} में आपकी चैट दूसरे सदस्यों से निजी हैं। {team} के एडमिन उन्हें देख सकते हैं।",
+  "team.privateHeader": "निजी · एडमिन देख सकते हैं"
 }

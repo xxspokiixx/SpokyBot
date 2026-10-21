@@ -176,3 +176,21 @@ describe("spawnCli goes through the box", () => {
     expect(botBox.report().boxed).toBe(1);
   });
 });
+
+describe("BoxRunner.lend", () => {
+  it("puts a conversation's lent folders (a memory layer) back read-write in its boxes only, until they are taken back", () => {
+    const dataDir = "/data/.openmausbot";
+    const setup = { dataDir, home: "/data", codeRoots: ["/app"], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }] };
+    const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
+    const layer = join(dataDir, "workspaces", "bot-a--member-p_ada");
+    const request = { command: "/usr/bin/x", args: [], cwd: join(dataDir, "task-workspaces", "bot-a", "thread-1"), env: { PATH: "/usr/bin", HOME: "/data" } };
+    expect(runner.wrap(request).plan.writable).not.toContain(layer);
+    runner.lend("bot-a", "thread-1", [layer]);
+    expect(runner.wrap(request).plan.writable).toContain(layer);
+    // Another conversation of the same bot never gets it.
+    expect(runner.wrap({ ...request, cwd: join(dataDir, "task-workspaces", "bot-a", "thread-2") }).plan.writable).not.toContain(layer);
+    runner.lend("bot-a", "thread-1", []);
+    expect(runner.wrap(request).plan.writable).not.toContain(layer);
+    expect(runner.lentTo("bot-a", "thread-1")).toEqual([]);
+  });
+});

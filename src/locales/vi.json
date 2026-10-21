@@ -4516,5 +4516,7 @@
   "cloudBuy.row.storageGrows": "{gb} GB dung lượng lưu trữ, tăng đến {max} GB",
   "cloudBuy.row.backups": "Sao lưu hằng ngày, giữ {days} ngày",
   "cloudBuy.trialTerms": "Cần thẻ, nhưng không bị tính phí cho đến khi hết thời gian dùng thử. Hủy trong ứng dụng bất kỳ lúc nào.",
-  "cloudBuy.timeline.firstPayment": "Thanh toán đầu tiên"
+  "cloudBuy.timeline.firstPayment": "Thanh toán đầu tiên",
+  "team.privateChats": "Các cuộc trò chuyện trong {team} được giữ riêng tư với các thành viên khác. Quản trị viên của {team} có thể xem chúng.",
+  "team.privateHeader": "Riêng tư · quản trị viên có thể xem"
 }

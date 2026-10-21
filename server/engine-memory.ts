@@ -351,7 +351,7 @@ export class EngineMemory {
   }
 }
 
-export const engineMemory = new EngineMemory({ enabled: process.env.OMB_CLOUD_ROLE === "home" && process.platform === "linux" });
+export const engineMemory = new EngineMemory({ enabled: (process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team") && process.platform === "linux" });
 
 /**
  * One engine's adapter on a Cloud home: a turn that needs a new engine process waits for memory first (saying so in the

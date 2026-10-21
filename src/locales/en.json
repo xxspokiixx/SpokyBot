@@ -6078,5 +6078,7 @@
   "homeScreen.signInEnded": "This computer's sign-in to MausBot Cloud has ended. Your bots and chats are safe on My Cloud.",
   "homeScreen.signInOther": "This computer is signed in to MausBot Cloud with another account. Sign in with the account My Cloud belongs to.",
   "homeScreen.signInButton": "Sign in",
-  "homeScreen.plan": "My Cloud isn't running"
+  "homeScreen.plan": "My Cloud isn't running",
+  "team.privateChats": "Chats in {team} are private from other members. {team}'s admins can see them.",
+  "team.privateHeader": "Private · admins can see"
 }

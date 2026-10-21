@@ -2827,5 +2827,7 @@
   "cloudBuy.row.storageGrows": "{gb} GB 存储空间，最多可增至 {max} GB",
   "cloudBuy.row.backups": "每日备份，保留 {days} 天",
   "cloudBuy.trialTerms": "需要绑定银行卡，但试用结束前不会收费。随时可在应用中取消。",
-  "cloudBuy.timeline.firstPayment": "首次付款"
+  "cloudBuy.timeline.firstPayment": "首次付款",
+  "team.privateChats": "你在 {team} 中的聊天对其他成员保密。{team} 的管理员可以查看。",
+  "team.privateHeader": "私密 · 管理员可以查看"
 }
