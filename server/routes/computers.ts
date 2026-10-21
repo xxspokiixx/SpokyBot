@@ -12,7 +12,8 @@ import {
   type LocalVmTarget,
   type Runtime,
 } from "../container-computer.ts";
-import { localVmViewerStatus, viewerTargetId } from "../desktop-viewer-targets.ts";
+import { viewerTargetId } from "../../shared/desktop-viewer.ts";
+import { localVmViewerStatus } from "../desktop-viewer-targets.ts";
 import { keepFirefoxProfileBeforeRemove } from "../local-vm-profiles.ts";
 import type { ComputerIdleTimer } from "../computer-idle.ts";
 import type { LocalVmLease } from "../local-vm-lease.ts";
@@ -70,7 +71,8 @@ export interface ComputerRouteDeps {
   computerPreviewBot(botId: string, url: URL): BotRecord | null;
   computerPreviewSurface(bot: BotRecord, threadId?: string): Promise<string | undefined>;
   claimTeamComputerLifecycle(computer: TeamComputerRecord): () => void;
-  claimBotComputerLifecycle(botId: string): () => void;
+  /** `allowPreview`: a desktop link only reads the screen, so a panel's preview in flight does not refuse it. */
+  claimBotComputerLifecycle(botId: string, allowPreview?: boolean): () => void;
   claimBoatInventoryRequest(boxId: string): () => void;
   claimManagedBoatMutation(instance: boat.ManagedBoatInventoryInstance): () => void;
   claimManagedVpsMutation(containerName: string): () => void;
@@ -178,7 +180,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
           const key = teamComputerOwner(found.id);
           if (boatLifecycleBusyBots.has(key)) return json(res, 409, { error: "Wait for this computer's action to finish" });
           if (!computerControl.snapshot(key).held) return json(res, 409, { error: "Take control before opening this shared desktop" });
-          const release = claimBotComputerLifecycle(key);
+          const release = claimBotComputerLifecycle(key, true);
           try { return json(res, 200, await boat.joinReadyBoat(cfg, key)); }
           finally { release(); cloudComputerUsed(key); }
         }
