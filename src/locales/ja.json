@@ -2222,6 +2222,8 @@
   "task.unreadMany": "未読のスレッド",
   "task.deleteConfirm": "スレッドを削除しますか？",
   "task.deleteBody": "「{title}」とその会話を削除します。元に戻せません。",
+  "task.deleteAll": "すべてのスレッドを削除…",
+  "task.deleteAllConfirm": "すべてのスレッド（{count}件）を削除しますか？",
   "folder.settings": "フォルダーの設定",
   "folder.markRead": "フォルダーを既読にする",
   "folder.markingRead": "フォルダーを既読にしています…",

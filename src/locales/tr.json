@@ -1924,6 +1924,8 @@
   "task.unreadMany": "Okunmamış konular",
   "task.deleteConfirm": "Konu silinsin mi?",
   "task.deleteBody": "“{title}” ve sohbeti silinecek. Bu işlem geri alınamaz.",
+  "task.deleteAll": "Tüm konuları sil…",
+  "task.deleteAllConfirm": "Tüm konular silinsin mi ({count})?",
   "folder.settings": "Klasör ayarları",
   "folder.markRead": "Klasörü okundu olarak işaretle",
   "folder.markingRead": "Klasör okundu olarak işaretleniyor…",

@@ -1615,6 +1615,8 @@
   "task.unreadMany": "未讀對話",
   "task.deleteConfirm": "要刪除對話嗎？",
   "task.deleteBody": "「{title}」及其對話將被刪除。此操作無法復原。",
+  "task.deleteAll": "刪除所有對話…",
+  "task.deleteAllConfirm": "要刪除所有對話（{count} 個）嗎？",
   "folder.settings": "資料夾設定",
   "folder.markRead": "將資料夾標為已讀",
   "folder.markingRead": "正在將資料夾標為已讀…",

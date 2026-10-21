@@ -918,6 +918,8 @@
   "task.unreadMany": "Непрочитані гілки",
   "task.deleteConfirm": "Видалити гілку?",
   "task.deleteBody": "«{title}» та її розмова буде видалена. Цю дію не можна скасувати.",
+  "task.deleteAll": "Видалити всі гілки…",
+  "task.deleteAllConfirm": "Видалити всі гілки ({count})?",
   "folder.settings": "Налаштування папки",
   "folder.markRead": "Позначити папку прочитаною",
   "folder.markingRead": "Позначаємо папку прочитаною…",

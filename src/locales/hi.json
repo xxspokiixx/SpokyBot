@@ -695,6 +695,8 @@
   "task.renameTitle": "इस थ्रेड का नाम बदलें",
   "task.deleteAria": "थ्रेड हटाएँ",
   "task.deleteTitle": "इस थ्रेड और इसकी बातचीत को हटाएँ",
+  "task.deleteAll": "सभी थ्रेड हटाएँ…",
+  "task.deleteAllConfirm": "सभी थ्रेड हटाएँ ({count})?",
   "model.setupRequired": "सेटअप चाहिए",
   "model.signInRequired": "साइन-इन चाहिए",
   "model.ready": "तैयार",

@@ -34,7 +34,7 @@ import type {
   OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
-import { movesThreadToTop } from "../shared/wire.ts";
+import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts";
@@ -2428,7 +2428,7 @@ export class Store {
     const doomed = new Set(deleted);
     mdb.deleteThreads(deleted, () => this.commitBotChange(bot, "the thread deletion", () => {
       const kept = bot.tasks!.filter((t) => !doomed.has(t.threadId));
-      const visible = kept.find((task) => !task.routineRunId) ?? this.buildTask(bot);
+      const visible = nextOpenThread(kept) ?? this.buildTask(bot);
       bot.tasks = kept.includes(visible) ? kept : [visible, ...kept];
       if (doomed.has(bot.threadId) || this.taskByThread(botId, bot.threadId)?.routineRunId) this.mirrorActiveTask(bot, visible);
       bot.unread = bot.tasks.some(taskCountsAsBotUnread);
