@@ -139,6 +139,13 @@ const heldElsewhere = (held: boolean) => {
 const releases = () => fixture.beacons.filter((beacon) => beacon.url === "/api/bots/scout/computer/control" && beacon.body.action === "release");
 
 beforeEach(() => {
+  // The panel remembers each conversation's tab (computer-panel-view.ts), so one test's tab must not open the next test on it.
+  const saved = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => saved.get(key) ?? null,
+    setItem: (key: string, value: string) => void saved.set(key, value),
+    removeItem: (key: string) => void saved.delete(key),
+  });
   fixture.held = false;
   fixture.owned = true;
   fixture.controls = [];
@@ -198,7 +205,7 @@ describe("taking control of a Local VM", () => {
     expect(liveDesktop()!.dataset.expanded).toBe("true");
   });
 
-  it("closing the panel, leaving its Computer view or closing the page gives back the hold it took", async () => {
+  it("closing the panel, leaving its Screen view or closing the page gives back the hold it took", async () => {
     await open(makeBot({ computer: "vm" }));
     await press("Take control");
     const lease = fixture.controls[0]!.controlLeaseId;
@@ -212,10 +219,10 @@ describe("taking control of a Local VM", () => {
     await open(makeBot({ computer: "vm" }));
     await press("Take control");
     await press("Browser");
-    expect(releases(), "leaving the Computer view left the bot waiting").toHaveLength(1);
+    expect(releases(), "leaving the Screen view left the bot waiting").toHaveLength(1);
 
     fixture.beacons = [];
-    await press("Computer");
+    await press("Screen");
     await press("Take control");
     window.dispatchEvent(new Event("pagehide"));
     await settle();
