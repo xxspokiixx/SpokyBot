@@ -377,7 +377,8 @@ it("a sleeping Cloud is never dialled: while the Admin says it sleeps the Mac ne
     linkHeaders: () => ({ authorization: `Bearer ${owner}`, "x-forwarded-for": MAC_PUBLIC }), egress: macEgress(),
     WebSocket: class extends WebSocket { constructor(url: string | URL, init?: unknown) { dials++; super(url, init as never); } } as typeof WebSocket,
   });
-  // The grant the Mac kept: lent when the app quit.
+  // The grant the Mac kept: lent when the app quit. Where the case above is skipped, the first Mac quits here.
+  mac.connector.close();
   counted.start();
   const dialsBefore = dials;
   await new Promise((resolve) => setTimeout(resolve, 1500));
