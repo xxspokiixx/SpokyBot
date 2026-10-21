@@ -334,7 +334,7 @@ test("the session's offer is this account's: its plans, the preselected one, and
   const offer = parseCloudOffer({ plans: catalog(), recommended: "pro", trialDays: 7, creditUsd: 5, refundDays: 14, reminderDays: 2, checkout: { plan: "pro", openUntil: NOW + 3600_000 } });
   assert.ok(offer.plans.every(plan => !("sleeps" in plan.allowances)), "a plan says nothing about sleeping unless the Admin does");
   assert.deepEqual(offer.plans.map(plan => [plan.tier, plan.label, plan.amount, plan.trialDays]), [["personal", "Personal", 2900, 7], ["pro", "Pro", 4900, 7], ["max", "Max", 9900, 7]]);
-  assert.deepEqual(offer.plans[1].allowances, { cpus: 4, memoryMb: 4096, diskGb: 40, maxDiskGb: 50, computers: 4, computerHours: 200, voiceCharacters: 100_000 });
+  assert.deepEqual(offer.plans[1].allowances, { cpus: 4, cpuKind: "shared", memoryMb: 4096, diskGb: 40, maxDiskGb: 50, computers: 4, computerHours: 200, voiceCharacters: 100_000 });
   assert.equal(offer.recommended, "pro");
   assert.deepEqual([offer.creditUsd, offer.refundDays, offer.reminderDays], [5, 14, 2]);
   assert.deepEqual(offer.checkout, { plan: "pro", openUntil: NOW + 3600_000 });
@@ -346,6 +346,16 @@ test("the session's offer is this account's: its plans, the preselected one, and
   assert.deepEqual([paid.creditUsd, paid.reminderDays, paid.refundDays], [undefined, undefined, 14]);
   assert.equal(parseCloudOffer({ plans: catalog(), recommended: "team" }).recommended, "pro");
   assert.equal(parseCloudOffer({ plans: catalog().filter(plan => plan.tier !== "pro") }).recommended, "personal");
+});
+
+test("a plan's swap, backup days and CPU kind come along when the Admin lists them, and are left out when they are malformed", () => {
+  const listed = parseCloudOffer({ plans: [{ ...catalog()[1], allowances: { ...allowances(4, 10, 100), swapMb: 4096, snapshotDays: 14 } }] });
+  assert.deepEqual(listed.plans[0].allowances, { cpus: 4, cpuKind: "shared", memoryMb: 4096, diskGb: 10, maxDiskGb: 100, computers: 4, computerHours: 200, voiceCharacters: 100_000,
+    swapMb: 4096, snapshotDays: 14 });
+  for (const extra of [{ swapMb: 0 }, { swapMb: -1 }, { swapMb: "4096" }, { snapshotDays: 0 }, { snapshotDays: 400 }, { snapshotDays: 7.5 }, { cpuKind: "gpu" }, { cpuKind: null }]) {
+    const plan = parseCloudOffer({ plans: [{ ...catalog()[1], allowances: { ...allowances(4, 10, 100), ...extra } }] }).plans[0];
+    assert.deepEqual(Object.keys(plan.allowances).filter(key => ["swapMb", "snapshotDays"].includes(key) || (key === "cpuKind" && "cpuKind" in extra)), [], JSON.stringify(extra));
+  }
 });
 
 test("a malformed offer is no offer, and a malformed plan or extra is left out, never trusted in part", () => {
@@ -360,7 +370,8 @@ test("a malformed offer is no offer, and a malformed plan or extra is left out, 
   const [personal, pro] = catalog();
   const offer = parseCloudOffer({ plans: [personal, { ...pro, label: "Pro <script>", allowances: { cpus: "4" }, trialDays: 99 }, { ...pro }, { tier: "team", price: null }],
     trialDays: 0, creditUsd: 500, refundDays: 400, reminderDays: 2, checkout: { plan: "max", openUntil: NOW } });
-  assert.deepEqual(offer.plans, [{ tier: "personal", label: "Personal", amount: 2900, allowances: { cpus: 1, memoryMb: 1024, diskGb: 10, maxDiskGb: 10, computers: 1, computerHours: 50, voiceCharacters: 100_000 } },
+  assert.deepEqual(offer.plans, [{ tier: "personal", label: "Personal", amount: 2900, allowances: { cpus: 1, cpuKind: "shared", memoryMb: 1024, diskGb: 10, maxDiskGb: 10, computers: 1, computerHours: 50,
+    voiceCharacters: 100_000 } },
     { tier: "pro", amount: 4900 }]);
   assert.equal(offer.checkout, undefined); assert.equal(offer.refundDays, undefined); assert.equal(offer.creditUsd, undefined);
 });

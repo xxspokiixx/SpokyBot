@@ -269,7 +269,8 @@ it("keeps the conversation's level when an old report means the chat can't be pr
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } } });
   await claudeRun(old.body.routine.id);
   await release(bot.id);
-  expect((await api("GET", `/api/threads/${bot.threadId}/messages`, { token: owner })).body.messages.some((message: any) => message.kind === "routine.run")).toBe(true);
+  await expect.poll(async () => (await api("GET", `/api/threads/${bot.threadId}/messages`, { token: owner })).body.messages
+    .some((message: any) => message.automation?.routineId === old.body.routine.id), { timeout: hostTimeout(15_000) }).toBe(true);
   expect((await api("DELETE", `/api/routines/${old.body.routine.id}`, { token: owner })).status).toBe(200);
 
   const call = await ownerAsks(bot, "Summarise my inbox every hour.");
