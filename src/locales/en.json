@@ -2321,6 +2321,8 @@
   "task.unreadMany": "Unread threads",
   "task.deleteConfirm": "Delete thread?",
   "task.deleteBody": "“{title}” and its conversation will be deleted. This cannot be undone.",
+  "task.deleteAll": "Delete all threads…",
+  "task.deleteAllConfirm": "Delete all threads ({count})?",
   "folder.settings": "Folder settings",
   "folder.markRead": "Mark folder as read",
   "folder.markingRead": "Marking folder as read…",

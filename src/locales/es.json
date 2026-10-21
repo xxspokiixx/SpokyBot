@@ -2158,6 +2158,8 @@
   "task.unreadMany": "Hilos no leídos",
   "task.deleteConfirm": "¿Eliminar el hilo?",
   "task.deleteBody": "Se eliminarán «{title}» y su conversación. No se puede deshacer.",
+  "task.deleteAll": "Eliminar todos los hilos…",
+  "task.deleteAllConfirm": "¿Eliminar todos los hilos ({count})?",
   "folder.settings": "Configuración de la carpeta",
   "folder.markRead": "Marcar la carpeta como leída",
   "folder.markingRead": "Marcando la carpeta como leída…",
