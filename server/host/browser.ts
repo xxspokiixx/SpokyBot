@@ -57,7 +57,8 @@ export interface BrowserHostDeps {
   device?: EgressSetup["device"];
   /** Whether a turn may use the person's lent computer (cloud-lending.ts). Without it, no browser a turn holds may. */
   mayLend?(turn: TurnOwner): boolean;
-  memory?: { useBrowsers(browsers: EngineBrowsers): void };
+  /** The engine memory guard, told which browsers each thread's turn starts or holds. */
+  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void };
 }
 
 /** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
@@ -305,7 +306,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (browser?.session !== undefined && browser.spec) void closeForMemory(browser.session, browser.spec);
     },
   };
-  deps.memory?.useBrowsers(engineBrowsers);
+  deps.engineMemory?.useBrowsers(engineBrowsers);
   /** A deleted bot's or profile's browser on the new engine, whatever the flag says now. */
   function eraseChromeBrowser(request: { type: string; botId?: string; partitionId?: string }): Promise<boolean> {
     if (request.type === "openmausbot:browser-bot-deleted" && request.botId) return chromeEngine.erase({ kind: "bot", id: request.botId, partitionId: "" });

@@ -1,6 +1,6 @@
 // Screen 1: what MausBot Cloud is, the plans the Admin sells now (its recommended one preselected) and the money in one line.
 import type { KeyboardEvent } from "react";
-import { CloudUpload, Lock, Monitor, Moon, Smartphone, type LucideIcon } from "lucide-react";
+import { Check, CloudUpload, Lock, Monitor, Moon, Smartphone, type LucideIcon } from "lucide-react";
 import type { CloudOffer } from "../../../electron/cloud-home.mjs";
 import { cn } from "@/lib/cn";
 import { offerPlan, planRow, planTerms, trialTimeline } from "@/lib/cloud-plan";
@@ -30,6 +30,8 @@ export function ChooseScreen({ offer, chosen, now, busy, signedOut, notice, onCh
   onChoose: (tier: string) => void; onStart: () => void; onSignIn: () => void;
 }) {
   const plan = offerPlan(offer, chosen);
+  const rows = offer.plans.map((entry, index) => planRow(entry, offer.recommended, index > 0 ? offer.plans[index - 1] : null));
+  const picked = rows.find(row => row.tier === plan.tier)!;
   const terms = planTerms(offer, plan);
   const timeline = trialTimeline(offer, plan, now);
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -57,10 +59,10 @@ export function ChooseScreen({ offer, chosen, now, busy, signedOut, notice, onCh
     <div className="flex min-w-0 flex-col gap-3 px-[26px] pb-[18px] pt-6">
       <h3 id="cloud-add-plans" className="pe-8 text-[15px] font-semibold text-ink">{t("cloudBuy.choose")}</h3>
       <div role="radiogroup" aria-labelledby="cloud-add-plans" className="flex flex-col gap-2">
-        {offer.plans.map(entry => {
-          const row = planRow(entry, offer.recommended), selected = entry.tier === plan.tier;
-          return <button key={entry.tier} type="button" role="radio" aria-checked={selected} tabIndex={selected ? 0 : -1} data-plan={entry.tier}
-            onClick={() => onChoose(entry.tier)} onKeyDown={onKeyDown}
+        {rows.map(row => {
+          const selected = row.tier === plan.tier;
+          return <button key={row.tier} type="button" role="radio" aria-checked={selected} tabIndex={selected ? 0 : -1} data-plan={row.tier}
+            onClick={() => onChoose(row.tier)} onKeyDown={onKeyDown}
             className={cn("grid w-full grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-0.5 rounded-xl border px-3.5 py-2.5 text-start transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none",
               selected ? "border-accent bg-accent/10 shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_25%,transparent)]" : "border-hairline hover:border-ink-tertiary")}>
             <span aria-hidden="true" className={cn("mt-0.5 grid size-[18px] place-items-center rounded-full border-[1.8px]", selected ? "border-accent" : "border-ink-tertiary")}>
@@ -70,14 +72,24 @@ export function ChooseScreen({ offer, chosen, now, busy, signedOut, notice, onCh
               {row.popular && <span className="rounded-full bg-accent px-[7px] py-0.5 text-[10.5px] font-semibold tracking-[0.02em] text-accent-ink">{t("cloudAdd.popular")}</span>}
             </span>
             <span className="row-span-2 text-end text-[16px] font-bold tabular-nums text-ink">{row.price}<small className="block text-[11.5px] font-medium text-ink-tertiary">{t("cloudBuy.perMonth")}</small></span>
-            {row.line && <span className="col-start-2 -mt-0.5 text-[12.5px] text-ink-secondary">{row.line}</span>}
+            {row.promise && <span data-plan-promise className="col-start-2 -mt-0.5 text-[12.5px] leading-snug text-ink-secondary">{row.promise}</span>}
+            {row.line && <span data-plan-hours className="col-span-2 col-start-2 text-[12.5px] font-medium text-ink">{row.line}
+              {row.limit && <small className="text-[11px] font-normal text-ink-tertiary"> · {row.limit}</small>}</span>}
             {row.sleeps && <span data-plan-sleeps className="col-span-2 col-start-2 text-[12px] text-ink-secondary">{row.sleeps}</span>}
-            {row.chips.length > 0 && <span className="col-span-2 col-start-2 mt-1 flex flex-wrap gap-1.5">
-              {row.chips.map(chip => <span key={chip} className="whitespace-nowrap rounded-full border border-hairline/70 bg-card px-[7px] py-0.5 text-[11px] text-ink-secondary">{chip}</span>)}
-            </span>}
           </button>;
         })}
       </div>
+      {picked.benefits.length > 0 && <section aria-live="polite" aria-labelledby="cloud-add-includes" data-plan-benefits={picked.tier}
+        className="flex flex-col gap-2 rounded-xl border border-hairline/70 bg-card/70 px-3.5 py-3">
+        <h4 id="cloud-add-includes" className="text-[12.5px] font-semibold text-ink">{t("cloudBuy.includes", { plan: picked.name })}</h4>
+        <ul className="flex flex-col gap-1.5">
+          {picked.benefits.map(item => <li key={item.text} className="grid grid-cols-[14px_minmax(0,1fr)] items-start gap-2 text-[12.5px] leading-snug text-ink">
+            <Check size={14} aria-hidden="true" className="mt-0.5 text-accent-text" />
+            <span>{item.text}{item.note && <small className="block text-[11px] text-ink-tertiary">{item.note}</small>}</span>
+          </li>)}
+        </ul>
+        {picked.adds && <p data-plan-adds className="border-t border-hairline/60 pt-2 text-[12.5px] font-medium text-ink">{picked.adds}</p>}
+      </section>}
       <div aria-live="polite" className="flex flex-col gap-2 rounded-xl border border-hairline/70 bg-card/70 px-3.5 py-3">
         <p className="flex items-baseline justify-between gap-2.5"><span className="text-[13.5px] font-semibold text-ink">{t("cloudBuy.dueToday")}</span>
           <strong className="text-[20px] tabular-nums tracking-[-0.01em] text-ink">{terms.due}</strong></p>

@@ -33,8 +33,8 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, memory, device, mayLend, holder }: {
-  cloudHome?: boolean; memory?: { useBrowsers: () => void }; device?: BrowserHostDeps["device"]; mayLend?: BrowserHostDeps["mayLend"]; holder?: (resource: string) => TurnOwner | undefined;
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, device, mayLend, holder }: {
+  cloudHome?: boolean; device?: BrowserHostDeps["device"]; mayLend?: BrowserHostDeps["mayLend"]; holder?: (resource: string) => TurnOwner | undefined;
 } = {}) {
   const cfg = {
     features: { browser: true },
@@ -55,13 +55,31 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
     DESKTOP_MANAGED: !cloudHome,
     CLOUD_HOME: cloudHome ? { machineId: "m-1" } : null,
     PORT: 4100,
-    memory,
     device,
     mayLend,
   });
   hosts.push(host);
   return { cfg, host, minted, bots };
 }
+
+describe("the bots' browser host and the engine memory guard", () => {
+  it("hands the guard the browsers each thread's turn starts or holds", () => {
+    const told: unknown[] = [];
+    const host = createBrowserHost({
+      cfg: { features: { browser: true } } as unknown as AppConfig,
+      store: () => ({ bots: [], bot: () => undefined, botByThread: () => undefined }) as unknown as Pick<Store, "bots" | "bot" | "botByThread">,
+      turnResources: { free: () => true, holder: () => undefined },
+      activeInternalGenerationByThread: new Map(),
+      mintInternalCapability: () => "capability-token",
+      DESKTOP_MANAGED: false,
+      CLOUD_HOME: { machineId: "m-1" },
+      PORT: 4100,
+      engineMemory: { useBrowsers: (browsers) => { told.push(browsers); } },
+    });
+    hosts.push(host);
+    expect(told).toEqual([host.engineBrowsers]);
+  });
+});
 
 describe("the bots' browser host with browserEngine.engine set to chrome", () => {
   it("gives a bot's turn the browser MCP server over its own profile on the new engine", async () => {
@@ -114,12 +132,6 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
 });
 
 describe("what the memory guard sees of a bot's browser", () => {
-  it("is handed to the memory guard when the host starts", () => {
-    const memory = { useBrowsers: vi.fn() };
-    const { host } = setup(undefined, { cloudHome: true, memory });
-    expect(memory.useBrowsers).toHaveBeenCalledExactlyOnceWith(host.engineBrowsers);
-  });
-
   it("counts a browser a bot's turn may start, but not one it can't use or the person's own Chrome", () => {
     const { host, bots } = setup(undefined, { cloudHome: true });
     const bot = bots[0] as { browser: boolean; browserProfile?: string };

@@ -230,10 +230,12 @@ describe("bot-first sidebar", () => {
     const enabled = render();
     expect(enabled).toContain("New thread");
     expect(enabled).toContain("New folder");
+    expect(enabled).toContain("Delete all threads…");
     fixture.showThreads = false;
     const disabled = render();
     expect(disabled).not.toContain("New thread");
     expect(disabled).not.toContain("New folder");
+    expect(disabled).toContain("Delete all threads…");
     expect(disabled).toContain("Edit Profile");
     expect(disabled).toContain("Move to team");
   });
