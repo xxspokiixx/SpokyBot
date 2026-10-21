@@ -669,10 +669,14 @@ the desktop app it starts with this computer's own **Let my bots use this Mac**
 switch and its one line (electron/cloud-lending-ipc.mjs), so nobody leaves My
 Cloud to change it: the page learns only on/off, how it is going and folder
 names, never a path; turning it on needs the person's real click on the switch
-(the preload bridge checks it), and nothing else asks. Turned on with nothing
-chosen (here or on this computer), lending lends the internet connection and
-Desktop, Documents and Downloads, read only; other folders, editing and the
-screen wait under **Choose what's lent** on this computer. Where the system
+(the preload bridge checks it), and nothing else asks. While it is on, the page
+also has **Apps and screen**: ticking it needs a real click too, and main then
+asks in a native dialog of its own, because a page served by the Cloud must
+never grant control of the computer alone. Turned on with nothing chosen (here
+or on this computer), lending lends the internet connection and Desktop,
+Documents and Downloads, read only; other folders and editing wait under
+**Choose what's lent** on this computer. A bot that finds apps and screen not
+lent is told where to tick it, in the refusal and in list_shared_computers. Where the system
 names the home folder itself for one of them (Linux without user-dirs.dirs),
 the folder of that name in the home folder is lent instead; one that can't be
 found is left out. A refusal a person can act on (the whole home folder or a

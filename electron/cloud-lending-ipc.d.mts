@@ -6,6 +6,8 @@ export interface PageLending {
   status: string | null;
   folders: Array<{ name: string; write: boolean }>;
   screen: boolean;
+  /** Whether computer control is set up here, so Apps and screen can be lent. */
+  screenAvailable: boolean;
   /** Its internet connection, for the bots' browsers on My Cloud. */
   internet: boolean;
   /** Whether My Cloud's browsing goes through it yet. */

@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { DeviceLinks, LinkedComputer } from "./device-links.ts";
-import { awayNotice, deviceWord, LENT_PLATFORMS, type LentComputers } from "./lent-computers.ts";
+import { awayNotice, deviceWord, lendScreenSteps, LENT_PLATFORMS, type LentComputers } from "./lent-computers.ts";
 export { LentComputers } from "./lent-computers.ts";
 
 const folder = z.object({ id: z.string().uuid(), name: z.string().min(1).max(120), write: z.boolean() }).strict();
@@ -66,7 +66,7 @@ export function sharedComputerScopeRefusal(registration: Registration, operation
       return registration.terminal ? null : "Terminal access is not lent to this server.";
     case "computer_tools":
     case "computer_call":
-      return registration.computer ? null : "Apps and screen are not lent to this server.";
+      return registration.computer ? null : `Apps and screen are not lent to this server. ${lendScreenSteps(deviceWord(registration.platform))}`;
     case "list_files":
     case "read_file":
     case "write_file": {
@@ -157,6 +157,13 @@ export class SharedComputers {
   away(principal: string | null) {
     if (!principal) return {};
     return awayNotice(this.lent?.list(principal) ?? [], new Set(this.list(principal).map(registration => registration.id)));
+  }
+  /** For a bot: how the person lends apps and screen, when an online computer of theirs lends neither. */
+  screenNotLent(principal: string | null): { screen?: string } {
+    if (!principal) return {};
+    const entry = [...this.computers.values()].find(candidate => candidate.owner.person === principal && this.online(candidate) && !candidate.registration.computer);
+    if (!entry) return {};
+    return { screen: `${entry.registration.name} does not lend its apps and screen. ${lendScreenSteps(deviceWord(entry.registration.platform))}` };
   }
   /** A computer that lends its internet connection but is away: the bots' browsers here use My Cloud's own connection
    * meanwhile, and say so once. Nothing while one is online, or when none lends it. */

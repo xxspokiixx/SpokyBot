@@ -526,7 +526,7 @@ it("My Cloud's own page turns this computer's lending on in place, with the inte
   expect((await handlers.get("cloud-lending:state")!({})).on).toBe(false);
   await handlers.get("cloud-lending:set")!({}, true);
   await expect.poll(() => lending.cloudState(env).link, { timeout: 8000 }).toBe("on");
-  expect(await handlers.get("cloud-lending:state")!({})).toEqual({ available: true, on: true, status: "lent", screen: false, internet: true, link: "on",
+  expect(await handlers.get("cloud-lending:state")!({})).toEqual({ available: true, on: true, status: "lent", screen: false, screenAvailable: false, internet: true, link: "on",
     folders: [{ name: "Desktop", write: false }, { name: "Documents", write: false }, { name: "Downloads", write: false }] });
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.find((computer: { lent: boolean }) => computer.lent), { timeout: 5000 })
     .toEqual(expect.objectContaining({ online: true, scopes: { folders: 3, terminal: false, screen: false, internet: true } }));
