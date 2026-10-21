@@ -165,8 +165,9 @@ export function createTeamMoveIn(deps: TeamMoveInDeps) {
         const elsewhere = deps.routines()?.listRoutines().find((held) => held.id === routine[1] && held.botId !== bot);
         if (elsewhere) return refused;
         const own = body.record;
-        // A routine reports into a conversation of the mover's, never into the team's main chat.
-        return own.resultsThreadId === undefined && own.sourceThreadId === undefined && move.threadId ? { ...body, record: { ...own, resultsThreadId: move.threadId } } : body;
+        // A routine reports into a conversation of the mover's that came with it, never into the team's main chat.
+        const reports = typeof own.resultsThreadId === "string" && deps.store.botByThread(own.resultsThreadId)?.id === bot && deps.starters.get(own.resultsThreadId) === move.person;
+        return !reports && move.threadId ? { ...body, record: { ...own, resultsThreadId: move.threadId } } : body;
       }
       const skill = /^library-skill:([a-z0-9-]{1,64})$/u.exec(key);
       if (skill && !Object.hasOwn(deps.library(), skill[1]!)) return body;
@@ -175,14 +176,23 @@ export function createTeamMoveIn(deps: TeamMoveInDeps) {
     if (path === "/api/cloud-send/chats") {
       const conversations = Array.isArray(body.conversations) ? body.conversations : [];
       if (conversations.some((entry) => !record(entry) || entry.bot !== bot || entry.room !== undefined || typeof entry.threadId !== "string" || !ownThread(bot, move, entry.threadId))) return refused;
-      // Each is the mover's own conversation from the moment it arrives.
+      // Each is the mover's own conversation from the moment it arrives, and the lines its owner wrote on My Cloud are theirs.
       for (const entry of conversations) deps.starters.set((entry as { threadId: string }).threadId, move.person);
-      return { ...body, conversations: conversations.map((entry) => {
+      const from = typeof body.owner === "string" ? body.owner : null;
+      const theirs = (row: unknown) => {
+        if (!from || !record(row)) return row;
+        const sender = record(row.sender) && row.sender.id === from ? { ...row.sender, id: move.person, name: move.who } : row.sender;
+        const card = record(row.card) && record(row.card.answeredBy) && row.card.answeredBy.person === from
+          ? { ...row.card, answeredBy: { ...row.card.answeredBy, person: move.person, name: move.who } } : row.card;
+        return sender === row.sender && card === row.card ? row : { ...row, ...(sender ? { sender } : {}), ...(card ? { card } : {}) };
+      };
+      const { owner: _owner, ...rest } = body;
+      return { ...rest, conversations: conversations.map((entry) => {
         const conversation = entry as Record<string, unknown>;
-        if (conversation.task) return conversation;
-        const rows = Array.isArray(conversation.rows) ? conversation.rows : [];
+        const rows = (Array.isArray(conversation.rows) ? conversation.rows : []).map(theirs);
+        if (conversation.task) return { ...conversation, rows };
         const first = record(rows[0]) && typeof rows[0].at === "number" ? rows[0].at : now();
-        return { ...conversation, task: { threadId: conversation.threadId, title: move.name, createdAt: first } };
+        return { ...conversation, rows, task: { threadId: conversation.threadId, title: move.name, createdAt: first } };
       }) };
     }
     if (["/api/cloud-send/chats/settings", "/api/cloud-send/chats/owner", "/api/cloud-send/chats/verify"].includes(path)) {

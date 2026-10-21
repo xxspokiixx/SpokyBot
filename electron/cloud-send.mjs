@@ -476,7 +476,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (cursor === "removed" || (head.bot && (!cloudBots.has(head.bot) || keptHere(head.bot)))) return false;
       return !cursor || cursor.after !== head.last || cursor.id !== head.lastId;
     });
-    return { dataDir: typeof listed?.dataDir === "string" ? listed.dataDir : "", ready: waiting.filter((head) => !head.busy), busy: waiting.filter((head) => head.busy).length };
+    return { dataDir: typeof listed?.dataDir === "string" ? listed.dataDir : "", ready: waiting.filter((head) => !head.busy), busy: waiting.filter((head) => head.busy).length,
+      owner: team && typeof listed?.owner === "string" && /^p_[\w-]{22}$/u.test(listed.owner) ? listed.owner : null };
   }
 
   /** Each waiting conversation's new rows, page by page, a few conversations per request; the cursor moves only past
@@ -484,7 +485,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * The attachments those rows name go first, unless My Cloud has them. `result.chats.left`: the conversations that did
    * not all go (a bot answering in one, or My Cloud not taking a page), for the next send. */
   async function sendChatRows(origin, session, theirs, result, { everything = false } = {}) {
-    const { dataDir, ready, busy } = await chatsWaiting(origin, theirs, { everything });
+    const { dataDir, ready, busy, owner: from } = await chatsWaiting(origin, theirs, { everything });
     const kept = entry(origin);
     const total = ready.length;
     const held = new Set();
@@ -512,7 +513,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
           if (!stored.ok) throw new CloudSendError("refused", refusal(stored, "My Cloud could not take an attachment of the chats."));
         }
       }
-      const answer = await session.call("POST", "/api/cloud-send/chats", { v: 1, dataDir,
+      // Into a team: whose lines on My Cloud become the mover's there.
+      const answer = await session.call("POST", "/api/cloud-send/chats", { v: 1, dataDir, ...(from ? { owner: from } : {}),
         conversations: batch.map(({ owner, threadId, task, rows, leaf, sent }) => ({ ...owner, threadId, task, rows, leaf, sent })) });
       if (!answer.ok) throw new CloudSendError("refused", refusal(answer, "My Cloud could not add the chats."));
       const accepted = new Set(Array.isArray(answer.body?.accepted) ? answer.body.accepted : []);

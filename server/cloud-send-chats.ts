@@ -221,6 +221,9 @@ export interface CloudSendChatsDeps {
   approvalSupported?(selection: ModelSelection, mode: ApprovalMode): boolean;
   /** A move of this one bot into a team: its conversations only. */
   bot?: string;
+  /** This Cloud's owner's person key, as their lines here carry it: a bot moving into a team tells the team whose lines
+   * become the mover's. */
+  ownerKey?: string;
 }
 
 const ownerOf = (store: Pick<ChatStore, "bots" | "groups">, threadId: string) => {
@@ -324,7 +327,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
   // This computer's side: what each conversation has, and its rows after a point.
   if (path === PREFIX && method === "GET") {
     const heads = deps.bot ? chatHeads(store.bots.filter((bot) => bot.id === deps.bot), []) : chatHeads(store.bots, store.groups);
-    json(res, 200, { v: 1, dataDir: deps.dataDir, conversations: heads.map((head) => ({ ...head, settings: conversationSettings(store, head) })),
+    json(res, 200, { v: 1, dataDir: deps.dataDir, ...(deps.bot && deps.ownerKey ? { owner: deps.ownerKey } : {}), conversations: heads.map((head) => ({ ...head, settings: conversationSettings(store, head) })),
       ...(url.searchParams.get("attachments") === "1" ? { attachments: await attachmentSizes(store, deps.dataDir, heads) } : {}) });
     return true;
   }
