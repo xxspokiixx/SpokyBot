@@ -1502,7 +1502,10 @@ resume, someone's use, or 120 s (a sleep the Admin never carried out):
   its stream, stops its polls, shows "My Cloud is asleep" and stays quiet until
   the person clicks, types or focuses it, which wakes the home
   (`src/lib/cloud-power.ts`): Fly wakes a machine for **any** inbound request,
-  so a page that kept polling would keep it awake;
+  so a page that kept polling would keep it awake. The frame is live only: a
+  stream that resumes from before it never gets it again. The wake is one
+  ordinary request (`GET /api/auth/session`), so it also ends a sleep the
+  Admin has not carried out yet;
 - held `GET /api/sync/changes` and `POST /api/shared-computers/<id>/poll`
   answer `503 {"error":"asleep"}` with `x-omb-cloud-power: asleep`, and new
   ones get the same, so the desktop's Files sync and lending pause instead of

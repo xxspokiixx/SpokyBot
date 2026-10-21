@@ -27,7 +27,7 @@ describe("api() and a Cloud home that sleeps", () => {
     await expect(api("/api/team-map", { background: true })).rejects.toMatchObject({ status: 503 });
     expect(fetch).not.toHaveBeenCalled();
     await api("/api/threads");
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls.map(([path]) => path)).toEqual(["/api/auth/session", "/api/threads"]);
     expect(cloudAsleep()).toBe(false);
   });
 
