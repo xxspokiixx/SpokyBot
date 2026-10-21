@@ -10,7 +10,7 @@ import { BrowserRuntime, TransportError, attachesToChrome, browserRuntimeEnv, fo
 import { RelayTimeout, relay, relayCommand, relayInput } from "../browser-relay.ts";
 import { browserSteps } from "../browser-steps.ts";
 import { BrowserLive } from "../browser-live.ts";
-import { browserEgress } from "../browser/egress/registry.ts";
+import { browserEgress, type EgressSetup } from "../browser/egress/registry.ts";
 import {
   agentBrowserIntegration,
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
@@ -38,13 +38,13 @@ import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "../proxy-paths.ts";
 import type { Store } from "../store.ts";
-import type { TurnResources } from "../turn-resources.ts";
+import type { TurnOwner, TurnResources } from "../turn-resources.ts";
 
 export interface BrowserHostDeps {
   cfg: AppConfig;
   /** The store is built after this host, so it is read when used. */
   store(): Pick<Store, "bots" | "bot" | "botByThread">;
-  turnResources: Pick<TurnResources, "free">;
+  turnResources: Pick<TurnResources, "free" | "holder">;
   activeInternalGenerationByThread: ReadonlyMap<string, string>;
   mintInternalCapability(capability: {
     botId: string; threadId: string; generation: string; browserSession: string; kind: "browser";
@@ -53,8 +53,23 @@ export interface BrowserHostDeps {
   DESKTOP_MANAGED: boolean;
   CLOUD_HOME: unknown;
   PORT: number;
+  /** A Cloud home's way out through the person's own lent computer. */
+  device?: EgressSetup["device"];
+  /** Whether a turn may use the person's lent computer (cloud-lending.ts). Without it, no browser a turn holds may. */
+  mayLend?(turn: TurnOwner): boolean;
   /** The engine memory guard, told which browsers each thread's turn starts or holds. */
   engineMemory?: { useBrowsers(browsers: EngineBrowsers): void };
+}
+
+/** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
+ * turn to hold that browser may use the lent computer. A browser no turn has held is the person's own. */
+function lentDevice(device: NonNullable<EgressSetup["device"]>, holder: (session: string) => TurnOwner | undefined, mayLend: (turn: TurnOwner) => boolean) {
+  const lends = new Map<string, boolean>();
+  return (session: string) => {
+    const turn = holder(session);
+    if (turn) lends.set(session, mayLend(turn));
+    return lends.get(session) === false ? null : device(session);
+  };
 }
 
 type Spec = { command: string; args?: readonly string[]; env: Record<string, string> };
@@ -96,7 +111,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   });
   const browserLive = new LiveRouter(agentBrowserLive, chromeEngine);
   const usedBrowserSessions = new Map<string, Spec>();
-  browserEgress.configure({ host: DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server", config: () => cfg.browserEngine?.egress });
+  const device = deps.device && lentDevice(deps.device, (session) => turnResources.holder(`browser:${session}`), deps.mayLend ?? (() => false));
+  browserEgress.configure({ host: DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server", config: () => cfg.browserEngine?.egress, ...(device ? { device } : {}) });
   /** A live bot's, profile's or temporary browser of this data dir. */
   const belongs = (session: string) => isTemporaryBrowserSession(session) || store.bots.some((bot) => browserSessionId(bot.id, "") === session)
     || (cfg.browserProfiles ?? []).some((profile) => !usesMyChrome(profile.id) && currentBrowserSession("", profile.id) === session);

@@ -6,7 +6,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { localizedRelativeTime } from "@/lib/memory";
 import { api } from "@/state/store";
-import { lendingFailureKey, lendingProblemKey, lentWhat } from "./CloudLending";
+import { lendingFailureKey, lendingProblemKey, lendingTitle, lendsLine, lentWhat } from "./CloudLending";
 import { Card, Switch } from "./SettingsPrimitives";
 
 /** A computer lent to this server, now or before (server/shared-computers.ts KnownLentComputer). */
@@ -19,7 +19,7 @@ export interface KnownLentComputer {
   lent: boolean;
   lastSeenAt: number;
   lastUsedAt: number | null;
-  scopes: { folders: number; terminal: boolean; screen: boolean };
+  scopes: { folders: number; terminal: boolean; screen: boolean; internet?: boolean };
 }
 
 const PLATFORM: Record<string, string> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
@@ -30,11 +30,15 @@ export function lentComputerLines(computer: KnownLentComputer, now = Date.now())
     : computer.online ? t("lending.cloudSide.online")
     : t("lending.cloudSide.offline", { when: localizedRelativeTime(computer.lastSeenAt, activeLocale(), now) });
   const what = [
-    ...(computer.scopes.folders ? [t("lending.cloudSide.folders", { count: String(computer.scopes.folders) })] : []),
+    ...(computer.scopes.internet ? [t("lending.cloudSide.internet")] : []),
+    ...(computer.scopes.folders === 1 ? [t("lending.cloudSide.folderOne")]
+      : computer.scopes.folders ? [t("lending.cloudSide.folders", { count: String(computer.scopes.folders) })] : []),
     ...(computer.scopes.screen ? [t("lending.cloudSide.screen")] : []),
     ...(computer.scopes.terminal ? [t("lending.cloudSide.terminal")] : []),
   ];
+  const away = computer.lent && !computer.online && computer.scopes.internet === true;
   return [state, ...(computer.lent && what.length ? [t("lending.cloudSide.lends", { what: what.join(", ") })] : []),
+    ...(away ? [t("lending.cloudSide.internetAway")] : []),
     computer.lastUsedAt ? t("lending.cloudSide.lastUsed", { when: localizedRelativeTime(computer.lastUsedAt, activeLocale(), now) }) : t("lending.cloudSide.neverUsed")];
 }
 
@@ -44,12 +48,14 @@ export function pageLendingLine(lending: PageLending): string {
   if (lending.status === "busy") return t("lending.status.busy");
   if (lending.status && lending.status !== "lent" && lending.status !== "starting") return t(lendingProblemKey(lending.status) ?? "lending.status.starting");
   if (lending.status === "starting") return t("lending.status.starting");
-  const what = lentWhat(lending.folders, lending.screen);
-  return what ? t("lending.page.lends", { what }) : t("lending.status.lent");
+  const updating = lending.link === "unsupported";
+  const what = lentWhat(lending.folders, lending.screen, lending.internet === true && !updating);
+  if (updating) return what ? `${lendsLine(what)} ${t("lending.internetUnsupported")}` : t("lending.internetUnsupported");
+  return what ? lendsLine(what) : t("lending.status.lent");
 }
 
-/** In the desktop app on My Cloud's own page: "Let My Cloud use this computer" right here, one switch and one line, so
- * nobody has to leave My Cloud. Main confirms turning it on in a native dialog. */
+/** In the desktop app on My Cloud's own page: "Let my bots use this Mac" right here, one switch and one line, so nobody
+ * has to leave My Cloud. Turning it on takes a real click on the switch, and nothing else asks. */
 function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending> } }) {
   const [lending, setLending] = useState<PageLending | null>(null);
   const [working, setWorking] = useState(false);
@@ -68,7 +74,7 @@ function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>;
   };
   return <div data-lend-this-computer={lending.on ? "on" : "off"} className="flex flex-col gap-1.5 rounded-lg bg-raised/60 p-3">
     <div className="flex items-start justify-between gap-3">
-      <p id="lend-this-computer" className="text-[13px] font-medium text-ink">{t("lending.title")}</p>
+      <p id="lend-this-computer" className="text-[13px] font-medium text-ink">{lendingTitle()}</p>
       <Switch checked={lending.on} disabled={working} aria-labelledby="lend-this-computer" onClick={toggle} />
     </div>
     <p role="status" className="text-[12.5px] text-ink-secondary">{pageLendingLine(lending)}</p>

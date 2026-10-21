@@ -6,9 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT, browserEngineStatus, clearBrowserSessionState, closeBrowserSession, runningBrowserSessionNames } from "../browser-engine.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
 import { TOOL_LIST } from "../browser/tools.ts";
+import { browserEgress } from "../browser/egress/registry.ts";
 import type { AppConfig } from "../config.ts";
 import type { Store } from "../store.ts";
-import { createBrowserHost } from "./browser.ts";
+import type { TurnOwner } from "../turn-resources.ts";
+import { createBrowserHost, type BrowserHostDeps } from "./browser.ts";
 
 vi.mock("../browser-engine.ts", async (original) => {
   const actual = await original<typeof import("../browser-engine.ts")>();
@@ -31,7 +33,9 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false }: { cloudHome?: boolean } = {}) {
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, device, mayLend, holder }: {
+  cloudHome?: boolean; device?: BrowserHostDeps["device"]; mayLend?: BrowserHostDeps["mayLend"]; holder?: (resource: string) => TurnOwner | undefined;
+} = {}) {
   const cfg = {
     features: { browser: true },
     ...(engine ? { browserEngine: { engine } } : {}),
@@ -45,12 +49,14 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
   const host = createBrowserHost({
     cfg,
     store: () => ({ bots, bot: (id: string) => bots.find((bot) => bot.id === id), botByThread: () => bots[0] }) as unknown as Pick<Store, "bots" | "bot" | "botByThread">,
-    turnResources: { free: () => true },
+    turnResources: { free: () => true, holder: holder ?? (() => undefined) },
     activeInternalGenerationByThread: new Map([[turn.threadId, turn.generation]]),
     mintInternalCapability: (capability) => { minted.push(capability); return "capability-token"; },
     DESKTOP_MANAGED: !cloudHome,
     CLOUD_HOME: cloudHome ? { machineId: "m-1" } : null,
     PORT: 4100,
+    device,
+    mayLend,
   });
   hosts.push(host);
   return { cfg, host, minted, bots };
@@ -62,7 +68,7 @@ describe("the bots' browser host and the engine memory guard", () => {
     const host = createBrowserHost({
       cfg: { features: { browser: true } } as unknown as AppConfig,
       store: () => ({ bots: [], bot: () => undefined, botByThread: () => undefined }) as unknown as Pick<Store, "bots" | "bot" | "botByThread">,
-      turnResources: { free: () => true },
+      turnResources: { free: () => true, holder: () => undefined },
       activeInternalGenerationByThread: new Map(),
       mintInternalCapability: () => "capability-token",
       DESKTOP_MANAGED: false,
@@ -151,6 +157,36 @@ describe("what the memory guard sees of a bot's browser", () => {
     host.engineBrowsers.stopped("thread-1");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(closeBrowserSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("the person's lent computer's connection, for a bot's browser on My Cloud", () => {
+  it("is offered only while the last turn to hold that browser may use the lent computer", () => {
+    const configure = vi.spyOn(browserEgress, "configure");
+    const holders = new Map<string, TurnOwner>();
+    const upstream = { open: async () => ({ refused: "port" as const }) };
+    setup(undefined, { cloudHome: true, device: () => upstream, mayLend: (turn) => turn.threadId === "owner-thread", holder: (resource) => holders.get(resource) });
+    const device = configure.mock.lastCall![0].device!;
+    configure.mockRestore();
+    expect(device("bot-1"), "a browser no turn has held is the person's own").toBe(upstream);
+    holders.set("browser:bot-1", { threadId: "guest-thread", generation: "g1" });
+    expect(device("bot-1"), "held by a turn that may not use the lent computer").toBeNull();
+    holders.delete("browser:bot-1");
+    expect(device("bot-1"), "its pages stay off the computer after that turn ends").toBeNull();
+    expect(device("bot-2"), "another browser keeps its own verdict").toBe(upstream);
+    holders.set("browser:bot-1", { threadId: "owner-thread", generation: "g2" });
+    expect(device("bot-1")).toBe(upstream);
+    holders.delete("browser:bot-1");
+    expect(device("bot-1"), "and on it after the person's own turn ends").toBe(upstream);
+  });
+
+  it("is never offered to a browser a turn holds when the host can't tell who may use the lent computer", () => {
+    const configure = vi.spyOn(browserEgress, "configure");
+    const upstream = { open: async () => ({ refused: "port" as const }) };
+    setup(undefined, { cloudHome: true, device: () => upstream, holder: () => ({ threadId: "t", generation: "g" }) });
+    const device = configure.mock.lastCall![0].device!;
+    configure.mockRestore();
+    expect(device("bot-1")).toBeNull();
   });
 });
 

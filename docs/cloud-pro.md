@@ -375,7 +375,7 @@ answers, so no step flickers back. When the main pane already shows the step tha
 sign-in in the chat view), the card says **You're on this step** instead of
 repeating it. With every listed step done but no turn finished yet, the card says the bot
 is setting itself up in the chat. Lending this Mac to the Cloud is not a step;
-it stays in Settings → MausBot Cloud and the menu-bar item's **Lending
+it stays in Settings → MausBot Cloud and the menu-bar item's **Sharing
 settings…**.
 
 **Hide setup** is the only dismiss. The Cloud keeps it (`cloud-setup-hidden`
@@ -589,27 +589,38 @@ The web UI's pages are sent with `Content-Security-Policy: frame-ancestors
 (`serveStatic`, `server/index.ts`): no other page can frame them. Nothing
 frames the web UI: the desktop app shows it in its own window.
 
-## Let My Cloud use this computer
+## Use my Mac: Let my bots use this Mac
 
 The Cloud is home: bots and chats live there. The person's Mac or PC is a computer
-the Cloud can borrow while it is awake. Lending is off until the person turns
-it on, and it exists only between their own desktop app and their own Cloud
+the Cloud can borrow while it is awake: its folders, its screen and apps, and its
+home internet connection. The switch reads **Let my bots use this Mac** on a Mac,
+**this PC** on Windows and **this computer** on Linux. Lending is off until the
+person turns it on (or until the move to My Cloud turns it on with the default
+grant below), and it exists only between their own desktop app and their own Cloud
 home. Other users (desktop only, self-hosted, hosted team workspaces) keep
 computer sharing exactly as before: off unless a maintainer sets
 `features.sharedComputers` by hand.
 
 ### What the person sees
 
-In **Settings → MausBot Cloud**, the **My Cloud** card has a **Let My Cloud use
-this computer** switch under **Open My Cloud** (it is part of connecting, not
+In **Settings → MausBot Cloud**, the **My Cloud** card has a **Let my bots use
+this Mac** switch under **Open My Cloud** (it is part of connecting, not
 a dialog). Turning it on shows what can be lent; each change applies at once,
 with no confirmation. The switch and the chosen scopes are the consent.
 
+- **Internet connection**: the sites that turn away data centres (Instagram,
+  YouTube, Google sign-in) open for the bots' browser on My Cloud through this
+  computer, so they see the person's home connection; every other site loads
+  straight from My Cloud (see "The internet connection" below). It can be the
+  only thing lent.
 - **Folders**: chosen with the folder picker. Read-only by default; **Can
   edit** lets bots create files and overwrite them, but only after reading the
   current version (the overwrite is checked against its hash). Nothing is ever
-  deleted. At most 256 KiB per file, no symbolic or hard links. The home folder
-  and anything above it cannot be chosen.
+  deleted. A read takes a file of up to 2 MiB (text whose escaping would not fit
+  the Cloud's 4 MB request body is refused with "read it as base64"); a write is
+  at most 256 KiB. No symbolic or hard links. The home folder and anything
+  above it cannot be chosen. A lent folder deleted since is left out; the rest
+  keeps working.
 - **Apps and screen**: bots see the screen and use apps as the person, through
   this app's own computer control (the signed app holds Accessibility and
   Screen Recording; the Cloud never does). This is broad by nature, since it
@@ -621,7 +632,10 @@ The switch can be turned on before the first **Open My Cloud**; lending
 starts once this Mac is signed in to the Cloud. Lending runs while the app is
 open: quitting it (or the Mac sleeping) only pauses lending, and it resumes
 when the app runs again with the switch still on. Below the choices, **Activity
-on this computer** lists every request the Cloud made, refused ones included.
+on this computer** lists every request the Cloud made, refused ones included,
+and each website opened through this computer's internet connection
+(**Opened a website** with its name, once per site and outcome every 10
+minutes, so a page's many connections are one line).
 
 The switch always says where lending stands, whichever way it got there:
 
@@ -639,7 +653,7 @@ The switch always says where lending stands, whichever way it got there:
   included, and when it cannot run (that panel follows the maintainer flag) it
   says so. Stopping or choosing here replaces it.
 - **Last used.** "My Cloud last used this computer 3 minutes ago", from the
-  activity log.
+  activity log, so a website opened through it counts too.
 - **Reconnects by itself.** Lending already resumed after sleep, a lost
   network or a Cloud restart. When this app's session on the Cloud has ended
   (unused for a month, or signed out there), main now signs the window back in
@@ -651,26 +665,91 @@ The switch always says where lending stands, whichever way it got there:
 On My Cloud's own page, **Settings → MausBot Cloud** lists **Computers lent to
 My Cloud**: each by name and platform, **Online now**, **Offline, last online
 …**, or **No longer lent**, what it lends and when My Cloud last used it. In
-the desktop app it starts with this computer's own **Let My Cloud use this
-computer** switch and its one line (electron/cloud-lending-ipc.mjs), so nobody
-leaves My Cloud to change it: the page learns only on/off, how it is going and
-folder names, never a path; turning it on needs the person's click and a
-native confirmation naming what goes. Turned on with nothing chosen (here or
-on this computer), lending lends Desktop, Documents and Downloads, read only;
-other folders, editing and the screen wait under **Choose what's lent** on
-this computer. Where the system names the home folder itself for one of them
-(Linux without user-dirs.dirs), the folder of that name in the home folder is
-lent instead; one that can't be found is left out. With none of the three,
-nothing is lent and the line says so plainly. A refusal a person can act on
-(the whole home folder or a disk, a file, more than 20 folders) is said in
-plain words; only a failure that trying again can fix says Try again.
+the desktop app it starts with this computer's own **Let my bots use this Mac**
+switch and its one line (electron/cloud-lending-ipc.mjs), so nobody leaves My
+Cloud to change it: the page learns only on/off, how it is going and folder
+names, never a path; turning it on needs the person's real click on the switch
+(the preload bridge checks it), and nothing else asks. Turned on with nothing
+chosen (here or on this computer), lending lends the internet connection and
+Desktop, Documents and Downloads, read only; other folders, editing and the
+screen wait under **Choose what's lent** on this computer. Where the system
+names the home folder itself for one of them (Linux without user-dirs.dirs),
+the folder of that name in the home folder is lent instead; one that can't be
+found is left out. A refusal a person can act on (the whole home folder or a
+disk, a file, more than 20 folders) is said in plain words; only a failure
+that trying again can fix says Try again. A computer that lends its internet
+connection shows **Shares: internet connection, …**, and while it is away
+**While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own
+connection and may turn your bots away.**
 
-While lending is on, a menu-bar item shows it (**In use** while the Cloud is
-running something on this Mac) with **Stop lending**. Turning the switch off or
-choosing **Stop lending** stops at once: the Cloud is told, a running action
+**The default grant at the move.** The move to My Cloud turns lending on by
+itself (`installCloudLending(...).lendByDefault({ projects })`): the internet
+connection, Desktop, Documents and Downloads read only, each moved bot's own
+project folder with editing, and the screen only when it was lent before (and
+this app's computer control is ready). It adds to what is lent already, never
+takes away, and never undoes the person's own Off: lending they turned off
+(`stopped.reason "you"`) stays off, across restarts too.
+
+While lending is on, a menu-bar item shows it (**In use** while bots use this
+Mac: running something on it or browsing through it) with **Stop sharing**, and the
+app opens at login, out of sight (`electron/open-at-login.mjs`: a login item on
+macOS and Windows, an XDG autostart entry on Linux; only one this app added is
+ever removed, and only such a launch starts hidden). Turning the switch off or
+choosing **Stop sharing** stops at once: the Cloud is told, a running action
 is cancelled (the computer-control transport is closed and the screen lease
 released), and nothing more runs. An action an app had already started may
 still finish.
+
+### The internet connection
+
+Every bot browser on a Cloud home already connects through its per-session
+SOCKS egress gate (`server/browser/egress/gate.ts`). While the owner's lent
+computer is online with the internet connection on, the gate has one more way
+out for the sites that turn away data centres, the computer itself
+(`server/device-links.ts`, offered by `server/browser/egress/registry.ts` for
+the names in `server/browser/egress/home-sites.ts`):
+
+- **The device link.** One WebSocket per lent computer, opened by the desktop's
+  main process to `wss://<My Cloud>/api/shared-computers/<id>/link` with the
+  same sign-in as the poll (the session cookie plus the grant's secret). It
+  carries open, data, credit, end and close frames for many TCP streams, each
+  side sending a stream's bytes only while the other has room (a 256 KiB
+  window per stream, at most 128 streams), with pings both ways: a link that
+  goes silent is dropped within seconds on either side. The Cloud advertises
+  `capabilities.deviceLink`; a desktop never dials an older Cloud. The path is
+  held like the poll, so it never keeps My Cloud awake, and the desktop never
+  dials it while My Cloud sleeps: it waits on the same power gate, and My
+  Cloud closes it as asleep (code 4001) the moment it agrees to sleep.
+- **What goes through it.** Reddit is refused first, as before. A name for
+  this machine (`localhost`) and every address that is not on the public
+  internet stay on the Cloud's own way, under its own policy (a bot's dev
+  server here still loads; the local network and metadata stay refused). Only
+  the sites that turn away data centres become a stream on the link, and the
+  computer resolves the name itself: Instagram (its 429), YouTube with its
+  videos, which play only for the address that asked for them
+  (`googlevideo.com`) and its player's check (`jnn-pa.googleapis.com`), and all
+  of Google in every country (sign-in refuses a data centre and search answers
+  it with "unusual traffic"; a Google account signed in from home stays on
+  home). Every other site loads straight from My Cloud: through a home
+  connection on the other side of the world it is much slower (measured in
+  PR #3201: in India with My Cloud in Frankfurt, BBC News took 58 s instead of
+  2 s and the Python docs 3.6 s instead of 0.6 s), and a site that answers a
+  data centre gains nothing from it. The list is My Cloud's alone, so a new
+  site needs only a Cloud update.
+- **The computer's own check** (`electron/device-egress.mjs`, with the one
+  address list both sides use, `electron/egress-addresses.mjs`): only ports 80
+  and 443; never loopback, the computer itself, the networks it sits on (its
+  own IPv6 prefix included), the private ranges (100.64/10 and fc00::/7
+  included), the home's own public address (the address My Cloud sees the link
+  come from), link-local, metadata or reserved addresses, after unwrapping NAT64
+  and 6to4; every address a name resolves to must pass, and it connects only to
+  the addresses it checked. A refusal reaches the bot's page-health line ("the
+  person's own computer or home network", "a port other than 80 and 443").
+- **When the computer is away**, those sites load from My Cloud's own
+  connection at once, a connection in flight ends with the link, and the bot
+  is told once, the first time one of them loads that way: "The person's Mac is
+  away, so sites that turn away data centres, such as Instagram, YouTube and
+  Google sign-in, load from My Cloud's own connection for now and may refuse…".
 
 ### How it is enforced
 
@@ -696,10 +775,12 @@ On the Mac (the authority; `electron/computer-sharing.mjs`,
   apps and screen. Jobs are validated against the server's schema first.
 - **What folders never reach**, read-only or not: this app's data and grants,
   keys and sign-in stores (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
-  `~/.claude`, `~/.codex`, keychains, browser profiles and cookies…) and places
-  that run code (`~/Library/LaunchAgents`, git and shell configuration,
-  `~/.local/bin`), decided by filesystem identity rather than spelling. Writes
-  inside any `.git` directory are refused.
+  `~/.claude`, `~/.codex`, `~/.cua`, keychains, browser profiles and cookies…;
+  on Windows also Chrome's, Edge's and Brave's user data, Mozilla, the
+  credential store and vault with their Protect keys) and places that run code
+  (`~/Library/LaunchAgents`, the Windows Startup folder, git and shell
+  configuration, `~/.local/bin`), decided by filesystem identity rather than
+  spelling. Writes inside any `.git` directory are refused.
 - **Screen tools and their arguments are an allow-list**
   (`electron/lent-screen-tools.mjs`), derived from the local driver's own
   schemas: observation and input only. The driver's tools that work outside
@@ -712,8 +793,8 @@ On the Mac (the authority; `electron/computer-sharing.mjs`,
   cursor image cannot be read from a path. Any other argument is refused, and
   the tool list the Cloud sees shows only what is accepted.
 - **Activity log**: `lending-activity.jsonl` in the app's data folder, owner
-  only: time, action, folder and relative path or tool name, and whether it
-  ran. Never contents, output or typed text. The app only ever appends to it
+  only: time, action, folder and relative path, tool name or website name, and
+  whether it ran (a refused website keeps the computer's reason). Never contents, output or typed text. The app only ever appends to it
   (never through a link); a full file of 500 entries is moved to
   `lending-activity.jsonl.1` intact. No folder or screen argument reaches it.
 
@@ -726,7 +807,8 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   for each computer lent to it, by name, its platform (sent by desktops once
   the Cloud advertises `lendingDetails`), how many folders it lends and whether
   apps and screen or a terminal, when it was last online (written at most once
-  a minute) and last used, and whether its owner turned lending off. Never a
+  a minute) and last used (a page opened through its internet connection
+  counts, at most once a minute), and whether its owner turned lending off. Never a
   folder name or path, a secret or anything a job carried; kept 90 days.
 - **What bots are told.** `list_shared_computers` lists online computers with
   their `device` ("PC", "Mac" or "computer"). When none is online it adds
@@ -1880,7 +1962,7 @@ section is only what the Cloud adds.
 - A volume binds to one machine and is never adopted by another.
 - Each customer's app lives in its own Fly private network.
 - A lent Mac is reached only through its own outbound connection, within the
-  scopes the person chose, which the Mac itself enforces (see "Let My Cloud use
+  scopes the person chose, which the Mac itself enforces (see "Use my Mac: Let my bots use
   this Mac").
 
 ## Published image

@@ -137,6 +137,15 @@ describe("scopes", () => {
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
+  it("lets a desktop's own lending connector reach its device link only while lending is on, like its poll", () => {
+    for (const path of ["/api/shared-computers/c1/poll", "/api/shared-computers/c1/link"]) {
+      const method = path.endsWith("link") ? "GET" : "POST";
+      expect(requiredScope(method, path, { sharedComputers: true }), path).toBe("client");
+      expect(requiredScope(method, path, { sharedComputers: false }), path).toBe("admin");
+    }
+    expect(requiredScope("POST", "/api/shared-computers/c1/link", { sharedComputers: true })).toBe("admin");
+  });
+
   it("limits a client's bot and room edits to display fields, naming the field it refused", () => {
     expect(clientBotPatchViolation({ unread: true })).toBeNull();
     expect(clientBotPatchViolation({ pinned: true, color: "green" })).toBeNull();

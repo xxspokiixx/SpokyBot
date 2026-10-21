@@ -11,7 +11,7 @@ export type LentPlatform = typeof LENT_PLATFORMS[number];
 
 const recordSchema = z.object({
   id: z.string().uuid(), person: z.string().min(1).max(200), name: z.string().min(1).max(120), platform: z.enum(LENT_PLATFORMS).nullable(),
-  folders: z.number().int().min(0).max(20), terminal: z.boolean(), screen: z.boolean(),
+  folders: z.number().int().min(0).max(20), terminal: z.boolean(), screen: z.boolean(), internet: z.boolean().optional(),
   lastSeenAt: z.number(), lastUsedAt: z.number().nullable(), stoppedAt: z.number().nullable(),
 }).strict();
 const fileSchema = z.object({ version: z.literal(1), computers: z.array(recordSchema).max(200) });
@@ -56,12 +56,12 @@ export class LentComputers {
 
   /** A computer that registered, now lending these scopes. Each new grant has a new id, so a computer is known by its
    * name: lending again from the same computer updates its one record. A person's newest computers are kept. */
-  connected(person: string, input: { id: string; name: string; platform?: LentPlatform; folders: number; terminal: boolean; screen: boolean }): void {
+  connected(person: string, input: { id: string; name: string; platform?: LentPlatform; folders: number; terminal: boolean; screen: boolean; internet?: boolean }): void {
     const at = this.now();
     const same = (computer: LentComputer) => computer.person === person && (computer.id === input.id || computer.name === input.name);
     const previous = this.computers.find(same);
     const next: LentComputer = { id: input.id, person, name: input.name, platform: input.platform ?? previous?.platform ?? null, folders: input.folders,
-      terminal: input.terminal, screen: input.screen, lastSeenAt: at, lastUsedAt: previous?.lastUsedAt ?? null, stoppedAt: null };
+      terminal: input.terminal, screen: input.screen, internet: input.internet === true, lastSeenAt: at, lastUsedAt: previous?.lastUsedAt ?? null, stoppedAt: null };
     const others = this.computers.filter((computer) => !same(computer));
     const mine = [next, ...others.filter((computer) => computer.person === person)].slice(0, PER_PERSON);
     this.computers = [...mine, ...others.filter((computer) => computer.person !== person)];
@@ -116,6 +116,6 @@ export function awayNotice(known: LentComputer[], online: ReadonlySet<string>): 
   const device = deviceWord(latest.platform);
   const say = latest.stoppedAt === null
     ? `Their ${device} ${latest.name} is shared with the Cloud but offline (last online ${dateText(latest.lastSeenAt)}): OpenMausBot on it is closed, or the ${device} is asleep or off. Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`
-    : `Their ${device} ${latest.name} is no longer shared with the Cloud: sharing was turned off on it. They can turn on Let Cloud bots use this computer under Settings → MausBot Cloud in OpenMausBot on that ${device}.`;
+    : `Their ${device} ${latest.name} is no longer shared with the Cloud: sharing was turned off on it. They can turn on Let my bots use this ${device} under Settings → MausBot Cloud in OpenMausBot on that ${device}.`;
   return { offline, say };
 }
