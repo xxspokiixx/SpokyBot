@@ -133,6 +133,8 @@ export interface WireTask {
   routineRunId?: string;
   /** Set when a bot, not a person, opened this thread. */
   openedBy?: TaskOpenedBy;
+  /** On a team's server: one person's conversation, seen by them and the team's admins only. */
+  private?: true;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
   archivedAt?: number;

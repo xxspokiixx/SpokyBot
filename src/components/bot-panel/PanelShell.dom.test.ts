@@ -22,17 +22,10 @@ vi.mock("../DesktopCapabilities", async (importOriginal) => ({
 vi.mock("../Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
 vi.mock("../AvatarImageGenerator", () => ({ AvatarImageGenerator: () => null }));
 vi.mock("@/lib/use-organization-branding", () => ({ useOrganizationBranding: () => null }));
-vi.mock("../bot-settings/MemorySection", () => ({ MemorySection: () => null }));
-vi.mock("../bot-settings/useBotOverview", () => ({
-  useBotOverview: () => ({ overview: null, overviewError: false, prompt: null, promptError: false }),
-  useBotHistory: () => ({ rows: null, error: false, revision: null, rollingBack: false }),
-  HistoryRollbackDialog: () => null,
-}));
-const stub = (name: string) => () => createElement("div", { [`data-stub-${name}`]: true });
-vi.mock("./DetailsTab", () => ({ DetailsTab: stub("details") }));
-vi.mock("./LibraryTab", () => ({ LibraryTab: stub("library") }));
+const stub = (name: string) => (props: Record<string, unknown>) =>
+  createElement("div", { [`data-stub-${name}`]: true, "data-editing-instructions": props.editingInstructions === true ? "true" : undefined });
+vi.mock("./BotTab", () => ({ BotTab: stub("bot") }));
 vi.mock("./ComputerTab", () => ({ ComputerTab: stub("computer") }));
-vi.mock("./SettingsTab", () => ({ SettingsTab: stub("settings") }));
 vi.mock("./pages", () => ({ PageBody: ({ page }: { page: string }) => createElement("div", { "data-stub-page": page }), pageSurfaceCls: "" }));
 
 const { BotPanel } = await import("./PanelShell");
@@ -102,9 +95,14 @@ describe("named links into the bot panel", () => {
     await settle();
     expect(page()).toBe("apps");
 
+    flushSync(() => openBotSettings(fixture.dispatch, "access", { page: "folder" }));
+    await settle();
+    expect(page()).toBe("folder");
+
+    // Simple mode has no MCP page: the link lands where Access does.
     flushSync(() => openBotSettings(fixture.dispatch, "access", { page: "mcp" }));
     await settle();
-    expect(page()).toBe("mcp");
+    expect([tab(), page()]).toEqual(["computer", null]);
 
     flushSync(() => openBotSettings(fixture.dispatch, "access"));
     await settle();
@@ -112,27 +110,47 @@ describe("named links into the bot panel", () => {
   });
 
   it("follows the same link again after the panel has moved on", async () => {
-    openBotSettings(fixture.dispatch, "usage");
-    render("usage");
+    openBotSettings(fixture.dispatch, "access");
+    render("access");
     await settle();
-    expect(tab()).toBe("settings");
+    expect(tab()).toBe("computer");
 
-    click(host.querySelector('[data-panel-tab="details"]'));
-    expect(tab()).toBe("details");
+    click(host.querySelector('[data-panel-tab="bot"]'));
+    expect(tab()).toBe("bot");
 
-    flushSync(() => openBotSettings(fixture.dispatch, "usage"));
-    render("usage");
+    flushSync(() => openBotSettings(fixture.dispatch, "access"));
+    render("access");
     await settle();
-    expect(tab()).toBe("settings");
+    expect(tab()).toBe("computer");
+  });
+
+  it("opens the Instructions editor for a soul link, and closes it when the panel moves on", async () => {
+    openBotSettings(fixture.dispatch, "soul");
+    render("soul");
+    await settle();
+    expect(tab()).toBe("bot");
+    expect(host.querySelector("[data-stub-bot]")?.getAttribute("data-editing-instructions")).toBe("true");
+    click(host.querySelector('[data-panel-tab="computer"]'));
+    click(host.querySelector('[data-panel-tab="bot"]'));
+    expect(host.querySelector("[data-stub-bot]")?.getAttribute("data-editing-instructions")).toBeNull();
+  });
+
+  it("lands usage, history, voice and visibility links on the Bot tab, with no Advanced page", async () => {
+    for (const section of ["usage", "history", "voice", "visibility", "overview"] as const) {
+      openBotSettings(fixture.dispatch, section);
+      render(section);
+      await settle();
+      expect([tab(), page()], section).toEqual(["bot", null]);
+    }
   });
 });
 
 describe("Escape in the bot panel", () => {
   const onPage = async () => {
-    openBotSettings(fixture.dispatch, "model");
-    render("model");
+    openBotSettings(fixture.dispatch, "skills");
+    render("skills");
     await settle();
-    expect(page()).toBe("model");
+    expect(page()).toBe("skills");
   };
 
   it("goes back from a drill-in page instead of closing the panel, though the panel sits in a dialog", async () => {
@@ -141,10 +159,10 @@ describe("Escape in the bot panel", () => {
     back?.focus();
     const event = press(back, "Escape");
     expect(event.defaultPrevented).toBe(true);
-    expect([tab(), page()]).toEqual(["details", null]);
+    expect([tab(), page()]).toEqual(["bot", null]);
     expect(dialogCloses).not.toHaveBeenCalled();
     // On a tab, Escape is the dialog's: it closes the panel.
-    press(host.querySelector('[data-panel-tab="details"]'), "Escape");
+    press(host.querySelector('[data-panel-tab="bot"]'), "Escape");
     expect(dialogCloses).toHaveBeenCalledTimes(1);
   });
 
@@ -167,9 +185,9 @@ describe("Escape in the bot panel", () => {
     expect(menu()).not.toBeNull();
     press(moreButton(), "Escape");
     expect(menu()).toBeNull();
-    expect(page()).toBe("model");
+    expect(page()).toBe("skills");
     press(moreButton(), "Escape");
-    expect([tab(), page()]).toEqual(["details", null]);
+    expect([tab(), page()]).toEqual(["bot", null]);
     expect(dialogCloses).not.toHaveBeenCalled();
   });
 });

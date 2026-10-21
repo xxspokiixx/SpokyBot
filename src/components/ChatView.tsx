@@ -87,7 +87,7 @@ import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle";
 import { BotActivityPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
-import { ChatHeaderMenu } from "./ChatMoreMenu";
+import { ChatHeaderMenu } from "./ChatMoreMenu"; import { TeamPrivateFirstLine, TeamPrivateHeader } from "./TeamPrivateChatsLine";
 import { useChatFindRequests } from "@/lib/chat-find";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { SpeakButton } from "./SpeakButton";
@@ -1051,7 +1051,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, mentionPerson: { profileName: state.config?.profile?.name }, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, conversational: isConversational(bot.replyStyle), simple: !advanced, canReact: canWrite !== false, openedAt }),
     [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, state.config?.profile?.name, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, bot.replyStyle, advanced, canWrite, openedAt],
   );
-  const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
+  const currentTask = bot.tasks?.find((task) => task.threadId === bot.threadId), place = effectivePlace(bot, currentTask), team = state.config?.team, privateChat = Boolean(team) && currentTask?.private === true;
 
   const [editingId, setEditingId] = useState<string | null>(null);
   useEffect(() => setEditingId(null), [bot.id, bot.threadId]);
@@ -1209,7 +1209,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               <ChevronRight size={14} aria-hidden="true" className="-ml-2.5 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
             </button>
           )}
-          <span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>
+          <span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{privateChat && <TeamPrivateHeader />}
           {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
           {awayFromMainThread(profile, showThreads) && (
             <button
@@ -1261,7 +1261,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         </div>
       </div>
 
-      <BotActivityPicker bot={bot} />
+      <BotActivityPicker bot={bot} />{privateChat && team && <TeamPrivateFirstLine key={team.id} team={team} />}
       {routineExecution && <div className="mx-5 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[11.5px] text-ink-secondary">
         <span className="min-w-0 flex-1 truncate">{t("routines.executionDetails", { name: routineExecution.routineName })}</span>
         {canOpenResults && resultsThreadId && <button type="button" onClick={() => openNotificationTarget(dispatch, { botId: bot.id, threadId: resultsThreadId }, state, showThreads)} className="rounded px-2 py-1 text-accent hover:bg-raised">{t("routines.results.back")}</button>}

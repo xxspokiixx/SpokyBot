@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BoxReport } from "../bot-box/box.ts";
 import { boxSummary } from "../cloud-health.ts";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, createCloudPairing, createCloudRequestVerifier, readSignedBody } from "../cloud-home.ts";
+import type { CloudTeam } from "../cloud-team.ts";
 import type { CloudHealth } from "../cloud-health.ts";
 import { CLOUD_IDLE_ACTIVITY_MS, CLOUD_POWER_PATH, CLOUD_POWER_SLEEP_PATH, type CloudPower } from "../cloud-power.ts";
 import { json } from "../harness/http.ts";
@@ -20,6 +21,8 @@ export const CLOUD_BOX_PATH = "/api/cloud/box";
 export function createCloudSignedRoutes(deps: {
   secret: string;
   sessions: Pick<SessionRegistry, "openPairing" | "attemptAllowed" | "noteFailure" | "clearFailures">;
+  /** A Team Cloud: every pairing body must carry the Admin's member claim (cloud-team.ts). */
+  team?: CloudTeam | null;
   health: Pick<CloudHealth, "report">;
   /** The home's power once the server listens (null before, and on a server that is not a Cloud home). */
   power?: () => Pick<CloudPower, "report" | "prepareSleep"> | null;
@@ -27,7 +30,7 @@ export function createCloudSignedRoutes(deps: {
   box?: () => BoxReport;
   now?: () => number;
 }) {
-  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, now: deps.now });
+  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, now: deps.now });
   const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const powerReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
@@ -66,7 +69,7 @@ export function createCloudSignedRoutes(deps: {
     if (path === CLOUD_BOX_PATH) {
       if (method !== "GET") { json(res, 405, { error: "method_not_allowed" }); return true; }
       const verdict = boxReads.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
-      if (!verdict.ok) { console.warn(`cloud box read refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
+      if (!verdict.ok) { console.warn(`bot box report read refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
       json(res, 200, { v: 1, at: (deps.now ?? Date.now)(), ...(boxSummary(deps.box?.()) ?? { box: "off", reason: "not-cloud", checks: null, failed: [], boxed: 0, refused: { egress: 0, harness: 0 }, broker: { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] }, hardening: { seccomp: "off", denied: 0, hidepid: false, flyApiPrivate: true } }) });
       return true;
     }

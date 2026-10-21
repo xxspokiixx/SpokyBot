@@ -5,7 +5,10 @@
 // handlers over loopback), webRequest's onCompleted is Chrome's own response events, and the permission handler's answer
 // is set on Chrome per origin as each page loads. My Cloud's page and this computer's are the real renderer from source
 // (Vite), each served at its own origin: My Cloud's through an edge that adds the Cloud's own headers, this computer's
-// asking this computer's real, frozen server which page it serves.
+// asking this computer's real, frozen server which page it serves. A team's Cloud is the same Cloud-mode server behind a
+// third edge at its own origin (for opening, a Team Cloud is a My Cloud), paired through a fake Admin's team pairing
+// route on this harness's own server, so main's team path (home-places.mjs, the session's teams as saved places) runs
+// as it does in the app.
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -17,7 +20,10 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { appPermissionHandlers } from "../../electron/app-permissions.mjs";
 import capabilities from "../../electron/capabilities.cjs";
 import { chatLinkFrom } from "../../electron/chat-link.mjs";
+import { parsePairingGrant, withCloudHome } from "../../electron/cloud-home.mjs";
 import { createCloudPowerGate } from "../../electron/cloud-power.mjs";
+import environments from "../../electron/environments.cjs";
+import { createHomePlaces } from "../../electron/home-places.mjs";
 import { createHomeWindow, installHomeWindowIpc, HOME_SCREEN_PATH } from "../../electron/home-window.mjs";
 import { createStartupScreen } from "../../electron/startup-screen.mjs";
 import { packageUrlFromDeepLink } from "../../electron/package-link.mjs";
@@ -209,6 +215,8 @@ export interface HomeWorld {
   /** My Cloud as this window reaches it, and this computer's own page. */
   cloudOrigin: string;
   localOrigin: string;
+  /** A team's Cloud: the same Cloud-mode server at its own origin. */
+  teamOrigin: string;
   /** Another saved server, for a page that is neither. */
   otherOrigin: string;
   window: TabWindow;
@@ -219,8 +227,18 @@ export interface HomeWorld {
   launch(): Promise<void>;
   /** The MausBot Cloud sign-in main reads: its state, and the power word of a Cloud that sleeps. */
   account: { state: Record<string, any>; power: { state: "awake" | "asleep" | "waking"; since: number; sleeps: true } | null; wakeMs: number; wakes: number; signIns: string[] };
-  /** Down: every request on the way to My Cloud fails, the window's and main's alike. */
-  network: { down: boolean };
+  /** Down: every request on the way to My Cloud fails, the window's and main's alike; `teamDown`: the team's Cloud only. */
+  network: { down: boolean; teamDown: boolean };
+  /** The fake Admin: each team pairing it signed, by team id; `removed`: teams whose pairing it refuses (404), as for a
+   * member removed while the session still lists the team. */
+  admin: { teamPairings: string[]; removed: Set<string> };
+  /** Main's places (home-places.mjs) and its saved servers, as the app keeps them. */
+  places: ReturnType<typeof createHomePlaces>;
+  environments(): { environments: any[]; activeId: string };
+  /** The switcher's entries as main's native menu would list them (environments.cjs). */
+  menu(): Array<{ label?: string; sublabel?: string; checked?: boolean }>;
+  /** The MausBot Cloud sign-in changed: main's own two steps (the places follow the session, then the window). */
+  sync(): Promise<void>;
   /** Each request My Cloud's edge passed on, in order. */
   cloudRequests: Array<{ path: string; at: number }>;
   /** main.mjs's own chat-link delivery, as a link from the OS reaches it. */
@@ -251,14 +269,17 @@ async function vite(port: number, host: string, plugin: (server: ViteDevServer) 
 
 /** `chrome`: the pinned Chrome for Testing; `ports`: two free pairs (each Vite server takes its port and the next). */
 export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, versionEveryMs = 1_000, quietMs = 1_500 }: {
-  chrome: string; ports: [number, number, number]; versionEveryMs?: number; quietMs?: number;
+  chrome: string; ports: [number, number, number, number]; versionEveryMs?: number; quietMs?: number;
 }): Promise<HomeWorld> {
-  const [cloudPort, localPort, ipcPort] = ports;
+  const [cloudPort, localPort, ipcPort, teamPort] = ports;
   const cloudOrigin = `http://localhost:${cloudPort}`;
   const localOrigin = `http://127.0.0.1:${localPort}`;
   const ipcBase = `http://127.0.0.1:${ipcPort}`;
+  // Its own host, not another localhost port: a browser's cookies are per host, and the team's session must be its own.
+  const teamOrigin = `http://[::1]:${teamPort}`;
   const otherOrigin = ipcBase;
-  const network = { down: false };
+  const network = { down: false, teamDown: false };
+  const admin: HomeWorld["admin"] = { teamPairings: [], removed: new Set() };
   const cloudRequests: HomeWorld["cloudRequests"] = [];
   const notifications = new Map<string, boolean>();
   const account: HomeWorld["account"] = {
@@ -286,6 +307,19 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     },
   }])));
   cleanup.push(() => cloudEdge.close());
+  // The team's Cloud: the same server, its own origin (so its own cookie, its own page).
+  const teamEdge = await vite(teamPort, "::1", (server) => {
+    server.middlewares.use((req, _res, next) => { if (network.teamDown) { req.socket.destroy(); return; } next(); });
+  }, Object.fromEntries(PROXIED.map((path) => [path, {
+    target: fx.cloudBase, ws: true, headers: fx.edge,
+    configure: (proxy: EventEmitter) => {
+      proxy.on("proxyRes", (proxyRes: IncomingMessage) => {
+        const cookies = proxyRes.headers["set-cookie"];
+        if (cookies) proxyRes.headers["set-cookie"] = cookies.map((cookie) => cookie.replace(/;\s*Secure/giu, ""));
+      });
+    },
+  }])));
+  cleanup.push(() => teamEdge.close());
 
   // This computer's page: the same renderer, and its real server, as the desktop's owner, decides which page it serves.
   const localEdge = await vite(localPort, "127.0.0.1", (server) => {
@@ -314,6 +348,16 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     res.setHeader("access-control-allow-origin", "*");
     const sync = /^\/__ipc-sync\/([\w:.-]+)$/.exec(req.url ?? ""), asked = /^\/__ipc\/([\w:.-]+)$/.exec(req.url ?? "");
     const reply = (status: number, value: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
+    // The fake Admin's team pairing: only for a team the session lists, answered as the Admin answers (docs/team-cloud.md).
+    const teamPairing = /^\/api\/cloud\/desktop\/teams\/([^/]+)\/pairing$/.exec(req.url ?? "");
+    if (teamPairing) {
+      const id = decodeURIComponent(teamPairing[1]!);
+      const listed = req.method === "POST" && req.headers.authorization === "Bearer omc_fixture" && account.state.status === "connected" && (account.state.teams ?? []).some((team: any) => team.id === id) && !admin.removed.has(id);
+      if (!listed) return reply(404, { error: "not_found" });
+      admin.teamPairings.push(id);
+      const grant = await fx.grant("OpenMausBot app (Team Cloud)");
+      return reply(200, { cloudContractVersion: 1, origin: teamOrigin, code: grant.code, pairingUrl: `${teamOrigin}/pair#code=${grant.code}`, expiresAt: grant.expiresAt, credential: "omb_pair_fixture" });
+    }
     if (!sync && !asked) { res.writeHead(200, { "content-type": "text/html" }); res.end("<!doctype html><title>Another server</title><p>Another server</p>"); return; }
     const { args = [] } = JSON.parse((await readBody(req)) || "{}") as { args?: unknown[] };
     const win = windowRef!;
@@ -334,8 +378,9 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   // Channels of the page this harness does not drive, answered as main answers a page that has nothing to say.
   const STAND_INS: Record<string, (...args: any[]) => unknown> = {
     "desktop:capabilities": (event) => capabilities.desktopCapabilities({ remote: new URL(event.senderFrame.url).origin !== localOrigin, platform: "darwin", env: {}, packaged: true, localConnection: { mode: "unavailable", reason: "fixture" } }),
-    "workspaces:state": (event) => (homeRef!.homePage(event) ? { local: false, name: "My Cloud", origin: cloudOrigin, home: true } : { local: true, name: "This computer" }),
+    "workspaces:state": (event) => ({ ...environments.workspaceSummary(envState), ...(homeAlone() && homeRef!.homePage(event) ? { home: true } : {}) }),
     "workspaces:menu": () => null,
+    "workspaces:line": () => homePlaces.line(),
     "desktop-notices:state": () => ({ seen: [...NOTICES], cloud: false }),
     "desktop-notices:seen": () => null, "desktop-notices:shown": () => false,
     "cloud-plan:state": () => ({ status: "paid", tier: "pro", home: true }),
@@ -366,10 +411,27 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     responded?.({ url: response.url, statusCode: response.status, webContentsId: win.webContents.id });
   });
 
-  // Main's own handlers.
+  // Main's own handlers. Saved servers and places as main keeps them, in memory here.
+  let envState: { environments: any[]; activeId: string } = { environments: [], activeId: environments.LOCAL_ID };
+  let envIds = 0;
+  const makeId = () => `env-${++envIds}`;
+  const persist = (next: typeof envState) => { envState = next; };
+  let placeRecord: unknown = null;
+  const homePlaces = createHomePlaces({ store: { read: () => placeRecord, write: (value) => { placeRecord = value; } }, environments: () => envState, persist, makeId, homeOrigin: () => homeRef?.cloudOrigin() ?? null });
+  const homeAlone = () => Boolean(homeRef?.cloudOrigin()) && !environments.otherPlaces(envState, homeRef!.cloudOrigin());
+  /** main.mjs's activateCloud / activateTeam / back to this computer, as its `go` does them. */
+  const activate = (origin: string | null, place: any) => {
+    if (place?.kind === "team") {
+      const next = environments.withTeam(envState, place, makeId);
+      persist(environments.withActive(next, next.environments.find((entry: any) => entry.origin === place.origin).id));
+    } else if (origin) {
+      const next = withCloudHome(envState, { status: "ready", origin }, makeId);
+      persist(environments.withActive(next, next.environments.find((entry: any) => entry.origin === origin).id));
+    } else if (environments.activeEnvironment(envState)) persist(environments.withActive(envState, environments.LOCAL_ID));
+  };
   const power = createCloudPowerGate({ power: () => account.power });
   const appPermissions = appPermissionHandlers({ rendererOrigin: () => localOrigin, mainContents: () => win.webContents, cloudHomeOrigin: () => cloudOrigin,
-    homeOrigin: () => homeRef?.cloudOrigin() ?? null });
+    homeOrigin: () => homeRef?.placeOrigin() ?? null });
   win.webContents.on("did-navigate", (_event: unknown, url: string) => {
     const origin = new URL(url).origin;
     if (!/^https?:/.test(url)) return;
@@ -381,6 +443,15 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     if (account.state.status !== "connected" || network.down) throw new Error("My Cloud is not ready to connect yet.");
     const grant = await fx.grant("OpenMausBot app (Cloud)");
     return { ...grant, origin: cloudOrigin };
+  };
+  /** The real client's `pairTeam` shape against the fake Admin's route: the Admin's answer, read as the app reads it. */
+  const pairTeam = async (teamId: string) => {
+    if (network.down) throw new TypeError("fetch failed");
+    const response = await fetch(`${ipcBase}/api/cloud/desktop/teams/${encodeURIComponent(teamId)}/pairing`, { method: "POST", headers: { authorization: "Bearer omc_fixture" } });
+    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, ...(response.status === 404 ? { gone: true } : {}) });
+    const grant = parsePairingGrant(await response.json(), teamOrigin, Date.now());
+    if (!grant) throw new Error("Invalid Cloud pairing response.");
+    return grant;
   };
   const client = {
     state: () => account.state,
@@ -394,14 +465,26 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     },
     setWaking: () => {},
     pairHome,
+    pairTeam,
     async signInAgain() { account.signIns.push("again"); },
     async begin() { account.signIns.push("begin"); },
   };
+  // The window's session's fetch: its cookies go along, and a cookie the answer sets is the window's from then on.
   const cookieFetch = async (url: string, init: RequestInit = {}) => {
-    if (network.down) throw new TypeError("fetch failed");
+    if (network.down || (network.teamDown && url.startsWith(teamOrigin))) throw new TypeError("fetch failed");
     const { cookies } = await cdp.request("Network.getCookies", { urls: [url] }, win.sessionId);
     const cookie = (cookies as Array<{ name: string; value: string }>).map((entry) => `${entry.name}=${entry.value}`).join("; ");
-    return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string>), ...(cookie ? { cookie } : {}) } });
+    const response = await fetch(url, { ...init, headers: { ...(init.headers as Record<string, string>), ...(cookie ? { cookie } : {}) } });
+    for (const line of response.headers.getSetCookie()) {
+      const [pair = "", ...attributes] = line.split(";").map((part) => part.trim());
+      const at = pair.indexOf("="), path = attributes.find((part) => /^path=/i.test(part))?.slice(5) || "/";
+      if (at <= 0) continue;
+      const name = pair.slice(0, at), cookieUrl = new URL(url).origin + path;
+      // A cookie the answer clears (Max-Age=0) is deleted, never kept with an empty value, as Electron's session does.
+      if (attributes.some((part) => /^max-age=(0|-\d+)$/i.test(part))) await cdp.request("Network.deleteCookies", { name, url: cookieUrl }, win.sessionId);
+      else await cdp.request("Network.setCookie", { name, value: pair.slice(at + 1), url: cookieUrl, path, httpOnly: attributes.some((part) => /^httponly$/i.test(part)) }, win.sessionId);
+    }
+    return response;
   };
   const world = {
     splash: null as TabWindow | null,
@@ -415,7 +498,8 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     localOrigin: () => localOrigin,
     cookieFetch: cookieFetch as typeof fetch,
     power,
-    go: (url: string) => win.loadURL(url).catch(() => {}),
+    go: (url: string, origin: string | null, place: unknown) => { activate(origin, place); return win.loadURL(url).catch(() => {}); },
+    remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
     showLocal: (leaving: boolean) => (leaving || !/^https?:/.test(win.url) ? win.loadURL(`${localOrigin}/`).catch(() => {}) : undefined),
     splash: () => (world.splash && !world.splash.destroyed ? { status: (text: string) => startup?.status(text) } : null),
     publish: (view: unknown) => { if (new URL(win.url.startsWith("http") ? win.url : "about:blank").origin === localOrigin) win.webContents.send("home:state-changed", view); },
@@ -443,7 +527,10 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
 
   let startup: ReturnType<typeof createStartupScreen> | null = null;
   return {
-    cloudOrigin, localOrigin, otherOrigin, window: win, home, account, network, cloudRequests, notifications,
+    cloudOrigin, localOrigin, teamOrigin, otherOrigin, window: win, home, account, network, admin, cloudRequests, notifications,
+    places: homePlaces, environments: () => envState,
+    menu: () => environments.workspaceMenuTemplate(envState, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: home.cloudOrigin() }),
+    async sync() { homePlaces.sync(account.state); await home.changed(); },
     get splash() { return world.splash; },
     async launch() {
       const splashTab = await TabWindow.open(cdp);

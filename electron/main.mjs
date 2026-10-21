@@ -98,6 +98,8 @@ import { createCloudEntry } from "./cloud-entry.mjs";
 import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin } from "./open-at-login.mjs";
 import { installOneHome } from "./one-home-main.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
+import { createHomePlaces } from "./home-places.mjs";
+import { createEnvironmentsFile } from "./environments-file.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
@@ -239,7 +241,7 @@ function sendToPage(win, channel, value) {
   try { shown = new URL(win.webContents.getURL()).origin; } catch {}
   const home = homeWindow.cloudOrigin();
   if (home ? shown !== home : shown !== rendererOrigin()) {
-    if (home) void showHome(); else if (activeRemote(environmentsState)) void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
+    if (home) void showHome({ place: "cloud" }); else if (activeRemote(environmentsState)) void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
     return false;
   }
   win.webContents.send(channel, value);
@@ -942,7 +944,7 @@ async function openCloudAdd(source) {
 }
 const announceCloudReady = createCloudReadyNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()),
   sheetOpen: () => cloudBuy.sheetOpen(), name: () => cloudLook.current().name, shown: () => cloudAccount?.checkoutDone(),
-  open: () => { if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows()); void workspaceMenuAction(() => (homeWindow.cloudOrigin() ? showHome() : connectCloudHome())); } });
+  open: () => { if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows()); void workspaceMenuAction(() => (homeWindow.cloudOrigin() ? showHome({ place: "cloud" }) : connectCloudHome())); } });
 
 function ensureManagedDesktop() {
   if (managedDesktop) return managedDesktop;
@@ -1509,7 +1511,7 @@ ipcMain.on("desktop:unread-count", (event, value) => {
   applyUnreadBadge(sender);
 });
 
-const { LOCAL_ID, activeEnvironment, activeRemote, allowedOrigins, bootEnvironmentDir, otherPlaces, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withEnvironmentLook, withLocalEnvironment, withMicrophone, withoutEnvironment, placesMenuOptions, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
+const { LOCAL_ID, activeEnvironment, activeRemote, allowedOrigins, bootEnvironmentDir, otherPlaces, parseHostedWorkspaceLink, startupEnvironmentDir, withActive, withEnvironment, withEnvironmentLook, withLocalEnvironment, withMicrophone, withoutEnvironment, withTeam, placesMenuOptions, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
 const sharingPrompts = new Set();
@@ -1569,7 +1571,7 @@ function stopLending() {
 async function openLendingSettings() {
   if (!app.isPackaged || desktopRemoteAccess || !serverReady) return;
   if (homeWindow.cloudOrigin()) {
-    await showHome();
+    await showHome({ place: "cloud" });
     if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings", "cloud-settings");
     return;
@@ -1615,34 +1617,7 @@ function environmentsFile() {
   return path.join(app.getPath("userData"), cloudTarget(process.env).environments);
 }
 
-function readEnvironments() {
-  try {
-    const state = parseEnvironments(fs.readFileSync(environmentsFile(), "utf8"));
-    return {
-      ...state,
-      environments: state.environments.map((entry) =>
-        entry.kind === "local" ? { ...entry, missing: !fs.existsSync(entry.dataDir) } : { ...entry, missing: false }),
-    };
-  } catch {
-    return { environments: [], activeId: LOCAL_ID };
-  }
-}
-
-function writeEnvironments(state) {
-  const file = environmentsFile();
-  const temporary = `${file}.${process.pid}.tmp`;
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(temporary, serializeEnvironments(state), { mode: 0o600 });
-    fs.renameSync(temporary, file);
-  } catch (error) {
-    try {
-      fs.rmSync(temporary, { force: true });
-    } catch {}
-    slog(`environments save failed: ${error?.message ?? error}`);
-    throw new Error("Could not save server connections on this computer. Please try again.");
-  }
-}
+const environmentsStore = createEnvironmentsFile({ file: environmentsFile, fs, path, log: slog });
 
 function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
@@ -1662,13 +1637,13 @@ function refreshApplicationMenu() {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
       },
       ...cloudMenuOptions(),
-      home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome() } : null,
+      home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null,
     }),
   );
 }
 
 function persistEnvironments(next) {
-  writeEnvironments(next);
+  environmentsStore.write(next);
   environmentsState = next;
   refreshApplicationMenu();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess, homeWindow.cloudOrigin()));
@@ -1792,11 +1767,13 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
 async function switchEnvironment(id) {
   if (id === environmentsState.activeId || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
+  if (entry?.team) return void await showHome({ place: { team: entry.team.id, name: entry.name } });
+  homePlaces.remember(null);
   if (entry?.kind === "local") return await switchLocalEnvironmentTo(entry.dataDir, entry.id);
   if (id === LOCAL_ID && (runningDataDir ?? desktopDataDir()) !== desktopDataDir()) {
     return await switchLocalEnvironmentTo(desktopDataDir(), LOCAL_ID);
   }
-  if (entry && entry.origin === homeWindow.cloudOrigin()) return void await showHome();
+  if (entry && entry.origin === homeWindow.cloudOrigin()) return void await showHome({ place: "cloud" });
   if (entry && cloudAccount && isCloudHomeEntry(entry, { homeOrigin: cloudAccount.homeTarget()?.origin, remembered: rememberedHome })) {
     try { await connectCloudHome(); return; } catch (error) {
       slog(`cloud home: could not connect from the Server menu (${error?.message ?? error})`);
@@ -1895,7 +1872,7 @@ async function openCloudEntry() {
   if (desktopRemoteAccess) throw new Error("This app is connected to another computer. Disconnect it to use MausBot Cloud on this computer.");
   if (!serverReady) throw new Error("This installation is unavailable. Restart the app and open My Cloud again.");
   await cloudAccountRestored();
-  if ((await homeWindow.refresh()).kind !== "computer") { await showHome(); return true; }
+  if ((await homeWindow.refresh()).kind !== "computer") { await showHome({ place: "cloud" }); return true; }
   const active = activeRemote(environmentsState);
   const showingCloud = Boolean(active) && active.origin === cloudAccount?.homeTarget()?.origin;
   if (active && !showingCloud) persistEnvironments(withActive(environmentsState, LOCAL_ID));
@@ -1956,10 +1933,12 @@ async function connectHostedWorkspace(input, name) {
   return true;
 }
 
+/** My Cloud, and each team's Cloud the session lists (home-places.mjs), under Servers. */
 function rememberCloudHome(state) {
   try {
     const next = withCloudHome(environmentsState, state?.status === "connected" ? state.machine : null, () => randomUUID(), cloudLook.pending());
     if (next !== environmentsState) persistEnvironments(next);
+    homePlaces.sync(state);
   } catch (error) {
     slog(`cloud home: could not list the Cloud machine under Servers (${error?.message ?? error})`);
   }
@@ -1981,6 +1960,13 @@ function activateCloud(origin) {
   const next = withCloudHome(environmentsState, { status: "ready", origin }, () => randomUUID(), cloudLook.pending());
   const entry = next.environments.find((candidate) => candidate.origin === origin);
   if (!entry) throw new Error("My Cloud could not be added to Servers.");
+  persistEnvironments(withActive(next, entry.id));
+}
+/** A team's Cloud listed under Servers as the Admin names it (never a page), and the server this window shows. */
+function activateTeam(place) {
+  const next = withTeam(environmentsState, place, () => randomUUID());
+  const entry = next.environments.find((candidate) => candidate.origin === place.origin);
+  if (!entry) throw new Error(`${place.name} could not be added to Servers.`);
   persistEnvironments(withActive(next, entry.id));
 }
 
@@ -2772,12 +2758,15 @@ const savedWorkspace = id => {
 const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath("userData"), cloudTarget(process.env).look), fs), accountId: () => cloudAccount?.state().account?.id ?? null,
   homeEntry: cloudHomeEntry, saveEntry: (origin, look) => persistEnvironments(withEnvironmentLook(environmentsState, origin, look)) });
 const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
-const oneHome = installOneHome({ ipcMain, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), localRequest: (route, init = {}) => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running"))), space: { disk: () => cloudPlanDisk(ensureCloudAccount().state()), grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) }, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, account: () => cloudAccount, journalFile: () => path.join(app.getPath("userData"), "one-home.json"), tempRoot: () => path.join(app.getPath("temp"), "openmaus-one-home"), lend: projects => useMyMac.lendByDefault({ projects }), phone: { paired: () => companionEnabledAtRest(), stop: () => stopDesktopCompanion({ remember: false }).then(() => {}), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: () => void showHome(), openLocal: () => void showHome(), restart: () => relaunchAfterDesktopRemoteChange(), version: app.getVersion(), log: slog });
+const oneHome = installOneHome({ ipcMain, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), localRequest: (route, init = {}) => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running"))), space: { disk: () => cloudPlanDisk(ensureCloudAccount().state()), grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) }, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, account: () => cloudAccount, journalFile: () => path.join(app.getPath("userData"), "one-home.json"), tempRoot: () => path.join(app.getPath("temp"), "openmaus-one-home"), lend: projects => useMyMac.lendByDefault({ projects }), phone: { paired: () => companionEnabledAtRest(), stop: () => stopDesktopCompanion({ remember: false }).then(() => {}), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: () => void showHome({ place: "cloud" }), openLocal: () => void showHome(), restart: () => relaunchAfterDesktopRemoteChange(), version: app.getVersion(), log: slog });
+// Teams from the verified session as places this window shows (home-places.mjs): the one to open next time, and its lines.
+const homePlaces = createHomePlaces({ store: jsonFile(path.join(app.getPath("userData"), "home-place.json")), environments: () => environmentsState, persist: persistEnvironments, makeId: randomUUID, homeOrigin: myCloud, log: slog });
 const homeWindow = createHomeWindow({ journal: oneHome.journal, frozen: oneHome.marker, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), restored: cloudAccountRestored,
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), ensureWindow: () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: true }); },
   localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, log: slog,
+  remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
-  go: (url, origin) => { if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
+  go: (url, origin, place) => { if (place?.kind === "team") activateTeam(place); else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
   showLocal: leaving => {
     if (!mainWindow || mainWindow.isDestroyed()) return createWindow();
     if (!leaving) return;
@@ -2875,6 +2864,7 @@ ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", 
 // Once My Cloud is home the switcher lists only whole places, and shows only when there is more than My Cloud.
 const homeAlone = () => Boolean(homeWindow.cloudOrigin()) && !otherPlaces(environmentsState, homeWindow.cloudOrigin());
 ipcMain.handle("workspaces:state", workspaceOnly(event => ({ ...workspaceSummary(environmentsState), ...(homeAlone() && homeWindow.homePage(event) ? { home: true } : {}) })));
+ipcMain.handle("workspaces:line", workspaceOnly(() => homePlaces.line()));
 let workspaceMenuOpen = false;
 ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
   if (workspaceMenuOpen || homeAlone()) return;
@@ -3011,7 +3001,7 @@ app.whenReady().then(async () => {
     revealDownloadWhenDone(item, (filePath) => shell.showItemInFolder(filePath));
   });
   // Registry before lease: the lease and the child's OMB_DATA_DIR both follow a named environment.
-  environmentsState = readEnvironments();
+  environmentsState = environmentsStore.read();
   let bootDataDir = desktopDataDir();
   if (app.isPackaged) {
     const boot = bootEnvironmentDir(environmentsState, desktopDataDir());
@@ -3206,7 +3196,7 @@ app.whenReady().then(async () => {
     activeRemoteOrigin: () => activeEnvironment(environmentsState)?.origin ?? null,
     activeRemoteMicrophone: () => activeEnvironment(environmentsState)?.microphone === true,
     askRemoteMicrophone,
-    homeOrigin: () => homeWindow.cloudOrigin(),
+    homeOrigin: () => homeWindow.placeOrigin(),
   });
   session.defaultSession.setPermissionRequestHandler(appPermissions.request);
   session.defaultSession.setPermissionCheckHandler(appPermissions.check);

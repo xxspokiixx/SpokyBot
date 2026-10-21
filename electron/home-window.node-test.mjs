@@ -7,9 +7,11 @@ import { cloudPlanSnapshot } from "./cloud-account.mjs";
 import { cloudPageSenderAllowed, myCloudOrigin } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 import localOrigin from "./local-origin.cjs";
-import { createHomeWindow, HOME_SCREEN_PATH, homeOf, installHomeWindowIpc, LOOK_MS, QUIET_MS, routeOf, SPLASH_TEXT } from "./home-window.mjs";
+import { createHomeWindow, HOME_SCREEN_PATH, homeOf, installHomeWindowIpc, LOOK_MS, placeOf, QUIET_MS, routeOf, SPLASH_TEXT, splashText, TEAM_RENEW_EARLY_MS, TEAM_RENEW_MS, TEAM_RENEW_RETRY_MS } from "./home-window.mjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
+const TEAM = "https://omb-u-acme.fly.dev";
+const ACME = { id: "team-acme", name: "Acme", role: "member", machine: { status: "ready", origin: TEAM } };
 const LOCAL = "http://127.0.0.1:8799";
 const ACCOUNT = { id: "acct-1", email: "person@example.test" };
 const connected = (machine = {}) => ({ status: "connected", account: ACCOUNT, machine: { status: "ready", origin: CLOUD, ...machine } });
@@ -54,11 +56,14 @@ test("a sign-in keeps only a path of My Cloud's own", () => {
  * sign-in (its power word, wake, pairing code), My Cloud's answers (`cloud`), the window (where it went), the startup
  * screen and a manual clock.
  */
-function world({ journal = done(), marker = null, state = connected(), power = null, cloud = {}, splash = true, url = "" } = {}) {
+function world({ journal = done(), marker = null, state = connected(), power = null, cloud = {}, team = {}, splash = true, url = "", remembered = null } = {}) {
   const w = {
     journal, marker, state, power, clock: 1_000_000, typed: 0, now: () => w.clock,
     cloud: { down: false, signedIn: true, version: "0.1.130", health: 200, wakes: true, ...cloud },
-    went: [], calls: [], fetched: [], pairs: 0, wakes: 0, waking: [], splash: [], published: [], local: [], reloads: 0, signIns: [],
+    /** The team's Cloud, answering at TEAM; `gone`: the Admin's team pairing says this person is no longer in it. */
+    team: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...team },
+    went: [], calls: [], fetched: [], pairs: 0, teamPairs: [], wakes: 0, waking: [], splash: [], published: [], local: [], reloads: 0, signIns: [],
+    remembered, remembers: [], left: [], dropped: [], redeemed: [],
     url, timers: [], intervals: [],
   };
   const timers = {
@@ -79,6 +84,12 @@ function world({ journal = done(), marker = null, state = connected(), power = n
       if (w.state?.status !== "connected" || w.cloud.down) throw new Error("My Cloud is not ready to connect yet.");
       return { origin: CLOUD, code: "AAAA-BBBB-CCCC", expiresAt: w.clock + 60_000 };
     },
+    async pairTeam(id) {
+      w.teamPairs.push(id);
+      if (w.team.gone || !(w.state?.teams ?? []).some((team) => team.id === id)) throw Object.assign(new Error("You're no longer in Acme."), { gone: true });
+      if (w.state?.status !== "connected" || w.team.down) throw new Error("Cloud request failed.");
+      return { origin: TEAM, code: "TTTT-EEEE-AAAA", expiresAt: w.clock + 60_000 };
+    },
     signInAgain: async () => { w.signIns.push("again"); },
     begin: async () => { w.signIns.push("begin"); },
   };
@@ -90,17 +101,26 @@ function world({ journal = done(), marker = null, state = connected(), power = n
     ensureWindow: () => { w.calls.push("ensure"); },
     localOrigin: () => LOCAL,
     cookieFetch: async (url, init) => {
-      w.fetched.push([String(url).replace(CLOUD, ""), init?.headers?.["x-omb-background"] ?? null]);
-      if (w.cloud.down) throw new TypeError("fetch failed");
-      const route = String(url).replace(CLOUD, "");
-      if (route === "/api/health") return new Response("", { status: w.cloud.health, headers: w.cloud.health === 503 ? { "x-omb-cloud-power": "asleep" } : {} });
-      if (route === "/api/auth/session") return w.cloud.signedIn ? json({ kind: "session" }) : json({ error: "sign in" }, 401);
-      if (route === "/.well-known/openmausbot/environment") return json({ version: w.cloud.version });
+      const atTeam = String(url).startsWith(TEAM), server = atTeam ? w.team : w.cloud;
+      w.fetched.push([String(url).replace(atTeam ? TEAM : CLOUD, atTeam ? "team:" : ""), init?.headers?.["x-omb-background"] ?? null]);
+      if (server.down) throw new TypeError("fetch failed");
+      const route = String(url).replace(atTeam ? TEAM : CLOUD, "");
+      if (route === "/api/health") return new Response("", { status: server.health, headers: server.health === 503 ? { "x-omb-cloud-power": "asleep" } : {} });
+      if (route === "/api/auth/session") return server.signedIn ? json({ kind: "session", ...(server.expiresAt ? { expiresAt: server.expiresAt } : {}) }) : json({ error: "sign in" }, 401);
+      if (route === "/api/auth/pair" && init?.method === "POST") {
+        w.redeemed.push([atTeam ? "team" : "cloud", JSON.parse(init.body)]);
+        return server.redeems === false ? json({ error: "invalid code" }, 400) : json({ kind: "session" });
+      }
+      if (route === "/.well-known/openmausbot/environment") return json({ version: server.version });
       return json({}, 404);
     },
     power: { asleep: () => w.power?.state === "asleep", hold: () => { w.power = { state: "asleep", since: 1 }; }, woke: () => w.calls.push("woke") },
-    go: async (url, origin) => { w.went.push([url, origin]); w.url = url; },
+    go: async (url, origin, place) => { w.went.push(place?.kind === "team" ? [url, origin, place.id] : [url, origin]); w.url = url; },
     showLocal: (leaving) => { w.local.push(leaving); if (leaving) w.url = `${LOCAL}/`; },
+    remembered: () => w.remembered,
+    remember: (place) => { w.remembers.push(place); w.remembered = place ? { ...place, name: ACME.name, origin: TEAM } : null; },
+    left: (name) => w.left.push(name),
+    drop: (place) => { w.dropped.push(place.id); w.left.push(place.name); w.remembered = null; },
     splash: () => (splash ? { status: (text) => w.splash.push(text) } : null),
     lastInput: () => w.typed,
     publish: (view) => w.published.push(view),
@@ -489,4 +509,216 @@ test("main shows the switcher at home only with somewhere else to go: My Cloud a
   assert.equal(context.homeAlone(), true, "a named folder of this computer is not a place once home is My Cloud");
   context.homeWindow = { cloudOrigin: () => null };
   assert.equal(context.homeAlone(), false, "no home: the switcher as before");
+});
+
+test("the place asked for: My Cloud unless a team is asked or remembered; a team is the session's, one the connected session no longer lists is gone, and one the Admin can't vouch for opens as saved", () => {
+  const state = { ...connected(), teams: [ACME] };
+  assert.deepEqual(placeOf({ state }), { kind: "cloud" });
+  assert.deepEqual(placeOf({ ask: "cloud", remembered: { team: "team-acme" }, state }), { kind: "cloud" }, "asked for My Cloud: My Cloud");
+  assert.deepEqual(placeOf({ ask: { team: "team-acme" }, state }), { kind: "team", id: "team-acme", name: "Acme", role: "member", origin: TEAM, machine: ACME.machine });
+  assert.deepEqual(placeOf({ remembered: { team: "team-acme", name: "Old name", origin: "https://old.fly.dev" }, state }).origin, TEAM, "the session's address wins over the saved one");
+  assert.deepEqual(placeOf({ ask: { team: "team-acme" }, state: { ...state, teams: [{ ...ACME, machine: null }] } }), { kind: "team", id: "team-acme", name: "Acme", role: "member", origin: null, machine: null });
+  assert.deepEqual(placeOf({ remembered: { team: "team-acme", name: "Acme", origin: TEAM }, state: connected() }), { kind: "cloud", left: "Acme" }, "connected, not listed: gone, by name");
+  assert.deepEqual(placeOf({ ask: { team: "team-acme", name: "Acme" }, state: connected() }), { kind: "cloud", left: "Acme" });
+  assert.deepEqual(placeOf({ remembered: { team: "team-acme" }, state: connected() }), { kind: "cloud", left: null }, "gone, with no name to say");
+  for (const state of [{ status: "unavailable", account: ACCOUNT }, { status: "reauth-required", account: ACCOUNT }, null]) {
+    assert.deepEqual(placeOf({ remembered: { team: "team-acme", name: "Acme", origin: TEAM }, state }), { kind: "team", id: "team-acme", name: "Acme", role: null, origin: TEAM, machine: null }, JSON.stringify(state));
+    assert.deepEqual(placeOf({ remembered: { team: "team-acme" }, state }), { kind: "cloud" }, "no saved address: My Cloud");
+  }
+  assert.equal(splashText("opening", "Acme"), "Opening Acme…");
+  assert.equal(splashText("waking"), SPLASH_TEXT.waking);
+});
+
+test("choosing a team opens its Cloud through the Admin's team pairing, at the team's address, remembered for next time; My Cloud on request lets it go", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] }, team: { signedIn: false } });
+  await w.home.show({ place: { team: "team-acme" } });
+  assert.deepEqual(w.teamPairs, ["team-acme"]);
+  assert.equal(w.pairs, 0, "never My Cloud's pairing");
+  assert.deepEqual(w.went, [[`${TEAM}/pair#code=TTTT-EEEE-AAAA`, TEAM, "team-acme"]]);
+  assert.deepEqual(w.fetched, [["team:/api/health", "1"], ["team:/api/auth/session", null]], "a look at the team's Cloud, never My Cloud");
+  assert.deepEqual(w.splash, ["Opening Acme…"]);
+  assert.deepEqual(w.remembers, [{ team: "team-acme" }]);
+  assert.deepEqual(w.home.shown(), { kind: "team", id: "team-acme", name: "Acme", role: "member", origin: TEAM, machine: ACME.machine });
+  assert.equal(w.home.cloudOrigin(), CLOUD, "My Cloud stays the person's home");
+  assert.equal(w.home.placeOrigin(), TEAM, "the window's page is the team's");
+  assert.equal(w.wakes, 0, "a team's Cloud is never woken through the Admin");
+  // Already there: only brought forward.
+  w.fetched.length = 0;
+  await w.home.show();
+  assert.deepEqual([w.went.length, w.fetched], [1, []]);
+  await w.home.show({ place: "cloud" });
+  assert.deepEqual(w.went.at(-1), [CLOUD, CLOUD]);
+  assert.deepEqual(w.remembers.at(-1), null);
+  assert.equal(w.home.placeOrigin(), CLOUD);
+});
+
+test("launching opens the team remembered from last time; one the connected session no longer lists is gone: My Cloud, with its name said once", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] }, remembered: { team: "team-acme", name: "Acme", origin: TEAM } });
+  await w.home.show();
+  assert.deepEqual(w.went, [[TEAM, TEAM, "team-acme"]], "the remembered team, on the window's own session");
+  assert.deepEqual(w.left, []);
+  // Removed from the team: the next sign-in check says so.
+  w.state = connected();
+  await w.home.changed();
+  assert.deepEqual(w.went.at(-1), [CLOUD, CLOUD]);
+  assert.deepEqual(w.left, ["Acme"]);
+  assert.deepEqual(w.remembers.at(-1), null);
+  assert.equal(w.home.placeOrigin(), CLOUD);
+  assert.deepEqual(w.teamPairs, [], "a team gone is never paired");
+});
+
+test("a team's Cloud that can't be reached shows this computer's screen with the team's name and looks again by itself; My Cloud is untouched", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] }, team: { down: true }, url: `${CLOUD}/` });
+  await w.home.show({ place: { team: "team-acme" } });
+  assert.deepEqual(w.went, [[`${LOCAL}${HOME_SCREEN_PATH}`, null]]);
+  assert.deepEqual(w.home.view(), { screen: "offline", name: "Acme" }, "named, with no reason of My Cloud's");
+  assert.equal(w.fetched.some(([route]) => !route.startsWith("team:")), false, "nothing asks My Cloud");
+  w.team.down = false;
+  await w.later(2_000);
+  assert.deepEqual(w.went.at(-1), [TEAM, TEAM, "team-acme"], "back by itself");
+  assert.deepEqual(w.home.view(), { screen: "opening", name: "Acme" });
+  // The team's Cloud answering asleep is simply not reachable yet: no wake through the Admin.
+  w.team.health = 503; w.url = `${LOCAL}/`;
+  await w.home.show({ place: { team: "team-acme" } });
+  assert.deepEqual(w.home.view(), { screen: "offline", name: "Acme" });
+  assert.equal(w.wakes, 0);
+});
+
+test("signed out, a team shows the sign-in screen with its name; the Admin refusing the team pairing (no longer a member) falls back to My Cloud and says so", async () => {
+  const out = world({ state: { status: "signed-out" }, remembered: { team: "team-acme", name: "Acme", origin: TEAM } });
+  await out.home.show();
+  assert.deepEqual(out.home.view(), { screen: "signin", name: "Acme" });
+  assert.deepEqual(out.teamPairs, []);
+  const w = world({ state: { ...connected(), teams: [ACME] }, team: { signedIn: false, gone: true } });
+  await w.home.show({ place: { team: "team-acme" } });
+  assert.deepEqual(w.teamPairs, ["team-acme"]);
+  assert.deepEqual(w.left, ["Acme"]);
+  assert.deepEqual(w.went.at(-1), [CLOUD, CLOUD], "My Cloud instead");
+  assert.deepEqual(w.remembers.at(-1), null);
+  const problem = world({ state: { ...connected(), teams: [{ ...ACME, machine: { status: "stopped", hold: { until: 9 } } }] } });
+  await problem.home.show({ place: { team: "team-acme" } });
+  assert.deepEqual(problem.home.view(), { screen: "plan", machine: "stopped", name: "Acme" }, "a team's Cloud that ended: its plan screen, by name");
+  assert.deepEqual(problem.teamPairs, []);
+});
+
+test("on the team's page, a session that ends is renewed through the team pairing, the page counts as this app's, and its new version reloads at a quiet moment", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] } });
+  await w.home.show({ place: { team: "team-acme" } });
+  w.url = `${TEAM}/chats/b1`;
+  const frame = w.contents.mainFrame;
+  assert.equal(w.home.homePage({ sender: w.contents, senderFrame: frame }), true, "the team's page is this app's");
+  w.team.signedIn = false;
+  w.home.responded({ url: `${TEAM}/api/bots`, statusCode: 401, webContentsId: 7 });
+  await w.home.repair();
+  assert.deepEqual(w.went.at(-1), [`${TEAM}/pair?next=%2Fchats%2Fb1#code=TTTT-EEEE-AAAA`, TEAM, "team-acme"]);
+  assert.deepEqual(w.teamPairs, ["team-acme"]);
+  assert.equal(w.pairs, 0);
+  w.team.signedIn = true;
+  w.url = `${TEAM}/`;
+  w.home.navigated(w.url);
+  await w.tick();
+  w.team.version = "0.1.131"; w.typed = w.clock - QUIET_MS - 1;
+  await w.tick();
+  assert.equal(w.reloads, 1, "the team's page reloads for its own new version");
+  w.state = { status: "signed-out" };
+  await w.home.refresh();
+  assert.equal(w.home.homePage({ sender: w.contents, senderFrame: frame }), false, "signed out, the team's page is no longer this app's");
+});
+
+test("going from a team to another server lets the team go: a later session check never pulls the window back", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] } });
+  await w.home.show({ place: { team: "team-acme" } });
+  assert.equal(w.home.placeOrigin(), TEAM);
+  // The Server menu moved the window to a saved server (main's switchEnvironment), not through the home window.
+  w.remembered = null;
+  w.url = "https://office.example.test/";
+  w.home.navigated(w.url);
+  assert.equal(w.home.shown(), null);
+  assert.equal(w.home.placeOrigin(), CLOUD, "My Cloud is home again for the window's rules");
+  const went = w.went.length;
+  await w.home.changed();
+  assert.equal(w.went.length, went, "the session check left the window where the person put it");
+  // The team's own sign-in page or this computer's screen keep the team as the place.
+  await w.home.show({ place: { team: "team-acme" } });
+  w.home.navigated(`${LOCAL}${HOME_SCREEN_PATH}`);
+  assert.equal(w.home.placeOrigin(), TEAM);
+});
+
+test("a team on screen signs in again before its hour ends, without moving the page: through the Admin's team pairing, into the window's own cookie", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] }, team: { signedIn: false } });
+  await w.home.show({ place: { team: "team-acme" } });
+  w.url = `${TEAM}/chats/b1`;
+  const went = w.went.length;
+  await w.later(TEAM_RENEW_MS - 1);
+  assert.deepEqual(w.teamPairs, ["team-acme"], "not before its time");
+  await w.later(1);
+  assert.deepEqual(w.teamPairs, ["team-acme", "team-acme"]);
+  assert.deepEqual(w.redeemed, [["team", { code: "TTTT-EEEE-AAAA", cookie: true, label: "OpenMausBot app" }]]);
+  assert.equal(w.went.length, went, "the page never moved");
+  assert.equal(w.pairs, 0, "never My Cloud's pairing");
+  await w.later(TEAM_RENEW_MS);
+  assert.equal(w.teamPairs.length, 3, "and again each time");
+  // My Cloud is never renewed this way, and leaving the team stops it.
+  await w.home.show({ place: "cloud" });
+  await w.later(TEAM_RENEW_MS * 2);
+  assert.equal(w.teamPairs.length, 3);
+  assert.equal(w.redeemed.length, 2);
+});
+
+test("opening a team on the window's own session renews before the end that session reports; a failed renewal tries again soon", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] } });
+  w.team.expiresAt = w.clock + 20 * 60_000;
+  await w.home.show({ place: { team: "team-acme" } });
+  assert.deepEqual(w.teamPairs, [], "its own session: no pairing to open it");
+  await w.later(20 * 60_000 - TEAM_RENEW_EARLY_MS - 1);
+  assert.deepEqual(w.teamPairs, []);
+  await w.later(1);
+  assert.deepEqual(w.teamPairs, ["team-acme"], "ten minutes before the end it reports");
+  w.team.redeems = false;
+  await w.later(TEAM_RENEW_MS);
+  assert.equal(w.teamPairs.length, 2);
+  await w.later(TEAM_RENEW_RETRY_MS);
+  assert.equal(w.teamPairs.length, 3, "a code that didn't take is asked again in five minutes");
+});
+
+test("the Admin refusing the team pairing (404) means the person was removed: the team is dropped at once and My Cloud opens, on a renewal or a session that ended", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] }, team: { signedIn: false } });
+  await w.home.show({ place: { team: "team-acme" } });
+  w.team.gone = true;
+  await w.home.renew();
+  assert.deepEqual(w.dropped, ["team-acme"], "dropped now, not at the next session check");
+  assert.deepEqual(w.left, ["Acme"]);
+  assert.deepEqual(w.went.at(-1), [CLOUD, CLOUD]);
+  assert.equal(w.home.placeOrigin(), CLOUD);
+  assert.equal(w.redeemed.length, 0);
+  await w.later(TEAM_RENEW_MS * 2);
+  assert.equal(w.teamPairs.length, 2, "no renewal of a team that is gone");
+  // The same on the 401 path: the team's session ended and the re-pair is refused.
+  const ended = world({ state: { ...connected(), teams: [ACME] } });
+  await ended.home.show({ place: { team: "team-acme" } });
+  ended.url = `${TEAM}/`;
+  ended.team.signedIn = false; ended.team.gone = true;
+  ended.home.responded({ url: `${TEAM}/api/bots`, statusCode: 401, webContentsId: 7 });
+  await ended.home.repair();
+  assert.deepEqual(ended.dropped, ["team-acme"]);
+  assert.deepEqual(ended.went.at(-1), [CLOUD, CLOUD]);
+});
+
+test("while the window is on the place's own sign-in page, its 401s start no second sign-in (a team's and My Cloud's alike)", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME] }, team: { signedIn: false } });
+  await w.home.show({ place: { team: "team-acme" } });
+  assert.deepEqual(w.teamPairs, ["team-acme"]);
+  assert.match(w.url, /^https:\/\/omb-u-acme\.fly\.dev\/pair#code=/);
+  w.home.responded({ url: `${TEAM}/api/auth/session`, statusCode: 401, webContentsId: 7 });
+  await w.later(0);
+  assert.deepEqual(w.teamPairs, ["team-acme"], "the code on its way is not replaced");
+  w.url = `${TEAM}/chats/b1`;
+  w.home.responded({ url: `${TEAM}/api/bots`, statusCode: 401, webContentsId: 7 });
+  await w.home.repair();
+  assert.deepEqual(w.teamPairs, ["team-acme", "team-acme"], "once on its page, a 401 signs in again as before");
+  const mine = world({ cloud: { signedIn: false } });
+  await mine.home.show();
+  mine.home.responded({ url: `${CLOUD}/api/auth/session`, statusCode: 401, webContentsId: 7 });
+  await mine.later(0);
+  assert.equal(mine.pairs, 1);
 });

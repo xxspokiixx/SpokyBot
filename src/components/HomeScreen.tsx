@@ -11,12 +11,15 @@ const MACHINE: Record<string, LocaleKey> = {
 
 /** The words for what the window is waiting on, and whether the person has anything to press. */
 export function homeScreenText(view: HomeView | null): { title: string; body: string | null; reason: string | null; action: "sign-in" | "manage" | null; busy: boolean } {
-  if (view?.screen === "offline") return { title: t("homeScreen.offline"), body: t("homeScreen.offlineBack"), reason: view.reason ?? null, action: null, busy: true };
-  if (view?.screen === "signin") return { title: t("homeScreen.signIn"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
-  if (view?.screen === "plan") return { title: t("homeScreen.plan"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };
+  // A team's Cloud is named; My Cloud keeps its own words.
+  const name = view?.name ?? null;
+  const named = (plain: LocaleKey, withName: LocaleKey) => (name ? t(withName, { name }) : t(plain));
+  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.reason ?? null, action: null, busy: true };
+  if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
+  if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };
   if (view?.screen === "waking") return { title: t("homeScreen.waking"), body: null, reason: null, action: null, busy: true };
   if (view?.screen === "moving") return { title: t("homeScreen.moving"), body: null, reason: null, action: null, busy: true };
-  return { title: t("homeScreen.opening"), body: null, reason: null, action: null, busy: true };
+  return { title: named("homeScreen.opening", "homeScreen.openingNamed"), body: null, reason: null, action: null, busy: true };
 }
 
 /**

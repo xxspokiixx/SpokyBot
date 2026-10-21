@@ -37,6 +37,8 @@ export type Adopted = { ok: true; outcome: "adopted" | "kept" } | { ok: false; s
 export interface CloudConnectionRouteDeps {
   /** Only a Cloud home takes connections. */
   cloudHome: boolean;
+  /** A Team Cloud: a person's own connections (a share, a sign-in, HighLevel) are refused with one plain line. */
+  personalRefusal?: (what: string) => string | null;
   list(): Promise<ConnectionsAnswer>;
   adoptShare(code: string): Promise<ShareOutcome>;
   adoptOwn(apiKey: string, userId: string): Promise<ShareOutcome>;
@@ -68,6 +70,8 @@ export function createCloudConnectionRoutes(deps: CloudConnectionRouteDeps): Rou
     if (path !== "/api/cloud-connections/connected-apps" && path !== "/api/cloud-connections/highlevel" && !signIn) return json(res, 404, { error: "not found" });
     if (method !== (path === "/api/cloud-connections/connected-apps" ? "POST" : "PUT")) return json(res, 405, { error: "method not allowed" });
     if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
+    const refused = deps.personalRefusal?.(signIn ? signIn[1]! : path === "/api/cloud-connections/highlevel" ? "HighLevel" : "these apps");
+    if (refused) { req.resume(); return json(res, 403, { error: refused }); }
     const body = await readBody(req, 64 * 1024);
     const replaces = url.searchParams.get("replaces");
     if (replaces !== null && !DIGEST.test(replaces)) return json(res, 400, { error: "replaces is a sign-in's digest" });
