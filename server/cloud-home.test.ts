@@ -8,7 +8,7 @@ import {
   cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, cloudRequestSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, codeTrustProblem, edgeHold, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
+import { cloudHomeChildEnvironments, codeTrustProblem, edgeHold, hardenHost, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
 import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
@@ -458,4 +458,19 @@ it("captures a child's stdout and stderr when asked, and shares this process's o
   const shared = await run(false);
   expect(shared.child.stdout).toBeNull();
   expect(shared.child.stderr).toBeNull();
+});
+
+it("the Cloud supervisor hardens the host before anything runs as maus: hidepid on /proc and Fly's socket folder root-only, each a note, never fatal", () => {
+  const calls: string[] = [];
+  const run = (status: number, exists = true) => ({
+    exec: (command: string, args: string[]) => { calls.push(`${command} ${args.join(" ")}`); return { status, stderr: status ? "mount: permission denied\n" : "" }; },
+    chmod: (path: string, mode: number) => { calls.push(`chmod ${mode.toString(8)} ${path}`); },
+    exists: () => exists,
+  });
+  expect(hardenHost({}, run(0))).toEqual(["/proc: hidepid=invisible", "/.fly: root only"]);
+  expect(calls).toEqual(["mount -o remount,hidepid=invisible /proc", "chmod 700 /.fly"]);
+  expect(hardenHost({}, run(32, false))).toEqual(["/proc: hidepid not applied (mount: permission denied)"]);
+  expect(hardenHost({ OMB_CLOUD_HARDEN: "0" }, run(0))).toEqual(["hardening skipped (OMB_CLOUD_HARDEN=0)"]);
+  const failing = { ...run(0), chmod: () => { throw new Error("read-only"); } };
+  expect(hardenHost({}, failing)).toEqual(["/proc: hidepid=invisible", "/.fly: left as is (read-only)"]);
 });

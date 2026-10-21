@@ -33,7 +33,7 @@ export async function startBotBoxAtBoot(options: {
   const timer = setTimeout(() => {
     runBoxSelfCheck({
       bwrap: tools.bwrap, bridge: { socat: tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
-      root: join(options.dataDir, "box"), denyEnv: BOX_DENY_ENV,
+      root: join(options.dataDir, "box"), denyEnv: BOX_DENY_ENV, seccompFile: box.seccomp(),
     }).then((result) => {
       box.noteChecks({ passed: result.passed, total: result.total, failed: result.failed, at: result.at });
       if (result.error) log(`bot box: self-check could not run (${result.error})`);

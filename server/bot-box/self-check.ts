@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { BOX_PROBE_SCRIPT, BoxRunner, BOX_BROKER_PORT, BOX_EGRESS_PORT, defaultCodeRoots, type BoxChecks } from "./box.ts";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync } from "node:fs";
 import type { BridgeTools } from "./bridge.ts";
 import { openCredentialBroker } from "./broker.ts";
 import { openBoxEgressGate } from "./egress-gate.ts";
@@ -35,6 +35,8 @@ export interface SelfCheckOptions {
   /** T0b: false leaves the broker out; by default a fixture broker is opened and the probe gets a token for a grant to
    * the fixture server, with the key names it must find replaced by that token. */
   broker?: boolean;
+  /** T0c: the seccomp filter file to hand the box; none (or an unsupported architecture) loads no filter. */
+  seccompFile?: string | null;
 }
 
 export interface SelfCheckResult extends BoxChecks {
@@ -115,12 +117,15 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
     bwrap: options.bwrap, bridge: options.bridge, denyEnv: options.denyEnv,
     setup: { dataDir: data, home, codeRoots: options.codeRoots ?? defaultCodeRoots(), bridges, mutate: options.mutate },
     broker: credentials ? { port: BOX_BROKER_PORT, mintForProcess: credentials.mintForProcess, revoke: credentials.revoke } : null,
+    seccompFile: options.seccompFile ?? null,
   });
   const isolatedNet = !options.mutate?.has("share-net");
   const spec: ProbeSpec = {
     dataDir: data, cwd, botFolder, messagesDb: join(data, "messages.db"), configJson: join(data, "config.json"), serverFiles,
     otherWorkspace, otherTaskWorkspace: otherTask, marker, canaryPid: canary.pid ?? 0, serverPid: process.pid, hostTmpFile,
     harnessPort: serverPort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
+    // Checked whenever a filter is in the setup: the no-seccomp mutation leaves it out of the box, so the check must fail.
+    seccomp: Boolean(options.seccompFile),
   };
   const wrapped = runner.wrap({
     command: process.execPath, args: [options.probeScript ?? BOX_PROBE_SCRIPT], cwd, botId: "probe",
@@ -136,10 +141,11 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   wrapped.env[PROBE_SPEC_ENV] = JSON.stringify(spec);
   let stdout = "", stderr = "";
   const results = await new Promise<ProbeResult[] | string>((resolve) => {
-    const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, stdio: ["ignore", "pipe", "pipe", ...wrapped.extraFds] });
+    for (const fd of wrapped.extraFds) try { closeSync(fd); } catch {}
     const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(`the probe did not answer within ${options.timeoutMs ?? 60_000} ms`); }, options.timeoutMs ?? 60_000);
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stdout?.on("data", (chunk) => { stdout += chunk; });
+    child.stderr?.on("data", (chunk) => { stderr += chunk; });
     child.once("error", (error) => { clearTimeout(timer); resolve(`the box could not start: ${error.message}`); });
     child.once("exit", (code) => {
       clearTimeout(timer);

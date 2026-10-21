@@ -6,7 +6,7 @@ import { BOX_MUTATIONS, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visible
 const home = "/data";
 const dataDir = "/data/.openmausbot";
 const setup = (mutate?: BoxMutation[]): BoxSetup => ({
-  dataDir, home, codeRoots: ["/app"],
+  dataDir, home, codeRoots: ["/app"], seccompFd: 3,
   bridges: [{ name: "egress", port: 3128, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }],
   mutate: mutate ? new Set(mutate) : undefined,
 });
@@ -40,7 +40,8 @@ describe("the box plan", () => {
   it("writes the bubblewrap argv in mount order, with its own namespaces and the bridged sockets", () => {
     const args = bwrapArgs(turn());
     const text = args.join(" ");
-    for (const flag of ["--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--hostname omb-box", `--chdir ${cwd}`]) expect(text).toContain(flag);
+    for (const flag of ["--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--hostname omb-box", "--seccomp 3", `--chdir ${cwd}`]) expect(text).toContain(flag);
+    expect(bwrapArgs(planBox({ ...setup(), seccompFd: undefined }, { command: "/usr/bin/x", args: [], env: {} })).join(" ")).not.toContain("--seccomp");
     expect(text).toContain("--ro-bind /usr /usr");
     expect(text).toContain("--symlink usr/bin /bin");
     expect(text).toContain("--proc /proc --dev /dev --tmpfs /tmp");
@@ -96,6 +97,7 @@ describe("the box plan", () => {
       "share-net": (plan) => plan.net === "shared",
       "env-all": () => true,
       "tmp-shared": (plan) => visibleInBox(plan, "/tmp/other-turn/mcp.json") === "rw",
+      "no-seccomp": (plan) => !plan.options.includes("--seccomp"),
     };
     for (const mutation of BOX_MUTATIONS) {
       if (mutation === "env-all") continue;

@@ -81,3 +81,23 @@ Cline, OpenCode, OpenRouter's own variable) stays raw in that box, and the repor
 so the gap is visible. The self-check adds six broker checks (29 in all): the key is nowhere in the box's environment
 or files, the base URL is the broker, a call with the token reaches the upstream with the real key, a wrong token is
 401, a grant the token lacks is 403.
+
+## What each layer stops
+
+| Layer | Where | What it stops | What it does not stop |
+|---|---|---|---|
+| Mount namespace (bubblewrap) | every boxed process | reading the server's data folder, other bots' folders, other turns' files in `/tmp`, `/.fly`; writing anywhere but its own folders | reading HOME's engine logins (the engine's own identity); a path a driver puts back on purpose |
+| PID namespace | every boxed process | seeing, reading the environment of, or signalling another turn's or the server's processes | nothing inside the same box |
+| Network namespace + the two gates | every boxed process with its own network | reaching this machine's other listeners, the local network, link-local, metadata, Fly's private network; any route out except the egress gate; any server route except `/api/internal/*` | what the harness routes allow with a valid per-turn bearer; a public destination |
+| Environment allow-list | every boxed process | `OMB_CLOUD_*`, the server's placement, workspace credentials, any unlisted name | the engines' own settings |
+| Credential broker (T0b) | every boxed process with its own network | holding a provider key or an MCP header; using a token after its process or conversation ends; choosing the upstream | keys with no base-URL setting (named in the report); subscription logins |
+| seccomp filter (T0c) | every boxed process on x86-64 | 34 system calls that only reach the kernel's attack surface: mount family, kernel modules, bpf, perf, userfaultfd, the kernel keyring, `open_by_handle_at`, `setns`, kexec, reboot, swap, clock setting, I/O ports (EPERM); a process of another architecture (killed) | anything an engine, shell, git, npm, python or Chrome uses: all allowed |
+| `hidepid=invisible` on the host's /proc (T0c) | the whole machine, set by the root supervisor at boot | a `maus` process outside a box (the browser engine, a helper) listing or reading root's processes | `maus` processes seeing each other; a box has its own /proc anyway |
+| `/.fly` root-only (T0c) | the whole machine | a `maus` process reaching Fly's local API socket | nothing else |
+
+Not built, and why: a **separate Linux user per bot**. The server runs as `maus` under a root supervisor and cannot
+switch uid; a per-bot uid needs a privileged spawn service (stdio over FIFOs, kills by proxy, file ownership across
+everything the server reads from the workspaces) which is a slice of its own, and with the user namespace the host
+sees the box as `maus` anyway. **nftables** rules would add nothing to a box with its own network namespace, and for
+the whole machine they would have to allow Fly's resolver on the private network; left for the separate-user design.
+`OMB_CLOUD_HARDEN=0` skips the two supervisor steps if a machine ever needs that.

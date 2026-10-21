@@ -2,6 +2,7 @@
 // another bot's folders, another turn's process and environment, the server's own loopback routes, the local network and
 // the cloud metadata service; and what a legitimate turn needs: its own folders, the harness routes and the public
 // internet. Prints one JSON line of results. Every check is named here once, so the report's `checks: n/n` means these.
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { connect } from "node:net";
@@ -32,6 +33,8 @@ export interface ProbeSpec {
   publicTarget: string | null;
   /** Checks that apply only when the box has its own network. */
   isolatedNet: boolean;
+  /** T0c: the seccomp filter is on, so a kernel-keyring call must fail with EPERM (an unprivileged process may make it otherwise). */
+  seccomp?: boolean;
   /** T0b: a model call through the broker, and the real key's value that must be nowhere in the box. */
   broker?: { port: number; token: string; provider: string; path: string; keyNames: string[]; marker: string };
 }
@@ -133,6 +136,13 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("egress-metadata-refused", (await connectThroughGate(spec.egressPort, "169.254.169.254:80")) === "403", "CONNECT metadata");
   add("egress-private-refused", (await connectThroughGate(spec.egressPort, "10.0.0.1:443")) === "403", "CONNECT private");
   if (spec.publicTarget) add("egress-public-allowed", (await connectThroughGate(spec.egressPort, spec.publicTarget)) === "200", `CONNECT ${spec.publicTarget}`);
+  if (spec.seccomp) {
+    // add_key(2) into the process keyring: fine for any user, EPERM under the box's filter. python3 is in the image.
+    const probe = "import ctypes,os;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(248,b'user',b'omb-box-probe',b'v',1,-2);print('ok' if r>=0 else os.strerror(ctypes.get_errno()))";
+    const result = spawnSync("python3", ["-c", probe], { encoding: "utf8", timeout: 10_000 });
+    const text = (result.stdout || result.stderr || "").trim();
+    add("keyring-denied", /Operation not permitted/.test(text), text.slice(0, 60) || `exit ${result.status}`);
+  }
   if (spec.broker) {
     const { port, token, provider, path, keyNames, marker: key } = spec.broker;
     const keys = keyNames.filter((name) => !env[name] || !env[name]!.startsWith("omb_t0_"));

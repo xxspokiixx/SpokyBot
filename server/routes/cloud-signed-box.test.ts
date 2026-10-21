@@ -12,7 +12,8 @@ import { CLOUD_BOX_PATH, createCloudSignedRoutes } from "./cloud-signed.ts";
 
 const secret = "S".repeat(43);
 const broker = { on: true, tokens: 2, forwarded: 9, refused: 1, unbrokered: ["XAI_API_KEY"] };
-const report: BoxReport = { box: "bwrap", reason: null, checks: { passed: 23, total: 23, failed: [], at: 5 }, bridge: "socat", boxed: 4, refused: { egress: 2, harness: 1 }, broker };
+const hardening = { seccomp: "on" as const, denied: 34, hidepid: true, flyApiPrivate: true };
+const report: BoxReport = { box: "bwrap", reason: null, checks: { passed: 23, total: 23, failed: [], at: 5 }, bridge: "socat", boxed: 4, refused: { egress: 2, harness: 1 }, broker, hardening };
 
 function routes(box?: () => BoxReport) {
   let clock = 1_800_000_000_000, counter = 0;
@@ -46,13 +47,13 @@ describe("GET /api/cloud/box", () => {
     const answer = await send("GET", CLOUD_BOX_PATH, sign(CLOUD_BOX_PATH));
     expect(answer.answered).toBe(true);
     expect(answer.status).toBe(200);
-    expect(answer.body).toEqual({ v: 1, at: 1_800_000_000_000, box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 }, broker });
-    expect(health.report(null).box).toEqual({ box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 }, broker });
+    expect(answer.body).toEqual({ v: 1, at: 1_800_000_000_000, box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 }, broker, hardening });
+    expect(health.report(null).box).toEqual({ box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 }, broker, hardening });
   });
 
   it("says off, with the reason, on a server with no box", async () => {
     const off = { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] };
-    const { sign, send, health } = routes(() => ({ box: "off", reason: "userns-refused", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 }, broker: off }));
+    const { sign, send, health } = routes(() => ({ box: "off", reason: "userns-refused", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 }, broker: off, hardening: { seccomp: "off", denied: 0, hidepid: false, flyApiPrivate: true } }));
     expect((await send("GET", CLOUD_BOX_PATH, sign(CLOUD_BOX_PATH))).body).toMatchObject({ box: "off", reason: "userns-refused", checks: null });
     expect(health.report(null).box).toMatchObject({ box: "off", reason: "userns-refused" });
     const none = routes();

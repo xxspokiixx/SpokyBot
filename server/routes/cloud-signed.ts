@@ -67,7 +67,7 @@ export function createCloudSignedRoutes(deps: {
       if (method !== "GET") { json(res, 405, { error: "method_not_allowed" }); return true; }
       const verdict = boxReads.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
       if (!verdict.ok) { console.warn(`cloud box read refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
-      json(res, 200, { v: 1, at: (deps.now ?? Date.now)(), ...(boxSummary(deps.box?.()) ?? { box: "off", reason: "not-cloud", checks: null, failed: [], boxed: 0, refused: { egress: 0, harness: 0 }, broker: { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] } }) });
+      json(res, 200, { v: 1, at: (deps.now ?? Date.now)(), ...(boxSummary(deps.box?.()) ?? { box: "off", reason: "not-cloud", checks: null, failed: [], boxed: 0, refused: { egress: 0, harness: 0 }, broker: { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] }, hardening: { seccomp: "off", denied: 0, hidepid: false, flyApiPrivate: true } }) });
       return true;
     }
     if (path === CLOUD_HEALTH_PATH) {
