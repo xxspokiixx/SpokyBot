@@ -144,16 +144,18 @@ describe("one gate per browser session", () => {
   it("on MausBot Cloud sends only the sites that turn away data centres through the person's computer, and every other site its own way", async () => {
     const asked: string[] = [];
     const looked: string[] = [];
+    const sessions: string[] = [];
     const cloud = new BrowserEgress();
     cloud.configure({ host: "cloud", config: () => ({}), listeners: new OwnListeners("cloud", { env: {}, ...noScans }), ownership,
       resolve: async (host) => { looked.push(host); return []; },
-      device: () => ({ open: async (target) => { asked.push(`${target.host}:${target.port}`); return { refused: "home-network" }; } }) });
+      device: (session) => { sessions.push(session); return { open: async (target) => { asked.push(`${target.host}:${target.port}`); return { refused: "home-network" }; } }; } });
     const port = await cloud.open("bot-1");
     try {
       for (const host of ["www.instagram.com", "rr1---sn-abc.googlevideo.com", "accounts.google.com", "www.google.co.in"]) {
         expect(await socksCode(port, host, 443), host).toBe(2);
       }
       expect(asked).toEqual(["www.instagram.com:443", "rr1---sn-abc.googlevideo.com:443", "accounts.google.com:443", "www.google.co.in:443"]);
+      expect(sessions, "asked for the browser whose page it is").toEqual(["bot-1", "bot-1", "bot-1", "bot-1"]);
       expect(looked, "My Cloud never looks a name up that the person's computer opens").toEqual([]);
       for (const host of ["en.wikipedia.org", "static.cdninstagram.com", "fonts.gstatic.com", "notgoogle.com", "google.com.evil.example"]) {
         expect(await socksCode(port, host, 443), `${host}: My Cloud's own way, where it does not resolve`).toBe(4);

@@ -93,7 +93,7 @@ export interface EgressSetup {
   resolve?(host: string): Promise<ResolvedAddress[]>;
   /** MausBot Cloud: the person's own computer while it lends its internet connection, or which device is away. Only
    * the sites that turn away data centres (home-sites.ts) go through it. */
-  device?(): GateUpstream | { away: string } | null;
+  device?(session: string): GateUpstream | { away: string } | null;
 }
 
 interface Blocked { target: string; reason: Refusal }
@@ -147,7 +147,7 @@ export class BrowserEgress {
    * person's computer while it lends its connection, else this server's own (when that computer is away, the bot is told
    * once). Every other site always goes this server's own way. */
   private through(session: string): GateUpstream | null {
-    const device = this.setup?.host === "cloud" ? this.setup.device?.() ?? null : null;
+    const device = this.setup?.host === "cloud" ? this.setup.device?.(session) ?? null : null;
     if (device && "open" in device) { this.toldAway.delete(session); return device; }
     if (device && !this.toldAway.has(session)) this.toldAway.set(session, awayNotice(device.away));
     if (!device) this.toldAway.delete(session);
