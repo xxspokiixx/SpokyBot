@@ -601,6 +601,7 @@ import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
 import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts";
+import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
@@ -2146,11 +2147,8 @@ const computerParks = new Map<string, string>();
 const parkedSeats = new Map<string, string>();
 const COMPUTER_FREE_NOTE = "OpenMausBot computer update: the computer this conversation waited for is free again. Continue the task that parked waiting for it.";
 const STEP_CAP_NOTE = "Your previous turn stopped at the step limit; continue from where it stopped.";
-const teamSetupDecisionText = (request: TeamSetupRequest): string => {
-  const notNow = request.suggestion && request.result?.state === "denied"
-    ? " The user chose Not now for this suggested specialist. Do not suggest another specialist in this conversation unless they ask for one." : "";
-  return `OpenMausBot team setup decision ${request.requestId}: ${JSON.stringify(request.result)}. Report this exact result and continue the user's already requested work. Do not ask for confirmation again or repeat this setup/deletion. A denied or cancelled operation did not authorize any substitute action. Existing thread models were not changed.${notNow}`;
-};
+const teamSetupDecisionText = (request: TeamSetupRequest): string =>
+  `OpenMausBot team setup decision ${request.requestId}: ${JSON.stringify(request.result)}. Report this exact result and continue the user's already requested work. Do not ask for confirmation again or repeat this setup/deletion. A denied or cancelled operation did not authorize any substitute action. Existing thread models were not changed.`;
 const connectionUpdateText = (labels: readonly string[]): string =>
   `OpenMausBot connection update: the user securely connected ${labels.join(", ")}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
 const credentialUpdateText = (label: string, outcome: "provided" | "dismissed"): string => outcome === "provided"
@@ -14685,22 +14683,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         return json(res, 201, proposed);
       }
-      if (method === "GET" && path === "/api/internal/team-setup-catalog") {
-        let chief = store.bot(internalCapability.botId)!;
-        if (!chief.chiefOfStaff || chief.hidden) return json(res, 403, { error: "Only an active Chief may plan team setup" });
-        const instances = await registry.describe();
-        requireActiveInternalCapability();
-        chief = store.bot(internalCapability.botId)!;
-        if (!chief.chiefOfStaff || chief.hidden) return json(res, 403, { error: "Only an active Chief may plan team setup" });
-        return json(res, 200, {
-          teams: teamSetupTeams().filter((name) => canAccessTeam(chief, name)),
-          bots: store.bots.filter((bot) => !bot.hidden && canAccessTeam(chief, bot.section) && (bot.id === chief.id || peerAllowed(chief, bot)))
-            .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection, chiefOfStaff: Boolean(bot.chiefOfStaff) })),
-          instances: instances.map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName,
-            state: instance.snapshot.state, models: instance.models, effortLevels: instance.capabilities?.effortLevels ?? [] })),
-          scope: "Bot model defaults apply to groups and new threads; existing threads retain their models. Requested team setup applies immediately, and the person can undo it. Existing unauthorized teams remain outside this Chief's scope.",
-        });
-      }
+      if (await dispatchRoutes([createInternalChiefTeamRoutes({ bot: () => store.bot(internalCapability.botId), requireActive: requireActiveInternalCapability,
+        teams: teamSetupTeams, bots: () => store.bots, instances: () => registry.describe() })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/team-setup-requests") {
         const parsed = z.object({ fromBotId: z.string().optional(), fromThreadId: z.string().optional(), plan: z.unknown() }).strict().safeParse(await readInternalBody());
         if (!parsed.success) return json(res, 400, { error: "Invalid team setup request" });
@@ -15430,7 +15414,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (duplicate) {
           return json(res, 409, { error: `@${duplicate.name} already exists in this section; use list_bots` });
         }
-        const suggestion = body.suggestion === true;
         const summary = instructions.split("\n").find((line) => line.trim())?.trim() ?? "";
         const setup = {
           botId: chief.id,
@@ -15438,7 +15421,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           canCommit: () => internalCapabilityIsActive(internalCapability),
           ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}),
           plan: {
-            reason: suggestion ? `@${chief.name} thinks the team needs @${name} (${role}).` : `Add @${name} (${role}) to the team.`,
+            reason: `Add @${name} (${role}) to the team.`,
             operations: [{
               action: "create",
               key: "create_bot",
@@ -15453,7 +15436,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }],
           },
         };
-        const proposed = suggestion ? teamSetupRequests.suggest(setup) : await teamSetupRequests.submit(setup);
+        const proposed = await teamSetupRequests.submit(setup);
         if (proposed.state === "applied" || proposed.state === "pending") {
           internalCapability.createdBots += 1;
           appendDecision(DATA_DIR, { threadId: fromThreadId, requestId: proposed.requestId, botId: chief.id,
