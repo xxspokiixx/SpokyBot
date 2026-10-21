@@ -885,7 +885,7 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
   assert.deepEqual(local.invoked, [["cloud-lending:open"]]);
   const page = preload({ remote: true });
   assert.ok(page.bridge.cloudLending);
-  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open", "state", "set"]);
+  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open", "state", "set", "screen"]);
   // My Cloud's page turns lending on only from the person's own click, which is all it takes; off any time.
   await assert.rejects(page.bridge.cloudLending.set(true), /Turn on the switch/);
   await page.bridge.cloudLending.set(false);
