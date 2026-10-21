@@ -391,6 +391,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (name === "list_team_setup") {
     return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };
   }
+  if (name === "list_team_library") {
+    return { text: JSON.stringify(await api("/api/internal/team-library")) };
+  }
   if (name === "propose_team_setup" || name === "propose_bot_deletion") {
     const deleting = name === "propose_bot_deletion";
     const result = await api(deleting ? "/api/internal/bot-deletion-requests" : "/api/internal/team-setup-requests", {
@@ -419,12 +422,8 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         instructions,
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
-        ...(args.suggestion === true ? { suggestion: true } : {}),
       }),
     });
-    if (r.state === "pending" && args.suggestion === true) {
-      return { text: `Your suggestion is on one card for the user: ${String(r.title)}. @${botName} has not been created. End this turn; their answer resumes you once. If they choose Not now, do not suggest another specialist in this conversation unless they ask.` };
-    }
     if (r.state === "pending") {
       return { text: `One review card is visible: ${String(r.title)}. @${botName} has not been created yet. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this request.` };
     }
