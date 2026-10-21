@@ -61,3 +61,23 @@ checks it guards.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged
   spawn service (T0c notes).
 - The bots' browser engine (agent-browser) is not boxed yet; its Chrome goes through its own gate.
+
+## The credential broker
+
+Keys stay in the server process; boxes get tokens (`server/bot-box/broker.ts`). When a bot spawn is boxed, each provider
+key in its environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`)
+is replaced by a per-process token (`omb_t0_…`, random, bound to the bot and the conversation, 24 h at most, revoked
+when the process exits), and the provider's base URL (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GOOGLE_GEMINI_BASE_URL`)
+points at `http://127.0.0.1:18080/b/<token>/<provider>` inside the box, bridged to the broker's unix socket. The broker
+drops whatever credential header the client sent, adds the real key, and forwards to the provider's fixed upstream
+(the base URL the server had, or the provider's default); the box cannot choose the upstream. A URL MCP server's
+headers ride the same way (`server/bot-box/broker-mcp.ts`): the turn's server list carries
+`http://127.0.0.1:18080/b/<token>/mcp-<name>` with no headers, and that token is kept for the conversation's later
+turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. Connected apps (Composio,
+HighLevel) were already behind the harness (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
+
+A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Cerebras, MiniMax, Kimi, Cursor, Factory,
+Cline, OpenCode, OpenRouter's own variable) stays raw in that box, and the report names it under `broker.unbrokered`,
+so the gap is visible. The self-check adds six broker checks (29 in all): the key is nowhere in the box's environment
+or files, the base URL is the broker, a call with the token reaches the upstream with the real key, a wrong token is
+401, a grant the token lacks is 403.

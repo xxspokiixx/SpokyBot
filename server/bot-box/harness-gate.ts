@@ -34,8 +34,7 @@ export function openHarnessGate(options: HarnessGateOptions): Promise<HarnessGat
   const gate = { socketPath: options.socketPath, refused: 0 } as HarnessGate;
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const socket = req.socket;
-    sockets.add(socket);
-    socket.once("close", () => sockets.delete(socket));
+    if (!sockets.has(socket)) { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); }
     const path = (req.url ?? "").split("?")[0]!;
     if (!harnessPathAllowed(path, allow)) {
       gate.refused += 1;

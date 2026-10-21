@@ -104,6 +104,8 @@ export function spawnCli(
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
   const child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
+  // The broker token minted for this process dies with it.
+  if (boxed?.token) child.once("exit", boxed.release);
   if (process.platform !== "win32") cliGroups.add(child);
   if (process.platform !== "win32" && owner === "bot") {
     rememberEngineSession(child);

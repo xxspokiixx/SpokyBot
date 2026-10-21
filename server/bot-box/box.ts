@@ -7,14 +7,18 @@ import { dirname, join } from "node:path";
 
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
 import { bridgedCommand, type BridgeTools } from "./bridge.ts";
+import { brokerRewrite } from "./broker-env.ts";
+import { openCredentialBroker, type BrokerGrant, type CredentialBroker } from "./broker.ts";
 import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
-import { bwrapArgs, planBox, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { bwrapArgs, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
+/** The loopback port inside a box that reaches the credential broker. */
+export const BOX_BROKER_PORT = 18080;
 export const BOX_BRIDGE_SCRIPT = resolveProxy("bot-box/box-bridge");
 export const BOX_PROBE_SCRIPT = resolveProxy("bot-box/box-probe");
 
@@ -23,6 +27,20 @@ export interface WrappedSpawn {
   args: string[];
   env: Record<string, string>;
   plan: BoxPlan;
+  /** The broker token this process got, or null; `release` revokes it (the caller does so when the process exits). */
+  token: string | null;
+  release(): void;
+  /** Keys left raw in the environment because their CLI takes no base URL. */
+  unbrokered: string[];
+}
+
+/** What the box runtime offers the broker's callers: mint a conversation-bound grant (an MCP server's headers). */
+export interface BoxBroker {
+  port: number;
+  mintForThread: CredentialBroker["mintForThread"];
+  touchThread: CredentialBroker["touchThread"];
+  revokeThread: CredentialBroker["revokeThread"];
+  lookup: CredentialBroker["lookup"];
 }
 
 export interface RunnerOptions {
@@ -32,6 +50,8 @@ export interface RunnerOptions {
   /** Names refused in the box's environment whatever the allow-list says: the workspace credentials. */
   denyEnv: ReadonlySet<string>;
   egressPort?: number;
+  /** The broker to mint per-process tokens with; none leaves keys in the environment. */
+  broker?: { port: number; mintForProcess(input: { botId?: string | null; threadId?: string | null; grants: Record<string, BrokerGrant> }): { token: string }; revoke(token: string): void } | null;
 }
 
 /** Wraps spawns for one setup (the server's, or a self-check fixture's). */
@@ -56,7 +76,23 @@ export class BoxRunner {
     }
     const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
     const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);
-    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env, plan };
+    const brokered = this.broker(env, plan, request);
+    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered: brokered.unbrokered };
+  }
+
+  /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
+  private broker(env: Record<string, string>, plan: BoxPlan, request: BoxRequest): { env: Record<string, string>; token: string | null; release(): void; unbrokered: string[] } {
+    const broker = this.options.broker;
+    if (!broker || plan.net !== "isolated") return { env, token: null, release: () => {}, unbrokered: [] };
+    const ids = request.cwd ? taskWorkspaceIds(request.cwd, this.options.setup.dataDir) : null;
+    // The token is minted first (its value goes in the environment), then granted exactly what the rewrite took out.
+    const minted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: {} });
+    const rewrite = brokerRewrite(env, minted.token, broker.port);
+    broker.revoke(minted.token);
+    if (!Object.keys(rewrite.grants).length) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
+    const granted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: rewrite.grants });
+    const again = brokerRewrite(env, granted.token, broker.port);
+    return { env: again.env, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
   }
 }
 
@@ -71,6 +107,8 @@ export interface BoxReport {
   /** Spawns boxed since boot, and what the gates refused. */
   boxed: number;
   refused: { egress: number; harness: number };
+  /** The credential broker: on with the box; live tokens, calls forwarded and refused, and key names left raw. */
+  broker: { on: boolean; tokens: number; forwarded: number; refused: number; unbrokered: string[] };
 }
 
 export interface StartOptions {
@@ -98,8 +136,10 @@ export class BotBox {
   private runner: BoxRunner | null = null;
   private egress: BoxEgressGate | null = null;
   private harness: HarnessGate | null = null;
+  private credentials: CredentialBroker | null = null;
   private checks: BoxChecks | null = null;
   private boxed = 0;
+  private unbrokered = new Set<string>();
   private started: StartOptions | null = null;
 
   /** Detects, and when the box is on opens the gates. Safe to call once; returns what it decided. */
@@ -114,29 +154,42 @@ export class BotBox {
     }
     const dir = join(options.dataDir, "box");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const egressSocket = join(dir, "egress.sock"), harnessSocket = join(dir, "harness.sock");
-    for (const socket of [egressSocket, harnessSocket]) rmSync(socket, { force: true });
+    const egressSocket = join(dir, "egress.sock"), harnessSocket = join(dir, "harness.sock"), brokerSocket = join(dir, "broker.sock");
+    for (const socket of [egressSocket, harnessSocket, brokerSocket]) rmSync(socket, { force: true });
     this.egress = await openBoxEgressGate({ socketPath: egressSocket });
     this.harness = await openHarnessGate({ socketPath: harnessSocket, port: options.port });
+    this.credentials = await openCredentialBroker({ socketPath: brokerSocket });
     const bridges: BoxBridge[] = [
       { name: "egress", port: BOX_EGRESS_PORT, socket: egressSocket },
       { name: "harness", port: options.port, socket: harnessSocket },
+      { name: "broker", port: BOX_BROKER_PORT, socket: brokerSocket },
     ];
     this.runner = new BoxRunner({
       bwrap: this.detection.tools.bwrap,
       bridge: { socat: this.detection.tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
       setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), bridges },
       denyEnv: options.denyEnv,
+      broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
     });
-    log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges)`);
+    log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker)`);
     return this.detection;
   }
+
+  /** The broker for callers that mint conversation-bound grants, or null when the box (and so the broker) is off. */
+  broker(): BoxBroker | null {
+    const credentials = this.credentials;
+    return credentials ? { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup } : null;
+  }
+
+  /** The broker's socket, for a self-check that bridges it. */
+  brokerSocket(): string | null { return this.credentials?.socketPath ?? null; }
 
   /** The box for one spawn, or null when turns are not boxed here. */
   wrap(request: BoxRequest): WrappedSpawn | null {
     if (!this.runner) return null;
     const wrapped = this.runner.wrap(request);
     this.boxed += 1;
+    for (const name of wrapped.unbrokered) this.unbrokered.add(name);
     return wrapped;
   }
 
@@ -154,15 +207,17 @@ export class BotBox {
       bridge: this.detection.tools ? (this.detection.tools.socat ? "socat" : "node") : null,
       boxed: this.boxed,
       refused: { egress: this.egress?.refused ?? 0, harness: this.harness?.refused ?? 0 },
+      broker: { on: this.credentials !== null, ...(this.credentials?.stats() ?? { tokens: 0, forwarded: 0, refused: 0 }), unbrokered: [...this.unbrokered].sort() },
     };
   }
 
   startOptions(): StartOptions | null { return this.started; }
 
   async stop(): Promise<void> {
-    await Promise.all([this.egress?.close(), this.harness?.close()]);
+    await Promise.all([this.egress?.close(), this.harness?.close(), this.credentials?.close()]);
     this.egress = null;
     this.harness = null;
+    this.credentials = null;
     this.runner = null;
   }
 }

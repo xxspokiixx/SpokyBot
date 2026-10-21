@@ -59,7 +59,7 @@ describe("BotBox", () => {
     const lines: string[] = [];
     expect((await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: (line) => lines.push(line) })).box).toBe("off");
     expect(box.wrap({ command: "claude", args: [], env: {} })).toBeNull();
-    expect(box.report()).toEqual({ box: "off", reason: "not-cloud", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 } });
+    expect(box.report()).toEqual({ box: "off", reason: "not-cloud", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 }, broker: { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] } });
     expect(lines).toEqual(["bot box: off (not-cloud)"]);
     expect(existsSync(join(dirs[0]!, "box"))).toBe(false);
   });
@@ -76,14 +76,27 @@ describe("BotBox", () => {
     expect(detection.box).toBe("bwrap");
     expect(existsSync(join(dataDir, "box", "egress.sock"))).toBe(true);
     expect(existsSync(join(dataDir, "box", "harness.sock"))).toBe(true);
+    expect(existsSync(join(dataDir, "box", "broker.sock"))).toBe(true);
+    expect(box.broker()?.port).toBe(18080);
     const wrapped = box.wrap({ command: "/usr/bin/codex", args: ["app-server"], env: { PATH: "/usr/bin" } })!;
     expect(wrapped.command).toBe("/usr/bin/bwrap");
     expect(wrapped.args).toContain(join(dataDir, "box", "harness.sock"));
     expect(wrapped.args).toContain("/run/omb/harness.sock");
-    expect(box.report()).toMatchObject({ box: "bwrap", bridge: "node", boxed: 1, checks: null });
+    expect(wrapped.args).toContain("/run/omb/broker.sock");
+    expect(box.report()).toMatchObject({ box: "bwrap", bridge: "node", boxed: 1, checks: null, broker: { on: true, tokens: 0 } });
+    // A key becomes a token bound to this process; releasing it (the process exit) revokes it.
+    const keyed = box.wrap({ command: "/usr/local/bin/claude", args: [], cwd: join(dataDir, "task-workspaces", "b1", "t1"), env: { PATH: "/usr/bin", ANTHROPIC_API_KEY: "sk-ant-real", XAI_API_KEY: "xai-real" } })!;
+    expect(keyed.token).toMatch(/^omb_t0_[a-f0-9]{48}$/);
+    expect(keyed.env.ANTHROPIC_API_KEY).toBe(keyed.token);
+    expect(keyed.env.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:18080/b/${keyed.token}/anthropic`);
+    expect(JSON.stringify(keyed.env)).not.toContain("sk-ant-real");
+    expect(keyed.unbrokered).toEqual(["XAI_API_KEY"]);
+    expect(box.report().broker).toMatchObject({ on: true, tokens: 1, unbrokered: ["XAI_API_KEY"] });
+    keyed.release();
+    expect(box.report().broker.tokens).toBe(0);
     box.noteChecks({ passed: 20, total: 21, failed: ["egress-public-allowed"], at: 1 });
     expect(box.report().checks).toEqual({ passed: 20, total: 21, failed: ["egress-public-allowed"], at: 1 });
-    expect(lines).toEqual(["bot box: on (bubblewrap, node bridges)"]);
+    expect(lines).toEqual(["bot box: on (bubblewrap, node bridges, credential broker)"]);
   });
 });
 
