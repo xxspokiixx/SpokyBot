@@ -50,8 +50,7 @@ async function cloud(options: { sleeping?: () => boolean; sleep?: AbortControlle
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   cleanups.push(() => new Promise<void>((resolve) => { computers.close(); links.close(); upgrades.close(); server.closeAllConnections(); server.close(() => resolve()); }));
-  const register = async (session = "owner", internet = true) => {
-    const id = randomUUID();
+  const register = async (session = "owner", internet = true, id: string = randomUUID()) => {
     const response = await fetch(`${base}/api/shared-computers/connect`, { method: "POST", headers: { authorization: `Bearer session-${session}`, "content-type": "application/json", "x-omb-computer-secret": secret },
       body: JSON.stringify({ id, name: "Ash's MacBook", environmentId: "11111111-1111-4111-8111-111111111111", folders: [], terminal: false, computer: false, platform: "darwin", internet }) });
     expect(response.status, await response.clone().text()).toBe(200);
@@ -176,6 +175,23 @@ describe("the device link", () => {
     await fetch(`${home.base}/api/shared-computers/${id}/disconnect`, { method: "POST", headers: { authorization: "Bearer session-owner", "content-type": "application/json", "x-omb-computer-secret": secret }, body: "{}" });
     expect((await second.ended).code).toBe(LINK_ENDED);
     expect(home.links.route(PERSON)).toBeNull();
+  });
+
+  it("ends the link when the computer registers again without its internet connection, and keeps it through any other registration", async () => {
+    const home = await cloud();
+    const site = await website();
+    const id = await home.register();
+    const mac = link(home.base, id, site.port);
+    let ended = false;
+    void mac.ended.then(() => { ended = true; });
+    await until(() => home.links.route(PERSON) !== null, "the link");
+    await home.register("owner", true, id);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(ended, "the same grant registered again keeps its link").toBe(false);
+    expect(home.links.route(PERSON)).not.toBeNull();
+    await home.register("owner", false, id);
+    expect(home.links.route(PERSON), "no page goes through a computer that stopped lending its connection").toBeNull();
+    expect((await mac.ended).code).toBe(LINK_ENDED);
   });
 
   it("leaves no sleep listener behind when a link ends, however often the computer reconnects while My Cloud stays awake", async () => {

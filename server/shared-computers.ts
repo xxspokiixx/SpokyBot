@@ -104,6 +104,8 @@ export class SharedComputers {
     const old = this.computers.get(key);
     if (old) {
       this.authorize(registration.id, owner.session, secret);
+      // Its link was let in for the internet connection as lent then: lent or taken back since, the link starts over.
+      if ((old.registration.internet === true) !== (registration.internet === true)) this.links?.drop(key);
       old.registration = registration; old.seen = Date.now();
       this.remember(registration, old.owner.person);
       return;
