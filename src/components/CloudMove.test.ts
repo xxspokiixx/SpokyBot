@@ -153,7 +153,7 @@ it("after a copy from a PC, one line says which of its folders and files stayed 
   const site = "C:\\Users\\Ada\\Projects\\site";
   expect(moveNextSteps(done(CLOUD, { bots: 2, paths: [site, "C:\\Users\\Ada\\Desktop\\x.docx"] }))).toEqual([
     `2 bots used folders on this computer, like ${site}. Those files didn't come over, so those bots now start in their own folder on My Cloud. Upload what they need there. `
-      + "Or turn on Let Cloud bots use this computer in Settings → MausBot Cloud, so Cloud bots can reach them here.",
+      + "Or turn on Let my bots use this computer in Settings → MausBot Cloud, so Cloud bots can reach them here.",
     expect.stringContaining("To use My Cloud from your phone"),
   ]);
   expect(moveNextSteps(done(VPS, { bots: 1, paths: [site] }))[0])

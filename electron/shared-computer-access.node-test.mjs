@@ -115,10 +115,60 @@ test("folder boundary rejects traversal, links, oversized files and unknown fold
     await symlink(dir, path.join(dir, "linked"));
     await assert.rejects(run({ action: "read_file", path: "linked/note.txt" }), /Symbolic links/);
   }
-  await writeFile(path.join(dir, "large.txt"), Buffer.alloc(262145));
-  await assert.rejects(run({ action: "read_file", path: "large.txt" }), /256 KiB/);
+  await writeFile(path.join(dir, "large.txt"), Buffer.alloc(2 * 1024 * 1024 + 1));
+  await assert.rejects(run({ action: "read_file", path: "large.txt", encoding: "base64" }), /2 MiB/);
   await assert.rejects(run({ action: "list_files", folder_id: randomUUID() }), /not been shared/);
   await assert.rejects(validateSharedFolders([{ id: randomUUID(), path: path.parse(dir).root, write: false }]), /specific folders/);
+});
+
+test("a file up to 2 MiB is read whole, as base64 under the server's 4 MB body, while a write stays at 256 KiB", async t => {
+  const { dir, folder, run } = await fixture(t);
+  const bytes = Buffer.alloc(2 * 1024 * 1024, 7);
+  await writeFile(path.join(dir, "photo.bin"), bytes);
+  const read = await run({ action: "read_file", path: "photo.bin", encoding: "base64" });
+  assert.deepEqual(Buffer.from(payload(read).content, "base64"), bytes, "the whole 2 MiB file arrives");
+  const body = JSON.stringify({ jobId: randomUUID(), result: read });
+  assert.ok(Buffer.byteLength(body) < 4_000_000, `the result body is ${Buffer.byteLength(body)} bytes, over the server's 4,000,000`);
+  await writeFile(path.join(dir, "notes.txt"), "a".repeat(300 * 1024));
+  assert.equal(payload(await run({ action: "read_file", path: "notes.txt" })).bytes, 300 * 1024, "a text file over 256 KiB reads too");
+  folder.write = true;
+  await assert.rejects(run({ action: "write_file", path: "big.txt", content: "b".repeat(256 * 1024 + 1) }), /limited to 256 KiB/);
+  await run({ action: "write_file", path: "fits.txt", content: "b".repeat(256 * 1024) });
+  assert.equal((await stat(path.join(dir, "fits.txt"))).size, 256 * 1024);
+});
+
+test("text that escapes past the server's body limit is refused with the way to read it, never sent to fail there", async t => {
+  const { dir, run } = await fixture(t);
+  // Each quote is escaped twice on the way: one byte becomes four.
+  await writeFile(path.join(dir, "quotes.json"), "\"".repeat(1024 * 1024 + 1024));
+  await assert.rejects(run({ action: "read_file", path: "quotes.json" }), /Read it with encoding base64/);
+  const asBase64 = await run({ action: "read_file", path: "quotes.json", encoding: "base64" });
+  assert.equal(payload(asBase64).bytes, 1024 * 1024 + 1024);
+});
+
+test("no folder grant reaches a browser's saved passwords, the Windows credential vault and its keys, startup programs or ~/.cua", async t => {
+  const { personalSecretPaths } = await import("./shared-computer-access.mjs");
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-secrets-home-")));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const secret = (relative) => path.join(home, ...relative.split("/"));
+  const windows = [
+    "AppData/Local/Google/Chrome/User Data", "AppData/Local/Microsoft/Edge/User Data", "AppData/Local/BraveSoftware/Brave-Browser/User Data",
+    "AppData/Roaming/Mozilla", "AppData/Roaming/Microsoft/Credentials", "AppData/Local/Microsoft/Credentials", "AppData/Roaming/Microsoft/Protect",
+    "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup", ".cua",
+  ];
+  const listed = new Set(personalSecretPaths(home));
+  assert.deepEqual(windows.filter((relative) => !listed.has(secret(relative))), [], "every one of them is protected");
+  // Through the real boundary: AppData lent as a folder still hides each one.
+  for (const relative of windows) await mkdir(secret(relative), { recursive: true });
+  await writeFile(path.join(secret("AppData/Roaming/Microsoft/Protect"), "master-key"), "dpapi");
+  await writeFile(path.join(secret(".cua"), "token"), "cua");
+  const appData = { id: randomUUID(), name: "AppData", path: secret("AppData"), write: false };
+  const grant = { enabled: true, folders: [appData], terminal: false, computer: false, protectedPaths: personalSecretPaths(home) };
+  const run = (operation) => executeSharedOperation(grant, { folder_id: appData.id, ...operation }, new AbortController().signal);
+  await assert.rejects(run({ action: "read_file", path: "Roaming/Microsoft/Protect/master-key" }), /Desktop credentials/);
+  await assert.rejects(run({ action: "list_files", path: "Local/Google/Chrome/User Data" }), /Desktop credentials/);
+  const lentHome = { id: randomUUID(), name: "cua", path: secret(".cua"), write: false };
+  await assert.rejects(executeSharedOperation({ ...grant, folders: [lentHome] }, { folder_id: lentHome.id, action: "read_file", path: "token" }, new AbortController().signal), /Desktop credentials/);
 });
 
 test("terminal and computer control are separately off, and revocation fails closed", async t => {

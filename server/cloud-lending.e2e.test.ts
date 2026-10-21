@@ -109,6 +109,7 @@ function lend(env: { id: string; name: string; origin: string }, desktop: Pick<P
     file: join(home, "desktop-profile", "computer-sharing.json"), environments: () => [env], cuaConnection: async () => null, enabled: async () => false,
     cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: join(home, "mac-home"), ...desktop,
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, authorization: `Bearer ${owner}`, host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${HOST}` } }),
+    linkHeaders: () => ({ authorization: `Bearer ${owner}`, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" }),
   });
 }
 
@@ -450,7 +451,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   await waitForExit(child, { signal: "SIGTERM" });
   await boot();
   const known = (await api("GET", "/api/shared-computers", { token: owner })).body.known;
-  expect(known).toEqual([expect.objectContaining({ id, platform: process.platform, online: false, lent: true, scopes: { folders: 1, terminal: false, screen: false } })]);
+  expect(known).toEqual([expect.objectContaining({ id, platform: process.platform, online: false, lent: true, scopes: { folders: 1, terminal: false, screen: false, internet: false } })]);
   call = await ask();
   // The turn's own instructions name the computer the same way.
   expect(turn.systemPrompt).toContain(`If they ask for something on their ${device} (`);
@@ -470,7 +471,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   await expect.poll(() => connector!.cloudState(env).connected, { timeout: 8000 }).toBe(true);
   connector.revoke(env);
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known, { timeout: 5000 })
-    .toEqual([expect.objectContaining({ online: false, lent: false, scopes: { folders: 0, terminal: false, screen: true } })]);
+    .toEqual([expect.objectContaining({ online: false, lent: false, scopes: { folders: 0, terminal: false, screen: true, internet: false } })]);
   call = await ask();
   expect(JSON.parse((await call("list_shared_computers")).content[0].text).say).toMatch(new RegExp(`^Their ${device} .+ is no longer shared with the Cloud`, "u"));
   rmSync(folderPath, { recursive: true, force: true });
@@ -504,15 +505,16 @@ it("a computer lending while My Cloud restarts waits for it, never asks to open 
 }, hostTimeout(60_000));
 
 // The person used to press Change what's lent on My Cloud's page and land back on This computer. The switch is on My
-// Cloud's page now, through main's own handlers, and turning it on with nothing chosen lends the usual folders, read only.
-it("My Cloud's own page turns this computer's lending on in place, with the usual folders read only, and off again", async () => {
+// Cloud's page now, through main's own handlers, and turning it on with nothing chosen lends the internet connection and
+// the usual folders, read only, with no dialog to answer.
+it("My Cloud's own page turns this computer's lending on in place, with the internet connection and the usual folders read only, and off again", async () => {
   const env = { id: "my-cloud", name: "My Cloud", origin: base };
   connector?.close();
   connector = lend(env);
   const lending = connector;
   const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-usual-folders-")));
   const usual = ["Desktop", "Documents", "Downloads"].map((name) => { mkdirSync(join(root, name)); return join(root, name); });
-  const handlers = new Map<string, (...args: unknown[]) => Promise<any>>(), confirmed: string[][] = [];
+  const handlers = new Map<string, (...args: unknown[]) => Promise<any>>();
   installCloudLending({
     ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => Promise<any>) => handlers.set(channel, handler) },
     localOnly: (_channel: string, handler: unknown) => handler, cloudPage: (_channel: string, handler: unknown) => handler,
@@ -520,16 +522,14 @@ it("My Cloud's own page turns this computer's lending on in place, with the usua
     environment: () => env, save: (target: typeof env, choice: { folders: unknown; screen: boolean }) => lending.saveCloud(target, choice as never), stop: () => lending.revoke(env),
     chooseFolder: async () => null,
     defaults: () => usualFolders([...usual, join(root, "Missing")], validateSharedFolders), validate: validateSharedFolders,
-    confirm: async (grant: { folders: Array<{ name: string }> }) => { confirmed.push(grant.folders.map((folder) => folder.name)); return true; },
   });
   expect((await handlers.get("cloud-lending:state")!({})).on).toBe(false);
   await handlers.get("cloud-lending:set")!({}, true);
-  expect(confirmed).toEqual([["Desktop", "Documents", "Downloads"]]);
-  await expect.poll(() => lending.cloudState(env).connected, { timeout: 8000 }).toBe(true);
-  expect(await handlers.get("cloud-lending:state")!({})).toEqual({ available: true, on: true, status: "lent", screen: false,
+  await expect.poll(() => lending.cloudState(env).link, { timeout: 8000 }).toBe("on");
+  expect(await handlers.get("cloud-lending:state")!({})).toEqual({ available: true, on: true, status: "lent", screen: false, internet: true, link: "on",
     folders: [{ name: "Desktop", write: false }, { name: "Documents", write: false }, { name: "Downloads", write: false }] });
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.find((computer: { lent: boolean }) => computer.lent), { timeout: 5000 })
-    .toEqual(expect.objectContaining({ online: true, scopes: { folders: 3, terminal: false, screen: false } }));
+    .toEqual(expect.objectContaining({ online: true, scopes: { folders: 3, terminal: false, screen: false, internet: true } }));
   await handlers.get("cloud-lending:set")!({}, false);
   expect(lending.cloudState(env).enabled).toBe(false);
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.every((computer: { lent: boolean }) => !computer.lent), { timeout: 5000 }).toBe(true);

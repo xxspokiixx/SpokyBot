@@ -24,6 +24,10 @@ export interface CloudLendingState {
   folders: SharedFolder[];
   /** Apps and screen. */
   screen: boolean;
+  /** Its internet connection, for the bots' browsers on My Cloud. */
+  internet: boolean;
+  /** Lent and connected with the internet connection: whether My Cloud's browsing goes through it yet. */
+  link?: "on" | "connecting" | "unsupported";
   /** An action from the Cloud is running on this computer right now. */
   busy: boolean;
   connected?: boolean;
@@ -47,7 +51,7 @@ export interface CloudLendingSnapshot {
 export interface CloudLendingBridge {
   state(): Promise<CloudLendingSnapshot>;
   chooseFolder(): Promise<SharedFolder | null>;
-  save(input: { folders: SharedFolder[]; screen: boolean }): Promise<CloudLendingSnapshot>;
+  save(input: { folders: SharedFolder[]; screen: boolean; internet?: boolean }): Promise<CloudLendingSnapshot>;
   stop(): Promise<CloudLendingSnapshot>;
 }
 export type CloudLendingVerdict = { allow: true } | { pause: string } | { stop: "signed-out" | "account-changed" | "machine-changed" };
@@ -75,7 +79,13 @@ export function createComputerSharing(options: {
   now?: () => number;
   /** My Cloud's power gate: lending to it waits, calling nothing, while it sleeps. */
   power?: import("./cloud-power.mjs").CloudPowerGate;
+  /** `busy.action` is "internet" while My Cloud's browsing goes through this computer. */
   onChange?: (summary: { lending: string[]; busy: { env: string; action: string } | null }) => void;
+  /** The device link's sign-in for My Cloud, as the poll's fetch carries it (its session cookie). */
+  linkHeaders?: (env: Workspace) => Record<string, string> | Promise<Record<string, string>>;
+  WebSocket?: typeof globalThis.WebSocket;
+  /** This computer's own check on each connection, for tests: how it looks names up and connects. */
+  egress?: Omit<NonNullable<Parameters<typeof import("./device-egress.mjs").createDeviceEgress>[0]>, "seenAs">;
 }): {
   state(id: string): SharingState;
   activity(id?: string, limit?: number): LendingActivityEntry[];
@@ -87,7 +97,7 @@ export function createComputerSharing(options: {
   forget(env: Workspace): void;
   cloudState(env: Workspace | null | undefined): CloudLendingState;
   lendingToCloud(): boolean;
-  saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean }): Promise<CloudLendingState>;
+  saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean; internet?: boolean }): Promise<CloudLendingState>;
   cloudChanged(): void;
   start(options?: { maintainer?: boolean }): void;
   close(): void;

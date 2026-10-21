@@ -29,7 +29,6 @@ const STOPPED: Partial<Record<string, LocaleKey>> = {
 
 /** Refusals main names (electron/cloud-lending-ipc.mjs LENDING_REFUSED): trying again never helps, so no Try again. */
 const REFUSED: Partial<Record<string, LocaleKey>> = {
-  "nothing-to-lend": "lending.refused.nothingToLend",
   "home-or-root": "lending.refused.homeOrRoot",
   "not-folder": "lending.refused.notFolder",
   "too-many": "lending.refused.tooMany",
@@ -44,11 +43,23 @@ export function lendingFailureKey(cause: unknown): LocaleKey {
 /** The words for why lending isn't working, from computer-sharing.mjs's problem code. */
 export const lendingProblemKey = (code: string): LocaleKey | null => PROBLEMS[code] ?? null;
 
-/** "Desktop, Documents and Downloads (read only)", or with apps and screen. */
-export function lentWhat(folders: ReadonlyArray<{ name: string; write: boolean }>, screen: boolean): string {
-  const names = folders.map((folder) => folder.write ? `${folder.name} (${t("lending.page.canEdit")})` : folder.name);
-  const list = listOf([...names, ...(screen ? [t("lending.cloudSide.screen")] : [])]);
-  return folders.length && folders.every((folder) => !folder.write) ? `${list} (${t("lending.page.readOnly")})` : list;
+/** The word the person knows this computer by, from the app's own platform: this Mac, this PC, this computer. */
+export type Device = "mac" | "pc" | "computer";
+export const thisDevice = (platform = typeof window === "undefined" ? undefined : window.ogb?.platform): Device => platform === "darwin" ? "mac" : platform === "win32" ? "pc" : "computer";
+const TITLE: Record<Device, LocaleKey> = { mac: "lending.title.mac", pc: "lending.title.pc", computer: "lending.title.computer" };
+const LENDS: Record<Device, LocaleKey> = { mac: "lending.page.lends.mac", pc: "lending.page.lends.pc", computer: "lending.page.lends.computer" };
+/** "Let my bots use this Mac". */
+export const lendingTitle = (device: Device = thisDevice()) => t(TITLE[device]);
+/** "Your bots can use the internet connection and Desktop, … on this Mac." */
+export const lendsLine = (what: string, device: Device = thisDevice()) => t(LENDS[device], { what });
+
+/** "the internet connection and Desktop, Documents and Downloads (read only)", or each folder with whether bots may edit
+ * it, and apps and screen. */
+export function lentWhat(folders: ReadonlyArray<{ name: string; write: boolean }>, screen: boolean, internet = false): string {
+  const readOnly = folders.length > 0 && folders.every((folder) => !folder.write);
+  const lentFolders = readOnly ? [`${listOf(folders.map((folder) => folder.name))} (${t("lending.page.readOnly")})`]
+    : folders.map((folder) => folder.write ? `${folder.name} (${t("lending.page.canEdit")})` : folder.name);
+  return listOf([...(internet ? [t("lending.page.internet")] : []), ...lentFolders, ...(screen ? [t("lending.cloudSide.screen")] : [])]);
 }
 
 /** Why it is off and since when, kept across restarts: an off switch never hides that it was on. */
@@ -83,6 +94,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   const [draftOn, setDraftOn] = useState(false);
   const [folders, setFolders] = useState<SharedFolder[]>([]);
   const [screen, setScreen] = useState(false);
+  const [internet, setInternet] = useState(false);
   const [working, setWorking] = useState(false);
   const [failed, setFailed] = useState<LocaleKey | null>(null);
   const [more, setMore] = useState(false);
@@ -90,7 +102,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   const accept = (next: CloudLendingSnapshot) => {
     if (!mounted.current) return;
     setSnapshot(next);
-    if (!pending.current && next.state) { setFolders(next.state.folders); setScreen(next.state.screen); }
+    if (!pending.current && next.state) { setFolders(next.state.folders); setScreen(next.state.screen); setInternet(next.state.internet === true); }
   };
   useEffect(() => {
     mounted.current = true;
@@ -106,33 +118,35 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
     catch (cause) { if (mounted.current) setFailed(lendingFailureKey(cause)); }
     finally { pending.current = false; if (mounted.current) setWorking(false); }
   };
-  const lend = (nextFolders: SharedFolder[], nextScreen: boolean) => {
-    setFolders(nextFolders); setScreen(nextScreen);
-    void perform(() => nextFolders.length || nextScreen ? bridge.save({ folders: nextFolders, screen: nextScreen }) : bridge.stop());
+  const lend = (nextFolders: SharedFolder[], nextScreen: boolean, nextInternet: boolean) => {
+    setFolders(nextFolders); setScreen(nextScreen); setInternet(nextInternet);
+    void perform(() => nextFolders.length || nextScreen || nextInternet ? bridge.save({ folders: nextFolders, screen: nextScreen, internet: nextInternet }) : bridge.stop());
   };
   const enabled = snapshot?.state?.enabled === true;
   const on = enabled || draftOn;
-  // Nothing chosen yet: main lends the usual folders, read only.
+  // Nothing chosen yet: main lends the internet connection and the usual folders, read only.
   const toggle = () => {
     if (on) { setDraftOn(false); void perform(() => bridge.stop()); return; }
     setDraftOn(true);
-    void perform(() => bridge.save({ folders, screen }));
+    void perform(() => bridge.save({ folders, screen, internet }));
   };
   if (!snapshot?.available) return null;
   const status = lendingStatusKey(snapshot, on);
-  const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen) : "";
+  const updating = enabled && snapshot.state?.link === "unsupported";
+  const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen, snapshot.state.internet === true && !updating) : "";
   const stopped = on ? null : lendingStoppedLine(snapshot.state);
   const lastUsed = lendingLastUsedLine(snapshot);
   const via = snapshot.state?.via === "access" ? t(snapshot.state.terminal ? "lending.viaAccessTerminal" : "lending.viaAccess") : null;
   return <div data-cloud-lending={enabled ? "on" : "off"} className="mt-2 flex w-full flex-col gap-3 border-t border-hairline/40 pt-4">
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <p className="text-[14px] font-medium text-ink">{t("lending.title")}</p>
+        <p className="text-[14px] font-medium text-ink">{lendingTitle()}</p>
         <p className="mt-1 text-[12px] text-ink-secondary">{t("lending.explain")}</p>
       </div>
-      <Switch checked={on} disabled={working} aria-label={t("lending.title")} onClick={toggle} />
+      <Switch checked={on} disabled={working} aria-label={lendingTitle()} onClick={toggle} />
     </div>
-    {status && <p role="status" className={`text-[13px] ${enabled && snapshot.state?.busy ? "font-medium text-ink" : "text-ink-secondary"}`}>{lent ? t("lending.page.lends", { what: lent }) : t(status)}</p>}
+    {status && <p role="status" className={`text-[13px] ${enabled && snapshot.state?.busy ? "font-medium text-ink" : "text-ink-secondary"}`}>{lent ? lendsLine(lent) : t(status)}</p>}
+    {updating && <p data-lending-internet="unsupported" className="text-[12px] text-ink-secondary">{t("lending.internetUnsupported")}</p>}
     {stopped && <p data-lending-stopped={snapshot.state?.stopped?.reason} className="text-[13px] text-ink-secondary">{stopped}</p>}
     {via && <p data-lending-via="access" className="text-[12px] text-ink-secondary">{via}</p>}
     {lastUsed && <p data-lending-last-used className="text-[12px] text-ink-secondary">{lastUsed}</p>}
@@ -146,23 +160,29 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
         {folders.map(folder => <div key={folder.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-hairline/40 p-2">
           <div className="min-w-0 flex-1"><p className="text-[13px] text-ink">{folder.name}</p><p dir="ltr" className="break-all text-[11px] text-ink-secondary">{folder.path}</p></div>
           <label className="flex items-center gap-2 text-[12px] text-ink-secondary">
-            <input type="checkbox" checked={folder.write} onChange={event => lend(folders.map(entry => entry.id === folder.id ? { ...entry, write: event.target.checked } : entry), screen)} />{t("lending.canEdit")}
+            <input type="checkbox" checked={folder.write} onChange={event => lend(folders.map(entry => entry.id === folder.id ? { ...entry, write: event.target.checked } : entry), screen, internet)} />{t("lending.canEdit")}
           </label>
-          <button type="button" aria-label={t("lending.removeFolder", { name: folder.name })} onClick={() => lend(folders.filter(entry => entry.id !== folder.id), screen)} className="rounded p-1 text-ink-secondary hover:bg-control"><X size={14} /></button>
+          <button type="button" aria-label={t("lending.removeFolder", { name: folder.name })} onClick={() => lend(folders.filter(entry => entry.id !== folder.id), screen, internet)} className="rounded p-1 text-ink-secondary hover:bg-control"><X size={14} /></button>
         </div>)}
         <button type="button" disabled={folders.length >= 20} onClick={() => void perform(async () => {
           const folder = await bridge.chooseFolder();
           const next = folder && !folders.some(entry => entry.path === folder.path) ? [...folders, folder] : folders;
-          if (next !== folders) { setFolders(next); return bridge.save({ folders: next, screen }); }
+          if (next !== folders) { setFolders(next); return bridge.save({ folders: next, screen, internet }); }
           return bridge.state();
         })} className="ui-button flex w-fit items-center gap-2"><FolderPlus size={14} />{t("lending.addFolder")}</button>
       </fieldset>
       <fieldset disabled={working} className="flex flex-col gap-1 disabled:opacity-60">
         <label className="flex items-start gap-2">
-          <input className="mt-1" type="checkbox" checked={screen} disabled={!screen && !snapshot.screenAvailable} onChange={event => lend(folders, event.target.checked)} />
+          <input className="mt-1" type="checkbox" checked={screen} disabled={!screen && !snapshot.screenAvailable} onChange={event => lend(folders, event.target.checked, internet)} />
           <span className="text-[13px] text-ink">{t("lending.screen")}<span className="mt-1 block text-[12px] text-ink-secondary">{t("lending.screenHelp")}</span></span>
         </label>
         {!snapshot.screenAvailable && <p className="ms-6 text-[12px] text-ink-secondary">{t("lending.screenUnavailable")}</p>}
+      </fieldset>
+      <fieldset disabled={working} className="flex flex-col gap-1 disabled:opacity-60">
+        <label className="flex items-start gap-2">
+          <input className="mt-1" type="checkbox" data-lending-internet-choice checked={internet} onChange={event => lend(folders, screen, event.target.checked)} />
+          <span className="text-[13px] text-ink">{t("lending.internet")}<span className="mt-1 block text-[12px] text-ink-secondary">{t("lending.internetHelp")}</span></span>
+        </label>
       </fieldset>
       <p className="text-[12px] text-ink-secondary">{t("lending.ownConversations")}</p>
       <p className="text-[12px] text-ink-secondary">{t("lending.stopHelp")}</p>
