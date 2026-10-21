@@ -57,7 +57,7 @@ function profiles(): Record<string, Profile> {
 }
 
 const PROFILES = profiles();
-const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
+const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
 const CHIEF_TARGET_TOOLS = ["propose_profile", "propose_model"];
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const TEAMWORK_TOOLS = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
@@ -67,12 +67,12 @@ const FULL = "skills+shared+voice+escalations+x";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 56818,
-  "voice": 57559,
-  "shared": 58751,
-  "shared+voice": 59492,
-  "skills": 59637,
-  "skills+voice": 60378,
+  "default": 58032,
+  "voice": 58773,
+  "shared": 59965,
+  "shared+voice": 60706,
+  "skills": 60851,
+  "skills+voice": 61592,
   "skills+shared": 61570,
   "skills+shared+voice": 62311,
   "non-chief": 48104,
@@ -85,7 +85,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+non-chief": 53597,
   "skills+shared+voice+cloud-home": 61366,
   "skills+shared+voice+non-chief+cloud-home": 52652,
-  "default+legacy-switches": 56818,
+  "default+legacy-switches": 58032,
   "skills+shared+voice+escalations": 63171,
   "skills+shared+voice+escalations+x": 67809,
 };

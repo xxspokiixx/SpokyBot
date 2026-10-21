@@ -4,21 +4,18 @@ import { ChevronRight, FileText, Plus, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { BotOverview } from "@/lib/bot-overview-types";
-import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
 import type { Routine } from "@/lib/routines";
 import { routineFinished, routineNextLabel } from "@/lib/routine-display";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { firstSentence } from "@/lib/soul";
-import { currentTaskBot, useStore, type Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
-import type { EffortLevel } from "../../../shared/wire";
 import type { ReplyStyle } from "../../../shared/reply-style";
 import { approvalModeOptionsFor } from "../ApprovalModeSelector";
+import { engineReady } from "../EngineLibrary";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
-import { ModelPicker } from "../ModelPicker";
 import { RoutineEditor } from "../RoutinesPage";
 import { SoulField } from "../SoulField";
-import { ThreadModelsLine } from "../ThreadModelsLine";
 import { useBotApps } from "../bot-settings/useBotApps";
 import type { BotPatch, useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { AppsCard } from "./apps-and-logins";
@@ -62,13 +59,6 @@ export function DetailsTab({ bot, derived, overview, onOpen }: {
     : t(displayedApprovalMode === "auto" ? "botSettings.simple.decideHint"
       : displayedApprovalMode === "full" ? "botSettings.simple.fullHint" : "botSettings.simple.askHint");
 
-  const effortLevels = engine?.capabilities?.modelVariants ? [] : engine?.capabilities?.effortLevels ?? [];
-  const thinkingLevels = effortLevels.length > 0 ? simpleEffortLevels(effortLevels, bot.modelSelection.effort) : [];
-  const chooseEffort = (level: EffortLevel) => {
-    if (bot.busy || level === bot.modelSelection.effort) return;
-    dispatch({ type: "setModel", botId: bot.id, selection: { ...bot.modelSelection, effort: level } });
-  };
-
   const routines = [...derived.botRoutines].sort((a, b) =>
     Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity) || a.name.localeCompare(b.name));
   const soulOpen = editingSoul || Boolean(bot.soulDrift);
@@ -88,31 +78,14 @@ export function DetailsTab({ bot, derived, overview, onOpen }: {
         </Card>
       )}
 
-      <Card label={t("model.simple.model")} anchor="model">
-        <div className={cn(rowCls, "block", thinkingLevels.length > 0 && "[&_[data-simple-effort]]:hidden")} data-simple-default-model>
-          {/* The open thread, as the Advanced header's picker: a Cloud guest changes only their own conversation. */}
-          <ModelPicker
-            key={bot.threadId}
-            bot={currentTaskBot(bot)}
-            threadId={bot.threadId}
-            contained
-            label={<span className="text-[13.5px] font-medium text-ink">{t("model.simple.model")}</span>}
-          />
-          <ThreadModelsLine bot={bot} className="mt-2" />
-        </div>
-        {thinkingLevels.length > 0 && (
-          <SegmentedRow
-            attr="data-thinking-choice"
-            title={t("botSettings.simple.thinking")}
-            hint={t(bot.modelSelection.effort === undefined ? "botSettings.simple.thinkingDefault" : "botSettings.simple.thinkingHint")}
-            label={t("botSettings.simple.thinkingAria", { name: bot.name })}
-            value={bot.modelSelection.effort}
-            onChange={chooseEffort}
-            options={thinkingLevels.map((level) => ({ value: level, label: friendlyEffort(level), disabled: Boolean(bot.busy) }))}
-          />
-        )}
-        <LinkRow data-panel-link="model" onClick={() => onOpen("model")}>{t("botPanel.moreModel")}</LinkRow>
-      </Card>
+      {!(engine && engineReady(engine)) && (
+        <Card anchor="model">
+          <NoteRow tone="warn">{t("botPanel.noAi", { name: bot.name })}</NoteRow>
+          <LinkRow data-panel-link="connect-ai" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "engines" })}>
+            {t("onboarding.engines.title")}
+          </LinkRow>
+        </Card>
+      )}
 
       <Card label={t("botSettings.simple.instructions")} anchor="instructions">
         {soulOpen ? (

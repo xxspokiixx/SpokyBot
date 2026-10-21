@@ -40,7 +40,7 @@ vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
     return props.renderTrigger({ open: false });
   },
 }));
-vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite, useReactor: () => "user" }));
 vi.mock("./CitationUI", async (importOriginal) => ({
   ...await importOriginal<typeof import("./CitationUI")>(),
   CitationSelectionToolbar: () => createElement("span", { "data-testid": "citation-toolbar" }),

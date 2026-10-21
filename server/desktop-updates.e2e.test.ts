@@ -11,17 +11,21 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { HOST_WHILE_UPDATING, LOCAL_VM_UPDATING, LOCAL_VM_UPDATING_PROBLEM, VPS_OUTDATED_HINT } from "./desktop-updates.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
-import { VPS_CONTAINER_LABEL, VPS_MANAGED_LABEL } from "./vps-computer.ts";
+import { VPS_CONTAINER_LABEL, VPS_MANAGED_LABEL, vpsContainerName } from "./vps-computer.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const OLD_DESKTOP = { containers: ["shared"], outdated: ["shared"], imageMissing: true, holdPull: true };
 
-// A VPS that answers like Docker over SSH: no image for this release, and this bot's container on the previous one.
+// Two VPS hosts that answer like Docker over SSH: neither has the image for this release, old-vps holds a bot's container on
+// the previous one and new-vps none. The sealed server gives its children no system folder on PATH, and sed lives there.
 const FAKE_DOCKER = `#!/bin/sh
+PATH="/usr/bin:/bin:$PATH"
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 case "$*" in
   *" image inspect "*) echo "Error response from daemon: No such image: openmausbot" >&2; exit 1 ;;
-  *" inspect "*) for arg in "$@"; do name="$arg"; done; sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/vps-container.json" ;;
+  *" container ls "*) ;;
+  "-H ssh://old-vps inspect "*) for arg in "$@"; do name="$arg"; done; sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/vps-container.json" ;;
+  *" inspect "*) for arg in "$@"; do name="$arg"; done; echo "Error: No such object: $name" >&2; exit 1 ;;
   *) echo "unexpected docker invocation: $*" >&2; exit 64 ;;
 esac
 `;
@@ -101,7 +105,7 @@ describe.skipIf(process.platform === "win32")("a bot's old desktop after an app 
         TEMP: home, TMP: home, TMPDIR: home,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: join(home, "static"), OMB_TEST_VM_STATE: stateFile,
         OMB_USER_DATA: join(home, "user-data"), OMB_EXTRA_PATH: fakeBin,
-        FAKE_DOCKER_DIR: fakeBin, FAKE_DOCKER_LOG: join(fakeBin, "docker.log"),
+        FAKE_DOCKER_DIR: fakeBin, FAKE_DOCKER_LOG: join(fakeBin, "docker.log"), OMB_TEST_SEALED_PATH: "1",
       }, stdio: ["ignore", "pipe", "pipe"],
     });
     child = proc;
@@ -256,17 +260,22 @@ describe.skipIf(process.platform === "win32")("a bot's old desktop after an app 
     expect(actions()).toEqual(["stop", "rescue", "remove"]);
   }, 60_000);
 
-  it("never lands an Auto chat on this computer while its VPS desktop runs an older version", async () => {
+  // A bot on its own server while the default is new-vps: a check made on the default would find nothing there to update.
+  it.each([
+    { server: "the default VPS", name: "Old VPS Bot", defaultAlias: "old-vps", botAlias: undefined },
+    { server: "its own VPS", name: "Own VPS Bot", defaultAlias: "new-vps", botAlias: "old-vps" },
+  ])("never lands an Auto chat on this computer while its desktop on $server runs an older version", async ({ name, defaultAlias, botAlias }) => {
     // No Local VM can be made either, so without the rule the turn would fall through to this computer.
     vm({ noContainers: true });
+    rmSync(join(fakeBin, "docker.log"), { force: true });
     await start();
-    expect((await api("PUT", "/api/config", { vps: { sshAlias: "old-vps" } })).status).toBe(200);
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Old VPS Bot", browser: false });
-    await apiOk("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps", computer: null });
+    expect((await api("PUT", "/api/config", { vps: { sshAlias: defaultAlias } })).status).toBe(200);
+    const { bot } = await apiOk("POST", "/api/bots", { name, browser: false });
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps", computer: null, ...(botAlias ? { vpsAlias: botAlias } : {}) });
     const threadId = await send(bot.id, "Check the VPS desktop.");
     const sent = await dumpFor("Check the VPS desktop.");
     expect(sent.mcpConfig?.mcpServers?.computer, "this computer must not stand in for the VPS").toBeUndefined();
-    expect(readFileSync(join(fakeBin, "docker.log"), "utf8")).toContain("ssh://old-vps");
+    expect(readFileSync(join(fakeBin, "docker.log"), "utf8")).toContain(`-H ssh://old-vps inspect ${vpsContainerName(bot.id)}`);
     // Nor can the bot pick it: select_computer offers this computer to no bot whose own desktop awaits its update.
     const token = sent.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN as string;
     const select = (method: "GET" | "POST") => fetch(`${base}/api/internal/computer/select`, {

@@ -223,7 +223,7 @@ beforeEach(() => {
   onGo.mockReset();
   onClose.mockReset();
   fixture.derived = {
-    patch, approvalMode: "ask", engine: { driverKind: "claudeAgent" }, trustedModesAvailable: false, activeState: "idle",
+    patch, approvalMode: "ask", engine: { driverKind: "claudeAgent", snapshot: { state: "available", authenticated: true } }, trustedModesAvailable: false, activeState: "idle",
     botRoutines: [], canCoordinate: true, sectionName: "General", mascotMotion: null,
     canUseConnectedApps: true, connectedAppsConfigured: true, connectedAppsEnabled: true, browserEnabled: true,
   };
@@ -418,10 +418,13 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("picks one of the ten bodies, ten colors and a face for the mascot", () => {
+  it("picks one of the ten bodies, ten Halloween bodies, ten colors and a face for the mascot", () => {
     const bot = makeBot();
     const rendered = editor(bot);
-    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(10);
+    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(20);
+    expect(rendered.html).toContain(">Halloween<");
+    click(find(rendered, "aria-label", "Use the Pumpkin body"));
+    expect(patch).toHaveBeenLastCalledWith({ mascotBody: "pumpkin" });
     expect(rendered.html.match(/aria-label="Use \w+ mascot color"/g)).toHaveLength(10);
     expect(find(rendered, "aria-label", "Use the Cursor body").props["aria-pressed"]).toBe(true);
     click(find(rendered, "aria-label", "Use the Blob body"));
@@ -493,45 +496,18 @@ describe("the Details tab", () => {
     expect(onOpen).toHaveBeenLastCalledWith("setup");
   });
 
-  it("picks the model in the contained picker for the open thread, with Thinking on its own row", () => {
-    fixture.derived.engine = { driverKind: "claudeAgent", capabilities: { effortLevels: ["low", "medium", "high", "max"] } };
-    const bot = makeBot({ modelSelection: { instanceId: "claude", model: "claude-opus-5-5", effort: "medium" } });
-    const rendered = details(bot);
-    const picker = ofType(rendered, ModelPicker)!;
-    // As the Advanced header's picker: the thread's view of the bot and its thread, so a Cloud guest's pick stays in
-    // their own conversation while an owner's also sets the bot's default.
-    expect(picker.props).toMatchObject({ bot, contained: true, threadId: "thread-scout" });
-    expect(picker.key).toMatch(/thread-scout$/);
-    const onOwnModel = makeBot({ tasks: [{ threadId: "thread-scout", title: "Side", createdAt: 1, modelSelection: { instanceId: "claude", model: "claude-haiku-4-5" } }] });
-    expect((ofType(details(onOwnModel), ModelPicker)!.props.bot as Bot).modelSelection.model).toBe("claude-haiku-4-5");
-    expect(String(find(rendered, "data-simple-default-model").props.className)).toContain("[&_[data-simple-effort]]:hidden");
-    expect(rendered.html).toContain("More thinking is slower and more careful.");
-    const thinking = segment(rendered, "data-thinking-choice");
-    expect(thinking.options.map((option) => [option.value, option.label])).toEqual([["low", "Quick"], ["medium", "Balanced"], ["high", "Deep"], ["max", "Max"]]);
-    expect(thinking.value).toBe("medium");
-    thinking.onChange("high");
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({
-      type: "setModel", botId: "scout", selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
-    });
-    (fixture.dispatch as ReturnType<typeof vi.fn>).mockClear();
-    thinking.onChange("medium");
-    expect(fixture.dispatch).not.toHaveBeenCalled();
-    click(find(rendered, "data-panel-link", "model"));
-    expect(onOpen).toHaveBeenLastCalledWith("model");
-  });
-
-  it("has no Thinking row where the engine has no steps or keeps its own variants", () => {
-    expect(details(makeBot()).html).not.toContain("data-thinking-choice");
-    fixture.derived.engine = { driverKind: "acp", capabilities: { effortLevels: ["low", "high"], modelVariants: true } };
-    const variants = details(makeBot());
-    expect(variants.html).not.toContain("data-thinking-choice");
-    expect(String(find(variants, "data-simple-default-model").props.className)).not.toContain("hidden");
-  });
-
-  it("holds Thinking while a turn runs", () => {
-    fixture.derived.engine = { driverKind: "claudeAgent", capabilities: { effortLevels: ["low", "high"] } };
-    const busy = details(makeBot({ busy: true }));
-    expect(busy.html).toMatch(/data-thinking-choice="high" aria-pressed="false" disabled=""/);
+  it("picks no model, and says plainly when the bot has no AI, with one way to connect one", () => {
+    const working = details(makeBot());
+    expect(ofType(working, ModelPicker)).toBeUndefined();
+    expect(has(working, "data-panel-link", "connect-ai")).toBe(false);
+    for (const engine of [undefined, { driverKind: "claudeAgent", snapshot: { state: "available", authenticated: false } }, { driverKind: "codex", snapshot: { state: "unavailable" } }]) {
+      fixture.derived.engine = engine;
+      const missing = details(makeBot());
+      expect(missing.html).toContain("Scout has no AI to think with yet.");
+      expect(ofType(missing, ModelPicker)).toBeUndefined();
+      click(find(missing, "data-panel-link", "connect-ai"));
+      expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleAppSettings", open: true, section: "engines" });
+    }
   });
 
   it("edits instructions in place, and opens the box by itself while the file has drifted", () => {
@@ -584,7 +560,7 @@ describe("the Details tab", () => {
   });
 
   it("shows legacy Antigravity Auto as Ask without changing the saved mode", () => {
-    fixture.derived.engine = { driverKind: "antigravityAgent" };
+    fixture.derived.engine = { driverKind: "antigravityAgent", snapshot: { state: "available", authenticated: true } };
     fixture.derived.approvalMode = "auto";
     const rendered = details(makeBot({ approvalMode: "auto" }));
     expect(segment(rendered, "data-approval-choice").value).toBe("ask");
@@ -633,17 +609,6 @@ describe("the Details tab", () => {
     expect(details(makeBot()).html).toContain("Nothing scheduled yet. Ask Scout in chat, or create a schedule.");
   });
 
-  it("shows the line and its button under the model only while a thread runs on its own model", () => {
-    const opus = { instanceId: "claude", model: "claude-opus-5-5" };
-    const tasks = [
-      { threadId: "thread-scout", title: "Follows", createdAt: 1, modelSelection: opus, followsBotModel: true },
-      { threadId: "own", title: "Own", createdAt: 1, modelSelection: { instanceId: "codex", model: "gpt-5.6" }, followsBotModel: false },
-    ];
-    const { html } = details(makeBot({ tasks }));
-    expect(html).toContain("1 thread uses its own model.");
-    expect(html).toContain("Switch it too");
-    expect(ofType(details(makeBot({ tasks })), ThreadModelsLine)).toBeDefined();
-  });
 });
 
 describe("the Apps card", () => {
@@ -983,18 +948,13 @@ describe("the Settings tab", () => {
     click(hit);
     expect(onOpen).toHaveBeenLastCalledWith("voice");
 
-    const model = settings(makeBot(), "fallback");
-    expect(find(model, "data-panel-page", "model").props.hint).toBe("Details › Model");
+    expect(has(settings(makeBot(), "fallback"), "data-panel-page", "model"), "Simple mode's search finds no model page").toBe(false);
 
     const pin = settings(makeBot(), "pin");
     expect(has(pin, "data-panel-row", "pin")).toBe(true);
     expect(has(pin, "data-panel-row", "notify")).toBe(false);
 
-    const thinking = settings(makeBot(), "thinking");
-    const jump = find(thinking, "data-panel-jump", "thinking");
-    expect(jump.props.hint).toBe("Details › Model");
-    click(jump);
-    expect(onGo).toHaveBeenLastCalledWith({ tab: "details", anchor: "model" });
+    expect(has(settings(makeBot(), "thinking"), "data-panel-jump", "thinking")).toBe(false);
 
     expect(settings(makeBot(), "zzz").html).toContain("Nothing matches “zzz”.");
     expect(has(settings(makeBot(), "slack"), "data-panel-page", "slack")).toBe(false);

@@ -3,8 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), api: vi.fn(), create: vi.fn(), setDraft: vi.fn(), ready: false, hook: 0, admin: false,
-  profile: {} as Record<string, unknown>, track: vi.fn() }));
+  profile: {} as Record<string, unknown>, track: vi.fn(), advanced: true }));
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 vi.mock("react", async importOriginal => {
@@ -57,6 +58,7 @@ function render(defaultsMode = false, onCreated?: () => void | Promise<void>) {
   return { html, nodes: nodes(tree) };
 }
 beforeEach(() => {
+  fixture.advanced = true;
   fixture.effects = []; fixture.dispatch.mockReset(); fixture.api.mockReset();
   fixture.ready = false; fixture.admin = false; fixture.create.mockReset(); fixture.setDraft.mockReset(); fixture.profile = {};
   fixture.track.mockReset();
@@ -137,6 +139,10 @@ describe("bot draft dialog", () => {
     for (const section of ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice &amp; alerts"]) {
       expect(result.html).toContain(section);
     }
+    fixture.advanced = false;
+    const simple = render().html;
+    expect(simple, "Simple mode picks no model: new bots use the default").not.toContain(">Model<");
+    expect(simple).toContain(">Permissions<");
     fixture.effects[0]();
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/bot-defaults");
     expect(fixture.dispatch).not.toHaveBeenCalled();

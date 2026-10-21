@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { botCreated } from "@/lib/product-events";
 import { visibilityFromForm, type VisibilityMode } from "./bot-settings/VisibilitySection";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
@@ -94,6 +95,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
   const [audience, setAudience] = useState<VisibilityMode>("everyone");
   const [people, setPeople] = useState("");
   const ownerOrAdmin = useOwnerOrAdmin();
+  const sections = useAdvancedMode() ? SECTIONS : SECTIONS.filter((section) => section !== "Model");
   const choosesVisibility = !defaultsMode && typeof window !== "undefined" && !window.ogb && ownerOrAdmin === true;
   const dialog = useRef<HTMLDivElement>(null);
   const closeRef = useRef(() => {});
@@ -222,7 +224,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
         )}
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
         <nav aria-label={t("newBot.sections")} className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline/40 p-2 sm:w-40 sm:flex-col sm:border-b-0 sm:border-r">
-          {SECTIONS.map(label => <button key={label} type="button" onClick={() => setActive(label)} aria-current={active === label ? "page" : undefined}
+          {sections.map(label => <button key={label} type="button" onClick={() => setActive(label)} aria-current={active === label ? "page" : undefined}
             className={cn("shrink-0 rounded-lg px-3 py-2 text-left text-[13px]", active === label ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50")}>{t(SECTION_KEYS[label])}</button>)}
         </nav>
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-5">

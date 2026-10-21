@@ -2709,42 +2709,52 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps one suggested specialist open per conversation and remembers Not now", async () => {
+  it("adds a specialist the Chief chose itself at once, at Ask too, with an Undo and no card, up to four a turn", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
+    const created: string[] = [];
     try {
-      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
-      const before = (await api("GET", "/api/bots?messages=0")).body.bots.length;
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
       const token = await mintTestCapability(BASE, chief.id, chief.threadId);
-      const suggest = async (name: string) => {
+      const add = async (name: string) => {
         const response = await fetch(`${BASE}/api/internal/create-bot`, {
           method: "POST",
           headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          // suggestion: true marks the Chief's own pick; it takes the same path as a requested one.
           body: JSON.stringify({ name, role: "Checker", instructions: "Check the totals.", suggestion: true }),
         });
-        return { status: response.status, body: await response.json() as { state?: string; requestId?: string; title?: string; error?: string } };
+        return { status: response.status, body: await response.json() as { id?: string; state?: string; requestId?: string; error?: string } };
       };
-      const first = await suggest(`Suggested ${chief.id}`);
-      expect(first).toMatchObject({ status: 201, body: { state: "pending", title: `Add @Suggested ${chief.id} to the team?` } });
-      const card = (await api("GET", `/api/threads/${chief.threadId}/messages?limit=20`)).body.messages.find((m: { card?: { requestId?: string } }) => m.card?.requestId === first.body.requestId).card;
-      expect(card.options).toEqual(["Add bot", "Not now"]);
-      expect(await suggest(`Second ${chief.id}`)).toMatchObject({ status: 409, body: { error: expect.stringMatching(/already waiting/) } });
-      const notNow = await fetch(`${BASE}/api/threads/${chief.threadId}/respond`, {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: BASE },
-        body: JSON.stringify({ requestId: first.body.requestId, behavior: "deny" }),
-      });
-      expect((await notNow.json() as { result: { state: string } }).result.state).toBe("denied");
-      const fresh = await mintTestCapability(BASE, chief.id, chief.threadId);
-      const again = await fetch(`${BASE}/api/internal/create-bot`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${fresh}`, "content-type": "application/json" },
-        body: JSON.stringify({ name: `Third ${chief.id}`, role: "Checker", instructions: "Check the totals.", suggestion: true }),
-      });
-      expect(again.status).toBe(409);
-      expect((await again.json() as { error: string }).error).toMatch(/not now/);
-      expect((await api("GET", "/api/bots?messages=0")).body.bots.length).toBe(before);
+      const first = await add(`Checker ${chief.id}`);
+      expect(first, "the Chief's own pick is created at once").toMatchObject({ status: 201, body: { state: "applied", id: expect.any(String) } });
+      created.push(first.body.id!);
+      const messages = (await api("GET", `/api/threads/${chief.threadId}/messages?limit=20`)).body.messages as Array<{ kind?: string; card?: any }>;
+      expect(messages.find((message) => message.card?.requestId === first.body.requestId)?.card)
+        .toMatchObject({ autoApplied: true, answered: "allow", options: [], teamSetupRequest: { undo: { created: [first.body.id] } } });
+      expect(messages.filter((message) => message.kind === "options" && !message.card?.answered && !message.card?.dismissed && !message.card?.expired),
+        "nothing waits on the person").toEqual([]);
+      for (const n of [2, 3, 4]) {
+        const next = await add(`Checker ${n} ${chief.id}`);
+        expect(next.status).toBe(201);
+        created.push(next.body.id!);
+      }
+      expect(await add(`Checker 5 ${chief.id}`), "the per-turn cap still holds").toMatchObject({ status: 429 });
+      expect((await api("POST", `/api/threads/${chief.threadId}/undo`, { requestId: first.body.requestId })).body).toEqual({ ok: true, undone: true });
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some((bot: { id: string }) => bot.id === first.body.id)).toBe(false);
     } finally {
+      for (const id of created) await api("DELETE", `/api/bots/${id}`);
       await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("lets only a Chief read the team library from its turn", async () => {
+    const helper = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, helper.id, helper.threadId);
+      const response = await fetch(`${BASE}/api/internal/team-library`, { headers: { authorization: `Bearer ${token}` } });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Only an active Chief may plan team setup" });
+    } finally {
+      await api("DELETE", `/api/bots/${helper.id}`);
     }
   });
 
@@ -2796,21 +2806,14 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps Chief room changes behind pending user approvals", async () => {
-    const bot = (await api("POST", "/api/bots", { name: "Pending Chief", section: "Pending room" })).body.bot;
-    const peer = (await api("POST", "/api/bots", { name: "Pending peer", section: "Pending room" })).body.bot;
-    await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true, approvalMode: "ask" });
-    const room = (await api("POST", "/api/groups", { name: "Pending room", memberIds: [bot.id], section: "Pending room" })).body.group;
+  it("keeps Chief room changes behind an approval still waiting on the person", async () => {
+    const state = (await api("GET", "/api/bots")).body;
+    const room = state.groups.find((group: { id: string }) => group.id === "test-stranded-room");
+    expect(room.messages.find((message: { id: string }) => message.id === "stranded-card").card.answered, "the fixture's approval is still open").toBeFalsy();
+    const chief = state.bots.find((bot: { id: string }) => bot.id === "test-bot-a");
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
     try {
-      const roomToken = await mintTestCapability(BASE, bot.id, room.threadId);
-      // A suggested specialist waits on the person's answer at every level.
-      const proposed = await fetch(`${BASE}/api/internal/create-bot`, {
-        method: "POST", headers: { authorization: `Bearer ${roomToken}`, "content-type": "application/json" },
-        body: JSON.stringify({ name: `Room helper ${peer.id}`, role: "Helper", instructions: "Help the room.", suggestion: true }),
-      });
-      expect(proposed.status).toBe(201);
-      expect((await proposed.json() as { state: string }).state).toBe("pending");
-      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
       const changed = await chiefRoomRequest(BASE, token, "manage-room", {
         roomId: room.id, action: "set_bulletin", bulletin: "Changed during approval",
       });
@@ -2818,9 +2821,7 @@ describe("harness HTTP API", () => {
       expect(changed.body.error).toMatch(/waiting on you/);
       expect((await chiefRoomRequest(BASE, token, "manage-room", { roomId: "test-dm", action: "rename", name: "A room" })).status).toBe(403);
     } finally {
-      await api("DELETE", `/api/groups/${room.id}`);
-      await api("DELETE", `/api/bots/${bot.id}`);
-      await api("DELETE", `/api/bots/${peer.id}`);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: false })).status).toBe(200);
     }
   });
 
@@ -8828,7 +8829,7 @@ describe("harness HTTP API", () => {
 
       const sections = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text: string }>;
       const team = sections.find((section) => section.id === "coordination")?.text ?? "";
-      expect(team).toContain("You are the Chief of Staff for the Roster end section.");
+      expect(team).toContain("the Chief of Staff for the Roster end section: their one point of contact.");
       expect(team.endsWith(roster)).toBe(true);
 
       rmSync(fakeClaudeDump, { force: true });
