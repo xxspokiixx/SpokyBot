@@ -67,8 +67,8 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   nova = (await local("POST", "/api/bots", { name: "Nova", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
   expect((await local("PATCH", `/api/bots/${nova.id}`, { soul: "You are Nova.", section: "Ops" })).status).toBe(200);
   await turn(local, nova, nova.threadId, "Hello Nova.");
-  // Nova reached My Cloud once before, with an earlier send: from then on each side keeps its own memory.
-  expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(nova.id)] })).result.bots).toEqual(["Nova"]);
+  // Nova reached My Cloud once before, with an older app's Send: from then on each side keeps its own memory.
+  expect((await fx.olderSend({ keys: [itemKey.bot(nova.id)] })).result.bots).toEqual(["Nova"]);
 
   // Memory on both sides: one fact both have (dated and marked differently), one only each side has.
   const put = (side: Side, path: string, text: string) => side("PUT", `/api/bots/${nova.id}/memory/file`, { path, text });

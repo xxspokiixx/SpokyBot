@@ -365,14 +365,12 @@ describe("the buying sheet, one view per state", () => {
   });
 });
 
-describe("This computer's My Cloud card", () => {
+describe("This computer's Cloud sign-in card", () => {
   const view = (account: CloudAccountState) => cloudNoticeKind(cloudPlanView(account), account);
-  it("says The Cloud is ready to someone with a plan (in a trial too), and sign in again where the sign-in ended", () => {
+  it("says sign in again where the sign-in ended, and nothing to someone signed in", () => {
     const base = { status: "connected" as const, account: { id: "a", email: "p@example.test" } };
     const ready = { status: "ready" as const, origin: "https://omb-u-1.fly.dev" };
-    expect(view({ ...base, entitlement: { plan: "pro", status: "active", expiresAt: NOW + DAY, version: 1 }, machine: ready })).toBe("my-cloud");
-    expect(view({ ...base, entitlement: { plan: "pro", status: "active", expiresAt: NOW + DAY, version: 1 }, machine: ready, trial: trial("active") })).toBe("my-cloud");
-    expect(view({ ...base, entitlement: { plan: "pro", status: "active", expiresAt: NOW + DAY, version: 1 }, machine: { status: "provisioning" } })).toBeNull();
+    expect(view({ ...base, entitlement: { plan: "pro", status: "active", expiresAt: NOW + DAY, version: 1 }, machine: ready })).toBeNull();
     expect(view({ status: "reauth-required", message: "expired", lastPlan: { active: true } })).toBe("sign-in-again");
     expect(view({ status: "reauth-required", message: "expired", lastPlan: { active: false } })).toBeNull();
     expect(view({ status: "signed-out", message: "restore-removed" })).toBe("removed");

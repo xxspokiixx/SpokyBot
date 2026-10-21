@@ -1,21 +1,13 @@
-// Main's side of Send to My Cloud (cloud-send.mjs): its IPC, the Cloud sessions it uses, and where its state lives.
-// Chats go by row; a Cloud too old for that gets Bring newer chats' copy (cloud-move.mjs), which only adds.
-// This computer's Settings may ask for everything; My Cloud's own page, verified as the person's Cloud, learns only
-// what waits (sendNotice) and may start a send from the person's click. Settings → Logins' "Also use on My Cloud" is the
-// same send for one login.
+// Main's side of the send that carries the one-time move to My Cloud (cloud-send.mjs): the Cloud sessions it uses, where
+// its state lives, and the move's line on either page (the notice).
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { BACKGROUND_HEADERS } from "./cloud-power.mjs";
-import { createLoginHandoffClient, handoffWhat } from "./cloud-logins.mjs";
+import { createLoginHandoffClient } from "./cloud-logins.mjs";
 import { MOVE_LINE, resultKey } from "./cloud-send-parts.mjs";
 import { createCloudSend, sendNotice } from "./cloud-send.mjs";
 
 const SESSION_LABEL = "Send to My Cloud";
 const MOVE_LABEL = "Move to My Cloud";
-const NOT_READY = {
-  outdated: "My Cloud needs an update before it can receive logins from this computer. It updates by itself; try again later.",
-  asleep: "My Cloud is asleep. Open it once to wake it, then try again.",
-  unreachable: "My Cloud didn't answer. Check it in Settings → MausBot Cloud, then try again.",
-};
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
 
@@ -54,21 +46,9 @@ export async function openOwnerSession(target, fetchImpl, { label = SESSION_LABE
   };
 }
 
-/** What Settings → Logins compares: My Cloud's logins (site and username) and whether 1Password is connected there. */
-export function loginsView(snapshot) {
-  if (snapshot.cloud === "none") return { cloud: null };
-  if (snapshot.cloud !== "ready") return { cloud: { reachable: false } };
-  const onCloud = new Set(["on-both", "to-update", "differs"]);
-  const there = [...snapshot.rows.filter((row) => row.kind === "login" && onCloud.has(row.state)), ...snapshot.cloudOnly.filter((row) => row.kind === "login")];
-  const logins = there.map((row) => ({ site: /^login:([^|]+)\|/u.exec(row.key)?.[1], username: row.detail ?? "" })).filter((login) => login.site);
-  const onePassword = snapshot.rows.some((row) => row.kind === "1password" && onCloud.has(row.state)) || snapshot.cloudOnly.some((row) => row.kind === "1password");
-  return { cloud: { reachable: true, logins, onePassword: { connected: onePassword, vaults: [] } } };
-}
-
 /**
  * @param {{
  *   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void },
- *   localOnly: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   cloudPage: (event: unknown) => "local" | "cloud" | null,
  *   server: () => { postMessage(message: unknown): void } | null | undefined,
  *   local: (route: string, init?: { method?: string }) => Promise<Response>,
@@ -79,18 +59,16 @@ export function loginsView(snapshot) {
  *   file: () => string,
  *   window: () => { isDestroyed(): boolean, webContents: { send(channel: string, value: unknown): void, mainFrame: { url: string } } } | null,
  *   localOrigin: () => string,
- *   openSettings: () => void,
  *   fetch?: typeof fetch,
- *   bringChats?: () => Promise<{ phase: string, action?: string, brought?: { conversations: number, messages: number }, error?: { message?: string } }>,
  *   engineWaitMs?: number,
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  *   move?: () => { view(): unknown, seen(): unknown, retry(): Promise<unknown> } | null,
- * }} deps `bringChats`: Bring newer chats to My Cloud, as cloud-move.mjs's bring answers it. `engineWaitMs`: how long a
+ * }} deps `engineWaitMs`: how long a
  * move waits for My Cloud's engines (cloud-connections.mjs). `space`: My Cloud's plan disk and the Admin's grow, so a
  * move makes room for the files it carries. `move`: the one-time move (one-home.mjs), whose line either page shows.
  */
-export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin, openSettings,
-  fetch: fetchImpl = globalThis.fetch, bringChats = null, engineWaitMs, space, move = () => null }) {
+export function installCloudSend({ ipcMain, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin,
+  fetch: fetchImpl = globalThis.fetch, engineWaitMs, space, move = () => null }) {
   const handoff = createLoginHandoffClient();
   const pageOf = () => {
     const win = window();
@@ -104,9 +82,7 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
   /** The notice either page gets, with the one-time move's line when there is one. */
   const notice = (snapshot) => { const line = moving(); return { ...sendNotice(snapshot), ...(line ? { move: line } : {}) }; };
   const deliver = (snapshot) => {
-    const page = pageOf();
-    if (page === "local") window().webContents.send("cloud-send:state-changed", snapshot);
-    if (page) window().webContents.send("cloud-send:notice-changed", notice(snapshot));
+    if (pageOf()) window().webContents.send("cloud-send:notice-changed", notice(snapshot));
   };
   const read = async (route) => {
     const target = home();
@@ -130,11 +106,6 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
       },
     },
     handoff: (what) => handoff.request(server(), what),
-    bringChats: bringChats && (async () => {
-      const state = await bringChats();
-      if (state?.phase === "done" && state.action === "bring" && record(state.brought)) return { conversations: state.brought.conversations, messages: state.brought.messages };
-      throw new Error(sentence(state?.error?.message) ?? "Another copy to My Cloud is running. Send again when it has finished.");
-    }),
     store: {
       read: () => { try { return JSON.parse(readFileSync(file(), "utf8")); } catch { return null; } },
       write: (value) => { const target = file(); writeFileSync(`${target}.tmp`, JSON.stringify(value), { mode: 0o600 }); renameSync(`${target}.tmp`, target); },
@@ -143,27 +114,13 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
     engineWaitMs,
     space,
   });
-  const fresh = () => send.compare().catch(() => send.snapshot());
-  const options = (input) => ({
-    keys: Array.isArray(input?.keys) ? input.keys.filter((key) => typeof key === "string").slice(0, 5_000) : null,
-    force: Array.isArray(input?.force) ? input.force.filter((key) => typeof key === "string").slice(0, 5_000) : [],
-  });
   const onPage = (channel, handler) => (event, ...args) => {
     const asking = cloudPage(event);
     if (!asking) throw new Error(`${channel} is only available in this app's window`);
     return handler(asking, ...args);
   };
 
-  ipcMain.handle("cloud-send:state", localOnly("cloud-send:state", () => send.snapshot()));
-  ipcMain.handle("cloud-send:refresh", localOnly("cloud-send:refresh", () => fresh()));
-  ipcMain.handle("cloud-send:send", localOnly("cloud-send:send", (_event, input) => send.send({ ...options(input), reason: "button" })));
-  ipcMain.handle("cloud-send:item", localOnly("cloud-send:item", (_event, key, on) => send.setItem(String(key), on === true)));
-  ipcMain.handle("cloud-send:notice", onPage("cloud-send:notice", async () => notice(await fresh())));
-  // A send that fails as a whole is this send's outcome too: the notice carries why.
-  ipcMain.handle("cloud-send:page-send", onPage("cloud-send:page-send", async (asking) => {
-    await send.send({ reason: asking === "cloud" ? "my-cloud" : "button" }).catch(() => {});
-    return notice(send.snapshot());
-  }));
+  ipcMain.handle("cloud-send:notice", onPage("cloud-send:notice", () => notice(send.snapshot())));
   ipcMain.handle("cloud-send:dismiss", onPage("cloud-send:dismiss", (_event, signature) => {
     if (String(signature) === MOVE_LINE) {
       // The done line says what the move brought; the move's own send result is not said again after it.
@@ -176,23 +133,6 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
   // The move's Try again, after a day of failing.
   ipcMain.handle("cloud-send:move-retry", onPage("cloud-send:move-retry", async () => { await move()?.retry(); return notice(send.snapshot()); }));
 
-  // Settings → Logins: the same comparison and the same send, for one login or 1Password.
-  ipcMain.handle("cloud-logins:state", localOnly("cloud-logins:state", async () => loginsView(await fresh())));
-  ipcMain.handle("cloud-logins:send", localOnly("cloud-logins:send", async (_event, input) => {
-    const what = handoffWhat(input);
-    if (!what) throw new Error("Choose a login to send to My Cloud.");
-    if (!home()) throw new Error("This computer has no My Cloud yet.");
-    const before = await fresh();
-    if (before.cloud !== "ready") throw new Error(NOT_READY[before.cloud] ?? NOT_READY.unreachable);
-    const row = before.rows.find((entry) => what.kind === "1password" ? entry.kind === "1password" : entry.kind === "login" && entry.id === what.id);
-    if (!row) throw new Error(what.kind === "1password" ? "1Password is not connected on this computer." : "This login is no longer saved on this computer.");
-    if (row.state === "off" || row.state === "removed") send.setItem(row.key, true);
-    const outcome = await send.send({ keys: [row.key], force: [row.key], reason: "logins" });
-    const failed = outcome.result.failed.find((entry) => entry.key === row.key);
-    if (failed) throw new Error(failed.error);
-    return { sent: true, ...(outcome.result.notes.some((note) => note.kind === "narrowed") ? { narrowed: true } : {}), ...loginsView(send.snapshot()) };
-  }));
-
   return {
     receive: handoff.receive,
     /** The one-time move to My Cloud (cloud-send.mjs): a pass that carries everything, `final` the one after this computer
@@ -204,16 +144,6 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
     snapshot: () => send.snapshot(),
     /** The move's line changed: both pages get it again. */
     publish: () => deliver(send.snapshot()),
-    /** The switcher: what waits, from the last comparison (refreshed in the background), and its Send. */
-    menu: () => {
-      void fresh();
-      const waiting = send.waiting();
-      return {
-        waiting,
-        onSend: () => { openSettings(); void send.send({ reason: "menu" }).catch(() => {}); },
-        onOpen: () => openSettings(),
-      };
-    },
   };
 }
 

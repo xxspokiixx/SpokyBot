@@ -97,7 +97,7 @@ export interface CloudAccountBridge {
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
 /** On the person's own Cloud, open in this app's window: the plan, read
- * only, and two ways out. No account, credential or address. */
+ * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */
 export interface CloudPlanSnapshot {
   status: "paid" | "attention" | "checking" | "signin" | "none";
@@ -109,11 +109,14 @@ export interface CloudPlanSnapshot {
   notice?: import("./cloud-home.mjs").CloudTrialState;
   /** Verified: the plan sleeps when idle. */
   sleeps?: true;
+  /** This window's home is this Cloud: the person's bots moved here (home-window.mjs). */
+  home?: true;
 }
 export interface CloudPlanBridge {
   state(): Promise<CloudPlanSnapshot>;
   manage(): Promise<void>;
-  useThisComputer(): Promise<void>;
+  /** This device's MausBot Cloud sign-in, again, once it has ended: only from the person's click. */
+  signIn?(): Promise<void>;
   /** The trial's popup due now was shown: main shows it no more today. Absent on an older app. */
   noticeSeen?(): Promise<void>;
 }
