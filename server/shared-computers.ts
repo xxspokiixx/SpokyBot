@@ -171,7 +171,7 @@ export class SharedComputers {
     const entry = this.authorize(id, session, secret);
     entry.seen = Date.now();
     return { key: SharedComputers.key(session, id), person: entry.owner.person, internet: entry.registration.internet === true, seenAs: null,
-      used: () => this.lent?.used(entry.owner.person, id) };
+      live: () => this.sessionLive(session), used: () => this.lent?.used(entry.owner.person, id) };
   }
   status(principal: string | null): SharedComputerStatus[] {
     if (!principal) return [];

@@ -177,6 +177,17 @@ describe("the device link", () => {
     expect(home.links.route(PERSON)).toBeNull();
   });
 
+  it("carries no more browsing the moment the computer's session is signed out, and ends its link", async () => {
+    const home = await cloud();
+    const site = await website();
+    const id = await home.register();
+    const mac = link(home.base, id, site.port);
+    await until(() => home.links.route(PERSON) !== null, "the link");
+    home.live.delete("owner");
+    expect(home.links.route(PERSON), "the next page goes My Cloud's own way").toBeNull();
+    expect((await mac.ended).code).toBe(LINK_ENDED);
+  });
+
   it("ends the link when the computer registers again without its internet connection, and keeps it through any other registration", async () => {
     const home = await cloud();
     const site = await website();

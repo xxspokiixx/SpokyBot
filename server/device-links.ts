@@ -18,6 +18,9 @@ export interface LinkedComputer {
   key: string;
   person: string;
   internet: boolean;
+  /** Its sign-in is still live: asked at each page and each ping, so a session signed out carries no more browsing and
+   * its link ends. */
+  live: () => boolean;
   /** The address My Cloud sees the computer connect from: its home's public address, which it never connects to. */
   seenAs: string | null;
   /** A page opened through it: its "Last used" moves. */
@@ -45,6 +48,7 @@ export class DeviceLinks {
       this.drop(computer.key, 1000);
       const mux = createLinkMux({ send: (frame) => { if (ws.readyState === ws.OPEN) ws.send(frame); } });
       const link: Link = { ws, mux, computer: { ...computer, seenAs: computer.seenAs && isIP(computer.seenAs) ? computer.seenAs : null }, since: Date.now(), heard: true, usedAt: 0, ping: setInterval(() => {
+        if (!link.computer.live()) { ws.close(LINK_ENDED, "lending ended"); return; }
         if (!link.heard) { ws.terminate(); return; }
         link.heard = false;
         try { ws.ping(); } catch {}
@@ -78,7 +82,7 @@ export class DeviceLinks {
   route(person: string): DeviceRoute | null {
     let newest: Link | null = null;
     for (const link of this.#links.values()) {
-      if (link.computer.person !== person || !link.computer.internet || link.ws.readyState !== link.ws.OPEN) continue;
+      if (link.computer.person !== person || !link.computer.internet || link.ws.readyState !== link.ws.OPEN || !link.computer.live()) continue;
       if (!newest || link.since > newest.since) newest = link;
     }
     const chosen = newest;
