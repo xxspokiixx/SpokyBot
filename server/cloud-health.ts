@@ -249,10 +249,11 @@ export interface CloudHealthDeps {
 }
 
 /** Fixed codes and counts only: the box kind, why it is off, and the self-check's `passed/total` with the failed check ids. */
-export function boxSummary(report: BoxReport | undefined): { box: BoxReport["box"]; reason: BoxReport["reason"]; checks: string | null; failed: string[]; boxed: number; refused: BoxReport["refused"] } | null {
+export function boxSummary(report: BoxReport | undefined): { box: BoxReport["box"]; reason: BoxReport["reason"]; checks: string | null; failed: string[]; boxed: number; refused: BoxReport["refused"]; broker: BoxReport["broker"] } | null {
   if (!report) return null;
   const failed = report.checks?.failed.filter((id) => CODE.test(id)).slice(0, 50) ?? [];
-  return { box: report.box, reason: report.reason, checks: report.checks ? `${report.checks.passed}/${report.checks.total}` : null, failed, boxed: report.boxed, refused: report.refused };
+  const broker = { ...report.broker, unbrokered: report.broker.unbrokered.filter((name) => KIND.test(name)).slice(0, 50) };
+  return { box: report.box, reason: report.reason, checks: report.checks ? `${report.checks.passed}/${report.checks.total}` : null, failed, boxed: report.boxed, refused: report.refused, broker };
 }
 
 /** The report's body, at most CLOUD_HEALTH_MAX_BYTES of JSON. */

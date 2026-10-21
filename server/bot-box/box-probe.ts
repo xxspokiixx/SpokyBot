@@ -32,8 +32,8 @@ export interface ProbeSpec {
   publicTarget: string | null;
   /** Checks that apply only when the box has its own network. */
   isolatedNet: boolean;
-  /** T0b: a model call through the broker. */
-  broker?: { port: number; token: string; provider: string; path: string; keyNames: string[] };
+  /** T0b: a model call through the broker, and the real key's value that must be nowhere in the box. */
+  broker?: { port: number; token: string; provider: string; path: string; keyNames: string[]; marker: string };
 }
 
 export interface ProbeResult { id: string; ok: boolean; detail: string }
@@ -134,11 +134,16 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("egress-private-refused", (await connectThroughGate(spec.egressPort, "10.0.0.1:443")) === "403", "CONNECT private");
   if (spec.publicTarget) add("egress-public-allowed", (await connectThroughGate(spec.egressPort, spec.publicTarget)) === "200", `CONNECT ${spec.publicTarget}`);
   if (spec.broker) {
-    const { port, token, provider, path, keyNames } = spec.broker;
-    const keys = keyNames.filter((name) => env[name] && !env[name]!.startsWith("omb_t0_"));
-    add("no-provider-key-in-env", keys.length === 0, keys.length ? `raw key in ${keys.join(",")}` : "tokens only");
+    const { port, token, provider, path, keyNames, marker: key } = spec.broker;
+    const keys = keyNames.filter((name) => !env[name] || !env[name]!.startsWith("omb_t0_"));
+    const anywhere = Object.entries(env).filter(([name, value]) => name !== PROBE_SPEC_ENV && value?.includes(key)).map(([name]) => name);
+    add("no-provider-key-in-env", keys.length === 0 && anywhere.length === 0, anywhere.length ? `raw key in ${anywhere.join(",")}` : keys.length ? `no token in ${keys.join(",")}` : "tokens only");
+    const base = env.ANTHROPIC_BASE_URL ?? "";
+    add("base-url-is-broker", base === `http://127.0.0.1:${port}/b/${token}/${provider}`, base ? "points at the broker" : "unset");
     add("broker-call-works", (await httpStatus(port, `/b/${token}/${provider}${path}`)) === "200", `GET /b/<token>/${provider}${path}`);
-    add("broker-no-token-refused", (await httpStatus(port, `/b/omb_t0_wrong/${provider}${path}`)) === "401", "wrong token");
+    add("broker-wrong-token-refused", (await httpStatus(port, `/b/omb_t0_${"0".repeat(48)}/${provider}${path}`)) === "401", "wrong token");
+    add("broker-other-grant-refused", (await httpStatus(port, `/b/${token}/openai${path}`)) === "403", "a grant the token lacks");
+    add("broker-key-not-on-disk", scanForMarker(spec.dataDir, key, { files: 5_000 }) + scanForMarker("/tmp", key, { files: 5_000 }) === 0, "0 hits");
   }
   return results;
 }

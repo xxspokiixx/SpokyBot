@@ -25,7 +25,8 @@ describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubble
     const result = await runBoxSelfCheck(options());
     expect(result.error).toBeUndefined();
     expect(result.failed).toEqual([]);
-    expect(result.total).toBeGreaterThanOrEqual(20);
+    expect(result.total).toBe(28);
+    expect(result.results.map((check) => check.id)).toEqual(expect.arrayContaining(["no-provider-key-in-env", "broker-call-works", "broker-wrong-token-refused", "broker-other-grant-refused", "broker-key-not-on-disk", "base-url-is-broker"]));
   }, 120_000);
 
   it("each mutation fails the checks it guards, and only those", async () => {

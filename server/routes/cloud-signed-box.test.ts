@@ -11,7 +11,8 @@ import { SessionRegistry } from "../sessions.ts";
 import { CLOUD_BOX_PATH, createCloudSignedRoutes } from "./cloud-signed.ts";
 
 const secret = "S".repeat(43);
-const report: BoxReport = { box: "bwrap", reason: null, checks: { passed: 23, total: 23, failed: [], at: 5 }, bridge: "socat", boxed: 4, refused: { egress: 2, harness: 1 } };
+const broker = { on: true, tokens: 2, forwarded: 9, refused: 1, unbrokered: ["XAI_API_KEY"] };
+const report: BoxReport = { box: "bwrap", reason: null, checks: { passed: 23, total: 23, failed: [], at: 5 }, bridge: "socat", boxed: 4, refused: { egress: 2, harness: 1 }, broker };
 
 function routes(box?: () => BoxReport) {
   let clock = 1_800_000_000_000, counter = 0;
@@ -45,12 +46,13 @@ describe("GET /api/cloud/box", () => {
     const answer = await send("GET", CLOUD_BOX_PATH, sign(CLOUD_BOX_PATH));
     expect(answer.answered).toBe(true);
     expect(answer.status).toBe(200);
-    expect(answer.body).toEqual({ v: 1, at: 1_800_000_000_000, box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 } });
-    expect(health.report(null).box).toEqual({ box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 } });
+    expect(answer.body).toEqual({ v: 1, at: 1_800_000_000_000, box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 }, broker });
+    expect(health.report(null).box).toEqual({ box: "bwrap", reason: null, checks: "23/23", failed: [], boxed: 4, refused: { egress: 2, harness: 1 }, broker });
   });
 
   it("says off, with the reason, on a server with no box", async () => {
-    const { sign, send, health } = routes(() => ({ box: "off", reason: "userns-refused", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 } }));
+    const off = { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] };
+    const { sign, send, health } = routes(() => ({ box: "off", reason: "userns-refused", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 }, broker: off }));
     expect((await send("GET", CLOUD_BOX_PATH, sign(CLOUD_BOX_PATH))).body).toMatchObject({ box: "off", reason: "userns-refused", checks: null });
     expect(health.report(null).box).toMatchObject({ box: "off", reason: "userns-refused" });
     const none = routes();
@@ -68,9 +70,10 @@ describe("GET /api/cloud/box", () => {
     expect((await send("POST", CLOUD_BOX_PATH, sign(CLOUD_BOX_PATH, "POST"))).status).toBe(405);
   });
 
-  it("carries only fixed codes: a failed check id that is not one is left out", () => {
-    const summary = boxSummary({ ...report, checks: { passed: 1, total: 3, failed: ["egress-public-allowed", "a bot's name!"], at: 1 } });
+  it("carries only fixed codes: a failed check id or an unbrokered name that is not one is left out", () => {
+    const summary = boxSummary({ ...report, checks: { passed: 1, total: 3, failed: ["egress-public-allowed", "a bot's name!"], at: 1 }, broker: { ...broker, unbrokered: ["XAI_API_KEY", "not a name!"] } });
     expect(summary?.failed).toEqual(["egress-public-allowed"]);
+    expect(summary?.broker.unbrokered).toEqual(["XAI_API_KEY"]);
     expect(summary?.checks).toBe("1/3");
     expect(boxSummary(undefined)).toBeNull();
   });

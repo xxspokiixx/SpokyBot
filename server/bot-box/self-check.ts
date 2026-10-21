@@ -10,9 +10,10 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { BOX_PROBE_SCRIPT, BoxRunner, BOX_EGRESS_PORT, defaultCodeRoots, type BoxChecks } from "./box.ts";
+import { BOX_PROBE_SCRIPT, BoxRunner, BOX_BROKER_PORT, BOX_EGRESS_PORT, defaultCodeRoots, type BoxChecks } from "./box.ts";
 import { existsSync } from "node:fs";
 import type { BridgeTools } from "./bridge.ts";
+import { openCredentialBroker } from "./broker.ts";
 import { openBoxEgressGate } from "./egress-gate.ts";
 import { openHarnessGate } from "./harness-gate.ts";
 import type { BoxBridge, BoxMutation } from "./plan.ts";
@@ -31,8 +32,9 @@ export interface SelfCheckOptions {
   /** `host:port` on the public internet; null skips that check; undefined tries example.com:443 and skips when the host itself cannot reach it. */
   publicTarget?: string | null;
   timeoutMs?: number;
-  /** T0b: the broker socket to bridge in, with a minted token for the probe. */
-  broker?: { socket: string; port: number; token: string; provider: string; path: string; keyNames: string[] };
+  /** T0b: false leaves the broker out; by default a fixture broker is opened and the probe gets a token for a grant to
+   * the fixture server, with the key names it must find replaced by that token. */
+  broker?: boolean;
 }
 
 export interface SelfCheckResult extends BoxChecks {
@@ -78,17 +80,28 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const hostTmpFile = join(existsSync("/tmp") ? "/tmp" : tmpdir(), `omb-box-check-${randomBytes(6).toString("hex")}`);
   writeFileSync(hostTmpFile, "host tmp");
 
+  // The key the broker takes over: its own value, so a box that is never brokered (the host's network) is not counted
+  // as leaking the canary when the raw key stays.
+  const brokerKey = `sk-ant-${randomBytes(12).toString("hex")}`;
   const canary = spawn("sleep", ["120"], { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", OMB_BOX_CANARY: marker }, stdio: "ignore" });
-  const answer = (req: { url?: string }, res: { writeHead(code: number, headers: Record<string, string>): unknown; end(body: string): void }) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ path: req.url })); };
+  const answer = (req: { url?: string; headers: Record<string, string | string[] | undefined> }, res: { writeHead(code: number, headers: Record<string, string>): unknown; end(body: string): void }) => {
+    // A model call must arrive with the real key, never the token (so the broker forwarded and swapped it).
+    const model = req.url?.startsWith("/v1/");
+    const status = !model ? 200 : req.headers["x-api-key"] === brokerKey ? 200 : 401;
+    res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify({ path: req.url, status }));
+  };
   // Two fixture listeners on the host's loopback: the "server" the harness gate forwards to, and a private one that is
   // bridged nowhere, so reaching it from the box would mean the box shares the host's network.
   const upstream = createServer(answer), privateServer = createServer(answer);
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
   await new Promise<void>((resolve) => privateServer.listen(0, "127.0.0.1", resolve));
   const serverPort = (upstream.address() as { port: number }).port, privatePort = (privateServer.address() as { port: number }).port;
-  const egressSocket = join(sockets, "egress.sock"), harnessSocket = join(sockets, "harness.sock");
+  const egressSocket = join(sockets, "egress.sock"), harnessSocket = join(sockets, "harness.sock"), brokerSocket = join(sockets, "broker.sock");
   const egress = await openBoxEgressGate({ socketPath: egressSocket });
   const harness = await openHarnessGate({ socketPath: harnessSocket, port: serverPort });
+  // The broker: the probe's environment holds a real-looking key, which the runner's rewrite turns into a token whose
+  // grant reaches the fixture server; the probe checks the key is gone and the token works.
+  const credentials = options.broker === false ? null : await openCredentialBroker({ socketPath: brokerSocket });
   const skipped: string[] = [];
   let publicTarget: string | null = options.publicTarget === undefined ? "example.com:443" : options.publicTarget;
   if (publicTarget && (await hostConnect(egressSocket, publicTarget)) !== "200") { skipped.push("egress-public-allowed"); publicTarget = null; }
@@ -96,29 +109,31 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const bridges: BoxBridge[] = [
     { name: "egress", port: BOX_EGRESS_PORT, socket: egressSocket },
     { name: "harness", port: serverPort, socket: harnessSocket },
-    ...(options.broker ? [{ name: "broker", port: options.broker.port, socket: options.broker.socket }] : []),
+    ...(credentials ? [{ name: "broker", port: BOX_BROKER_PORT, socket: brokerSocket }] : []),
   ];
   const runner = new BoxRunner({
     bwrap: options.bwrap, bridge: options.bridge, denyEnv: options.denyEnv,
     setup: { dataDir: data, home, codeRoots: options.codeRoots ?? defaultCodeRoots(), bridges, mutate: options.mutate },
+    broker: credentials ? { port: BOX_BROKER_PORT, mintForProcess: credentials.mintForProcess, revoke: credentials.revoke } : null,
   });
   const isolatedNet = !options.mutate?.has("share-net");
   const spec: ProbeSpec = {
     dataDir: data, cwd, botFolder, messagesDb: join(data, "messages.db"), configJson: join(data, "config.json"), serverFiles,
     otherWorkspace, otherTaskWorkspace: otherTask, marker, canaryPid: canary.pid ?? 0, serverPid: process.pid, hostTmpFile,
     harnessPort: serverPort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
-    ...(options.broker ? { broker: { port: options.broker.port, token: options.broker.token, provider: options.broker.provider, path: options.broker.path, keyNames: options.broker.keyNames } } : {}),
   };
   const wrapped = runner.wrap({
     command: process.execPath, args: [options.probeScript ?? BOX_PROBE_SCRIPT], cwd, botId: "probe",
     env: {
       PATH: process.env.PATH, HOME: home, LANG: process.env.LANG, TMPDIR: "/tmp",
-      [PROBE_SPEC_ENV]: JSON.stringify(spec),
       // What must not get in: a control-plane secret, a workspace credential and an unlisted name, each holding the marker.
       OMB_CLOUD_BOOTSTRAP_SECRET: marker, COMPOSIO_API_KEY: marker, SOME_OTHER_SECRET: marker,
-      ...(options.broker ? Object.fromEntries(options.broker.keyNames.map((name) => [name, `omb_t0_${options.broker!.token}`])) : {}),
+      // The real-looking key the broker takes over; its upstream is the fixture server, which answers 200 only to the real key.
+      ...(credentials ? { ANTHROPIC_API_KEY: brokerKey, ANTHROPIC_BASE_URL: `http://127.0.0.1:${serverPort}/v1` } : {}),
     },
   });
+  if (credentials && wrapped.token) spec.broker = { port: BOX_BROKER_PORT, token: wrapped.token, provider: "anthropic", path: "/messages", keyNames: ["ANTHROPIC_API_KEY"], marker: brokerKey };
+  wrapped.env[PROBE_SPEC_ENV] = JSON.stringify(spec);
   let stdout = "", stderr = "";
   const results = await new Promise<ProbeResult[] | string>((resolve) => {
     const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, stdio: ["ignore", "pipe", "pipe"] });
@@ -132,7 +147,8 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
     });
   });
   canary.kill("SIGKILL");
-  await Promise.all([egress.close(), harness.close(), new Promise<void>((resolve) => upstream.close(() => resolve())), new Promise<void>((resolve) => privateServer.close(() => resolve()))]);
+  wrapped.release();
+  await Promise.all([egress.close(), harness.close(), credentials?.close(), new Promise<void>((resolve) => upstream.close(() => resolve())), new Promise<void>((resolve) => privateServer.close(() => resolve()))]);
   rmSync(root, { recursive: true, force: true });
   rmSync(hostTmpFile, { force: true });
   const durationMs = Date.now() - startedAt;
