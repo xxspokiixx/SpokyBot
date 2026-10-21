@@ -2396,6 +2396,11 @@
   "cloudSend.move.homeAgain": "Твій Cloud завершився, тож твої боти знову на цьому комп’ютері. Те, що ти робив у Cloud, теж повертається.",
   "cloudSend.move.back": "Твій Cloud завершився, тож твої боти знову на цьому комп’ютері разом із тим, що ти робив у Cloud. Логіни й ключі, які ти додав у Cloud, не повернулися: додай їх тут знову, якщо вони потрібні.",
   "cloudSend.move.backLost": "Твій Cloud завершився, тож твої боти знову на цьому комп’ютері такими, якими були під час переїзду. Те, що ти робив у Cloud відтоді, не вдалося повернути.",
+  "homeScreen.openingNamed": "Відкриваємо {name}…",
+  "homeScreen.offlineNamed": "Зараз не вдається зв'язатися з {name}.",
+  "homeScreen.signInNamed": "Увійдіть, щоб відкрити {name}",
+  "homeScreen.planNamed": "{name} не працює",
+  "homeLine.left": "Ви більше не в {name}.",
   "homeScreen.opening": "Відкриваємо My Cloud…",
   "homeScreen.waking": "Будимо My Cloud…",
   "homeScreen.moving": "Переїзд у My Cloud… майже готово",
@@ -2419,10 +2424,5 @@
   "cloudBuy.row.storageGrows": "{gb} ГБ сховища, зростає до {max} ГБ",
   "cloudBuy.row.backups": "Щоденні резервні копії, зберігаються {days} дн.",
   "cloudBuy.trialTerms": "Потрібна картка, але нічого не списується, доки не закінчиться безкоштовний період. Скасувати можна в застосунку будь-коли.",
-  "cloudBuy.timeline.firstPayment": "Перший платіж",
-  "homeScreen.openingNamed": "Відкриваємо {name}…",
-  "homeScreen.offlineNamed": "Зараз не вдається зв'язатися з {name}.",
-  "homeScreen.signInNamed": "Увійдіть, щоб відкрити {name}",
-  "homeScreen.planNamed": "{name} не працює",
-  "homeLine.left": "Ви більше не в {name}."
+  "cloudBuy.timeline.firstPayment": "Перший платіж"
 }

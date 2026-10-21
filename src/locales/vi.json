@@ -4488,6 +4488,11 @@
   "cloudSend.move.homeAgain": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này. Những gì bạn đã làm trên Cloud cũng đang quay về.",
   "cloudSend.move.back": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này, cùng với những gì bạn đã làm trên Cloud. Thông tin đăng nhập và khóa bạn thêm trên Cloud chưa quay về: hãy thêm lại ở đây nếu cần.",
   "cloudSend.move.backLost": "Cloud của bạn đã kết thúc nên bot của bạn đã quay về máy tính này như lúc chuyển đi. Những gì bạn làm trên Cloud từ đó không thể quay về.",
+  "homeScreen.openingNamed": "Đang mở {name}…",
+  "homeScreen.offlineNamed": "Hiện không kết nối được với {name}.",
+  "homeScreen.signInNamed": "Đăng nhập để mở {name}",
+  "homeScreen.planNamed": "{name} không chạy",
+  "homeLine.left": "Bạn không còn trong {name} nữa.",
   "homeScreen.opening": "Đang mở My Cloud…",
   "homeScreen.waking": "Đang đánh thức My Cloud…",
   "homeScreen.moving": "Đang chuyển sang My Cloud… sắp xong",
@@ -4511,10 +4516,5 @@
   "cloudBuy.row.storageGrows": "{gb} GB dung lượng lưu trữ, tăng đến {max} GB",
   "cloudBuy.row.backups": "Sao lưu hằng ngày, giữ {days} ngày",
   "cloudBuy.trialTerms": "Cần thẻ, nhưng không bị tính phí cho đến khi hết thời gian dùng thử. Hủy trong ứng dụng bất kỳ lúc nào.",
-  "cloudBuy.timeline.firstPayment": "Thanh toán đầu tiên",
-  "homeScreen.openingNamed": "Đang mở {name}…",
-  "homeScreen.offlineNamed": "Hiện không kết nối được với {name}.",
-  "homeScreen.signInNamed": "Đăng nhập để mở {name}",
-  "homeScreen.planNamed": "{name} không chạy",
-  "homeLine.left": "Bạn không còn trong {name} nữa."
+  "cloudBuy.timeline.firstPayment": "Thanh toán đầu tiên"
 }

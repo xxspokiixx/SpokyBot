@@ -1898,6 +1898,11 @@
   "cloudSend.move.homeAgain": "आपका Cloud खत्म हो गया है, इसलिए आपके बॉट वापस इस कंप्यूटर पर हैं। आपने Cloud पर जो किया, वह भी वापस आ रहा है।",
   "cloudSend.move.back": "आपका Cloud खत्म हो गया है, इसलिए आपके बॉट वापस इस कंप्यूटर पर हैं, Cloud पर किए गए आपके काम के साथ। Cloud पर जोड़े गए लॉगिन और की वापस नहीं आए: ज़रूरत हो तो उन्हें यहाँ फिर से जोड़ें।",
   "cloudSend.move.backLost": "आपका Cloud खत्म हो गया है, इसलिए आपके बॉट वापस इस कंप्यूटर पर वैसे ही हैं जैसे जाते समय थे। उसके बाद Cloud पर आपने जो किया, वह वापस नहीं आ सका।",
+  "homeScreen.openingNamed": "{name} खोला जा रहा है…",
+  "homeScreen.offlineNamed": "{name} से अभी संपर्क नहीं हो पा रहा है।",
+  "homeScreen.signInNamed": "{name} खोलने के लिए साइन इन करें",
+  "homeScreen.planNamed": "{name} चल नहीं रहा है",
+  "homeLine.left": "अब आप {name} में नहीं हैं।",
   "homeScreen.opening": "My Cloud खोला जा रहा है…",
   "homeScreen.waking": "My Cloud जगाया जा रहा है…",
   "homeScreen.moving": "My Cloud पर जा रहे हैं… लगभग हो गया",
@@ -1921,10 +1926,5 @@
   "cloudBuy.row.storageGrows": "{gb} GB स्टोरेज, {max} GB तक बढ़ता है",
   "cloudBuy.row.backups": "रोज़ाना बैकअप, {days} दिन तक रखे जाते हैं",
   "cloudBuy.trialTerms": "कार्ड ज़रूरी है, पर ट्रायल खत्म होने तक कुछ चार्ज नहीं होता। ऐप में कभी भी रद्द करें।",
-  "cloudBuy.timeline.firstPayment": "पहला भुगतान",
-  "homeScreen.openingNamed": "{name} खोला जा रहा है…",
-  "homeScreen.offlineNamed": "{name} से अभी संपर्क नहीं हो पा रहा है।",
-  "homeScreen.signInNamed": "{name} खोलने के लिए साइन इन करें",
-  "homeScreen.planNamed": "{name} चल नहीं रहा है",
-  "homeLine.left": "अब आप {name} में नहीं हैं।"
+  "cloudBuy.timeline.firstPayment": "पहला भुगतान"
 }

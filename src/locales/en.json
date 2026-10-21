@@ -6064,6 +6064,11 @@
   "history.refreshError": "Couldn’t refresh history.",
   "history.undo": "Undo this change",
   "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone.",
+  "homeScreen.openingNamed": "Opening {name}…",
+  "homeScreen.offlineNamed": "Can't reach {name} right now.",
+  "homeScreen.signInNamed": "Sign in to open {name}",
+  "homeScreen.planNamed": "{name} isn't running",
+  "homeLine.left": "You're no longer in {name}.",
   "homeScreen.opening": "Opening My Cloud…",
   "homeScreen.waking": "Waking My Cloud…",
   "homeScreen.moving": "Moving to My Cloud… almost done",
@@ -6073,10 +6078,5 @@
   "homeScreen.signInEnded": "This computer's sign-in to MausBot Cloud has ended. Your bots and chats are safe on My Cloud.",
   "homeScreen.signInOther": "This computer is signed in to MausBot Cloud with another account. Sign in with the account My Cloud belongs to.",
   "homeScreen.signInButton": "Sign in",
-  "homeScreen.plan": "My Cloud isn't running",
-  "homeScreen.openingNamed": "Opening {name}…",
-  "homeScreen.offlineNamed": "Can't reach {name} right now.",
-  "homeScreen.signInNamed": "Sign in to open {name}",
-  "homeScreen.planNamed": "{name} isn't running",
-  "homeLine.left": "You're no longer in {name}."
+  "homeScreen.plan": "My Cloud isn't running"
 }
