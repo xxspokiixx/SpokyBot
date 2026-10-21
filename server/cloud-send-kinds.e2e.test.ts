@@ -57,7 +57,7 @@ let plan: { threadId: string };
 let room: { id: string; threadId: string };
 let project = "";
 let routineId = "", callId = "", webhookId = "", appEventId = "";
-let webhookHere: { endpointUrl: string; secret: string };
+let webhookHere: { endpointId: string; secret: string };
 let finishedRun = "";
 let longRow = "";
 let first: CloudSendOutcome;
@@ -150,7 +150,7 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   callId = (await local("POST", "/api/calendar-calls", { name: "Weekly sync", botIds: [nova.id], schedule: { type: "daily", time: "10:00", weekdays: [1] } })).body.call.id;
   const webhook = (await local("POST", "/api/webhooks", { name: "Orders", prompt: "File the order.", botId: nova.id })).body;
   webhookId = webhook.webhook.id;
-  webhookHere = webhook.credential;
+  webhookHere = { endpointId: webhook.webhook.endpointId, secret: webhook.credential.secret };
   broker.account(fx.desktopInstallation!.userId, "gmail");
   const trigger = await local("POST", "/api/app-triggers", { botId: nova.id, name: "Invoices", prompt: "File the invoice.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE" });
   expect(trigger.status, JSON.stringify(trigger.body)).toBeLessThan(300);
@@ -185,7 +185,7 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   const hookThere = hooks.find((hook) => hook.id === webhookId)!;
   expect(hookThere.enabled).toBe(false);
   const address = (await onCloud("GET", `/api/webhooks/${webhookId}/address`)).body.credential as { endpointUrl: string; secret: string };
-  expect(address.endpointUrl).not.toBe(webhookHere.endpointUrl);
+  expect(hookThere.endpointId).not.toBe(webhookHere.endpointId);
   expect(address.secret).not.toBe(webhookHere.secret);
   expect(address.endpointUrl.endsWith(`/hooks/${hookThere.endpointId}`)).toBe(true);
   expect((await triggersThere()).find((entry) => entry.id === appEventId)).toMatchObject({ enabled: false });

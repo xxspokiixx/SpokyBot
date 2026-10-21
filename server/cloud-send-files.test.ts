@@ -73,6 +73,24 @@ describe("My Cloud takes a file", () => {
     expect(readFileSync(join(data, "workspaces", "b1", "plan (Mac).md"), "utf8")).toBe("this computer's, edited");
   });
 
+  it("hands main a part of a bot file, never through a link", async () => {
+    mkdirSync(join(data, "workspaces", "b1"), { recursive: true });
+    writeFileSync(join(data, "workspaces", "b1", "part.md"), "0123456789");
+    writeFileSync(join(data, "outside.md"), "secret");
+    symlinkSync(join(data, "outside.md"), join(data, "workspaces", "b1", "linked.md"));
+    const read = async (path: string, offset: number, length: number) => {
+      let status = 0, bytes = Buffer.alloc(0);
+      const url = new URL(`http://127.0.0.1/api/cloud-send/files?${new URLSearchParams({ path, offset: String(offset), length: String(length) })}`);
+      await moveFilesRoute(deps(), { path: "/api/cloud-send/files", method: "GET", url, auth: {} as never, req: {} as never,
+        res: { setHeader() {}, writeHead: (code: number) => { status = code; }, end: (body: Buffer) => { bytes = body; } } as never,
+        json: ((_res: unknown, code: number) => { status = code; }) as never, readBody: (async () => null) as never });
+      return { status, text: bytes.toString() };
+    };
+    expect(await read("workspaces/b1/part.md", 3, 4)).toEqual({ status: 200, text: "3456" });
+    expect((await read("workspaces/b1/linked.md", 0, 6)).status).toBe(404);
+    expect((await read("workspaces/b1/MEMORY.md", 0, 6)).status).toBe(404);
+  });
+
   it("only from its owner, only for a bot it has, and only a bot file a move carries", async () => {
     expect((await send({ ...file("workspaces/b1/x.md", "x"), offset: 0 }, "x", null)).status).toBe(403);
     expect((await send({ ...file("workspaces/b2/x.md", "x"), offset: 0 }, "x")).status).toBe(409);

@@ -63,7 +63,7 @@ export async function listBotFiles(dataDir: string, botIds: readonly string[]): 
       if (out.length >= MAX_FILES) return;
       const path = `${relative}/${name}`;
       const info = await lstat(join(dataDir, path)).catch(() => null);
-      if (!info || info.isSymbolicLink() || name === "node_modules") continue;
+      if (!info || name === "node_modules") continue;
       if (info.isDirectory()) { if (!CARRIED_OTHERWISE.test(`${path}/`) && !omittedFromWorkspaceBackup(path)) await walk(path); continue; }
       if (info.isFile() && movedFilePath(path)) out.push({ path, size: info.size, sha256: await fileSha256(join(dataDir, path), info.size, info.mtimeMs) });
     }

@@ -132,3 +132,14 @@ test("files My Cloud has no room for are said plainly and none of them goes; a v
   assert.deepEqual(growing.failed, []);
   assert.ok(growing.stored.has("workspaces/b1/small.bin"));
 });
+
+test("a volume that could not grow is said, and none of the files goes", async () => {
+  const small = { ...file("workspaces/b1/small.bin", "s"), text: "s" };
+  for (const [answer, error] of [[{ supported: true, refused: true }, "My Cloud does not have enough space for this computer's files."],
+    [{ supported: false }, "My Cloud could not make room for this computer's files just now. It tries again next time."]]) {
+    const sides = filesSides({ here: [small], free: 0, volume: 10 * GB, disk: { maxBytes: 50 * GB }, grow: async () => answer });
+    await sides.kinds.moveFiles(sides.ctx, [{ id: "b1", name: "Nova" }], "Mac");
+    assert.deepEqual(sides.failed.map((entry) => [entry.key, entry.error]), [["files", error]]);
+    assert.deepEqual(sides.uploads, []);
+  }
+});
