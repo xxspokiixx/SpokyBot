@@ -598,7 +598,6 @@
   "lending.internetUnsupported": "My Cloud 正在更新。更新完成後，你的機器人就能使用這台電腦的網路連線。",
   "lending.stopHelp": "關閉後會立即停止共用，並取消所有執行中的作業。應用程式已開始的動作可能仍會完成。",
   "lending.failed": "無法變更共用項目，請再試一次。",
-  "lending.refused.homeOrRoot": "請選擇個人資料夾中的資料夾，而不是整個個人資料夾或整個磁碟。",
   "lending.refused.notFolder": "請選擇資料夾，而不是檔案。",
   "lending.refused.tooMany": "最多出借 20 個資料夾。",
   "lending.status.lent": "已共用。這台電腦處於喚醒狀態時，Cloud 上的機器人即可使用。",

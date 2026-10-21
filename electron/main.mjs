@@ -2888,7 +2888,7 @@ ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_even
 }));
 ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
   await requireSharedComputers();
-  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder to share", properties: ["openDirectory"] });
+  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder or drive to share", properties: ["openDirectory"] });
   if (picked.canceled || !picked.filePaths[0]) return null;
   return (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0];
 }));
@@ -2927,7 +2927,7 @@ async function lendingSnapshot() {
 }
 const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
-  chooseFolder: async () => { const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder My Cloud can use", properties: ["openDirectory"] }); return picked.canceled || !picked.filePaths[0] ? null : (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0]; },
+  chooseFolder: async () => { const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder or drive My Cloud can use", properties: ["openDirectory"] }); return picked.canceled || !picked.filePaths[0] ? null : (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0]; },
   defaults: () => usualFolders(usualFolderPaths(name => app.getPath(name), os.homedir()), validateSharedFolders), validate: validateSharedFolders,
   confirmScreen: async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return false;

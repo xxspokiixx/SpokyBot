@@ -11,6 +11,7 @@ import { BACKGROUND_HEADERS, CloudAsleepError, asleepAnswer, createCloudPowerGat
 import { linkUrl, runDeviceLink } from "./device-link.mjs";
 import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
 import { existingFolders } from "./cloud-lending-ipc.mjs";
+import { shareableDrive } from "./shared-drives.mjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -66,7 +67,9 @@ export async function validateSharedFolders(folders) {
     if (!uuid(folder?.id) || typeof folder.path !== "string" || !path.isAbsolute(folder.path) || typeof folder.write !== "boolean") throw Object.assign(new Error("Choose folders using the desktop folder picker"), { code: "NOT_PICKED" });
     const canonical = await fsp.realpath(folder.path);
     if (!(await fsp.stat(canonical)).isDirectory()) throw Object.assign(new Error("Choose a folder, not a file"), { code: "NOT_FOLDER" });
-    if (enclosing.has(await identify(canonical)) || (await volumeRoot(canonical))) throw Object.assign(new Error("Choose specific folders, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
+    // The home folder, everything above it and the system disk are never shared. A separate drive (an external disk, a data
+    // disk on a server, a drive letter) may be shared whole; any other mount point is still refused.
+    if (enclosing.has(await identify(canonical)) || ((await volumeRoot(canonical)) && !(await shareableDrive(canonical)))) throw Object.assign(new Error("Choose specific folders or a separate drive, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
     if (result.some(entry => entry.id === folder.id || entry.path === canonical)) continue;
     result.push({ id: folder.id, path: canonical, name: path.basename(canonical).slice(0, 120), write: folder.write });
   }

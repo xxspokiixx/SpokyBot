@@ -421,7 +421,6 @@
   "lending.internetUnsupported": "My Cloud 正在更新。更新完成后，你的机器人就能使用这台电脑的网络连接。",
   "lending.stopHelp": "关闭后会立即停止共享，并取消所有正在运行的操作。应用已开始的操作可能仍会完成。",
   "lending.failed": "无法更改共享的内容，请重试。",
-  "lending.refused.homeOrRoot": "请选择个人文件夹内的文件夹，而不是整个个人文件夹或整个磁盘。",
   "lending.refused.notFolder": "请选择文件夹，而不是文件。",
   "lending.refused.tooMany": "最多出借 20 个文件夹。",
   "lending.status.lent": "已共享。这台电脑处于唤醒状态时，Cloud 上的机器人即可使用。",

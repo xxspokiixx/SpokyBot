@@ -354,7 +354,6 @@
   "lending.internetUnsupported": "My Cloud wird gerade aktualisiert. Deine Bots können die Internetverbindung dieses Computers nutzen, sobald das erledigt ist.",
   "lending.stopHelp": "Wenn du das ausschaltest, endet das Teilen sofort und alles Laufende wird abgebrochen. Eine Aktion, die eine App schon begonnen hat, kann trotzdem noch fertig werden.",
   "lending.failed": "Was geteilt wird, konnte nicht geändert werden. Versuch es noch einmal.",
-  "lending.refused.homeOrRoot": "Wähle einen Ordner in deinem Benutzerordner, nicht den ganzen Benutzerordner oder ein ganzes Laufwerk.",
   "lending.refused.notFolder": "Wähle einen Ordner, keine Datei.",
   "lending.refused.tooMany": "Gib höchstens 20 Ordner frei.",
   "lending.status.lent": "Geteilt. Cloud-Bots können diesen Computer nutzen, solange er wach ist.",

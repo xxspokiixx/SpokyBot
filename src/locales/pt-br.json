@@ -857,7 +857,6 @@
   "lending.screenUnavailable": "Primeiro configure o controle do computador para este app (Acessibilidade e Gravação de Tela) e depois escolha esta opção.",
   "lending.stopHelp": "Desativar isto encerra o compartilhamento na hora e cancela tudo o que estiver em execução. Uma ação que um app já começou ainda pode terminar.",
   "lending.failed": "Não foi possível alterar o que está compartilhado. Tente novamente.",
-  "lending.refused.homeOrRoot": "Escolha uma pasta dentro da sua pasta pessoal, não a pasta pessoal inteira nem um disco inteiro.",
   "lending.refused.notFolder": "Escolha uma pasta, não um arquivo.",
   "lending.refused.tooMany": "Empreste no máximo 20 pastas.",
   "lending.status.lent": "Compartilhado. Os bots do Cloud podem usar este computador enquanto ele estiver ativo.",
