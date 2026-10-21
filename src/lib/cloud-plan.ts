@@ -131,9 +131,8 @@ export function cloudCreditLine(credit: CloudCredit): string {
 }
 
 
-export type CloudNoticeKind = "my-cloud" | "sign-in-again" | "removed";
+export type CloudNoticeKind = "sign-in-again" | "removed";
 export function cloudNoticeKind(view: CloudPlanView, account: CloudAccountState | null | undefined): CloudNoticeKind | null {
-  if (view.kind === "paid" && account?.machine?.status === "ready") return "my-cloud";
   if (view.kind === "reauth" && account?.lastPlan?.active === true) return "sign-in-again";
   if (view.kind === "removed") return "removed";
   return null;

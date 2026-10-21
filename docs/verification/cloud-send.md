@@ -1,9 +1,8 @@
-# Send to My Cloud
+# The move to My Cloud
 
-What it covers: Settings → MausBot Cloud's **This computer and My Cloud**
-(where things stand, and Send everything), My Cloud's strip, the switcher's
-send line, and the one-time move to My Cloud with its check. Settings → Logins
-shows where each login is.
+What it covers: the one-time move of everything on this computer to My Cloud
+(its transport, what it carries and its check), and the line either page shows
+while it goes.
 
 ## Two real servers
 
@@ -16,34 +15,23 @@ node --test electron/cloud-send.node-test.mjs electron/cloud-send-move.node-test
 `scripts/testing/cloud-send-fixture.ts` starts this computer's server as the
 desktop app starts it (its private utility-process port over Node's IPC) and a
 Cloud home paired the way the Admin pairs it, with main's own wiring
-(`electron/cloud-send-main.mjs`) between them through a fake `ipcMain`. Temp
-homes, a synthetic Claude CLI and a fake 1Password SDK; no network. The e2e
-checks:
+(`electron/one-home-main.mjs`, which installs `electron/cloud-send-main.mjs`)
+between them through a fake `ipcMain`. Temp homes, a synthetic Claude CLI and a
+fake 1Password SDK; no network. `fx.olderSend` sends as an older desktop's Send
+everything did, so a test can start from what such a send left on My Cloud.
 
-- a bot (instructions, picture, skill, notes), a login kept to it, 1Password
-  and About me reach My Cloud, the bot with its own id and conversation id;
-- a bot whose switch is off stays here, and a login kept to it reaches no bot
-  there (narrowed);
-- a change here goes, a change made on My Cloud is kept until **Use this
-  computer's**, and something removed on My Cloud is not brought back until its
-  switch is turned on again;
-- a password changed here goes on the next send;
-- My Cloud's page is told bot names and counts only, never a login's site;
-- every send signs its session out, and no answer or log carries a secret;
-- **Bring newer chats** adds a sent bot's chats to My Cloud;
-- **Send everything** brings the chats too, by row, under the same bot and
-  conversation ids; a second send adds only the new messages, nothing twice; a
-  send of one item never carries chats;
+`server/cloud-send.e2e.test.ts` checks:
+
 - when My Cloud's 1Password refuses this computer's token, everything else
-  arrives and the strip's notice says *1Password* and why, never a login's site;
-- **a long conversation, sent in pages by the real send** (tool-heavy turns, so
-  a few turns make several 300-row pages): a new bot's conversation of three
-  pages and more with the move, one My Cloud got from a Bring
-  and then sent from its first row, a later send of two pages and more, a
-  context summary that ends a send, and a room of three pages and more (made on
-  My Cloud under the same ids). Each is read back on both servers the way the
-  chat view pages it, and the path from each server's own leaf, which is what
-  its bot reads, must match row for row, summaries included.
+  arrives and My Cloud's notice says *1Password* and why, never a login's site;
+- an attachment a row names is kept on My Cloud under its own name, once;
+- **a long conversation, carried in pages by the move** (tool-heavy turns, so a
+  few turns make several 300-row pages): a new bot's conversation of three
+  pages and more, a later pass of two pages and more, a context summary that
+  ends a pass, and a room of three pages and more (made on My Cloud under the
+  same ids). Each is read back on both servers the way the chat view pages it,
+  and the path from each server's own leaf, which is what its bot reads, must
+  match row for row, summaries included.
 
 `server/cloud-send-move.e2e.test.ts` runs the move as main runs it (`move`, then
 `move({ final: true })`, then `check`): a 1,599-row conversation with 22
@@ -83,17 +71,17 @@ the sender's ids). `electron/cloud-send.node-test.mjs` covers main's paging (a
 page's `sent` as it goes, a conversation's later pages waiting once one is not
 taken) and a send that goes on once My Cloud is back after being away. `server/login-handoff.test.ts` and
 `electron/cloud-send.node-test.mjs` cover the
-rest of the reasons a person reads: a send that stops as a whole, logins this
+rest of the reasons a person reads: a pass that stops as a whole, logins this
 computer's server did not hand over, and a 1Password token 1Password already
 refused here.
 
 My Cloud's welcome (`src/components/cloud-welcome/CloudWelcome.test.ts`): while
-a move or a whole send runs, or once one has gone, **Bring your stuff** is done
-by itself, so the welcome goes straight on to the AI with no Copy, fresh start
-or button; back on that step it says so in one line, with a fresh start only
-behind **More**. Before anything has come, the old choice is offered. Found by a
-real-user run on a packaged desktop and a test Cloud, where the welcome kept
-offering **Copy to My Cloud** after everything had already arrived.
+the move runs, or once it has gone, **Bring your stuff** is done by itself, so
+the welcome goes straight on to the AI with nothing to press; back on that step
+it says so in one line, with a fresh start only behind **More**. Before anything
+has come, it offers a fresh start. The line on either page
+(`src/components/CloudSendStrip.test.ts`) shows only the move: on its way, Try
+again after a day of failing, and on My Cloud's page once what arrived.
 
 ## The real utility port
 
@@ -111,22 +99,6 @@ Point the same pieces at a disposable Fly test Cloud set up like a customer's
 (never a customer's): this computer's server started as the app starts it,
 main's wiring with Node's own fetch, the Cloud paired through its signed
 pairing route. Print each failed item's error, never a value.
-
-## The real renderer
-
-```sh
-node --experimental-strip-types scripts/verify-cloud-send.ts
-```
-
-It seeds the same two servers (Ember with instructions, a picture, two skills
-and notes, two logins and 1Password here; a Chief and nine bots on My Cloud),
-mounts the app twice through the isolated Vite preview, and prints both pages:
-this computer's, opened on Settings → MausBot Cloud, and My Cloud's. Only the
-desktop's main-process bridges are stand-ins (`scripts/testing/cloud-send-preview.tsx`);
-Send to My Cloud's call main's real wiring through `/__send`. The switcher's
-native menu is drawn from main's own template, since a page can't show a native
-menu. Drive either page with any browser automation; nothing reaches the
-user's app, data or a real Cloud.
 
 ## The move to My Cloud, by itself
 

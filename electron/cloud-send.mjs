@@ -37,7 +37,6 @@ const VAULT_ID = /^[\w-]{1,128}$/u;
 const CHAT_REASONS = new Set(["button", "my-cloud", "menu", "move"]);
 /** Bring newer chats' copy of the whole workspace, for a Cloud too old to take chats by row: never a move, which such a
  * Cloud refuses. */
-const BRING_REASONS = new Set(["button", "my-cloud", "menu"]);
 const OUTDATED_FOR_MOVE = "My Cloud is updating. Your bots move there by themselves when it's done.";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -182,7 +181,6 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  *       upload(route: string, bytes: Uint8Array, type: string): Promise<{ status: number, ok: boolean, body: any }>, close(): Promise<void> }>,
  *   },
  *   handoff: (what: { kind: string, [key: string]: unknown }) => Promise<any>,
- *   bringChats?: () => Promise<{ conversations: number, messages: number }>,
  *   store: { read(): unknown, write(value: unknown): void },
  *   onChange?: (snapshot: unknown) => void,
  *   now?: () => number,
@@ -192,7 +190,7 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  * move waits for My Cloud to run the engines whose keys it just took. `local(route, { method })`: a change on this
  * computer's server (an app event My Cloud now collects). `space`: My Cloud's plan disk and the Admin's grow.
  */
-export function createCloudSend({ local, cloud, handoff, bringChats = null, store, onChange = () => {}, now = Date.now, engineWaitMs, space }) {
+export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
   let running = null, progress = null;
@@ -318,14 +316,6 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
     const withChats = !keys && CHAT_REASONS.has(reason);
     const latest = await sendItems(origin, mine, result, { keys, force, job, withChats });
-    // A Cloud too old to take rows: Bring newer chats, after the items' session is signed out, since it opens its own
-    // for as long as the upload takes.
-    if (withChats && !latest.chats && bringChats && BRING_REASONS.has(reason)) {
-      job.chats = true;
-      publish();
-      try { result.chats = await bringChats(); }
-      catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
-    }
     const outcome = { at: now(), reason, result };
     const kept = entry(origin);
     kept.last = outcome;

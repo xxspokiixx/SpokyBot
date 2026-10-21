@@ -182,7 +182,7 @@ test("Settings learns how many conversations are still to go, and a pass says ho
   assert.deepEqual(send.snapshot().chats, { waiting: 2 });
 });
 
-test("a move's session counts as someone using My Cloud, so it stays awake; any other send's never does", async () => {
+test("a move's session counts as someone using My Cloud, so it stays awake; any other session main opens never does", async () => {
   const headers = [];
   const fetchImpl = async (url, init) => { headers.push([String(url).replace(CLOUD, ""), init.headers["x-omb-background"] ?? null, init.body]); return json({ token: "omb_sess_fake" }); };
   const target = { origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) };
@@ -200,10 +200,10 @@ test("a move's session counts as someone using My Cloud, so it stays awake; any 
   const handlers = new Map();
   const listing = { computer: { environmentId: "env", label: "Mac" }, connections: [], engines: [], commands: [] };
   const main = installCloudSend({
-    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localOnly: (_channel, handler) => handler, cloudPage: () => "local", server: () => null,
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: () => "local", server: () => null,
     local: async (route) => json(route === "/api/cloud-send" || route === "/api/cloud-send?move=1" ? summary([]) : route === "/api/cloud-connections" ? listing : { v: 1, dataDir: "/d", conversations: [] }),
     home: () => target, cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false },
-    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {},
+    file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL,
     fetch: async (url, init) => {
       const route = String(url).replace(CLOUD, "");
       if (route === "/api/auth/pair") { paired.push([JSON.parse(init.body).label, init.headers["x-omb-background"] ?? null]); return json({ token: "omb_sess_fake" }); }
@@ -211,8 +211,7 @@ test("a move's session counts as someone using My Cloud, so it stays awake; any 
     },
   });
   assert.equal((await main.move()).reason, "move");
-  await handlers.get("cloud-send:send")({});
-  assert.deepEqual(paired, [["Move to My Cloud", null], ["Send to My Cloud", "1"]]);
+  assert.deepEqual(paired, [["Move to My Cloud", null]]);
 });
 
 test("an app or key that could not move is said with My Cloud's reason, counted, and never stops the bots", async () => {

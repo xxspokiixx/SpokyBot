@@ -234,9 +234,22 @@ export function withCloudHome(state, machine, makeId, look = null) {
   return { ...added, environments: added.environments.map((entry) => entry.origin === machine.origin ? { ...entry, ...(color ? { color } : {}), home: true } : entry) };
 }
 
-/** The one-time code goes in the hash, never a query. */
-export function cloudHomeConnectUrl(target, now, open = null) {
-  const query = open === "phone" ? "?desktop-settings=phone" : "";
-  return target.grant && target.grant.origin === target.origin && target.grant.expiresAt > now
-    ? `${target.origin}/pair${query}#code=${target.grant.code}` : query ? `${target.origin}/${query}` : target.origin;
+/** The one-time code goes in the hash, never a query. `route`: a path of the Cloud's own to land on after signing in. */
+export function cloudHomeConnectUrl(target, now, open = null, route = null) {
+  const params = new URLSearchParams(open === "phone" ? { "desktop-settings": "phone" } : {});
+  const back = typeof route === "string" && /^\/(?!\/)/.test(route) ? route : null;
+  if (target.grant && target.grant.origin === target.origin && target.grant.expiresAt > now) {
+    if (back) params.set("next", back);
+    const query = params.size ? `?${params}` : "";
+    return `${target.origin}/pair${query}#code=${target.grant.code}`;
+  }
+  if (back) return `${target.origin}${back}`;
+  return params.size ? `${target.origin}/?${params}` : target.origin;
+}
+
+/** Only the verified Cloud, open as this window's active server, in the main window's main frame. */
+export function cloudPageSenderAllowed(event, { contents, homeOrigin, activeOrigin }) {
+  if (!contents || !homeOrigin || activeOrigin !== homeOrigin) return false;
+  if (event?.sender !== contents || !event.senderFrame || event.senderFrame !== contents.mainFrame) return false;
+  try { return new URL(event.senderFrame.url).origin === homeOrigin; } catch { return false; }
 }

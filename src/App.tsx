@@ -29,9 +29,7 @@ import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
-import { finishCloudProHandoff, takeCloudProHandoff } from "@/components/CloudProPopup";
 import { CloudHowTo } from "@/components/CloudHowTo";
-import { CloudHomeNote } from "@/components/CloudMove";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { NoEngines } from "@/components/NoEngines";
@@ -65,13 +63,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
   const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
-  const [handedOver, setHandedOver] = useState(false);
   useEffect(() => {
     if (!window.ogb?.environments) return;
-    const open = (computerId?: string | null, panel?: "copy") => {
+    const open = (computerId?: string | null) => {
       if (computerId) {
         const target = new URL(window.location.href);
-        target.searchParams.set(panel === "copy" ? "copy-to" : "share-computer", computerId);
+        target.searchParams.set("share-computer", computerId);
         window.history.replaceState(null, "", `${target.pathname}${target.search}${target.hash}`);
       }
       dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
@@ -81,11 +78,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     const cloud = ["cloud", "cloud-settings", "cloud-add", "cloud-add-howto"].includes(requestedSettings ?? "");
     if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient) ||
       (cloud && window.ogb.cloudAccount && !remoteClient)) {
-      const handoff = takeCloudProHandoff(url);
       url.searchParams.delete("desktop-settings");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-      if (handoff && window.ogb.cloudAccount) { setHandedOver(true); finishCloudProHandoff(handoff, window.ogb.cloudAccount, dispatch); }
-      else if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
+      if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
       else if (requestedSettings === "cloud") dispatch(CLOUD_LINK_SETTINGS);
       else if (requestedSettings === "cloud-settings") dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
       else if (requestedSettings === "cloud-add" || requestedSettings === "cloud-add-howto") dispatch({ type: "openCloudAdd", source: requestedSettings === "cloud-add" ? "app_menu" : "app_howto" });
@@ -244,7 +239,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ? { type: "openCloudAdd", source: section === "cloud-add" ? "app_menu" : "app_howto" }
       : section === "cloud" && window.ogb?.cloudAccount && !remoteClient
         ? CLOUD_LINK_SETTINGS
-        : section === "cloud-settings" && window.ogb?.cloudAccount && !remoteClient
+        : section === "cloud-settings" && (window.ogb?.cloudAccount || window.ogb?.cloudPlan) && !remoteClient
           ? { type: "toggleAppSettings", open: true, section: "cloudAccount" }
           : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
   }, [dispatch]);
@@ -276,7 +271,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
       <CloudAsleepStrip />
       <CloudSendStrip cloudHome={state.config?.cloudHome === true} onPairPhone={() => dispatch(phonePairingSettingsAction())} />
-      <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId) || handedOver} viewer={viewer} />
+      <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
         type="button"
@@ -387,7 +382,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
       />}
       </div>
-      <CloudHomeNote />
       {/* Last child on purpose: Blink resolves -webkit-app-region in DOM order, so no-drag buttons must follow every drag region. */}
       <WindowCaptionButtons
         visible={capabilities.windowChrome === "win-caption" && Boolean(window.ogb?.windowControls)}

@@ -462,6 +462,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
     openLendingSettings: async () => { calls.push("settings"); },
     persistEnvironments: next => { calls.push(`active:${next.activeId}`); context.environmentsState = next; }, withActive: environments.withActive,
     navigateMainWindow: url => calls.push(`navigate:${url}`), activeOrigin: () => context.environmentsState.environments.find(e => e.id === context.environmentsState.activeId)?.origin,
+    homeWindow: { cloudOrigin: () => null }, showHome: async () => { calls.push("home"); },
   });
   vm.runInContext(`${source.slice(start, end)}; this.switchEnvironment = switchEnvironment; this.remember = value => { rememberedHome = value; };`, context);
   await context.switchEnvironment("cloud");
@@ -478,4 +479,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   context.cloudAccount = null; context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   calls.length = 0; await context.switchEnvironment("cloud");
   assert.deepEqual(calls, ["active:cloud", `navigate:${origin}`]);
+  context.homeWindow = { cloudOrigin: () => origin }; context.environmentsState = { environments: [entry, other], activeId: "vps" };
+  calls.length = 0; await context.switchEnvironment("cloud");
+  assert.deepEqual(calls, ["home"], "once My Cloud is home, choosing it shows home the one way every window does");
 });

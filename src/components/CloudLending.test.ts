@@ -200,7 +200,6 @@ it("the words that name other controls name them as the person sees them, in eve
     ["lending.explain", ["lending.more"]],
     ["lending.cloudSide.empty", ["lending.title.computer", "settings.title"]],
     ["computer.worksOnHintCloudHome", ["lending.title.computer", "settings.title"]],
-    ["cloudMove.leftBehindLend", ["lending.title.computer", "settings.title"]],
     ["browser.passkey.lendPc", ["lending.title.pc", "settings.title"]],
   ];
   const unseen = localeChoices.flatMap(({ code }) => {
