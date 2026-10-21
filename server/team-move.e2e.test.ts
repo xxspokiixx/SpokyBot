@@ -269,6 +269,9 @@ it("refuses someone else's bot: Acme's own, one another person moves, and anythi
   expect(manifest.status).toBe(200);
   expect(manifest.body.items, "it reads its own bot only, which isn't here yet").toEqual([]);
   expect(manifest.body.conversations).toEqual([]);
+  expect((await moveIn("GET", "/api/cloud-send/files")).body.files, "never another bot's files").toEqual([]);
+  expect((await moveIn("GET", "/api/cloud-send/chats")).body.conversations, "never another bot's conversations").toEqual([]);
+  expect((await moveIn("GET", "/api/cloud-send?move=1")).body.items).toEqual([]);
   // A Member's own session never reaches the move routes.
   expect((await onTeam("cleo")("GET", "/api/cloud-send/manifest")).status).toBe(403);
 }, hostTimeout(120_000));
