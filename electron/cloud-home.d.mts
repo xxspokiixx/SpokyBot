@@ -18,8 +18,9 @@ export interface CloudMachine {
   power?: import("./cloud-power.mjs").CloudPower;
   /** The Admin lets this account's computer move to it now (its `moves` gate). */
   moves?: true;
-  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. */
-  hold?: { until: number };
+  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. `homecoming`: the one
+   * computer its things come home to (the Admin's device id and name for it); every other computer keeps its own copy. */
+  hold?: { until: number; homecoming?: { deviceId: string; name: string } };
 }
 /** A payment received but not yet linked to this account: nobody pays twice. */
 export interface CloudPurchase { state: "confirming" | "held"; tier?: string; paidAt?: number }

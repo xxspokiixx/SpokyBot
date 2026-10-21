@@ -13,12 +13,14 @@ import { createOneHome } from "./one-home.mjs";
 const MOVE_LABEL = "Move to My Cloud";
 const HOME_LABEL = "Bring My Cloud home";
 
-/** One home's view of the person's Cloud, from the Admin's last verified word; null while nobody is signed in. */
+/** One home's view of the person's Cloud, from the Admin's last verified word; null while nobody is signed in. An ended
+ * Cloud's `homecoming` is the computer its things come home to, by name, and whether that is this one. */
 export function oneHomeCloud(state) {
   const account = state?.account?.id;
   if (typeof account !== "string" || !account) return null;
   const connected = state.status === "connected", machine = connected ? state.machine ?? null : null;
   const trialOn = ["active", "ending"].includes(state.trial?.state ?? "");
+  const homecoming = machine?.hold?.homecoming ?? null;
   return {
     origin: machine?.origin ?? null,
     account,
@@ -27,6 +29,7 @@ export function oneHomeCloud(state) {
     moves: connected && machine?.moves === true,
     ended: connected && Boolean(machine?.hold),
     paid: connected && state.entitlement?.status === "active" && !trialOn,
+    ...(homecoming ? { homecoming: { name: homecoming.name, here: homecoming.deviceId === state.deviceId } } : {}),
   };
 }
 
@@ -131,8 +134,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
         if (!got.ok || got.body?.frozen !== true) throw Object.assign(new Error("OpenMausBot on this computer could not pause."), { status: got.status });
         return { frozen: true };
       },
-      async unfreeze() {
-        const got = await local.call("DELETE", "/api/move/freeze");
+      async unfreeze(options) {
+        const got = await local.call("DELETE", "/api/move/freeze", options?.automations === "off" ? { automations: "off" } : undefined);
         if (!got.ok) throw Object.assign(new Error("OpenMausBot on this computer could not go on again."), { status: got.status });
       },
       frozen: async () => (await local.json("/api/move/freeze"))?.frozen === true,

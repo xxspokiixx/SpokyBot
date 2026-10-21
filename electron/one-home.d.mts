@@ -7,11 +7,16 @@ export type OneHomeView =
   | { phase: "finishing"; failing?: { error: string | null } }
   /** What arrived, checked on both sides; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
   | { phase: "done"; counts?: OneHomeCounts; phone: boolean; held: string[] }
-  /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`. */
-  | { phase: "home-again" | "back"; lost?: true };
+  /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`; or, with
+   * `elsewhere`, they came back to that other computer and this one keeps its own copy from `since`, with automations off. */
+  | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number } };
 export interface OneHomeCounts { bots: number; skills: number; logins: number; onePassword: boolean; chats: number; routines: number }
 
-export interface OneHomeCloud { origin: string | null; account: string; machine: string | null; ready: boolean; moves: boolean; ended: boolean; paid: boolean }
+export interface OneHomeCloud {
+  origin: string | null; account: string; machine: string | null; ready: boolean; moves: boolean; ended: boolean; paid: boolean;
+  /** An ended Cloud's things come home to this computer (`here`) or to the one named. */
+  homecoming?: { name: string; here: boolean };
+}
 type Answer = { ok: boolean; status: number; body: any };
 
 export declare const QUIET_MS: number;
@@ -30,7 +35,7 @@ export function createOneHome(deps: {
   send: { move(options?: { final?: boolean }): Promise<unknown>; check(): Promise<{ ok: boolean }>; switches(): Record<string, boolean>; snapshot(): any };
   local: {
     freeze(origin: string): Promise<{ frozen: true } | { busy: string }>;
-    unfreeze(): Promise<void>;
+    unfreeze(options?: { automations?: "off" }): Promise<void>;
     frozen(): Promise<boolean>;
     json(route: string): Promise<any>;
     call(method: string, route: string, body?: unknown): Promise<Answer>;

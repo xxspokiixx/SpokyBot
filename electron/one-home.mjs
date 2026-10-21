@@ -12,7 +12,8 @@
 // Before the switch a failure lifts the freeze and tries again later; from the switch on the move only goes forward, so
 // nothing ever runs in two places. If My Cloud ends, this computer is home again at once (`home-again`), then brings
 // back what was done on My Cloud while the Admin still holds it (one-home-again.mjs) and switches on what was on there
-// (`back`).
+// (`back`). When the Admin names another computer as the one its things come home to, this one only opens its own copy,
+// with every automation off, and says where the bots went (`back` with `elsewhere`).
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/gu, " ").slice(0, 300) : null);
@@ -77,9 +78,10 @@ export function arrivedCounts(here, there) {
 /**
  * @param {{
  *   journal: { read(): unknown, write(value: unknown): void },
- *   cloud(): null | { origin: string | null, account: string, machine: string | null, ready: boolean, moves: boolean, ended: boolean, paid: boolean },
+ *   cloud(): null | { origin: string | null, account: string, machine: string | null, ready: boolean, moves: boolean, ended: boolean, paid: boolean,
+ *     homecoming?: { name: string, here: boolean } },
  *   send: { move(options?: { final?: boolean }): Promise<unknown>, check(): Promise<{ ok: boolean }>, switches(): Record<string, boolean>, snapshot(): any },
- *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string }>, unfreeze(): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
+ *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string }>, unfreeze(options?: { automations?: "off" }): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
  *     call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, forget?(): Promise<void> },
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
  *   lend?(projects: string[]): Promise<unknown>,
@@ -117,7 +119,7 @@ export function createOneHome(deps) {
     const journal = read();
     if (!journal || journal.paused || journal.told) return null;
     if (journal.phase === "done") return { phase: "done", ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [] };
-    if (journal.phase === "home-again" || journal.phase === "back") return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}) };
+    if (journal.phase === "home-again" || journal.phase === "back") return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}), ...(journal.elsewhere ? { elsewhere: journal.elsewhere } : {}) };
     const running = deps.send.snapshot?.()?.running;
     const chats = journal.phase === "copy" && running?.phase === "chats" && running.progress ? { done: running.progress.done, total: running.progress.total } : null;
     const failing = journal.failingSince && now() - journal.failingSince >= FAILING_LINE_MS ? { error: journal.error ?? null } : null;
@@ -255,7 +257,7 @@ export function createOneHome(deps) {
    * My Cloud was paid for, and comes home if My Cloud ends. */
   async function steady(journal, cloud, waiting) {
     let next = await settle(journal);
-    if (cloud?.ended) return homeAgain(next);
+    if (cloud?.ended) return ended(next, cloud);
     if (!waiting && !next.forgot && deps.version && next.version !== deps.version && cloud?.ready) {
       try { await deps.send.move({ final: true }); next = write({ ...next, version: deps.version, retryAt: undefined }); }
       catch (error) { log(`one home: the top-up waits (${error?.message ?? error})`); next = write({ ...next, retryAt: now() + HOUR }); }
@@ -265,6 +267,24 @@ export function createOneHome(deps) {
       catch (error) { log(`one home: this computer's copy is deleted later (${error?.message ?? error})`); }
     }
     if (!next.forgot) later(next.doneAt + KEPT_MS - now());
+    return null;
+  }
+
+  /** My Cloud ended: its things come home here, unless the Admin names another computer as the one they come home to. */
+  function ended(journal, cloud) {
+    const elsewhere = cloud?.homecoming && !cloud.homecoming.here ? cloud.homecoming.name : null;
+    return elsewhere === null ? homeAgain(journal) : cameHomeElsewhere(journal, elsewhere);
+  }
+
+  /** Another computer is home now: this one opens its own copy as it was at the move, with every automation off, takes
+   * nothing from My Cloud and starts nothing. */
+  async function cameHomeElsewhere(journal, name) {
+    try { await deps.local.unfreeze({ automations: "off" }); }
+    catch (error) { log(`one home: could not open this computer's copy yet (${error?.message ?? error})`); later(MINUTE); return null; }
+    const { retryAt: _, ...rest } = journal;
+    const since = journal.forgot ? null : journal.frozenAt ?? journal.doneAt ?? null;
+    write({ ...rest, phase: "back", endedAt: journal.endedAt ?? now(), told: undefined, elsewhere: { name, ...(since ? { since } : {}) } });
+    deps.openLocal?.();
     return null;
   }
 
@@ -329,7 +349,7 @@ export function createOneHome(deps) {
     if (journal.phase === "done") return void await steady(journal, cloud, waiting());
     if (journal.phase === "home-again" || journal.phase === "switch" && cloud?.ended) {
       if (journal.phase === "home-again" && waiting()) return void later(journal.retryAt - now());
-      return void await homeAgain(journal);
+      return void await ended(journal, cloud);
     }
     if (journal.phase === "switch" && waiting()) return void later(journal.retryAt - now());
     if (journal.phase !== "switch") {

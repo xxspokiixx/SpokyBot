@@ -37,6 +37,14 @@ export function parseCloudPower(input) {
 }
 const wholeGb = value => Number.isSafeInteger(value) && value >= 1 && value <= 10_000;
 
+const DEVICE_NAME_MAX = 100;
+/** An ended My Cloud's `hold.homecoming`: the Admin's id for the one computer its things come home to, and its name. */
+function parseHomecoming(input) {
+  if (!record(input) || typeof input.deviceId !== "string" || !/^[\w-]{1,128}$/u.test(input.deviceId) || typeof input.name !== "string") return null;
+  const name = input.name.trim();
+  return name && name.length <= DEVICE_NAME_MAX && !/\p{Cc}/u.test(name) ? { deviceId: input.deviceId, name } : null;
+}
+
 /** A malformed summary is no machine, never a partly trusted one; a malformed optional extra is dropped. */
 export function parseCloudSummary(input) {
   if (!record(input)) return null;
@@ -52,7 +60,8 @@ export function parseCloudSummary(input) {
   const unreachable = status === "ready" && record(input.unreachable) && CLOUD_UNREACHABLE_CAUSES.includes(input.unreachable.cause) && moment(input.unreachable.since)
     ? { cause: input.unreachable.cause, since: input.unreachable.since } : null;
   const power = parseCloudPower(input.power);
-  const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until } : null;
+  const homecoming = record(input.hold) ? parseHomecoming(input.hold.homecoming) : null;
+  const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until, ...(homecoming ? { homecoming } : {}) } : null;
   return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
     ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}) };
 }

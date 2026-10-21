@@ -580,7 +580,7 @@ import {
 } from "./phone-secret.ts";
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
-import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { applyIncludedPagesMessage } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createXResearchInternalRoutes } from "./routes/x-research.ts"; import { createMoveFreeze } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
+import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { applyIncludedPagesMessage } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createXResearchInternalRoutes } from "./routes/x-research.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -10060,7 +10060,7 @@ const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => w
   access: composio.brokerAccess, connectedApps: () => composio.connectedServices(cfg), visibleBot: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId),
   audit: (row) => appendDecision(DATA_DIR, { ...row, decision: "auto-approved", source: "routine" }) });
 tieAutomationsToBots(store, { routines: routines!, webhooks, apps: appTriggers.manager });
-ROUTES.push(appTriggers.routes); ROUTES.unshift(createMoveFreezeRoutes({ freeze: moveFreeze, restart: () => { restartRequested = true; gracefulShutdown(); }, busy: () => store.bots.find((bot) => botHasActiveTurn(bot.id) || routines?.activeRunForBot(bot.id))?.name ?? store.groups.find(groupIsWorking)?.name ?? (coordinator.active().some((node) => !ENDED.has(node.status)) || providerAuthSessions.active ? "" : null) }));
+ROUTES.push(appTriggers.routes); ROUTES.unshift(createMoveFreezeRoutes({ freeze: moveFreeze, automationsOff: () => switchAutomationsOff({ routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager }), restart: () => { restartRequested = true; gracefulShutdown(); }, busy: () => store.bots.find((bot) => botHasActiveTurn(bot.id) || routines?.activeRunForBot(bot.id))?.name ?? store.groups.find(groupIsWorking)?.name ?? (coordinator.active().some((node) => !ENDED.has(node.status)) || providerAuthSessions.active ? "" : null) }));
 ROUTES.push(createLimitResetRoutes({ clock: limitClock, routines: routines!, requests: routineRequests, engineName, threadEngine: (botId, threadId) => turnSelection(botId, threadId)?.instanceId,
   threadTitle: (botId, threadId) => store.bot(botId) && !store.bot(botId)!.hidden ? store.taskByThread(botId, threadId)?.title ?? null : null,
   created: (id, auth) => cloudRoutineAuthors?.wrote(id, auth.kind === "session" ? actorKey(auth) : CLOUD_NOBODY_KEY) }));
