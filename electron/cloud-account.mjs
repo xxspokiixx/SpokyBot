@@ -491,6 +491,22 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!pairing) throw new Error("Invalid Cloud pairing response.");
       return pairing;
     },
+    /** A Cloud that ended and that the Admin still holds, started for its owner's export only: a one-time code for it
+     * (main only, not kept), `starting` while it starts, `notHeld` when it is not held (yet), `deleted` once it is gone. */
+    async exportHome() {
+      const current = grant;
+      if (!current) throw new Error("Sign in to MausBot Cloud first.");
+      let result;
+      try { result = await request("export", { method: "POST", body: {}, token: current.token }); } catch (error) {
+        if (error?.status === 409) return { notHeld: true };
+        if (error?.status === 410) return { deleted: true };
+        throw error;
+      }
+      if (result?.cloudContractVersion === 1 && result.state === "starting") return { starting: true };
+      const pairing = typeof result?.origin === "string" && result.origin.startsWith("https://") ? parsePairingGrant(result, result.origin, now()) : null;
+      if (!pairing) throw new Error("Invalid Cloud export response.");
+      return { grant: pairing };
+    },
     /** This sign-in's own X research relay access while its plan is paid:
      * `{ url, token }` for the local server (electron/included-x.mjs), or null
      * when there is no sign-in, the Admin says the plan is not active (402) or

@@ -275,7 +275,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <div className="flex h-full flex-col">
       <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
       <CloudAsleepStrip />
-      <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
+      <CloudSendStrip cloudHome={state.config?.cloudHome === true} onPairPhone={() => dispatch(phonePairingSettingsAction())} />
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId) || handedOver} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button

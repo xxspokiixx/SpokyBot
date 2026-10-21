@@ -1,15 +1,16 @@
 # Send to My Cloud
 
 What it covers: Settings → MausBot Cloud's **This computer and My Cloud**
-(Send everything, Keep My Cloud up to date, Choose what goes), My Cloud's
-strip (**Bring them over**) and the switcher's send line. Settings → Logins
-shows where each login is; it no longer sends one by hand.
+(where things stand, and Send everything), My Cloud's strip, the switcher's
+send line, and the one-time move to My Cloud with its check. Settings → Logins
+shows where each login is.
 
 ## Two real servers
 
 ```sh
-pnpm exec vitest run server/cloud-send.e2e.test.ts server/cloud-send.test.ts
-node --test electron/cloud-send.node-test.mjs
+pnpm exec vitest run server/cloud-send.e2e.test.ts server/cloud-send-move.e2e.test.ts server/cloud-send-kinds.e2e.test.ts server/cloud-send-store.e2e.test.ts server/cloud-send.test.ts
+pnpm exec vitest run server/cloud-send-kinds.test.ts server/cloud-send-memory.test.ts server/cloud-send-files.test.ts server/cloud-send-attachments.test.ts server/cloud-send-settings.test.ts
+node --test electron/cloud-send.node-test.mjs electron/cloud-send-move.node-test.mjs electron/cloud-send-check.node-test.mjs electron/cloud-send-kinds.node-test.mjs
 ```
 
 `scripts/testing/cloud-send-fixture.ts` starts this computer's server as the
@@ -33,19 +34,45 @@ checks:
 - **Send everything** brings the chats too, by row, under the same bot and
   conversation ids; a second send adds only the new messages, nothing twice; a
   send of one item never carries chats;
-- **Keep My Cloud up to date**: the first check sends everything with no click,
-  chats included; a new message goes on a later check (chats alone at most
-  every five minutes), and only its rows; nothing goes once the switch is off;
 - when My Cloud's 1Password refuses this computer's token, everything else
   arrives and the strip's notice says *1Password* and why, never a login's site;
 - **a long conversation, sent in pages by the real send** (tool-heavy turns, so
   a few turns make several 300-row pages): a new bot's conversation of three
-  pages and more with the first send by itself, one My Cloud got from a Bring
+  pages and more with the move, one My Cloud got from a Bring
   and then sent from its first row, a later send of two pages and more, a
   context summary that ends a send, and a room of three pages and more (made on
   My Cloud under the same ids). Each is read back on both servers the way the
   chat view pages it, and the path from each server's own leaf, which is what
   its bot reads, must match row for row, summaries included.
+
+`server/cloud-send-move.e2e.test.ts` runs the move as main runs it (`move`, then
+`move({ final: true })`, then `check`): a 1,599-row conversation with 22
+context summaries, a 610-message room and a conversation both sides added to
+pass the path check; MCP servers with their keys and header tokens, an MCP
+sign-in of its own (left here by the first pass, carried by the final one and
+let go of here), an AI key, HighLevel by its token and the connected-apps
+account (a fake broker) arrive, with equal credential fingerprints; the move's
+session counts as someone using My Cloud; a moved conversation may use a lent
+Mac and feeds its bot's memory on My Cloud; and a move run again changes
+nothing there.
+
+`server/cloud-send-kinds.e2e.test.ts` runs what only a move carries, then the
+check, then the move again: a routine naming this computer's folder, with a
+finished run, arrives switched off under its id, as the owner's, naming My
+Cloud's folder; a scheduled call arrives unscheduled; a webhook arrives off
+with an address and secret of its own; an app event goes only in the final
+pass, and this computer stops collecting it. Bot files arrive by path and
+bytes, a file My Cloud has another version of is kept beside it, and nothing
+under `node_modules` goes. Memory on both sides merges with each fact once,
+daily logs and the journal included, as do what bots learned about the person
+and a team's context and memory. Archived, pinned, Chief, projects and fallback
+models reach the bot; a conversation's project, model, approval and snooze and a
+room conversation's time limit reach it too. A reply over 1 MB arrives whole,
+imported, Claude Code and library skills arrive, and a model on the home network
+stays here. `check()` is ok, and a move run again changes nothing.
+`server/cloud-send-store.e2e.test.ts` fills My Cloud's attachment store: the
+attachment is refused in plain words, its chat still goes, no partial file is
+left, and the check names the attachment.
 
 `server/cloud-send-chats.test.ts` covers the row cursor (pages, a deleted row
 starting a conversation over, each page's own leaf, a page never ending between
@@ -61,10 +88,10 @@ computer's server did not hand over, and a 1Password token 1Password already
 refused here.
 
 My Cloud's welcome (`src/components/cloud-welcome/CloudWelcome.test.ts`): while
-Keep My Cloud up to date is on, or once a send has run, **Bring your stuff** is
-done by itself, so the welcome goes straight on to the AI with no Copy, fresh
-start or button; back on that step it says so in one line, with a fresh start
-only behind **More**. With the switch off, the old choice is offered. Found by a
+a move or a whole send runs, or once one has gone, **Bring your stuff** is done
+by itself, so the welcome goes straight on to the AI with no Copy, fresh start
+or button; back on that step it says so in one line, with a fresh start only
+behind **More**. Before anything has come, the old choice is offered. Found by a
 real-user run on a packaged desktop and a test Cloud, where the welcome kept
 offering **Copy to My Cloud** after everything had already arrived.
 
@@ -100,3 +127,31 @@ Send to My Cloud's call main's real wiring through `/__send`. The switcher's
 native menu is drawn from main's own template, since a page can't show a native
 menu. Drive either page with any browser automation; nothing reaches the
 user's app, data or a real Cloud.
+
+## The move to My Cloud, by itself
+
+```sh
+pnpm exec vitest run server/one-home.e2e.test.ts server/one-home-retry.e2e.test.ts server/one-home-trial-key.e2e.test.ts
+pnpm exec vitest run server/move-freeze.test.ts server/cloud-send-arrived.test.ts server/cloud-held-keys.test.ts
+node --test electron/one-home.node-test.mjs
+```
+
+The same two servers, with main's move wiring (`electron/one-home-main.mjs`)
+and a fake MausBot Cloud sign-in whose word the test sets (`fx.account`). The
+fixture can kill and start again either server on its own data (`fx.relaunch`),
+and can fail any request main sends My Cloud (`fx.intercept`). The e2e checks:
+
+- a new buyer's move ends with home on My Cloud and its own check passing, with
+  the app killed and opened again the moment each phase would be written down;
+- §2.2's merge rules, the done line's counts, the webhook bot's one line, and
+  this computer lent, its phone link stopped and My Cloud opened, once each;
+- the frozen computer refuses turns and webhooks, never starts a routine (one
+  that runs at every start included) through its restarts, and no routine
+  occurrence runs on both sides;
+- a check that can't pass lifts the freeze, switches nothing on, and tries again
+  in an hour; after a day the line offers Try again, which finishes the move;
+- when My Cloud ends, this computer is home again at once, then restores the
+  held Cloud's backup (started export-only), its later chats included, and
+  switches on what was on there;
+- on a trial, a moved key is saved and checked but unused while the credit
+  lasts (a stub plays the Admin's credit relay), and used once it runs out.

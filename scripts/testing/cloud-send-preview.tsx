@@ -89,7 +89,7 @@ window.ogb = {
     },
     cloudSend: {
       state: () => call("cloud-send:state"), refresh: () => call("cloud-send:refresh"), send: (options?: unknown) => call("cloud-send:send", options),
-      setAuto: (on: boolean) => call("cloud-send:auto", on), setItem: (key: string, on: boolean) => call("cloud-send:item", key, on),
+      setItem: (key: string, on: boolean) => call("cloud-send:item", key, on),
       onState: polled("cloud-send:state"),
     },
     cloudLogins: { state: () => call("cloud-logins:state"), send: (what: unknown) => call("cloud-logins:send", what) },

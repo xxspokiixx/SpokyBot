@@ -16,6 +16,10 @@ export interface CloudMachine {
   unreachable?: { cause: CloudUnreachableCause; since: number };
   /** Only for a plan that sleeps when idle: whether it is awake now, as the Admin says. */
   power?: import("./cloud-power.mjs").CloudPower;
+  /** The Admin lets this account's computer move to it now (its `moves` gate). */
+  moves?: true;
+  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. */
+  hold?: { until: number };
 }
 /** A payment received but not yet linked to this account: nobody pays twice. */
 export interface CloudPurchase { state: "confirming" | "held"; tier?: string; paidAt?: number }

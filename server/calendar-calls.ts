@@ -235,6 +235,18 @@ export class CalendarCallManager {
     return cloneCall(call);
   }
 
+  /** Another server's call under its own id. A new one is not scheduled (`nextRunAt` null) until it is switched on;
+   * one already here keeps its schedule's next time. */
+  adopt(record: CalendarCall): CalendarCall {
+    const clean = cleanInput(record, this.botExists);
+    const index = this.calls.findIndex((call) => call.id === record.id);
+    const held = index < 0 ? null : this.calls[index]!;
+    const call: CalendarCall = { id: record.id, ...clean, ...(record.roomId ? { roomId: record.roomId } : {}), nextRunAt: held?.nextRunAt ?? null,
+      createdAt: record.createdAt, updatedAt: this.now() };
+    this.commit(() => { if (held) this.calls[index] = call; else this.calls.push(call); });
+    return cloneCall(call);
+  }
+
   update(id: string, patch: CalendarCallPatch): CalendarCall {
     const index = this.calls.findIndex((call) => call.id === id);
     if (index < 0) throw new Error("Call not found");

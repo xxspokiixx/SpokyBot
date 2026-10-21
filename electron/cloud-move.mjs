@@ -7,6 +7,7 @@ import { isAbsolute, join, parse, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { CLOUD_HOME_NAME } from "./cloud-home.mjs";
+import { growToFit, moveFit } from "./cloud-space.mjs";
 
 const MAGIC = Buffer.from("OMB-WORKSPACE-1\n");
 const MIN_BYTES = MAGIC.length + 16 + 12 + 16;
@@ -16,9 +17,6 @@ const MAX_PART_BYTES = 64 * 1024 ** 2;
 // A proxy (nginx allows 1 MB by default) answers 413 to a part: parts halve down to this.
 const MIN_PART_BYTES = 512 * 1024;
 const SPACE_MARGIN = 256 * 1024 ** 2;
-const GB = 1024 ** 3;
-/** Must match openmaus-cloud's VOLUME_EXTEND step. */
-const DISK_STEP_GB = 10;
 const REUSE_MS = 30 * 60_000;
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/;
 const LOCAL_ROUTES = /^\/api\/(?:workspace-backup\/(?:status|export|download\/[a-f\d-]{36})|cloud-move\/estimate)$/;
@@ -117,18 +115,7 @@ const identity = value => ({
 });
 
 /** Mirrors the Cloud's own room rule (three times the upload, plus a margin); the Cloud checks again before uploading. */
-export function moveFit({ localBytes, freeBytes, uploadReceived = 0, volumeBytes = null, disk = null }) {
-  const neededBytes = 3 * localBytes + SPACE_MARGIN, available = freeBytes + uploadReceived;
-  const maxBytes = count(disk?.maxBytes) && disk.maxBytes > 0 ? disk.maxBytes : null;
-  const volume = [volumeBytes, disk?.volumeBytes, disk?.startBytes].find(value => count(value) && value > 0) ?? null;
-  if (available >= neededBytes) return { fit: "now", neededBytes, freeBytes: available };
-  const room = maxBytes && volume && maxBytes > volume ? maxBytes - volume : 0;
-  if (room > 0 && available + room >= neededBytes) {
-    const sizeGb = Math.min(Math.floor(maxBytes / GB), Math.ceil((volume + neededBytes - available) / GB / DISK_STEP_GB) * DISK_STEP_GB);
-    return { fit: "grow", neededBytes, freeBytes: available, maxBytes, sizeGb };
-  }
-  return { fit: "never", neededBytes, freeBytes: available, ...(maxBytes ? { maxBytes, ...(disk?.largest === true ? { largest: true } : {}) } : volume ? { volumeBytes: volume } : {}) };
-}
+export { moveFit };
 function leftBehindOf(value) {
   if (!record(value) || !count(value.bots) || !Array.isArray(value.paths)) return null;
   const paths = value.paths.filter(path => typeof path === "string" && path.length <= 4096).slice(0, 20).map(sentence).filter(Boolean);
@@ -408,19 +395,15 @@ export function createCloudMove({ localRequest, fetchImpl = fetch, tempRoot, ava
   async function makeRoom(dest, session, fit, signal) {
     publish({ phase: "growing", action });
     const details = { freeBytes: fit.freeBytes, neededBytes: fit.neededBytes, maxBytes: fit.maxBytes };
-    let answer = null;
-    try { answer = await dest.grow(fit.sizeGb); } catch { signal.throwIfAborted(); fail("cloud_grow_unavailable", "My Cloud could not make room for this move just now.", details); }
+    const free = async () => {
+      try { const status = await cloudStatus(session, signal); return status ? status.freeBytes + status.uploadReceived : null; }
+      catch (error) { if (signal.aborted || error?.code === "access_changed") throw error; return null; }
+    };
+    const grown = await growToFit(fit, { grow: (sizeGb) => dest.grow(sizeGb), free, sleep: (ms) => sleep(ms, signal), pollMs, timeoutMs: growTimeoutMs, now });
     signal.throwIfAborted();
-    if (!answer?.supported) fail("cloud_grow_unsupported", "My Cloud can't make room for a move this size yet.", details);
-    if (answer.refused) fail("cloud_full", "My Cloud does not have enough space for this move.", details);
-    const deadline = now() + growTimeoutMs;
-    for (;;) {
-      await sleep(pollMs, signal);
-      let status = null;
-      try { status = await cloudStatus(session, signal); } catch (error) { if (signal.aborted || error?.code === "access_changed") throw error; }
-      if (status && status.freeBytes + status.uploadReceived >= fit.neededBytes) return;
-      if (now() > deadline) fail("cloud_grow_unavailable", "My Cloud could not make room for this move in time.", details);
-    }
+    if (grown === "unsupported") fail("cloud_grow_unsupported", "My Cloud can't make room for a move this size yet.", details);
+    if (grown === "full") fail("cloud_full", "My Cloud does not have enough space for this move.", details);
+    if (grown !== "grown") fail("cloud_grow_unavailable", "My Cloud could not make room for this move just now.", details);
   }
 
   async function waitForMerge(session, signal) {

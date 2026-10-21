@@ -585,11 +585,11 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
-/** Each conversation's newest stored row, by its row number: what Keep My Cloud up to date compares with what it sent. */
-export function threadHeads(): Map<string, { last: number; lastId: string }> {
-  const rows = db().prepare("SELECT m.thread_id AS threadId, m.rowid AS last, m.id AS lastId FROM messages m " +
-    "JOIN (SELECT thread_id, MAX(rowid) AS head FROM messages GROUP BY thread_id) h ON m.rowid = h.head").all() as Array<{ threadId: string; last: number; lastId: string }>;
-  return new Map(rows.map((row) => [row.threadId, { last: Number(row.last), lastId: row.lastId }]));
+/** Each conversation's newest stored row, by its row number, and how many rows it has: what Send to My Cloud compares with what it sent. */
+export function threadHeads(): Map<string, { last: number; lastId: string; rows: number }> {
+  const rows = db().prepare("SELECT m.thread_id AS threadId, m.rowid AS last, m.id AS lastId, h.rows AS rows FROM messages m " +
+    "JOIN (SELECT thread_id, MAX(rowid) AS head, COUNT(*) AS rows FROM messages GROUP BY thread_id) h ON m.rowid = h.head").all() as Array<{ threadId: string; last: number; lastId: string; rows: number }>;
+  return new Map(rows.map((row) => [row.threadId, { last: Number(row.last), lastId: row.lastId, rows: Number(row.rows) }]));
 }
 
 /** A conversation's rows numbered past `after`, oldest first, each with its stored size: `limit` of them, or all up to `through`. */

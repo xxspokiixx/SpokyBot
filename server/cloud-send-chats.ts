@@ -1,27 +1,30 @@
-// Keep My Cloud up to date's chats, by row, never as a copy. This computer lists each bot conversation's newest stored
+// Send to My Cloud's chats, by row, never as a copy. This computer lists each bot conversation's newest stored
 // row (GET /api/cloud-send/chats) and hands main the rows stored after the last one My Cloud took (GET
 // /api/cloud-send/chats/rows); My Cloud adds them as Bring newer chats adds a copy's (cloud-chat-merge.ts): only what it
 // lacks, never replacing or deleting anything. A conversation's history therefore goes once, and then only what is new.
 // Admin scope (request-auth's default) on both sides.
-import { randomUUID } from "node:crypto";
-import { link, lstat, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
-import type { IncomingMessage } from "node:http";
+import { lstat, open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { ATTACHMENTS_DIR, FILE_MAX_BYTES } from "./attachments.ts";
+import type { ApprovalMode } from "../shared/approval-mode.ts";
+import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
+import { ATTACHMENTS_DIR, FILE_MAX_BYTES, saveNamedAttachment } from "./attachments.ts";
+import { audienceEquals, narrowestAudience } from "./bot-visibility.ts";
 import { activePath, addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation, type SentRoom } from "./cloud-chat-merge.ts";
 import { threadHeads, threadRowNumbers, threadRowsFrom } from "./message-db.ts";
+import { ownerStamp, unstamped, type CloudOwner } from "./cloud-owner-lines.ts";
+import type { RequestAuth } from "./request-auth.ts";
 import type { RouteContext } from "./routes/table.ts";
-import type { BotRecord, GroupRecord, GroupTaskRecord, Message, TaskRecord } from "./store.ts";
+import type { BotRecord, GroupRecord, GroupTaskRecord, Message, Store, TaskPatch, TaskRecord } from "./store.ts";
 
 export const CHAT_ROWS_PAGE = 300;
 /** A page's rows past its first, by their stored size: main sends a few pages per request, under CHATS_BODY_MAX. */
 export const CHAT_PAGE_BYTES = 2 * 1024 * 1024;
-/** One row bigger than this goes shortened, so no single message can keep a conversation from going. */
-export const CHAT_ROW_MAX = 1024 * 1024;
-export const CHATS_BODY_MAX = 8 * 1024 * 1024;
-const SHORTENED = "\n\n[Shortened: this message was too long to copy to My Cloud.]";
+/** A request may hold one row of any size the app keeps: rows always go whole. */
+export const CHATS_BODY_MAX = 64 * 1024 * 1024;
+/** A check of a move's chats asks about at most this many row ids of a conversation, and of its path, at a time. */
+export const VERIFY_IDS = 5_000;
 const PREFIX = "/api/cloud-send/chats";
 
 /** A bot's conversation (`bot`) or a room's (`room`). */
@@ -102,15 +105,6 @@ export function threadRowsAfter(threadId: string, after: number, afterId: string
   return { rows, leaf, last: end, lastId: found.at(-1)?.message.id ?? (held ? afterId : null), more, restarted: after > 0 && !held };
 }
 
-/** A row as it goes: whole, or past CHAT_ROW_MAX its text cut and only what a message is kept. */
-export function fittedRow(row: Message): Message {
-  if (Buffer.byteLength(JSON.stringify(row), "utf8") <= CHAT_ROW_MAX) return row;
-  const { id, at, role, kind, parentId, turnId, turnCompletedAt } = row as Message & { turnId?: string; turnCompletedAt?: number };
-  return { id, at, role, kind, parentId, ...(turnId ? { turnId } : {}), ...(turnCompletedAt ? { turnCompletedAt } : {}),
-    // At most four UTF-8 bytes a character: a quarter of the limit in characters stays under it.
-    text: `${(row.text ?? "").slice(0, CHAT_ROW_MAX / 4)}${SHORTENED}` } as Message;
-}
-
 const taskOf = (bot: BotRecord, threadId: string): TaskRecord | null => (bot.tasks ?? []).find((task) => task.threadId === threadId) ?? null;
 /** What a task carries to My Cloud: never this computer's turn state. */
 function sentTask(task: TaskRecord): TaskRecord {
@@ -120,8 +114,84 @@ function sentTask(task: TaskRecord): TaskRecord {
 const pick = <T extends object>(source: T, keys: readonly string[]) => Object.fromEntries(keys.filter((key) => (source as Record<string, unknown>)[key] !== undefined)
   .map((key) => [key, (source as Record<string, unknown>)[key]]));
 /** What a room's thread carries to My Cloud: never this computer's folders. */
-const sentRoomTask = (task: GroupTaskRecord) => pick(task, ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId"]) as unknown as GroupTaskRecord;
-const sentRoom = (room: GroupRecord) => pick(room, ["name", "memberIds", "defaultResponder", "bulletin", "section", "setupCompletedAt", "setupSkippedAt"]) as unknown as SentRoom;
+const sentRoomTask = (task: GroupTaskRecord) => pick(task, ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"]) as unknown as GroupTaskRecord;
+const sentRoom = (room: GroupRecord) => pick(room, ["name", "memberIds", "defaultResponder", "bulletin", "section", "setupCompletedAt", "setupSkippedAt", "audienceFloor"]) as unknown as SentRoom;
+
+/** A conversation's own settings a move carries: its model, approval, snooze and project; a room conversation's time
+ * limit and its room's audience floor. Custom approval never leaves the computer that granted it. */
+const BOT_SETTINGS = ["modelSelection", "approvalMode", "autoApprove", "snoozedUntil", "projectId"] as const;
+export function conversationSettings(store: Pick<ChatStore, "bot" | "group">, head: Pick<ChatHead, "bot" | "room" | "threadId">): Record<string, unknown> {
+  if (head.bot) {
+    const bot = store.bot(head.bot);
+    const task = bot ? taskOf(bot, head.threadId) : null;
+    const out = task ? pick(task, BOT_SETTINGS) : {};
+    if (out.approvalMode === "custom") { delete out.approvalMode; delete out.autoApprove; }
+    return out;
+  }
+  const room = store.group(head.room!);
+  const task = room?.tasks?.find((candidate) => candidate.threadId === head.threadId);
+  return { ...(task?.turnTimeoutMinutes !== undefined ? { turnTimeoutMinutes: task.turnTimeoutMinutes } : {}), ...(room?.audienceFloor ? { audienceFloor: room.audienceFloor } : {}) };
+}
+
+/** Each stored attachment the conversations' rows name, with its size. */
+async function attachmentSizes(store: ChatStore, dataDir: string, heads: readonly ChatHead[]): Promise<Array<{ name: string; size: number }>> {
+  const names = new Set<string>();
+  for (const head of heads) for (const row of store.messagesFor(head.threadId)) for (const name of attachmentNames(row, dataDir)) names.add(name);
+  const out: Array<{ name: string; size: number }> = [];
+  for (const name of names) {
+    const info = await lstat(join(ATTACHMENTS_DIR, name)).catch(() => null);
+    if (info?.isFile()) out.push({ name, size: info.size });
+  }
+  return out;
+}
+
+const settingsSchema = z.object({
+  v: z.literal(1),
+  conversations: z.array(z.object({ threadId: z.string().regex(/^[\w-]{1,200}$/u), settings: z.object({
+    modelSelection: z.object({ instanceId: z.string().max(128), model: z.string().max(500) }).passthrough().optional(),
+    approvalMode: z.enum(["ask", "edits", "auto", "full"]).optional(),
+    autoApprove: z.boolean().optional(),
+    snoozedUntil: z.number().finite().min(0).optional(),
+    projectId: z.string().max(128).optional(),
+    turnTimeoutMinutes: z.number().int().min(1).max(24 * 60).optional(),
+    audienceFloor: z.unknown().optional(),
+  }) })).max(500),
+});
+
+/** A setting My Cloud's copy of a conversation lacks takes this computer's; one it has stays its own. The audience floor
+ * only ever narrows. How many conversations changed. */
+export function adoptConversationSettings(store: CloudSendChatsDeps["store"], conversations: z.infer<typeof settingsSchema>["conversations"],
+  allowed: { instance(id: string): boolean; approval(selection: ModelSelection, mode: ApprovalMode): boolean }): number {
+  let changed = 0;
+  for (const { threadId, settings } of conversations) {
+    const { bot, room } = ownerOf(store, threadId);
+    if (bot) {
+      const task = store.taskByThread(bot.id, threadId);
+      if (!task) continue;
+      const patch: TaskPatch = {};
+      if (task.modelSelection === undefined && settings.modelSelection && allowed.instance(settings.modelSelection.instanceId)) patch.modelSelection = settings.modelSelection as ModelSelection;
+      const selection = patch.modelSelection ?? task.modelSelection ?? bot.modelSelection;
+      if (task.approvalMode === undefined && settings.approvalMode && allowed.approval(selection, settings.approvalMode)) {
+        patch.approvalMode = settings.approvalMode;
+        patch.autoApprove = settings.approvalMode === "auto";
+      }
+      if (task.snoozedUntil === undefined && settings.snoozedUntil !== undefined) patch.snoozedUntil = settings.snoozedUntil;
+      if (task.projectId === undefined && settings.projectId && bot.projects?.some((project) => project.id === settings.projectId)) patch.projectId = settings.projectId;
+      if (Object.keys(patch).length && store.patchTask(bot.id, threadId, patch)) changed++;
+      continue;
+    }
+    if (!room) continue;
+    let touched = false;
+    const task = room.tasks?.find((candidate) => candidate.threadId === threadId);
+    if (task && task.turnTimeoutMinutes === undefined && settings.turnTimeoutMinutes !== undefined) touched = Boolean(store.patchGroupTask(room.id, threadId, { turnTimeoutMinutes: settings.turnTimeoutMinutes })) || touched;
+    if (settings.audienceFloor !== undefined) {
+      const floor = narrowestAudience([room.audienceFloor, settings.audienceFloor]);
+      if (!audienceEquals(floor, room.audienceFloor ?? "everyone")) touched = Boolean(store.patchGroup(room.id, { audienceFloor: floor === "everyone" ? undefined : floor as BotVisibility })) || touched;
+    }
+    if (touched) changed++;
+  }
+  return changed;
+}
 
 const messageSchema = z.object({ id: z.string().min(1).max(200), at: z.number().finite() }).passthrough();
 const sentSchema = z.object({
@@ -139,44 +209,151 @@ const sentSchema = z.object({
   }).refine((entry) => (entry.bot === undefined) !== (entry.room === undefined))).max(200),
 });
 
-/** The request's bytes, or null past `limit` (read to the end either way, so the answer still reaches the sender). */
-function rawBody(req: IncomingMessage, limit: number): Promise<Buffer | null> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    req.on("data", (chunk: Buffer) => { bytes += chunk.length; if (bytes <= limit) chunks.push(chunk); });
-    req.on("end", () => resolve(bytes > limit ? null : Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
+export interface CloudSendChatsDeps {
+  store: ChatStore & Pick<Store, "patchMessage" | "taskByThread" | "patchTask" | "patchGroupTask"> & { bots: BotRecord[] };
+  dataDir: string;
+  /** My Cloud's owner, when the request is the owner's own session on a Cloud home; null otherwise. */
+  owner?(auth: RequestAuth): CloudOwner | null;
+  /** Lines of a conversation it held became its owner's: whatever remembers who wrote in it looks again. */
+  stamped?(threadId: string): void;
+  /** A model this server runs, and an approval level it lets a conversation on that model have. */
+  instanceExists?(id: string): boolean;
+  approvalSupported?(selection: ModelSelection, mode: ApprovalMode): boolean;
 }
 
-export interface CloudSendChatsDeps {
-  store: ChatStore & { bots: BotRecord[] };
-  dataDir: string;
-}
+const ownerOf = (store: Pick<ChatStore, "bots" | "groups">, threadId: string) => {
+  const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
+  return { bot, room: bot ? undefined : store.groups.find((candidate) => roomThreads(candidate).includes(threadId)) };
+};
 
 /** A conversation's rows after a point, a page at a time, as main sends them on; null when no bot or room here has it. */
 export function chatPage({ store, dataDir }: CloudSendChatsDeps, threadId: string, after: number, afterId: string | null) {
-  const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
-  const room = bot ? undefined : store.groups.find((candidate) => roomThreads(candidate).includes(threadId));
+  const { bot, room } = ownerOf(store, threadId);
   if ((!bot && !room) || !Number.isSafeInteger(after) || after < 0) return null;
   const path = activePath(store.messagesFor(threadId), store.activeLeaf(threadId)).map((row) => row.id);
   const page = threadRowsAfter(threadId, after, afterId, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES, path);
   const task = bot ? taskOf(bot, threadId) : room!.tasks?.find((candidate) => candidate.threadId === threadId) ?? null;
   const owner = bot ? { bot: bot.id, task: task ? sentTask(task as TaskRecord) : null }
     : { room: room!.id, roomInfo: sentRoom(room!), task: task ? sentRoomTask(task as GroupTaskRecord) : null };
-  return { v: 1, ...owner, threadId, ...page, rows: page.rows.map(fittedRow),
+  return { v: 1, ...owner, threadId, ...page,
     attachments: [...new Set(page.rows.flatMap((row) => attachmentNames(row as Message, dataDir)))] };
 }
 
+/** A conversation's stored row ids and the ids of its visible path, root first, each from `from` on, VERIFY_IDS at a
+ * time; null when no bot or room here has it. Ids only: what a move checks My Cloud has. */
+export function chatIds({ store }: CloudSendChatsDeps, threadId: string, from: number) {
+  const { bot, room } = ownerOf(store, threadId);
+  if ((!bot && !room) || !Number.isSafeInteger(from) || from < 0) return null;
+  const rows = store.messagesFor(threadId);
+  const path = activePath(rows, store.activeLeaf(threadId)).map((row) => row.id);
+  return { v: 1, ids: rows.slice(from, from + VERIFY_IDS).map((row) => row.id), path: path.slice(from, from + VERIFY_IDS), leaf: path.at(-1) ?? null,
+    more: from + VERIFY_IDS < Math.max(rows.length, path.length) };
+}
+
+/** Whether `ids` appear in this order on `path` after the row `after` (from its start when null), and the last of them
+ * found there. */
+export function inOrder(path: readonly string[], after: string | null, ids: readonly string[]): { holds: boolean; at: string | null } {
+  let at = after === null ? 0 : path.indexOf(after) + 1;
+  if (after !== null && at === 0) return { holds: false, at: null };
+  let last = after;
+  for (const id of ids) {
+    const found = path.indexOf(id, at);
+    if (found < 0) return { holds: false, at: last };
+    at = found + 1;
+    last = id;
+  }
+  return { holds: true, at: last };
+}
+
+const idsSchema = z.object({
+  v: z.literal(1),
+  conversations: z.array(z.object({ threadId: z.string().regex(/^[\w-]{1,200}$/u), ids: z.array(z.string().max(200)).max(VERIFY_IDS) })).max(200),
+}).refine((body) => body.conversations.reduce((sum, entry) => sum + entry.ids.length, 0) <= 2 * VERIFY_IDS);
+
+/** My Cloud's side of the move's own lines: of these rows it holds of a bot conversation, each its owner wrote or
+ * answered in the window they came from, which an earlier send or a Bring left naming nobody, becomes the owner's as an
+ * arriving one does. A room's never do. Ids only. */
+export function stampHeld(store: CloudSendChatsDeps["store"], conversations: ReadonlyArray<{ threadId: string; ids: readonly string[] }>, owner: CloudOwner): { stamped: number; threads: string[] } {
+  let stamped = 0;
+  const threads = new Set<string>();
+  for (const { threadId, ids } of conversations) {
+    if (!ownerOf(store, threadId).bot) continue;
+    const named = new Set(ids);
+    for (const row of store.messagesFor(threadId)) {
+      const stamp = named.has(row.id) ? ownerStamp(row, owner) : null;
+      if (!stamp || !store.patchMessage(threadId, row.id, stamp)) continue;
+      stamped++;
+      threads.add(threadId);
+    }
+  }
+  return { stamped, threads: [...threads] };
+}
+
+const verifySchema = z.object({
+  v: z.literal(1),
+  conversations: z.array(z.object({
+    threadId: z.string().regex(/^[\w-]{1,200}$/u),
+    ids: z.array(z.string().max(200)).max(VERIFY_IDS).optional(),
+    path: z.object({ after: z.string().max(200).nullable(), ids: z.array(z.string().max(200)).max(VERIFY_IDS), last: z.boolean() }).optional(),
+  })).max(200),
+}).refine((body) => body.conversations.reduce((sum, entry) => sum + (entry.ids?.length ?? 0) + (entry.path?.ids.length ?? 0), 0) <= 2 * VERIFY_IDS);
+
+/** My Cloud's side of checking a move's chats: which of the sent ids it lacks, how many of them are a bot conversation's
+ * lines of its owner's that do not carry the owner yet, and whether the sender's visible path holds on its own, in order
+ * (a conversation both sides added to weaves the two together). The last chunk of a path also gets My Cloud's leaf and
+ * path length, so the sender can tell an equal path from one that holds inside a longer one. Ids only, never a row. */
+export function verifyChats(store: ChatStore, conversations: z.infer<typeof verifySchema>["conversations"]) {
+  return conversations.map(({ threadId, ids, path }) => {
+    const rows = store.messagesFor(threadId);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const bot = Boolean(ownerOf(store, threadId).bot);
+    const visible = path ? activePath(rows, store.activeLeaf(threadId)).map((row) => row.id) : [];
+    return { threadId, missing: (ids ?? []).filter((id) => !byId.has(id)),
+      unstamped: bot ? (ids ?? []).filter((id) => { const row = byId.get(id); return row !== undefined && unstamped(row); }).length : 0,
+      ...(path ? { path: { ...inOrder(visible, path.after, path.ids), ...(path.last ? { leaf: visible.at(-1) ?? null, length: visible.length } : {}) } } : {}) };
+  });
+}
+
 /** False when the path is not one of these routes. */
-export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, path, method, url, json, readBody }: RouteContext): Promise<boolean> {
+export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, path, method, url, auth, json, readBody }: RouteContext): Promise<boolean> {
   if (path !== PREFIX && !path.startsWith(`${PREFIX}/`)) return false;
   res.setHeader("cache-control", "no-store");
   const { store } = deps;
   // This computer's side: what each conversation has, and its rows after a point.
   if (path === PREFIX && method === "GET") {
-    json(res, 200, { v: 1, dataDir: deps.dataDir, conversations: chatHeads(store.bots, store.groups) });
+    const heads = chatHeads(store.bots, store.groups);
+    json(res, 200, { v: 1, dataDir: deps.dataDir, conversations: heads.map((head) => ({ ...head, settings: conversationSettings(store, head) })),
+      ...(url.searchParams.get("attachments") === "1" ? { attachments: await attachmentSizes(store, deps.dataDir, heads) } : {}) });
+    return true;
+  }
+  if (path === `${PREFIX}/settings` && method === "POST") {
+    if (!deps.owner?.(auth)) { json(res, 403, { error: "Only My Cloud's owner can set its conversations as they were." }); return true; }
+    const parsed = settingsSchema.safeParse(await readBody(req, 1024 * 1024));
+    if (!parsed.success) { json(res, 400, { error: "send { v: 1, conversations: [{ threadId, settings }] }" }); return true; }
+    json(res, 200, { v: 1, changed: adoptConversationSettings(store, parsed.data.conversations,
+      { instance: (id) => deps.instanceExists?.(id) ?? false, approval: (selection, mode) => deps.approvalSupported?.(selection, mode) ?? false }) });
+    return true;
+  }
+  if (path === `${PREFIX}/ids` && method === "GET") {
+    const ids = chatIds(deps, url.searchParams.get("thread") ?? "", Number(url.searchParams.get("from") ?? 0));
+    if (!ids) json(res, 404, { error: "no such conversation" });
+    else json(res, 200, ids);
+    return true;
+  }
+  if (path === `${PREFIX}/verify` && method === "POST") {
+    const parsed = verifySchema.safeParse(await readBody(req, 2 * 1024 * 1024));
+    if (!parsed.success) { json(res, 400, { error: `send { v: 1, conversations: [{ threadId, ids, path }] }, at most ${VERIFY_IDS} ids of each` }); return true; }
+    json(res, 200, { v: 1, conversations: verifyChats(store, parsed.data.conversations) });
+    return true;
+  }
+  if (path === `${PREFIX}/owner` && method === "POST") {
+    const owner = deps.owner?.(auth) ?? null;
+    if (!owner) { json(res, 403, { error: "Only My Cloud's owner can say which of its lines are theirs." }); return true; }
+    const parsed = idsSchema.safeParse(await readBody(req, 2 * 1024 * 1024));
+    if (!parsed.success) { json(res, 400, { error: `send { v: 1, conversations: [{ threadId, ids }] }, at most ${VERIFY_IDS} ids of each` }); return true; }
+    const { stamped, threads } = stampHeld(store, parsed.data.conversations, owner);
+    for (const threadId of threads) deps.stamped?.(threadId);
+    json(res, 200, { v: 1, stamped });
     return true;
   }
   if (path === `${PREFIX}/rows` && method === "GET") {
@@ -198,19 +375,16 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     }
     // My Cloud's side: an attachment a sent row names, kept under its own name; one already here is the same upload.
     if (method === "POST") {
-      const bytes = await rawBody(req, FILE_MAX_BYTES);
-      if (!bytes) { json(res, 413, { error: `attachments are limited to ${FILE_MAX_BYTES} bytes` }); return true; }
-      await mkdir(ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
-      // Written whole under a name of its own, then linked: the attachment's name never shows a partial file.
-      const partial = join(ATTACHMENTS_DIR, `.sent-${randomUUID()}.partial`);
-      await writeFile(partial, bytes, { flag: "wx", mode: 0o600 });
-      try { await link(partial, file); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        json(res, 200, { stored: false });
-        return true;
-      } finally { await unlink(partial).catch(() => {}); }
-      json(res, 201, { stored: true });
+      const declared = Number(req.headers["content-length"]);
+      try {
+        const saved = await saveNamedAttachment(named, req, Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined);
+        json(res, saved.stored ? 201 : 200, saved);
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (status !== 413 && status !== 507) throw error;
+        req.resume();
+        json(res, status, { error: (error as Error).message, ...(status === 507 ? { full: true } : {}) });
+      }
       return true;
     }
     json(res, 405, { error: "method not allowed" });
@@ -238,7 +412,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     }
     for (const room of store.groups) if (room.busyBotId) for (const threadId of [room.threadId, ...(room.tasks ?? []).map((task) => task.threadId)]) busy.add(threadId);
     const result = addSentChats(store, deps.dataDir, parsed.data.dataDir, parsed.data.conversations as unknown as SentConversation[],
-      { busy: (threadId) => busy.has(threadId) });
+      { busy: (threadId) => busy.has(threadId), owner: deps.owner?.(auth) ?? null });
     json(res, 200, result);
     return true;
   }

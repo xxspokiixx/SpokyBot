@@ -354,12 +354,12 @@ describe("CloudWelcome", () => {
     expect(hintsPut().at(-1)).toEqual([SHOWN, CLOUD_WELCOME_DONE]);
     expect(welcome.current!.ended).toBe(true);
   });
-  describe("when this computer's things come over by themselves (Keep My Cloud up to date)", () => {
+  describe("when this computer's things come over (the move, or Send everything)", () => {
     const counts = { bots: 4, updatedBots: 0, skills: 2, logins: 2, onePassword: true, settings: 1, chats: { conversations: 3, messages: 10 } };
-    const sentLast = (extra: Record<string, unknown> = {}) => ({ at: 1, reason: "first", failed: 0, seen: false, sent: counts, ...extra }) as NonNullable<CloudSendNotice["last"]>;
+    const sentLast = (extra: Record<string, unknown> = {}) => ({ at: 1, reason: "move", failed: 0, seen: false, sent: counts, ...extra }) as NonNullable<CloudSendNotice["last"]>;
     const notice = (extra: Partial<CloudSendNotice> = {}): CloudSendNotice => ({
-      ready: true, auto: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false,
-      running: false, last: null, ...extra,
+      ready: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false,
+      running: false, last: null, whole: null, ...extra,
     });
     let pushNotice: (value: CloudSendNotice) => void = () => {};
     const withSend = (value: CloudSendNotice | null) => {
@@ -370,23 +370,27 @@ describe("CloudWelcome", () => {
     };
     const rail = () => host.querySelector('[data-welcome-rail="bring"]')!;
 
-    it("says what came over only after a whole send went through, and keeps the choice when nothing comes by itself", () => {
+    it("says what came over only after a whole send went through, and keeps the choice while nothing is coming", () => {
       const state = (value: CloudSendNotice | null) => sentHere(value)?.state ?? null;
       expect(state(null)).toBeNull();
-      expect(state({ ...notice(), auto: undefined } as unknown as CloudSendNotice), "a desktop too old to say keeps its choice").toBeNull();
-      expect(state(notice({ auto: false }))).toBeNull();
-      expect(state(notice()), "switched on, nothing gone yet: on its way").toBe("sending");
-      expect(state(notice({ running: true, runningReason: "first" }))).toBe("sending");
+      expect(state({ ...notice(), whole: undefined } as unknown as CloudSendNotice), "a desktop too old to say keeps its choice").toBeNull();
+      expect(state(notice()), "nothing sent and nothing on its way").toBeNull();
+      expect(state(notice({ running: true, runningReason: "move" }))).toBe("sending");
+      expect(state(notice({ running: true, runningReason: "button" }))).toBe("sending");
       expect(state(notice({ last: sentLast() }))).toBe("sent");
-      expect(state(notice({ auto: false, last: sentLast({ reason: "button" }) }))).toBe("sent");
+      expect(state(notice({ last: sentLast({ reason: "button" }) }))).toBe("sent");
       expect(state(notice({ last: sentLast({ error: "This app could not sign in to My Cloud. Try again." }) })), "a send that failed as a whole").toBeNull();
-      expect(state(notice({ auto: false, last: sentLast({ reason: "logins" }) })), "one login sent by hand").toBeNull();
-      expect(state(notice({ auto: false, running: true, runningReason: "logins" }))).toBeNull();
-      expect(state(notice({ last: sentLast({ reason: "logins" }) })), "switched on: the whole send is still to come").toBe("sending");
+      expect(state(notice({ last: sentLast({ reason: "logins" }) })), "one login sent by hand").toBeNull();
+      expect(state(notice({ running: true, runningReason: "logins" }))).toBeNull();
+      // An older desktop that sends by itself: its first send, its later ones, and nothing gone yet while its switch is on.
+      for (const older of ["first", "auto"]) expect(state(notice({ last: sentLast({ reason: older }) })), older).toBe("sent");
+      expect(state(notice({ running: true, runningReason: "first" }))).toBe("sending");
+      expect(state({ ...notice(), auto: true }), "its switch on, nothing gone yet: on its way").toBe("sending");
+      expect(state({ ...notice({ last: sentLast({ reason: "logins" }) }), auto: true })).toBe("sending");
     });
 
     it("moves straight on to the AI while they come over, ticking Bring your stuff only once they arrived, never taking focus", async () => {
-      withSend(notice({ running: true, runningReason: "first" }));
+      withSend(notice({ running: true, runningReason: "move" }));
       render();
       await vi.waitFor(() => expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull());
       expect(rail().hasAttribute("data-finished")).toBe(false);
@@ -407,22 +411,24 @@ describe("CloudWelcome", () => {
       fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [SHOWN, welcomeStepHint("bring")] };
       render();
       flushSync(() => (rail() as HTMLButtonElement).click());
-      await vi.waitFor(() => expect(text()).toContain("New ones keep coming by themselves."));
+      await vi.waitFor(() => expect(text()).toContain("came over from This computer."));
+      expect(text()).not.toContain("by themselves");
       for (const label of ["More", "Choose a team", "Continue"]) expect(button(label)).toBeUndefined();
     });
 
     it("back on its step it says in one line what is happening, with a fresh start only behind More in Advanced mode", async () => {
       localStorage.setItem(ADVANCED_MODE_KEY, "1");
-      withSend(notice({ running: true, runningReason: "first" }));
+      withSend(notice({ running: true, runningReason: "move" }));
       render();
       await vi.waitFor(() => expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull());
       flushSync(() => (rail() as HTMLButtonElement).click());
-      expect(text()).toContain("Your bots come over by themselves");
+      expect(text()).toContain("Your bots are already here");
       expect(text()).toContain("Bringing this computer's bots, chats and logins here…");
       expect(host.querySelector("[data-bring-choice]")).toBeNull();
       for (const label of ["Copy to Studio Cloud", "Continue", "Choose a team", "Skip for now"]) expect(button(label)).toBeUndefined();
       flushSync(() => pushNotice(notice({ last: sentLast() })));
-      await vi.waitFor(() => expect(text()).toContain("4 bots, 2 skills, 2 logins, 1Password, your settings, and 3 chats came over from This computer. New ones keep coming by themselves."));
+      await vi.waitFor(() => expect(text()).toContain("4 bots, 2 skills, 2 logins, 1Password, your settings, and 3 chats came over from This computer."));
+      expect(text()).not.toContain("by themselves");
       expect(host.querySelector('[data-welcome-step="bring"]'), "never moved off a step the person opened").not.toBeNull();
       click("More");
       expect(text()).toContain("Start fresh");
@@ -430,8 +436,8 @@ describe("CloudWelcome", () => {
       expect(host.querySelector("[data-team-library]")).not.toBeNull();
     });
 
-    it("with the switch off, a whole send it made says what arrived and nothing about more coming", async () => {
-      withSend(notice({ auto: false, last: sentLast({ reason: "button", sent: { ...counts, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null } }) }));
+    it("a whole send says what arrived and nothing about more coming", async () => {
+      withSend(notice({ last: sentLast({ reason: "button", sent: { ...counts, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null } }) }));
       fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [SHOWN, welcomeStepHint("bring")] };
       render();
       flushSync(() => (rail() as HTMLButtonElement).click());
@@ -441,8 +447,8 @@ describe("CloudWelcome", () => {
     });
 
     it("a whole send that failed, a single login sent by hand, or an older desktop keep the choice to copy or start fresh", async () => {
-      for (const value of [notice({ last: sentLast({ error: "This app could not sign in to My Cloud. Try again." }) }), notice({ auto: false, last: sentLast({ reason: "logins" }) }),
-        { ...notice({ last: sentLast() }), auto: undefined } as unknown as CloudSendNotice]) {
+      for (const value of [notice({ last: sentLast({ error: "This app could not sign in to My Cloud. Try again." }) }), notice({ last: sentLast({ reason: "logins" }) }),
+        { ...notice({ last: sentLast() }), whole: undefined } as unknown as CloudSendNotice]) {
         flushSync(() => root.unmount());
         root = createRoot(host);
         resetCloudWelcome();

@@ -30,6 +30,9 @@ export interface EnvironmentDescriptor {
     deviceLink?: true;
     /** A person's own OMB Cloud home. */
     cloudHome?: true;
+    /** A Cloud home that takes the one-time move from the person's computer: by-row chats, the manifest, the chats and
+     * credentials checks, and lines its owner wrote there stamped as the owner's. */
+    move?: 1;
     /** Who can update the server: the desktop app that runs it, or the operator. */
     selfUpdate: "desktop-managed" | "operator";
     /** Whether /pair offers "sign in with your email" (an allow-list is set). */
@@ -128,7 +131,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
       ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
-      ...(input.cloudHome === true ? { cloudHome: true as const } : {}),
+      ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
       emailSignIn: input.emailSignIn === true,
       jobs: true,
