@@ -36,6 +36,27 @@ test("a picked folder is checked and lent read only; a cancelled picker lends no
   assert.deepEqual({ path: folder.path, name: folder.name, write: folder.write }, { path: "/Users/me/Plans", name: "Plans", write: false });
 });
 
+test("the whole home folder is lent only after its own warning, and is named in the access dialog", async () => {
+  const win = liveWindow(), isHome = async (path) => path === "/Users/me";
+  for (const [response, lent] of [[0, true], [1, false], [-1, false]]) {
+    const { dialog, calls } = fakeDialog({ response, picked: { canceled: false, filePaths: ["/Users/me"] } });
+    const folder = await createLendingDialogs({ dialog, window: () => win, validate: named, isHome }).chooseFolder("Choose a folder or drive to share");
+    assert.equal(calls[1][0], "message");
+    assert.equal(calls[1][2].message, "Share your whole home folder?");
+    // The truth, not a scare: secrets inside it stay private (proven through the lending path in shared-computer-access).
+    assert.match(calls[1][2].detail, /readable by the bots you allow\. .*keys, passwords and browser data, like \.ssh .*always stay private\./);
+    assert.deepEqual([calls[1][2].defaultId, calls[1][2].cancelId], [1, 1]);
+    assert.equal(folder === null, !lent);
+    if (lent) assert.deepEqual({ path: folder.path, home: folder.home, write: folder.write }, { path: "/Users/me", home: true, write: false });
+  }
+  const other = fakeDialog({ picked: { canceled: false, filePaths: ["/Volumes/Photos"] } });
+  const drive = await createLendingDialogs({ dialog: other.dialog, window: () => win, validate: named, isHome }).chooseFolder("Choose");
+  assert.equal(other.calls.length, 1);
+  assert.equal(drive.home, undefined);
+  const detail = serverAccessDetail({ name: "S", origin: "https://s.test" }, { folders: [{ path: "/Users/me", write: false, home: true }], terminal: false, computer: false });
+  assert.equal(detail.split("\n\n")[1], "Read only: /Users/me (your whole home folder)");
+});
+
 test("a server's computer access is allowed only by the dialog's own Allow, and it says what each part lets the bots do", async () => {
   const env = { name: "Team server", origin: "https://team.example.test" };
   const grant = { folders: [{ path: "/Users/me/Plans", write: true }, { path: "/Users/me/Notes", write: false }], terminal: true, computer: false };
@@ -90,7 +111,7 @@ function mainLending({ response }) {
   let cloudState = { enabled: true, connected: true, folders: [], screen: false, internet: true };
   const passThrough = (_channel, handler) => handler;
   const context = vm.createContext({
-    createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named,
+    createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: passThrough, cloudPageAsking: () => "cloud",
     requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua" }),
     stopLending: () => {}, app: { getPath: (name) => `/Users/me/${name}` }, os: { homedir: () => "/Users/me" },
@@ -121,5 +142,5 @@ test("main asks in its own dialog before a server or My Cloud's page gets this c
   assert.equal(allowed.saved[1][2].screen, true);
   const folder = await allowed.handlers.get("sharing:folder")({});
   assert.deepEqual({ path: folder.path, write: folder.write }, { path: "/Users/me/Plans", write: false });
-  assert.equal(allowed.calls.at(-1)[2].title, "Choose a folder to share");
+  assert.equal(allowed.calls.at(-1)[2].title, "Choose a folder or drive to share");
 });

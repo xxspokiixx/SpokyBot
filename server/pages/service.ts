@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { PublishedPageCard } from "../../shared/published-page.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes } from "../routes/published-pages.ts";
-import { applyIncludedPagesMessage, pagesAccess } from "./access.ts";
+import { applyIncludedPagesMessage, pagesAccess, pagesNotOffered } from "./access.ts";
 import { createPagesClient } from "./client.ts";
 import { createPagePublisher } from "./publisher.ts";
 import { PublishedPagesStore } from "./store.ts";
@@ -15,7 +15,8 @@ export function createPublishedPages(options: {
   fetch?: typeof fetch;
 }) {
   const store = new PublishedPagesStore(join(options.dataDir, "published-pages.json"));
-  const client = createPagesClient({ access: () => pagesAccess(options.cloudHome), ...(options.fetch ? { fetch: options.fetch } : {}) });
+  const client = createPagesClient({ access: () => pagesAccess(options.cloudHome), notOffered: () => pagesNotOffered(options.cloudHome),
+    ...(options.fetch ? { fetch: options.fetch } : {}) });
   const publisher = createPagePublisher({ client, store, patch: options.patch });
   return { store, publisher, internal: createPagesInternalRoutes(publisher), routes: createPublishedPageRoutes(publisher), receive: applyIncludedPagesMessage };
 }

@@ -139,16 +139,23 @@ export function moveBotParts(bot: BotRecord, hash: (value: unknown) => string): 
 }
 
 /** This server's automations and skill extras, as a move compares them: automations only of the bots it carries, and a
- * definition apart from its switch, its address and its counts. */
-export function moveItems(deps: MoveKindsDeps, bots: ReadonlySet<string>): CloudSendItem[] {
+ * definition apart from its switch, its address and its counts. `only`: a move of that one bot into a team carries its
+ * own routines and the library skills it uses; its calls, webhooks and app events, and the person's imported skills,
+ * stay. */
+export function moveItems(deps: MoveKindsDeps, bots: ReadonlySet<string>, only?: Pick<BotRecord, "id" | "assignedSkills">): CloudSendItem[] {
   const items: CloudSendItem[] = [];
   const add = (kind: MoveKind, id: string, label: string, parts: Record<string, string>, bot?: string) =>
     items.push({ key: itemKey.moved(kind, id), kind, label: label.slice(0, 200), id, ...(bot ? { bot } : {}), parts });
   const routines = deps.routines();
   for (const routine of routines?.listRoutines() ?? []) {
-    if (!bots.has(routine.botId)) continue;
+    if (!bots.has(routine.botId) || (only && (routine.botId !== only.id || routine.target !== "bot"))) continue;
     add("routine", routine.id, routine.name, { def: definitionHash(routine, ROUTINE_FIELDS, deps.dataDir),
       runs: hashOf(finishedRuns(routines!, routine.id).map((run) => run.id).sort()) }, routine.botId);
+  }
+  if (only) {
+    const uses = new Set(only.assignedSkills ?? []);
+    for (const { entry } of librarySkills()) if (uses.has(entry.name)) add("library-skill", entry.name, entry.name, { text: entry.sha256.slice(0, 24) || EMPTY, state: entry.reviewState });
+    return items;
   }
   for (const call of deps.calls()?.list() ?? []) {
     if (call.botIds.every((id) => bots.has(id))) add("call", call.id, call.name, { def: definitionHash(call, CALL_FIELDS, deps.dataDir) }, call.botIds[0]);
@@ -164,8 +171,10 @@ export function moveItems(deps: MoveKindsDeps, bots: ReadonlySet<string>): Cloud
   return items;
 }
 
-/** Each automation here and whether it is on, for the switch that turns on there what was on here. */
-export function automationSwitches(deps: MoveKindsDeps): Array<{ key: string; on: boolean }> {
+/** Each automation here and whether it is on, for the switch that turns on there what was on here; `bot`: that bot's
+ * routines only. */
+export function automationSwitches(deps: MoveKindsDeps, bot?: string): Array<{ key: string; on: boolean }> {
+  if (bot !== undefined) return (deps.routines()?.listRoutines() ?? []).filter((routine) => routine.botId === bot && routine.target === "bot").map((routine) => ({ key: itemKey.moved("routine", routine.id), on: routine.enabled }));
   return [
     ...(deps.routines()?.listRoutines() ?? []).map((routine) => ({ key: itemKey.moved("routine", routine.id), on: routine.enabled })),
     ...(deps.calls()?.list() ?? []).map((call) => ({ key: itemKey.moved("call", call.id), on: call.nextRunAt !== null })),
@@ -174,10 +183,11 @@ export function automationSwitches(deps: MoveKindsDeps): Array<{ key: string; on
   ];
 }
 
-/** The finished runs of this server's routines, by id with their routine's. */
-export function routineRunIds(deps: MoveKindsDeps): Array<{ id: string; routine: string }> {
+/** The finished runs of this server's routines, by id with their routine's; `bot`: that bot's routines' only. */
+export function routineRunIds(deps: MoveKindsDeps, bot?: string): Array<{ id: string; routine: string }> {
   const routines = deps.routines();
-  return routines ? routines.listRuns().filter((run) => FINISHED.has(run.status) && run.triggerSource !== "webhook")
+  const kept = bot === undefined ? null : new Set(routines?.listRoutines().filter((routine) => routine.botId === bot && routine.target === "bot").map((routine) => routine.id));
+  return routines ? routines.listRuns().filter((run) => FINISHED.has(run.status) && run.triggerSource !== "webhook" && (!kept || kept.has(run.routineId)))
     .map((run) => ({ id: run.id, routine: run.routineId })).sort((a, b) => a.id.localeCompare(b.id)) : [];
 }
 

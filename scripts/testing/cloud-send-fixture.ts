@@ -66,9 +66,15 @@ export interface CloudSendFixture {
   handoff(what: ConnectionAsk): Promise<any>;
   /** The one-time move (one-home.mjs), as main runs it in the app that is open now. */
   oneHome: { kick(): Promise<void>; view(): OneHomeView | null; away(): boolean };
-  /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, its export of a held one, and (when a
-   * test sets it) the Admin taking a computer's word that its move is done. */
+  /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, its export of a held one, the Admin
+   * taking a computer's word that its move is done (when a test sets it), and the Admin's team pairing for one of the
+   * account's teams (`state.teams`). */
   account: CloudSendAccount;
+  /** A bot moving from My Cloud into a team, as main runs it (team-move-main.mjs). */
+  teamMove: { start(input: { bot: { id: string; name: string }; team: { id: string; name: string; origin?: string } }): Promise<void>; kick(): Promise<void>; view(): any; retry(): Promise<void>; seen(): any; journal(): any };
+  /** The team moves' journal, and a look at each write before it lands: throwing there is the app killed. */
+  teamJournalFile: string;
+  beforeTeamJournalWrite: ((value: any) => void) | null;
   /** Its journal (userData/one-home.json), and a look at each write before it lands: throwing there is the app killed. */
   journalFile: string;
   beforeJournalWrite: ((value: any) => void) | null;
@@ -92,6 +98,7 @@ export interface CloudSendAccount {
   state: Record<string, any>;
   exportHome(options?: { installation?: string }): Promise<any>;
   reportMove?(options: { installation: string }): Promise<boolean>;
+  pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>;
 }
 
 /** One more of the person's computers (CloudSendFixture `addDesk`): what the fixture has for its own, for this one. */
@@ -112,6 +119,8 @@ export interface CloudTeamFixture {
   home: string;
   id: string;
   name: string;
+  /** The Admin's signed pairing for one member, as the Admin hands it to the app: a one-time code, not redeemed. */
+  grant(member: TeamMember): Promise<{ origin: string; code: string; expiresAt: number }>;
   /** The Admin's signed pairing for one member, redeemed into a bearer. `body` replaces the member and team claims
    * (a forged or missing claim); `secret` signs with another key (a forgery). */
   pair(member: TeamMember | null, options?: { body?: Record<string, unknown>; secret?: string; label?: string }): Promise<{ status: number; body: any; token: string | null }>;
@@ -273,6 +282,14 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     };
     teamFixture = {
       base: teamBase, home: join(root, "team"), id: team.id, name: team.name,
+      async grant(member) {
+        const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, team: { id: team.id, name: team.name }, member });
+        const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
+        const minted = await fetch(`${teamBase}/api/cloud/pairing`, { method: "POST", headers: { ...EDGE, "content-type": "application/json",
+          "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}` }, body });
+        if (minted.status !== 200) throw Object.assign(new Error(`team pairing ${minted.status}`), { status: minted.status });
+        return { origin: teamBase, code: ((await minted.json()) as { code: string }).code, expiresAt: Date.now() + 300_000 };
+      },
       async pair(member, options = {}) {
         const claims = options.body ?? { team: { id: team.id, name: team.name }, ...(member ? { member } : {}) };
         const body = JSON.stringify({ label: options.label ?? "OpenMausBot app (Team Cloud)", ttlSeconds: 300, ...claims });
@@ -317,13 +334,15 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const port = { postMessage: (message: unknown) => { desktop.send(message as object); } };
   const journalFile = join(root, "one-home.json");
+  const teamJournalFile = join(root, "team-moves.json");
   const account: CloudSendFixture["account"] = {
     state: { status: "connected", account: { id: "acct-fixture", email: "person@example.test" }, entitlement: { plan: "pro", status: "active", expiresAt: null, version: 1 },
       machine: { status: "ready", origin: cloudBase } },
     exportHome: async () => ({ notHeld: true }),
+    pairTeam: async () => { throw Object.assign(new Error("You're no longer in this team."), { gone: true }); },
   };
   const spies: CloudSendFixture["spies"] = { lent: [], phoneStops: 0, phoneStarts: 0, opened: [], relaunches: 0 };
-  const fixture = { beforeJournalWrite: null as CloudSendFixture["beforeJournalWrite"], intercept: null as CloudSendFixture["intercept"] };
+  const fixture = { beforeJournalWrite: null as CloudSendFixture["beforeJournalWrite"], intercept: null as CloudSendFixture["intercept"], beforeTeamJournalWrite: null as CloudSendFixture["beforeTeamJournalWrite"] };
   const chatRequests: CloudSendFixture["chatRequests"] = [];
   const sessions: CloudSendFixture["sessions"] = [];
   const throughEdge = (bearer: string | null) => async (url: string | URL | Request, init: RequestInit = {}) => {
@@ -355,7 +374,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     engineWaitMs: 2_000,
     ...(space ? { space } : {}),
     account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => account.exportHome(options),
-      reportMove: async (options) => (account.reportMove ? account.reportMove(options) : false) }),
+      reportMove: async (options) => (account.reportMove ? account.reportMove(options) : false), pairTeam: (teamId: string) => account.pairTeam(teamId) }),
+    teamJournal: {
+      read: () => { try { return JSON.parse(readFileSync(teamJournalFile, "utf8")); } catch { return null; } },
+      write: (value: unknown) => { fixture.beforeTeamJournalWrite?.(value); writeFileSync(`${teamJournalFile}.tmp`, JSON.stringify(value ?? null)); renameSync(`${teamJournalFile}.tmp`, teamJournalFile); },
+    },
+    openTeam: (team: { id: string; name: string }) => { spies.opened.push(`team:${team.id}`); },
     journalFile: () => journalFile,
     journal: {
       read: () => { try { return JSON.parse(readFileSync(journalFile, "utf8")); } catch { return null; } },
@@ -405,7 +429,9 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const ready = async () => { for (let tries = 0; (await deskLocal("GET", "/api/bots")).status !== 200 && tries < 50; tries++) await new Promise((resolve) => setTimeout(resolve, 100)); };
     await ready();
     const journalFile = join(root, `${name}-one-home.json`);
-    const deskAccount: CloudSendDesk["account"] = { state: structuredClone(account.state), exportHome: async () => ({ notHeld: true }) };
+    const deskAccount: CloudSendDesk["account"] = { state: structuredClone(account.state), exportHome: async () => ({ notHeld: true }),
+      pairTeam: async () => { throw Object.assign(new Error("You're no longer in this team."), { gone: true }); } };
+    const teamJournal = join(root, `${name}-team-moves.json`);
     const spies: CloudSendDesk["spies"] = { lent: [], phoneStops: 0, phoneStarts: 0, opened: [], relaunches: 0 };
     const ipc = { postMessage: (message: unknown) => { child.send(message as object); } };
     const throughOwner = ((url: string | URL | Request, init?: RequestInit) => throughEdge(owner)(url, init)) as typeof fetch;
@@ -424,7 +450,11 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       fetch: throughEdge(null) as typeof fetch,
       engineWaitMs: 2_000,
       account: () => ({ state: () => deskAccount.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => deskAccount.exportHome(options),
-        reportMove: async (options) => (deskAccount.reportMove ? deskAccount.reportMove(options) : false) }),
+        reportMove: async (options) => (deskAccount.reportMove ? deskAccount.reportMove(options) : false), pairTeam: (teamId: string) => deskAccount.pairTeam(teamId) }),
+      teamJournal: {
+        read: () => { try { return JSON.parse(readFileSync(teamJournal, "utf8")); } catch { return null; } },
+        write: (value: unknown) => { writeFileSync(`${teamJournal}.tmp`, JSON.stringify(value ?? null)); renameSync(`${teamJournal}.tmp`, teamJournal); },
+      },
       journalFile: () => journalFile,
       tempRoot: () => join(root, `${name}-one-home-temp`),
       lend: async (projects) => { spies.lent.push(projects); },
@@ -460,7 +490,11 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
 
   return {
     root, desktopBase, cloudBase, get owner() { return owner; }, ownerCapability, edge: EDGE, answers, labels, logs: () => logs, local, onCloud, desktopInstallation,
-    account, journalFile, spies,
+    account, journalFile, spies, teamJournalFile,
+    get beforeTeamJournalWrite() { return fixture.beforeTeamJournalWrite; },
+    set beforeTeamJournalWrite(hook) { fixture.beforeTeamJournalWrite = hook; },
+    teamMove: { start: (input) => main.teamMove.start(input), kick: () => main.teamMove.kick(), view: () => main.teamMove.view(), retry: () => main.teamMove.retry(),
+      seen: () => main.teamMove.seen(), journal: () => main.teamMove.journal() },
     get beforeJournalWrite() { return fixture.beforeJournalWrite; },
     set beforeJournalWrite(hook) { fixture.beforeJournalWrite = hook; },
     get intercept() { return fixture.intercept; },

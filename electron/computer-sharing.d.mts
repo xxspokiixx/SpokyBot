@@ -1,4 +1,4 @@
-export interface SharedFolder { id: string; name: string; path: string; write: boolean }
+export interface SharedFolder { id: string; name: string; path: string; write: boolean; /** The person's whole home folder, lent after an explicit warning. */ home?: boolean }
 export interface SharingState {
   enabled: boolean;
   folders: SharedFolder[];
@@ -57,6 +57,7 @@ export interface CloudLendingBridge {
 }
 export type CloudLendingVerdict = { allow: true } | { pause: string } | { stop: "signed-out" | "account-changed" | "machine-changed" };
 export function cloudLendingVerdict(binding: { accountId: string; origin: string } | null | undefined, current: { status: string; accountId: string | null; origin: string | null } | null, env: { origin: string } | null | undefined): CloudLendingVerdict;
+export function isHomeFolder(target: string): Promise<boolean>;
 export function validateSharedFolders(folders: unknown): Promise<SharedFolder[]>;
 export function validSharedOperation(operation: unknown, computerId: string): boolean;
 export function createComputerSharing(options: {
