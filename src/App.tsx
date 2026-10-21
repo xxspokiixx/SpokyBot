@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { addBot } from "@/lib/add-bot";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
+import { CloudTimeZoneSync } from "@/components/CloudTimeZone";
 import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
@@ -17,12 +18,16 @@ import { GroupView } from "@/components/GroupView";
 import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import {
-  ActivityPanel, BotSettingsDialog, ComputerPanel, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
-  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoutinesPage, SettingsModal, TeamMapPage, TriggersPanel,
+  ActivityPanel, BotSettingsDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
+  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TodayPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
+import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
+import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
+import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
+import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -32,14 +37,18 @@ import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
 import { CloudIntent } from "@/components/CloudIntent";
 import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-intent";
 import { CloudSetup } from "@/components/CloudSetup";
+import { CloudWelcome } from "@/components/cloud-welcome/CloudWelcome";
+import { WelcomeKeeper } from "@/components/cloud-welcome/WelcomeKeeper";
+import { cloudFirstRun, cloudWelcomeVisible, useCloudWelcome } from "@/lib/cloud-welcome";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing";
+import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
+import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { ChatNotice } from "@/components/ChatErrorBanner";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
@@ -56,10 +65,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
   useEffect(() => {
     if (!window.ogb?.environments) return;
-    const open = (computerId?: string | null, panel?: "copy") => {
+    const open = (computerId?: string | null) => {
       if (computerId) {
         const target = new URL(window.location.href);
-        target.searchParams.set(panel === "copy" ? "copy-to" : "share-computer", computerId);
+        target.searchParams.set("share-computer", computerId);
         window.history.replaceState(null, "", `${target.pathname}${target.search}${target.hash}`);
       }
       dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
@@ -85,6 +94,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     window.history.replaceState(null, "", rest);
     dispatch(phonePairingSettingsAction());
   }, [dispatch]);
+  useEffect(() => { // A bot's link to a connection that needs the person on My Cloud opens the page that connects it.
+    const request = takeConnectRequest(window.location.href);
+    if (!request) return;
+    window.history.replaceState(null, "", request.rest);
+    dispatch({ type: "togglePlugins", open: true, surface: request.surface });
+  }, [dispatch]);
   useExternalChatLinks(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const language = effectiveLanguage(useLanguageChoice(), state.config?.language);
@@ -100,13 +115,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const calendarOriginRef = useRef<"chat" | "team-map">("chat");
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
-  const sidePanelOpen = Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen);
+  const notificationFeed = useNotificationFeed() && !remoteClient;
+  const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || (notificationFeed && state.notificationsOpen);
   const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
-  const calendarFocus = state.activeView === "routines";
-  const advanced = useAdvancedMode();
-  useEffect(() => {
-    if (!advanced && state.inspectorOpen) dispatch({ type: "toggleInspector", open: false });
-  }, [advanced, state.inspectorOpen, dispatch]);
+  const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
 
   const noEngines =
     state.connected &&
@@ -119,6 +131,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     onboarding: state.config?.onboarding, reopened: false,
   }), cloudIntent);
   const cloudJobWaiting = Boolean(viewer?.cloudHome && viewer.canSave && cloudIntent.pending);
+  const welcome = useCloudWelcome();
+  const welcomeOnScreen = cloudWelcomeVisible({ viewer, connected: state.connected, enginesKnown: state.instances.length > 0, onboarding: state.config?.onboarding }, welcome)
+    && state.activeView === "chat" && !(!remoteClient && localVmWorkspaceBotId);
+  const firstRun = cloudFirstRun({ welcome: welcomeOnScreen, intent: cloudAsk, signIn: cloudSignIn || cloudJobWaiting });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -134,7 +150,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       const bots = state.bots.filter((b) => !b.hidden);
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
-        dispatch({ type: "toggleNewBot", open: true });
+        addBot(dispatch, state.bots, showThreads);
       } else if (/^[1-9]$/.test(e.key)) {
         const target = bots[Number(e.key) - 1];
         if (target) {
@@ -162,6 +178,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     if (!state.connected) return;
     void preloadConnectedApps().catch(() => {});
   }, [state.connected]);
+  useUsageSnapshot();
 
   useEffect(() => preloadScreens(), []);
 
@@ -171,7 +188,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
 
   useEffect(() => {
     if (state.activeView === "routines" && previousViewRef.current !== "routines") {
-      calendarOriginRef.current = previousViewRef.current;
+      calendarOriginRef.current = previousViewRef.current === "team-map" ? "team-map" : "chat";
     }
     previousViewRef.current = state.activeView;
   }, [state.activeView]);
@@ -215,15 +232,14 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     state.inspectorOpen ||
     state.activityOpen ||
     state.appSettingsOpen ||
-    state.pluginsOpen ||
-    state.triggersOpen;
+    state.pluginsOpen;
 
   useEffect(() => {
     return window.ogb?.onOpenAppSettings?.(section => dispatch((section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
       ? { type: "openCloudAdd", source: section === "cloud-add" ? "app_menu" : "app_howto" }
       : section === "cloud" && window.ogb?.cloudAccount && !remoteClient
         ? CLOUD_LINK_SETTINGS
-        : section === "cloud-settings" && window.ogb?.cloudAccount && !remoteClient
+        : section === "cloud-settings" && (window.ogb?.cloudAccount || window.ogb?.cloudPlan) && !remoteClient
           ? { type: "toggleAppSettings", open: true, section: "cloudAccount" }
           : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
   }, [dispatch]);
@@ -253,6 +269,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   return (
     <div className="flex h-full flex-col">
       <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
+      <CloudAsleepStrip />
+      <CloudSendStrip cloudHome={state.config?.cloudHome === true} onPairPhone={() => dispatch(phonePairingSettingsAction())} />
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
@@ -282,8 +300,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       />}
       {state.activeView === "team-map" ? (
         <TeamMapPage />
-      ) : state.activeView === "routines" ? (
-        <RoutinesPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
+      ) : state.activeView === "files" ? (
+        <FilesView />
+      ) : state.activeView === "today" ? <TodayPage /> : state.activeView === "routines" ? (
+        <TriggersPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
         <LocalVmWorkspace
           primaryBotId={localVmWorkspaceBotId}
@@ -291,9 +311,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           onClose={() => setLocalVmWorkspaceBotId(null)}
           onOpenComputer={openComputerFromWorkspace}
         />
-      ) : cloudAsk ? (
+      ) : firstRun === "welcome" ? (
+        <CloudWelcome />
+      ) : firstRun === "intent" ? (
         <CloudIntent />
-      ) : cloudSignIn || cloudJobWaiting ? (
+      ) : firstRun === "sign-in" ? (
         <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
@@ -307,11 +329,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           <div className="w-full max-w-md"><ChatNotice notice={state.notice} /></div>
           <Loader2 size={20} className="animate-spin" />
           <div className="text-[14px]">
-            {state.connected ? "No bots yet" : "Connecting to the bot server…"}
+            {state.connected ? t("app.loading.noBots") : t("app.loading.connecting")}
           </div>
           {!state.connected && (
             <div className="text-[12px]">
-              Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
+            {t("app.loading.startServer")} <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
             </div>
           )}
         </main>
@@ -320,7 +342,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {state.settingsOpen && bot && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen) && !twoSidePanelsFit} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (
@@ -335,12 +357,14 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       )}
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
+      {notificationFeed && !calendarFocus && state.notificationsOpen && <NotificationsPanel />}
+      {notificationFeed && !calendarFocus && <NotificationRail />}
       {state.appSettingsOpen && <SettingsModal />}
       <CloudAddDialog />
       <CloudHowTo />
-      <CloudSetup viewer={viewer} />
+      <CloudSetup viewer={viewer} welcomeShown={welcomeOnScreen} />
+      <WelcomeKeeper viewer={viewer} />
       {state.pluginsOpen && <PluginsPanel />}
-      {state.triggersOpen && <TriggersPanel />}
       {state.newBotOpen && <NewBotDialog />}
       {state.shortcutsOpen && (
         <KeyboardShortcutsModal
@@ -378,6 +402,7 @@ function Application() {
           <Shell viewer={viewer} />
         </ThreadRefsProvider>
         <WelcomeGate viewer={viewer} />
+        <CloudTimeZoneSync viewer={viewer} />
         <GuidedTour />
         <LiveCallHost />
         <FirstConversationTour quiet={spotlightsQuiet(viewer)} />

@@ -1,3 +1,5 @@
+import { hasPriorRun } from "./prior-run";
+
 export const SKIN_IDS = [
   "midnight",
   "atelier",
@@ -8,6 +10,8 @@ export const SKIN_IDS = [
   "dusk",
   "daylight",
   "meadow",
+  "pop",
+  "halloween",
 ] as const;
 export type SkinId = (typeof SKIN_IDS)[number];
 
@@ -27,9 +31,12 @@ export const SKINS: readonly Skin[] = [
   { id: "dusk", name: "Dusk", tagline: "Muted plum after dark, calm and low-key." },
   { id: "daylight", name: "Daylight", tagline: "Midnight in reverse. Near-white, ink-black bubbles." },
   { id: "meadow", name: "Meadow", tagline: "Fresh white with a calm green. The MausBot look." },
+  { id: "pop", name: "Pop", tagline: "Cream paper, thick ink outlines, hard shadows. Chunky and cheerful." },
+  { id: "halloween", name: "Halloween", tagline: "Plum after dark, lit in pumpkin orange. Bats optional." },
 ];
 
-export const DEFAULT_SKIN: SkinId = "midnight";
+export const DEFAULT_SKIN: SkinId = "meadow";
+export const PRIOR_INSTALL_SKIN: SkinId = "midnight";
 
 const KEY = "omb-skin";
 
@@ -48,10 +55,12 @@ function getStore(): Storage | undefined {
 
 export function readSkin(): SkinId {
   try {
-    const stored = getStore()?.getItem(KEY);
-    return isSkinId(stored) ? stored : DEFAULT_SKIN;
+    const store = getStore();
+    const stored = store?.getItem(KEY);
+    if (isSkinId(stored)) return stored;
+    return hasPriorRun(store) ? PRIOR_INSTALL_SKIN : DEFAULT_SKIN;
   } catch {
-    return DEFAULT_SKIN;
+    return PRIOR_INSTALL_SKIN;
   }
 }
 

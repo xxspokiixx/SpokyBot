@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -230,6 +230,10 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_PERMISSION_TOOL_CALL;
     delete process.env.FAKE_ACP_PERMISSION_OPTIONS;
     delete process.env.FAKE_ACP_QUESTION_OPTIONS;
+    delete process.env.FAKE_ACP_ASK_METHOD;
+    delete process.env.FAKE_ACP_ASK_PARAMS;
+    delete process.env.FAKE_ACP_ASK_ANSWER;
+    delete process.env.FAKE_ACP_ASK_TIMING;
     delete process.env.FAKE_ACP_HOLD_ON_CANCELLED;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
@@ -250,6 +254,8 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_GROK_VERSION;
     delete process.env.FAKE_ACP_TOOL_MS;
     delete process.env.FAKE_ACP_USAGE_UPDATES_FILE;
+    delete process.env.FAKE_ACP_UPDATES_FILE;
+    delete process.env.OMB_ACP_PLAN_LINES;
     delete process.env.FAKE_ACP_DUMP_PROMPT;
     delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
     delete process.env.OMB_ACP_QUIET_NOTICE_MS;
@@ -522,6 +528,256 @@ describe("ACP turns (fake CLI)", () => {
     expect(await send("turn 2")).toBe("turn 2");
   });
 
+  const reportingThread = async (name: string) => {
+    const dump = join(scratch, `acp-${name}.json`);
+    const updatesFile = join(scratch, `acp-${name}-updates.json`);
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    process.env.FAKE_ACP_UPDATES_FILE = updatesFile;
+    writeFileSync(updatesFile, "[]");
+    await create();
+    const threadId = `t-acp-${name}-` + randomUUID();
+    let lastTurnId = "";
+    /** Whole session/update params, for a `_meta` beside the update. */
+    const reportParams = (...params: object[]) => writeFileSync(updatesFile, JSON.stringify(params));
+    const report = (...updates: object[]) => reportParams(...updates.map((update) => ({ update })));
+    const send = async (text: string, ok = true) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: FULL,
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+      });
+      lastTurnId = turnId;
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok });
+      return (JSON.parse(readFileSync(dump + ".prompt.json", "utf8")) as Array<{ type: string; text: string }>)[0]?.text;
+    };
+    return { threadId, report, reportParams, send, lastTurn: () => recorder.events.filter((event) => event.turnId === lastTurnId) };
+  };
+  /** A turn's usage events, down to their figures: an absent key stays absent. */
+  const usageFigures = (events: EventRecorder["events"]) => events.flatMap((event) => {
+    if (event.type !== "thread.token-usage.updated") return [];
+    const usage = event;
+    const keys = ["input", "output", "cachedInput", "contextTokens", "contextWindow"] as const;
+    return [Object.fromEntries(keys.filter((key) => key in usage).map((key) => [key, usage[key]]))];
+  });
+
+  it("reports the context an agent says it holds, and the window when it names one", async () => {
+    const { report, send, lastTurn } = await reportingThread("context-report");
+    report(
+      { sessionUpdate: "usage_update", used: 48_000, size: 200_000 },
+      // opencode nests its figures under `usage`
+      { sessionUpdate: "usage_update", usage: { used: 61_000, size: 128_000 } },
+    );
+    await send("turn 1");
+    // The turn's token count is still the prompt result's, the last usage event.
+    expect(usageFigures(lastTurn())).toStrictEqual([
+      { input: 0, output: 0, contextTokens: 48_000, contextWindow: 200_000 },
+      { input: 0, output: 0, contextTokens: 61_000, contextWindow: 128_000 },
+      { input: 10, output: 5 },
+    ]);
+  });
+
+  it("reports the context alone when the agent names no usable window", async () => {
+    const { report, send, lastTurn } = await reportingThread("context-only");
+    report(
+      { sessionUpdate: "usage_update", used: 48_000 },
+      { sessionUpdate: "usage_update", used: 49_000, size: 0 },
+      { sessionUpdate: "usage_update", used: 50_000, size: -200_000 },
+      { sessionUpdate: "usage_update", used: 51_000, size: "200000" },
+      { sessionUpdate: "usage_update", usage: { used: 52_000 } },
+    );
+    await send("turn 1");
+    expect(usageFigures(lastTurn())).toStrictEqual([
+      { input: 0, output: 0, contextTokens: 48_000 },
+      { input: 0, output: 0, contextTokens: 49_000 },
+      { input: 0, output: 0, contextTokens: 50_000 },
+      { input: 0, output: 0, contextTokens: 51_000 },
+      { input: 0, output: 0, contextTokens: 52_000 },
+      { input: 10, output: 5 },
+    ]);
+  });
+
+  it("reports no context for a usage update that is not a positive count", async () => {
+    const { report, send, lastTurn } = await reportingThread("context-not-positive");
+    report(
+      { sessionUpdate: "usage_update", used: 0, size: 200_000 },
+      { sessionUpdate: "usage_update", used: -48_000, size: 200_000 },
+      { sessionUpdate: "usage_update", used: "48000", size: 200_000 },
+      { sessionUpdate: "usage_update", used: null, size: 200_000 },
+      { sessionUpdate: "usage_update", size: 200_000 },
+    );
+    await send("turn 1");
+    expect(usageFigures(lastTurn())).toStrictEqual([{ input: 10, output: 5 }]);
+  });
+
+  /** Hermes's notice that it rotated its session, as hermes-agent sends it. */
+  const provenance = (fields: object) => ({
+    sessionUpdate: "session_info_update",
+    _meta: { hermes: { sessionProvenance: { acpSessionId: "fake-acp-session", sessionKind: "continuation", ...fields } } },
+  });
+
+  it("re-anchors the full prompt on the turn after Hermes reports a compression", async () => {
+    const { report, send } = await reportingThread("hermes-compression");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    // Hermes compressed its history mid-turn and said so, so the next turn is full
+    report(provenance({ reason: "compression", compressionDepth: 1 }));
+    expect(await send("turn 2")).toBe("turn 2");
+    report();
+    expect(await send("turn 3")).toBe(FULL + "\n\nturn 3");
+    expect(await send("turn 4")).toBe("turn 4");
+  });
+
+  it("re-anchors once for each rise in Hermes's compression depth", async () => {
+    const { report, send } = await reportingThread("hermes-depth");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    // no stated reason: a depth above the last one seen is the marker
+    report(provenance({ compressionDepth: 1 }));
+    expect(await send("turn 2")).toBe("turn 2");
+    // the same depth again is the same compaction, not another
+    report(provenance({ compressionDepth: 1 }));
+    expect(await send("turn 3")).toBe(FULL + "\n\nturn 3");
+    report(provenance({ compressionDepth: 2 }));
+    expect(await send("turn 4")).toBe("turn 4");
+    report();
+    expect(await send("turn 5")).toBe(FULL + "\n\nturn 5");
+    expect(await send("turn 6")).toBe("turn 6");
+  });
+
+  it("reads Hermes's marker beside the update as well as inside it", async () => {
+    const { reportParams, send } = await reportingThread("hermes-params-meta");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    reportParams({
+      update: { sessionUpdate: "session_info_update", title: "Continued" },
+      _meta: { hermes: { sessionProvenance: { reason: "compression" } } },
+    });
+    expect(await send("turn 2")).toBe("turn 2");
+    reportParams();
+    expect(await send("turn 3")).toBe(FULL + "\n\nturn 3");
+  });
+
+  it("invalidates a rejected prompt's receipt after Hermes reports a compression", async () => {
+    const failureFile = join(scratch, "hermes-compression-failure.json");
+    process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+    process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE = "1";
+    const { report, send } = await reportingThread("hermes-rejected");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    report(provenance({ reason: "compression", compressionDepth: 1 }));
+    writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error after compression" }));
+    expect(await send("turn 2", false)).toBe("turn 2");
+    unlinkSync(failureFile);
+    report();
+    expect(await send("turn 3")).toBe(FULL + "\n\nturn 3");
+    expect(await send("turn 4")).toBe("turn 4");
+  });
+
+  it("ignores session info whose meta is unknown or malformed", async () => {
+    const { report, send, lastTurn } = await reportingThread("hermes-malformed");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    report(
+      { sessionUpdate: "session_info_update", title: "Renamed" },
+      { sessionUpdate: "session_info_update", _meta: "compression" },
+      { sessionUpdate: "session_info_update", _meta: { hermes: null } },
+      { sessionUpdate: "session_info_update", _meta: { hermes: { sessionProvenance: "compression" } } },
+      { sessionUpdate: "session_info_update", _meta: { hermes: { sessionProvenance: ["compression"] } } },
+      { sessionUpdate: "session_info_update", _meta: { other: { sessionProvenance: { reason: "compression" } } } },
+      provenance({ reason: "rename" }),
+      provenance({ reason: ["compression"] }),
+      provenance({ sessionKind: "root", compressionDepth: 0 }),
+      provenance({ compressionDepth: "3" }),
+      provenance({ compressionDepth: 2.5 }),
+      provenance({ compressionDepth: -1 }),
+      provenance({ compressionDepth: null }),
+    );
+    expect(await send("turn 2")).toBe("turn 2");
+    // silently: nothing about it reaches the transcript
+    expect(lastTurn().filter((event) => event.type === "runtime.error" || event.type === "runtime.notice")).toEqual([]);
+    report();
+    expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  const plan = (...entries: Array<[status: string, content: string]>) => ({
+    sessionUpdate: "plan",
+    entries: entries.map(([status, content]) => ({ content, priority: "medium", status })),
+  });
+  /** A turn's plan lines: each started step's title with how it completed. */
+  const planSteps = (events: EventRecorder["events"]) => events.flatMap((event) => {
+    if (event.type !== "item.started" || event.itemType !== "tool" || !event.title?.startsWith("Plan:")) return [];
+    const done = events.find((other) => other.type === "item.completed" && other.itemType === "tool" && other.itemId === event.itemId);
+    return [{ title: event.title, ok: done?.type === "item.completed" && done.itemType === "tool" ? done.ok : undefined }];
+  });
+
+  it("keeps an agent's plan out of the transcript unless plan lines are switched on", async () => {
+    const { report, send, lastTurn } = await reportingThread("plan-off");
+    report(plan(["in_progress", "Read the brief"], ["pending", "Write the tests"]));
+    await send("turn 1");
+    expect(planSteps(lastTurn())).toEqual([]);
+    // the fake's own tool call is the turn's only step
+    expect(lastTurn().filter((event) => event.type === "item.started")).toHaveLength(1);
+  });
+
+  it("shows one finished step each time an agent's plan reads differently", async () => {
+    process.env.OMB_ACP_PLAN_LINES = "1";
+    const { report, send, lastTurn } = await reportingThread("plan-lines");
+    report(
+      plan(["pending", "Read the brief"], ["pending", "Write the tests"], ["pending", "Ship it"]),
+      // the same list again says nothing new
+      plan(["pending", "Read the brief"], ["pending", "Write the tests"], ["pending", "Ship it"]),
+      plan(["in_progress", "Read the brief"], ["pending", "Write the tests"], ["pending", "Ship it"]),
+      plan(["completed", "Read the brief"], ["in_progress", "Write the tests"], ["pending", "Ship it"]),
+      // a later entry reworded: the line a person reads is the same
+      plan(["completed", "Read the brief"], ["in_progress", "Write the tests"], ["pending", "Ship it on Friday"]),
+      // not a plan anyone can read: nothing is shown, and nothing is forgotten
+      { sessionUpdate: "plan", entries: "Read the brief" },
+      { sessionUpdate: "plan" },
+      { sessionUpdate: "plan", entries: [] },
+      plan(["completed", "Read the brief"], ["in_progress", "Write the tests"], ["pending", "Ship it on Friday"]),
+      plan(["completed", "Read the brief"], ["completed", "Write the tests"], ["completed", "Ship it on Friday"]),
+    );
+    await send("turn 1");
+    expect(planSteps(lastTurn())).toEqual([
+      { title: "Plan: 0 of 3 done — next: Read the brief", ok: true },
+      { title: "Plan: 0 of 3 done — Read the brief", ok: true },
+      { title: "Plan: 1 of 3 done — Write the tests", ok: true },
+      { title: "Plan: 3 of 3 done", ok: true },
+    ]);
+    // each line is its own step, with the whole list one click away
+    const started = lastTurn().filter((event) => event.type === "item.started" && event.itemType === "tool" && event.title?.startsWith("Plan:"));
+    expect(new Set(started.map((event) => event.itemId)).size).toBe(4);
+    expect(started[2]).toMatchObject({ input: expect.stringContaining("Ship it") });
+
+    report(plan(["completed", "Read the brief"], ["completed", "Write the tests"], ["completed", "Ship it on Friday"]));
+    await send("turn 2");
+    expect(planSteps(lastTurn())).toEqual([]);
+    report(plan(["completed", "Read the brief"], ["completed", "Write the tests"], ["completed", "Ship it on Friday"], ["pending", "Tell the team"]));
+    await send("turn 3");
+    expect(planSteps(lastTurn())).toEqual([{ title: "Plan: 3 of 4 done — next: Tell the team", ok: true }]);
+  });
+
+  it("bounds a plan line and redacts it before it is cut", async () => {
+    process.env.OMB_ACP_PLAN_LINES = "1";
+    const { report, send, lastTurn } = await reportingThread("plan-redacted");
+    const secret = "xai-" + "a".repeat(40);
+    report(plan(["in_progress", `Rotate the deploy key ${secret} on every runner in the fleet, then check each one of them twice`]));
+    await send("turn 1");
+    const [step] = planSteps(lastTurn());
+    expect(step!.title).toMatch(/^Plan: 0 of 1 done — Rotate the deploy key «redacted \d+ chars» on every runner.*…$/);
+    expect(step!.title.length).toBeLessThanOrEqual("Plan: 0 of 1 done — ".length + 80);
+    expect(JSON.stringify(lastTurn())).not.toContain(secret);
+  });
+
+  it("does not take a plan for the turn's reply", async () => {
+    process.env.OMB_ACP_PLAN_LINES = "1";
+    process.env.FAKE_ACP_MODE = "empty-reply";
+    const { report, send, lastTurn } = await reportingThread("plan-no-reply");
+    report(plan(["in_progress", "Read the brief"]));
+    // a turn that only planned is still a lost turn, not a success
+    await send("turn 1", false);
+    expect(planSteps(lastTurn())).toEqual([{ title: "Plan: 0 of 1 done — Read the brief", ok: true }]);
+    expect(lastTurn().at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "empty_turn" });
+  });
+
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {
     const imagePath = join(scratch, "tiny.png");
     writeFileSync(imagePath, "not-read-before-capability-check");
@@ -776,6 +1032,25 @@ describe("ACP turns (fake CLI)", () => {
       args: ["/tmp/connector-proxy.js"],
       env: [{ name: "OMB_CONNECTOR_UPSTREAM_URL", value: "http://127.0.0.1:8799/api/internal/connectors/mcp" }],
     });
+  });
+
+  it("hands an agent that reaches MCP servers by URL OpenMausBot's own servers as endpoints of this server, no proxy process", async () => {
+    await create(createAcpDriver({ ...SELECT_MODEL_SUPPORT, driverKind: "httpMcpTest", selectModel: undefined, ownMcpOverHttp: true }));
+    const dump = join(scratch, "own-http.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    const harness = "http://127.0.0.1:8799";
+    await instance.adapter.sendTurn({
+      threadId: "t-own-http", text: "go",
+      integrations: {
+        browser: { command: process.execPath, args: ["/app/dist-server/harness-mcp-proxy.js", "browser"], env: { OMB_HARNESS_URL: harness, OMB_MCP_TOKEN_BROWSER: "synthetic-browser-capability" } },
+        custom: { notes: { command: process.execPath, args: ["/tmp/notes-mcp.js"], env: {} } },
+      },
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))).toEqual([
+      { type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] },
+      { name: "notes", command: process.execPath, args: ["/tmp/notes-mcp.js"], env: [] },
+    ]);
   });
 
   it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
@@ -1187,6 +1462,110 @@ describe("ACP turns (fake CLI)", () => {
     expect(readFileSync(answer, "utf8")).toBe(collision ? "cancelled" : "green-id");
   });
 
+  describe("Grok ask_user_question", () => {
+    // The request Grok's shell sends when its ask_user_question tool runs
+    // (xai-org/grok-build AskUserQuestionExtRequest, camelCase on the wire).
+    const GROK_ASK = {
+      sessionId: "fake-acp-session",
+      toolCallId: "call-1",
+      mode: "default",
+      questions: [
+        { question: "Which database?", options: [{ label: "Redis", description: "In-memory store" }, { label: "Postgres", description: "Relational" }] },
+        { question: "Which caches?", multiSelect: true, options: [{ label: "Hot path", description: "" }, { label: "Cold path", description: "" }] },
+        { question: "Anything else?", options: [{ label: "No", description: "" }, { label: "Yes", description: "" }] },
+      ],
+    };
+    const ask = async (threadId: string, env: Record<string, string> = {}, approvalMode?: "full") => {
+      Object.assign(process.env, {
+        FAKE_ACP_ASK_METHOD: "_x.ai/ask_user_question",
+        FAKE_ACP_ASK_PARAMS: JSON.stringify(GROK_ASK),
+        FAKE_ACP_ASK_ANSWER: join(scratch, "grok-ask.json"),
+        ...env,
+      });
+      await create(GrokAgentDriver, "ask-question");
+      await instance.adapter.sendTurn({ threadId, text: "go", ...(approvalMode ? { approvalMode } : {}) });
+    };
+    const reply = () => JSON.parse(readFileSync(join(scratch, "grok-ask.json"), "utf8"));
+
+    it("asks every question on one card and keys the answers by Grok's question text", async () => {
+      await ask("t-grok-ask");
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(opened).toMatchObject({
+        requestType: "question",
+        tool: "ask_user",
+        summary: "Which database? (+2 more questions)",
+        questions: [
+          { question: "Which database?", options: [{ label: "Redis", description: "In-memory store" }, { label: "Postgres", description: "Relational" }] },
+          { question: "Which caches?", multiSelect: true, options: [{ label: "Hot path" }, { label: "Cold path" }] },
+          { question: "Anything else?", options: [{ label: "No" }, { label: "Yes" }] },
+        ],
+      });
+      const outcome = await instance.adapter.respondToRequest("t-grok-ask", (opened as { requestId: string }).requestId, {
+        behavior: "answer",
+        message: "The user answered your questions.\n\nQ: Which database?\nA: Postgres\n\nQ: Which caches?\nA: Hot path, Cold path, and the CDN\n\nQ: Anything else?\nA: Use version 16",
+      });
+      expect(outcome).toBe("answered");
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: {
+        outcome: "accepted",
+        answers: { "Which database?": ["Postgres"], "Which caches?": ["Hot path", "Cold path", "Other"], "Anything else?": ["Other"] },
+        annotations: { "Which caches?": { notes: "and the CDN" }, "Anything else?": { notes: "Use version 16" } },
+      } });
+    });
+
+    it("still asks under Full access, reads multi_select, and accepts the bare method name", async () => {
+      await ask("t-grok-ask-full", {
+        FAKE_ACP_ASK_METHOD: "x.ai/ask_user_question",
+        FAKE_ACP_ASK_PARAMS: JSON.stringify({ ...GROK_ASK, questions: [{ question: "Which caches?", multi_select: true, options: [{ label: "Hot path" }, { label: "Cold path" }] }] }),
+      }, "full");
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(opened).toMatchObject({ requestType: "question", questions: [{ question: "Which caches?", multiSelect: true }] });
+      // a multi-select question has no flat one-tap answer
+      expect(opened).not.toHaveProperty("choices");
+      await instance.adapter.respondToRequest("t-grok-ask-full", (opened as { requestId: string }).requestId, { behavior: "answer", message: "Cold path" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: "accepted", answers: { "Which caches?": ["Cold path"] } } });
+    });
+
+    it("cancels a denied card and refuses malformed params", async () => {
+      await ask("t-grok-ask-deny");
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(await instance.adapter.respondToRequest("t-grok-ask-deny", (opened as { requestId: string }).requestId, { behavior: "deny" })).toBe("rejected");
+      expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ behavior: "deny", source: "user" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: "cancelled" } });
+
+      process.env.FAKE_ACP_ASK_PARAMS = JSON.stringify({ ...GROK_ASK, questions: [{ options: [{ label: "Redis" }] }] });
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-grok-ask-deny", text: "again" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
+      expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
+
+      // More questions than one card holds: refused whole, not partly answered.
+      const seven = Array.from({ length: 7 }, (_, i) => ({ question: `Question ${i}?`, options: [{ label: "Yes" }, { label: "No" }] }));
+      process.env.FAKE_ACP_ASK_PARAMS = JSON.stringify({ ...GROK_ASK, questions: seven });
+      const many = await instance.adapter.sendTurn({ threadId: "t-grok-ask-deny", text: "seven" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === many.turnId);
+      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 distinct questions with question text" } });
+      expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
+
+      // Two questions with the same text: Grok keys answers by text, so refused.
+      process.env.FAKE_ACP_ASK_PARAMS = JSON.stringify({ ...GROK_ASK, questions: [GROK_ASK.questions[0], GROK_ASK.questions[0]] });
+      const twins = await instance.adapter.sendTurn({ threadId: "t-grok-ask-deny", text: "twins" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === twins.turnId);
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
+      expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
+    });
+
+    it("cancels a question that arrives between turns", async () => {
+      await ask("t-grok-ask-idle", { FAKE_ACP_ASK_TIMING: "after-result" });
+      await recorder.until((e) => e.type === "turn.completed");
+      for (let i = 0; i < 80 && !existsSync(join(scratch, "grok-ask.json")); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(reply()).toEqual({ result: { outcome: "cancelled" } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+  });
+
   it("per-bot Ask surfaces permissions from a legacy full-auto instance", async () => {
     process.env.FAKE_ACP_MODE = "permission";
     const dump = join(scratch, "ask-permission-overrides-full-auto.json");
@@ -1495,10 +1874,11 @@ describe("ACP turns (fake CLI)", () => {
   it("reads Qwen's debug log: a logged rate-limit retry is reported and keeps the turn alive", async () => {
     vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 1 });
     process.env.QWEN_HOME = scratch;
-    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "400";
+    // Margins wide enough for a slow Windows runner: the log must be read well inside the idle guard.
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "1500";
     process.env.OMB_ACP_QUIET_NOTICE_MS = "150";
     process.env.OMB_ACP_QUIET_TICK_MS = "50";
-    process.env.FAKE_ACP_QUIET_MS = "1200";
+    process.env.FAKE_ACP_QUIET_MS = "3500";
     process.env.FAKE_ACP_QWEN_LOG = JSON.stringify([
       "[ERROR] [OPENAI_ERROR] OpenAI API Error: 429 rate limited {",
       "[WARN] [RETRY] Attempt 1 failed with status 429. Retrying after explicit delay of 20000ms... {",
@@ -1509,6 +1889,59 @@ describe("ACP turns (fake CLI)", () => {
     const notices = (recorder.events.filter(e => e.type === "runtime.notice") as Array<{ message: string }>).map(n => n.message);
     expect(notices.some(m => /Qwen hit a rate limit \(HTTP 429\) and is retrying \(attempt 2\)\. Next try in 20 s\./.test(m))).toBe(true);
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
+  });
+
+  it("preserves a streamed partial reply before disposal removes its listeners", async () => {
+    await create(GrokAgentDriver, "stall-after-text");
+    await instance.adapter.sendTurn({ threadId: "t-dispose-partial", text: "go" });
+    await recorder.until((event) => event.type === "content.delta" && event.streamKind === "assistant_text");
+
+    await instance.dispose();
+
+    expect(recorder.events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_text"))
+      .toEqual([expect.objectContaining({ text: "half an answer, then silence" })]);
+    expect(recorder.events.filter((event) => event.type === "turn.completed"))
+      .toEqual([expect.objectContaining({ threadId: "t-dispose-partial", stopReason: "cancelled" })]);
+  });
+
+  it("rejects turns started by completion listeners during disposal", async () => {
+    await create(GrokAgentDriver, "stall-after-text");
+    await instance.adapter.sendTurn({ threadId: "t-dispose-listener", text: "go" });
+    await recorder.until((event) => event.type === "content.delta" && event.streamKind === "assistant_text");
+    let followup: Promise<unknown> | undefined;
+    instance.adapter.onEvent((event) => {
+      if (event.type === "turn.completed" && event.threadId === "t-dispose-listener") {
+        followup = instance.adapter.sendTurn({ threadId: "t-dispose-followup", text: "next" });
+        void followup.catch(() => {});
+      }
+    });
+
+    await instance.dispose();
+
+    expect(followup).toBeDefined();
+    await expect(followup).rejects.toThrow(/shutting down/);
+    expect(instance.adapter.hasSession("t-dispose-followup")).toBe(false);
+    await expect(instance.adapter.sendTurn({ threadId: "t-after-dispose", text: "late" })).rejects.toThrow(/shutting down/);
+  });
+
+  it("rejects a turn whose command resolution finishes after disposal", async () => {
+    let markResolving!: () => void;
+    const resolving = new Promise<void>((resolve) => { markResolving = resolve; });
+    let finishCommand!: (command: { command: string }) => void;
+    const command = new Promise<{ command: string }>((resolve) => { finishCommand = resolve; });
+    await create(createAcpDriver({
+      ...SELECT_MODEL_SUPPORT,
+      resolveCommand: () => { markResolving(); return command; },
+    }));
+    const sending = instance.adapter.sendTurn({ threadId: "t-dispose-resolving", text: "go" });
+    void sending.catch(() => {});
+    await resolving;
+    await instance.dispose();
+    finishCommand({ command: FAKE_CLI });
+
+    await expect(sending).rejects.toThrow(/shutting down/);
+    expect(instance.adapter.hasSession("t-dispose-resolving")).toBe(false);
+    expect(recorder.events).toEqual([]);
   });
 
   it("defaults the prompt idle guard above an agent's longest normal silence", () => {
@@ -1525,6 +1958,7 @@ describe("ACP turns (fake CLI)", () => {
     const err = recorder.events.find((e) => e.type === "runtime.error");
     expect(err?.message).toMatch(/no tool running/i);
     expect(err?.message).toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
+    expect(err).toMatchObject({ stalled: true });
     expect(recorder.events.some((e) => e.type === "content.delta")).toBe(true);
     expect(instance.adapter.hasSession("t-stall")).toBe(false);
   });
@@ -1921,6 +2355,60 @@ describe("ACP turns (fake CLI)", () => {
       await failStartup();
       const ack = await instance.adapter.sendTurn({ threadId: "startup-activity", text: "go", startupRecovery: true });
       expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId)).toMatchObject({ ok: false });
+    });
+  });
+
+  describe("an engine's account and HTTP failures", () => {
+    /** The provider's refusal as the CLI answers session/prompt: JSON-RPC's internal error around its own line. */
+    const refuse = (details: string) => {
+      const failureFile = join(scratch, "prompt-failure.json");
+      process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+      writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: { details, service: "session", errorName: "APIError" } }));
+    };
+    const failed = async (threadId: string) => {
+      const ack = await instance.adapter.sendTurn({ threadId, text: "Run the morning report" });
+      const completed = await recorder.until((e) => e.type === "turn.completed" && e.turnId === ack.turnId);
+      const errors = recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === ack.turnId);
+      return { completed, errors };
+    };
+
+    it("names a Grok account out of credits, with Grok's own reason, as the account failure it is", async () => {
+      // what Cloud routine runs recorded, as far as the aggregate kept it
+      refuse("API error (status 402 Payment Required): Grok Build us…");
+      await create(GrokAgentDriver);
+      const { completed, errors } = await failed("t-grok-402");
+      expect(errors).toEqual([expect.objectContaining({
+        message: 'Your Grok account is out of credits (Grok says: "Grok Build us…"). Add credits with Grok, then run it again.',
+        setup: true,
+      })]);
+      expect(completed).toMatchObject({ ok: false, stopReason: "auth_required" });
+    });
+
+    it("names any other ACP engine out of credits the same way", async () => {
+      refuse("API error (status 402 Payment Required): Your plan has no credits left. Ask an admin to add more.");
+      await create(GeminiAgentDriver);
+      const { errors } = await failed("t-gemini-402");
+      expect(errors).toEqual([expect.objectContaining({
+        message: 'Your Gemini account is out of credits (Gemini says: "Your plan has no credits left"). Add credits with Gemini, then run it again.',
+      })]);
+    });
+
+    it("puts another HTTP failure in plain words that keep its class, and leaves an unknown one as it was", async () => {
+      refuse("API error (status 503 Service Unavailable): upstream connect error");
+      await create(GrokAgentDriver);
+      const outage = await failed("t-grok-503");
+      expect(outage.errors).toEqual([expect.objectContaining({
+        message: 'Grok had a temporary server problem (HTTP 503; Grok says: "upstream connect error"). Try again in a few minutes.',
+      })]);
+      expect(outage.errors[0]).not.toHaveProperty("setup");
+      expect(outage.completed).toMatchObject({ ok: false, stopReason: "rpc_error" });
+
+      refuse("Grok could not finish the session");
+      await create(GrokAgentDriver);
+      const unknown = await failed("t-grok-unknown");
+      expect(unknown.errors).toEqual([expect.objectContaining({
+        message: "Internal error: Grok could not finish the session (session/prompt, service: session, APIError)",
+      })]);
     });
   });
 

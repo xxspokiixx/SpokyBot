@@ -19,6 +19,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { execCli } from "../procs.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { answersAlone } from "./permission-command.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { parseProtocolAskQuestions, questionAnswersById, type ProtocolAskQuestion } from "../../shared/ask-question.ts";
@@ -68,8 +69,8 @@ export function museCatalog(result: unknown, preferred?: string): ModelCatalog |
   const options: ModelCatalog["options"] = [];
   let listedDefault: string | undefined;
   for (const row of rows) {
-    const entry = (row ?? {}) as { modelId?: unknown; displayLabel?: unknown; isActive?: unknown; isDefault?: unknown; contextLimit?: unknown };
-    if (typeof entry.modelId !== "string" || !entry.modelId.trim() || entry.isActive === false) continue;
+    const entry = (row ?? {}) as { modelId?: unknown; displayLabel?: unknown; isDefault?: unknown; contextLimit?: unknown };
+    if (typeof entry.modelId !== "string" || !entry.modelId.trim()) continue;
     if (options.some(option => option.id === entry.modelId)) continue;
     const id = entry.modelId;
     options.push({
@@ -430,7 +431,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         case "approval/requested": {
           const approval = params as unknown as MuseApproval;
           if (!active || !Array.isArray(approval.availableChoices)) return;
-          if (state.approvalMode === "allowAll") {
+          if (state.approvalMode === "allowAll" && answersAlone(approval.subject?.command)) {
             const choice = museChoice(approval.availableChoices, "allow");
             if (choice) void decide(state, approval, choice).catch(() => {});
             return;
@@ -442,7 +443,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
             type: "request.opened", threadId, turnId: active.turnId, requestId: approval.approvalId, requestType: "permission",
             tool: approval.toolName || subject.toolName || subject.kind || "tool",
             summary: redactSecretsInText(command ?? subject.path ?? subject.host ?? subject.target ?? approval.toolName ?? "Muse Code asks to continue"),
-            ...(command ? { command: { command, cwd: subject.workspaceRoot ?? "" } } : {}),
+            ...(command ? { command: { command, cwd: subject.workspaceRoot ?? "" }, commandLine: command } : {}),
             allowSession: Boolean(museChoice(approval.availableChoices, "allow", true)?.decision.startsWith("approvedFor")
               || approval.availableChoices.some(choice => choice.scope === "session")),
           });
@@ -602,6 +603,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         composioMcp: true,
         browserMcp: true,
         dataMcp: true,
+        highlevelMcp: true,
         images: true,
         nativeImageInput: true,
         effortLevels: EFFORT_LEVELS,

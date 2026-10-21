@@ -11,12 +11,11 @@ import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { Worker } from "node:worker_threads";
 import * as tar from "tar";
-import { fromMarkdown } from "mdast-util-from-markdown";
 import { writeFileAtomic } from "./atomic.ts";
-import { escapeAttribute, splitTranscriptAttachments } from "../src/lib/composer-attachments.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
-import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary } from "../shared/workspace-backup.ts";
+import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
+import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
 export const MAX_WORKSPACE_BACKUP_BYTES = 10 * 1024 ** 3;
@@ -28,13 +27,16 @@ const HEADER_BYTES = MAGIC.length + 16 + 12;
 const TAG_BYTES = 16;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const EXCLUDED = new Set([
-  ".backups", "tools", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
+  ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
   "openmausbot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
   "runtime.db-wal", "runtime.db-shm",
   "decider-log",
   "cloud-owner.json",
+  "sync",
+  // "Also use my Claude Code skills": a link to the person's own ~/.claude/skills, made again on each turn.
+  "claude-user-skills",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
@@ -69,9 +71,11 @@ export interface WorkspaceRestoreResult {
   id?: string;
   safetyCopyPath?: string;
   summary?: WorkspaceBackupSummary;
+  leftBehind?: WorkspaceLeftBehind;
   clientState?: WorkspaceBackupClientState;
 }
-export type LastWorkspaceRestore = WorkspaceRestoreResult & { restored: true; id: string };
+/** `pathsRewritten`: the source data folder was rewritten in text too, by the restore or by repairMovedWorkspacePaths. */
+export type LastWorkspaceRestore = WorkspaceRestoreResult & { restored: true; id: string; pathsRewritten?: true };
 
 function excluded(name: string): boolean {
   return EXCLUDED.has(name) || excludedWorkspaceAuthPath(name) || name.startsWith("openmausbot-server.lease.") || name.startsWith("box-create-requests.lock.") || /^perm-[A-Za-z0-9_-]+\.sock$/.test(name);
@@ -119,11 +123,6 @@ function newJob(dataDir: string, id: string = randomUUID()): { id: string; direc
   const directory = jobPath(dataDir, id);
   mkdirSync(directory, { mode: 0o700 });
   return { id, directory };
-}
-function validRelative(path: string): boolean {
-  return !!path && path.length <= 4096 && !isAbsolute(path) && !/[\\\0:]/.test(path) &&
-    path.split("/").every((part) => !!part && part !== "." && part !== ".." && !/[. ]$/.test(part) &&
-      !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part));
 }
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -298,6 +297,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   const snapshot = join(job.directory, "snapshot");
   folder(join(snapshot, "data"));
   const entries: Entry[] = [];
+  const foldedPaths = new Map<string, string>();
   const warnings = ["Stop external editors and managed desktops before exporting; files written outside this server cannot be frozen by the backup gate.", "Conversation text and user files are not redacted and may contain secrets you pasted. Keep the encrypted backup private.", RESTORE_WARNING];
   let bytes = 0;
   let skippedLinks = 0;
@@ -325,7 +325,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
         if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path)) continue;
         // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
-        if (!validRelative(path)) throw new Error("A workspace filename cannot be safely restored on supported platforms.");
+        if (!validRelative(path)) throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
         const source = join(directory, name);
         const stat = lstatSync(source);
         if (name === "node_modules" && (stat.isDirectory() || stat.isSymbolicLink())) {
@@ -333,7 +333,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           continue;
         }
         if (stat.isSymbolicLink() && path.startsWith("task-workspaces/")) {
-          skippedWorkLinks++;
+          if (managedTaskSkillLink(source, path, [root, resolve(dataDir)])) skippedLinks++; else skippedWorkLinks++;
           continue;
         }
         if (stat.isSymbolicLink()) {
@@ -352,6 +352,9 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           continue;
         }
         if (entries.length >= MAX_WORKSPACE_BACKUP_FILES) throw new Error("The workspace exceeds the 100,000-entry backup limit.");
+        const caseTwin = foldedPaths.get(path.toLowerCase());
+        if (caseTwin) throw new Error(`Cannot back up names that differ only by letter case, which collide on Windows and macOS; rename one first: ${caseTwin} and ${path}`);
+        foldedPaths.set(path.toLowerCase(), path);
         const destination = join(snapshot, "data", path);
         if (stat.isDirectory()) {
           folder(destination);
@@ -364,7 +367,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
             if (path === "config.json") writeJson(destination, portableWorkspaceConfig(value));
             else {
               if (!record(value)) throw new Error("Invalid webhook definitions in workspace backup.");
-              if (Array.isArray(value.webhooks)) for (const webhook of value.webhooks) if (record(webhook)) delete webhook.secretHash;
+              if (Array.isArray(value.webhooks)) for (const webhook of value.webhooks) if (record(webhook)) { delete webhook.secretHash; delete webhook.sealedSecret; }
+              if (Array.isArray(value.deleted)) for (const entry of value.deleted) if (record(entry) && record(entry.webhook)) delete entry.webhook.sealedSecret;
               writeJson(destination, value);
             }
             copied = { size: lstatSync(destination).size, mode: 0o600, sha256: hashFile(destination) };
@@ -549,7 +553,9 @@ function validateStaged(directory: string, expected?: Map<string, { type: string
   }
   if (existsSync(join(data, "webhooks.json"))) {
     const value = privateJson(join(data, "webhooks.json"));
-    if (!record(value) || Array.isArray(value.webhooks) && value.webhooks.some((webhook) => record(webhook) && Object.hasOwn(webhook, "secretHash"))) throw new Error("Workspace backup contains webhook credentials.");
+    const carries = (webhook: unknown, fields: string[]) => record(webhook) && fields.some((field) => Object.hasOwn(webhook, field));
+    if (!record(value) || Array.isArray(value.webhooks) && value.webhooks.some((webhook) => carries(webhook, ["secretHash", "sealedSecret"]))
+      || Array.isArray(value.deleted) && value.deleted.some((entry) => record(entry) && carries(entry.webhook, ["sealedSecret"]))) throw new Error("Workspace backup contains webhook credentials.");
   }
   const counts = databaseCounts(join(data, "messages.db"));
   if (counts.messages !== manifest.summary.messages || counts.threads !== manifest.summary.threads) throw new Error("The message database does not match the backup summary.");
@@ -589,6 +595,13 @@ export function readStagedWorkspaceBackup(dataDir: string, id: string): Workspac
   if (!record(ready) || ready.id !== id) throw new Error("This workspace backup is not ready to restore.");
   const manifest = validateManifest(privateJson(join(directory, "staged", "manifest.json")));
   return { id, ...privateMetadata(manifest) };
+}
+
+/** A staged backup's own data folder, and the folder it was made from. */
+export function stagedWorkspaceData(dataDir: string, id: string): { data: string; sourceDataDir: string } {
+  readStagedWorkspaceBackup(dataDir, id);
+  const staged = join(jobPath(dataDir, id), "staged");
+  return { data: join(staged, "data"), sourceDataDir: validateManifest(privateJson(join(staged, "manifest.json"))).sourceDataDir };
 }
 
 export function commitPendingWorkspaceRestore(dataDir: string, id: string) {
@@ -647,49 +660,6 @@ function rollback(dataDir: string, journal: RestoreJournal): void {
   }
 }
 
-function rebasePath(value: string, source: string, destination: string): string {
-  const normalized = value.replaceAll("\\", "/");
-  const original = source.replaceAll("\\", "/").replace(/\/$/, "");
-  if (normalized !== original && !normalized.startsWith(`${original}/`)) return value;
-  const suffix = normalized.slice(original.length).replace(/^\//, "");
-  if (suffix && !validRelative(suffix)) return value;
-  return suffix ? join(destination, suffix) : destination;
-}
-const PATH_KEYS = new Set(["cwd", "pinnedCwd", "workspace", "configDir", "profileDirectory", "agentDir", "dataDir", "home", "cli", "path", "filePath", "localPath"]);
-function rebaseFields(value: unknown, source: string, destination: string): void {
-  if (Array.isArray(value)) { for (const item of value) rebaseFields(item, source, destination); }
-  else if (record(value)) {
-    for (const [key, item] of Object.entries(value)) {
-      if (PATH_KEYS.has(key) && typeof item === "string") value[key] = rebasePath(item, source, destination);
-      else if (typeof item === "object") rebaseFields(item, source, destination);
-    }
-  }
-}
-function rebaseMessage(message: unknown, source: string, destination: string): void {
-  if (!record(message)) return;
-  for (const field of ["attachments", "images", "fileAttachments", "file", "card"]) rebaseFields(message[field], source, destination);
-  if (typeof message.text !== "string") return;
-  const text = message.text;
-  const edits: Array<{ from: number; to: number; text: string }> = [];
-  // After a single newline a tag is inline HTML in a Markdown paragraph, though the app's parser shows it as a card.
-  const candidates = fromMarkdown(text).children.flatMap((node) => node.type === "html" ? [node] :
-    node.type === "paragraph" ? node.children.filter((child) => child.type === "html") : []);
-  for (const node of candidates) {
-    if (node.position?.start.offset === undefined || node.position.end.offset === undefined || node.position.start.column !== 1) continue;
-    const lineEnd = text.indexOf("\n", node.position.end.offset);
-    if (text.slice(node.position.end.offset, lineEnd < 0 ? text.length : lineEnd).trim()) continue;
-    const parsed = splitTranscriptAttachments(node.value, false);
-    if (parsed.display.trim() || !parsed.images.length && !parsed.files.length) continue;
-    const next = node.value.replace(/(<attached-(?:image|file)[\t ]+path=")([^"\r\n]*)(")/g, (whole, before: string, encoded: string, after: string) => {
-      const attachment = [...parsed.images, ...parsed.files].find((item) => escapeAttribute(item.path) === encoded);
-      return attachment ? `${before}${escapeAttribute(rebasePath(attachment.path, source, destination))}${after}` : whole;
-    });
-    if (next !== node.value) edits.push({ from: node.position.start.offset, to: node.position.end.offset, text: next });
-  }
-  let next = text;
-  for (const edit of edits.reverse()) next = next.slice(0, edit.from) + edit.text + next.slice(edit.to);
-  message.text = next;
-}
 function prepareRestore(dataDir: string, id: string, manifest: Manifest): string {
   assertLocalAuthOutsideSnapshot(dataDir);
   const job = jobPath(dataDir, id);
@@ -709,13 +679,26 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
     change(value);
     writeJson(path, value);
   };
-  for (const name of ["bots.json", "groups.json", "config.json", "routines.json", "calendar-calls.json"]) {
-    changeJson(name, (value) => rebaseFields(value, manifest.sourceDataDir, resolve(dataDir)));
-  }
+  const paths = restorePaths(manifest.sourceDataDir, resolve(dataDir));
   changeJson("bots.json", (value) => {
     if (!Array.isArray(value)) throw new Error("Invalid bot definitions in workspace backup.");
-    for (const bot of value) if (record(bot)) delete bot.voice;
+    for (const bot of value) if (record(bot)) {
+      paths.definitions(bot, String(bot.id));
+      if (typeof bot.soul === "string") bot.soul = paths.text(bot.soul);
+      delete bot.voice;
+    }
   });
+  changeJson("groups.json", (value) => {
+    paths.definitions(value);
+    if (Array.isArray(value)) for (const group of value) if (record(group) && typeof group.bulletin === "string") group.bulletin = paths.text(group.bulletin);
+  });
+  for (const name of ["config.json", "routines.json", "calendar-calls.json"]) changeJson(name, (value) => paths.definitions(value));
+  for (const entry of installed) {
+    if (entry.type !== "file" || entry.size > MAX_METADATA_BYTES || !INSTRUCTION_FILE.test(entry.path)) continue;
+    const before = readFileSync(join(prepared, entry.path), "utf8");
+    const after = paths.text(before);
+    if (after !== before) writeFileAtomic(join(prepared, entry.path), after, { mode: entry.mode });
+  }
   // Never install source connection settings.
   const oldConfig = join(dataDir, "config.json");
   const newConfig = join(prepared, "config.json");
@@ -739,7 +722,10 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
   }
   changeJson("routines.json", (value) => {
     if (!record(value)) throw new Error("Invalid routine definitions in workspace backup.");
-    if (Array.isArray(value.routines)) for (const routine of value.routines) if (record(routine)) routine.enabled = false;
+    if (Array.isArray(value.routines)) for (const routine of value.routines) if (record(routine)) {
+      routine.enabled = false;
+      if (typeof routine.prompt === "string") routine.prompt = paths.text(routine.prompt);
+    }
     if (Array.isArray(value.runs)) for (const run of value.runs) {
       if (record(run) && ["queued", "running", "waiting"].includes(String(run.status))) {
         run.status = "failed";
@@ -758,7 +744,9 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
       webhook.verificationPending = false;
       const previous = oldHooks.find((old) => record(old) && old.id === webhook.id && old.endpointId === webhook.endpointId);
       // A migrated hook needs a secret rotation: an unknown hash cannot authenticate a caller.
-      webhook.secretHash = record(previous) && typeof previous.secretHash === "string" && /^[a-f0-9]{64}$/.test(previous.secretHash) ? previous.secretHash : randomBytes(32).toString("hex");
+      const kept = record(previous) && typeof previous.secretHash === "string" && /^[a-f0-9]{64}$/.test(previous.secretHash);
+      webhook.secretHash = kept ? previous.secretHash : randomBytes(32).toString("hex");
+      if (kept && typeof previous.sealedSecret === "string" && previous.sealedSecret) webhook.sealedSecret = previous.sealedSecret;
     }
   });
   changeJson("calendar-calls.json", (value) => {
@@ -769,8 +757,8 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
   if (existsSync(join(prepared, "browser-cleanups.json"))) writeJson(join(prepared, "browser-cleanups.json"), []);
   for (const entry of manifest.entries) {
     if (/^messages-[^/]+\.json$/.test(entry.path)) changeJson(entry.path, (value) => {
-      if (Array.isArray(value)) for (const message of value) rebaseMessage(message, manifest.sourceDataDir, resolve(dataDir));
-      else if (record(value) && Array.isArray(value.messages)) for (const message of value.messages) rebaseMessage(message, manifest.sourceDataDir, resolve(dataDir));
+      if (Array.isArray(value)) for (const message of value) paths.message(message);
+      else if (record(value) && Array.isArray(value.messages)) for (const message of value.messages) paths.message(message);
     });
   }
   const dbPath = join(prepared, "messages.db");
@@ -782,7 +770,7 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
         const update = db.prepare("UPDATE messages SET json = ?, text = ? WHERE thread_id = ? AND id = ?");
         for (const row of db.prepare("SELECT thread_id, id, json FROM messages").iterate()) {
           const message: unknown = JSON.parse(String(row.json));
-          rebaseMessage(message, manifest.sourceDataDir, resolve(dataDir));
+          paths.message(message);
           const json = JSON.stringify(message);
           if (json !== row.json) update.run(json, record(message) && typeof message.text === "string" ? message.text : null, row.thread_id, row.id);
         }
@@ -792,7 +780,7 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
         const pause = db.prepare("UPDATE chat_followups SET status = 'interrupted', payload = ? WHERE id = ?");
         for (const row of db.prepare("SELECT id, payload FROM chat_followups WHERE status IN ('pending', 'dispatching', 'interrupted')").iterate()) {
           const payload: unknown = JSON.parse(String(row.payload));
-          rebaseMessage(payload, manifest.sourceDataDir, resolve(dataDir));
+          paths.message(payload);
           if (record(payload)) delete payload.prompt;
           pause.run(JSON.stringify(payload), row.id);
         }
@@ -827,6 +815,9 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
       db.exec("PRAGMA journal_mode = DELETE");
     } finally { db.close(); }
   }
+  const leftBehind = paths.leftBehind();
+  if (leftBehind) writeJson(join(job, "left-behind.json"), leftBehind);
+  else rmSync(join(job, "left-behind.json"), { force: true });
   return prepared;
 }
 
@@ -846,11 +837,13 @@ function finishRestore(dataDir: string, id: string, consumePending = true): Last
     try {
       const value: unknown = JSON.parse(draftAttachments);
       const manifest = validateManifest(privateJson(join(jobPath(dataDir, id), "staged", "manifest.json")));
-      rebaseFields(value, manifest.sourceDataDir, resolve(dataDir));
+      restorePaths(manifest.sourceDataDir, resolve(dataDir)).fields(value);
       clientState["omb-draft-attachments"] = JSON.stringify(value);
     } catch {}
   }
-  const result: LastWorkspaceRestore = { restored: true, id, safetyCopyPath: join(root, `safety-${id}`), summary, clientState };
+  const leftBehind = join(jobPath(dataDir, id), "left-behind.json");
+  const result: LastWorkspaceRestore = { restored: true, id, safetyCopyPath: join(root, `safety-${id}`), summary, clientState, pathsRewritten: true,
+    ...(existsSync(leftBehind) ? { leftBehind: privateJson(leftBehind) as WorkspaceLeftBehind } : {}) };
   writeJson(join(root, "last-restore.json"), result);
   if (consumePending) rmSync(join(root, "pending-restore.json"), { force: true });
   return result;

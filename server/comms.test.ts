@@ -19,6 +19,10 @@ const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const TEST_CAPABILITY_KEY = "comms-test-capability-key-0123456789abcdef";
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
+// A fresh connection per request: a request sent on an idle kept-alive socket while the server's event loop is busy
+// (seconds, on a Windows runner) is reset when Node's keep-alive timeout fires before the server reads it (Node 24).
+const request = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
+  fetch(`${BASE}${path}`, { ...init, headers: { ...init.headers, connection: "close" } });
 const SETTLED = "Your downstream room requests have settled.";
 const WOKE_WITH_RESULT = "woke after delegation: saw the result";
 const WOKE_WITHOUT_RESULT = "woke after delegation: no result";
@@ -109,7 +113,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     for (;;) {
       if (await predicate()) return;
       if (Date.now() > deadline) {
-        const state = await fetch(`${BASE}/api/bots`).then((res) => res.json()).catch(() => ({ bots: [] })) as any;
+        const state = await request("/api/bots").then((res) => res.json()).catch(() => ({ bots: [] })) as any;
         const tails = (state.bots ?? []).filter((candidate: any) => !candidate.hidden).map((candidate: any) => ({
           name: candidate.name, busy: candidate.busy,
           tail: (candidate.messages ?? []).slice(-6).map((m: any) => ({ role: m.role, kind: m.kind, text: m.text?.slice(0, 300), tool: m.tool?.name, from: m.from?.name })),
@@ -121,7 +125,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     }
   };
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await request(path, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -268,6 +272,12 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
             },
             config: { cli: antigravityCli, fullAuto: true },
           },
+          // Hermes shape: keeps the first agents proxy it is offered for the life of the process
+          poolLister: {
+            driver: "hermesAgent",
+            environment: { FAKE_ACP_MODE: "list-peers" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // the asker that hands work on with coordinate_bots (mode work)
           askerDelegate: {
             driver: "grokAgent",
@@ -358,7 +368,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     const deadline = Date.now() + 20_000;
     for (;;) {
       try {
-        const res = await fetch(`${BASE}/api/health`);
+        const res = await request("/api/health");
         if (res.ok) break;
       } catch {
       }
@@ -501,20 +511,14 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const send = await startRoutine(chief.id, "Create the specialist team and start the design review.");
       expect(send.status).toBe(201);
       const threadId = send.body.run.threadId;
-      let card: any;
+      // Team setup applies at once at every level, Ask included: its one record is a notice with Undo, and nothing waits on a person.
+      let notice: any;
       await waitUntil(async () => {
         const messages = (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages ?? [];
-        card = messages.find((message: any) => message.card?.requestId && message.card?.title?.includes("Apply setup"))?.card;
-        return Boolean(card);
-      }, 30_000, "create_bot never showed the team setup card");
-      expect((await api("GET", "/api/bots")).body.bots.some((bot: any) => bot.name === "Pixel")).toBe(false);
-      await waitUntil(async () => (await api("GET", "/api/bots")).body.bots.every((bot: any) => !bot.busy), 15_000, "bots never went idle");
-      const applied = await fetch(`${BASE}/api/threads/${threadId}/respond`, {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: BASE },
-        body: JSON.stringify({ requestId: card.requestId, behavior: "allow" }),
-      });
-      expect(applied.status, await applied.clone().text()).toBe(200);
+        notice = messages.find((message: any) => message.card?.requestId && message.card?.teamSetupRequest)?.card;
+        return Boolean(notice);
+      }, 30_000, "create_bot never showed the team setup notice");
+      expect(notice).toMatchObject({ title: "Team setup applied", autoApplied: true, answered: "allow", options: [] });
 
       let operator: any;
       let work: any[] = [];
@@ -540,6 +544,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
         modelSelection: defaultSelection,
       });
       expect(operator.chiefOfStaff).toBeFalsy();
+      expect(notice.teamSetupRequest.undo.created).toEqual([operator.id]);
       expect(work.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
     },
     60_000,
@@ -761,14 +766,14 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
 
         const taskId = readFileSync(join(home, "chief-task-id"), "utf8").trim();
         expect(taskId).toBeTruthy();
-        const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
+        const minted = await request("/api/testing/internal-capability", {
           method: "POST",
           headers: { "content-type": "application/json", "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
           body: JSON.stringify({ botId: chief.id, threadId: sourceThreadId, kind: "agents" }),
         });
         expect(minted.status).toBe(201);
         const { token } = await minted.json() as { token: string };
-        const status = await fetch(`${BASE}/api/internal/assignment-status?id=${taskId}`, {
+        const status = await request(`/api/internal/assignment-status?id=${taskId}`, {
           headers: { authorization: `Bearer ${token}` },
         });
         expect(status.status).toBe(200);
@@ -795,6 +800,47 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
           return !current?.busy;
         }, 10_000, "approval helper did not settle during cleanup").catch(() => {});
       }
+    },
+    60_000,
+  );
+
+  it(
+    "keeps OpenMausBot tools authorized for Hermes after Stop issues a new bearer",
+    async () => {
+      // Stop issues a new bearer; a pooled Hermes keeps its first agents server, so the next turn must run on a fresh process.
+      for (const existing of (await api("GET", "/api/bots")).body.bots) {
+        await api("PATCH", `/api/bots/${existing.id}`, { hidden: true });
+      }
+      const helper = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${helper.id}`, { name: "PoolHelper", modelSelection: { instanceId: "grok", model: "fake-model" } });
+      const asker = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${asker.id}`, { name: "PoolAsker", modelSelection: { instanceId: "poolLister", model: "fake-model" } });
+
+      const replies = async (count: number) => {
+        const deadline = Date.now() + 25_000;
+        for (;;) {
+          const bot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
+          const done = bot.messages.filter((m: any) => m.kind === "text" && m.role === "bot" && m.text?.startsWith("peers"));
+          if (done.length >= count && !bot.busy) return done;
+          if (Date.now() > deadline) {
+            throw new Error(`turn ${count} never settled: ${JSON.stringify(bot.messages.slice(-4))}\nstderr: ${stderr.slice(-1500)}`);
+          }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      };
+      const send = async (text: string) =>
+        expect((await api("POST", `/api/bots/${asker.id}/messages`, { text })).status).toBe(202);
+
+      await send("first: who is on the team?");
+      expect((await replies(1))[0].text).toContain("PoolHelper");
+      await send("second: and now?");
+      expect((await replies(2))[1].text).toContain("PoolHelper");
+
+      expect((await api("POST", `/api/bots/${asker.id}/interrupt`)).status).toBe(200);
+      await send("third: after stopping, who is on the team?");
+      const third = (await replies(3))[2];
+      expect(third.text).not.toContain("unauthorized");
+      expect(third.text).toContain("PoolHelper");
     },
     60_000,
   );

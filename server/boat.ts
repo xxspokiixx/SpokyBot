@@ -58,7 +58,7 @@ export function isolatedRemoteCommand(command: string): string {
 }
 
 const READY = new Set(["idle", "ready", "running"]);
-const SLEEPING = new Set(["archived", "archiving"]);
+export const SLEEPING_BOAT_STATES = new Set(["archived", "archiving"]);
 /** Never usable again: `cancelled` is a create that got no machine; its GET answers 404 next. */
 const TERMINAL = new Set(["error", "cancelled"]);
 const DEFAULT_BOAT_TTL_SECONDS = 8 * 60 * 60;
@@ -367,17 +367,17 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
 
 // Boat desktop access: VNC (POST /desktop?vnc=1) first, a plain WebSocket that survives P2P-blocking networks and answers
 // {provisioning:true} until ready; WebRTC (POST /desktop) is a STUN-only fallback that can hang. The sandbox's desktopUrl is not usable alone.
-async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000 } = {}) {
+async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000, requestMs = 30_000 } = {}) {
   assertBoatNotDeleting(boxId);
   const t0 = Date.now();
   while (Date.now() - t0 < vncBudgetMs) {
     assertBoatNotDeleting(boxId);
-    const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop?vnc=1`, { method: "POST" });
+    const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop?vnc=1`, { method: "POST", signal: AbortSignal.timeout(requestMs) });
     if (body?.desktopUrl) return body.desktopUrl;
     if (!body?.provisioning) break;
     await new Promise((r) => setTimeout(r, 3000));
   }
-  const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop`, { method: "POST" });
+  const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop`, { method: "POST", signal: AbortSignal.timeout(requestMs) });
   return body?.desktopUrl ?? null;
 }
 
@@ -419,9 +419,16 @@ function boatInventoryProblem(status: number, body: any, included = false): stri
   if (status === 401 || status === 403) {
     return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → API keys";
   }
-  if (status === 429) return "boat.dev is rate-limiting this account — wait a minute and refresh";
+  const service = boatServiceName(included);
+  if (status === 429) return `${service} is rate-limiting this account — wait a minute and refresh`;
   const message = typeof body?.message === "string" ? body.message.trim() : "";
-  return message ? `boat.dev could not list cloud computers: ${message}` : `boat.dev could not list cloud computers (${status})`;
+  return message ? `${service} could not list cloud computers: ${message}` : `${service} could not list cloud computers (${status})`;
+}
+
+/** A read that fails on the network or times out is sent once more; any answer, even an error status, is final. */
+function boatRead(cfg: AppConfig, path: string) {
+  const read = () => boatJson(cfg, path, { signal: AbortSignal.timeout(20_000) });
+  return read().catch(async () => { await new Promise((resolve) => setTimeout(resolve, 1_000)); return read(); });
 }
 
 function safeBoatState(value: unknown): string {
@@ -432,7 +439,7 @@ function safeBoatState(value: unknown): string {
 
 async function listBoatPages(
   cfg: AppConfig,
-): Promise<{ ok: true; boats: any[] } | { ok: false; problem: string; credentialRejected?: boolean }> {
+): Promise<{ ok: true; boats: any[] } | { ok: false; problem: string; credentialRejected?: boolean; unreachable?: boolean }> {
   const boats: any[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
@@ -441,16 +448,13 @@ async function listBoatPages(
     const path = `/sandboxes?limit=${BOAT_INVENTORY_PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     let listed: Awaited<ReturnType<typeof boatJson>>;
     try {
-      listed = await boatJson(cfg, path, { signal: AbortSignal.timeout(20_000) });
+      listed = await boatRead(cfg, path);
     } catch {
-      return { ok: false, problem: "Could not reach boat.dev to list cloud computers — check your connection and refresh" };
+      return { ok: false, unreachable: true, problem: `Could not reach ${boatServiceName(usesIncludedBoat(cfg))} to list cloud computers — check your connection and refresh` };
     }
     if (!listed.ok || !Array.isArray(listed.body?.sandboxes)) {
-      return {
-        ok: false,
-        problem: boatInventoryProblem(listed.status, listed.body, usesIncludedBoat(cfg)),
-        credentialRejected: listed.status === 401 || listed.status === 403,
-      };
+      const credentialRejected = listed.status === 401 || listed.status === 403;
+      return { ok: false, problem: boatInventoryProblem(listed.status, listed.body, usesIncludedBoat(cfg)), credentialRejected };
     }
     boats.push(...listed.body.sandboxes);
 
@@ -481,15 +485,7 @@ export async function listManagedBoats(
   }
 
   const listed = await listBoatPages(cfg);
-  if (!listed.ok) {
-    return {
-      configured: true,
-      available: false,
-      problem: listed.problem,
-      credentialRejected: listed.credentialRejected,
-      instances: [],
-    };
-  }
+  if (!listed.ok) return { configured: true, available: false, problem: listed.problem, credentialRejected: listed.credentialRejected, instances: [] };
 
   const namedOwners = await Promise.all(owners.map(async (owner) => ({
     currentName: await boatNameFor(owner.botId),
@@ -690,7 +686,7 @@ export async function inspectBoatIdentity(cfg: AppConfig, boxId: string): Promis
     return {
       available: false,
       identity: null,
-      problem: "Could not reach boat.dev to verify a remembered cloud computer",
+      problem: `Could not reach ${boatServiceName(usesIncludedBoat(cfg))} to verify a remembered cloud computer`,
     };
   }
   const candidate = inspected.body?.sandbox;
@@ -781,12 +777,12 @@ export async function sleepManagedBoat(
   if (instance.inUse) {
     throw Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 });
   }
-  if (!SLEEPING.has(instance.state) && !READY.has(instance.state)) {
+  if (!SLEEPING_BOAT_STATES.has(instance.state) && !READY.has(instance.state)) {
     throw Object.assign(new Error(`this cloud computer cannot sleep while it is ${instance.state}`), { status: 409 });
   }
   const release = claim?.(instance);
   try {
-    if (!SLEEPING.has(instance.state)) await stopBoat(cfg, instance.boxId);
+    if (!SLEEPING_BOAT_STATES.has(instance.state)) await stopBoat(cfg, instance.boxId);
     forgetBoatId(instance.boxId);
     return { ok: true };
   } finally {
@@ -859,7 +855,7 @@ export async function findBoat(cfg: AppConfig, botId: string) {
   const legacyName = legacyBoatNameFor(botId);
   const listed = await listBoatPages(cfg);
   if (!listed.ok) {
-    throw Object.assign(new Error(listed.problem), { status: 503 });
+    throw Object.assign(new Error(listed.problem), { status: 503, transient: listed.unreachable === true });
   }
   const expected = listed.boats.filter((candidate: any) => candidate?.name === name || candidate?.name === legacyName);
   if (expected.some((candidate: any) => !BOAT_ID.test(candidate?.id))) {
@@ -905,7 +901,7 @@ export function describeBoatAccount(cfg: AppConfig): { configured: boolean; incl
   return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) };
 }
 
-export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string; rejected?: true }> {
   try {
     const res = await fetch(`${boatProviderApi()}/sandboxes?limit=1`, {
       headers: { authorization: `Bearer ${token}` },
@@ -915,7 +911,7 @@ export async function verifyToken(token: string): Promise<{ ok: true } | { ok: f
     if (res.status === 401 || res.status === 403) {
       // Boat API keys are prefixed boat_ (box_ before v1).
       return {
-        ok: false,
+        ok: false, rejected: true,
         message: /^(boat|box)_/.test(token)
           ? "boat.dev rejected that key — it may have been revoked or expired. Copy a fresh one from your boat.dev account."
           : "That doesn't look like a Boat API key: they start with boat_ (older ones with box_). Copy the API key from your boat.dev account (an account or session token won't work here).",
@@ -928,6 +924,7 @@ export async function verifyToken(token: string): Promise<{ ok: true } | { ok: f
 }
 
 const INCLUDED_BOAT_UNAVAILABLE = "The cloud computers included with your Cloud plan aren't available right now. Try again later.";
+const boatServiceName = (included: boolean) => included ? "MausBot Cloud's computer service" : "boat.dev";
 
 export function boatErrorMessage(status: number, what: string, body?: any, included = false): string {
   const theirs = typeof body?.message === "string" ? body.message.trim() : "";
@@ -1214,7 +1211,7 @@ const SHOT_CMD = panelShotCommand();
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 const FRAME_TOO_LARGE = "the cloud computer's frame exceeds the 8 MB limit";
 
-async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
+export async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
   let bytes: Buffer | null = null;
   let tooLarge = false;
   try {

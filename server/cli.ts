@@ -19,7 +19,6 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import qrcode from "qrcode-terminal";
 
 import { phonePairingLink } from "../shared/pairing-link.ts";
 import { parseAllowList } from "./account-signin.ts";
@@ -31,6 +30,7 @@ import { restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
+import { runSentinelCli } from "./sentinel/cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
 import { fleetLayout } from "./fleet.ts";
@@ -38,6 +38,7 @@ import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleSt
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { HEADLESS_VERB_NAMES, USAGE } from "./cli-usage.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
+import { browserSignInLines, pairingBlock } from "./cli-pairing.ts";
 import type { AppConfig } from "./config.ts";
 import {
   cleanupTunnelOrigin,
@@ -79,6 +80,7 @@ export interface CliOptions {
   chatOnly?: boolean;
   /** `service install|uninstall` */
   serviceAction?: "install" | "uninstall";
+  sentinel?: boolean;
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
@@ -166,6 +168,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
         if (arg !== "list") options.email = value();
       } else if (options.command === "access" && arg === "--chat-only") options.chatOnly = true;
       else if (options.command === "service" && !options.serviceAction && (arg === "install" || arg === "uninstall")) options.serviceAction = arg;
+      else if (options.command === "service" && arg === "--sentinel") options.sentinel = true;
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
       else if (options.command === "fleet" && !options.fleetAction && ["init", "create", "list", "users", "suspend", "resume", "delete", "upgrade", "agent"].includes(arg)) options.fleetAction = arg as FleetInput["action"] | "agent";
@@ -342,53 +345,7 @@ async function showPhonePairing(options: CliOptions, origin: string | undefined,
   return true;
 }
 
-/** `url` opens the web app (browsers, the iOS app); `inviteUrl` (openmausbot://) is the only thing the Android app scans. */
-export function pairingBlock(input: {
-  code: string;
-  url: string | null;
-  inviteUrl?: string | null;
-  expiresAt: number;
-  hint?: string | null;
-  phone?: "ios" | "android";
-}): string {
-  const lines = [`pairing code:  ${input.code}`, `expires:       ${new Date(input.expiresAt).toLocaleTimeString()} (single use)`];
-  if (!input.url && !input.inviteUrl) {
-    lines.push(`open:          /pair on the address you use for this server, and type the code`);
-    if (input.hint) lines.push(`               (${input.hint})`);
-    return lines.join("\n");
-  }
-  const scanInvite = input.phone === "android" && !!input.inviteUrl;
-  if (input.url) lines.push(scanInvite ? `web browser:   ${input.url}` : `open or scan:  ${input.url}`);
-  if (input.inviteUrl) lines.push(`phone app:     ${input.inviteUrl}`);
-  const target = scanInvite ? input.inviteUrl! : input.url;
-  if (target) {
-    lines.push("");
-    lines.push(qrToString(target));
-    lines.push("");
-    if (scanInvite) {
-      lines.push(`Scan that in the OpenMausBot app. For a browser instead, open the web`);
-      lines.push(`address above and type the code.`);
-    } else if (input.phone === "android") {
-      lines.push(`That QR opens the web app. The Android app needs the phone-app link,`);
-      lines.push(`which this server cannot build without a public address: set`);
-      lines.push(`OMB_PUBLIC_URL, or open the web address above and type the code.`);
-    } else if (input.inviteUrl) {
-      lines.push(`Scan that with Camera for the browser, or paste the phone-app link`);
-      lines.push(`above into the OpenMausBot app.`);
-    }
-  }
-  return lines.join("\n");
-}
-
-export function qrToString(text: string): string {
-  let out = "";
-  qrcode.generate(text, { small: true }, (rendered: string) => {
-    out = rendered;
-  });
-  return out;
-}
-
-async function mintPairing(port: number, options: { label?: string; client?: boolean; publicUrl?: string; phone?: "ios" | "android" }): Promise<string> {
+async function mintPairing(port: number, options: { label?: string; client?: boolean; publicUrl?: string; phone?: "ios" | "android"; guided?: boolean }): Promise<string> {
   const request: { label?: string; scopes?: string[] } = {};
   if (options.label) request.label = options.label;
   if (options.client) request.scopes = ["client"];
@@ -399,7 +356,9 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
   const invite = (options.publicUrl && typeof body.credential === "string"
     ? phonePairingLink({ address: options.publicUrl, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined })
     : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);
-  return pairingBlock({ code: body.code, url, inviteUrl: invite, expiresAt: body.expiresAt, hint: typeof body.hint === "string" ? body.hint : null, phone: options.phone });
+  const localUrl = options.phone ? null : `http://127.0.0.1:${port}/pair#code=${body.code}`;
+  if (options.guided && localUrl) return browserSignInLines(localUrl, body.code, body.expiresAt);
+  return pairingBlock({ code: body.code, url, inviteUrl: invite, localUrl, expiresAt: body.expiresAt, hint: typeof body.hint === "string" ? body.hint : null, phone: options.phone });
 }
 
 export async function runPair(options: CliOptions): Promise<number> {
@@ -648,7 +607,7 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
   const { browserEngineStatus, describeBrowserEngine, ensureChrome, installAgentBrowserBinary, resolveAgentBrowserBinary } = await import("./browser-engine.ts");
   const status = browserEngineStatus({ dataDir: options.dataDir });
   if (options.browserAction === "status") {
-    io.log(describeBrowserEngine(status));
+    io.log(describeBrowserEngine(status, status.kind === "ready" ? new (await import("./browser/chrome/launcher.ts")).ChromeLauncher({ dataDir: options.dataDir }).describe() : undefined));
     if (status.kind !== "ready" && status.installable) io.log("install it with:  openmausbot browser install");
     return status.kind === "ready" ? 0 : 1;
   }
@@ -944,12 +903,11 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
         if (timer) clearTimeout(timer);
       }
       if (!stopping && exited === null) await showPhonePairing(options, publicUrl, log).catch((error: unknown) => log(`no pairing code: ${message(error)}`));
-    } else if (options.pair && !options.guided) {
+    } else if (options.pair) {
       log("");
       try {
-        log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined }));
-        log("");
-        log("another device later:  openmausbot pair --label \"Kitchen iPad\"");
+        log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined, guided: options.guided }));
+        if (!options.guided) log("\nanother device later:  openmausbot pair --label \"Kitchen iPad\"");
       } catch (error) {
         log(`no pairing code: ${message(error)}`);
         log("start without one next time:  openmausbot serve --no-pair");
@@ -1046,6 +1004,7 @@ export async function runOnboardingCommand(
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
+  if (argv[0] === "sentinel") return runSentinelCli(argv.slice(1));
   if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
   const options = parseArgs(argv);
   if ("error" in options) {
@@ -1071,15 +1030,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return runAccess(options);
     case "service":
       return runServiceCommand({
-        action: options.serviceAction ?? "install",
-        dataDir: options.dataDir,
-        port: options.port,
-        domain: options.domain,
-        tunnel: options.tunnel,
-        tailscale: options.tailscale,
-        label: options.label,
-        script: process.argv[1] ?? "",
-        node: process.execPath,
+        action: options.serviceAction ?? "install", dataDir: options.dataDir, port: options.port, domain: options.domain, tunnel: options.tunnel,
+        tailscale: options.tailscale, label: options.label, sentinel: options.sentinel, script: process.argv[1] ?? "", node: process.execPath,
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "fleet":
       if (options.fleetAction === "agent") {

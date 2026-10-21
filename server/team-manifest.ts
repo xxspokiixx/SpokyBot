@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { schemaIssue, type JsonValue } from "./schema.ts";
 import type { MausColor } from "./store.ts";
-import { botMascotBody, type MascotBodyId } from "../shared/mascot-bodies.ts";
+import { botBodyId, type BotBodyId } from "../shared/bot-body.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { optionalText, requiredText } from "../shared/package-format.ts";
@@ -214,7 +214,7 @@ export interface ImportedMemberProfile {
   soul?: string;
   color: MausColor;
   mascotExpression?: string;
-  mascotBody?: MascotBodyId;
+  mascotBody?: BotBodyId;
 }
 
 /** Everything an untrusted manifest may seed into a new bot, and nothing else:
@@ -236,7 +236,7 @@ export function importedMemberProfile(
   };
   if (member.appearance.mascotExpression) profile.mascotExpression = member.appearance.mascotExpression;
   // Free text in the manifest: safe-parsed so an untrusted value never reaches a BotRecord unvalidated.
-  if (member.appearance.mascotBody) profile.mascotBody = botMascotBody(member.appearance.mascotBody);
+  if (member.appearance.mascotBody) profile.mascotBody = botBodyId(member.appearance.mascotBody);
   return profile;
 }
 

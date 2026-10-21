@@ -1,4 +1,4 @@
-import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
+import { approvalModeFor, approvalModeWidens, isApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { threadLinkUrl } from "../../shared/thread-link.ts";
 import type { WireBot, WireTask } from "../../shared/wire.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
@@ -15,7 +15,9 @@ import { parseSurface } from "../surface.ts";
 import type { ThreadStarters } from "../thread-starters.ts";
 import { titleConversationExcerpt, type ThreadTitleSource } from "../thread-title.ts";
 import type { MessagePage } from "./channels.ts";
+import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { sawThread } from "../thread-presence.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -23,7 +25,7 @@ export interface TaskRouteDeps {
   store: Pick<Store,
     | "bot" | "bots" | "taskByThread" | "project" | "projectBotForTask" | "patchTask" | "patchProject" | "tasks"
     | "switchTaskModel" | "switchTask" | "retitleTask" | "reorderProjects" | "refreshTaskPermissions" | "messagesTail"
-    | "messagesFor" | "deleteTask" | "deleteProject" | "createTask" | "createProject">;
+    | "messagesFor" | "deleteTasks" | "deleteProject" | "createTask" | "createProject">;
   /** On a Cloud home only the owner changes how a bot asks for approval. */
   cloudHome: boolean;
   /** The desktop app owns this server, so a loopback caller is its owner. */
@@ -78,9 +80,34 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
   const DESKTOP_MANAGED = deps.desktopManaged;
   const HOSTED_WORKSPACE = deps.hostedWorkspace;
   const HOSTED_FULL_ACCESS_REFUSAL = deps.hostedFullAccessRefusal;
+  const deleteRefusal = (auth: RequestAuth, botId: string, threadId: string): { status: 403 | 404 | 409; error: string } | null => {
+    if (!store.taskByThread(botId, threadId)) return { status: 404, error: "no such task" };
+    const notYours = cloudThreadRefusal(auth, threadId);
+    if (notYours) return { status: 403, error: notYours };
+    if (phoneSecretSubmissions.hasThread(threadId)) {
+      return { status: 409, error: "this task is securely saving a credential — try again when it finishes" };
+    }
+    if (threadBusy(botId, threadId) || deps.routines()!.isActiveThread(threadId)) {
+      return { status: 409, error: "this task is running — stop it first" };
+    }
+    return null;
+  };
+  const deleteTasks = (botId: string, threadIds: string[]) => {
+    const stagedSkillCleanups = new Map(threadIds.map((threadId) => [threadId, stagedSkillCleanupsForThread(threadId)]));
+    for (const threadId of threadIds) coordinator.cancelDirect(threadId, "The source conversation was deleted");
+    const result = store.deleteTasks(botId, threadIds);
+    for (const threadId of result?.deleted ?? []) {
+      clearTurnDigestState(threadId);
+      skillReview.dropThread(threadId);
+      revokeInternalCapabilitiesForThread(threadId);
+      handoffs.forget(threadId);
+      settleDirectFollowup(directTurnGenerationByThread.get(threadId));
+      rejectDeletedThreadSkillStages(stagedSkillCleanups.get(threadId) ?? []);
+    }
+    return result;
+  };
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
-    const routines = deps.routines();
 
     // Folders never own settings, transcripts or working directories; the "project" wire names stay.
     m = path.match(/^\/api\/bots\/([\w-]+)\/projects\/order$/);
@@ -165,6 +192,24 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) });
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/delete$/);
+    if (m && method === "POST") {
+      const parsed = bulkDeleteThreadIds(await readBody(req));
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const allowed: string[] = [];
+      const refused: BulkDeleteRefusal[] = [];
+      for (const threadId of parsed.threadIds) {
+        const refusal = deleteRefusal(auth, bot.id, threadId);
+        if (!refusal) allowed.push(threadId);
+        else refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+      }
+      const result = deleteTasks(bot.id, allowed);
+      if (!result) return json(res, 404, { error: "no such bot" });
+      for (const threadId of result.missing) refused.push({ threadId, reason: "not-found" });
+      return json(res, 200, { bot: publicBot(result.bot), deleted: result.deleted, refused });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
@@ -178,7 +223,9 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
-      const switchedSettings = { ...wireBot(switched), tasks: store.tasks(switched.id).map((task) => wireTask(task, switched.modelSelection)) };
+      sawThread(m[2]);
+      const wiredSwitch = wireBot(switched);
+      const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).
       const responseBot = requestedMessages === "0"
         ? switchedSettings
@@ -235,8 +282,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
         if (nextMode === "auto" && current.computer === "local" && approvalModeFor(current) !== "auto" && body.acknowledgeLocalAuto !== true) {
           return json(res, 400, { error: "Auto mode on this computer requires confirming the warning first (acknowledgeLocalAuto)" });
         }
-        const approvalRank = { ask: 0, edits: 1, auto: 2, full: 3, custom: 4 } as const;
-        const widensMode = approvalRank[nextMode] > approvalRank[approvalModeFor(current)];
+        const widensMode = approvalModeWidens(approvalModeFor(current), nextMode);
         const nextAllow = profile.alwaysAllow ?? [];
         const widensAllow = nextAllow.some((key) => !(current.alwaysAllow ?? []).includes(key));
         // Full has no OMB-side guard here; the narrower levels keep this one.
@@ -335,28 +381,12 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
     }
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
-      if (!bot || !store.taskByThread(bot.id, m[2])) {
-        return json(res, 404, { error: "no such task" });
-      }
-      const notYours = cloudThreadRefusal(auth, m[2]);
-      if (notYours) return json(res, 403, { error: notYours });
-      if (phoneSecretSubmissions.hasThread(m[2])) {
-        return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
-      }
-      if (threadBusy(bot.id, m[2]) || routines!.isActiveThread(m[2])) {
-        return json(res, 409, { error: "this task is running — stop it first" });
-      }
-      const stagedSkillCleanups = stagedSkillCleanupsForThread(m[2]);
-      coordinator.cancelDirect(m[2], "The source conversation was deleted");
-      const updated = store.deleteTask(m[1], m[2]);
-      if (!updated) return json(res, 404, { error: "no such task" });
-      clearTurnDigestState(m[2]);
-      skillReview.dropThread(m[2]);
-      revokeInternalCapabilitiesForThread(m[2]);
-      handoffs.forget(m[2]);
-      settleDirectFollowup(directTurnGenerationByThread.get(m[2]));
-      rejectDeletedThreadSkillStages(stagedSkillCleanups);
-      return json(res, 200, { bot: publicBot(updated) });
+      if (!bot) return json(res, 404, { error: "no such task" });
+      const refusal = deleteRefusal(auth, bot.id, m[2]);
+      if (refusal) return json(res, refusal.status, { error: refusal.error });
+      const updated = deleteTasks(bot.id, [m[2]]);
+      if (!updated?.deleted.length) return json(res, 404, { error: "no such task" });
+      return json(res, 200, { bot: publicBot(updated.bot) });
     }
     // A rename that lands while the one-shot runs wins; the late title is dropped.
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/title$/);

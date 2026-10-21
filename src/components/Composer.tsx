@@ -1,6 +1,7 @@
-import { track } from "@/lib/analytics";
+import { directMessageSent, roomMessageSent } from "@/lib/product-events";
+import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, Users, X } from "lucide-react";
+import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
@@ -27,8 +28,7 @@ import {
   type ComposerSendSnapshot,
   type FailedComposerSend,
 } from "@/lib/drafts";
-import { BotAvatar } from "./Avatar";
-import { ComposerMenuRow } from "./ComposerMenuRow";
+import { MentionMenu, type MentionChoice } from "./MentionMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
@@ -56,10 +56,12 @@ import {
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
-import { normalizeState } from "@/lib/mascot";
+import { MAUS_COLORS } from "@/lib/mascot";
 import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, openTaskWorking, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
+import { GroupCallButton } from "./GroupCallView";
+import { ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ComposerReplyStrip } from "./ReplyQuote";
 import { escapeCancelsReply } from "@/lib/replies";
@@ -71,7 +73,7 @@ import {
   doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
-import { mentionChoicesForQuery, mentionRowDescription } from "@/lib/mentions";
+import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions";
 import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
 import {
   composerSlashTrigger,
@@ -82,18 +84,6 @@ import {
   type ComposerSlashCommand,
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
-
-function mentionQueryAt(text: string, caret: number): { start: number; query: string } | null {
-  const upto = text.slice(0, caret);
-  const at = upto.lastIndexOf("@");
-  if (at === -1) return null;
-  if (at > 0 && !/\s/.test(upto[at - 1])) return null;
-  const query = upto.slice(at + 1);
-  if (query.length > 24 || query.includes("@") || query.includes("\n")) return null;
-  return { start: at, query };
-}
-
-type MentionChoice = { id: string; name: string; bot?: Bot };
 
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
@@ -212,8 +202,9 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const [recording, setRecording] = useState(false);
-  const [speechError, setSpeechError] = useState<string | null>(null);
+  const { recording, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({
+    draftId, text, onText: editText, available: capabilities.dictation.available,
+  });
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -260,7 +251,6 @@ export function Composer({
   }, [replyToId]);
   const mentionListRef = useRef<HTMLDivElement>(null);
   const commandListRef = useRef<HTMLDivElement>(null);
-  const baseText = useRef("");
 
   const botSupportsImages = (candidate?: Bot) =>
     Boolean(
@@ -564,6 +554,7 @@ export function Composer({
     }
     const composed = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
     if (!composed) return;
+    stopDictation();
     const body = restoredRequestText(draftId) ?? composed;
     const dataContext = dataContextFor(body, state.computerOpen ? state.dataView : null, !group && bot ? { botId: bot.id, threadId } : undefined);
     const sentDraft: ComposerDraftSnapshot = {
@@ -589,7 +580,7 @@ export function Composer({
         mode: effectiveChannelMode,
         onError: () => restoreDraft(sentDraft),
       });
-      track("message_sent", { room: true, mode: effectiveChannelMode, queued: busy });
+      roomMessageSent(effectiveChannelMode, busy);
     } else if (bot) {
       dispatch({
         type: "send",
@@ -601,7 +592,7 @@ export function Composer({
         dataContext,
         onError: () => restoreDraft(sentDraft),
       });
-      track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !canSteer });
+      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && !canSteer);
     }
     setText("");
     setAttachments([]);
@@ -672,50 +663,32 @@ export function Composer({
     editAttachments((prev) => [...prev, pasteAttachment(pasted)]);
   };
 
-  useEffect(() => {
-    if (!recording) return;
-    const bridge = window.ogb;
-    if (!bridge) {
-      setRecording(false);
+  const toggleGoal = () => {
+    markDraftEdited(draftId);
+    if (typedGoalText !== null) {
+      const nextCaret = Math.max(0, caret - (text.length - typedGoalText.length));
+      editText(typedGoalText);
+      setCaret(nextCaret);
+      setChannelMode("chat");
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(nextCaret, nextCaret);
+      });
       return;
     }
-    setSpeechError(null);
-    const offTranscript = bridge.onSpeechTranscript((line) => {
-      if (typeof line.text === "string") {
-        const base = baseText.current;
-        editText(base ? `${base} ${line.text}` : line.text);
-      }
-    });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
-      setRecording(false);
-      if (code === 2) {
-        setSpeechError(t("composer.dictation.macOnly"));
-      } else if (code === 1) {
-        setSpeechError(t(
-          reason === "dictation-disabled"
-            ? "composer.dictation.disabled"
-            : reason === "speech-not-authorized"
-              ? "composer.dictation.permission"
-              : "composer.dictation.failed",
-        ));
-      }
-    });
-    void bridge.speechStart();
-    return () => {
-      offTranscript();
-      offEnd();
-      void bridge.speechStop();
-    };
-  }, [recording, editText]);
-
-  const toggleMic = () => {
-    if (!capabilities.dictation.available || !window.ogb) {
-      setSpeechError(t("composer.dictation.unavailable"));
-      return;
-    }
-    baseText.current = text.trim();
-    setRecording((r) => !r);
+    setChannelMode((current) => current === "goal" ? "chat" : "goal");
   };
+  const goal = group && !group.dm ? { on: effectiveChannelMode === "goal", onToggle: toggleGoal } : undefined;
+  const approvalChoice = modeBot && approvalEngine && !remoteClient ? {
+    approvalMode: modeBot.approvalMode,
+    autoApprove: modeBot.autoApprove,
+    providerName: approvalEngine.displayName,
+    driverKind: approvalEngine.driverKind,
+    onSelect: setApprovalMode,
+    disabled: Boolean(modeBot.busy),
+    trustedModesAvailable: trustedThreadAccess,
+    onManageCommandAllowlist: ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: modeBot.name, threadId: modeBot.threadId }) : undefined,
+  } : undefined;
 
   return (
     <div className="pointer-events-none relative px-5 pb-3">
@@ -802,59 +775,19 @@ export function Composer({
             ))}
           </div>
         )}
-        {mentionMotion.shown && (
-          <div
-            ref={mentionListRef}
-            role="listbox"
-            aria-label={t("composer.mention.aria")}
-            className={cn("absolute bottom-full start-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", mentionMotion.className)} {...mentionMotion.exitProps}
-          >
-            {candidates.map((peer, i) => {
-              const description = mentionRowDescription(peer.bot
-                ? { kind: "bot", title: peer.bot.title }
-                : { kind: "everyone", count: mentionEveryoneCount });
-              return (
-                <ComposerMenuRow
-                  key={peer.id}
-                  id={`composer-mention-${peer.id}`}
-                  data-mention-index={i}
-                  role="option"
-                  aria-selected={i === highlight}
-                  onClick={() => pickMention(peer)}
-                  onMouseEnter={() => setHighlight(i)}
-                  selected={i === highlight}
-                  icon={peer.bot ? (
-                    <BotAvatar
-                      bot={peer.bot}
-                      state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
-                      size={24}
-                    />
-                  ) : (
-                    <span className="flex size-6 items-center justify-center rounded-full bg-raised text-ink-secondary">
-                      <Users size={14} aria-hidden="true" />
-                    </span>
-                  )}
-                  name={peer.name}
-                  description={description || undefined}
-                  kind={peer.bot ? t("composer.mention.agent") : t("composer.mention.channel")}
-                />
-              );
-            })}
-          </div>
-        )}
+        <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}
+          everyoneCount={mentionEveryoneCount} onPick={pickMention} onHighlight={setHighlight} />
         {approval && (
-          <div className="mb-2 overflow-hidden rounded-2xl border border-accent/40 bg-card">
+          <div className="mb-2 overflow-hidden rounded-3xl bg-composer ring-1 ring-composer-ring">
             <PendingApprovalPanel
+              key={approval.requestId}
               pending={approval}
+              botName={approvalBot?.name}
               count={approvals.length}
               index={0}
               locale={activeLocale()}
-            />
-            <PendingApprovalActions
-              pending={approval}
-              threadId={threadId}
-              bot={approvalBot}
-              onCancelTurn={interruptTurn}
+              actions={<PendingApprovalActions part="primary" pending={approval} threadId={threadId} bot={approvalBot} onCancelTurn={interruptTurn} />}
+              more={<PendingApprovalActions part="more" pending={approval} threadId={threadId} bot={approvalBot} onCancelTurn={interruptTurn} />}
             />
           </div>
         )}
@@ -883,11 +816,11 @@ export function Composer({
           onEdit={locked ? undefined : editQueued}
         />
         <div className="relative">
-          <div
+          {advanced && <div
             aria-hidden
             data-composer-backdrop
             className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
-          />
+          />}
         <div data-tour="composer" className="@container/composer relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
         <div data-composer-row className="flex items-end gap-1 @max-[30rem]/composer:flex-wrap">
@@ -904,7 +837,13 @@ export function Composer({
           />
           {!locked && (
             <div className="flex flex-wrap items-center gap-1">
-              <button
+              {!advanced && <ComposerPlusMenu
+                onAttach={() => fileInput.current?.click()}
+                goal={goal}
+                approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
+                callBotId={bot && !group ? bot.id : undefined}
+              />}
+              {advanced && <button
                 type="button"
                 onClick={() => fileInput.current?.click()}
                 aria-label={t("composer.attach")}
@@ -912,51 +851,10 @@ export function Composer({
                 className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
               >
                 <Paperclip size={17} />
-              </button>
-              {group && !group.dm && (
-                <button
-                  type="button"
-                  aria-pressed={effectiveChannelMode === "goal"}
-                  aria-label={t("composer.goal.aria")}
-                  title={t("composer.goal.title")}
-                  onClick={() => {
-                    markDraftEdited(draftId);
-                    if (typedGoalText !== null) {
-                      const nextCaret = Math.max(0, caret - (text.length - typedGoalText.length));
-                      editText(typedGoalText);
-                      setCaret(nextCaret);
-                      setChannelMode("chat");
-                      requestAnimationFrame(() => {
-                        inputRef.current?.focus();
-                        inputRef.current?.setSelectionRange(nextCaret, nextCaret);
-                      });
-                      return;
-                    }
-                    setChannelMode((current) => current === "goal" ? "chat" : "goal");
-                  }}
-                  className={cn(
-                    "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] transition-colors",
-                    effectiveChannelMode === "goal"
-                      ? "border-accent/35 bg-accent/10 text-accent"
-                      : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
-                  )}
-                >
-                  <Target size={14} aria-hidden="true" />
-                  {effectiveChannelMode === "goal" ? "/goal" : t("composer.goal.chip")}
-                </button>
-              )}
-              {modeBot && approvalEngine && !remoteClient && (
-                <ApprovalModeSelector
-                  approvalMode={modeBot.approvalMode}
-                  autoApprove={modeBot.autoApprove}
-                  providerName={approvalEngine.displayName}
-                  driverKind={approvalEngine.driverKind}
-                  onSelect={setApprovalMode}
-                  disabled={Boolean(modeBot.busy)}
-                  trustedModesAvailable={trustedThreadAccess}
-                  onManageCommandAllowlist={ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: modeBot.name, threadId: modeBot.threadId }) : undefined}
-                />
-              )}
+              </button>}
+              {/* Simple mode keeps the chip only while Finish together is on, so the + menu's choice stays visible. */}
+              {goal && (advanced || goal.on) && <GoalToggle on={goal.on} onToggle={goal.onToggle} />}
+              {advanced && approvalChoice && <ApprovalModeSelector {...approvalChoice} />}
               {modeBot && !remoteClient && advanced && (
                 <PlaceChip
                   bot={modeBot}
@@ -977,6 +875,7 @@ export function Composer({
           rows={1}
           value={text}
           onChange={(e) => {
+            if (recording) stopDictation();
             editText(e.target.value);
             setCaret(e.target.selectionStart ?? e.target.value.length);
             setDismissedAt(null);
@@ -1048,7 +947,7 @@ export function Composer({
               }
               send();
             }
-            if (e.key === "Escape" && recording) setRecording(false);
+            if (e.key === "Escape" && recording) stopDictation();
           }}
           // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
           // is pending.
@@ -1096,7 +995,7 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && !hasContent && capabilities.dictation.available && (
+        {!locked && !busy && capabilities.dictation.available && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
@@ -1104,14 +1003,15 @@ export function Composer({
               "flex size-8 shrink-0 items-center justify-center rounded-full",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
-                : "text-ink-secondary hover:bg-raised hover:text-ink",
+                : advanced ? "text-ink-secondary hover:bg-raised hover:text-ink" : "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]",
             )}
             title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
           >
-            <Mic size={18} />
+            <Mic size={advanced ? 18 : 16} />
           </button>
         )}
-        {bot && !group && <CallButton bot={bot} placement="composer" />}
+        {bot && !group && <CallButton bot={bot} placement="composer" fill={advanced ? undefined : MAUS_COLORS[bot.color] ?? MAUS_COLORS.green} />}
+        {group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill="var(--color-accent)" />}
         {hasContent && !locked && (
           <button
             onClick={send}

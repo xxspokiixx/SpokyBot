@@ -223,9 +223,9 @@ export function configChangeRows(before: unknown, after: unknown): Array<Omit<Ad
 
 /** What a bot may do, where, and who may see it; display fields (colour, unread, pins) are not audited. */
 export const BOT_AUDIT_FIELDS = [
-  "approvalMode", "autoApprove", "alwaysAllow", "peers", "approvePeerComms", "computer", "cloudBackend", "autoStartVps",
+  "approvalMode", "autoApprove", "alwaysAllow", "peers", "approvePeerComms", "computer", "cloudBackend", "autoStartVps", "vpsAlias",
   "cwd", "composio", "browser", "browserProfile", "mcpServers", "chiefOfStaff", "managedSections", "section",
-  "parkDirectMessages", "hidden", "modelSelection", "visibility",
+  "parkDirectMessages", "hidden", "modelSelection", "helperModel", "visibility",
 ] as const;
 
 export function botAuditSnapshot(bot: Record<string, unknown> | null | undefined): Record<string, unknown> | null {

@@ -8,7 +8,8 @@ import {
   botAvatarUrlSchema,
 } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
-import { MASCOT_BODY_IDS, mascotBodySchema } from "../shared/mascot-bodies.ts";
+import { REPLY_STYLES } from "../shared/reply-style.ts";
+import { BOT_BODY_IDS, botBodySchema } from "../shared/bot-body.ts";
 
 import type { BotRecord } from "./store.ts";
 
@@ -28,6 +29,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "mascotBody",
   "voice",
   "speakReplies",
+  "replyStyle",
 ] as const;
 
 export const profilePatchSchema = z.object({
@@ -62,12 +64,13 @@ export const profilePatchSchema = z.object({
   avatarZoom: z.number({ error: "avatarZoom must be a number from 1 to 3" }).finite().min(AVATAR_ZOOM_MIN).max(AVATAR_ZOOM_MAX).optional(),
   avatarFocusX: z.number({ error: "avatarFocusX must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
   avatarFocusY: z.number({ error: "avatarFocusY must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
-  mascotBody: mascotBodySchema.optional(),
+  mascotBody: botBodySchema.optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
     .optional(),
   speakReplies: z.boolean({ error: "speakReplies must be true or false" }).optional(),
+  replyStyle: z.enum(REPLY_STYLES, { error: "replyStyle must be default or conversational" }).optional(),
 });
 
 export type BotProfilePatchInput = z.input<typeof profilePatchSchema>;
@@ -88,6 +91,7 @@ export type BotProfilePatch = Partial<
     | "mascotBody"
     | "voice"
     | "speakReplies"
+    | "replyStyle"
   >
 >;
 
@@ -110,7 +114,7 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
       return { ok: false, error: `avatarCrop must be ${options}` };
     }
     if (issue?.path[0] === "mascotBody") {
-      const options = `${MASCOT_BODY_IDS.slice(0, -1).join(", ")}, or ${MASCOT_BODY_IDS.at(-1)}`;
+      const options = `${BOT_BODY_IDS.slice(0, -1).join(", ")}, or ${BOT_BODY_IDS.at(-1)}`;
       return { ok: false, error: `mascotBody must be ${options}` };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };

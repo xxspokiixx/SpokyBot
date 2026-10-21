@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -315,6 +315,31 @@ describe("the upkeep loop", () => {
     expect(readMemoryJournal(BOT.id, 5).filter((row) => row.via === "capture").map((row) => row.path)).toEqual(["MEMORY.md", "memory/archive.md"]);
   });
 
+  it("forgets a deleted bot: its waiting turns and its status go", async () => {
+    ensureWorkspace(BOT.id);
+    const loop = upkeep();
+    answers.push(JSON.stringify([{ text: "The person is vegetarian", kind: "preference", aboutUser: false, confidence: 0.9 }]));
+    await loop.capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "I'm vegetarian", bot: "Noted" }] });
+    expect(loop.status(BOT.id).lastCapture).toBeDefined();
+    loop.noteTurn(BOT.id, "t2", { person: "I moved to Lyon", bot: "Nice" });
+    loop.forgetBot(BOT.id);
+    loop.flushThread("t2");
+    await loop.idle();
+    expect(prompts).toHaveLength(1);
+    expect(loop.status(BOT.id).lastCapture).toBeUndefined();
+  });
+
+  it("forgets a deleted bot's turns saved at shutdown, keeping other bots'", () => {
+    const pending = join(DATA_DIR, "memory-capture-pending.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(pending, JSON.stringify({ batches: [
+      { botId: BOT.id, threadId: "t1", turnIds: ["a"] },
+      { botId: "other-bot", threadId: "t2", turnIds: ["b"] },
+    ] }));
+    upkeep().forgetBot(BOT.id);
+    expect(JSON.parse(readFileSync(pending, "utf8")).batches).toEqual([{ botId: "other-bot", threadId: "t2", turnIds: ["b"] }]);
+  });
+
   it("adds to About me a fact the notebook already holds, without appending it again", async () => {
     ensureWorkspace(BOT.id);
     writeMemoryFile(BOT.id, "- 2026-09-25 · The user's company is called Northwind Studio.\n");
@@ -591,7 +616,7 @@ describe("the upkeep loop", () => {
     const loop = upkeep();
     answers.push(JSON.stringify([{ text: "Likes jazz", kind: "preference" }]));
     loop.pause();
-    loop.noteTurn(BOT.id, "t1", { person: "I like jazz", bot: "Nice" });
+    loop.noteTurn(BOT.id, "t1", { person: "I like jazz", bot: "Nice, jazz is a great pick." });
     loop.flushThread("t1");
     await loop.idle();
     expect(prompts).toEqual([]);
@@ -602,7 +627,7 @@ describe("the upkeep loop", () => {
 
   it("keeps turns still waiting at shutdown as ids and captures them after the next start", async () => {
     const pending = join(DATA_DIR, "memory-capture-pending.json");
-    const jazz = { person: "I like jazz", bot: "Nice", turnId: "turn-1" };
+    const jazz = { person: "I like jazz", bot: "Nice, jazz is a great pick.", turnId: "turn-1" };
     transcript.set("turn-1", jazz);
     const first = upkeep();
     first.noteTurn(BOT.id, "t1", jazz);
@@ -661,7 +686,7 @@ describe("the upkeep loop", () => {
     const pending = join(DATA_DIR, "memory-capture-pending.json");
     const paused = upkeep();
     paused.pause();
-    paused.noteTurn(BOT.id, "t1", { person: "I like jazz", bot: "Nice", turnId: "turn-1" });
+    paused.noteTurn(BOT.id, "t1", { person: "I like jazz", bot: "Nice, jazz is a great pick.", turnId: "turn-1" });
     paused.flushThread("t1");
     paused.stop();
     expect(JSON.parse(readFileSync(pending, "utf8"))).toEqual({ batches: [{ botId: BOT.id, threadId: "t1", turnIds: ["turn-1"] }] });

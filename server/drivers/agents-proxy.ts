@@ -6,60 +6,15 @@
 //   OMB_TURN_DEPTH  this turn's comms depth (the harness refuses recursion)
 //   OMB_EXTERNAL_RUNTIME  "1" for a standing process: oversized results are cut instead of cached
 //   OMB_CHIEF_OF_STAFF  "1" for a Chief of Staff, the only bot shown the Chief-only tools
-// scripts/bundle-server.mjs inlines agents-catalog/-call/-client into this file, which the harness spawns.
+//   OMB_AGENTS_TOOL_BRIDGE  "1" lists a few tools and puts the rest behind find_tool and use_tool
+// scripts/bundle-server.mjs inlines agents-mcp and agents-catalog/-call/-client/-bridge into this file, which the harness spawns.
 import readline from "node:readline";
 
-import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
-import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
+import { agentsMcp } from "./agents-mcp.ts";
 import type { Json } from "./agents-client.ts";
 
-const AVAILABLE_TOOLS = availableTools(catalogProfileFromEnv(process.env));
-const CONTEXT = toolCallContextFromEnv(process.env);
-
+const handle = agentsMcp(process.env);
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
-const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
-const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
-const textResult = (id: unknown, text: string, isError = false) =>
-  ok(id, { content: [{ type: "text", text }], isError });
-
-async function handle(msg: Json) {
-  const id = msg.id;
-  const method = msg.method as string | undefined;
-  if (!method) return;
-  const params = (msg.params ?? {}) as Json;
-  switch (method) {
-    case "initialize":
-      ok(id, {
-        protocolVersion: (params.protocolVersion as string) ?? "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "openmausbot-agents", version: "0.1.0" },
-      });
-      return;
-    case "notifications/initialized":
-    case "notifications/cancelled":
-      return;
-    case "ping":
-      ok(id, {});
-      return;
-    case "tools/list":
-      ok(id, { tools: AVAILABLE_TOOLS });
-      return;
-    case "tools/call": {
-      const name = params.name as string;
-      if (!AVAILABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
-      try {
-        const { text, isError, passthrough } = await callTool(name, (params.arguments ?? {}) as Json, CONTEXT);
-        if (passthrough) ok(id, passthrough);
-        else textResult(id, name === "tool_result_read" ? text : await capResult(text, CONTEXT), isError);
-      } catch (e) {
-        textResult(id, await capResult((e as Error).message, CONTEXT), true);
-      }
-      return;
-    }
-    default:
-      if (id !== undefined) rpcErr(id, -32601, `Method not found: ${method}`);
-  }
-}
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
 rl.on("line", (line) => {
@@ -71,8 +26,8 @@ rl.on("line", (line) => {
   } catch {
     return;
   }
-  void handle(msg).catch((e) => {
-    if (msg.id !== undefined) rpcErr(msg.id, -32603, (e as Error).message);
+  void handle(msg).then((reply) => { if (reply) send(reply); }, (e) => {
+    if (msg.id !== undefined) send({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: (e as Error).message } } as Json);
   });
 });
 rl.on("close", () => process.exit(0));

@@ -11,6 +11,17 @@ const running = (name: string): Message =>
   ({ id: `t${++seq}`, at: seq, role: "bot", kind: "activity", tool: { name } });
 const text = (body: string): Message => ({ id: `m${++seq}`, at: seq, role: "bot", kind: "text", text: body });
 
+describe("a reaction's own line", () => {
+  it("draws no bubble in a conversation or a room: the reaction shows on the message it answered", () => {
+    const asked = text("Shall I send it?");
+    const reaction: Message = { id: `u${++seq}`, at: seq, role: "user", kind: "text", text: "👍", replyToId: asked.id, reaction: "👍" };
+    const typed: Message = { id: `u${++seq}`, at: seq, role: "user", kind: "text", text: "👍", replyToId: asked.id };
+    for (const items of [groupTranscript([asked, reaction, typed]), groupActivityRuns([asked, reaction, typed])]) {
+      expect(items.map((item) => item.kind === "message" ? item.message.id : item.id)).toEqual([asked.id, typed.id]);
+    }
+  });
+});
+
 describe("groupActivityRuns", () => {
   it("folds consecutive tool steps into one run", () => {
     const items = groupActivityRuns([tool("Edit"), tool("Bash"), tool("Edit")]);
@@ -194,6 +205,11 @@ describe("describeRun", () => {
     expect(describeRun([tool("Edit"), tool("Bash"), tool("Write"), tool("Grep"), tool("Read")])).toBe(
       "5 steps · Edit, Bash, Write +2 more",
     );
+  });
+
+  it("names steps by the label it is given, counting steps that read the same together", () => {
+    const plain = ({ name }: { name: string }) => (name === "Bash" || name.includes(" ") ? "Run a command" : name);
+    expect(describeRun([tool("Bash"), tool("ls -la"), tool("Edit")], plain)).toBe("3 steps · Run a command ×2, Edit");
   });
 });
 

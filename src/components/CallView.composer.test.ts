@@ -19,7 +19,7 @@ const fixture = vi.hoisted(() => ({
 
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config, bots: fixture.bots }, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config, bots: fixture.bots, instances: [{ instanceId: "codex", driverKind: "codex" }, { instanceId: "claude-3f0c2b1e-9d1a-4c55-8a51-0a3a6f1e2b7c", driverKind: "claudeAgent" }] }, dispatch: fixture.dispatch }) };
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -115,6 +115,19 @@ describe("composer call button", () => {
     expect(fixture.endCall).not.toHaveBeenCalled();
   });
 
+  it("names the engine, never the instance id, for an added account", () => {
+    const added = { ...bot, modelSelection: { instanceId: "claude-3f0c2b1e-9d1a-4c55-8a51-0a3a6f1e2b7c", model: "m" } };
+    let tree: ReactNode = null;
+    function Capture() {
+      const element = CallButton({ bot: added }) as ReactElement<Parameters<typeof CallTargetButton>[0]>;
+      tree = CallTargetButton(element.props);
+      return tree;
+    }
+    renderToStaticMarkup(createElement(Capture));
+    findButton(tree)!.props.onClick!();
+    expect(fixture.track.mock.calls).toEqual([["call_started", { driver: "claude", mode: "turns" }]]);
+  });
+
   it("shows a hang-up state during the call and hangs up", () => {
     fixture.onCall = "pepper";
     const { html, button } = render();
@@ -164,6 +177,39 @@ describe("composer call button", () => {
       expect(html, host).not.toContain("Call unavailable");
       expect(html, host).not.toContain("Choose This computer");
     }
+  });
+
+  it("is round and filled with the bot's colour in the Simple composer, the call mode left to its + menu", () => {
+    let tree: ReactNode = null;
+    function Capture() {
+      const element = CallButton({ bot, placement: "composer", fill: "#8057C8" }) as ReactElement<Parameters<typeof CallTargetButton>[0]>;
+      tree = CallTargetButton(element.props);
+      return tree;
+    }
+    const html = renderToStaticMarkup(createElement(Capture));
+    const button = findButton(tree)!;
+    const classes = String(button.props.className).split(" ");
+    expect(classes).toEqual(expect.arrayContaining(["size-8", "rounded-full", "text-white"]));
+    expect(classes).not.toContain("rounded-l-3xl");
+    expect(classes).not.toContain("bg-control");
+    expect(button.props.style).toEqual({ backgroundColor: "#8057C8" });
+    expect(html).toContain("lucide-audio-lines");
+    expect(html).not.toContain('aria-label="Call mode"');
+    expect(renderToStaticMarkup(createElement(() => CallButton({ bot, placement: "composer" })))).toContain('aria-label="Call mode"');
+  });
+
+  it("drops the bot's colour for the red hang-up during a call", () => {
+    fixture.onCall = "pepper";
+    let tree: ReactNode = null;
+    function Capture() {
+      const element = CallButton({ bot, placement: "composer", fill: "#8057C8" }) as ReactElement<Parameters<typeof CallTargetButton>[0]>;
+      tree = CallTargetButton(element.props);
+      return tree;
+    }
+    renderToStaticMarkup(createElement(Capture));
+    const button = findButton(tree)!;
+    expect(String(button.props.className)).toContain("bg-danger");
+    expect(button.props.style).toBeUndefined();
   });
 
   it("leaves the header placement (rooms) as it was", () => {

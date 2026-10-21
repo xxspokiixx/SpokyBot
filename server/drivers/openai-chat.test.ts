@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
-import type { RuntimeEvent } from "../contracts.ts";
+import type { RuntimeEvent, SendTurnInput } from "../contracts.ts";
 import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
@@ -89,6 +89,14 @@ describe("createOpenAIChatRuntime one-shot usage", () => {
     const onUsage = vi.fn();
     await expect(instance.generateText!("summarize", { onUsage })).rejects.toThrow();
     expect(onUsage.mock.calls).toEqual([[{ model: "grok-3-mini", input: 10, output: 5, cachedInput: undefined, costUsd: undefined }]]);
+    await instance.dispose();
+  });
+
+  it("writes with the model a caller names, and with its own quick model otherwise", async () => {
+    const instance = await fixture({ choices });
+    await expect(instance.generateText!("summarize", { model: "grok-4.7" })).resolves.toBe("helper result");
+    await instance.generateText!("summarize");
+    expect(vi.mocked(fetch).mock.calls.map((call) => JSON.parse(call[1]!.body as string).model)).toEqual(["grok-4.7", "grok-3-mini"]);
     await instance.dispose();
   });
 
@@ -309,6 +317,66 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       await instance.dispose();
     }
   }, 20_000);
+
+  describe("corrective rounds", () => {
+    const toolCall = (id: string, name: string, args: unknown = {}) =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }] })}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const answer = 'data: {"choices":[{"index":0,"delta":{"content":"Done."}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const run = async (replies: string[], rounds?: number, integrations?: SendTurnInput["integrations"]) => {
+      const bodies: any[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
+        if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(replies[bodies.length - 1] ?? answer, { headers: { "content-type": "text/event-stream" } });
+      }));
+      const instance = await OpenAICompatDriver.create({
+        instanceId: "corrective", displayName: "Synthetic", enabled: true,
+        config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+        environment: { K: "synthetic" },
+      });
+      const events: RuntimeEvent[] = [];
+      instance.adapter.onEvent((event) => events.push(event));
+      try {
+        await instance.adapter.sendTurn({
+          threadId: "corrective", text: "Use the tool, then answer.", approvalMode: "full",
+          ...(rounds === undefined ? {} : { toolErrorCorrectiveRounds: rounds }), ...(integrations ? { integrations } : {}),
+        });
+        await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+      } finally { await instance.dispose(); }
+      const corrective = bodies.at(-1)!.messages.filter((message: any) => message.role === "user" && /Re-run the failed/.test(String(message.content)));
+      const completed = events.find((event) => event.type === "turn.completed") as any;
+      return { requests: bodies.length, corrective: corrective.length, ok: completed.ok, stopReason: completed.stopReason };
+    };
+
+    it("sends a failed call back once per round, then ends the turn as failed", async () => {
+      expect(await run([toolCall("c1", "nope"), answer, toolCall("c2", "nope"), answer], 1))
+        .toEqual({ requests: 4, corrective: 1, ok: false, stopReason: "tool_error" });
+    }, 20_000);
+
+    it("keeps the failure when the bot answers the round without running a tool", async () => {
+      expect(await run([toolCall("c1", "nope"), answer, answer], 1))
+        .toEqual({ requests: 3, corrective: 1, ok: false, stopReason: "tool_error" });
+    }, 20_000);
+
+    it("ends the turn ok when the bot runs tools again after the round and they succeed", async () => {
+      expect(await run([toolCall("c1", "nope"), answer, toolCall("c2", "fx_write"), answer], 1, { custom: { fx: toolServer() } }))
+        .toMatchObject({ requests: 4, corrective: 1, ok: true });
+    }, 20_000);
+
+    it("never sends a denial back, and a denial during a round keeps the turn failed", async () => {
+      expect(await run([toolCall("a1", "ask_user"), answer], 5))
+        .toEqual({ requests: 2, corrective: 0, ok: false, stopReason: "tool_error" });
+      expect(await run([toolCall("c1", "nope"), answer, toolCall("a2", "ask_user"), toolCall("c2", "fx_write"), answer], 5, { custom: { fx: toolServer() } }))
+        .toEqual({ requests: 5, corrective: 1, ok: false, stopReason: "tool_error" });
+    }, 20_000);
+
+    it("without rounds, a later call that succeeds does not clear the failure", async () => {
+      expect(await run([toolCall("c1", "nope"), toolCall("c2", "fx_write"), answer], undefined, { custom: { fx: toolServer() } }))
+        .toEqual({ requests: 3, corrective: 0, ok: false, stopReason: "tool_error" });
+    }, 20_000);
+  });
 
   it("completes the turn when a question goes unanswered, without tainting the final answer", async () => {
     const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
@@ -676,13 +744,18 @@ describe("createOpenAIChatRuntime HTTP error text", () => {
     return { message: error?.message, calls };
   };
 
-  it("shows an out-of-credits account in the provider's own words, whole, and does not retry it", async () => {
+  it("names an out-of-credits account in plain words with the provider's own reason, and does not retry it", async () => {
     const { message, calls } = await failure(402, JSON.stringify({
       code: "The caller does not have permission to execute the specified operation",
       error: XAI_NO_CREDITS,
     }));
-    expect(message).toBe(`xAI HTTP 402: ${XAI_NO_CREDITS}`);
+    expect(message).toBe("Your xAI account is out of credits (xAI says: \"Your team 0000-fixture has either used all available credits or reached its monthly spending limit\"). Add credits with xAI, then run it again.");
     expect(calls).toBe(1);
+  });
+
+  it("keeps an OpenAI-compatible endpoint's 402 line raw: it names no provider, and the Cloud trial credit reads it", async () => {
+    const events = await runTurn(() => new Response(JSON.stringify({ error: { message: "Insufficient credits", code: "trial_credit_used_up" } }), { status: 402 }));
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: "upstream HTTP 402: Insufficient credits (trial_credit_used_up)" });
   });
 
   it("reads an OpenAI-style error envelope's message", async () => {

@@ -3,6 +3,7 @@ import { parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { DATA_DIR } from "./config.ts";
 import type { SendTurnInput } from "./contracts.ts";
+import { unbridgedServer } from "./drivers/agents-bridge.ts";
 import { GATE_APPS_ENV, REMOTE_MCP_APPS_ENV, type AppMount } from "./mcp-app-observer.ts";
 import { DEFAULT_RESULT_BUDGET } from "./mcp-trim.ts";
 import { REMOTE_MCP_CONFIG_ENV, remoteMcpSpec } from "./mcp-http.ts";
@@ -24,6 +25,35 @@ export function resultBudget(env: NodeJS.ProcessEnv = process.env): number {
   if (raw === undefined || raw === "") return DEFAULT_RESULT_BUDGET;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_RESULT_BUDGET;
+}
+
+/** A bot-owned server's own `resultBudget` (0 = never trim), else the app-wide one. */
+export function serverResultBudget(
+  name: string,
+  perServer: Readonly<Record<string, number>> | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const own = perServer && Object.hasOwn(perServer, name) ? perServer[name] : undefined;
+  if (typeof own === "number" && Number.isFinite(own) && own >= 0) return Math.floor(own);
+  return resultBudget(env);
+}
+
+export function hasOwnResultBudget(name: string, perServer: Readonly<Record<string, number>> | undefined): boolean {
+  const own = perServer && Object.hasOwn(perServer, name) ? perServer[name] : undefined;
+  return typeof own === "number" && Number.isFinite(own) && own >= 1;
+}
+
+/** A URL server keeps its native connection (and Claude Code's tool search) unless it has a limit of its own, which must then hold. */
+export function customServerGate(
+  name: string,
+  owned: boolean,
+  perServer: Readonly<Record<string, number>> | undefined,
+  env?: NodeJS.ProcessEnv,
+): { budget: number; gateRemote: boolean } {
+  return {
+    budget: owned ? serverResultBudget(name, perServer, env) : 0,
+    gateRemote: owned && hasOwnResultBudget(name, perServer),
+  };
 }
 
 export function spillDir(threadId: string): string {
@@ -113,6 +143,7 @@ export function gateServer(input: {
   configEnvName?: string;
   directory?: boolean;
   sourceEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  gateRemote?: boolean;
   apps?: AppMount;
 }): { command: string; args: string[]; env: Record<string, string> } | null {
   const { name, server, budget, apps } = input;
@@ -129,7 +160,7 @@ export function gateServer(input: {
     ...(directory ? { directory: { name, ...(scoped ? { toolScope: parsed.scope } : {}) } } : {}),
     ...(apps && remote ? { apps } : {}),
   };
-  if (!scoped && remote) {
+  if (!scoped && remote && !(input.gateRemote === true && budget > 0)) {
     if (!apps) return null;
     const proxy = mcpStdioServer(server, proxyOptions);
     return proxy ? { command: proxy.command, args: proxy.args ?? [], env: proxy.env ?? {} } : null;
@@ -139,9 +170,12 @@ export function gateServer(input: {
     if (scoped) throw new Error("Tool selection requires a supported MCP server.");
     return null;
   }
+  // Security: a selection matches the name in the call, so behind one the agents server is never bridged,
+  // whatever the turn decided earlier.
+  const upstream = scoped && name === "agents" ? unbridgedServer(spec) : spec;
   const env = {
     OMB_GATE_NAME: name,
-    OMB_GATE_UPSTREAM: JSON.stringify({ command: spec.command, args: spec.args ?? [], env: spec.env ?? {} }),
+    OMB_GATE_UPSTREAM: JSON.stringify({ command: upstream.command, args: upstream.args ?? [], env: upstream.env ?? {} }),
     OMB_GATE_SPILL_DIR: spillDir(input.threadId),
     OMB_GATE_BUDGET: String(budget),
     ...(scoped ? { OMB_GATE_TOOL_SCOPE: JSON.stringify(parsed.scope) } : {}),

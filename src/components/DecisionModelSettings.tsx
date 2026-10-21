@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { Select } from "./Select";
 
 const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
 /** The room decision budget in server/decider/room-routing.ts; slower falls back to the lead. */
@@ -67,7 +68,9 @@ export function DecisionModelSettings() {
   const openrouter = provider === "openrouter";
   const configured = decider?.configured ?? false;
   const included = configured && decider?.included === true;
-  const ownKey = configured && !included;
+  const usingShared = openrouter && configured && decider?.keySource === "shared";
+  const sharedKey = openrouter && decider?.sharedKey === true;
+  const ownKey = configured && !included && !usingShared;
   const enabled = decider?.enabled ?? false;
   const roomRouting = decider?.jobs.roomRouting ?? true;
   const [value, setValue] = useState("");
@@ -79,6 +82,15 @@ export function DecisionModelSettings() {
   const [models, setModels] = useState<ModelList | null>(null);
   const draft = value.trim();
   const clearing = !draft && ownKey;
+  const keyHint: LocaleKey | null = !openrouter || included
+    ? null
+    : usingShared
+      ? "decider.openrouter.status.sharedHint"
+      : !configured
+        ? "decider.openrouter.status.notConnectedHint"
+        : sharedKey
+          ? "decider.openrouter.status.ownFallbackHint"
+          : null;
 
   const applied = (config: ConfigStatus) => dispatch({ type: "configStatus", config });
 
@@ -135,6 +147,7 @@ export function DecisionModelSettings() {
     setVerdict(null);
     setError(null);
     const testingIncluded = !draft && included;
+    const testingShared = !draft && usingShared;
     try {
       const result = await api<TestResult>("/api/decider/test", { method: "POST", body: JSON.stringify(draft ? { key: draft } : {}) });
       setVerdict(result.ok
@@ -142,7 +155,7 @@ export function DecisionModelSettings() {
           ok: true,
           text: openrouter
             ? [
-              t("decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
+              t(testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
               ...(result.latencyMs > ROOM_BUDGET_MS ? [t("decider.test.slow")] : []),
             ].join(" ")
             : t("decider.test.ok", { ms: String(result.latencyMs) }),
@@ -161,21 +174,20 @@ export function DecisionModelSettings() {
         <p className="text-[13px] leading-relaxed text-ink-secondary">{t("decider.intro")}</p>
       </section>
       <SettingRow title={t("decider.provider.label")}>
-        <select
+        <Select className="w-48"
           data-testid="decider-provider"
           value={provider}
           onChange={(event) => choose({ provider: event.target.value === "openrouter" ? "openrouter" : "jev" })}
           disabled={switching || !state.config}
           aria-label={t("decider.provider.label")}
-          className="w-48 cursor-pointer rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none disabled:opacity-50"
         >
           <option value="jev">{t("decider.provider.jev")}</option>
           <option value="openrouter">{t("decider.provider.openrouter")}</option>
-        </select>
+        </Select>
       </SettingRow>
       {openrouter && (
         <SettingRow title={t("decider.model.label")} subtitle={models?.source === "builtin" ? t("decider.model.builtinNote") : undefined}>
-          <select
+          <Select className="w-64 max-w-full"
             data-testid="decider-model"
             value={decider?.model ?? ""}
             onChange={(event) => choose({
@@ -184,7 +196,6 @@ export function DecisionModelSettings() {
             })}
             disabled={switching}
             aria-label={t("decider.model.label")}
-            className="w-64 max-w-full cursor-pointer rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none disabled:opacity-50"
           >
             {decider?.model && !models?.models.some((model) => model.id === decider.model) && (
               <option value={decider.model}>{decider.model}</option>
@@ -197,12 +208,12 @@ export function DecisionModelSettings() {
                 </optgroup>
               );
             })}
-          </select>
+          </Select>
         </SettingRow>
       )}
       <SettingRow
         title={t(openrouter ? "decider.openrouter.master" : "decider.master")}
-        subtitle={configured ? undefined : t("decider.masterNeedsKey")}
+        subtitle={configured ? undefined : t(openrouter ? "decider.masterNeedsKey.openrouter" : "decider.masterNeedsKey")}
       >
         <Switch
           data-testid="decider-master"
@@ -218,9 +229,33 @@ export function DecisionModelSettings() {
         <div role="status" className="mb-2 flex items-center gap-2 text-[13px] text-ink-secondary">
           <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
           <span className={configured ? "text-success" : undefined}>
-            {included ? t("keys.includedWithCloudPro") : configured ? t("decider.status.connected") : t("decider.status.notConnected")}
+            {included
+              ? t("keys.includedWithCloudPro")
+              : usingShared
+                ? t("decider.openrouter.status.shared")
+                : configured
+                  ? t(sharedKey ? "decider.openrouter.status.own" : "decider.status.connected")
+                  : t("decider.status.notConnected")}
           </span>
         </div>
+        {keyHint && (
+          <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
+            {t(keyHint)}
+            {!ownKey && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  data-testid="decider-manage-keys"
+                  onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+                  className="cursor-pointer text-accent hover:underline"
+                >
+                  {t("decider.openrouter.key.manageLink")}
+                </button>
+              </>
+            )}
+          </p>
+        )}
         <div className="flex gap-2">
           <input
             type="password"
@@ -228,7 +263,7 @@ export function DecisionModelSettings() {
             onChange={(event) => { setVerdict(null); setError(null); setValue(event.target.value); }}
             onKeyDown={(event) => event.key === "Enter" && void save()}
             disabled={saving}
-            placeholder={ownKey ? t("keys.replace") : t(openrouter ? "decider.openrouter.key.placeholder" : "decider.key.placeholder")}
+            placeholder={ownKey ? t("keys.replace") : t(usingShared ? "decider.openrouter.key.overridePlaceholder" : openrouter ? "decider.openrouter.key.placeholder" : "decider.key.placeholder")}
             aria-label={t(openrouter ? "decider.openrouter.key.label" : "decider.key.label")}
             autoComplete="off"
             spellCheck={false}
@@ -259,15 +294,17 @@ export function DecisionModelSettings() {
         </div>
         {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
         {verdict && <p role="status" className={cn("mt-1 text-[12px]", verdict.ok ? "text-success" : "text-danger")}>{verdict.text}</p>}
-        <a
-          href={KEY_URL[provider]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 inline-flex cursor-pointer items-center gap-1 text-[12px] text-accent hover:underline"
-        >
-          {t(openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
-          <ExternalLink size={11} aria-hidden="true" />
-        </a>
+        {!usingShared && (
+          <a
+            href={KEY_URL[provider]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex cursor-pointer items-center gap-1 text-[12px] text-accent hover:underline"
+          >
+            {t(openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
+            <ExternalLink size={11} aria-hidden="true" />
+          </a>
+        )}
       </Card>
 
       <Card title={t("decider.jobs.title")}>

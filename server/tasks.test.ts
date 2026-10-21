@@ -260,4 +260,163 @@ describe("tasks", () => {
     expect(migrated[0]).toMatchObject({ threadId: bot.threadId, resumeCursors: { claude: "old-session" } });
     expect(migrated[0]!.title).not.toBe(UNTITLED_TASK);
   });
+
+  it("deleteTasks removes several tasks in one pass with one bot event and per-thread deleted events", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const first = bot.threadId;
+    const b = store.createTask(bot.id)!;
+    const c = store.createTask(bot.id)!;
+    const d = store.createTask(bot.id)!;
+    for (const t of [b, c, d]) store.appendMessage(t.threadId, { role: "user", kind: "text", text: `msg ${t.threadId}` });
+    const { EVENTS_DIR } = await import("./config.ts");
+    mkdirSync(EVENTS_DIR, { recursive: true });
+    for (const id of [first, b.threadId, c.threadId]) writeFileSync(join(EVENTS_DIR, `${id}.ndjson`), "{}\n");
+    const events: Array<{ type: string; threadId?: string }> = [];
+    store.onChange((change) => events.push(change as { type: string; threadId?: string }));
+
+    const result = store.deleteTasks(bot.id, [b.threadId, c.threadId, c.threadId, "no-such-thread"])!;
+
+    expect(result.deleted).toEqual([b.threadId, c.threadId]);
+    expect(result.missing).toEqual(["no-such-thread"]);
+    expect(store.tasks(bot.id).map((t) => t.threadId)).toEqual([d.threadId, first]);
+    expect(store.messagesFor(b.threadId)).toHaveLength(0);
+    expect(store.messagesFor(c.threadId)).toHaveLength(0);
+    expect(store.messagesFor(d.threadId)).toHaveLength(1);
+    expect(existsSync(join(EVENTS_DIR, `${b.threadId}.ndjson`))).toBe(false);
+    expect(existsSync(join(EVENTS_DIR, `${first}.ndjson`))).toBe(true);
+    expect(events.filter((e) => e.type === "bot")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "thread.deleted").map((e) => e.threadId)).toEqual([b.threadId, c.threadId]);
+    expect(store.bot(bot.id)!.threadId).toBe(d.threadId);
+
+    const { Store } = await import("./store.ts");
+    const reloaded = new Store(() => ({ instanceId: "claude", model: "m" }));
+    expect(reloaded.tasks(bot.id).map((t) => t.threadId)).toEqual([d.threadId, first]);
+  });
+
+  it("deleteTasks of every task leaves exactly one fresh active conversation and one bot event", async () => {
+    const { store, UNTITLED_THREAD } = await freshStore();
+    const bot = store.createBot();
+    const all = [bot.threadId, store.createTask(bot.id)!.threadId, store.createTask(bot.id)!.threadId];
+    const events: Array<{ type: string }> = [];
+    store.onChange((change) => events.push(change as { type: string }));
+
+    const result = store.deleteTasks(bot.id, all)!;
+
+    expect(result.deleted.sort()).toEqual([...all].sort());
+    expect(store.tasks(bot.id)).toHaveLength(1);
+    const fresh = store.activeTask(bot.id)!;
+    expect(all).not.toContain(fresh.threadId);
+    expect(fresh).toMatchObject({ title: UNTITLED_THREAD, resumeCursors: {}, busy: false, unread: false, activity: "idle" });
+    expect(store.bot(bot.id)!.threadId).toBe(fresh.threadId);
+    expect(events.filter((e) => e.type === "bot")).toHaveLength(1);
+    expect(store.deleteTasks(bot.id, all)!.deleted).toEqual([]);
+  });
+
+  it("deleteTasks moves the active pointer to a surviving visible task and skips routine-run tasks", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const first = bot.threadId;
+    const routine = store.createTask(bot.id, "Morning brief", false)!;
+    store.patchTask(bot.id, routine.threadId, { routineRunId: "run-1" } as never);
+    const active = store.createTask(bot.id)!;
+    expect(store.bot(bot.id)!.threadId).toBe(active.threadId);
+
+    store.deleteTasks(bot.id, [active.threadId]);
+
+    expect(store.bot(bot.id)!.threadId).toBe(first);
+    expect(store.tasks(bot.id).map((t) => t.threadId).sort()).toEqual([first, routine.threadId].sort());
+  });
+
+  it("deleteTasks of the open thread opens the newest-active thread, not the newest-created one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { store } = await freshStore();
+      vi.setSystemTime(1_000);
+      const bot = store.createBot();
+      const first = bot.threadId;
+      vi.setSystemTime(2_000);
+      const second = store.createTask(bot.id)!.threadId;
+      vi.setSystemTime(3_000);
+      const newestCreated = store.createTask(bot.id)!.threadId;
+      vi.setSystemTime(4_000);
+      store.appendMessage(first, { role: "user", kind: "text", text: "back to the first one" });
+      vi.setSystemTime(5_000);
+      store.appendMessage(second, { role: "user", kind: "text", text: "and the second" });
+      store.switchTask(bot.id, second);
+
+      store.deleteTasks(bot.id, [second]);
+
+      expect(store.bot(bot.id)!.threadId).toBe(first);
+      expect(store.tasks(bot.id).map((t) => t.threadId)).toEqual([newestCreated, first]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("deleteTasks of the open thread prefers a pinned thread and passes over archived, closed, snoozed and bot-opened ones", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { store } = await freshStore();
+      vi.setSystemTime(1_000);
+      const bot = store.createBot();
+      const pinned = bot.threadId;
+      store.patchTask(bot.id, pinned, { pinned: true });
+      vi.setSystemTime(2_000);
+      const plain = store.createTask(bot.id, "Plain")!.threadId;
+      vi.setSystemTime(3_000);
+      store.patchTask(bot.id, store.createTask(bot.id, "Archived")!.threadId, { archivedAt: 3_000 });
+      vi.setSystemTime(4_000);
+      store.setTaskClosedBy(bot.id, store.createTask(bot.id, "Closed")!.threadId, { botId: bot.id, name: bot.name, at: 4_000 });
+      vi.setSystemTime(5_000);
+      store.createTask(bot.id, "Opened by a bot", true, undefined, { botId: "other", name: "Other", at: 5_000 });
+      vi.setSystemTime(5_500);
+      store.patchTask(bot.id, store.createTask(bot.id, "Snoozed")!.threadId, { snoozedUntil: 0 });
+      vi.setSystemTime(6_000);
+      const open = store.createTask(bot.id, "Open")!.threadId;
+
+      store.deleteTasks(bot.id, [open]);
+      expect(store.bot(bot.id)!.threadId).toBe(pinned);
+
+      store.patchTask(bot.id, pinned, { pinned: undefined });
+      store.switchTask(bot.id, pinned);
+      store.deleteTasks(bot.id, [pinned]);
+      expect(store.bot(bot.id)!.threadId).toBe(plain);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("deleteTasks returns null for an unknown bot and changes nothing", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    expect(store.deleteTasks("no-such-bot", [bot.threadId])).toBeNull();
+    expect(store.tasks(bot.id)).toHaveLength(1);
+  });
+
+  it("deleteTasks leaves tasks and files untouched when the database delete fails", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const b = store.createTask(bot.id)!;
+    const c = store.createTask(bot.id)!;
+    for (const t of [b, c]) store.appendMessage(t.threadId, { role: "user", kind: "text", text: "keep me" });
+    const { EVENTS_DIR, DATA_DIR } = await import("./config.ts");
+    mkdirSync(EVENTS_DIR, { recursive: true });
+    writeFileSync(join(EVENTS_DIR, `${b.threadId}.ndjson`), "{}\n");
+    const { DatabaseSync } = await import("node:sqlite");
+    const breaker = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    breaker.exec(`CREATE TRIGGER boom BEFORE DELETE ON messages WHEN old.thread_id = '${c.threadId}'
+      BEGIN SELECT RAISE(ABORT, 'boom'); END`);
+    breaker.close();
+    const events: Array<{ type: string }> = [];
+    store.onChange((change) => events.push(change as { type: string }));
+
+    expect(() => store.deleteTasks(bot.id, [b.threadId, c.threadId])).toThrow("boom");
+
+    expect(store.tasks(bot.id).map((t) => t.threadId)).toContain(b.threadId);
+    expect(store.tasks(bot.id).map((t) => t.threadId)).toContain(c.threadId);
+    expect(store.messagesFor(b.threadId)).toHaveLength(1);
+    expect(existsSync(join(EVENTS_DIR, `${b.threadId}.ndjson`))).toBe(true);
+    expect(events.filter((e) => e.type === "thread.deleted" || e.type === "bot")).toEqual([]);
+  });
 });

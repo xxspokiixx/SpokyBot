@@ -2,14 +2,15 @@
 // edge on 0.0.0.0:8080, the only listener the network reaches, always forwarding X-Forwarded-*, so no remote request gets
 // loopback trust. Secrets never ride a child's environment (/proc/<pid>/environ stays readable by the same user): the
 // server reads them from an inherited pipe. Root runs and trusts only the image's code, never the volume's.
-import { spawn, type ChildProcess } from "node:child_process";
-import { chownSync, readFileSync, statSync, type Stats } from "node:fs";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { chmodSync, chownSync, existsSync, readFileSync, statSync, type Stats } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   CLOUD_SECRETS_FD_ENV, cloudHomeConfiguration, cloudHomeHost, cloudHomeSecrets, prepareCloudHomeVolume,
   withoutCloudSecrets, withoutIgnoredCloudKeys, type CloudHomeConfig,
 } from "./cloud-home.ts";
+import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
 import { restartPolicy } from "./restart.ts";
 
 const SERVICE_USER = "maus";
@@ -24,15 +25,26 @@ export function passwdIds(passwd: string, name: string): { uid: number; gid: num
   return null;
 }
 
-/** An allow-list by name, so a secret the platform adds later never reaches the server. */
+/** An allow-list by name, so a secret the platform adds later never reaches the server. Every setting the image's ENV
+ * gives the server belongs here too (docker-image.test.ts checks): without OMB_DUCKDB_DIR the server found neither the
+ * 1Password SDK nor DuckDB, which the image keeps in /app/duckdb, and said 1Password was "not available in this build". */
 const SERVER_ENV_NAMES = new Set([
   "PATH", "SHELL", "HOSTNAME", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "NO_COLOR", "NODE_ENV", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
-  "AGENT_BROWSER_EXECUTABLE_PATH", "OMB_STATIC_DIR", "OMB_DATA_DIR",
+  "AGENT_BROWSER_EXECUTABLE_PATH", "OMB_STATIC_DIR", "OMB_DATA_DIR", "OMB_DUCKDB_DIR",
   "OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_IMAGE", "OMB_PUBLIC_URL", "OMB_WEBHOOK_PUBLIC_URL",
-  "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_AI_URL", "OMB_TTS_DEFAULT_VOICE",
+  "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_AI_URL", "OMB_CLOUD_X_URL", "OMB_TTS_DEFAULT_VOICE",
+  "OMB_HIGHLEVEL_RELAY_URL", "OMB_COMPOSIO_BROKER_URL",
+  // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
+  "OMB_BOT_BOX",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
+}
+
+/** Caddy duration for OMB_CLOUD_EDGE_HOLD: whole seconds, at most 120; anything else is no hold (0s). */
+export function edgeHold(raw: string | undefined): string {
+  const match = /^(\d{1,3})s$/.exec(raw?.trim() ?? "");
+  return match && Number(match[1]) <= 120 ? `${Number(match[1])}s` : "0s";
 }
 
 export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.ProcessEnv, home: string) {
@@ -49,8 +61,26 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
     PATH: env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: "/tmp/omb-edge",
     XDG_DATA_HOME: "/tmp/omb-edge/data", XDG_CONFIG_HOME: "/tmp/omb-edge/config",
     OMB_CLOUD_PUBLIC_HOST: cloudHomeHost(config),
+    // A plan whose home sleeps: requests wait this long for the server while it starts (deploy/fly/Caddyfile). Unset: 0s.
+    OMB_CLOUD_EDGE_HOLD: edgeHold(env.OMB_CLOUD_EDGE_HOLD),
   };
   return { server, edge, secrets: cloudHomeSecrets(env), dropped };
+}
+
+/** What root does to the machine before anything runs as `maus` (docs/bot-box.md, "What each layer stops"): /proc hides
+ * other users' processes (`hidepid=invisible`), so no `maus` process lists root's, and Fly's local API socket folder is
+ * root's alone. Each step is one command; a failure is logged, never fatal, and OMB_CLOUD_HARDEN=0 skips them all. */
+export function hardenHost(env: NodeJS.ProcessEnv, run: { exec: (command: string, args: string[]) => { status: number | null; stderr?: string }; chmod: (path: string, mode: number) => void; exists: (path: string) => boolean } = {
+  exec: (command, args) => spawnSync(command, args, { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8", timeout: 10_000 }), chmod: chmodSync, exists: existsSync,
+}): string[] {
+  if (env.OMB_CLOUD_HARDEN === "0") return ["hardening skipped (OMB_CLOUD_HARDEN=0)"];
+  const notes: string[] = [];
+  const remount = run.exec("mount", ["-o", "remount,hidepid=invisible", "/proc"]);
+  notes.push(remount.status === 0 ? "/proc: hidepid=invisible" : `/proc: hidepid not applied (${String(remount.stderr ?? "").trim().split("\n")[0] || `exit ${remount.status}`})`);
+  if (run.exists("/.fly")) {
+    try { run.chmod("/.fly", 0o700); notes.push("/.fly: root only"); } catch (error) { notes.push(`/.fly: left as is (${error instanceof Error ? error.message : String(error)})`); }
+  }
+  return notes;
 }
 
 /** Each file and every folder above it must be root's and not writable by others, and never on the `maus`-owned volume:
@@ -94,6 +124,7 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   if (process.getuid?.() === 0) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
     if (!ids) throw new Error(`The ${SERVICE_USER} user is missing from this image.`);
+    if (process.platform === "linux") for (const note of hardenHost(env)) console.log(`cloud home: ${note}`);
     // Only the mount point changes owner; anything inside keeps its owner.
     const stat = statSync(home);
     if (stat.uid !== ids.uid || stat.gid !== ids.gid) chownSync(home, ids.uid, ids.gid);
@@ -138,15 +169,15 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   };
   const policy = restartPolicy();
   const runServer = () => {
-    watch(spawnWithSecrets(process.execPath, [join(here, "index.js")], server, secrets, ids), (code) => {
+    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [join(here, "index.js")], server, secrets, ids)), (code) => {
       if (!policy.again(code, stopping)) return false;
       runServer();
       return true;
     });
   };
   runServer();
-  watch(spawn(edgeBin, ["run", "--config", edgeConfig, "--adapter", "caddyfile"],
-    { env: edge, stdio: "inherit", ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) }));
+  watch(spawnWithOomScore(OOM_SCORE.edge, () => spawn(edgeBin, ["run", "--config", edgeConfig, "--adapter", "caddyfile"],
+    { env: edge, stdio: "inherit", ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) })));
   process.once("SIGTERM", () => stop(false));
   process.once("SIGINT", () => stop(false));
 }

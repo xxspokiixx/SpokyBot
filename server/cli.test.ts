@@ -5,7 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { applyStartupPreferences, formatSessions, pairingBlock, parseArgs, qrToString, runAccess, runLogin, runOnboardingCommand, serverEntry, type CliOptions, verifyPhoneEndpoint } from "./cli.ts";
+import { applyStartupPreferences, formatSessions, parseArgs, runAccess, runLogin, runOnboardingCommand, serverEntry, type CliOptions, verifyPhoneEndpoint } from "./cli.ts";
+import { browserSignInLines, pairingBlock, qrToString } from "./cli-pairing.ts";
 import { readAdminActivityRange } from "./admin-activity.ts";
 import { SetupCancelled } from "./cli-prompts.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
@@ -59,6 +60,8 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["access", "add"], {})).toEqual({ error: "add needs a value" });
     expect(parseArgs(["service", "install", "--domain", "maus.example.com", "--port", "8799"], {})).toMatchObject({ command: "service", serviceAction: "install", domain: "maus.example.com", port: 8799 });
     expect(parseArgs(["service", "uninstall"], {})).toMatchObject({ command: "service", serviceAction: "uninstall" });
+    expect(parseArgs(["service", "install", "--sentinel"], {})).toMatchObject({ command: "service", serviceAction: "install", sentinel: true });
+    expect(parseArgs(["serve", "--sentinel"], {})).toEqual({ error: expect.stringContaining("--sentinel") });
     expect(parseArgs(["service"], {})).toEqual({ error: expect.stringContaining("service needs one of") });
     expect(parseArgs(["serve", "--domain", "Maus.Example.com"], {})).toMatchObject({ command: "serve", domain: "maus.example.com" });
     expect(parseArgs(["serve", "--domain", "localhost"], {})).toEqual({ error: expect.stringContaining("bare hostname") });
@@ -80,6 +83,18 @@ describe("openmausbot command line", () => {
     expect(noUrl).toContain("/pair on the address you use");
     expect(noUrl).toContain("set OMB_PUBLIC_URL");
     expect(qrToString("https://example.com").length).toBeGreaterThan(200);
+  });
+
+  it("adds a link that signs in a browser on this computer, which is no longer the owner by being here", () => {
+    const local = "http://127.0.0.1:8799/pair#code=ABCD-EFGH-JKLM";
+    const block = pairingBlock({ code: "ABCD-EFGH-JKLM", url: null, localUrl: local, expiresAt: Date.now() + 60_000, hint: "set OMB_PUBLIC_URL" });
+    expect(block).toContain(`this computer: ${local}`);
+    expect(block).toContain("/pair on the address you use");
+    expect(block).not.toContain(qrToString(local));
+    const guided = browserSignInLines(local, "ABCD-EFGH-JKLM", Date.now() + 60_000);
+    expect(guided).toContain(local);
+    expect(guided).toContain("ABCD-EFGH-JKLM");
+    expect(guided).toContain("openmausbot pair");
   });
 
   describe("the two links one pairing window has", () => {

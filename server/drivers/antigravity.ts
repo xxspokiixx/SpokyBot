@@ -37,7 +37,7 @@ export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
 
 /** Antigravity's session modes: `yolo` for Full, `auto_edit` for auto-accept edits, `default` otherwise (it has no reviewer for Auto). */
 export function antigravityPermissionMode(fullAuto: boolean, approvalMode?: ApprovalMode): "yolo" | "auto_edit" | "default" {
-  if (fullAuto) return "yolo";
+  if (fullAuto || approvalMode === "full") return "yolo";
   return approvalMode === "edits" ? "auto_edit" : "default";
 }
 
@@ -45,7 +45,8 @@ const managedAsset = resolveAntigravityReleaseAsset();
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
-  displayName: "Antigravity",
+  // Named for what people look for: Google moved personal Gemini subscriptions (free, AI Pro, AI Ultra) from Gemini CLI to Antigravity on 2026-06-18.
+  displayName: "Google Gemini (Antigravity)",
   models: STATIC_ANTIGRAVITY_MODELS,
   defaultCli: "agy", // migration alias: resolveAntigravityRuntime treats it as managed
   nativeSource: "antigravity.acp",

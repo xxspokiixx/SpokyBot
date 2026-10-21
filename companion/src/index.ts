@@ -8,7 +8,7 @@
 import { createServer } from "node:http";
 
 import { createAddressWatcher } from "./advertise-watch.ts";
-import { createControlServer, hostCandidates } from "./control.ts";
+import { createControlServer, hostCandidates, initialControlToken } from "./control.ts";
 import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
@@ -24,6 +24,7 @@ import {
 import { notifyDeviceRevoked } from "./harness-notice.ts";
 import { createProxyHandler } from "./proxy.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
+import { gzipTunnelReplies } from "./tunnel-gzip.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
 
 // Only Electron supplies this port; Electron children fail closed until initialized.
@@ -31,12 +32,19 @@ const parentPort = (process as NodeJS.Process & {
   parentPort?: { on(event: "message", listener: (event: { data?: unknown }) => void): void };
 }).parentPort;
 let mutationToken: string | null = null;
+let controlToken = initialControlToken(process.env, Boolean(parentPort));
+let controlTokenReceived = (): void => {};
+const controlReady = controlToken ? Promise.resolve() : new Promise<void>((resolve) => { controlTokenReceived = resolve; });
 parentPort?.on("message", ({ data }) => {
   if (!data || typeof data !== "object") return;
   const message = data as Record<string, unknown>;
   if (message.type !== "openmausbot:companion-mutation-token") return;
   if (typeof message.token === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.token)) {
     mutationToken = message.token;
+  }
+  if (controlToken === null && typeof message.controlToken === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.controlToken)) {
+    controlToken = message.controlToken;
+    controlTokenReceived();
   }
 });
 
@@ -126,11 +134,13 @@ const companion = createServer(proxy);
 // `createServer(proxy)` handles plain HTTP only; noVNC's WebSocket arrives as
 // Node's separate `upgrade` event.
 companion.on("upgrade", proxy.upgrade);
-const managedOrigin = PRIVATE_ORIGIN ? createServer(proxy) : null;
+// Large JSON replies go gzipped here: this is the only listener whose replies go up the home connection to Cloudflare.
+const managedOrigin = PRIVATE_ORIGIN ? createServer(gzipTunnelReplies(proxy)) : null;
 managedOrigin?.on("upgrade", proxy.upgrade);
 
 const control = createControlServer({
   devices,
+  controlToken: () => controlToken,
   companionPort: COMPANION_PORT,
   secretPublicKey: () => SECRET_PUBLIC_KEY,
   hostedUrl: () => hostedUrl,
@@ -192,6 +202,7 @@ async function main(): Promise<void> {
     );
   }
 
+  await controlReady;
   await listen(control, CONTROL_PORT, "127.0.0.1");
   await listen(companion, COMPANION_PORT, "0.0.0.0");
   if (managedOrigin && PRIVATE_ORIGIN) {
@@ -213,7 +224,7 @@ async function main(): Promise<void> {
   const tailscale = tailscaleAddress(addresses);
   const reach = tailnetName() ?? tailscale ?? addresses[0];
   console.log(`companion  http://0.0.0.0:${COMPANION_PORT}  →  harness 127.0.0.1:${HARNESS_PORT}`);
-  console.log(`pair here  http://127.0.0.1:${CONTROL_PORT}`);
+  if (!parentPort) console.log(`pair here  http://127.0.0.1:${CONTROL_PORT}/#token=${controlToken}`);
   if (reach) console.log(`on your phone, enter  ${reach}:${COMPANION_PORT}`);
   if (tailscale && !tailnetName()) {
     console.log("no MagicDNS name found. Tailscale CLI attempts:");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeEvent } from "./contracts.ts";
+import { classifyError } from "./drivers/retry.ts";
 import type { Message } from "./store.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 
@@ -32,6 +33,23 @@ describe("TurnStops", () => {
     const limit = "You've hit your weekly limit · resets 6pm (Europe/Berlin)";
     stops.note(event({ type: "item.completed", itemType: "assistant_text", turnId: "turn-1", text: limit, synthetic: true }));
     expect(stops.read("t1", "turn-1")).toEqual({ turnId: "turn-1", error: limit });
+  });
+
+  it("says why a settled turn failed: its own last error, else the provider's stop reason in words, and nothing for a turn that worked", () => {
+    const stops = new TurnStops();
+    const limit = "You've hit your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)";
+    stops.note(event({ type: "turn.started", turnId: "turn-1" }));
+    stops.note(event({ type: "runtime.error", turnId: "turn-1", message: limit }));
+    expect(stops.failureCause({ threadId: "t1", turnId: "turn-1", ok: false, stopReason: "quota" })).toBe(limit);
+    // a turn that left no error has only its stop reason, never as a bare token; a blank one says nothing
+    const quota = stops.failureCause({ threadId: "t1", turnId: "turn-2", ok: false, stopReason: " quota " });
+    expect(quota).toBe("The engine stopped without saying why (stop reason: quota).");
+    expect(classifyError({ text: quota! }).reason).toBe("quota");
+    expect(stops.failureCause({ threadId: "t1", turnId: "turn-2", ok: false, stopReason: "stop_sequence" })).toBe("The engine stopped without saying why (stop reason: stop_sequence).");
+    expect(stops.failureCause({ threadId: "t1", turnId: "turn-2", ok: false, stopReason: "provider crashed" })).toBe("provider crashed");
+    expect(stops.failureCause({ threadId: "t2", ok: false, stopReason: " " })).toBeUndefined();
+    expect(stops.failureCause({ threadId: "t2", ok: false, stopReason: null })).toBeUndefined();
+    expect(stops.failureCause({ threadId: "t1", turnId: "turn-1", ok: true, stopReason: "end_turn" })).toBeUndefined();
   });
 
   it("keeps a step cap's handoff for the turn that continues from it", () => {

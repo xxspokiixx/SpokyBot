@@ -1,21 +1,28 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, BellOff, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
-import type { BotProject, Task } from "@/state/store";
+import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
+import type { AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
+import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl } from "@/lib/thread-refs";
 import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { threadLinkLabel } from "../../shared/thread-link";
+import { isSnoozed, orderedThreadList } from "../../shared/wire";
+import { Select } from "./Select";
+import { localizedTaskTitle } from "@/lib/task-title";
+
+export { isSnoozed, orderedThreadList };
 
 type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link"> & {
   queued?: boolean;
   pinned?: boolean;
   createdAt?: number;
   updatedAt?: number;
+  lastThreadOrderAt?: number;
 };
 
 export function formatUpdatedAt(at: number): string {
@@ -47,19 +54,6 @@ export function threadRecency(task: { updatedAt?: number; createdAt?: number }):
   return 0;
 }
 
-export function orderedThreadList<T extends { pinned?: boolean; updatedAt?: number; createdAt?: number }>(tasks: T[]): T[] {
-  return tasks
-    .map((task, index) => ({ task, index }))
-    .sort((a, b) => {
-      const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
-      if (pin) return pin;
-      const recency = threadRecency(b.task) - threadRecency(a.task);
-      if (recency) return recency;
-      return a.index - b.index;
-    })
-    .map((entry) => entry.task);
-}
-
 export function threadOpenerLabel(task: Pick<Task, "openedBy">): string | null {
   const name = task.openedBy?.name.trim();
   return name ? t("task.openedBy", { name }) : null;
@@ -74,10 +68,6 @@ export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archive
 
 /** Present, not truthy: a thread stored with archivedAt: 0 is archived. */
 export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.archivedAt !== undefined;
-
-/** 0 is the "until new activity" sentinel. The event stream never drops an expired snooze, so check the clock too. */
-export const isSnoozed = (task: Pick<Task, "snoozedUntil">, now = Date.now()): boolean =>
-  task.snoozedUntil !== undefined && (task.snoozedUntil === 0 || task.snoozedUntil > now);
 
 const nextSixPm = () => {
   const when = new Date();
@@ -101,6 +91,36 @@ const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
   task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || isWaitingOnTeammate(task) || Boolean(task.queued) || Boolean(task.unread);
 
+export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = []): { own: T[]; helpers: T[] } {
+  if (query.trim()) return { own: tasks, helpers: [] };
+  const own: T[] = [];
+  const helpers: T[] = [];
+  for (const task of tasks) {
+    const filed = folders.some((folder) => folder.id === task.projectId);
+    const needsPerson = task.threadId === activeId || task.activity === "waiting-on-you" || Boolean(task.unread);
+    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !needsPerson &&
+      !task.closedBy && !isArchived(task) && !isSnoozed(task);
+    (helper ? helpers : own).push(task);
+  }
+  return { own, helpers };
+}
+
+export function HelperThreadGroup<T>({ tasks, busy, renderThread }: { tasks: T[]; busy: boolean; renderThread: (task: T) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (tasks.length === 0) return null;
+  const label = t("task.helperGroup");
+  return <div data-sidebar-helper-threads="">
+    <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: label })}
+      className="flex min-h-8 w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-3 text-left text-[12px] text-ink-secondary hover:bg-raised/30 hover:text-ink">
+      <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+      <span className="truncate">{label}</span>
+      <span className="shrink-0 text-[10px] opacity-50">{tasks.length}</span>
+      {!open && busy && <Loader2 size={10} className="shrink-0 animate-spin text-success" />}
+    </button>
+    {open && <div role="group" aria-label={label}>{tasks.map(renderThread)}</div>}
+  </div>;
+}
+
 export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
@@ -110,7 +130,8 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
   let open = 0;
   return orderedThreadList(tasks).filter((task) => {
     if (task.pinned === true) return true;
-    return task.closedBy || isArchived(task) || isSnoozed(task)
+    if (isArchived(task)) return task.threadId === activeId;
+    return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)
       : open++ < 6 || demandsAttention(task, activeId);
   });
@@ -131,6 +152,14 @@ export function useSnoozeExpiry(tasks: readonly Pick<Task, "snoozedUntil">[]): v
     const id = window.setTimeout(() => rerender((count) => count + 1), Math.max(1, Math.min(2_147_483_647, next - Date.now() + 1)));
     return () => window.clearTimeout(id);
   }, [next, tick]);
+}
+
+export function useRevealedThreadRow(reveal: AppState["revealThread"], currentThreadId: string | null) {
+  useEffect(() => {
+    if (!reveal || reveal.threadId !== currentThreadId) return;
+    const row = document.querySelector<HTMLElement>(`[data-sidebar-thread-row="${CSS.escape(reveal.threadId)}"]`);
+    row?.scrollIntoView({ block: "nearest" });
+  }, [reveal, currentThreadId]);
 }
 
 export function useRelativeNow(): number {
@@ -182,6 +211,9 @@ type ThreadRowProps = {
   onSnooze?: (task: ThreadRowTask, snoozedUntil: number | null) => void;
   onLink?: (task: ThreadRowTask, link: string | null) => void;
   onRefreshPermissions?: (task: ThreadRowTask) => void;
+  selectMode?: boolean;
+  checked?: boolean;
+  onToggleSelect?: (task: ThreadRowTask, shiftKey: boolean) => void;
 };
 
 const sameFields = <T extends object>(a: T, b: T): boolean => {
@@ -192,13 +224,14 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
 const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
   sameFields(previousTask, task) && sameFields(previous, next);
 
-export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now }: ThreadRowProps) {
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect }: ThreadRowProps) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const displayTitle = localizedTaskTitle(task.title);
   const finishing = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
@@ -210,6 +243,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
   const snoozed = isSnoozed(task);
+  const tickable = isTickable(task);
+  const choose = (event: React.MouseEvent) => { if (!selectMode) onSelect(task); else if (tickable) onToggleSelect?.(task, event.shiftKey); };
+  const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
@@ -252,19 +288,23 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
   }, [menu]);
   return <>
-    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", current ? "bg-raised" : "hover:bg-raised/50")}>
+    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? "bg-raised" : "hover:bg-raised/50")}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
-        title={[task.title, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
-        onClick={() => onSelect(task)} onDoubleClick={startRename}
-        onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
-        onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
+        title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
+        {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
+        onClick={choose} onDoubleClick={selectMode ? undefined : startRename} onContextMenu={contextMenu}
+        onKeyDown={(event) => { if (opensRowMenuFromKey(event.key, event.shiftKey, selectMode)) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
+        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
+        {selectMode && <span aria-hidden="true" title={tickable ? undefined : t("task.bulk.running")}
+          className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border", checked ? "border-accent bg-accent text-white" : "border-ink-tertiary", !tickable && "opacity-50")}>
+          {checked && <Check size={10} strokeWidth={3} />}
+        </span>}
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{task.title}</span>
+          <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
           {byline && (
             <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
           )}
@@ -272,29 +312,29 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       </button>}
       {task.link && <a href={task.link} target="_blank" rel="noreferrer" dir="ltr" title={task.link} aria-label={t("task.openLink", { link: threadLinkLabel(task.link) ?? task.link })}
         className="shrink-0 rounded px-1 font-mono text-[11px] text-ink-secondary hover:bg-raised hover:text-ink outline-none focus-visible:ring-1 focus-visible:ring-accent/60 [unicode-bidi:isolate]">{threadLinkLabel(task.link) ?? t("task.link")}</a>}
-      {!renaming && <span className="flex shrink-0 items-center gap-2 px-1" onClick={() => onSelect(task)} onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}>
+      {!renaming && <span className="flex shrink-0 items-center gap-2 px-1" onClick={choose} onContextMenu={contextMenu}>
         {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
         {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
       </span>}
-      <button ref={actionRef} type="button" aria-label={t("task.actions", { title: task.title })} aria-expanded={Boolean(menu)}
+      {!selectMode && <button ref={actionRef} type="button" aria-label={t("task.actions", { title: displayTitle })} aria-expanded={Boolean(menu)}
         onClick={(event) => { if (menu) { setMenu(null); return; } const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); }}
         className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70">
         <MoreHorizontal size={13} />
-      </button>
+      </button>}
     </div>
-    {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: task.title })} style={menuMotion.value}
+    {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: displayTitle })} style={menuMotion.value}
       className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto rounded-lg border border-hairline/50 bg-card p-1 shadow-xl", menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2 size={12} />{t("task.copyLink")}</button>
       <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Pencil size={12} />{t("task.renameAria")}</button>
       {onRegenerateTitle && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{regenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
       {onMove && Boolean(folders?.length) && <label className="block rounded px-2.5 py-2 text-[12px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={12} />{t("folder.move")}</span>
-        <select aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
-          onChange={(event) => { onMove(task, event.target.value || null); setMenu(null); }} className="w-full rounded border border-hairline/40 bg-card px-1 py-1 text-ink outline-none">
+        <Select size="sm" className="w-full" aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
+          onChange={(event) => { onMove(task, event.target.value || null); setMenu(null); }}>
           <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
-        </select>
+        </Select>
       </label>}
       {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
       {onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2Off size={12} />{t("task.removeLink")}</button>}

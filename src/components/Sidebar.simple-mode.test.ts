@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type Group } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
-const fixture = vi.hoisted(() => ({ showThreads: true, state: {} as Partial<AppState>, dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, state: {} as Partial<AppState>, dispatch: vi.fn() }));
+vi.mock("@/lib/interface-mode", async (original) => ({
+  ...await original<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => fixture.advanced,
+}));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
@@ -47,6 +51,7 @@ function findElement(tree: ReactNode, attribute: string, value: string): ReactEl
 }
 
 beforeEach(() => {
+  fixture.advanced = false;
   fixture.showThreads = true;
   fixture.state = { bots: [bot], selectedId: "other-bot", activeView: "chat", pendingQueued: { queued: [{ queueId: "q", text: "next" }] } };
   fixture.dispatch.mockClear();
@@ -57,14 +62,33 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("bot-first sidebar", () => {
+  it.each([false, true])("uses the selected mode for bot and room tool previews (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.showThreads = false;
+    const messages: Bot["messages"] = [{ id: "step", role: "bot", kind: "activity", at: 1, tool: { name: "mcp__omb__computer_batch", ok: true } }];
+    const candidate = { ...bot, messages, tasks: [], projects: [] };
+    const group: Group = { id: "room", threadId: "room-thread", name: "Team", memberIds: [bot.id], messages, defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    const expected = advanced ? "mcp__omb__computer_batch" : "Use the screen";
+    const other = advanced ? "Use the screen" : "mcp__omb__computer_batch";
+    for (const markup of [
+      renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))),
+      renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() })),
+    ]) {
+      expect(markup).toContain(expected);
+      expect(markup).not.toContain(other);
+    }
+  });
+
   it.each([
-    { enabled: true, density: "comfortable", size: 32, spacing: ["gap-2", "py-2", "pl-6"] },
-    { enabled: true, density: "compact", size: 26, spacing: ["gap-1.5", "py-1", "pl-6"] },
-    { enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
-    { enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5"] },
-    { enabled: false, density: "compact", size: 36, spacing: ["gap-2.5", "py-1.5", "pl-2"] },
-    { enabled: false, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
-  ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled", ({ enabled, density, size, spacing }) => {
+    { advanced: true, enabled: true, density: "comfortable", size: 32, spacing: ["gap-2", "py-2", "pl-6"] },
+    { advanced: true, enabled: true, density: "compact", size: 26, spacing: ["gap-1.5", "py-1", "pl-6"] },
+    { advanced: true, enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
+    { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
+    { advanced: false, enabled: false, density: "comfortable", size: 36, spacing: ["gap-2.5", "py-2", "pl-2", "pr-3", "group-hover:pr-9"] },
+    { advanced: false, enabled: false, density: "compact", size: 36, spacing: ["gap-2.5", "py-1.5", "pl-2", "pr-9"] },
+    { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[52px]", "justify-center"] },
+  ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
+    fixture.advanced = advanced;
     fixture.showThreads = enabled;
     for (const avatar of [{}, { avatarUrl: "/api/attachments/portrait.png", avatarCrop: "circle" as const }]) {
       let tree: ReactNode;
@@ -97,6 +121,52 @@ describe("bot-first sidebar", () => {
       }
     });
   }
+
+  it.each([false, true])("uses 14px regular names in Simple comfortable rows and keeps 15px semibold otherwise (advanced %s)", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.showThreads = false;
+    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })));
+    const name = markup.match(/<span class="flex min-w-0 grow items-center gap-1\.5 truncate text-ink ([^"]*)"/)?.[1];
+    expect(name).toBe(advanced ? "text-[15px] font-semibold leading-5" : "text-[14px] font-normal leading-[19px]");
+    expect(markup).toContain("truncate text-[13px] leading-[18px]");
+  });
+
+  it.each([
+    { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2.5", "py-2", "pl-2", "pr-3"], name: "font-normal", preview: "text-[13px]" },
+    { advanced: false, density: "icons", face: 36, spacing: ["h-[52px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "icons", face: 44, spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "comfortable", face: 32, spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: false, density: "compact", face: 26, spacing: ["gap-1.5", "py-1", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
+  ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, face, spacing, name, preview }) => {
+    fixture.advanced = advanced;
+    const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    let tree: ReactNode;
+    function Capture() { tree = GroupListItem({ group, density, onMenu: vi.fn() }); return tree; }
+    const markup = renderToStaticMarkup(createElement(Capture));
+    const row = findElement(tree, "data-sidebar-group-row", group.id)!;
+    expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
+    expect(markup).toContain(`width="${face}px" height="${face}px"`);
+    expect(markup).toMatch(new RegExp(`truncate text-\\[14px\\] text-ink ${name}`));
+    expect(markup).toContain(`truncate text-ink-secondary ${preview}`);
+  });
+
+  it("keeps the queued dot small", () => {
+    const queuedBot: Bot = {
+      ...bot,
+      unread: false,
+      projects: [],
+      tasks: [{ threadId: "queued", title: "Next job", createdAt: 5 }],
+    };
+    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", queuedBot)));
+    const queuedDot = markup.match(/<span[^>]*data-testid="queued-dot"[^>]*>/)?.[0] ?? "";
+    expect(queuedDot).toContain("size-2.5");
+    expect(queuedDot).toContain("bg-ink-secondary");
+    expect(queuedDot).not.toContain("size-4");
+    expect(queuedDot).not.toContain("size-5");
+    expect(markup).toContain('class="truncate">Queued</span>');
+    expect(markup).not.toContain("font-semibold text-warning");
+    expect(markup).not.toContain("waiting-dot");
+  });
 
   it.each(densities)("opens the thread the person last wrote in when threads are hidden, %s density", (density) => {
     const used = { ...bot, mainThreadId: "idle-history" };
@@ -160,10 +230,12 @@ describe("bot-first sidebar", () => {
     const enabled = render();
     expect(enabled).toContain("New thread");
     expect(enabled).toContain("New folder");
+    expect(enabled).toContain("Delete all threads…");
     fixture.showThreads = false;
     const disabled = render();
     expect(disabled).not.toContain("New thread");
     expect(disabled).not.toContain("New folder");
+    expect(disabled).toContain("Delete all threads…");
     expect(disabled).toContain("Edit Profile");
     expect(disabled).toContain("Move to team");
   });

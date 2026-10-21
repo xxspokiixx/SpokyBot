@@ -679,6 +679,7 @@ describe("Antigravity driver over shared ACP", () => {
     expect(antigravityPermissionMode(false, "ask")).toBe("default");
     expect(antigravityPermissionMode(false, "auto")).toBe("default");
     expect(antigravityPermissionMode(false, "edits")).toBe("auto_edit");
+    expect(antigravityPermissionMode(false, "full")).toBe("yolo");
     expect(antigravityPermissionMode(true)).toBe("yolo");
     expect(antigravityPermissionMode(true, "edits")).toBe("yolo");
   });
@@ -975,12 +976,17 @@ describe("Antigravity driver over shared ACP", () => {
   );
 
   it.each([
-    ["question", undefined],
-    ["question", "full"],
-    ["permission", "full"],
-  ] as const)("keeps Antigravity %s requests interactive with mode %s", async (requestKind, approvalMode) => {
+    ["question", undefined, undefined],
+    ["question", "full", undefined],
+    ["permission", "full", undefined],
+    ["permission", "ask", "CommandLine"],
+    ["permission", "ask", "conflicting commands"],
+  ] as const)("keeps Antigravity %s requests interactive with mode %s and input %s", async (requestKind, approvalMode, commandInput) => {
     ensureDirs();
     const fake = fakeRuntime();
+    const command = "  printf 'synthetic permission'\n  pwd  ";
+    const commandCwd = join(fake.directory, "native-shell");
+    if (commandInput) mkdirSync(commandCwd);
     const instanceId = "antigravity-question";
     const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
     mkdirSync(tokenDirectory, { recursive: true });
@@ -994,6 +1000,12 @@ describe("Antigravity driver over shared ACP", () => {
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: "gemini-3.8-flash-high",
         FAKE_ACP_MODES: "default,yolo",
+        ...(commandInput ? { FAKE_ACP_PERMISSION_TOOL_CALL: JSON.stringify({
+          kind: "execute", title: "Truncated command preview", rawInput: {
+            CommandLine: command, Cwd: commandCwd,
+            ...(commandInput === "conflicting commands" ? { command: "different command" } : {}),
+          },
+        }) } : {}),
       },
       enabled: true,
       config: { cli: fake.executable, fullAuto: true },
@@ -1002,6 +1014,7 @@ describe("Antigravity driver over shared ACP", () => {
     await instance.adapter.sendTurn({ threadId: "thread-question", text: "ask me", cwd: fake.directory, approvalMode });
     const opened = await recorder.until((event) => event.type === "request.opened");
     expect(opened).toMatchObject({ requestType: requestKind });
+    if (commandInput) expect(opened).toHaveProperty("command", commandInput === "CommandLine" ? { command, cwd: commandCwd } : undefined);
     if (requestKind === "question") expect(opened).toMatchObject({ summary: "Which color?", choices: ["Blue", "Green"] });
     await instance.adapter.respondToRequest("thread-question", (opened as { requestId: string }).requestId, {
       behavior: requestKind === "question" ? "answer" : "allow",

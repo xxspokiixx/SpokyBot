@@ -128,7 +128,7 @@ function group(messages: Message[], foldAssistantTurns: boolean): TranscriptItem
       items.push(turn);
       continue;
     }
-    if (folds.hiddenIds.has(message.id)) continue;
+    if (folds.hiddenIds.has(message.id) || message.reaction) continue;
     if (foldable(message)) {
       const first = run[0];
       if (
@@ -159,10 +159,10 @@ export function groupTranscript(messages: Message[]): TranscriptItem[] {
 
 const MAX_NAMES = 3;
 
-export function describeRun(messages: Message[]): string {
+export function describeRun(messages: Message[], label: (tool: NonNullable<Message["tool"]>) => string = (tool) => tool.name): string {
   const counts = new Map<string, number>();
   for (const message of messages) {
-    const name = message.tool?.name ?? "";
+    const name = message.tool ? label(message.tool) : "";
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   const names = [...counts].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name));

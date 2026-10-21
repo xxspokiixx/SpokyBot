@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEvents } from "../testing/events.ts";
-import { buildTurnContext, NATIVELY_REPLAYING_DRIVER_KINDS } from "../turn-context.ts";
+import { buildTurnContext, replaysNatively } from "../turn-context.ts";
 import { instanceConfigs } from "../config.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
@@ -32,6 +32,42 @@ describe("OpenAICompatDriver", () => {
     const cfg = OpenAICompatDriver.defaultConfig();
     expect(cfg.url).toBe("https://openrouter.ai/api/v1");
     expect(cfg.apiKeyEnv).toBe("OPENAI_COMPAT_API_KEY");
+  });
+
+  it.each([
+    ["I'll open the browser first.", {}, 2],
+    ["I'm working in the Cua Local VM and will launch XFCE Terminal first.", {}, 2],
+    ["The terminal is open and the task is complete.", {}, 1],
+    ["Should I open the terminal?", {}, 1],
+    ["I'll open the browser first.", { tools: false }, 1],
+  ] as const)("bounds OpenRouter announcement nudges: %s %j", async (text, config, count) => {
+    const bodies: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [] });
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+        { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "openrouter-nudge", displayName: "OpenRouter", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ model: "qwen/qwen3.5-35b-a3b", ...config }),
+      environment: { OPENAI_COMPAT_API_KEY: "synthetic-fixture-key" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "nudge", text: "Open the terminal." });
+      expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: count !== 2 });
+      expect(bodies).toHaveLength(count);
+      expect(bodies[0]!.model).toBe("qwen/qwen3.5-35b-a3b");
+      if (count === 2) {
+        expect(bodies[1]!.messages.slice(0, -2)).toEqual(bodies[0]!.messages);
+        expect(bodies[1]!.messages.at(-2)).toEqual({ role: "assistant", content: text });
+        expect(bodies[1]!.messages.at(-1)).toMatchObject({ role: "user", content: expect.stringContaining("called no tool") });
+      }
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
   });
 
   it("honours an explicit url and apiKeyEnv override", () => {
@@ -499,7 +535,7 @@ describe("OpenAICompatDriver", () => {
       rewound: true,
       fresh: false,
       externallyUpdated: false,
-      replaysNatively: NATIVELY_REPLAYING_DRIVER_KINDS.includes("openai-compat"),
+      replaysNatively: replaysNatively("openai-compat"),
     });
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-u25",

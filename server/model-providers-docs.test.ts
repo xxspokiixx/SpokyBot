@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { OPENCODE_PROVIDER_ENV, PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.ts";
 import { discoverOpenCodeModels, ensureOpenCodeInjectModel, resetOpenCodeModelCache } from "./drivers/acp/opencode-go.ts";
 import { readClaudeAuthSettings, readClaudeModelCatalog } from "./drivers/claude.ts";
+import { OPENROUTER_FAILURES, freeLabel } from "./drivers/openrouter-free.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,15 +71,14 @@ describe("Claude Code section", () => {
     expect(text).toContain("On a server, use the `env` block too, not exports in the terminal that starts the server.");
   });
 
-  it("lists ANTHROPIC_MODEL under the picker entry the page names, and nothing else from the file", () => {
+  it("lists ANTHROPIC_MODEL and non-Claude tier models under the picker entry the page names, and nothing else from the file", () => {
     const home = settingsHome(providerEnv, {
       modelPicker: { options: [{ model: "glm-latest[1m]", label: "GLM" }] },
     });
     const catalog = readClaudeModelCatalog({ HOME: home });
     const custom = catalog.options.filter((option) => option.custom).map((option) => option.id);
 
-    expect(custom).toEqual([providerEnv.ANTHROPIC_MODEL]);
-    expect(JSON.stringify(catalog)).not.toContain(providerEnv.ANTHROPIC_DEFAULT_SONNET_MODEL);
+    expect(custom).toEqual([providerEnv.ANTHROPIC_MODEL, providerEnv.ANTHROPIC_DEFAULT_SONNET_MODEL]);
     expect(JSON.stringify(catalog)).not.toContain(providerEnv.CLAUDE_CODE_SUBAGENT_MODEL);
     expect(JSON.stringify(catalog)).not.toContain("glm-latest");
     const carried = Object.keys(readClaudeAuthSettings({ HOME: home }).env ?? {});
@@ -89,6 +89,7 @@ describe("Claude Code section", () => {
     const text = section("### Claude Code");
     expect(text).toContain(`If you also set \`ANTHROPIC_MODEL\` there, that model appears under **${label}** in the Claude model picker; pick it.`);
     expect(text).toContain("FireConnect's model list doesn't show up in OpenMausBot, so add `ANTHROPIC_MODEL` yourself.");
+    expect(text).toContain("So do `ANTHROPIC_CUSTOM_MODEL_OPTION` and each `ANTHROPIC_DEFAULT_*_MODEL` that isn't a Claude model.");
     expect(text).toContain("`ANTHROPIC_DEFAULT_*_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` aren't carried over.");
     expect(text).not.toMatch(/such as `ANTHROPIC_MODEL`, aren't carried/u);
   });
@@ -183,4 +184,16 @@ describe("Keys exported on a server", () => {
     expect(cline).toContain("An unconfigured account remains unavailable.");
   });
 
+});
+
+describe("Free OpenRouter models section", () => {
+  it("quotes the turn errors and the picker mark the chat engine shows", () => {
+    const text = section("### Free OpenRouter models");
+    expect(OPENROUTER_FAILURES.credits).toMatch(/^This model needs OpenRouter credit\b/u);
+    expect(text).toContain('"This model needs OpenRouter credit"');
+    expect(OPENROUTER_FAILURES.privacy).toMatch(/^OpenRouter's privacy settings block this free model\b/u);
+    expect(text).toContain(`"OpenRouter's privacy settings block this free model"`);
+    expect(freeLabel("Gemma 4 31B", { id: "google/gemma-4-31b-it:free" })).toBe("Gemma 4 31B (free)");
+    expect(text).toContain("**(free)**");
+  });
 });

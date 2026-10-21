@@ -4,6 +4,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { managedConnectorUnavailableReason } from "../shared/connector-availability.ts";
+import { planAccountLink } from "../shared/connector-account-link.ts";
+import type { CuratedConnectorSlug } from "../shared/connector-curated.ts";
 import { CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/wire.ts";
 import {
   CONNECTOR_ALLOWED_TOOLS_ENV,
@@ -14,6 +16,7 @@ import {
   serializeConnectorServiceSlugs,
 } from "./connector-advertisement.ts";
 import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { parseMcpResponse, withToolsListFallback } from "./connector-tools-list.ts";
 
 const DEFAULT_BACKEND_ORIGIN = "https://backend.composio.dev";
 
@@ -188,7 +191,7 @@ export function setManagedBrokerAccess(access: unknown): void {
   managedBrokerAccess = { url: normalizeManagedBrokerUrl(parsed.url), token: parsed.token };
 }
 
-function brokerAccess(): { url: string; token: string } | null {
+export function brokerAccess(): { url: string; token: string } | null {
   if (managedBrokerAccess !== undefined) return managedBrokerAccess;
   const url = process.env.OMB_COMPOSIO_BROKER_URL?.trim();
   const token = process.env.OMB_COMPOSIO_BROKER_TOKEN?.trim();
@@ -270,15 +273,15 @@ export function connectorAvailability(
   return storeState === "unavailable" ? "unreadable" : "unconfigured";
 }
 
-/** Only the packaged desktop app (OMB_DESKTOP_PARENT=1) uses the managed service, so only there is a missing one an outage. */
+/** Only a host the managed service comes with (the desktop app, OMB_DESKTOP_PARENT=1, or a Cloud home) calls a missing one an outage. */
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
 
 export function connectorSetup(
   cfg: AppConfig,
-  desktopManaged: boolean = process.env.OMB_DESKTOP_PARENT === "1",
+  managedHost: boolean = process.env.OMB_DESKTOP_PARENT === "1",
 ): ConnectorSetup {
   if (configured(cfg)) return "ready";
-  return desktopManaged ? "service-unavailable" : "needs-setup";
+  return managedHost ? "service-unavailable" : "needs-setup";
 }
 
 async function brokerRequest(path: string, init?: RequestInit): Promise<Response> {
@@ -607,12 +610,12 @@ export async function relayMcp(
   }
   // Discovery may await I/O: check turn authority and permissions after it, right before dispatch.
   beforeSend?.();
-  const response = await fetch(url, {
+  const response = await withToolsListFallback(identity, payload, () => fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10 * 60_000),
-  });
+  }));
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (declared > 20 * 1024 * 1024) throw new Error("Connected-app response exceeded 20 MB");
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -900,31 +903,6 @@ function connectorToolListing(tool: unknown): ConnectorToolListing | null {
   return trimmed ? { name, description: trimmed } : { name };
 }
 
-function parseMcpResponse(text: string, id: string | number): Record<string, unknown> | null {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  const candidate = (value: unknown): value is Record<string, unknown> =>
-    Boolean(value) && typeof value === "object" && !Array.isArray(value);
-  if (trimmed.startsWith("{")) {
-    const parsed: unknown = JSON.parse(trimmed);
-    return candidate(parsed) ? parsed : null;
-  }
-  const frames = trimmed
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).trim())
-    .filter((line) => line && line !== "[DONE]")
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line) as unknown];
-      } catch {
-        return [];
-      }
-    })
-    .filter(candidate);
-  return frames.findLast((frame) => frame.id === id) ?? frames.at(-1) ?? null;
-}
-
 async function collectConnectorTools(cfg: AppConfig): Promise<Record<string, ConnectorToolListing[]>> {
   const connected = await connectedServices(cfg).catch(() => null);
   const candidates = connected ? Object.keys(connected) : [];
@@ -1072,12 +1050,16 @@ export async function removeService(cfg: AppConfig, slug: string) {
   const body = toolkitPageSchema.parse(await list.json());
   const id = body.items?.find((item) => item.slug && canonicalToolkitSlug(item.slug) === toolkit)?.connected_account?.id;
   if (!id) return { removed: 0 };
+  await deleteConnectedAccount(apiKey, id);
+  return { removed: 1 };
+}
+
+async function deleteConnectedAccount(apiKey: string, id: string) {
   const removed = await fetch(
     `${apiBase()}/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`,
     { method: "DELETE", headers: projectHeaders(apiKey), signal: AbortSignal.timeout(30_000) },
   );
   if (!removed.ok) throw new Error(await responseError(removed, `Composio disconnect: HTTP ${removed.status}`));
-  return { removed: 1 };
 }
 
 /** Disconnect exactly one account after proving it belongs to this user/toolkit. */
@@ -1103,16 +1085,12 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
       && canonicalToolkitSlug(account.toolkit.slug) === toolkit
   );
   if (!owned) return { removed: 0 };
-  const removed = await fetch(
-    `${apiBase()}/connected_accounts/${encodeURIComponent(accountId)}?revoke_on_delete=true`,
-    { method: "DELETE", headers: projectHeaders(apiKey), signal: AbortSignal.timeout(30_000) },
-  );
-  if (!removed.ok) throw new Error(await responseError(removed, `Composio disconnect: HTTP ${removed.status}`));
+  await deleteConnectedAccount(apiKey, accountId);
   return { removed: 1 };
 }
 
 export async function authorizeService(cfg: AppConfig, slug: string, requestedAlias?: string | null) {
-  let alias = normalizeAccountAlias(requestedAlias);
+  const alias = normalizeAccountAlias(requestedAlias);
   const toolkit = canonicalToolkitSlug(slug);
   const mode = connectionMode(cfg);
   const unavailable = managedConnectorUnavailableReason(mode, toolkit);
@@ -1133,23 +1111,11 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   const serviceAccounts = accounts.filter((account) =>
     account.toolkit?.slug !== undefined && canonicalToolkitSlug(account.toolkit.slug) === toolkit
   );
-  const usableAccounts = serviceAccounts.filter((account) => /^(active|initiated|initializing|pending)$/i.test(account.status ?? ""));
-  if (usableAccounts.length >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit) {
-    throw inputError(`${toolkit} already has the maximum of ${MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit} accounts`, 409);
-  }
-  if (serviceAccounts.length > 0 && !alias) {
-    if (serviceAccounts.every((account) => /^(initializing|initiated|expired)$/i.test(account.status ?? ""))) {
-      // Composio's EXPIRED can mean an abandoned flow or an expired credential.
-      alias = `omb-retry-${randomUUID()}`;
-    } else {
-      throw inputError("Add an account alias so the existing connection is not replaced");
-    }
-  }
-  if (alias && serviceAccounts.some((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())) {
-    throw inputError(`Account alias "${alias}" is already in use for ${toolkit}`, 409);
-  }
+  const plan = planAccountLink(toolkit, serviceAccounts, alias, MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit, () => `omb-retry-${randomUUID()}`);
+  if (!plan.ok) throw inputError(plan.error, plan.status);
+  for (const id of plan.replace) await deleteConnectedAccount(apiKey, id);
   const linkRequest: AccountLinkRequest = { toolkit };
-  if (alias) linkRequest.alias = alias;
+  if (plan.alias) linkRequest.alias = plan.alias;
   const link = (sessionId: string) =>
     fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(sessionId)}/link`, {
       method: "POST",
@@ -1200,7 +1166,7 @@ export function toolkitCategories(raw: unknown): string[] | undefined {
   return unique.length ? unique : undefined;
 }
 
-const CURATED: ToolkitCard[] = [
+const CURATED: Array<ToolkitCard & { slug: CuratedConnectorSlug }> = [
   { slug: "slack", label: "Slack", blurb: "Post updates and read channels", domain: "slack.com", logo: null, categories: ["Communication"] },
   { slug: "github", label: "GitHub", blurb: "Issues, pull requests, and code", domain: "github.com", logo: null, categories: ["Developer tools"] },
   { slug: "gmail", label: "Gmail", blurb: "Read and send email", domain: "gmail.com", logo: null, categories: ["Communication"] },
@@ -1357,8 +1323,7 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
         toolkitCache = { at: Date.now(), cards: uniqueCards, identity: identity!, pagination };
         return { cards: uniqueCards, source: "api", pagination };
       }
-    } catch {
-    }
+    } catch {}
   }
   return { cards: CURATED, source: "curated" };
 }

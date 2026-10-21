@@ -1,0 +1,197 @@
+// Once the person's bots moved to My Cloud, the desktop window is one window onto it: main's own handlers in a real
+// headless Chrome (testing/one-workspace-fixture.ts), My Cloud a real Cloud-mode server and this computer its real,
+// frozen server (testing/cloud-send-fixture.ts). Screenshots go to OMB_ONE_WORKSPACE_SHOTS, else the fixture's folder.
+import { randomBytes } from "node:crypto";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
+import { hostTimeout } from "../../server/testing/host-timeout.ts";
+import { freePortBlock } from "../../server/testing/ports.ts";
+import { launchCloudSendFixture, type CloudSendFixture } from "./cloud-send-fixture.ts";
+import { ensureUiBrowser, UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { launchHomeWorld, shotsDir, welcomed, type HomeWorld } from "./one-workspace-fixture.ts";
+
+const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
+if (!enabled) console.info("skipping the one-window UI e2e: set OMB_UI_E2E=1 to install the pinned browser");
+
+const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code|Connect to|Sign in to/.test(document.body.innerText))";
+
+(enabled ? describe : describe.skip)("the desktop window once My Cloud is home", () => {
+  let fx: CloudSendFixture;
+  let world: HomeWorld;
+  let shots = "";
+  let nova = "";
+  const until = async <T>(read: () => Promise<T>, ok: (value: T) => boolean, timeoutMs = 30_000, what = "the window"): Promise<T> => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const value = await read().catch(() => undefined as T);
+      if (value !== undefined && ok(value)) return value;
+      if (Date.now() > deadline) {
+        await world.window.screenshot(join(shots, `failure-${Date.now()}.png`)).catch(() => {});
+        throw new Error(`timed out waiting for ${what}: ${JSON.stringify(value)} at ${world.window.url}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+  const page = <T>(expression: string) => world.window.evaluate<T>(expression);
+  const onCloudPage = () => until(() => page<boolean>("Boolean(document.querySelector('textarea[aria-label^=\"Message\"]'))"), Boolean, 60_000, "My Cloud's page")
+    .then(() => expect(new URL(world.window.url).origin).toBe(world.cloudOrigin));
+  const screen = () => page<string | null>("document.querySelector('[data-home-screen]')?.dataset.homeScreen ?? null");
+  const blank = async () => { await world.window.loadURL("about:blank"); await new Promise((resolve) => setTimeout(resolve, 200)); };
+
+  beforeAll(async () => {
+    fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-window-${randomBytes(12).toString("hex")}` });
+    await welcomed(fx);
+    nova = (await fx.onCloud("POST", "/api/bots", { name: "Nova", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot.id;
+    const tools = await ensureUiBrowser(process.env);
+    if (!tools.chrome) throw new Error("This harness needs the pinned Chrome for Testing");
+    const ports = await Promise.all([freePortBlock([0, 1]), freePortBlock([0, 1]), freePortBlock([0])]) as [number, number, number];
+    world = await launchHomeWorld(fx, { chrome: tools.chrome, ports });
+    shots = shotsDir(fx.root);
+    // Each page's dev server bundles what it imports on the first visit, then reloads it once: done before anything counts.
+    for (const url of [`${world.localOrigin}/`, `${world.cloudOrigin}/`]) {
+      await world.window.loadURL(url).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+    }
+  }, hostTimeout(240_000));
+  afterAll(async () => { await world?.close(); await fx?.close(); }, hostTimeout(60_000));
+
+  it("someone with no Cloud move sees this computer's page as before, and the window never asks My Cloud", async () => {
+    await blank();
+    const before = world.cloudRequests.length;
+    expect((await fx.local("GET", "/api/move/freeze")).body.frozen).toBe(false);
+    await world.window.loadURL(`${world.localOrigin}/`);
+    await until(() => page<boolean>("Boolean(document.querySelector('#root')?.childElementCount)"), Boolean, 60_000);
+    expect(new URL(world.window.url).pathname).toBe("/");
+    expect(await screen()).toBeNull();
+    expect(world.cloudRequests.length).toBe(before);
+    // From here on this computer's copy is frozen, as the move leaves it.
+    expect((await fx.local("POST", "/api/move/freeze", { cloud: world.cloudOrigin })).body.frozen).toBe(true);
+  }, hostTimeout(120_000));
+
+  it("this computer's frozen copy serves only its screen, never the workspace", async () => {
+    const answer = await fetch(`${fx.desktopBase}/settings`, { redirect: "manual" });
+    expect([answer.status, answer.headers.get("location")]).toEqual([302, "/home"]);
+    const signedIn = world.account.state;
+    world.account.state = { status: "signed-out" };
+    try {
+      await world.window.loadURL(`${world.localOrigin}/`);
+      await until(() => screen(), (value) => value === "signin");
+      expect(new URL(world.window.url).pathname).toBe("/home");
+    } finally { world.account.state = signedIn; }
+  }, hostTimeout(60_000));
+
+  it("launching with My Cloud asleep shows Waking My Cloud…, then the page", async () => {
+    await blank();
+    world.account.power = { state: "asleep", since: Date.now(), sleeps: true };
+    const before = world.cloudRequests.length;
+    const launched = world.launch();
+    await until(async () => world.splash && !world.splash.destroyed ? world.splash.evaluate<string>("document.querySelector('.status')?.textContent ?? ''") : "", (text) => text === "Waking My Cloud…", 20_000, "the startup screen");
+    await world.splash!.screenshot(join(shots, "1-startup-waking.png"));
+    expect(world.cloudRequests.slice(before).filter((entry) => entry.at < Date.now()).map((entry) => entry.path)).not.toContain("/api/health");
+    await launched;
+    await onCloudPage();
+    expect(world.account.wakes).toBe(1);
+    expect(world.cloudRequests.slice(before)[0]?.path, "nothing knocks on a sleeping Cloud before the Admin wakes it").not.toBe("/api/health");
+    await until(async () => world.splash?.destroyed ?? true, Boolean, 15_000, "the startup screen to close");
+    await world.window.screenshot(join(shots, "2-my-cloud-after-waking.png"));
+    world.account.power = null;
+  }, hostTimeout(180_000));
+
+  it("a lapsed cookie signs in again by itself, with no pairing page, back where it was", async () => {
+    await world.home.show();
+    await onCloudPage();
+    const sessions = (await fx.onCloud("GET", "/api/auth/sessions")).body.sessions as Array<{ id: string; label: string }>;
+    const cookie = (await world.cloudCookies()).length;
+    expect(cookie).toBeGreaterThan(0);
+    for (const session of sessions.filter((entry) => !entry.label.startsWith("OpenMausBot app (Cloud)"))) await fx.onCloud("DELETE", `/api/auth/sessions/${session.id}`);
+    expect(await page("fetch('/api/auth/session').then((response) => response.status)")).toBe(401);
+    let formSeen = false;
+    const watching = (async () => {
+      const stop = Date.now() + 20_000;
+      while (Date.now() < stop && !formSeen) { formSeen = await page<boolean>(PAIR_FORM).catch(() => false); await new Promise((resolve) => setTimeout(resolve, 40)); }
+    })();
+    world.window.webContents.reload();
+    await until(() => page<string>("fetch('/api/auth/session').then((response) => response.json()).then((session) => session.kind)"), (kind) => kind === "session", 30_000, "a new session");
+    await onCloudPage();
+    formSeen = formSeen || await page<boolean>(PAIR_FORM);
+    const stop = formSeen; formSeen = true; await watching;
+    expect(stop, "the pairing form never showed").toBe(false);
+    await world.window.screenshot(join(shots, "3-my-cloud-signed-in-again.png"));
+  }, hostTimeout(120_000));
+
+  it("an ended Admin grant with a lapsed session shows one Sign in, and My Cloud opens by itself once signed in", async () => {
+    const sessions = (await fx.onCloud("GET", "/api/auth/sessions")).body.sessions as Array<{ id: string; label: string }>;
+    for (const session of sessions.filter((entry) => !entry.label.startsWith("OpenMausBot app (Cloud)"))) await fx.onCloud("DELETE", `/api/auth/sessions/${session.id}`);
+    world.account.state = { status: "reauth-required", message: "access-ended", account: { id: "acct-fixture", email: "person@example.test" }, lastPlan: { tier: "pro", active: true } };
+    await blank();
+    await world.home.show();
+    await until(() => screen(), (value) => value === "signin");
+    const buttons = await page<string[]>("[...document.querySelectorAll('button')].map((button) => button.textContent.trim())");
+    expect(buttons).toEqual(["Sign in"]);
+    await world.window.screenshot(join(shots, "4-sign-in.png"));
+    await page("document.querySelector('button').click(), true");
+    await until(async () => world.account.signIns.length, (count) => count === 1);
+    expect(world.account.signIns).toEqual(["again"]);
+    world.account.state = { status: "connected", account: { id: "acct-fixture", email: "person@example.test" }, entitlement: { plan: "pro", status: "active", expiresAt: null, version: 1 },
+      machine: { status: "ready", origin: world.cloudOrigin } };
+    await world.home.changed();
+    await onCloudPage();
+  }, hostTimeout(120_000));
+
+  it("with the network down the offline screen shows within 3 s, and goes away by itself", async () => {
+    await blank();
+    world.network.down = true;
+    const started = Date.now();
+    void world.home.show();
+    await until(() => screen(), (value) => value === "offline", 3_000, "the offline screen within 3 s");
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(await page<string>("document.body.innerText")).toContain("Can't reach My Cloud right now.");
+    await world.window.screenshot(join(shots, "5-offline.png"));
+    world.network.down = false;
+    await onCloudPage();
+    expect(await screen()).toBeNull();
+    // A reload with the network gone fails to load My Cloud: the same screen, as quickly.
+    world.network.down = true;
+    const reloaded = Date.now();
+    world.window.webContents.reload();
+    await until(() => screen(), (value) => value === "offline", 3_000, "the offline screen after a failed load");
+    expect(Date.now() - reloaded).toBeLessThan(3_000);
+    world.network.down = false;
+    await onCloudPage();
+  }, hostTimeout(120_000));
+
+  it("notifications are allowed for My Cloud's page and this computer's, never another server's", async () => {
+    await onCloudPage();
+    expect(await page("Notification.permission")).toBe("granted");
+    await world.window.loadURL(`${world.otherOrigin}/`);
+    await until(() => page<string>("document.title"), (title) => title === "Another server");
+    expect(await page("Notification.permission")).toBe("denied");
+    expect(Object.fromEntries(world.notifications)).toMatchObject({ [world.cloudOrigin]: true, [world.otherOrigin]: false });
+    await world.home.show();
+    await onCloudPage();
+  }, hostTimeout(120_000));
+
+  it("chat links and the Settings key open on My Cloud's page", async () => {
+    await onCloudPage();
+    expect(world.openLink(`openmausbot://bot/${nova}`)).toBe(true);
+    await until(() => page<string | null>("document.querySelector('textarea[aria-label^=\"Message\"]')?.getAttribute('aria-label') ?? null"), (label) => label === "Message Nova", 20_000, "Nova's chat");
+    expect(new URL(world.window.url).origin).toBe(world.cloudOrigin);
+    await world.window.screenshot(join(shots, "6-chat-link.png"));
+    world.window.webContents.send("app:open-settings");
+    await until(() => page<boolean>("Boolean(document.querySelector('[role=dialog]'))"), Boolean, 20_000, "Settings");
+    await world.window.screenshot(join(shots, "7-settings-key.png"));
+    await page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true");
+  }, hostTimeout(120_000));
+
+  it("a new version of My Cloud reloads its page at a quiet moment, and only then", async () => {
+    await onCloudPage();
+    await page("window.__sameLoad = true");
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    expect(await page("window.__sameLoad === true"), "no reload while the version stays").toBe(true);
+    await fx.relaunch({ kill: false, cloud: { OMB_APP_VERSION: "0.1.999" } });
+    await until(() => page<boolean>("window.__sameLoad === true"), (same) => same === false, 30_000, "the page to reload");
+    await onCloudPage();
+    expect(await page("fetch('/.well-known/openmausbot/environment').then((response) => response.json()).then((env) => env.version)")).toBe("0.1.999");
+  }, hostTimeout(180_000));
+});

@@ -122,6 +122,9 @@ export type RuntimeEvent = RuntimeEventBase &
          * Used for exact-command grants; never reconstructed from a display
          * summary, tool title, or argv. Absent when either value is unknown. */
         command?: { command: string; cwd: string };
+        /** The shell command line exactly as the engine sent it, even when `command` is absent for want of a cwd.
+         * Read only by the safety floor; no grant is ever made from it, and like `command` it is never broadcast. */
+        commandLine?: string;
         choices?: string[];
         /** A provider's structured ask (Claude's AskUserQuestion): the whole
          * set of questions, each with its own options, so the card can offer
@@ -167,7 +170,10 @@ export type RuntimeEvent = RuntimeEventBase &
     // `terminal`: the complete turn failed, not a transient error.
     // `claudeUpdate`: this Claude Code is too old for the model.
     // `trialCredit`: the trial's Claude credit refused the call.
-    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low" }
+    // `stalled`: the engine went silent and the turn was stopped as stuck.
+    // `limitResetsAt`: epoch ms when the usage limit refusing this account resets, when the engine says.
+    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
+        stalled?: boolean; limitResetsAt?: number }
     /** Something the person should know that did not fail the turn — for
      * example, a saved model the engine no longer offers was replaced. */
     | { type: "runtime.notice"; message: string }

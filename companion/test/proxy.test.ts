@@ -2,7 +2,7 @@
 // live in the seam between them.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import { createProxyHandler } from "../src/proxy.ts";
 import { MAX_SSE_EVENT_BYTES } from "../src/wire.ts";
 import { createConnectedDeviceTracker } from "../src/connected-devices.ts";
 import type { CompanionEndpoint } from "../src/endpoints.ts";
+import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
@@ -82,9 +83,12 @@ const device = async (
 };
 
 /** fetch will not set a Host header */
+const CONTROL_TOKEN = "fixture-control-token";
+const controlHeaders = { "x-openmausbot-control-token": CONTROL_TOKEN };
+
 const withHost = (port: number, host: string, path = "/api/health", headers: Record<string, string> = {}) =>
   new Promise<number>((resolve, reject) => {
-    const r = request({ hostname: "127.0.0.1", port, path, headers: { host, ...headers } }, (res) => {
+    const r = request({ hostname: "127.0.0.1", port, path, headers: { host, ...controlHeaders, ...headers } }, (res) => {
       res.resume();
       resolve(res.statusCode ?? 0);
     });
@@ -155,16 +159,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((r) => (sidecar ? sidecar.close(() => r()) : r()));
-  harness?.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    if (!harness || harness.exitCode !== null) return resolve();
-    harness.on("close", () => resolve());
-    // Wait for `close` after SIGKILL: deleting the home directory under a
-    // live process fails on loaded runners.
-    setTimeout(() => harness.kill("SIGKILL"), 5_000).unref?.();
-    setTimeout(resolve, 10_000).unref?.();
-  });
-  rmSync(home, { recursive: true, force: true });
+  await waitForExit(harness, { signal: "SIGTERM" });
+  await removeTempDir(home);
 });
 
 describe("the sidecar in front of an unmodified harness", () => {
@@ -261,7 +257,7 @@ describe("the sidecar in front of an unmodified harness", () => {
 
     const { body } = await device("GET", "/api/bots");
     const botId = body.bots[0].id;
-    expect((await device("PATCH", `/api/bots/${botId}`, { body: { autoApprove: true } })).status).toBe(404);
+    expect((await device("PATCH", `/api/bots/${botId}`, { body: { autoApprove: true } })).status).toBe(403);
     expect((await device("PATCH", `/api/groups/not-a-room`, { body: { unread: false } })).status).toBe(404);
   });
 
@@ -280,6 +276,98 @@ describe("the sidecar in front of an unmodified harness", () => {
       expect(res.status, `${method} ${path} was blocked by the sidecar`).not.toBe(403);
       expect(res.status, `${method} ${path} never reached the harness`).not.toBe(404);
     }
+  });
+
+  it("saves a paired device's bot appearance and returns it to other clients", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const appearance = { color: "teal", mascotBody: "star", mascotExpression: "happy" };
+    const saved = await device("PATCH", `/api/bots/${bot.id}`, { body: appearance });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body.bot).toMatchObject(appearance);
+
+    const refreshed = await device("GET", "/api/bots");
+    expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id))
+      .toMatchObject(appearance);
+    const host = await fetch(`${HARNESS}/api/bots`).then((response) => response.json()) as { bots: Array<{ id: string }> };
+    expect(host.bots.find((candidate: { id: string }) => candidate.id === bot.id))
+      .toMatchObject(appearance);
+  });
+
+  it("refuses unauthenticated appearance saves and protected fields without changing the bot", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const path = `/api/bots/${bot.id}`;
+    const appearance = { color: "coral", mascotBody: "diamond", mascotExpression: "sleeping" };
+    for (const token of [null, "omb_wrong"]) {
+      expect((await device("PATCH", path, { token, body: appearance })).status).toBe(401);
+    }
+    for (const protectedPatch of [
+      { autoApprove: true },
+      { approvalMode: "full" },
+      { soul: "not permitted" },
+      { computer: "local" },
+      { modelSelection: { instanceId: "ghost", model: "other" } },
+      { unexpected: true },
+    ]) {
+      const refused = await device("PATCH", path, { body: { ...appearance, ...protectedPatch } });
+      expect(refused.status, JSON.stringify(protectedPatch)).toBe(403);
+      expect(refused.body.error).toContain(Object.keys(protectedPatch)[0]);
+      expect(refused.body.error).toContain("host computer");
+      const refreshed = await device("GET", "/api/bots");
+      expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
+    }
+  });
+
+  it("saves the avatar panel's reset and shape choices from a paired device", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const path = `/api/bots/${bot.id}`;
+    const shape = await device("PATCH", path, { body: { color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 } });
+    expect(shape.status, JSON.stringify(shape.body)).toBe(200);
+    expect(shape.body.bot).toMatchObject({ color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 });
+
+    const reset = await device("PATCH", path, { body: { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" } });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    const host = await fetch(`${HARNESS}/api/bots`).then((response) => response.json()) as { bots: Array<{ id: string }> };
+    expect(host.bots.find((candidate) => candidate.id === bot.id))
+      .toMatchObject({ avatarCrop: "mascot", color: "green", mascotBody: "cursor" });
+    expect((await device("PATCH", path, { body: { avatarUrl: "/etc/passwd" } })).status).toBe(400);
+  });
+
+  it("refuses appearance values clients cannot draw without changing the bot", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    for (const invalid of [
+      { color: "#168aad" },
+      { color: "<script>" },
+      { color: { nested: true } },
+      { mascotExpression: 12345 },
+      { mascotExpression: "x".repeat(81) },
+      { mascotBody: "nope" },
+      { pinned: [1, 2] },
+      { avatarCrop: "triangle" },
+      { avatarFocusX: "left" },
+    ]) {
+      const refused = await device("PATCH", `/api/bots/${bot.id}`, { body: invalid });
+      expect(refused.status, JSON.stringify(invalid)).toBe(400);
+      expect(refused.body.error).toContain(Object.keys(invalid)[0]);
+      const refreshed = await device("GET", "/api/bots");
+      expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
+    }
+  });
+
+  it("does not let a device suppress the companion marker to change protected fields", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const refused = await device("PATCH", `/api/bots/${bot.id}`, {
+      headers: { "x-openmausbot-companion": "0" },
+      body: { color: "coral", autoApprove: true },
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toContain("autoApprove");
+    const refreshed = await device("GET", "/api/bots");
+    expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
   });
 
   it("files bots through only the narrow atomic organizer route", async () => {
@@ -325,7 +413,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect(after).toHaveLength(before.length + 1);
     expect(after.some((bot: { id: string }) => bot.id === id)).toBe(true);
     expect((await device("GET", "/api/bot-defaults")).status).toBe(404);
-    expect((await device("PATCH", `/api/bots/${id}`, { body: { soul: "not permitted" } })).status).toBe(404);
+    expect((await device("PATCH", `/api/bots/${id}`, { body: { soul: "not permitted" } })).status).toBe(403);
   });
 
   it("only remembers an always-allow key carried by a pending card", async () => {
@@ -655,6 +743,7 @@ describe("pairing, end to end", () => {
     const port = (paired.address() as { port: number }).port;
     const control = createControlServer({
       devices: registry,
+      controlToken: () => CONTROL_TOKEN,
       companionPort: port,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
       connectedDeviceIds: connections.ids,
@@ -668,7 +757,7 @@ describe("pairing, end to end", () => {
     try {
       expect((await fetch(`${base}/api/bots`)).status).toBe(401);
 
-      const opened = (await (await fetch(`${ctl}/pairing`, { method: "POST" })).json()) as {
+      const opened = (await (await fetch(`${ctl}/pairing`, { method: "POST", headers: controlHeaders })).json()) as {
         code: string;
         token: string;
       };
@@ -735,7 +824,7 @@ describe("pairing, end to end", () => {
       eventStream.resume();
       const eventStreamClosed = new Promise<void>((resolve) => eventStream.once("close", resolve));
 
-      const state = (await (await fetch(`${ctl}/state`)).json()) as {
+      const state = (await (await fetch(`${ctl}/state`, { headers: controlHeaders })).json()) as {
         devices: Array<{ id: string; name: string }>;
         connectedDeviceIds: string[];
       };
@@ -743,7 +832,7 @@ describe("pairing, end to end", () => {
       // By name: `devices[0]` is load order.
       const ada = state.devices.find((d) => d.name === "Ada's iPhone")!;
       expect(state.connectedDeviceIds).toContain(ada.id);
-      const revoked = await fetch(`${ctl}/devices/${ada.id}`, { method: "DELETE" });
+      const revoked = await fetch(`${ctl}/devices/${ada.id}`, { method: "DELETE", headers: controlHeaders });
       expect(revoked.status).toBe(200);
       expect((await revoked.json() as { connectedDeviceIds: string[] }).connectedDeviceIds).not.toContain(ada.id);
       await eventStreamClosed;
@@ -759,6 +848,7 @@ describe("pairing, end to end", () => {
     const { createControlServer } = await import("../src/control.ts");
     const control = createControlServer({
       devices: new DeviceRegistry(),
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });
@@ -783,6 +873,7 @@ describe("pairing, end to end", () => {
 
     const control = createControlServer({
       devices: new DeviceRegistry(),
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });
@@ -806,6 +897,7 @@ describe("pairing, end to end", () => {
     const registry = new DeviceRegistry();
     const control = createControlServer({
       devices: registry,
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });
@@ -815,22 +907,27 @@ describe("pairing, end to end", () => {
     try {
       const evil = await fetch(`${base}/pairing`, {
         method: "POST",
-        headers: { origin: "https://evil.example" },
+        headers: { origin: "https://evil.example", ...controlHeaders },
       });
       expect(evil.status).toBe(403);
+      expect(registry.pairing()).toBe(null);
+
+      // A page served from the control port itself, as a bot's browser would open it, has no token.
+      const tokenless = await fetch(`${base}/pairing`, { method: "POST", headers: { origin: base } });
+      expect(tokenless.status).toBe(403);
       expect(registry.pairing()).toBe(null);
 
       // Browsers send Origin on any write, so the control page's own must pass.
       const ours = await fetch(`${base}/pairing`, {
         method: "POST",
-        headers: { origin: base },
+        headers: { origin: base, ...controlHeaders },
       });
       expect(ours.status).toBe(201);
       expect(registry.pairing()).not.toBe(null);
 
       const stolen = await fetch(`${base}/devices/whatever`, {
         method: "DELETE",
-        headers: { origin: "https://evil.example" },
+        headers: { origin: "https://evil.example", ...controlHeaders },
       });
       expect(stolen.status).toBe(403);
     } finally {
@@ -844,6 +941,7 @@ describe("pairing, end to end", () => {
     const registry = new DeviceRegistry();
     const control = createControlServer({
       devices: registry,
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });

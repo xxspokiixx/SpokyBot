@@ -19,24 +19,28 @@ import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { navigateThreadMenu } from "./BotProjects";
-import { LiveKeySetup } from "./LiveKeySetup";
-import { LiveProPrompt } from "./ProIntroduction";
+import { LiveKeyNeeded } from "./LiveKeyNeeded";
 import { liveLineHeldElsewhere } from "./LiveCallBar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
-import { track } from "@/lib/analytics";
+import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
+import { onCallStartRequest } from "@/lib/call-start-request";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
+import { openBotSettings } from "./bot-panel/panel-link";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 const CALL_ENDPOINT_MS = 850;
 
 export type CallButtonPlacement = "header" | "composer";
 
-export function CallButton({ bot, placement = "header" }: { bot: Bot; placement?: CallButtonPlacement }) {
+/** `fill` (Simple composer): a round button in that colour, with no chevron; the + menu picks the call mode. */
+export function CallButton({ bot, placement = "header", fill }: { bot: Bot; placement?: CallButtonPlacement; fill?: string }) {
+  const { state } = useStore();
   return (
     <CallTargetButton
       placement={placement}
+      fill={fill}
       targetId={bot.id}
       targetName={bot.name}
       threadId={bot.threadId}
@@ -44,7 +48,7 @@ export function CallButton({ bot, placement = "header" }: { bot: Bot; placement?
       setupBotId={bot.id}
       requireExplicitVoices={false}
       liveCapable
-      onStart={(mode) => track("call_started", { driver: bot.modelSelection?.instanceId, mode })}
+      onStart={(mode) => callStarted(state.instances, bot.modelSelection?.instanceId, mode)}
     />
   );
 }
@@ -59,8 +63,10 @@ export function CallTargetButton({
   liveCapable = false,
   onStart,
   placement = "header",
+  fill,
 }: {
   placement?: CallButtonPlacement;
+  fill?: string;
   targetId: string;
   targetName: string;
   threadId?: string;
@@ -98,6 +104,7 @@ export function CallTargetButton({
   const liveMode = canLive && mode === "live";
   const turnsReady = capabilitiesReady && supported && voiceReady;
   const unavailable = !active && !liveElsewhere && !liveMode && !turnsReady;
+  const lineHeldElsewhere = liveMode && !onCall && liveLineHeldElsewhere(media, state.liveCall);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const cloudHome = state.config?.cloudHome === true;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -108,18 +115,14 @@ export function CallTargetButton({
   const setupBot = shownSetupBotId ? state.bots.find((candidate) => candidate.id === shownSetupBotId) : undefined;
   const helpMotion = useMenuMotion(Boolean(unavailable && helpOpen));
   const [menuOpen, setMenuOpen] = useState(false);
-  const keyPopover = canLive && !active && media.needsKey && media.botId === targetId;
-  const proPopover = canLive && !active && media.needsPro && media.botId === targetId;
-  const startPrompt = keyPopover || proPopover;
+  const startPrompt = canLive && !active && media.needsKey && media.botId === targetId;
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
   const keyRef = useRef<HTMLDivElement>(null);
-  const proRef = useRef<HTMLDivElement>(null);
   const helpId = useId();
   const menuId = useId();
   const keyId = useId();
-  const proId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
   const label = active
@@ -174,6 +177,17 @@ export function CallTargetButton({
     startCall(targetId);
   };
 
+  // The Simple composer's + menu: the same choice as this button's own call-mode menu, which it replaces there.
+  const requestedStart = useRef<(next: CallMode) => void>(() => {});
+  requestedStart.current = (next) => {
+    // Hidden below while Live's line is held on another device: the + menu must not start a second call either.
+    if (active || liveElsewhere || (next === "live" && !canLive) || lineHeldElsewhere) return;
+    closePopovers();
+    setCallMode(next);
+    start(next);
+  };
+  useEffect(() => onCallStartRequest(targetId, (next) => requestedStart.current(next)), [targetId]);
+
   const popoverOpen = helpOpen || menuOpen || startPrompt;
   useEffect(() => {
     if (!popoverOpen) return;
@@ -193,20 +207,14 @@ export function CallTargetButton({
     };
   }, [popoverOpen, menuOpen, closePopovers]);
 
-  const keyShown = useRef(keyPopover);
+  const keyShown = useRef(startPrompt);
   useEffect(() => {
-    const opened = keyPopover && !keyShown.current;
-    keyShown.current = keyPopover;
-    if (opened) keyRef.current?.querySelector<HTMLInputElement>("input")?.focus();
-  }, [keyPopover]);
-  const proShown = useRef(proPopover);
-  useEffect(() => {
-    const opened = proPopover && !proShown.current;
-    proShown.current = proPopover;
-    if (opened) proRef.current?.focus();
-  }, [proPopover]);
+    const opened = startPrompt && !keyShown.current;
+    keyShown.current = startPrompt;
+    if (opened) keyRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [startPrompt]);
 
-  if (liveMode && !onCall && liveLineHeldElsewhere(media, state.liveCall)) return null;
+  if (lineHeldElsewhere) return null;
   return (
     <div ref={rootRef} className="relative flex items-center gap-0.5">
       <button
@@ -230,16 +238,19 @@ export function CallTargetButton({
           start(liveMode ? "live" : "turns");
         }}
         aria-expanded={unavailable ? helpOpen : startPrompt ? true : undefined}
-        aria-controls={unavailable ? helpId : keyPopover ? keyId : proPopover ? proId : undefined}
+        aria-controls={unavailable ? helpId : startPrompt ? keyId : undefined}
         aria-label={label}
         title={label}
         data-call-button={placement}
+        style={fill && !active ? { backgroundColor: fill } : undefined}
         className={cn(
           "relative flex shrink-0 items-center justify-center disabled:opacity-60",
-          "rounded-l-3xl rounded-r-lg active:rounded-3xl transition-[color,background,border-radius]",
+          fill ? "rounded-full transition-[color,background,filter]" : "rounded-l-3xl rounded-r-lg active:rounded-3xl transition-[color,background,border-radius]",
           composer ? "size-8" : "size-9",
           active
             ? "bg-danger text-white hover:brightness-110"
+            : fill
+              ? "text-white hover:brightness-110"
             : composer
               ? unavailable
                 ? "bg-control text-ink-tertiary hover:text-ink-secondary"
@@ -256,7 +267,7 @@ export function CallTargetButton({
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
       </button>
-      {canLive && (
+      {canLive && !fill && (
         <button
           ref={chevronRef}
           type="button"
@@ -297,28 +308,13 @@ export function CallTargetButton({
         />
       )}
 
-      {keyPopover && liveThreadId !== undefined && (
+      {startPrompt && (
         <div
           ref={keyRef}
           id={keyId}
           className={cn("animate-pop-in absolute right-0 z-30 w-[340px] max-w-[90vw] rounded-xl shadow-2xl", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
         >
-          <LiveKeySetup
-            key={`${targetId}:${liveThreadId}`}
-            compact
-            onSaved={() => void startLiveCall({ botId: targetId, threadId: liveThreadId })}
-          />
-        </div>
-      )}
-
-      {proPopover && (
-        <div
-          ref={proRef}
-          id={proId}
-          tabIndex={-1}
-          className={cn("animate-pop-in absolute right-0 z-30 w-[340px] max-w-[90vw] rounded-xl shadow-2xl outline-none", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
-        >
-          <LiveProPrompt />
+          <LiveKeyNeeded />
         </div>
       )}
 
@@ -353,7 +349,7 @@ export function CallTargetButton({
                 setHelpOpen(false);
                 if (remoteClient) {
                   if (setupBot.id !== targetId) openBot(dispatch, setupBot, showThreads);
-                  dispatch({ type: "toggleSettings", open: true, section: "voice" });
+                  openBotSettings(dispatch, "voice");
                   return;
                 }
                 setVoiceSetupOpen(true);

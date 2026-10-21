@@ -497,11 +497,39 @@ describe("RuntimeCoordinator: stops", () => {
 });
 
 describe("RuntimeCoordinator: read models", () => {
+  it("awaitingTeammateThreads answers, for every thread at once, what outstandingDirect and the parked roots answer per thread", async () => {
+    const w = world(hold);
+    const threads = ["chief-chat", "builder-work", "tester-work", "room-1", "ops-work", "elsewhere"];
+    const perThread = (threadId: string) => w.coordinator.outstandingDirect(threadId).length > 0 || w.coordinator.active().some((n) =>
+      !n.parentId && !n.groupId && n.threadId === threadId && (n.status === "resume" || (n.status === "waiting" && n.question === undefined && !n.cards?.length)));
+    const agree = () => expect(w.coordinator.awaitingTeammateThreads()).toEqual(new Set(threads.filter(perThread)));
+    agree();
+    const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    send(w, chief, "gen-1", undefined, inRoom("scout"), "Scout it");
+    w.coordinator.enqueue(chief, "gen-1", undefined, { botId: "ops", threadId: "ops-work" }, "FYI", { mode: "notify" });
+    agree();
+    w.coordinator.tick();
+    agree();
+    expect(w.coordinator.awaitingTeammateThreads()).toEqual(new Set(["chief-chat"]));
+    ended(w, "gen-1");
+    agree();
+    await w.host.release(b.id, { ok: true, text: "built" });
+    agree();
+    w.coordinator.beginTurn({ id: "gen-2", address: tester, brief: "Ask", level: "ask", origin: userOrigin });
+    w.coordinator.endTurn("gen-2", { ok: true, text: "", cards: { question: "Which account?", ids: ["msg-1"] } });
+    agree();
+    expect(w.coordinator.awaitingTeammateThreads().has("tester-work")).toBe(false);
+  });
+
   it("activeDirect, assignerOf, outstandingDirect and liveEdges follow the tree", async () => {
     const w = world(hold);
     expect(w.coordinator.activeDirect("builder-work")).toBe(false);
     const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
     const { node: r } = send(w, chief, "gen-1", undefined, inRoom("scout"), "Scout it");
+    // The close_thread guard must see queued work before a dispatch tick.
+    expect(w.coordinator.node(b.id)?.status).toBe("queued");
+    expect(w.coordinator.activeDirect("builder-work")).toBe(true);
+    expect(w.host.runs).toHaveLength(0);
     w.coordinator.tick();
     expect(w.coordinator.activeDirect("builder-work")).toBe(true);
     expect(w.coordinator.activeDirect("chief-chat")).toBe(true);

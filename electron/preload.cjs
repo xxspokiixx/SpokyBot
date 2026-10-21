@@ -38,17 +38,26 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // The full bridge goes only to the local server's UI; a remote page gets the safe subset, and main enforces the same rule.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "windowControls"]);
+/** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
+const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
-const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : [])]);
+function homePage() {
+  try { return ipcRenderer.sendSync("home:page") === true; } catch { return false; }
+}
+function savedAnalyticsChoice() {
+  try { const saved = ipcRenderer.sendSync("desktop-analytics:read"); return typeof saved === "boolean" ? saved : null; } catch { return null; }
+}
+let analyticsChoice;
+const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : []), ...(homePage() ? HOME_PAGE : [])]);
 
 // Keep in parity with shared/workspace-backup-client.ts (a sandboxed preload cannot import it).
 const COMPANY_BACKUP_CLIENT_KEYS = [
   "omb-drafts", "omb-draft-attachments", "omb-draft-send-ids", "omb-draft-channel-modes",
-  "omb-skin", "omb-show-threads", "omb-show-run-card", "omb-send-key", "omb-color-user-bubbles", "openmausbot.sidebarDensity",
+  "omb-skin", "omb-show-threads", "omb-show-run-card", "omb-send-key", "omb-color-user-bubbles", "omb-chat-width", "openmausbot.sidebarDensity",
+  "openmausbot.sidebarToolsLayout",
   "openmausbot.sidebarCollapsedSections.v1", "openmausbot.sidebarSectionOrder.v1",
   "omb-analytics-opt-out", "openmausbot.remote-voice.v1",
 ];
@@ -233,6 +242,8 @@ const bridge = {
       throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
     }),
   revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
+  // This app's own logs folder (server.log, desktop-crashes.log, updater.log); the page names no path.
+  openLogsFolder: () => ipcRenderer.invoke("desktop:open-logs"),
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 
   updater: {
@@ -259,7 +270,7 @@ const bridge = {
     pickDir: () => ipcRenderer.invoke("environments:pick-dir"),
     forget: (id, purge) => ipcRenderer.invoke("environments:forget", id, purge === true),
     onOpenSettings: (cb) => {
-      const handler = (_event, computerId, panel) => cb(computerId, panel === "copy" ? "copy" : undefined);
+      const handler = (_event, computerId) => cb(computerId);
       ipcRenderer.on("workspaces:open-settings", handler);
       return () => ipcRenderer.removeListener("workspaces:open-settings", handler);
     },
@@ -275,6 +286,17 @@ const bridge = {
     openDashboard: () => ipcRenderer.invoke("cloud-account:openDashboard"),
     offer: () => ipcRenderer.invoke("cloud-account:offer"),
     checkout: (plan, source) => ipcRenderer.invoke("cloud-account:checkout", String(plan), String(source)),
+    // The buying sheet: plain text in, outcomes out; the attempt, the token and the checkout page stay in main.
+    signInStart: email => ipcRenderer.invoke("cloud-account:signInStart", String(email)),
+    signInVerify: code => ipcRenderer.invoke("cloud-account:signInVerify", String(code)),
+    signInCancel: () => ipcRenderer.invoke("cloud-account:signInCancel"),
+    reopenCheckout: (plan, source) => ipcRenderer.invoke("cloud-account:reopenCheckout", String(plan), String(source)),
+    copyCheckoutLink: () => ipcRenderer.invoke("cloud-account:copyCheckoutLink"),
+    interest: () => ipcRenderer.invoke("cloud-account:interest"),
+    look: () => ipcRenderer.invoke("cloud-account:look"),
+    setLook: (name, color) => ipcRenderer.invoke("cloud-account:setLook", String(name), String(color)),
+    sheet: open => ipcRenderer.invoke("cloud-account:sheet", open === true),
+    readySeen: () => ipcRenderer.invoke("cloud-account:readySeen"),
     connectHome: () => ipcRenderer.invoke("cloud-account:connectHome"),
     connectHomeForPhone: () => ipcRenderer.invoke("cloud-account:connectHomeForPhone"),
     onState: cb => {
@@ -288,29 +310,50 @@ const bridge = {
       save: input => ipcRenderer.invoke("lending:save", input),
       stop: () => ipcRenderer.invoke("lending:stop"),
     },
-  } : undefined,
-  cloudMove: process.argv.includes("--omb-company-desktop=1") ? {
-    state: id => ipcRenderer.invoke("cloud-move:state", ...savedServer(id)),
-    start: id => isLocalPage ? ipcRenderer.invoke("cloud-move:start", ...savedServer(id))
-      : navigator.userActivation?.isActive === true ? ipcRenderer.invoke("cloud-move:start") : Promise.reject(new Error("Choose Copy to start copying.")),
-    cancel: () => ipcRenderer.invoke("cloud-move:cancel"),
-    restorePrevious: id => ipcRenderer.invoke("cloud-move:restore-previous", ...savedServer(id)),
-    dismiss: id => ipcRenderer.invoke("cloud-move:dismiss", ...savedServer(id)),
-    onState: cb => {
-      const handler = (_event, state) => cb(state);
-      ipcRenderer.on("cloud-move:state-changed", handler);
-      return () => ipcRenderer.removeListener("cloud-move:state-changed", handler);
+    files: {
+      state: () => ipcRenderer.invoke("files:state"),
+      pickFolder: () => ipcRenderer.invoke("files:pick"),
+      checkFolders: paths => ipcRenderer.invoke("files:check", paths),
+      share: token => ipcRenderer.invoke("files:share", token),
+      stopSharing: folderId => ipcRenderer.invoke("files:stop", folderId),
+      answerDeletes: (folderId, remove) => ipcRenderer.invoke("files:deletes", folderId, remove),
+      locate: folderId => ipcRenderer.invoke("files:locate", folderId),
+      setOutputs: enabled => ipcRenderer.invoke("files:outputs", enabled),
+      open: target => ipcRenderer.invoke("files:open", target),
+      moreSpace: () => ipcRenderer.invoke("files:more-space"),
+      onState: cb => {
+        const handler = (_event, state) => cb(state);
+        ipcRenderer.on("files:state-changed", handler);
+        return () => ipcRenderer.removeListener("files:state-changed", handler);
+      },
     },
   } : undefined,
   cloudLending: process.argv.includes("--omb-company-desktop=1") ? {
     open: () => ipcRenderer.invoke("cloud-lending:open"),
+    state: () => ipcRenderer.invoke("cloud-lending:state"),
+    set: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-lending:set", on === true) : Promise.reject(new Error("Turn on the switch to lend this computer.")),
+    screen: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-lending:screen", on === true) : Promise.reject(new Error("Tick Apps and screen to lend them.")),
+  } : undefined,
+  // Either page: the one-time move's line.
+  cloudSendPage: process.argv.includes("--omb-company-desktop=1") ? {
+    notice: () => ipcRenderer.invoke("cloud-send:notice"),
+    dismiss: signature => ipcRenderer.invoke("cloud-send:dismiss", String(signature)),
+    moveRetry: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-retry") : Promise.reject(new Error("Choose Try again to move.")),
+    onNotice: cb => {
+      const handler = (_event, notice) => cb(notice);
+      ipcRenderer.on("cloud-send:notice-changed", handler);
+      return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
+    },
   } : undefined,
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-plan:manage") : Promise.reject(new Error("Choose Manage to open your Plan page.")),
-    useThisComputer: () => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-plan:local") : Promise.reject(new Error("Choose Use this computer to switch.")),
+    signIn: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
     noticeSeen: () => ipcRenderer.invoke("cloud-plan:notice-seen"),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
@@ -350,6 +393,32 @@ const bridge = {
     activity: id => ipcRenderer.invoke("sharing:activity", id),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
+  /** The window onto My Cloud once it is the person's home: this computer's screen while My Cloud can't be opened, and
+   * on My Cloud's own page a new session when its own has ended. */
+  home: {
+    state: () => ipcRenderer.invoke("home:state"),
+    onState: cb => {
+      const handler = (_event, view) => cb(view);
+      ipcRenderer.on("home:state-changed", handler);
+      return () => ipcRenderer.removeListener("home:state-changed", handler);
+    },
+    retry: () => ipcRenderer.invoke("home:retry"),
+    signIn: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
+    repair: () => ipcRenderer.invoke("home:repair"),
+  },
+  desktopNotices: {
+    state: () => ipcRenderer.invoke("desktop-notices:state"),
+    seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
+    shown: id => ipcRenderer.invoke("desktop-notices:shown", String(id)),
+  },
+  desktopAnalytics: {
+    enabled: () => {
+      if (analyticsChoice === undefined) analyticsChoice = savedAnalyticsChoice();
+      return analyticsChoice;
+    },
+    ...(isLocalPage ? { set: enabled => { analyticsChoice = enabled === true; return ipcRenderer.invoke("desktop-analytics:set", analyticsChoice); } } : {}),
+  },
 };
 
 contextBridge.exposeInMainWorld(

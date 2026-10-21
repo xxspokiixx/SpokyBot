@@ -21,6 +21,7 @@ import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
+import { Select } from "./Select";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
@@ -63,7 +64,7 @@ export function offersLocalModels(instance: InstanceInfo | undefined, localCount
 }
 
 export function effortLabel(level: EffortLevel): string {
-  return level === "xhigh" ? "X-High" : level[0].toUpperCase() + level.slice(1);
+  return t(`model.effort.${level}` as Parameters<typeof t>[0]);
 }
 
 /**
@@ -97,20 +98,19 @@ export function EffortRow({
   if (compact) return (
     <label className={cn("flex items-center justify-between gap-3", className)}>
       {label}
-      <select aria-label="Reasoning effort" value={selection.effort ?? ""}
+      <Select size="sm" className="max-w-[65%]" aria-label={t("model.effort.label")} value={selection.effort ?? ""}
         onChange={(event) => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}),
-          selection: { ...selection, effort: levels.find((level) => level === event.target.value) } })}
-        className="min-w-0 max-w-[65%] rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
-        <option value="">Default</option>
+          selection: { ...selection, effort: levels.find((level) => level === event.target.value) } })}>
+        <option value="">{t("model.effort.default")}</option>
         {levels.map((level) => <option key={level} value={level}>{effortLabel(level)}</option>)}
-      </select>
+      </Select>
     </label>
   );
 
   return (
     <div className={className}>
       {label}
-      <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label="Reasoning effort">
+      <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label={t("model.effort.label")}>
         {[undefined, ...levels].map((level) => (
           <button
             key={level ?? "default"}
@@ -118,8 +118,8 @@ export function EffortRow({
             aria-pressed={selection.effort === level}
             title={
               level === undefined
-                ? "Send no effort level and let the provider decide"
-                : `Ask for ${effortLabel(level)} reasoning effort`
+                ? t("model.effort.noLevel")
+                : t("model.effort.ask", { level: effortLabel(level) })
             }
             onClick={() => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } })}
             className={cn(
@@ -129,7 +129,7 @@ export function EffortRow({
                 : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
             )}
           >
-            {level === undefined ? "Default" : effortLabel(level)}
+            {level === undefined ? t("model.effort.default") : effortLabel(level)}
           </button>
         ))}
       </div>
@@ -138,7 +138,7 @@ export function EffortRow({
 }
 
 function variantLabel(option: ModelVariantOption): string {
-  return option.id === "default" ? "OpenCode default" : option.label;
+  return option.id === "default" ? t("model.variant.openCodeDefault") : option.label;
 }
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
@@ -171,17 +171,15 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
     <div className={className}>
       <label className="flex items-center justify-between gap-3">
         {label}
-        <select aria-label="Reasoning variant" disabled={bot.busy}
+        <Select size="sm" aria-label={t("model.variant.label")} disabled={bot.busy} className={wide ? "flex-1" : "max-w-[65%]"}
           value={selection.variant === undefined ? "unset" : missing ? "missing" : String(options.findIndex((option) => option.id === selection.variant))}
-          onChange={(event) => choose(options[Number(event.target.value)]?.id)}
-          className={cn("min-w-0 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
-            wide ? "flex-1" : "max-w-[65%]")}>
-          <option value="unset">Use session setting</option>
-          {missing && <option value="missing" disabled>{selection.variant} ({unavailable ? "unavailable" : "unverified"})</option>}
+          onChange={(event) => choose(options[Number(event.target.value)]?.id)}>
+          <option value="unset">{t("model.variant.session")}</option>
+          {missing && <option value="missing" disabled>{selection.variant} ({unavailable ? t("model.variant.unavailable") : t("model.variant.unverified")})</option>}
           {options.map((option, index) => <option key={option.id} value={String(index)}>{variantLabel(option)}</option>)}
-        </select>
+        </Select>
       </label>
-      {missing && <p className="mt-1 text-[11px] text-ink-secondary">{unavailable ? "Saved variant is unavailable. Choose another or use the session setting." : "Saved variant has not been checked in this session."}</p>}
+      {missing && <p className="mt-1 text-[11px] text-ink-secondary">{unavailable ? t("model.variant.unavailableHelp") : t("model.variant.unverifiedHelp")}</p>}
     </div>
   );
   return (
@@ -189,27 +187,27 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
       {label}
       {(selection.variant === undefined || missing) && (
         <p className="mt-2 text-[12px] text-ink-secondary">
-          {unavailable ? `Saved variant “${selection.variant}” is unavailable. Choose an available variant.`
-            : missing ? `Saved variant “${selection.variant}” has not been checked in this session.` : "No variant selected."}
-          {current !== undefined && ` Session: ${variantLabel(options.find((option) => option.id === current) ?? { id: current, label: current })}.`}
+          {unavailable ? t("model.variant.unavailableChoice", { variant: selection.variant ?? "" })
+            : missing ? t("model.variant.unverifiedChoice", { variant: selection.variant ?? "" }) : t("model.variant.none")}
+          {current !== undefined && ` ${t("model.variant.sessionValue", { variant: variantLabel(options.find((option) => option.id === current) ?? { id: current, label: current }) })}`}
         </p>
       )}
       {selection.variant !== undefined && (
         <button type="button" disabled={bot.busy} onClick={() => choose()}
-          title="Send no variant selection; OpenCode keeps its session or configured setting"
+          title={t("model.variant.clearHint")}
           className="mt-2 block text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-50">
-          Clear variant selection
+          {t("model.variant.clear")}
         </button>
       )}
       {options.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label="Reasoning variant">
+        <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label={t("model.variant.label")}>
           {options.map((option) => (
             <button
               key={option.id}
               type="button"
               disabled={bot.busy}
               aria-pressed={selection.variant === option.id}
-              title={`Use ${variantLabel(option)} for this model`}
+              title={t("model.variant.use", { variant: variantLabel(option) })}
               onClick={() => choose(option.id)}
               className={cn(
                 "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
@@ -268,10 +266,10 @@ function ModelRow({
           </span>
         )}
         {option.id === defaultId && (
-          <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">Default</span>
+          <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">{t("model.effort.default")}</span>
         )}
         {option.loaded && (
-          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">Loaded</span>
+          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">{t("model.loadedNow")}</span>
         )}
         {botModel && <span data-bot-model className="shrink-0 text-[11px] text-ink-secondary">{t("model.botModelTag")}</span>}
       </span>
@@ -433,17 +431,16 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
   return (
     <label className="mt-2 flex min-w-0 items-center gap-2 text-[12px] text-ink-secondary">
       <span>{t("model.account")}:</span>
-      <select
+      <Select size="sm" className="flex-1"
         aria-label={t("model.account")}
         value={selectedId}
         onChange={(event) => {
           const account = accounts.find((instance) => instance.instanceId === event.target.value);
           if (account) onSelect(account);
         }}
-        className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus:border-accent/60 focus:outline-none"
       >
         {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{account.displayName}</option>)}
-      </select>
+      </Select>
     </label>
   );
 }
@@ -762,7 +759,7 @@ export function ModelPicker({
   const summary = active
     ? `${active.displayName} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
-      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${effortLabel(selection.effort)} effort` : ""}`
+      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${t("model.effort.summary", { level: effortLabel(selection.effort) })}` : ""}`
     : selection.model;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
 
@@ -917,16 +914,16 @@ export function ModelPicker({
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
             {threadId && (
               <div className="shrink-0 border-b border-hairline/40 px-3 py-2">
-                <div role="group" aria-label="Apply model changes to" className="flex gap-1">
+                <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
                   {(["thread", "bot"] as const).map((value) => (
                     <button key={value} type="button" aria-pressed={scope === value} onClick={() => setScope(value)}
                       className={cn("rounded-lg px-2 py-1 text-[12px]", scope === value ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60")}>
-                      {value === "bot" ? "Thread + bot default" : "Only this thread"}
+                      {value === "bot" ? t("model.scope.bot") : t("model.scope.thread")}
                     </button>
                   ))}
                 </div>
                 <p className="mt-1 text-[11px] text-ink-secondary">
-                  {scope === "bot" ? "The bot's model: this thread, groups, and every thread that uses the bot's model." : "This thread only. It keeps this model when the bot's model changes."}
+                  {scope === "bot" ? t("model.scope.botHelp") : t("model.scope.threadHelp")}
                 </p>
               </div>
             )}
@@ -1120,7 +1117,7 @@ export function ModelPicker({
                     threadId={threadId}
                     updateBotDefault={Boolean(threadId && scope === "bot")}
                     className="shrink-0 border-t border-hairline/40 px-4 py-2"
-                    label={<span className="text-[12.5px] font-medium text-ink">{active?.capabilities?.modelVariants ? "Reasoning" : "Effort"}</span>}
+                    label={<span className="text-[12.5px] font-medium text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                   />
                 )}
 

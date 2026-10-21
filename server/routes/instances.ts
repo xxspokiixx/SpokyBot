@@ -9,10 +9,13 @@ import {
 } from "../claude-accounts.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
+import { addEndpoint, addEndpointSchema, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
+import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
+import { checkEngine } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
@@ -25,7 +28,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface InstanceRouteDeps {
   store: Pick<Store, "bots" | "tasks">;
   cfg: AppConfig;
-  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget">;
+  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget" | "forgetSnapshots">;
   sessions: Pick<SessionRegistry, "isLive">;
   providerAuthSessions: Pick<ProviderAuthSessions, "status" | "start" | "revokeOwner" | "signOut" | "complete" | "cancel">;
   hostedModels: boolean;
@@ -45,9 +48,10 @@ export interface InstanceRouteDeps {
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, providerAuthSessions, hostedModels, providerConfigBusy, providerInstancesChanging,
-    describeInstances, persistProviderInstance, configStatus, broadcast, testCliBinary, cliProbeEnvironment, threadBusy,
+    persistProviderInstance, configStatus, broadcast, testCliBinary, cliProbeEnvironment, threadBusy,
     botForThread, activeGroupTurnForBot,
   } = deps;
+  const describeInstances = async () => hostedModels ? deps.describeInstances() : withEndpointUrls(await deps.describeInstances(), cfg.instances ?? {});
   // One updater per executable: Claude instances can share an install, and two self-updates would race its files.
   const claudeUpdatesInFlight = new Set<string>();
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
@@ -105,6 +109,21 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       } finally { providerConfigBusy.set(false); }
     }
 
+    if (method === "POST" && path === "/api/instances/openai-compat") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
+      const parsed = addEndpointSchema.safeParse(await readBody(req, 8192));
+      if (!parsed.success) return json(res, 400, { error: "Enter a display name (up to 80 characters), a base URL and an API key." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy.set(true);
+      try {
+        const instances = persistableInstanceConfigs(cfg);
+        const added = addEndpoint(instances, parsed.data);
+        if ("error" in added) return json(res, 400, { error: added.error });
+        await persistProviderInstance(added.instanceId, instances);
+        return json(res, 201, { instanceId: added.instanceId, instances: await describeInstances() });
+      } finally { providerConfigBusy.set(false); }
+    }
+
     if (method === "POST" && path === "/api/instances/claude-accounts") {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -124,9 +143,11 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     if (method === "GET" && authStatus) {
       res.setHeader("cache-control", "no-store");
       const state = await providerAuthSessions.status(authStatus[1], auth.kind === "session" ? auth.session.id : "loopback", url.searchParams.get("flowId") ?? "");
+      // A finished device sign-in changed what the engine reports; the page reads the engines next.
+      if (state.phase !== "waiting") registry.forgetSnapshots();
       return json(res, 200, { auth: state });
     }
-    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
+    const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|check|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
     if (method === "POST" && instanceAction) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -136,6 +157,12 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const owner = auth.kind === "session" ? auth.session.id : "loopback";
       if (action.startsWith("auth/")) res.setHeader("cache-control", "no-store");
       try {
+        if (action === "check") {
+          const instance = registry.get(instanceId);
+          if (!instance) return json(res, 404, { error: "unknown instance" });
+          res.setHeader("cache-control", "no-store");
+          return json(res, 200, await checkEngine(instance));
+        }
         if (action === "refresh-models") {
           if (!(await registry.refreshModels(instanceId))) return json(res, 404, { error: "unknown instance" });
           return json(res, 200, { instances: await describeInstances() });
@@ -152,6 +179,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
           }
           const started = await providerAuthSessions.start(instance, owner);
+          if (started.phase === "succeeded") registry.forgetSnapshots();
           // Revocation can arrive while the CLI is obtaining a device code.
           if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
             providerAuthSessions.revokeOwner(owner);
@@ -163,6 +191,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
           await providerAuthSessions.signOut(instance, owner);
+          registry.forgetSnapshots();
           return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "auth/complete") {
@@ -172,6 +201,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const callbackUrl = typeof body?.callbackUrl === "string" ? body.callbackUrl : typeof body?.code === "string" ? body.code : "";
           if (!flowId || !callbackUrl) return json(res, 400, { error: "flowId and a code or callbackUrl are required" });
           await providerAuthSessions.complete(instanceId, owner, flowId, callbackUrl);
+          registry.forgetSnapshots();
           return json(res, 200, { ok: true });
         }
         const body = await readBody(req, 4096);
@@ -242,6 +272,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
       } finally {
         claudeUpdatesInFlight.delete(target.cli);
+        // Even a failed update may have replaced the executable.
+        registry.forgetSnapshots();
       }
     }
 
@@ -302,8 +334,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const instances = persistableInstanceConfigs(cfg);
       if (!Object.hasOwn(instances, instanceId)) return json(res, 404, { error: "unknown instance" });
       const addedChatgpt = instances[instanceId].driver === "codex" && instanceId.startsWith("chatgpt-");
-      if (!addedChatgpt && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
-        return json(res, 400, { error: "Only added Claude and ChatGPT accounts can be removed here." });
+      const addedAntigravity = instances[instanceId].driver === "antigravityAgent" && instanceId.startsWith("antigravity-");
+      if (!addedChatgpt && !addedAntigravity && !isAddedEndpoint(instanceId, instances[instanceId]) && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
+        return json(res, 400, { error: "Only added Claude, ChatGPT, and Antigravity accounts and OpenAI-compatible endpoints can be removed here." });
       }
       if (cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
         bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
@@ -325,6 +358,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       try {
         delete instances[instanceId];
         await persistProviderInstance(instanceId, instances);
+        // An added Antigravity account's Google sign-in lives in OpenMausBot's data folder too: removing the account deletes it.
+        if (addedAntigravity) await removeAntigravityProfile(instanceId);
         return json(res, 200, { instances: await describeInstances() });
       } finally {
         providerInstancesChanging.delete(instanceId);

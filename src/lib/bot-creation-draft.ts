@@ -19,6 +19,7 @@ export class BotCreationDraft {
   consent: Pick<BotUpdatePatch, "acknowledgeLocalAuto"> & { acknowledgePeerScope?: boolean } = {};
   routines: Routine[];
   preset?: ChosenPreset;
+  role?: string;
   avatarFile?: File;
   private avatarObjectUrl?: string;
 
@@ -52,6 +53,11 @@ export class BotCreationDraft {
 
   choosePreset(preset: ChosenPreset | undefined) {
     this.preset = preset;
+    this.changed();
+  }
+
+  chooseRole(role: string | undefined) {
+    this.role = role;
     this.changed();
   }
 
@@ -89,7 +95,7 @@ export class BotCreationDraft {
     const normalizedSchedule = schedule.type === "interval" ? {
       ...schedule, weekdays: schedule.weekdays ?? undefined,
       window: schedule.window ?? undefined, endsAt: schedule.endsAt ?? undefined,
-    } : schedule;
+    } : schedule.type === "limit_reset" ? { ...schedule, repeat: schedule.repeat ?? "once", at: schedule.at ?? null } : schedule;
     return {
       id: previous?.id ?? `draft-${crypto.randomUUID()}`, createdAt: previous?.createdAt ?? Date.now(),
       updatedAt: Date.now(), nextRunAt: null, runOn: "maus", ...previous, ...fields,

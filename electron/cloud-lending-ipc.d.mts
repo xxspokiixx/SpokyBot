@@ -1,0 +1,31 @@
+export declare const DEFAULT_FOLDERS: readonly string[];
+export interface PageLending {
+  available: boolean;
+  on: boolean;
+  /** "lent", "busy", "starting", or why it isn't working (computer-sharing.mjs's problem codes). */
+  status: string | null;
+  folders: Array<{ name: string; write: boolean }>;
+  screen: boolean;
+  /** Whether computer control is set up here, so Apps and screen can be lent. */
+  screenAvailable: boolean;
+  /** Its internet connection, for the bots' browsers on My Cloud. */
+  internet: boolean;
+  /** Whether My Cloud's browsing goes through it yet. */
+  link?: "on" | "connecting" | "unsupported";
+}
+export function pageLending(snapshot: unknown): PageLending;
+export interface LentFolder { id: string; path: string; name: string; write: boolean }
+export function defaultGrant(input: { kept?: { folders?: LentFolder[]; screen?: boolean }; usual: LentFolder[]; projects: LentFolder[]; screenAvailable?: boolean }): { folders: LentFolder[]; screen: boolean; internet: true };
+export function existingFolders<T>(folders: unknown[], validate: (folders: unknown[]) => Promise<T[]>): Promise<T[]>;
+/** A refusal the page says plainly, never with Try again: `lending-refused:<code>` in the IPC error's message. */
+export declare const LENDING_REFUSED: string;
+export function usualFolderPaths(getPath: (name: string) => string, home: string): Array<{ path: string; named: string }>;
+export function usualFolders<T extends { path: string }>(entries: Array<string | { path: string; named: string | null }>, validate: (folders: Array<{ id: string; path: string; write: boolean }>) => Promise<T[]>): Promise<T[]>;
+export function createLendingTarget<E extends { origin: string }>(deps: {
+  account: () => { state(): { status: string; message?: string; account?: { id: string } | null; machine?: { origin?: string } | null } } | null | undefined;
+  environments: () => E[];
+}): { cloud(): { status: string; accountId: string | null; origin: string | null } | null; environment(): E | null };
+export function installCloudLending(deps: Record<string, unknown>): {
+  /** At the move to My Cloud: the default grant on top of what is lent; null when the person's own Off keeps it off. */
+  lendByDefault(input?: { projects?: string[] }): Promise<PageLending | null>;
+};

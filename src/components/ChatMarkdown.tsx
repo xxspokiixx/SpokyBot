@@ -8,7 +8,7 @@ import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-f
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { remarkMentions, type MentionPeer } from "@/lib/mentions";
+import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 
 import {
   countLines,
@@ -16,7 +16,9 @@ import {
   formatLineCount,
   getLanguageDisplayName,
   getSnippetFileName,
+  parseFenceInfo,
 } from "../lib/code-block";
+import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
@@ -27,7 +29,7 @@ import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, rema
 import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 import { MarkdownTable } from "./MarkdownTable";
-import { TableFileButton } from "./TableFilePreview";
+import { FilePreviewButton } from "./FilePreviewButton";
 
 const highlightCache = new Map<string, string>();
 export const HIGHLIGHT_CACHE_MAX = 200;
@@ -293,15 +295,19 @@ interface BlockProps {
 export interface CodeBlockProps {
   code: string;
   lang: string;
+  initialWrap?: boolean;
 }
 
-export function CodeBlock({ code, lang }: CodeBlockProps) {
+export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
   const highlightable = code.length <= HIGHLIGHT_MAX_CHARS;
   const [html, setHtml] = useState<string | null>(() => highlightable ? highlightCache.get(highlightKey(lang, code)) ?? null : null);
   // React compares dangerouslySetInnerHTML by identity: a fresh object each render rebuilds the highlighted DOM.
   const markup = useMemo(() => (html ? { __html: html } : null), [html]);
   const { state: copied, copy } = useCopyFeedback(code);
-  const [wrapLines, setWrapLines] = useState(false);
+  const [wrapLines, setWrapLines] = useState(initialWrap);
+  useEffect(() => {
+    setWrapLines(initialWrap);
+  }, [initialWrap]);
 
   useEffect(() => {
     if (!highlightable) return setHtml(null);
@@ -579,7 +585,7 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
-      <TableFileButton path={filePath} name={name ?? fileName(filePath)} message={message} />
+      <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />
       <button
         type="button"
         onClick={() => void save.save()}
@@ -615,27 +621,6 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
     </span>
   );
-}
-
-export function markdownImageName(src: string, alt?: string): string {
-  const supplied = alt?.trim();
-  if (supplied) return supplied;
-  try {
-    const path = decodeURIComponent(new URL(src, "https://openmausbot.invalid").pathname);
-    const name = path.split(/[\\/]/).filter(Boolean).at(-1)?.trim();
-    if (name) return name;
-  } catch {
-  }
-  return "Image";
-}
-
-export function markdownImageOpenUrl(src: string): string | undefined {
-  try {
-    const url = new URL(src.startsWith("//") ? `https:${src}` : src);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function Spoiler({ children }: { children?: ReactNode }) {
@@ -840,17 +825,17 @@ const fileName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 
 const MessageScopeContext = createContext<MessageScope>({ threads: [] });
 
-function MarkdownCode({ children }: { children?: ReactNode }) {
+function MarkdownCode({ node, children }: BlockProps) {
   const child: any = Array.isArray(children) ? children[0] : children;
   const className: string = child?.props?.className ?? "";
-  const lang = /language-([^\s]+)/.exec(className)?.[1] ?? "";
+  const { lang, wrap } = parseFenceInfo(/language-([^\s]+)/.exec(className)?.[1] ?? "", (node as { children?: { data?: { meta?: unknown } }[] })?.children?.[0]?.data?.meta);
   const flat = (n: any): string =>
     typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : (n?.props?.children ? flat(n.props.children) : "");
   const code = flat(child?.props?.children).replace(/\n$/, "");
   if (lang.trim().toLowerCase() === "mermaid") {
     return <MermaidDiagram code={code} />;
   }
-  return <CodeBlock code={code} lang={lang} />;
+  return <CodeBlock code={code} lang={lang} initialWrap={wrap} />;
 }
 
 function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
@@ -986,9 +971,9 @@ const MARKDOWN_COMPONENTS: Components = {
 const MAY_LINK_THREAD = /#|openmausbot/i;
 const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
-function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, delivered }: {
+function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered }: {
   text: string; message?: MessageAttachmentContext;
-  mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
+  mentionPeers?: readonly MentionPeer[]; everyone?: boolean; mentionPerson?: MentionPerson;
   delivered?: DeliveredFiles;
 }) {
   // use() may be called conditionally: only a message that can hold a thread link subscribes to the thread list.
@@ -1016,7 +1001,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">
         <Markdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }], remarkThreadRefs(threads, currentBotId)]}
           rehypePlugins={mathPlugin ? [mathPlugin] : []}
           urlTransform={chatUrlTransform}
           components={MARKDOWN_COMPONENTS}
@@ -1040,7 +1025,7 @@ export function samePeers(previous: readonly MentionPeer[], next: readonly Menti
 export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
   previous.text === next.text
   && samePeers(previous.mentionPeers ?? NO_MENTION_PEERS, next.mentionPeers ?? NO_MENTION_PEERS)
-  && previous.everyone === next.everyone
+  && previous.everyone === next.everyone && sameMentionPerson(previous.mentionPerson, next.mentionPerson)
   && previous.message?.threadId === next.message?.threadId
   && previous.message?.messageId === next.message?.messageId
   && sameDelivered(previous.delivered, next.delivered)

@@ -28,8 +28,7 @@ exception: `OMB_OPENAI_LIVE_URL` crosses when it is a loopback
 `http://127.0.0.1:PORT` (the fake GPT-Live that
 `node --experimental-strip-types server/testing/fake-openai-live.ts` prints),
 and `OMB_OPENAI_LIVE_KEY` crosses only with it, so that key can only ever
-reach the fake. `OMB_PRO_PLAN` crosses only as `1`: Live calls from a phone need a Pro plan,
-and that is how a server the desktop app did not start says so.
+reach the fake.
 
 Pass the printed URL explicitly from a second terminal:
 
@@ -56,10 +55,16 @@ Use only mapped, tested commands:
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
+- [The safety floor: a never-list no grant can allow](safety-floor.md)
 - [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
+- [Computer panel focus hand-off](computer-panel-focus.md)
+- [Taking control of a bot's computer](take-control.md)
+- [Native dictation retention and send-to-stop](dictation.md)
+- [The Today page](today.md)
 - [Chat widgets](widgets.md)
+- [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
 - [Phone web app installation and safe areas](phone-web-app.md)
 - [Welcome flow and guided tour](onboarding.md)
@@ -104,6 +109,10 @@ The [switchable local environments recipe](local-environments.md) verifies
 creating, switching between and recovering named local environments by hand on
 a packaged desktop install; the control surface cannot drive it, so it is not
 in the map above.
+
+The [move to My Cloud fixture](cloud-send.md) runs this computer's server and a
+Cloud home with the desktop's own wiring between them, and runs and checks the
+one-time move as main does.
 
 The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel
@@ -231,6 +240,11 @@ using the real renderer and an isolated fake-engine server.
 
 The [interval restrictions recipe](interval-restrictions.md) checks weekday and
 time-window limits on scheduled routines in that same disposable fixture.
+
+The [automation reports recipe](automation-reports.md) checks that every run
+reports into the bot's chat as one captioned bot message, that quiet runs write
+nothing, that a run's question is answered in that chat, and the concurrency
+rule with the person's own turn, in the real renderer and end to end.
 
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.

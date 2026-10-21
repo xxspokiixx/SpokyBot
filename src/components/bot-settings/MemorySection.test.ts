@@ -65,7 +65,7 @@ describe("MemoryFileRows", () => {
     const markup = render(createElement(MemoryFileRows, { title: "Topic files", hint: "hint", files, onOpen: vi.fn(), onDelete: vi.fn() }));
     expect(markup).toContain("clients.md");
     expect(markup).toContain("120 B");
-    expect(markup).toContain("3 min ago");
+    expect(markup).toContain("3 minutes ago");
     expect(markup).toContain('aria-label="Delete clients.md"');
   });
 
@@ -120,7 +120,7 @@ describe("MemoryJournalList", () => {
   it("reads each row as a sentence with the chat it came from, and offers Undo", () => {
     const markup = render(createElement(MemoryJournalList, { rows, botName: "Scout", reverting: null, onRevert: vi.fn(), now }));
     expect(markup).toContain("Scout added 2 lines to MEMORY.md");
-    expect(markup).toContain("3 min ago");
+    expect(markup).toContain("3 minutes ago");
     expect(markup).toContain("from chat “Follow-up”");
     expect(markup).toContain("+2 −0 · show what changed");
     expect(markup).toContain("+one");
@@ -194,7 +194,7 @@ describe("LendingReviewNotice", () => {
   it("says plainly why the bot cannot use the Mac, names what changed, and marks it reviewed in one click", () => {
     const onReviewed = vi.fn();
     const markup = render(createElement(LendingReviewNotice, { changed, stale: false, busy: false, onReviewed }));
-    expect(markup).toContain("This bot's memory was changed in a conversation you didn't write, so it can't use your Mac.");
+    expect(markup).toContain("This bot's memory was changed in a conversation you didn't write, so it can't use your computer.");
     expect(markup).toContain("Changed:");
     for (const file of changed) expect(markup).toContain(`>${file}<`);
     expect(markup).toContain(">Mark reviewed<");

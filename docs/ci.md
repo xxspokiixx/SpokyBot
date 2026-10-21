@@ -66,6 +66,68 @@ half hours. Now:
   Electron smokes.
 - `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).
 
+## Browser driver (S4)
+
+`browser driver S4 (<os>)` runs the omb-cdp conformance suites
+(`server/browser/cdp/s4-*.e2e.test.ts`) against real Chrome: snapshots across
+out-of-process frames and closed shadow roots, every action, dialogs,
+downloads, popups and tabs, both evaluation worlds, waiting, the calibrated
+identity against the headed browser and across page, worker, service worker,
+frame and request headers, Chrome exiting after its controller is killed, and
+the latency targets. Each suite records every CDP command its browsers were
+sent and fails on `Runtime.enable`, `Runtime.addBinding`, `Console.*`,
+`Debugger.*`, `Profiler.*` or an evaluation in the page's own world that the
+test did not ask for. The unit tests in the vitest shards hold the same rule
+without a browser: the method guard refuses those methods and no driver
+source names them.
+
+The same job runs the new browser's suites on that Chrome:
+`server/browser/checklist.e2e.test.ts` (the design's checklist items the
+browser service owns: tools and refs, sign-ins kept across a restart of the
+browser, erase and temporary profiles, uploads, downloads, dialogs, popups,
+HTTP sign-in, a person's hold, restart and idle close) and
+`server/browser/viewers/viewers.e2e.test.ts` (the page filling the viewer
+at the screen's device scale, resizes, presets, acknowledged frames, a
+scroll ending on a sharp frame, and the phone's v1 live view against its
+golden from agent-browser), `server/browser/passkey-wall.e2e.test.ts` (a
+sign-in shaped like Google's that stops at a passkey or a security key: the
+bot's notice, the request ending at once as unavailable, Try another way, the
+options and a code, and no passkey registered) and
+`server/browser/viewers/stream-v2.e2e.test.ts`
+(the panel's WebSocket stream through its routes: a 1600x1000 panel getting a
+1600x1000 page and 3200x2000 frames on a 2x screen, the page's file picker
+answered by an upload, a dropdown list drawn by the viewer, a download served
+to it, the page's cursor and copied text).
+
+- The job uses the runner's installed Google Chrome (`OMB_CDP_E2E=1`) on the
+  same platforms as the vitest shards: Linux and Windows on PRs, plus macOS
+  on main, merge groups and manual runs. Linux runs under Xvfb so the
+  headed-identity case has a display.
+- On Linux it then builds the server image's `runtime` stage and runs the
+  suites inside it as a non-root user against the image's Chrome for
+  Testing, with `OMB_BROWSER_SANDBOX=0` because the image has no setuid
+  sandbox helper yet.
+- It is advisory, outside the `CI` gate, until it has run green for a while.
+- The latency targets hold wherever Chrome itself can meet them. The suite
+  also times Chrome alone in the same run (the same binary started bare and
+  showing a page; a frame and the same mouse events with none of the driver's
+  checks), and where Chrome alone is slower, as on GitHub's macOS VM (0.7-1.5
+  s to start, 60-75 ms to click, against 0.3 s and 33 ms on a Mac), the driver
+  may add only its budget to that.
+- On macOS the job locks the runner's Google Chrome app before the suites and
+  fails if its version changed: the image's Chrome is older than Google's
+  release, and the GoogleUpdater it starts swaps the new version into the app
+  about a minute and a half after Chrome first runs, in the middle of the
+  suites.
+- Locally: `OMB_CDP_CHROME=<chrome executable> pnpm exec vitest run
+  server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e
+  server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e` (or
+  `OMB_CDP_E2E=1` for the installed Google Chrome). Without either the suites
+  skip. `OMB_CDP_TEST_TMP` moves the throwaway profiles.
+- `pnpm bench:browser-stream` measures the panel's stream on the installed
+  Google Chrome with this computer's display: frame and page sizes, input to
+  photon, frame rate, bytes and CPU. It is not part of CI.
+
 ## Main and releases
 
 Main keeps one CI run going and one waiting. Each merge replaces the waiting

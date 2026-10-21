@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, CircleUser, Coins, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen } from "lucide-react";
+import { Archive, CircleUser, Cloud, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
-import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, routinesInConversationEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
+import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
-import { AnthropicEveryClaudeBot, ApiKeyRow, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
+import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
+import { AnalyticsRow } from "./AnalyticsRow";
+import { DiagnosticsRow } from "./DiagnosticsRow";
+import { OtherOpenAiCompatServers } from "./OpenAiCompatServers";
 import { DecisionModelSettings } from "./DecisionModelSettings";
 import { useUpdaterState } from "@/lib/updater";
 import { brand } from "../lib/brand";
@@ -21,6 +23,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { currentPhonePairingTarget, phonePairingSettingsAction } from "@/lib/phone-pairing";
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
+import { BuiltInBrowserRow, NewBrowserSettings } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
@@ -28,7 +31,7 @@ import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
 import { ProSettingsCard } from "./ProIntroduction";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
-import { SkillReviewSettings } from "./SkillReviewSettings";
+import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { shortcutLabel } from "./ShortcutHint";
@@ -37,27 +40,28 @@ import { SkillsSection } from "./SkillsSection";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
-import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
+import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "./AppearanceSelectRows";
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
-import { AboutMeSettings } from "./AboutMeSettings";
+import { ProfileFields } from "./ProfileSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { AutomaticRecoverySettings } from "./AutomaticRecoverySettings";
 import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
 import { DefaultBotSettings } from "./NewBotDialog";
 import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
 import { CompanyBackupSettings } from "./CompanyBackupSettings";
+import { ImportSettings } from "./ImportSettings";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
-import { setNotificationSounds, useNotificationSounds } from "@/lib/notification-preferences";
-import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
+import { NotificationRows } from "./NotificationSettingsRows";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
-import { parseSidebarDensity, setSidebarDensity, SIDEBAR_DENSITIES, useSidebarDensity, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalPins, SIDEBAR_DENSITIES, usePinnedCircles, useSidebarDensity, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
+import { Select } from "./Select";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
 // boot language.
@@ -78,7 +82,7 @@ export const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule"] },
-  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "bubble", "bubbles", "message color", "my messages"] },
+  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
   { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
@@ -87,10 +91,11 @@ export const SECTIONS: Array<{
   { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
   { id: "logins", group: "computers", labelKey: "settings.section.logins", icon: LockKeyhole, keywords: ["logins", "login", "passwords", "password", "sign in", "2fa", "one-time code", "totp", "fill_login", "1password", "vault"] },
-  { id: "cloudAccount", group: "account", labelKey: "settings.section.cloudAccount", icon: User, keywords: ["cloud", "account", "personal", "sign in", "pro", "subscription", "billing"] },
+  { id: "cloudAccount", group: "account", labelKey: "settings.section.cloudAccount", icon: Cloud, keywords: ["cloud", "my cloud", "account", "personal", "sign in", "pro", "subscription", "billing", "sync", "send", "this computer", "bots", "logins", "1password", "lend"] },
   { id: "organization", group: "account", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "usage", group: "account", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing", "plan", "quota", "remaining", "weekly", "5-hour", "model", "used"] },
   { id: "backups", group: "account", labelKey: "settings.section.backups", icon: Archive, keywords: ["export", "import", "restore", "full backup", "password", "recovery"] },
+  { id: "import", group: "account", labelKey: "settings.section.import", icon: Download, keywords: ["import", "grok", "grok bot", "x.ai", "cursor", "claude code", "codex", "gemini", "skills", "mcp", "tools", "bring"] },
   { id: "people", group: "account", labelKey: "settings.section.people", icon: Users, keywords: ["people", "users", "invite", "sign in", "members", "admins", "access"] },
   { id: "activity", group: "account", labelKey: "settings.section.activity", icon: ScrollText, keywords: ["activity", "audit", "log", "history", "who changed", "approvals", "decisions", "admin"] },
   { id: "workspaces", group: "account", labelKey: "settings.section.workspaces", icon: Building2, keywords: ["clients", "tenants", "fleet", "workspaces", "installation", "installations"] },
@@ -109,7 +114,8 @@ export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, sections: ["appearance"] },
   { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections", "decisionModel"] },
   { id: "computers", labelKey: "settings.group.computers", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
-  { id: "account", labelKey: "settings.group.account", icon: CircleUser, sections: ["cloudAccount", "organization", "people", "activity"] },
+  { id: "cloud", labelKey: "settings.section.cloudAccount", icon: Cloud, sections: ["cloudAccount"] },
+  { id: "account", labelKey: "settings.group.account", icon: CircleUser, sections: ["organization", "import", "people", "activity"] },
 ];
 
 export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["usage", "backups", "experimental", "workspaces", "skills"];
@@ -132,10 +138,7 @@ export function revealSettingsBlock(
   section: AppSettingsSection,
   indexInPage: number,
 ): void {
-  if (indexInPage <= 0) {
-    scroller.scrollTop = 0;
-    return;
-  }
+  if (indexInPage <= 0) { scroller.scrollTop = 0; return; }
   scroller.querySelector(`[data-settings-block="${section}"]`)?.scrollIntoView?.({ block: "start" });
 }
 
@@ -151,47 +154,6 @@ function simplePageMatches(page: SimpleSettingsPage, query: string): boolean {
 export function sectionMatches(section: (typeof SECTIONS)[number], query: string): boolean {
   if (!query) return true;
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
-}
-
-function ProfileFields() {
-  const { state, dispatch } = useStore();
-  const [name, setName] = useState(state.config?.profile?.name ?? "");
-  const [email, setEmail] = useState(state.config?.profile?.email ?? "");
-  useEffect(() => {
-    setName(state.config?.profile?.name ?? "");
-    setEmail(state.config?.profile?.email ?? "");
-  }, [state.config?.profile?.name, state.config?.profile?.email]);
-
-  const save = () => {
-    void fetch("/api/config", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
-    })
-      .then((r) => { if (!r.ok) throw new Error("Profile save failed"); return r.json(); })
-      .then((config: ConfigStatus) => {
-        if (config.profile) dispatch({ type: "profileSaved", profile: { name: config.profile.name, email: config.profile.email } });
-      })
-      .catch(() => {});
-  };
-
-  const inputClass =
-    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none";
-  return (
-    <div className="flex flex-col gap-3">
-      <input aria-label={t("settings.profile.name")} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
-      <input
-        type="email"
-        aria-label={t("phone.signIn.email")}
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        onBlur={save}
-        placeholder="you@example.com"
-        className={inputClass}
-      />
-      <AboutMeSettings />
-    </div>
-  );
 }
 
 export function UpdatesRow() {
@@ -281,12 +243,11 @@ function NewBotEffortRow() {
       subtitle={t("settings.newBotEffort.subtitle")}
       message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={current}
         disabled={saving}
         aria-label={t("settings.newBotEffort.aria")}
         onChange={(event) => void save(event.target.value)}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.newBotEffort.default")}</option>
         {EFFORT_LEVELS.map((level) => (
@@ -294,24 +255,7 @@ function NewBotEffortRow() {
             {effortLabel(level)}
           </option>
         ))}
-      </select>
-    </SettingRow>
-  );
-}
-
-function AnalyticsRow() {
-  const [on, setOn] = useState(analyticsEnabled);
-  return (
-    <SettingRow title={t("settings.analytics.title")} subtitle={t("settings.analytics.subtitle")}>
-      <Switch
-        checked={on}
-        aria-label={t("settings.analytics.aria")}
-        onClick={() => {
-          const next = !on;
-          setAnalyticsEnabled(next);
-          setOn(next);
-        }}
-      />
+      </Select>
     </SettingRow>
   );
 }
@@ -377,11 +321,10 @@ function LanguageRow() {
       title={t("settings.language.title")}
       subtitle={t("settings.language.subtitle")}
     >
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={current}
         aria-label={t("settings.language.aria")}
         onChange={(event) => setLanguageChoice(event.target.value)}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
@@ -389,43 +332,7 @@ function LanguageRow() {
             {label}
           </option>
         ))}
-      </select>
-    </SettingRow>
-  );
-}
-
-function NotificationSoundsRow() {
-  const enabled = useNotificationSounds();
-  return (
-    <SettingRow title={t("settings.notificationSounds.title")} subtitle={t("settings.notificationSounds.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.notificationSounds.play")}
-        onClick={() => setNotificationSounds(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function FontRow() {
-  const [current, setCurrent] = useState<FontId>(readFont);
-  return (
-    <SettingRow title={t("settings.font.title")} subtitle={t("settings.font.subtitle")}>
-      <select
-        value={current}
-        aria-label={t("settings.font.aria")}
-        onChange={(event) => {
-          // SAFETY: the options are rendered from FONT_IDS, so the value is always a member.
-          const id = event.target.value as FontId;
-          applyFont(id);
-          setCurrent(id);
-        }}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
-      >
-        {FONT_IDS.map((id) => (
-          <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
-        ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -434,16 +341,15 @@ function SendKeyRow() {
   const sendKey = useSendKey();
   return (
     <SettingRow title={t("settings.sendKey.title")} subtitle={t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={sendKey}
         aria-label={t("settings.sendKey.title")}
         onChange={(event) => setSendKey(parseSendKey(event.target.value))}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {SEND_KEYS.map((mode) => (
           <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -510,16 +416,15 @@ function SidebarDensityRow() {
   const density = useSidebarDensity();
   return (
     <SettingRow title={t("sidebar.density.title")} subtitle={t("settings.sidebarDensity.subtitle")}>
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={density}
         aria-label={t("sidebar.density.chooseAria")}
         onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {SIDEBAR_DENSITIES.map((option) => (
           <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -545,46 +450,6 @@ function UniversalPinsRow() {
         checked={enabled}
         aria-label={t("settings.universalPins.title")}
         onClick={() => setUniversalPins(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function RoutinesInConversationRow() {
-  const { state, dispatch } = useStore();
-  const enabled = routinesInConversationEnabled(state.config);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const toggle = async () => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ features: { routinesInConversation: !enabled } }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.routinesInConversation.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <SettingRow
-      title={t("settings.routinesInConversation.title")}
-      subtitle={t("settings.routinesInConversation.subtitle")}
-      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
-    >
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.routinesInConversation.aria")}
-        disabled={saving}
-        onClick={() => void toggle()}
-        className="disabled:cursor-wait disabled:opacity-50"
       />
     </SettingRow>
   );
@@ -671,57 +536,9 @@ function ExperimentalFeaturesRow() {
         />
       </div>
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
-      <SkillReviewSettings />
+      <LearnedSkillsSettings />
+      <NewBrowserSettings />
     </Card>
-  );
-}
-
-function BuiltInBrowserRow() {
-  const { state, dispatch } = useStore();
-  const browser = builtInBrowserEnabled(state.config);
-  const desktopBrowser = browserAvailable(state.config);
-  const browserInstallable = state.config?.browserEngine?.installable === true;
-  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser && !browserInstallable;
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const toggle = async (next: boolean) => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ features: { browser: next } }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.experimental.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <SettingRow
-    title={t("settings.experimental.browserAria")}
-    subtitle={desktopBrowser
-        ? browser
-        ? t("settings.experimental.browserOn")
-        : t("settings.experimental.browserOff")
-        : browserBlockedOnWindows
-        ? t("settings.experimental.browserWindows")
-        : browserUnavailableReason(state.config)}
-    message={error ? <p role="alert" className="text-danger">{error}</p> : null}
-    >
-      <Switch
-          checked={browser}
-          aria-label={t("settings.experimental.browserAria")}
-          disabled={saving || (!browser && !desktopBrowser && !browserInstallable)}
-          onClick={() => void toggle(!browser)}
-          className="disabled:cursor-wait disabled:opacity-50"
-      />
-    </SettingRow>
   );
 }
 
@@ -733,47 +550,6 @@ function BrowserProfilesRow() {
     <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.sharedSubtitle")}>
       <BrowserProfilesManager />
     </Card>
-  );
-}
-
-/** Security: the report never holds credential values; the desktop shell does not read secret fields. */
-function DiagnosticsRow() {
-  const [exporting, setExporting] = useState(false);
-  const [result, setResult] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-
-  const exportDiagnostics = async () => {
-    if (!window.ogb?.exportDiagnostics || exporting) return;
-    setExporting(true);
-    setResult(null);
-    try {
-      const path = await window.ogb.exportDiagnostics();
-      if (path) setResult({ kind: "success", message: t("settings.diagnostics.saved", { path }) });
-    } catch (e) {
-      setResult({ kind: "error", message: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  return (
-    <SettingRow
-      title={t("settings.diagnostics.title")}
-      subtitle={t("settings.diagnostics.subtitle")}
-      message={result ? (
-        <p role={result.kind === "error" ? "alert" : "status"} className={cn("break-all", result.kind === "error" ? "text-danger" : "text-success")}>
-          {result.message}
-        </p>
-      ) : null}
-    >
-      <button
-        onClick={() => void exportDiagnostics()}
-        disabled={exporting}
-        aria-label={t("settings.diagnostics.aria")}
-        className="ui-button"
-      >
-        {exporting ? t("settings.diagnostics.exporting") : t("settings.diagnostics.export")}
-      </button>
-    </SettingRow>
   );
 }
 
@@ -794,7 +570,7 @@ export function SettingsModal() {
   const ownerOrAdmin = useOwnerOrAdmin();
   const baseSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
     .filter((entry) => entry.id !== "desktopWorkspaces" || Boolean(window.ogb?.environments))
-    .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization))
+    .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization)).filter((entry) => entry.id !== "import" || Boolean(window.ogb))
     .filter((entry) => entry.id !== "cloudAccount" || Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true)))
     .filter((entry) => entry.id !== "workspaces" || workspacesAvailable(state.config))
     .filter((entry) => entry.id !== "people" || (!window.ogb && state.config?.cloudHome !== true))
@@ -883,7 +659,7 @@ export function SettingsModal() {
       case "cloudAccount":
         return (window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true)) && !remoteActive
           ? <CloudAccountSettings linkRequest={state.appSettingsCloudLink} cloudHome={state.config?.cloudHome === true}
-            onConnectPhone={() => dispatch(phonePairingSettingsAction())} onAddCloud={() => dispatch({ type: "openCloudAdd", source: "app_settings" })} />
+            onConnectPhone={() => dispatch(phonePairingSettingsAction())} onAddCloud={() => dispatch({ type: "openCloudAdd", source: "app_settings" })} onSignIn={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })} />
           : null;
       case "general":
         return (
@@ -909,8 +685,6 @@ export function SettingsModal() {
             </Card>
             <ThreadConcurrencySettings />
 
-            {!remoteActive && <RoutinesInConversationRow />}
-
             <AutomaticRecoverySettings />
             <ThreadCleanupSettings />
 
@@ -927,13 +701,15 @@ export function SettingsModal() {
             </Card>
             {remoteActive && <AdvancedModeRow />}
             <FontRow />
+            <ChatWidthRow />
             <ColorUserBubblesRow />
             <SendKeyRow />
             <SidebarDensityRow />
+            {advanced && <SidebarToolsLayoutRow />}
             {advanced && <ShowThreadsRow />}
             <PinnedCirclesRow />
             <UniversalPinsRow />
-            <NotificationSoundsRow />
+            <NotificationRows />
             {!remoteActive && <ToolCallsRow />}
             <RunCardRow />
           </>
@@ -963,15 +739,9 @@ export function SettingsModal() {
               <ApiKeyRow section="cerebras" testProvider="cerebras" />
               <ApiKeyRow section="groq" testProvider="groq" />
               <ApiKeyRow section="meta" testProvider="meta" />
-              <details data-api-keys-other className="rounded-lg border border-hairline/40 bg-inset px-3 py-2" open={Boolean(state.config?.openaiCompat?.configured)}>
-                <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("keys.other.title")}</summary>
-                <div className="mt-3 flex flex-col gap-4">
-                  <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
-                  <OpenAiCompatUrl />
-                </div>
-              </details>
+              <OtherOpenAiCompatServers />
               <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
-              <ApiKeyRow section="box" />
+              <ApiKeyRow section="treg" testProvider="treg" /><ApiKeyRow section="box" />
               <VpsConnection />
               <ApiKeyRow section="opencodeGo" />
               {state.config?.cloudHome !== true && (
@@ -990,12 +760,10 @@ export function SettingsModal() {
             </div>
           </Card>
         );
-      case "decisionModel":
-        return <DecisionModelSettings />;
-      case "engines":
-        return <EnginesSettings />;
-      case "backups":
-        return <><WorkspaceBackupSettings /><CompanyBackupSettings /></>;
+      case "decisionModel": return <DecisionModelSettings />;
+      case "engines": return <EnginesSettings />;
+      case "backups": return <><WorkspaceBackupSettings /><CompanyBackupSettings /></>;
+      case "import": return <ImportSettings />;
       case "companion": {
         const phoneFocus = state.appSettingsPhonePairing;
         const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
@@ -1130,14 +898,13 @@ export function SettingsModal() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-9">
             {advanced ? (
-              <select
+              <Select className="min-w-0 sm:hidden"
                 aria-label={t("settings.title")}
                 value={section}
                 onChange={(event) => {
                   setQuery("");
                   openSection(event.target.value as AppSettingsSection);
                 }}
-                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {SETTINGS_GROUPS.map((group) => {
                   const entries = availableSections.filter((entry) => entry.group === group.id);
@@ -1149,9 +916,9 @@ export function SettingsModal() {
                     </optgroup>
                   );
                 })}
-              </select>
+              </Select>
             ) : (
-              <select
+              <Select className="min-w-0 sm:hidden"
                 aria-label={t("settings.title")}
                 value={currentPage?.id ?? ""}
                 onChange={(event) => {
@@ -1159,12 +926,11 @@ export function SettingsModal() {
                   const page = simplePages.find((candidate) => candidate.id === event.target.value);
                   if (page) openSection(page.sections[0]!);
                 }}
-                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {simplePages.map((page) => (
                   <option key={page.id} value={page.id}>{t(page.labelKey)}</option>
                 ))}
-              </select>
+              </Select>
             )}
             <span className="hidden text-[15px] font-semibold text-ink sm:block">
               {sectionLabelKey ? t(sectionLabelKey) : null}

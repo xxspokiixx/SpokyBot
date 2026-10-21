@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
+import { Select } from "./Select";
 
 // Hook-by-call-order harness: the picker's own state survives between renders, effects never run, and handlers are read
 // off the element tree.
@@ -109,13 +110,13 @@ function bot(effort?: EffortLevel, instanceId = "claude", model = "claude-opus-5
   };
 }
 
-function render(forBot: Bot, options: { contained?: boolean } = {}) {
+function render(forBot: Bot, options: { contained?: boolean; thread?: boolean } = {}) {
   fixture.values.length = Math.min(fixture.values.length, fixture.own);
   let tree: ReactNode = null;
   function Capture() {
     fixture.index = 0;
     tree = options.contained
-      ? ModelPicker({ bot: forBot, contained: true, label: "Default model" })
+      ? ModelPicker({ bot: forBot, contained: true, label: "Default model", ...(options.thread ? { threadId: forBot.threadId } : {}) })
       : ModelPicker({ bot: forBot, threadId: forBot.threadId });
     fixture.own = fixture.index;
     return tree;
@@ -124,7 +125,7 @@ function render(forBot: Bot, options: { contained?: boolean } = {}) {
   return { html, nodes: nodes(tree) };
 }
 
-function open(forBot: Bot, options: { contained?: boolean } = {}) {
+function open(forBot: Bot, options: { contained?: boolean; thread?: boolean } = {}) {
   const trigger = render(forBot, options).nodes.find((node) => node.props["data-tour"] === "model")!;
   (trigger.props.onClick as () => void)();
   return render(forBot, options);
@@ -469,7 +470,7 @@ describe("the model picker in Simple mode", () => {
     const variants = [{ id: "default", label: "Default" }, { id: "high", label: "High" }];
     fixture.instances = [{ ...claude(true, [{ id: "claude-opus-5-5", label: "Opus 5.5", variants }]), capabilities: { modelVariants: true } }];
     const row = pane(open(bot()))!.props.variantsRow as ReactElement<ComponentProps<typeof ModelVariantRow>>;
-    const select = nodes(ModelVariantRow(row.props)).find((node) => node.type === "select")!;
+    const select = nodes(ModelVariantRow(row.props)).find((node) => node.type === Select)!;
     (select.props.onChange as (event: unknown) => void)({ target: { value: "1" } });
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
       type: "setModel", botId: "scout", threadId: "thread-scout",
@@ -505,6 +506,22 @@ describe("the model picker in Simple mode", () => {
       selection: expect.objectContaining({ effort: "max" }),
     });
   });
+
+  it.each([[true, true], [false, false], [null, false]] as const)(
+    "lets the bot panel's picker, given the open thread, set the default only for the Cloud owner (owner: %s)",
+    (ownerOrAdmin, updatesDefault) => {
+      fixture.cloudHome = true;
+      fixture.ownerOrAdmin = ownerOrAdmin;
+      const simple = pane(open(bot(), { contained: true, thread: true }))!;
+      simple.props.onPick("claude-haiku-4-5-20251001");
+      expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: updatesDefault,
+      }));
+      simple.props.effort!.onPick("max");
+      expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", threadId: "thread-scout" }));
+      expect((fixture.dispatch as ReturnType<typeof vi.fn>).mock.lastCall![0].updateBotDefault).toBe(updatesDefault ? true : undefined);
+    },
+  );
 
   it("writes the real effort level behind a friendly step", () => {
     pane(open(bot()))!.props.effort!.onPick("high");
@@ -738,10 +755,10 @@ describe("the model picker in Simple mode", () => {
     expect(row.type).toBe(ModelVariantRow);
     expect(row.props).toMatchObject({ compact: true, wide: true });
     const bottom = region(menu(opened.html), "data-simple-effort-band");
-    const select = bottom.slice(bottom.indexOf("<select"), bottom.indexOf(">", bottom.indexOf("<select")));
-    expect(select).toContain('aria-label="Reasoning variant"');
-    expect(select).toContain("flex-1");
-    expect(select).not.toContain("max-w-[65%]");
+    const field = bottom.slice(bottom.lastIndexOf("<div", bottom.indexOf("<select")), bottom.indexOf(">", bottom.indexOf("<select")));
+    expect(field).toContain('aria-label="Reasoning variant"');
+    expect(field).toContain("flex-1");
+    expect(field).not.toContain("max-w-[65%]");
     expect(bottom.indexOf(">Reasoning</span>")).toBeGreaterThan(-1);
     expect(bottom.indexOf(">Reasoning</span>")).toBeLessThan(bottom.indexOf("<select"));
     expect(bottom).not.toContain(">Quick</button>");

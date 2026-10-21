@@ -105,11 +105,19 @@ describe("mascotBody", () => {
     });
   });
 
+  it("accepts a Halloween body", () => {
+    expect(parseBotProfilePatch({ mascotBody: "pumpkin" } as never, true)).toEqual({
+      ok: true,
+      patch: { mascotBody: "pumpkin" },
+    });
+  });
+
   it("maps an unknown body to a readable message", () => {
     expect(parseBotProfilePatch({ mascotBody: "hexagram" } as never, true)).toEqual({
       ok: false,
       error:
-        "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, or star",
+        "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, star, " +
+        "pumpkin, ghost, witch, bat, cat, skull, monster, mummy, vampire, or spider",
     });
   });
 });
@@ -131,5 +139,16 @@ describe("soul (standing instructions)", () => {
 
   it("rejects a non-string soul", () => {
     expect(parseBotProfilePatch({ soul: 5 } as never)).toEqual({ ok: false, error: "soul must be a string" });
+  });
+});
+
+describe("parseBotProfilePatch replyStyle", () => {
+  it("accepts default and conversational", () => {
+    expect(parseBotProfilePatch({ replyStyle: "conversational" })).toEqual({ ok: true, patch: { replyStyle: "conversational" } });
+    expect(parseBotProfilePatch({ replyStyle: "default" }, true)).toEqual({ ok: true, patch: { replyStyle: "default" } });
+  });
+
+  it("rejects any other value", () => {
+    expect(parseBotProfilePatch({ replyStyle: "terse" } as never)).toEqual({ ok: false, error: "replyStyle must be default or conversational" });
   });
 });

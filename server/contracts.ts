@@ -46,6 +46,22 @@ export class TurnNotStartedError extends Error {
   }
 }
 
+/** The CLI refused sign-in before any model or tool activity, and its process stopped. */
+export class TurnAuthenticationRefusedError extends TurnNotStartedError {
+  override readonly name = "TurnAuthenticationRefusedError";
+}
+
+/** The engine's usage limit refused the turn before any model or tool activity (or is known to be refusing until
+ * `resetsAt`), and no process of it is running the turn. */
+export class TurnUsageLimitRefusedError extends TurnNotStartedError {
+  override readonly name = "TurnUsageLimitRefusedError";
+  readonly resetsAt: number | undefined;
+
+  constructor(turnId: TurnId, message: string, resetsAt?: number) {
+    super(turnId, message);
+    this.resetsAt = resetsAt;
+  }
+}
 
 /** Variants are opaque provider IDs, not the cross-engine effort enum. */
 export function isModelVariant(value: unknown): value is string {
@@ -103,8 +119,12 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Start without the previous native context or retained process; wins over resumeCursor. */
   sessionReset?: boolean;
-  /** Hold the startup ACK until prompt dispatch; a retired transient setup failure may reject with TurnNotStartedError. */
+  /** Hold the startup ACK until prompt dispatch (Claude: first model activity); a retired transient setup failure or sign-in refusal may reject with TurnNotStartedError. */
   startupRecovery?: boolean;
+  /** Given to a driver with `capabilities.engineAdmission`: awaited right before it starts an engine process ("process") or
+   * adds this thread's session to the running one whose pid is `joining` ("session"); rejects with TurnNotStartedError when
+   * the turn is stopped first. */
+  engineAdmission?: (start: "process" | "session", joining?: number) => Promise<void>;
   /** The turn with the conversation replayed inline, sent once on a fresh session when the provider refuses resumeCursor before reading the prompt. */
   recoveryText?: string;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
@@ -142,6 +162,8 @@ export interface SendTurnInput {
     browser?: { command: string; args: string[]; env: Record<string, string> };
     /** The Data tools' MCP proxy: DuckDB on this bot's own database. */
     data?: { command: string; args: string[]; env: Record<string, string> };
+    /** The HighLevel CRM tools' MCP proxy: the harness holds the tokens and the per-bot verdict. */
+    highlevel?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb daemon tools; `url` is the dweb HTTP base. */
     dweb?: { url: string };
     /** The user's MCP servers, mounted without any pre-allow; a driver skips a kind it cannot speak. */
@@ -149,12 +171,18 @@ export interface SendTurnInput {
     /** The `custom` servers this turn mounts through an MCP Apps observer; `extension`: advertise the
      * UI extension (false once the server refused it). A server not named here is mounted unchanged. */
     mcpApps?: Record<string, { extension: boolean }>;
+    /** Characters of one tool result per `custom` server; 0 = never trim, a missing name = the app default. */
+    customResultBudgets?: Record<string, number>;
   };
   cwd?: string;
   /** Also load the person's own CLI MCP setup (Claude Code user scope, claude.ai connectors). */
   mcpFromUserConfig?: boolean;
+  /** Claude Code loads the person's own `~/.claude/skills` from this folder's `.claude/skills` (`--add-dir`). */
+  userSkillsDir?: string;
   /** Per-call ceiling (ms) for this turn's MCP tools; absent is the driver's default (10 min). */
   mcpCallTimeoutMs?: number;
+  /** Times an API-model turn that answers after a failed tool call is sent back to re-run it (`loopGuard.correctiveRounds`); never after a denial. */
+  toolErrorCorrectiveRounds?: number;
 }
 
 /** An MCP server this machine starts and talks to over stdio. */
@@ -193,6 +221,8 @@ export interface ProviderAdapter {
     browserMcp?: boolean;
     /** The driver can mount the Data tools MCP. */
     dataMcp?: boolean;
+    /** The driver can mount the HighLevel CRM tools MCP. */
+    highlevelMcp?: boolean;
     /** The engine accepts images in the prompt (gates composer paste). */
     images?: boolean;
     /** sendTurn consumes `images` as structured input, so dispatch strips the attachment path from `text`. */
@@ -216,6 +246,10 @@ export interface ProviderAdapter {
     hooks?: boolean;
     /** "confined": sendTurn honours `guestConfined`; absent, a guest turn is refused. */
     guestTurns?: "confined";
+    /** "meter": `contextTokens` / `contextWindow` are the engine's own report, shown on the context meter but never used to time compaction. */
+    contextReading?: "meter";
+    /** sendTurn calls `engineAdmission` itself before it starts an engine process or joins one. */
+    engineAdmission?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
@@ -376,6 +410,10 @@ export interface TextGenerationUsage {
 export interface TextGenerationOptions {
   signal?: AbortSignal;
   onUsage?: (usage: TextGenerationUsage) => void;
+  /** Only the helper model setting passes it: one of this instance's models instead of the driver's quick-call choice. */
+  model?: string;
+  /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
+  timeoutMs?: number;
 }
 
 export interface ProviderInstance {

@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BEFORE_CAP,
@@ -10,6 +10,7 @@ import {
   JOURNAL_DIR,
   beginMemoryTurn,
   endMemoryTurn,
+  forgetBotMemoryJournal,
   flushMemoryJournal,
   journalFile,
   journalMemoryDelete,
@@ -23,6 +24,7 @@ import {
 } from "./memory-journal.ts";
 import { MEMORY_INDEX, hashMemoryText, readMemoryDoc } from "./memory-store.ts";
 import { WORKSPACES_DIR, appendMemoryLog, ensureWorkspace, memoryLogPath, workspaceDir } from "./workspace.ts";
+import * as workspace from "./workspace.ts";
 
 let counter = 0;
 const freshBot = () => `journal-bot-${process.pid}-${counter++}`;
@@ -31,6 +33,41 @@ beforeEach(resetMemoryJournalState);
 afterEach(resetMemoryJournalState);
 
 describe("unifiedDiff", () => {
+  it("diffs a shared prefix exactly as the full line table does", () => {
+    const fullTableOps = (a: string[], b: string[]) => {
+      const cols = b.length + 1;
+      const table = new Uint32Array((a.length + 1) * cols);
+      for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+        table[i * cols + j] = a[i] === b[j] ? table[(i + 1) * cols + j + 1] + 1 : Math.max(table[(i + 1) * cols + j], table[i * cols + j + 1]);
+      }
+      const ops: string[] = [];
+      let i = 0;
+      let j = 0;
+      while (i < a.length && j < b.length) {
+        if (a[i] === b[j]) { ops.push(` ${a[i]}`); i++; j++; }
+        else if (table[(i + 1) * cols + j] >= table[i * cols + j + 1]) ops.push(`-${a[i++]}`);
+        else ops.push(`+${b[j++]}`);
+      }
+      while (i < a.length) ops.push(`-${a[i++]}`);
+      while (j < b.length) ops.push(`+${b[j++]}`);
+      return ops;
+    };
+    let seed = 7;
+    const next = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    for (let round = 0; round < 300; round++) {
+      const prefix = Array.from({ length: next(6) }, () => "xyz"[next(3)]!);
+      const a = [...prefix, ...Array.from({ length: next(6) }, () => "xyz"[next(3)]!)];
+      const b = [...prefix, ...Array.from({ length: next(6) }, () => "xyz"[next(3)]!)];
+      const body = (diff: string) => diff.split("\n").slice(2).filter((line) => !line.startsWith("@@"));
+      const diff = unifiedDiff(a.map((line) => `${line}\n`).join(""), b.map((line) => `${line}\n`).join(""), "MEMORY.md", 1_000_000);
+      const expected = fullTableOps(a, b);
+      expect({ a, b, ops: body(diff.text) }).toEqual({ a, b, ops: a.join() === b.join() ? [] : expected.filter((_op, index) =>
+        expected.slice(Math.max(0, index - 2), index + 3).some((near) => !near.startsWith(" "))) });
+      expect(diff.added).toBe(expected.filter((op) => op.startsWith("+")).length);
+      expect(diff.removed).toBe(expected.filter((op) => op.startsWith("-")).length);
+    }
+  });
+
   it("is empty when nothing changed", () => {
     expect(unifiedDiff("a\nb\n", "a\nb\n", "MEMORY.md")).toEqual({ text: "", added: 0, removed: 0, truncated: false });
   });
@@ -292,6 +329,57 @@ describe("turn boundary", () => {
     writeFileSync(join(workspaceDir(b), "MEMORY.md"), "b learned\n");
     const rows = endMemoryTurn("room-1");
     expect(rows.map((r) => r.botId).sort()).toEqual([a, b].sort());
+  });
+
+  it("does not re-read memory files whose size and mtime are unchanged", async () => {
+    const bot = freshBot();
+    ensureWorkspace(bot);
+    const topic = join(workspaceDir(bot), "memory", "notes.md");
+    const logDir = join(workspaceDir(bot), "memory", "log");
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(topic, "stable note\n");
+    writeFileSync(join(logDir, "2026-09-10.md"), "- stable line\n");
+    const read = vi.spyOn(workspace, "readMemoryText");
+    try {
+      beginMemoryTurn(bot, "t1");
+      expect(read).toHaveBeenCalled();
+      read.mockClear();
+      expect(endMemoryTurn("t1")).toEqual([]);
+      beginMemoryTurn(bot, "t2");
+      expect(endMemoryTurn("t2")).toEqual([]);
+      expect(read).not.toHaveBeenCalled();
+      await flushMemoryJournal(bot);
+      expect(readMemoryJournal(bot, 10)).toEqual([]);
+      forgetBotMemoryJournal(bot);
+      beginMemoryTurn(bot, "t3");
+      expect(read).toHaveBeenCalled();
+      expect(endMemoryTurn("t3")).toEqual([]);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("keeps a changed file it cannot read, instead of journaling it as deleted", async () => {
+    const bot = freshBot();
+    ensureWorkspace(bot);
+    const topic = join(workspaceDir(bot), "memory", "locked.md");
+    writeFileSync(topic, "first\n");
+    beginMemoryTurn(bot, "t1");
+    expect(endMemoryTurn("t1")).toEqual([]);
+    writeFileSync(topic, "first and second\n");
+    const read = vi.spyOn(workspace, "readMemoryText").mockImplementation(() => {
+      throw Object.assign(new Error("denied"), { code: "EACCES" });
+    });
+    try {
+      beginMemoryTurn(bot, "t2");
+      expect(endMemoryTurn("t2")).toEqual([]);
+    } finally {
+      read.mockRestore();
+    }
+    beginMemoryTurn(bot, "t3");
+    expect(endMemoryTurn("t3")).toEqual([]);
+    await flushMemoryJournal(bot);
+    expect(readMemoryJournal(bot, 10).map((row) => [row.path, row.kind, row.actor])).toEqual([["memory/locked.md", "edited", "person"]]);
   });
 
   it("journals the daily-log line a settled turn leaves as that turn's, so the next turn never credits the person", async () => {

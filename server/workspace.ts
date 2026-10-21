@@ -3,7 +3,7 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, open
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { alwaysCore, isExpired, isMemoryDate, parseMemoryEntries, untilMark, withoutExpired, type MemoryEntryLine } from "./memory-entries.ts";
+import { alwaysCore, isExpired, isMemoryDate, parseMemoryEntries, untilMark, withoutExpired, withoutSuperseded, type MemoryEntryLine } from "./memory-entries.ts";
 import { parseTopicHeader, readTopicHead, renderTopicIndex } from "./memory-topics.ts";
 import { indexMemoryFile, indexedMemoryFiles, recallMemory, removeMemoryFile, type MemoryHit, type SearchMode } from "./message-db.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -33,19 +33,46 @@ export const MEMORY_ENTRY_MAX_CHARS = 1_000;
 export const MEMORY_ENTRY_MAX_LINES = 20;
 export const ARCHIVE_TOPIC = "archive.md";
 
-const MEMORY_SEED = `# Memory
+const MEMORY_SEEDS: Record<string, string> = {
+  en: `# Memory
 
 Durable notes this bot keeps between tasks. The first ${MEMORY_MAX_LINES} lines
 load at the start of every session — keep this file short and curated.
 Longer notes belong in memory/<topic>.md files, read on demand.
-`;
+`,
+  "pt-br": `# Memória
 
-export function ensureWorkspace(botId: string): string {
+Notas permanentes que este bot mantém entre tarefas. As primeiras ${MEMORY_MAX_LINES} linhas
+são carregadas no início de cada sessão — mantenha este arquivo curto e organizado.
+Notas mais longas ficam em memory/<tópico>.md e são lidas quando necessário.
+`,
+  es: `# Memoria
+
+Notas permanentes que este bot mantiene entre tareas. Las primeras ${MEMORY_MAX_LINES} líneas
+se cargan al inicio de cada sesión — mantén este archivo corto y organizado.
+Las notas más largas van en memory/<tema>.md y se leen cuando es necesario.
+`,
+};
+
+const MEMORY_SEED_VALUES = new Set(Object.values(MEMORY_SEEDS));
+
+function isMemorySeed(text: string): boolean {
+  return MEMORY_SEED_VALUES.has(text);
+}
+
+function memorySeedFor(language?: string): string {
+  const normalized = (language?.trim() || Intl.DateTimeFormat().resolvedOptions().locale).toLowerCase().replaceAll("_", "-");
+  if (normalized === "pt" || normalized.startsWith("pt-")) return MEMORY_SEEDS["pt-br"];
+  if (normalized === "es" || normalized.startsWith("es-")) return MEMORY_SEEDS.es;
+  return MEMORY_SEEDS[normalized] ?? MEMORY_SEEDS.en;
+}
+
+export function ensureWorkspace(botId: string, language?: string): string {
   const dir = join(WORKSPACES_DIR, botId);
   // Memories can hold personal details: other local accounts must not read them.
   mkdirSync(join(dir, "memory"), { recursive: true, mode: 0o700 });
   const memoryFile = join(dir, "MEMORY.md");
-  if (!existsSync(memoryFile)) writeFileAtomic(memoryFile, MEMORY_SEED, { mode: 0o600 });
+  if (!existsSync(memoryFile)) writeFileAtomic(memoryFile, memorySeedFor(language), { mode: 0o600 });
   return dir;
 }
 
@@ -119,7 +146,7 @@ export function loadMemory(botId: string, opts: { now?: Date } = {}): { text: st
   } catch {
     return null;
   }
-  if (!raw.trim() || raw === MEMORY_SEED) return null;
+  if (!raw.trim() || isMemorySeed(raw)) return null;
   let truncated = false;
   const visible = withoutExpired(raw, memoryDate(opts.now));
   let text = visible.text;
@@ -146,7 +173,7 @@ export function readMemoryFile(botId: string) {
   } catch {
     return { text: "", truncated: false };
   }
-  if (!raw.trim() || raw === MEMORY_SEED) return { text: "", truncated: false };
+  if (!raw.trim() || isMemorySeed(raw)) return { text: "", truncated: false };
   return { text: raw, truncated: memoryOverBudget(raw) };
 }
 
@@ -167,7 +194,7 @@ function indexWrittenMemoryFile(botId: string, relativePath: string): void {
   }
 }
 
-function memoryFilesOnDisk(botId: string): Array<{ path: string; mtimeMs: number; bytes: number }> {
+export function memoryFilesOnDisk(botId: string): Array<{ path: string; mtimeMs: number; bytes: number }> {
   const dir = workspaceDir(botId);
   const names = [
     "MEMORY.md",
@@ -187,9 +214,9 @@ function memoryFilesOnDisk(botId: string): Array<{ path: string; mtimeMs: number
 const memoryIndexDates = new Map<string, string>();
 
 function searchableMemoryText(path: string, text: string): string {
-  if (path === "MEMORY.md" && text === MEMORY_SEED) return "";
+  if (path === "MEMORY.md" && isMemorySeed(text)) return "";
   if (path === "memory/archive.md" || path.startsWith(`memory/${MEMORY_LOG_DIR}/`)) return text;
-  return withoutExpired(text, memoryDate()).text;
+  return withoutSuperseded(withoutExpired(text, memoryDate()).text);
 }
 
 export function syncMemoryIndex(botId: string): void {
@@ -301,7 +328,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   const dir = ensureWorkspace(botId);
   // Not readMemoryFile's fallback: a failed read must never become an overwrite of old notes.
   const raw = readMemoryText(join(dir, "MEMORY.md"));
-  const current = raw === MEMORY_SEED ? "" : raw;
+  const current = isMemorySeed(raw) ? "" : raw;
   const today = memoryDate(opts.now);
   const appendEntry = (base: string, entry: string) => `${base}${base && !base.endsWith("\n") ? "\n" : ""}${entry}\n`;
   let next: string;
@@ -511,15 +538,21 @@ export function memoryTopicIndex(botId: string): string {
   return renderTopicIndex(listMemoryTopics(botId).map((topic) => ({ name: topic.name, header: parseTopicHeader(readTopicHead(join(dir, topic.name))) })));
 }
 
-/** Memory is a prompt-injection persistence vector once a bot copies untrusted text into it. */
-export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolean; fileTools?: boolean; enabled?: boolean } = {}): string {
+const NOTES_IN_RESULT =
+  " Notes cannot be saved from this conversation: on this Cloud only a conversation that only its owner writes in may change memory, and another bot or person wrote here." +
+  " Do not call memory_update or memory_log or edit memory files. Put any fact worth keeping in your reply; for work another bot handed you, in your result to that bot.";
+
+/** Memory is a prompt-injection persistence vector once a bot copies untrusted text into it.
+ * `writesRefused`: this turn's notes would be refused, so it is told where facts go instead. */
+export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolean; fileTools?: boolean; enabled?: boolean; writesRefused?: boolean } = {}): string {
   if (opts.enabled === false) return "";
   const memory = loadMemory(botId);
   const memoryFile = join(workspaceDir(botId), "MEMORY.md");
   const topicDir = join(workspaceDir(botId), "memory");
-  if (opts.fileTools === false && !opts.managedWrites) {
-    if (!memory) return "";
-    return ` Your saved memory is supplied as context; this turn has no memory editing tools.\n\nYour memory (MEMORY.md):\n${memory.text}${memory.truncated ? " [Only the initial memory excerpt is visible.]" : ""}${topicIndexBlock(botId, false)}`;
+  if (opts.writesRefused || (opts.fileTools === false && !opts.managedWrites)) {
+    const lead = opts.writesRefused ? NOTES_IN_RESULT : " Your saved memory is supplied as context; this turn has no memory editing tools.";
+    if (!memory) return opts.writesRefused ? lead : "";
+    return `${lead}\n\nYour memory (MEMORY.md):\n${memory.text}${memory.truncated ? " [Only the initial memory excerpt is visible.]" : ""}${topicIndexBlock(botId, opts.fileTools !== false)}`;
   }
   const writeGuidance = opts.managedWrites
     ? " Change MEMORY.md only with memory_update" + (opts.fileTools === false ? "; on a conflict, find the current passage with session_search." : ".")

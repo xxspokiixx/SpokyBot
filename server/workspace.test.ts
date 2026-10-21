@@ -115,6 +115,16 @@ describe("workspace", () => {
     expect(loadMemory(BOT)).toBeNull();
   });
 
+  it("treats localized factory memory seeds as empty", () => {
+    for (const [language, heading] of [["pt-BR", "# Memória"], ["es", "# Memoria"], ["en", "# Memory"]] as const) {
+      const bot = `${BOT}-${language}`;
+      const dir = ensureWorkspace(bot, language);
+      expect(readFileSync(join(dir, "MEMORY.md"), "utf8")).toContain(heading);
+      expect(loadMemory(bot)).toBeNull();
+      expect(readMemoryFile(bot)).toEqual({ text: "", truncated: false });
+    }
+  });
+
   it("loads written memory whole when under budget", () => {
     const dir = ensureWorkspace(BOT);
     writeFileSync(join(dir, "MEMORY.md"), "# Memory\n- fact one\n- fact two\n");
@@ -437,6 +447,18 @@ describe("workspace", () => {
     expect(memorySystemPrompt(BOT)).toContain("Keep MEMORY.md short and curated.");
     writeFileSync(join(dir, "MEMORY.md"), `${lines.slice(0, MEMORY_MAX_LINES).join("\n")}\n`);
     expect(loadMemory(BOT)?.truncated).toBe(false);
+  });
+
+  it("tells a turn whose notes would be refused where facts go, and still shows it the memory", () => {
+    const empty = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true, writesRefused: true });
+    expect(empty).toContain("Notes cannot be saved from this conversation");
+    expect(empty).toContain("in your result to that bot");
+    writeMemoryFile(BOT, "- The owner likes figs.");
+    const refused = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true, writesRefused: true });
+    expect(refused).toContain("The owner likes figs.");
+    expect(refused).not.toContain("Change MEMORY.md only with memory_update");
+    expect(refused).not.toContain("Record only facts");
+    expect(memorySystemPrompt(BOT, { managedWrites: true, fileTools: true })).toContain("Change MEMORY.md only with memory_update");
   });
 
   it("requires explicit remove to delete a memory passage", () => {

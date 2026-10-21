@@ -153,6 +153,11 @@ export class VisibleSet {
     for (const group of groups) this.groups.set(group.id, group);
   }
 
+  /** A non-admin session, even one that can see every bot: what only an admin reads still stays off its copy. */
+  get member(): boolean {
+    return this.viewer.kind === "member";
+  }
+
   bot(id: string): boolean {
     if (this.everything) return true;
     let seen = this.botMemo.get(id);
@@ -268,17 +273,31 @@ export interface StreamSeen {
 
 export interface FrameContext {
   visible: VisibleSet;
-  webhookBot: (webhookId: string) => string | undefined;
+  webhook: (webhookId: string) => { botId: string; groupId?: string } | undefined;
   freshBot: (botId: string) => Record<string, unknown> | undefined;
   freshGroup: (groupId: string) => Record<string, unknown> | undefined;
 }
 
-/** No audience list (who else may see a bot is an admin's business) and no teammate ids the member cannot see. */
+/** No audience list (who else may see a bot is an admin's business), no teammate ids the member cannot see, and no
+ * server alias: a member learns the default VPS alias only as configured-or-not, and a bot's own alias the same way. */
 export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
-  if (visible.everything) return bot;
-  const { visibility: _visibility, ...rest } = bot as T & { visibility?: unknown; peers?: unknown };
+  if (visible.everything) return visible.member ? withoutServerAlias(bot) : bot;
+  const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = bot as T & { visibility?: unknown; peers?: unknown; vpsAlias?: unknown };
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
   return { ...rest, ...(peers ? { peers } : {}) } as T;
+}
+
+/** The SSH alias of the server a bot's VPS computer lives on: an admin's, like the default alias in config. */
+export function withoutServerAlias<T extends object>(bot: T): T {
+  if (!("vpsAlias" in bot)) return bot;
+  const { vpsAlias: _vpsAlias, ...rest } = bot as T & { vpsAlias?: unknown };
+  return rest as T;
+}
+
+/** A broadcast as every member receives it before any audience narrowing; the same object when nothing changes. */
+export function memberFramePayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const bot = payload.kind === "bot" ? payload.bot : undefined;
+  return bot && typeof bot === "object" && "vpsAlias" in bot ? { ...payload, bot: withoutServerAlias(bot) } : payload;
 }
 
 /** A room as a member receives it: without its audience floor. */
@@ -289,16 +308,19 @@ export function memberGroup<T extends object>(group: T): T {
 }
 
 export function memberBody(body: unknown, visible: VisibleSet): unknown {
-  if (visible.everything || !body || typeof body !== "object" || Array.isArray(body)) return body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   const narrow = (value: unknown, depth: number): unknown => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return value;
     const record = value as Record<string, unknown>;
     let out: Record<string, unknown> | null = null;
     for (const [key, child] of Object.entries(record)) {
+      // A member who can see every bot and room is sent the rooms as they are; bots still lose their server alias.
+      if (visible.everything && (key === "group" || key === "groups")) continue;
       let next = child;
       if (key === "bot" && child && typeof child === "object" && !Array.isArray(child)) next = memberBot(child, visible);
       else if (key === "bots" && Array.isArray(child)) {
-        next = child.map((bot) => (bot && typeof bot === "object" ? memberBot(bot as object, visible) : bot));
+        const shown = child.map((bot) => (bot && typeof bot === "object" ? memberBot(bot as object, visible) : bot));
+        if (shown.some((bot, index) => bot !== child[index])) next = shown;
       } else if (key === "group" && child && typeof child === "object" && !Array.isArray(child)) next = memberGroup(child);
       else if (key === "groups" && Array.isArray(child)) {
         next = child.map((group) => (group && typeof group === "object" ? memberGroup(group as object) : group));
@@ -374,10 +396,10 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       return routineVisible(run, visible) ? payload : undefined;
     }
     case "webhook":
-      return visible.bot(str(field("webhook").botId)) ? payload : undefined;
+      return webhookVisible(field("webhook"), visible) ? payload : undefined;
     case "webhook.attempt": {
-      const botId = ctx.webhookBot(str(field("attempt").webhookId));
-      return botId && visible.bot(botId) ? payload : undefined;
+      const webhook = ctx.webhook(str(field("attempt").webhookId));
+      return webhook && webhookVisible(webhook, visible) ? payload : undefined;
     }
     case "runtime":
       return visible.thread(str(field("event").threadId)) ? payload : undefined;
@@ -408,6 +430,13 @@ export function noteSeen(payload: Record<string, unknown>, seen: StreamSeen): vo
     case "group": if (id(payload.group)) seen.groups.add(id(payload.group)); break;
     case "group.deleted": if (typeof payload.groupId === "string") seen.groups.delete(payload.groupId); break;
   }
+}
+
+/** A room webhook's attempts preview what it posted there, so it is shown only to someone who sees the room as well as the bot. */
+export function webhookVisible(value: { botId?: unknown; groupId?: unknown }, visible: Pick<VisibleSet, "everything" | "bot" | "group">): boolean {
+  if (visible.everything) return true;
+  if (typeof value.botId !== "string" || !visible.bot(value.botId)) return false;
+  return typeof value.groupId !== "string" || !value.groupId || visible.group(value.groupId);
 }
 
 export function routineVisible(value: { botId?: unknown; groupId?: unknown }, visible: VisibleSet): boolean {

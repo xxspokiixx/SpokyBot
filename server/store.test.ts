@@ -516,7 +516,7 @@ describe("Store", () => {
   });
 
   it("createBot seeds a greeting without promising engine-specific tools", () => {
-    const store = new Store(selection);
+    const store = new Store(selection, undefined, undefined, "en");
     const bot = store.createBot();
 
     const messages = store.messagesFor(bot.threadId);
@@ -527,6 +527,15 @@ describe("Store", () => {
       text: `Hi, I'm ${bot.name}. What would you like me to do?`,
     });
     expect(bot.modelSelection).toEqual(selection());
+  });
+
+  it("reads the current language when creating a bot", () => {
+    let language = "en";
+    const store = new Store(selection, undefined, undefined, () => language);
+    language = "pt-BR";
+
+    const bot = store.createBot();
+    expect(store.messagesFor(bot.threadId)[0]?.text).toBe(`Oi, eu sou ${bot.name}. O que você gostaria que eu fizesse?`);
   });
 
   it("clears provider-owned voice ids as one durable mutation", () => {
@@ -1516,16 +1525,28 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
   });
 
-  it("seedIfEmpty creates exactly one starter bot, once", () => {
+  it("seedIfEmpty starts a fresh workspace with one bot, the Chief of Staff, once", () => {
     const store = new Store(selection);
     store.seedIfEmpty();
     expect(store.bots).toHaveLength(1);
+    expect(store.bots[0], "the first bot a new person meets is their Chief of Staff").toMatchObject({ chiefOfStaff: true, hidden: false });
+    expect(store.bots[0], "the role is the flag, so an untouched starter still reads as unused when sending to the Cloud")
+      .toMatchObject({ title: "", description: "", soul: "" });
     store.seedIfEmpty();
     expect(store.bots).toHaveLength(1);
 
     const reloaded = new Store(selection);
     reloaded.seedIfEmpty();
     expect(reloaded.bots).toHaveLength(1);
+    expect(reloaded.bots[0]?.chiefOfStaff).toBe(true);
+  });
+
+  it("seedIfEmpty leaves an existing workspace without a Chief as it is", () => {
+    const store = new Store(selection);
+    const existing = store.createBot();
+    store.seedIfEmpty();
+    expect(store.bots.map((bot) => bot.id)).toEqual([existing.id]);
+    expect(new Store(selection).bot(existing.id)?.chiefOfStaff).toBeFalsy();
   });
 
   it("chains appended messages and keeps the newest as active leaf", () => {
@@ -1734,10 +1755,33 @@ describe("Store change stream", () => {
     store.patchMessage(bot.threadId, first.id, { text: "a2" });
     store.branchMessage(bot.threadId, first.id, "b");
     store.setActiveLeaf(bot.threadId, first.id);
-    store.toggleReaction(bot.threadId, first.id, "👍", "user");
+    store.setReaction(bot.threadId, first.id, "user", { emoji: "👍", at: 1 });
     expect(events.map((e) => e.type)).toEqual(["message.patch", "message", "thread", "thread", "message.patch"]);
     expect(events[2]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: (events[1] as any).message.id });
     expect(events[3]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: first.id });
+  });
+
+  it("keeps a reaction line a reaction when it is retried unchanged, and makes it words when edited", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const asked = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Shall I send it?" });
+    const line = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "👍", replyToId: asked.id, reaction: "👍" });
+    expect(store.branchMessage(bot.threadId, line.id, "👍")).toMatchObject({ text: "👍", replyToId: asked.id, reaction: "👍" });
+    expect(store.branchMessage(bot.threadId, line.id, "Yes, but tomorrow")).not.toHaveProperty("reaction");
+  });
+
+  it("keeps one reaction per person: a new one replaces theirs, and nobody else's", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Shall I send it?" });
+    const react = (by: string, emoji: string | null) =>
+      store.setReaction(bot.threadId, reply.id, by, emoji ? { emoji, at: 1 } : null)?.reactions;
+    expect(react("p_alice", "👍")).toEqual([{ emoji: "👍", by: "p_alice", at: 1 }]);
+    expect(react("p_bob", "👍")).toEqual([{ emoji: "👍", by: "p_alice", at: 1 }, { emoji: "👍", by: "p_bob", at: 1 }]);
+    expect(react("p_alice", "👎")).toEqual([{ emoji: "👍", by: "p_bob", at: 1 }, { emoji: "👎", by: "p_alice", at: 1 }]);
+    expect(react("p_bob", null)).toEqual([{ emoji: "👎", by: "p_alice", at: 1 }]);
+    expect(react("p_alice", null)).toBeUndefined();
+    expect(store.setReaction(bot.threadId, "no-such-message", "p_alice", null)).toBeNull();
   });
 
   it("announces screen frames whose pixels are pruned", () => {
@@ -1794,7 +1838,7 @@ describe("Store change stream", () => {
     const titled = store.titleGroupTaskFromFirstMessage(group.id, "Audit the payroll", task.threadId);
     expect(titled?.threadId).toBe(task.threadId);
     expect(titled?.title).toBe("Audit the payroll");
-    store.renameGroupTask(group.id, task.threadId, "Payroll audit");
+    store.patchGroupTask(group.id, task.threadId, { title: "Payroll audit" });
     expect(store.retitleGroupTask(group.id, task.threadId, "Audit the payroll", "Payroll checks")).toBeNull();
     expect(store.activeGroupTask(group.id)!.title).toBe("Payroll audit");
     const fresh = store.createGroupTask(group.id)!.threadId;

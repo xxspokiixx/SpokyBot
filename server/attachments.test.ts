@@ -44,9 +44,11 @@ const {
   ATTACHMENTS_DIR,
   ATTACHMENTS_MAX_BYTES,
   ATTACHMENT_PARTIAL_MAX_AGE_MS,
+  DEFAULT_ATTACHMENTS_MAX_BYTES,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
   __resetAttachmentAccountingForTests,
+  attachmentsMaxBytes,
   cleanupStaleAttachmentPartials,
   deleteAttachment,
   extensionForFileMime,
@@ -179,8 +181,19 @@ describe("saveAudio", () => {
     expect(saved.path.endsWith(".mp3")).toBe(true);
   });
 
+  it("keeps a WAV note as .wav and serves it back as audio/wav", () => {
+    for (const mime of ["audio/wav", "audio/x-wav", "Audio/Wave"]) {
+      const saved = saveAudio(Buffer.from(`RIFF-${mime}`), mime);
+      expect(saved.mime).toBe("audio/wav");
+      expect(saved.path.endsWith(".wav")).toBe(true);
+      const back = readAttachment(saved.path.split(/[\\/]/).pop()!);
+      expect(back?.bytes.toString()).toBe(`RIFF-${mime}`);
+      expect(back?.mime).toBe("audio/wav");
+    }
+  });
+
   it("rejects other audio mimes, empty bodies, and oversize bodies", () => {
-    expect(() => saveAudio(Buffer.from("x"), "audio/wav")).toThrow(/unsupported audio type/);
+    expect(() => saveAudio(Buffer.from("x"), "audio/ogg")).toThrow(/unsupported audio type/);
     expect(() => saveAudio(Buffer.alloc(0), "audio/mpeg")).toThrow(/empty/);
     expect(() => saveAudio(Buffer.alloc(FILE_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
   });
@@ -215,6 +228,17 @@ describe("saveAudio", () => {
   });
 });
 
+describe("attachmentsMaxBytes", () => {
+  it("keeps 512 MB unless OMB_ATTACHMENTS_MAX_BYTES is a positive whole number of bytes", () => {
+    expect(ATTACHMENTS_MAX_BYTES).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    expect(attachmentsMaxBytes({})).toBe(512 * 1024 * 1024);
+    expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: " 4294967296 " })).toBe(4 * 1024 * 1024 * 1024);
+    for (const bad of ["", "0", "-1", "2GB", "1.5", "NaN"]) {
+      expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: bad })).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    }
+  });
+});
+
 describe("aggregate attachment storage", () => {
   beforeEach(() => {
     resetDir();
@@ -233,7 +257,7 @@ describe("aggregate attachment storage", () => {
       throw new Error("expected quota rejection");
     } catch (error) {
       expect(error).toMatchObject({ status: 507 });
-      expect(error).toHaveProperty("message", expect.stringMatching(/storage is full/));
+      expect(error).toHaveProperty("message", "attachments storage is full (512 MB limit)");
     }
     expect(existsSync(referenced.path)).toBe(true);
     expect(statSync(referenced.path).size).toBe(ATTACHMENTS_MAX_BYTES);

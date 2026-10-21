@@ -3,12 +3,18 @@
 //   FAKE_CLAUDE_MODE  happy (default) | exit-early | hang | malformed | dead-session (fails on --resume)
 //     | stale-session (--resume answers 2.1.295's no-session error result, no init, stays up)
 //     | error-result | resume-dies-after-init | stream (partial deltas plus subagent noise)
-//     | not-logged-in (2.1.263's frames) | api-error | usage-limit (2.1.295's usage_limit_reached frames)
+//     | not-logged-in (2.1.296's frames) | api-error | usage-limit (2.1.295's usage_limit_reached frames)
 //   FAKE_CLAUDE_API_ERROR  text for the api-error frame (default: overloaded)
+//   FAKE_CLAUDE_API_ERROR_KIND  the api-error frame's `error` (default: unknown); FAKE_CLAUDE_API_ERROR_STATUS its result's
+//     api_error_status; FAKE_CLAUDE_NO_TERMINAL_REASON=1: the result has no terminal_reason, only stop_reason "stop_sequence"
 //   FAKE_CLAUDE_RATE_LIMIT  JSON rate_limit_info reported in a `rate_limit_event` after init
+//   FAKE_CLAUDE_LIMITED_FILE  path: while it exists, every turn plays usage-limit with the file's JSON rate_limit_info
+//   FAKE_CLAUDE_MCP_FAILED  comma list of MCP servers init reports as failed (`mcp_servers`)
 //   FAKE_CLAUDE_RELEASE  with hang: the turn ends normally once this file exists
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
+//   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
+//     calls a tool first
 //   FAKE_CLAUDE_GONE_AFTER_TURN  path: after the turn stop reading stdin, write <path>.closed, exit once <path> exists
 //   FAKE_CLAUDE_TEXT_FILE  path of the one-shot text reply; missing or exactly __FAIL__ fails the call
 //   FAKE_CLAUDE_TEXT_ROUTES  path of {"marker": "reply"}: the first marker a one-shot prompt contains picks the reply
@@ -23,13 +29,17 @@
 //   FAKE_CLAUDE_REPLIES  JSON array of replies (string, or string[] for several items) used in order
 //   FAKE_CLAUDE_REPLY_STATE  counter file keeping FAKE_CLAUDE_REPLIES in order across processes
 //   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?}] each turn calls before its reply (unset: one Bash call)
+//   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
+//     text_delta chunks of `chars` chars every `ms` ms before its assistant message
 //   FAKE_CLAUDE_USES_CLOUD_COMPUTER  1: first take one screenshot through the `computer` MCP server
 //   FAKE_CLAUDE_CONNECT_APPS  toolkits (gmail,slack): first call COMPOSIO_MANAGE_CONNECTIONS via `composio`
-//   FAKE_CLAUDE_HOOKS  1: run the --settings hooks like the CLI (PostToolUse per tool_result, Stop at the end)
-//   FAKE_CLAUDE_COMPACT  1: from the second turn, play a compaction (PreCompact, then SessionStart "compact")
+//   FAKE_CLAUDE_HOOKS  1: run the --settings hooks like the CLI (PostToolUse per tool_result, PostToolUseFailure for
+//     an ok:false call with its additionalContext echoed into the reply, Stop at the end)
+//   FAKE_CLAUDE_COMPACT  1: from the second turn, play a compaction (PreCompact, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_TURN_STATE  counter file keeping FAKE_CLAUDE_COMPACT's turn count across respawns
 //   FAKE_CLAUDE_CONTEXT_TOKENS  latest-prompt size reported in a scripted room-plan reply
 //   FAKE_CLAUDE_AUTH  in (default) | out | unsupported | malformed | inherited-api-key: what `auth status` says
+//     | api-key: signed in on the CLI's own API key (authMethod "api_key")
 //     | file: signed in while <CLAUDE_CONFIG_DIR or ~/.claude>/fake-auth.json exists; `auth login` prints a
 //     claude.ai link and writes it from the pasted code (`alice-…` signs in alice@example.com, `bad-…` is refused),
 //     `auth logout` removes it
@@ -47,6 +57,7 @@
 //   FAKE_CLAUDE_PROBE_LOG  path: each snapshot probe appends `<version|help|auth> <pid>`
 //   FAKE_CLAUDE_HOLD_VERSION / _HELP / _AUTH  path: that snapshot probe answers only once it exists
 // total_cost_usd and modelUsage are running totals (0.01 per result), as the real CLI reports them.
+import { splitLaunchNote } from "./launch-note.ts";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -54,6 +65,13 @@ import { join } from "node:path";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
+const streamCadence = (() => {
+  const raw = process.env.FAKE_CLAUDE_STREAM_CADENCE;
+  if (!raw) return null;
+  const [chars, ms] = raw.split(":");
+  const parsed = { chars: Number(chars), ms: Number(ms) };
+  return Number.isSafeInteger(parsed.chars) && parsed.chars > 0 && Number.isSafeInteger(parsed.ms) && parsed.ms >= 0 ? parsed : null;
+})();
 
 // Concurrent turns share a capture path: publish whole JSON in one rename.
 const writeDumpAtomic = (path: string, contents: string): void => {
@@ -105,7 +123,7 @@ const scriptedReplies = (() => {
     return [];
   }
 })();
-type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown };
+type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown; server?: string };
 const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
   const raw = process.env.FAKE_CLAUDE_TOOL_CALLS;
   if (raw === undefined) return null;
@@ -113,13 +131,14 @@ const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
     return parsed
-      .filter((call): call is { name: string; id?: unknown; input?: unknown; ok?: unknown; output?: unknown } => typeof call?.name === "string")
+      .filter((call): call is { name: string; id?: unknown; input?: unknown; ok?: unknown; output?: unknown; server?: unknown } => typeof call?.name === "string")
       .map((call) => ({
         name: call.name,
         ...(typeof call.id === "string" ? { id: call.id } : {}),
         input: call.input && typeof call.input === "object" && !Array.isArray(call.input) ? call.input as Record<string, unknown> : {},
         ok: call.ok !== false,
         output: call.output,
+        ...(typeof call.server === "string" ? { server: call.server } : {}),
       }));
   } catch {
     return null;
@@ -128,6 +147,9 @@ const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
 let toolUseCount = 0;
 let scriptedReplyIndex = 0;
 const nextScriptedReply = (): string[] => {
+  // A test that wants one long reply puts it in this file for as long as it wants it, read again each turn.
+  const replyFile = process.env.FAKE_CLAUDE_REPLY_FILE;
+  if (replyFile && existsSync(replyFile)) return [readFileSync(replyFile, "utf8")];
   const stateFile = process.env.FAKE_CLAUDE_REPLY_STATE;
   let index = scriptedReplyIndex;
   if (stateFile) {
@@ -140,6 +162,30 @@ const nextScriptedReply = (): string[] => {
   }
   const reply = scriptedReplies[index] ?? "hello from fake claude";
   return Array.isArray(reply) ? reply : [reply];
+};
+
+// FAKE_CLAUDE_MARKER_REPLIES: path of {"marker": "reply"}: a prompt whose
+// text contains a marker answers with that marker's reply, whatever process
+// or replay delivers it. The voice-latency harness routes replies this way
+// because the driver replays a user message over several CLI launches.
+const markerReplies = (() => {
+  const path = process.env.FAKE_CLAUDE_MARKER_REPLIES;
+  if (!path) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const entries = Object.entries(parsed as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string");
+    return entries.length ? entries : null;
+  } catch {
+    return null;
+  }
+})();
+const replyForPrompt = (prompt: JsonValue): string[] | null => {
+  if (!markerReplies) return null;
+  const text = steeredText(prompt);
+  const hit = markerReplies.find(([marker]) => marker !== "" && text.includes(marker));
+  return hit ? [hit[1]] : null;
 };
 
 const argv = process.argv.slice(2);
@@ -261,9 +307,9 @@ if (argv[0] === "auth" && argv[1] === "status") {
     process.stdout.write("not json\n");
     process.exit(0);
   }
-  const loggedIn = auth === "in" || (auth === "inherited-api-key" && Boolean(process.env.ANTHROPIC_API_KEY));
+  const loggedIn = auth === "in" || auth === "api-key" || (auth === "inherited-api-key" && Boolean(process.env.ANTHROPIC_API_KEY));
   process.stdout.write(
-    JSON.stringify({ loggedIn, authMethod: loggedIn ? "claude.ai" : "none", apiProvider: "firstParty" }) + "\n",
+    JSON.stringify({ loggedIn, authMethod: !loggedIn ? "none" : auth === "api-key" ? "api_key" : "claude.ai", apiProvider: "firstParty" }) + "\n",
     () => process.exit(auth === "out" ? 1 : 0),
   );
 }
@@ -303,7 +349,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   if (oneShotDump) {
     writeDumpAtomic(
       oneShotDump,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, mcpConfig: null }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, cwd: process.cwd(), mcpConfig: null }, null, 2),
     );
   }
   if (process.env.FAKE_CLAUDE_TEXT_LOG) appendFileSync(process.env.FAKE_CLAUDE_TEXT_LOG, `${JSON.stringify({ prompt })}\n`);
@@ -354,6 +400,9 @@ const autoUnavailableFor = (process.env.FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS ?? "
 const permissionMode =
   requestedPermissionMode === "auto" && autoUnavailableFor.includes(model) ? "default" : requestedPermissionMode;
 // FAKE_CLAUDE_KEEP_BASH=1 plays a CLI that keeps Bash whatever --tools said.
+const mcpStatus = () => process.env.FAKE_CLAUDE_MCP_FAILED
+  ? { mcp_servers: process.env.FAKE_CLAUDE_MCP_FAILED.split(",").map((name) => ({ name, status: "failed" })) }
+  : {};
 const toolsFlag = argAfter("--tools");
 const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"]),
   ...(process.env.FAKE_CLAUDE_KEEP_BASH === "1" ? ["Bash"] : [])])];
@@ -402,7 +451,8 @@ const armSteerGate = () => {
   }, 10);
 };
 
-const promptText = (prompt: JsonValue): string => {
+const promptText = (raw: JsonValue): string => {
+  const prompt = splitLaunchNote(raw).prompt;
   const m = prompt && typeof prompt === "object" && !Array.isArray(prompt) ? (prompt as { message?: { content?: unknown } }).message : undefined;
   return typeof m?.content === "string" ? m.content : "";
 };
@@ -518,6 +568,22 @@ child.on("exit", () => process.exit(1));
 child.stdin.write(JSON.stringify(request) + "\\n");
 `;
 
+const mcpToolCall = (serverName: string, name: string, input: Record<string, unknown>): { ok: boolean; content: unknown } => {
+  launchFiles ??= readLaunchFiles();
+  const server = (launchFiles.mcpConfig as { mcpServers?: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }> } | null)
+    ?.mcpServers?.[serverName];
+  if (!server?.command) return { ok: false, content: `no ${serverName} MCP server was launched for this turn` };
+  const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: input } };
+  const ran = spawnSync(process.execPath, ["-e", MCP_CALL_PROGRAM, JSON.stringify({ command: server.command, args: server.args ?? [], env: server.env ?? {}, request })], {
+    encoding: "utf8", timeout: 120_000,
+  });
+  let reply: { result?: { isError?: boolean; content?: unknown }; error?: { message?: string } } = {};
+  try { reply = JSON.parse(ran.stdout.trim().split("\n")[0] ?? ""); } catch { reply = { error: { message: ran.stderr || "no answer" } }; }
+  return { ok: !reply.error && !reply.result?.isError, content: reply.result?.content ?? reply.error?.message ?? "" };
+};
+
+/** COMPOSIO_MANAGE_CONNECTIONS through the launched connected-apps server, if
+ * this turn has one: the bridge turns it into a Connect card in the chat. */
 const connectApps = (toolkits: string[]) => {
   launchFiles ??= readLaunchFiles();
   const server = (launchFiles.mcpConfig as { mcpServers?: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }> } | null)
@@ -536,6 +602,14 @@ const connectApps = (toolkits: string[]) => {
     is_error: Boolean(reply.error || reply.result?.isError), content: reply.result?.content ?? reply.error?.message ?? "" }] } });
 };
 
+let volatileNote: string | null = null;
+/** The volatile half of the instructions a user message carries (prompt-split.ts withVolatileNote), if any. */
+const volatileNoteIn = (prompt: JsonValue): string | null => {
+  const text = JSON.stringify(prompt);
+  const parsed = /<system-reminder>\\nThis part of your instructions (?:changes from turn to turn|changed since this session started)[^:]*:\\n\\n([\s\S]*?)\\n<\/system-reminder>/.exec(text);
+  return parsed ? (JSON.parse(`"${parsed[1]}"`) as string) : null;
+};
+
 const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
   lateContinuation = late;
@@ -543,11 +617,15 @@ const playTurn = (prompt: JsonValue, late = false) => {
   steeredMessages = [];
   // FAKE_CLAUDE_PROMPTS: every prompt this process receives, one JSON line each.
   if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
+  volatileNote = volatileNoteIn(prompt) ?? volatileNote;
   if (!late && process.env.FAKE_CLAUDE_DUMP) {
     launchFiles ??= readLaunchFiles();
+    // systemPrompt: what the model is instructed with, the system prompt file plus the
+    // volatile half a user message carries (claude.ts keeps the file stable for the cache)
+    const systemPrompt = volatileNote && typeof launchFiles.systemPrompt === "string" ? `${launchFiles.systemPrompt}\n\n${volatileNote}` : launchFiles.systemPrompt;
     writeDumpAtomic(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, ...launchFiles }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, ...launchFiles, systemPrompt, systemPromptFile: launchFiles.systemPrompt }, null, 2),
     );
   }
 
@@ -590,7 +668,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     } catch {}
     const quota = Number(process.env.FAKE_CLAUDE_TRANSIENTS) || 0;
     writeFileSync(process.env.FAKE_CLAUDE_STATE, String(launched + 1));
-    out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools });
+    out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools, ...mcpStatus() });
     if (launched < quota) {
       if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
         out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
@@ -601,8 +679,10 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
 
   // the real CLI re-announces init on every turn of a live process
-  out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools });
-  const rateLimit = process.env.FAKE_CLAUDE_RATE_LIMIT ? JSON.parse(process.env.FAKE_CLAUDE_RATE_LIMIT) : null;
+  out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools, ...mcpStatus() });
+  const limitedFile = process.env.FAKE_CLAUDE_LIMITED_FILE;
+  const limited = limitedFile && existsSync(limitedFile) ? readFileSync(limitedFile, "utf8") : null;
+  const rateLimit = limited !== null ? JSON.parse(limited) : process.env.FAKE_CLAUDE_RATE_LIMIT ? JSON.parse(process.env.FAKE_CLAUDE_RATE_LIMIT) : null;
   if (rateLimit) out({ type: "rate_limit_event", rate_limit_info: rateLimit, session_id: sessionId });
 
   if (lateContinuation && process.env.FAKE_CLAUDE_LATE_STEER_SILENT) {
@@ -618,7 +698,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
 
   const resumedError = process.env.FAKE_CLAUDE_RESUMED_API_ERROR === "1" && argv.includes("--resume") && !resumedErrorPlayed;
   if (resumedError) resumedErrorPlayed = true;
-  if (mode === "usage-limit") {
+  if (mode === "usage-limit" || limited !== null) {
     // captured from 2.1.295 for an account past its weekly limit
     const text = process.env.FAKE_CLAUDE_API_ERROR ?? "You've hit your weekly limit \u00b7 resets Oct 12 at 2:30pm (Asia/Calcutta)";
     out({
@@ -633,8 +713,9 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
   if (mode === "api-error" || resumedError) {
     const text = process.env.FAKE_CLAUDE_API_ERROR ?? "API Error: 529 Overloaded. This is a server-side issue, usually temporary.";
-    out({ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text }] }, error: "unknown", is_api_error_message: true });
-    out({ type: "result", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: text });
+    out({ type: "assistant", message: { model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text }] }, error: process.env.FAKE_CLAUDE_API_ERROR_KIND ?? "unknown", is_api_error_message: true });
+    const status = Number(process.env.FAKE_CLAUDE_API_ERROR_STATUS) || undefined;
+    out({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", ...(process.env.FAKE_CLAUDE_NO_TERMINAL_REASON === "1" ? {} : { terminal_reason: "api_error" }), ...(status ? { api_error_status: status } : {}), result: text });
     turnRunning = false;
     finishIfDone();
     return;
@@ -677,8 +758,12 @@ const playTurn = (prompt: JsonValue, late = false) => {
     process.stdout.write("this is not json\n{broken\n");
   }
 
-  // A signed-out CLI's frames, verbatim: only the frame's own error fields mark the failure.
-  if (mode === "not-logged-in") {
+  // A signed-out CLI's frames, as Claude Code 2.1.296 sends them: only the frame's own error fields mark the failure.
+  if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0) {
+    if (process.env.FAKE_CLAUDE_AUTH_AFTER_WORK === "1") out({
+      type: "assistant", message: { model: "claude-fixture", content: [{ type: "tool_use", id: "before-sign-out", name: "Bash", input: { command: "pwd" } }] },
+    });
+    out({ type: "system", subtype: "status", status: "requesting" });
     out({
       type: "assistant",
       message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in \u00b7 Please run /login" }] },
@@ -691,6 +776,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       stop_reason: "stop_sequence",
       terminal_reason: "api_error",
       result: "Not logged in \u00b7 Please run /login",
+      total_cost_usd: runningCost.total,
     });
     turnRunning = false;
     finishIfDone();
@@ -712,7 +798,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
   if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
-  let replyParts = nextScriptedReply();
+  let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();
   const defaultToolId = `tu-${process.pid}-${++toolUseCount}`;
   if (process.env.FAKE_CLAUDE_TURN_STATE) {
     let n = 0;
@@ -723,31 +809,12 @@ const playTurn = (prompt: JsonValue, late = false) => {
   turnsPlayed += 1;
   if (process.env.FAKE_CLAUDE_COMPACT === "1" && turnsPlayed >= 2) {
     runHooks("PreCompact", { trigger: "auto" });
+    out({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 1000 } });
     const context = runHooks("SessionStart", { source: "compact" });
     if (context.trim()) replyParts = [`${context.trim()}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
   }
   const cacheRead = Number(process.env.FAKE_CLAUDE_CACHE_READ_TOKENS);
   const usage = { input_tokens: 10, cache_read_input_tokens: Number.isSafeInteger(cacheRead) && cacheRead > 0 ? cacheRead : 2, output_tokens: 5 };
-  if (scriptedToolCalls) {
-    for (const call of scriptedToolCalls) {
-      const id = call.id ?? `tu-${process.pid}-${++toolUseCount}`;
-      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
-      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !call.ok, content: call.output }] } });
-      runHooks("PostToolUse", { tool_name: call.name, tool_input: call.input, tool_response: call.output, tool_use_id: id });
-    }
-    for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
-  } else {
-    replyParts.forEach((text, index) => {
-      const content: Array<
-        { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-      > = [{ type: "text", text }];
-      if (index === replyParts.length - 1) content.push({ type: "tool_use", id: defaultToolId, name: "Bash", input: { command: "echo hi" } });
-      out({ type: "assistant", message: { content, usage } });
-    });
-    out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: defaultToolId, is_error: false, content: [{ type: "text", text: "hi" }] }] } });
-    runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
-  }
-
   const finish = () => {
     replaySteered();
     runHooks("Stop", { stop_hook_active: false });
@@ -771,6 +838,64 @@ const playTurn = (prompt: JsonValue, late = false) => {
     turnRunning = false;
     finishIfDone();
   };
+
+  if (streamCadence && mode === "happy") {
+    // Deterministic delta replay for the voice-latency harness: stream each
+    // scripted reply part as fixed-size text_delta chunks at a fixed interval,
+    // then the assistant message (the driver dedups the streamed text).
+    const emitPart = (part: number) => {
+      const text = replyParts[part] ?? "";
+      let at = 0;
+      const step = () => {
+        const chunk = text.slice(at, at + streamCadence.chars);
+        at += streamCadence.chars;
+        if (chunk) out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: chunk } } });
+        if (at < text.length) {
+          setTimeout(step, streamCadence.ms);
+        } else {
+          out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
+          if (part + 1 < replyParts.length) setTimeout(() => emitPart(part + 1), streamCadence.ms);
+          else setTimeout(() => finish(), 0);
+        }
+      };
+      step();
+    };
+    emitPart(0);
+    return;
+  }
+  if (scriptedToolCalls) {
+    const failureContext: string[] = [];
+    for (const call of scriptedToolCalls) {
+      const id = call.id ?? `tu-${process.pid}-${++toolUseCount}`;
+      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
+      const reply = call.server ? mcpToolCall(call.server, call.name, call.input)
+        : { ok: call.ok, content: call.output };
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !reply.ok, content: reply.content }] } });
+      if (!reply.ok) {
+        // Claude Code 2.1.296 runs only PostToolUseFailure for a failed call, with the result text as `error`.
+        const printed = runHooks("PostToolUseFailure", { tool_name: call.name, tool_input: call.input, error: reply.content, tool_use_id: id });
+        try {
+          const context = JSON.parse(printed)?.hookSpecificOutput?.additionalContext;
+          if (typeof context === "string" && context) failureContext.push(context);
+        } catch {}
+      } else {
+        runHooks("PostToolUse", { tool_name: call.name, tool_input: call.input, tool_response: reply.content, tool_use_id: id });
+      }
+    }
+    if (failureContext.length) replyParts = [`${failureContext.join("\n")}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
+    for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
+  } else {
+    replyParts.forEach((text, index) => {
+      const content: Array<
+        { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+      > = [{ type: "text", text }];
+      if (index === replyParts.length - 1) content.push({ type: "tool_use", id: defaultToolId, name: "Bash", input: { command: "echo hi" } });
+      out({ type: "assistant", message: { content, usage } });
+    });
+    out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: defaultToolId, is_error: false, content: [{ type: "text", text: "hi" }] }] } });
+    runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
+  }
+
   if (mode === "background-result") {
     // Claude emits a synthetic result when a background task finishes; it does not complete the turn.
     out({ type: "result", origin: { kind: "task-notification" }, is_error: false, total_cost_usd: 99 });

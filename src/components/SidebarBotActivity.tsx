@@ -4,10 +4,11 @@ import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
 import { t } from "@/lib/i18n";
-import { orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
+import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
+import { localizedTaskTitle } from "@/lib/task-title";
 
-export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>): Array<Task & { queued: boolean }> {
+export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
     threadId: bot.threadId, title: t("task.newShort"), createdAt: 0,
     busy: bot.busy, activity: bot.activity, unread: bot.unread,
@@ -15,6 +16,7 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
   }];
   return tasks.map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }))
     .filter((task) => !task.routineRunId)
+    .filter((task) => !isArchived(task) || (archivedApprovals && task.activity === "waiting-on-you"))
     .filter((task) => task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.waitingForTeammates === true || task.queued || task.unread);
 }
 
@@ -97,7 +99,7 @@ export function crossBotAttentionThreads(
   const flat: FlatAttentionEntry[] = [
     ...bots
       .filter((bot) => bot.id !== exceptBotId && !bot.hidden)
-      .flatMap((bot): FlatAttentionEntry[] => sidebarBotActivityTasks(bot, queued)
+      .flatMap((bot): FlatAttentionEntry[] => sidebarBotActivityTasks(bot, queued, true)
         .map((task) => ({ ...task, botId: bot.id, botName: bot.name }))),
     ...groups
       .flatMap((group): FlatAttentionEntry[] => sidebarGroupActivityTasks(group, bots, queued)
@@ -189,13 +191,14 @@ export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, d
       const teammateWait = !waiting && task.waitingForTeammates === true;
       const working = !waiting && !teammateWait && (task.busy || task.activity === "working");
       const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread");
-      const label = `${bot.name}: ${task.title} · ${status}${task.unread && (waiting || working || teammateWait || task.queued) ? ` · ${t("task.unread")}` : ""}`;
+      const title = localizedTaskTitle(task.title);
+      const label = `${bot.name}: ${title} · ${status}${task.unread && (waiting || working || teammateWait || task.queued) ? ` · ${t("task.unread")}` : ""}`;
       const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;
       return <button key={task.threadId} type="button" data-sidebar-activity-row={task.threadId} aria-label={label} title={label}
         onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}
         className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] outline-none hover:bg-raised/50 focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
         <Icon size={12} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
-        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{task.title}</span><span className="shrink-0 text-[10px]">{waiting ? t("task.waiting") : status}</span>
+        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span><span className="shrink-0 text-[10px]">{waiting ? t("task.waiting") : status}</span>
           {task.unread && (waiting || working || teammateWait || task.queued) && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}</>}
       </button>;
     })}

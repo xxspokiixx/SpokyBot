@@ -36,6 +36,7 @@ interface QueueEntry {
     via?: "call";
     callId?: string;
     fromApp?: Message["fromApp"];
+    reaction?: string;
   }>;
 }
 
@@ -99,7 +100,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; fromApp?: Message["fromApp"] } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"] } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -120,6 +121,7 @@ export function queueSteeredMessage(
     queuedAt: Date.now(),
     ...spokenLineFields(options.via, options.callId),
     ...(options.fromApp ? { fromApp: options.fromApp } : {}),
+    ...(options.reaction ? { reaction: options.reaction } : {}),
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
   entry.items.push(item);
@@ -198,6 +200,7 @@ export function drainSteeredMessages(
           sender: item.sender,
           ...spokenLineFields(item.via, item.callId),
           ...(item.fromApp ? { fromApp: item.fromApp } : {}),
+          ...(item.reaction ? { reaction: item.reaction } : {}),
         }),
       );
     }

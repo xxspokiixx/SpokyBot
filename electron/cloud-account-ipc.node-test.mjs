@@ -61,7 +61,7 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   const handlers = new Map(), calls = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
   localOrigin.setLocalOrigin(origin);
   let allowed = true;
-  const offer = { plans: [{ tier: "personal", amount: 2900 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
+  const offer = { plans: [{ tier: "starter", amount: 1500 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
   const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, CHECKOUT_SOURCES, cloudOffersReady: async () => allowed,
@@ -71,11 +71,12 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   vm.runInContext(source.slice(start, end), context);
   const handle = handlers.get("cloud-account:checkout"), event = { sender: contents, senderFrame: frame };
   assert.deepEqual(await handle(event, "pro", "app_card"), { outcome: "opened", state: { status: "connected" } });
+  assert.deepEqual(await handle(event, "pro", "app_onboarding"), { outcome: "opened", state: { status: "connected" } }, "the welcome's Cloud beat");
   for (const [plan, from] of [["max", "app_card"], ["team", "app_menu"], ["pro", "site_pro"], ["pro", "cloud_page"], [{ tier: "pro" }, "app_card"], ["pro", undefined]]) {
     await assert.rejects(handle(event, plan, from), /Choose a plan/, `${plan} ${from}`);
   }
   assert.throws(() => handle({ sender: contents, senderFrame: { url: "https://remote.example.test/" } }, "pro", "app_card"), /only available/);
   allowed = false;
   await assert.rejects(handle(event, "pro", "app_card"), /isn't offered/);
-  assert.deepEqual(calls, [["pro", "app_card"]]);
+  assert.deepEqual(calls, [["pro", "app_card"], ["pro", "app_onboarding"]]);
 });

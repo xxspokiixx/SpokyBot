@@ -1,12 +1,12 @@
-// agent-browser keeps a session's cookies and storage in the running Chrome and in the restore file it autosaves
-// (`<restore key>-<session>.json.enc`, cli/src/native/state.rs: AES-256-GCM under SHA-256 of the key text, 12-byte nonce
-// first, 16-byte tag last); signing out clears both. The key stays in this server process; no bot or page ever sees it.
+// agent-browser keeps a session's cookies and storage in the running Chrome, in its kept profile, and in the restore file
+// it autosaves (`<restore key>-<session>.json.enc`, cli/src/native/state.rs: AES-256-GCM under SHA-256 of the key text,
+// 12-byte nonce first, 16-byte tag last); signing out clears all three. The key stays in this server process; no bot or page ever sees it.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { browserRestoreKey, browserSessionsDirectory, inRunningBrowser } from "./browser-engine.ts";
+import { browserRestoreKey, browserSessionsDirectory, closeBrowserSession, inRunningBrowser, startBrowserSession } from "./browser-engine.ts";
 import { browserRuntimeEnv } from "./browser-runtime.ts";
 
 export interface SignedInSite {
@@ -33,9 +33,15 @@ export interface Cdp {
   close(): void;
 }
 
+export interface CdpEvent { method: string; params?: Record<string, unknown>; sessionId?: string }
+export interface CdpListeners { event?(message: CdpEvent): void; closed?(): void }
+
 export interface BrowserSitesDeps {
   engine?: (target: BrowserSitesTarget, args: string[]) => Promise<Record<string, unknown> | null>;
   connect?: (url: string) => Promise<Cdp>;
+  /** Starts the stopped browser of a session with a kept profile, so a sign-out reaches the profile too. */
+  start?: (target: BrowserSitesTarget) => Promise<boolean>;
+  stop?: (target: BrowserSitesTarget) => Promise<boolean>;
 }
 
 interface Cookie { name: string; domain: string; path: string; partitionKey?: unknown }
@@ -185,7 +191,7 @@ function rewriteSavedState(directory: string, session: string, key: string, site
   }
 }
 
-export function connectCdp(url: string, timeoutMs = 10_000): Promise<Cdp> {
+export function connectCdp(url: string, timeoutMs = 10_000, listeners: CdpListeners = {}): Promise<Cdp> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url);
     const pending = new Map<number, { done: (value: Record<string, unknown>) => void; fail: (error: Error) => void }>();
@@ -197,10 +203,17 @@ export function connectCdp(url: string, timeoutMs = 10_000): Promise<Cdp> {
       reject(new Error("Could not reach the running browser."));
       failAll(new Error("The browser connection failed."));
     });
-    socket.addEventListener("close", () => failAll(new Error("The browser connection closed.")));
+    socket.addEventListener("close", () => {
+      failAll(new Error("The browser connection closed."));
+      listeners.closed?.();
+    });
     socket.addEventListener("message", (event) => {
-      let message: { id?: number; result?: Record<string, unknown>; error?: { message?: string } };
+      let message: { id?: number; method?: unknown; params?: Record<string, unknown>; sessionId?: string; result?: Record<string, unknown>; error?: { message?: string } };
       try { message = JSON.parse(String(event.data)); } catch { return; }
+      if (message.id === undefined && typeof message.method === "string") {
+        listeners.event?.({ method: message.method, params: message.params, sessionId: message.sessionId });
+        return;
+      }
       const call = typeof message.id === "number" ? pending.get(message.id) : undefined;
       if (!call) return;
       pending.delete(message.id!);
@@ -211,6 +224,7 @@ export function connectCdp(url: string, timeoutMs = 10_000): Promise<Cdp> {
       clearTimeout(opening);
       resolve({
         send: (method, params = {}, sessionId) => new Promise((done, fail) => {
+          if (socket.readyState !== WebSocket.OPEN) return fail(new Error("The browser connection closed."));
           const id = next++;
           const timer = setTimeout(() => { pending.delete(id); fail(new Error("The running browser did not answer.")); }, timeoutMs);
           pending.set(id, {
@@ -281,8 +295,15 @@ async function signOutLive(cdp: Cdp, site: string | null, live: SavedState): Pro
   }
 }
 
-const defaultEngine = (target: BrowserSitesTarget, args: string[]) =>
-  inRunningBrowser(target.binaryPath, browserRuntimeEnv({ ...target.env, AGENT_BROWSER_SESSION: target.session }), args);
+const sessionEnv = (target: BrowserSitesTarget) => browserRuntimeEnv({ ...target.env, AGENT_BROWSER_SESSION: target.session });
+const defaultEngine = (target: BrowserSitesTarget, args: string[]) => inRunningBrowser(target.binaryPath, sessionEnv(target), args);
+const defaultStart = (target: BrowserSitesTarget) => startBrowserSession(target.binaryPath, sessionEnv(target));
+const defaultStop = (target: BrowserSitesTarget) => closeBrowserSession(target.binaryPath, sessionEnv(target));
+
+function keptProfile(target: BrowserSitesTarget): boolean {
+  const dir = target.env.AGENT_BROWSER_PROFILE;
+  return !!dir && existsSync(dir);
+}
 
 async function runningState(target: BrowserSitesTarget, deps: BrowserSitesDeps): Promise<SavedState | null> {
   const scratch = mkdtempSync(join(tmpdir(), "omb-browser-state-"));
@@ -331,8 +352,24 @@ async function visit(target: BrowserSitesTarget, deps: BrowserSitesDeps, site: s
     const after = savedState(directory, target.session, target.encryptionKey);
     return { running: false, sites: signedInSites(after.cookies, after.origins) };
   };
-  const live = await runningState(target, deps);
-  if (!live) return stopped();
+  let live = await runningState(target, deps);
+  const starting = !live && signOut && keptProfile(target);
+  if (starting) {
+    if (!await (deps.start ?? defaultStart)(target)) throw new Error("The browser could not start to sign out. Try again.");
+    live = await runningState(target, deps);
+  }
+  try {
+    if (!live) return stopped();
+    const result = await signOutLiveState(target, deps, site, signOut, live, stopped);
+    return starting ? { ...result, running: false } : result;
+  } finally {
+    if (starting) await (deps.stop ?? defaultStop)(target).catch(() => false);
+  }
+}
+
+async function signOutLiveState(target: BrowserSitesTarget, deps: BrowserSitesDeps, site: string | null, signOut: boolean, live: SavedState, stopped: () => SignedInSites): Promise<SignedInSites> {
+  const directory = directoryOf(target);
+  const listed = (sites: SignedInSite[]) => site === null || sites.some((entry) => entry.site === site);
   const sites = signedInSites(live.cookies, live.origins);
   if (!signOut || !listed(sites)) return { running: true, sites };
   const answer = await (deps.engine ?? defaultEngine)(target, ["get", "cdp-url"]);

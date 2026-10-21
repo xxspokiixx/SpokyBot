@@ -16,10 +16,11 @@ import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
-import { createChatToolApproval } from "./chat-tool-approval.ts";
+import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
+import { outOfCreditsMessage } from "./engine-errors.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 
@@ -121,7 +122,8 @@ interface RuntimeOptions<Config> {
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
-  /** Smaller models announce a step and end the turn without calling a tool; such a reply gets one nudge. */
+  /** Smaller models announce a step and end the turn without calling a tool; such a reply gets a nudge, at most three
+   * per turn and each only after tool progress since the last. */
   nudgeAnnouncedAction?: boolean;
 }
 
@@ -139,6 +141,7 @@ class UnsupportedChatToolsError extends Error {}
 
 const MAX_CHAT_ROUNDS = 64;
 const MAX_TURN_TOOL_CALLS = 200;
+const MAX_ANNOUNCEMENT_NUDGES = 3;
 const stoppedAfter = (count: string) =>
   `Stopped after ${count} without a final answer. The steps so far already ran, so ask only for what's left.`;
 
@@ -186,13 +189,19 @@ function replayDelivered(
   return { content, matched: found.map(({ record }) => record), volatile };
 }
 
-const NUDGE_ANNOUNCED_ACTION = "You said what you would do next but called no tool. Do it now with your tools, or reply with your final answer if nothing is left to do.";
+const CORRECTIVE_ROUND = "[OpenMausBot: a tool call in this turn failed (its result is marked ok:false). Re-run the failed operations with corrected inputs where possible, check the results, then give your final answer. Do not report results you did not get.]";
+const NUDGE_ANNOUNCED_ACTION = "You said what you would do next but called no tool. Use your tools for only the remaining work, or reply with verified results if nothing is left to do. Never repeat an operation that succeeded, was denied, or may already have taken effect; inspect its state instead. Do not retry a destructive operation.";
 
 export function announcesAction(text: string): boolean {
   const reply = text.trim();
-  if (!reply || reply.length > 400 || reply.includes("?")) return false;
+  if (!reply || reply.length > 4_000 || reply.includes("?")) return false;
+  if (reply.length > 400) {
+    const tail = reply.split(/\n\s*\n/).at(-1)!.trim();
+    return tail.length <= 400 && /^(?:let me|i['\u2019]ll|i will|i(?:['\u2019]m| am) going to)\s+(?:now\s+)?(?:execute|send|type|press|launch|open|check|inspect|read|fetch|run|create|write|verify)\b/i.test(tail);
+  }
   return /(?:[:\u2014\u2013]|\.\.\.|\u2026)$/.test(reply) ||
-    /^(?:checking|let me|i'll|i will|i'm going to|i am going to|opening|pulling|looking|searching|navigating|reading|fetching|loading|now (?:i'll|let me|opening|checking|pulling|reading))\b/i.test(reply);
+    /^(?:checking|let me(?! know\b)|i'll|i will|i'm going to|i am going to|opening|pulling|looking|searching|navigating|reading|fetching|loading|now (?:i'll|let me|opening|checking|pulling|reading))\b/i.test(reply) ||
+    /^i(?:['\u2019]m| am)\b[^.!?\n]*\band (?:i )?will\s+(?:launch|open|check|pull|look|search|navigate|read|fetch|load|run|inspect)\b/i.test(reply);
 }
 
 const TEXT_ONLY_ATTACHMENT_NOTE = "[The person attached image(s), but this model cannot see images. Say so if the request depends on them.]";
@@ -582,14 +591,19 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let stopReason: string | null = null;
       let failure: string | undefined;
       let toolFailed = false;
+      let correctiveRounds = 0;
       const denials: string[] = [];
       const seenCalls = new Set<string>();
-      let nudged = false;
+      let nudges = 0;
+      let callsAtNudge = -1;
       try {
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
         tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs);
+        for (const { server, reason } of tools.skipped) {
+          emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `MCP server "${server}" was skipped for this turn: ${safeText(reason)}` });
+        }
         const questionAllowed = options.tools !== false && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
         let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
           // An MCP server squatting ask_user cannot shadow it (dispatch intercepts the name); skip its definition.
@@ -682,15 +696,29 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             if (completion.finishReason && completion.finishReason !== "stop") {
               throw new ChatProtocolError(`provider did not finish the response (${completion.finishReason})`);
             }
-            if (options.nudgeAnnouncedAction && !nudged && tools.definitions.length && announcesAction(completion.text)) {
-              nudged = true;
-              messages.push({ role: "assistant", content: completion.text }, { role: "user", content: NUDGE_ANNOUNCED_ACTION });
-              continue;
-            }
             if (toolFailed) {
-              // A failed or denied tool op ends the turn: a person's "no" is never answered with another attempt.
+              // A person's "no" is never answered with another attempt; a failure may first get the configured corrective rounds.
+              if (!denials.length && correctiveRounds < (turn.toolErrorCorrectiveRounds ?? 0)) {
+                correctiveRounds += 1;
+                messages.push({ role: "user", content: CORRECTIVE_ROUND });
+                continue;
+              }
               stopReason = "tool_error";
               throw new ChatProtocolError("One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.");
+            }
+            if (options.nudgeAnnouncedAction && tools.definitions.length && announcesAction(completion.text)) {
+              if (nudges >= MAX_ANNOUNCEMENT_NUDGES) {
+                stopReason = "incomplete_action";
+                throw new ChatProtocolError(`Stopped after ${MAX_ANNOUNCEMENT_NUDGES} announcement nudges without a verified final answer. Earlier operations may have taken effect; inspect their state and continue only the remaining work.`);
+              }
+              if (callsAtNudge === seenCalls.size) {
+                stopReason = "incomplete_action";
+                throw new ChatProtocolError("The model announced another action without tool progress after a nudge. The task is incomplete; earlier operations may have taken effect. Inspect their state before continuing.");
+              }
+              nudges += 1;
+              callsAtNudge = seenCalls.size;
+              messages.push({ role: "assistant", content: completion.text }, { role: "user", content: NUDGE_ANNOUNCED_ACTION });
+              continue;
             }
             ok = true;
             break;
@@ -706,6 +734,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { [options.reasoningReplayField ?? "reasoning_content"]: completion.protocolReasoning } : {}),
             ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
           });
+          // After a corrective round, the failure stays pending only until the bot runs tools again.
+          if (correctiveRounds && !denials.length) toolFailed = false;
           const screenshotParts: ChatContentPart[] = [];
           for (const call of completion.toolCalls) {
             abort.signal.throwIfAborted();
@@ -744,8 +774,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 const shown = tools.view(call.function.name, args as Record<string, unknown>);
                 const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
                 // This runtime has no provider reviewer, so Full access is honoured here.
-                const allowed = turn.approvalMode === "full" || !shown.ask
-                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.", shown.grant);
+                const floored = approval.floored({ full: turn.approvalMode === "full", threadId: turn.threadId, botId: turn.botId, shown, summary: shownPreview });
+                const allowed = !floored && (turn.approvalMode === "full" || !shown.ask
+                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.", shown.grant));
                 abort.signal.throwIfAborted();
                 emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
                   title: shown.title, ...(shownPreview ? { input: shownPreview } : {}),
@@ -767,7 +798,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                   }
                 } else {
                   denials.push(shown.title);
-                  result = { ok: false, text: "Permission denied or expired; the tool was not executed." };
+                  result = { ok: false, text: refusal(floored, (message) => emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message })) };
                 }
               }
             } catch (error) {
@@ -804,7 +835,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         }
         if (abort.signal.aborted) { ok = false; stopReason = "interrupted"; }
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
-          emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: failure, terminal: !abort.signal.aborted });
+          // "upstream" (an OpenAI-compatible URL) names no provider, and the Cloud trial credit reads its raw line.
+          const message = options.httpErrorLabel === "upstream" ? failure : outOfCreditsMessage(options.httpErrorLabel, failure);
+          emit({ ...base(turn.threadId, turnId), type: "runtime.error", message, terminal: !abort.signal.aborted });
         }
         if (!ok && !abort.signal.aborted) {
           const continuable = classifyContinuable(stopReason, failure);
@@ -854,6 +887,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
         sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
         dataMcp: options.tools !== false,
+        highlevelMcp: options.tools !== false,
         queueing: true,
         guestTurns: "confined" },
       sendTurn,
@@ -882,8 +916,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt, { signal, onUsage } = {}) => {
-      const model = options.generateModel?.() ?? options.models().default;
+    generateText: async (prompt, { signal, onUsage, model: named } = {}) => {
+      const model = named ?? options.generateModel?.() ?? options.models().default;
       const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;

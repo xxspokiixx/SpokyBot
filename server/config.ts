@@ -5,18 +5,24 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
-
+import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
-import { EFFORT_LEVELS, type EffortLevel, type LiveSettings } from "../shared/wire.ts";
-import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
+import { replaySettings } from "./replay-settings.ts";
+import { EFFORT_LEVELS, type EffortLevel } from "../shared/wire.ts";
+import { isModelVariant, type InstanceConfigMap, type McpServerSpec, type ModelSelection } from "./contracts.ts";
 import { DEFAULT_WINDOW_MINUTES, MAX_WINDOW_MINUTES } from "./cache-keepwarm.ts";
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
-import type { McpServerSpec } from "./contracts.ts";
+import { helperStoredShape, type HelperConfig } from "./side-jobs.ts";
+import { loopGuardConfigSchema, type LoopGuardConfig } from "./host/loop-guard.ts";
+import { migrateLegacyFeatureFlags } from "./legacy-feature-flags.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
+import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
+import { roomContextSettings } from "./room-context-settings.ts";
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -50,19 +56,6 @@ export function isValidSshAlias(value: unknown): value is string {
   return typeof value === "string" && SSH_ALIAS.test(value);
 }
 
-const CDP_PORT = /^[0-9]{1,5}$/;
-const CDP_URL = /^(https?|wss?):\/\/\S+$/i;
-
-/** agent-browser's `--cdp` takes a bare port or an http(s)/ws(s) DevTools URL. */
-export function isValidCdpTarget(value: unknown): value is string {
-  if (typeof value !== "string" || value === "") return false;
-  if (CDP_PORT.test(value)) {
-    const port = Number(value);
-    return port >= 1 && port <= 65535;
-  }
-  return CDP_URL.test(value);
-}
-
 export function normalizeVpsConfig(raw: unknown): { sshAlias?: string } {
   if (raw === undefined || raw === null) return {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -77,15 +70,7 @@ export function normalizeVpsConfig(raw: unknown): { sshAlias?: string } {
 }
 
 const vpsConfigSchema = z.object({
-  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), {
-    message: "must be a simple SSH config alias",
-  }).optional(),
-});
-/** `attachCdpUrl`: a running Chrome that My Chrome profiles attach to. Config only, never env: the ambient environment must not redirect a bot's browser. */
-const browserEngineConfigSchema = z.object({
-  attachCdpUrl: z.string().trim().max(2048).refine((value) => value === "" || isValidCdpTarget(value),
-    { message: "browserEngine.attachCdpUrl must be a CDP port (1-65535) or an http(s)/ws(s) URL" }).optional(),
-  idleTimeoutMinutes: z.number().int().min(1).max(60).optional(), // an unused browser closes after this
+  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), { message: "must be a simple SSH config alias" }).optional(),
 });
 const roomConfigSchema = z.object({
   turnTimeoutMinutes: z
@@ -254,23 +239,27 @@ const featureConfigSchema = z.object({
   skillReviewSteps: z.number().int().min(3).max(100).optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
-  /** Run a routine in the conversation it reports to, not a hidden thread. Off unless true. */
-  routinesInConversation: z.boolean().optional(),
   /** Built-in browser. On unless false; each bot also has its own switch. */
   browser: z.boolean().optional(),
   /** Computer sharing. Off unless true, set by hand: there is no Settings toggle. */
   sharedComputers: z.boolean().optional(),
-  /** Claude bots also load this machine's own Claude Code MCP servers. Off unless true: each tool costs tokens on every call. */
-  claudeUserMcp: z.boolean().optional(),
+  claudeUserMcp: z.boolean().optional(), // Claude bots also load this machine's Claude Code MCP servers. Off unless true: tools cost tokens.
+  claudeUserSkills: z.boolean().optional(), // Claude bots also load the skills in ~/.claude/skills, in place. Off unless true.
   /** LLM-generated titles for new threads. Off unless true. */
   llmThreadTitles: z.boolean().optional(),
   /** Recall matching passages from the bot's memory into each turn. On unless false. */
   autoRecall: z.boolean().optional(),
   /** One shared skills store that bots read by assignment. Off unless true. */
   skillsLibrary: z.boolean().optional(),
+  shareLearnedSkills: z.enum(["off", "ask", "auto"]).optional(),
   /** Memory upkeep also reads a member bot's room turns. Off unless true. */
   roomMemoryCapture: z.boolean().optional(),
-});
+  /** Room jobs to several members run side by side, each in a thread of its own. Off unless true. */
+  parallelRoomJobs: z.boolean().optional(),
+  /** A teammate parked on a gate only the person can lift is reported to its Chief of Staff. Off unless true. */
+  chiefEscalations: z.boolean().optional(),
+  acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
+}).extend({ agentsToolBridge: z.boolean().optional() }); // the find_tool / use_tool bridge; off unless true
 const onboardingConfigSchema = z.object({
   completedAt: z.string().trim().max(40).optional(),
   version: z.number().int().min(0).max(1000).optional(),
@@ -346,7 +335,7 @@ const appConfigSchema = z.object({
     phone: z.enum(["ios", "android"]).optional(),
   }).optional(),
   mistral: z.object({ key: optionalText }).optional(),
-  cerebras: z.object({ key: optionalText }).optional(),
+  cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(),
   groq: z.object({ key: optionalText, url: optionalText }).optional(),
   meta: z.object({ key: optionalText, url: optionalText }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
@@ -405,7 +394,7 @@ const appConfigSchema = z.object({
     fishModel: z.enum(FISH_TTS_MODELS).optional(),
   }).optional(),
   decider: deciderConfigSchema.optional(),
-  /** Live calls: a GPT-Live OpenAI project key kept apart from every other OpenAI key; `voice` is a GPT-Live voice. */
+  /** Live calls: `key` is an OpenAI key for Live calls only; without one they use `openai.key`. `voice` is a GPT-Live voice. */
   live: z.object({
     key: optionalText,
     voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
@@ -430,18 +419,15 @@ const appConfigSchema = z.object({
     ).optional(),
   }).optional(),
   /** Non-secret profile details; aboutMe is shared with every bot. */
-  profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional() }).optional(),
+  profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional(), avatarUrl: z.union([z.literal(""), botAvatarUrlSchema]).optional() }).optional(),
   /** UI language override (BCP-47, lowercase); absent follows the system. */
   language: optionalText,
   rooms: roomConfigSchema.optional(),
   mcp: mcpConfigSchema.optional(),
   context: z.object({
-    rebuildBytes: z.number().int().min(1_024).max(1_000_000).optional(),
     compactAt: z.number().positive().max(10_000_000).optional(),
     autoCompact: z.boolean().optional(),
-    /** Start a fresh session before a room turn once context reaches this (fraction or tokens); default 0.9. */
-    roomCompactAt: z.number().positive().max(10_000_000).optional(),
-  }).optional(),
+  }).extend(roomContextSettings).extend(replaySettings).optional(),
   /** Memory upkeep timing, for bots with Memory upkeep switched on. */
   memory: z.object({
     /** Quiet time after a turn before its facts are captured (ms). */
@@ -452,6 +438,8 @@ const appConfigSchema = z.object({
   threads: threadsConfigSchema.optional(),
   /** Minimum days of decision-log month files kept; OMB_DECISION_RETENTION_DAYS wins. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
+  loopGuard: loopGuardConfigSchema.optional(),
+  safetyFloor: z.object({ enabled: z.boolean().optional() }).strict().optional(), // off by default: safetyFloorEnabled in server/safety-floor-gate.ts
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -461,7 +449,7 @@ const appConfigSchema = z.object({
   /** Loose on purpose: one bad server entry is skipped later, never fails the whole file. */
   mcpServers: z.record(z.string(), z.unknown()).optional(),
 });
-const storedAppConfigSchema = appConfigSchema.extend({
+const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
   /** Loose like mcpServers: a bad provider key is dropped later, never the whole file. */
   opencodeGo: z.object({
@@ -475,7 +463,7 @@ const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers:
   .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
-export interface AppConfig {
+export interface AppConfig extends HelperConfig {
   customDomain?: string;
   signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */
@@ -495,7 +483,7 @@ export interface AppConfig {
   language?: string;
   xai?: { key?: string; url?: string };
   mistral?: { key?: string };
-  cerebras?: { key?: string };
+  cerebras?: { key?: string }; treg?: { key?: string };
   groq?: { key?: string; url?: string };
   meta?: { key?: string; url?: string };
   /** `everyClaudeBot`: the key runs every Claude bot instead of its login; unset means true. */
@@ -504,6 +492,8 @@ export interface AppConfig {
   openrouter?: { key?: string };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
   decisions?: { retentionDays?: number };
+  loopGuard?: LoopGuardConfig;
+  safetyFloor?: { enabled?: boolean };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
@@ -516,17 +506,17 @@ export interface AppConfig {
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
-  profile?: { name?: string; email?: string; aboutMe?: string };
+  profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string };
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
-  context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number };
+  context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; routinesInConversation?: boolean; skillsLibrary?: boolean; roomMemoryCapture?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; chiefEscalations?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
-  browserEngine?: { attachCdpUrl?: string; idleTimeoutMinutes?: number };
+  browserEngine?: BrowserEngineConfig;
   instances?: InstanceConfigMap;
 }
 export type BrowserProfile = z.output<typeof browserProfileSchema> & {
@@ -643,19 +633,6 @@ export function cacheKeepWarmSettings(cfg: AppConfig): { enabled: boolean; windo
   return { enabled: cfg.cacheKeepWarm?.enabled === true, windowMinutes: cfg.cacheKeepWarm?.windowMinutes ?? DEFAULT_WINDOW_MINUTES };
 }
 
-export const LIVE_IDLE_MINUTES_DEFAULT = 5;
-
-export function liveSettingsFor(cfg: AppConfig): LiveSettings {
-  const minutes = cfg.live?.idleMinutes;
-  return {
-    configured: Boolean(cfg.live?.key?.trim()),
-    voice: cfg.live?.voice ?? "",
-    readTypedReplies: cfg.live?.readTypedReplies ?? true,
-    idleMinutes: Number.isInteger(minutes) && minutes! >= 1 && minutes! <= 60 ? minutes! : LIVE_IDLE_MINUTES_DEFAULT,
-  };
-}
-
-
 export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?: number } }): number {
   return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
 }
@@ -722,10 +699,6 @@ export function showToolCallsEnabled(cfg: AppConfig): boolean {
   return cfg.features?.showToolCalls === true;
 }
 
-export function routinesInConversationEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.routinesInConversation === true;
-}
-
 export function builtInBrowserEnabled(cfg: AppConfig, _env: NodeJS.ProcessEnv = process.env): boolean {
   return cfg.features?.browser !== false;
 }
@@ -735,7 +708,7 @@ export function sharedComputersEnabled(cfg: AppConfig): boolean {
   return cfg.features?.sharedComputers === true;
 }
 
-export function claudeUserMcpEnabled(cfg: AppConfig): boolean {
+export function claudeUserMcpEnabled(cfg: Pick<AppConfig, "features">): boolean {
   return cfg.features?.claudeUserMcp === true;
 }
 
@@ -743,10 +716,6 @@ export function llmThreadTitlesEnabled(cfg: AppConfig): boolean {
   return cfg.features?.llmThreadTitles === true;
 }
 
-
-export function skillsLibraryEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.skillsLibrary === true;
- }
 
 export function engineLaunches(configs: InstanceConfigMap, env: Record<string, string | undefined> = process.env): Record<string, unknown> {
   return Object.fromEntries(Object.entries(configs).map(([id, entry]) =>
@@ -787,25 +756,7 @@ export function ensureDirs() {
     }
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
-  migrateLegacyFeatureFlags();
-}
-
-function migrateLegacyFeatureFlags(): void {
-  const p = join(DATA_DIR, "config.json");
-  try {
-    if (!existsSync(p)) return;
-    const disk = jsonObjectSchema.safeParse(parseJson(readFileSync(p, "utf8")));
-    if (!disk.success) return;
-    const features = jsonObjectSchema.safeParse(disk.data.features);
-    if (!features.success || !Object.hasOwn(features.data, "skillRecorder")) return;
-    const next: JsonObject = { ...features.data };
-    if (!Object.hasOwn(next, "skillAuthoring")) next.skillAuthoring = next.skillRecorder === true;
-    delete next.skillRecorder;
-    writeFileAtomic(p, JSON.stringify({ ...disk.data, features: next }, null, 2), { mode: 0o600 });
-    console.log(`[config] features.skillRecorder renamed to features.skillAuthoring (${String(next.skillAuthoring)})`);
-  } catch (error) {
-    console.error(`[config] could not rename features.skillRecorder: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  migrateLegacyFeatureFlags(DATA_DIR);
 }
 
 let lastIgnoredConfigWarning = "";
@@ -832,6 +783,7 @@ export function loadConfig(): AppConfig {
   if (process.env.MISTRAL_API_KEY !== undefined) cfg.mistral.key = process.env.MISTRAL_API_KEY;
   cfg.cerebras = { ...cfg.cerebras };
   if (process.env.CEREBRAS_API_KEY !== undefined) cfg.cerebras.key = process.env.CEREBRAS_API_KEY;
+  if (process.env.OMB_TREG_KEY !== undefined) cfg.treg = { ...cfg.treg, key: process.env.OMB_TREG_KEY };
   cfg.groq = { ...cfg.groq };
   if (process.env.OMB_GROQ_API_KEY !== undefined) cfg.groq.key = process.env.OMB_GROQ_API_KEY;
   cfg.meta = { ...cfg.meta };
@@ -901,7 +853,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.mistral?.key, "MISTRAL_API_KEY"],
-    [patch.cerebras?.key, "CEREBRAS_API_KEY"],
+    [patch.cerebras?.key, "CEREBRAS_API_KEY"], [patch.treg?.key, "OMB_TREG_KEY"],
     [patch.groq?.key, "OMB_GROQ_API_KEY"],
     [patch.meta?.key, "OMB_META_API_KEY"],
     [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
@@ -960,17 +912,15 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_OPENROUTER_DECIDER_KEY",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
-  "OMB_OPENAI_LIVE_KEY",
+  "OMB_OPENAI_LIVE_KEY", "OMB_TREG_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   "OMB_CLOUD_BOAT_TOKEN",
   "OMB_CLOUD_VOICE_TOKEN",
   "OMB_CLOUD_DECIDER_TOKEN",
-  "OMB_CLOUD_AI_TOKEN",
+  "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_CONNECTED_APPS_GRANT",
   // Not credentials, but they point a shell-capable agent at app-owned state.
-  "OMB_BROWSER_CONNECTION",
-  "OMB_USER_DATA",
-  "OMB_BOAT_API",
+  "OMB_BROWSER_CONNECTION", "OMB_USER_DATA", "OMB_BOAT_API",
 ] as const;
 
 /** Operator secrets only this process reads, plus every `OMB_CLOUD_` var (the underscore leaves out OMB_CLOUDFLARED_PATH). */
@@ -1097,7 +1047,7 @@ export function saveConfig(
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "groq", "meta", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "groq", "meta", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1310,10 +1260,7 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
-  const anthropicHere = driver === "claudeAgent" && Boolean(cfg.anthropic?.key)
-    && (cfg.anthropic?.everyClaudeBot === false ? instanceId === CLAUDE_API_INSTANCE : instanceId !== CLAUDE_API_INSTANCE);
-  if (anthropicHere) environment.set("ANTHROPIC_API_KEY", cfg.anthropic!.key!);
-  if (anthropicHere && cfg.anthropic!.url) environment.set("ANTHROPIC_BASE_URL", cfg.anthropic!.url);
+  if (driver === "claudeAgent") for (const [name, value] of Object.entries(anthropicKeyEnv(cfg.anthropic, instanceId === CLAUDE_API_INSTANCE))) environment.set(name, value);
   if (driver === "openai-compat" && instanceId === OPENAI_API_INSTANCE) {
     if (cfg.openai?.key) environment.set("OMB_OPENAI_API_KEY", cfg.openai.key);
   } else if (driver === "openai-compat" && instanceId === OPENROUTER_API_INSTANCE) {
@@ -1479,7 +1426,7 @@ export function customMcpServers(cfg: AppConfig, only?: string[]): Record<string
       skipMcpEntry(name, `${parsed.error} Expected { "command": "npx", "args": [...], "env": { ... } } or { "type": "http", "url": "https://…", "headers": { ... } }`);
       continue;
     }
-    if (!parsed.server.enabled) continue;
+    if (!parsed.server.enabled || parsed.server.runsOn) continue; // a server of another computer's never starts here
     out[name] = isRemoteMcpServer(parsed.server)
       ? { type: parsed.server.type, url: parsed.server.url, headers: parsed.server.headers }
       : { command: parsed.server.command, args: parsed.server.args, env: parsed.server.env };

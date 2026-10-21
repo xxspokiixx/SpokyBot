@@ -26,7 +26,6 @@ import { cacheUntilConfigChanges,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
-  routinesInConversationEnabled,
   saveConfig,
   skillAuthoringEnabled,
   sharedComputersEnabled,
@@ -42,8 +41,6 @@ import { cacheUntilConfigChanges,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
-  liveSettingsFor,
-  LIVE_IDLE_MINUTES_DEFAULT,
   mergeOpenCodeProviderKeys,
   openCodeProviderKeys,
   OPENCODE_PROVIDER_KEY_LIMIT,
@@ -77,6 +74,15 @@ describe("configuration boundaries", () => {
     expect(reloaded({ profile })).toEqual([]);
     expect(() => parseConfigPatch({ profile: { aboutMe: "x".repeat(24_001) } })).toThrow();
   });
+  it("keeps the profile photo to a stored attachment picture, never an outside address or SVG", () => {
+    const avatarUrl = "/api/attachments/5f0c2b1e-8a43-4c1d-9e7a-2b6f1d3c4e5a.webp";
+    expect(parseConfigPatch({ profile: { avatarUrl } })).toEqual({ profile: { avatarUrl } });
+    expect(parseStoredConfig({ profile: { name: "Ada", avatarUrl } })).toEqual({ profile: { name: "Ada", avatarUrl } });
+    expect(parseConfigPatch({ profile: { avatarUrl: "" } })).toEqual({ profile: { avatarUrl: "" } });
+    for (const outside of ["https://tracker.example/me.png", "/api/attachments/me.svg", "javascript:alert(1)", "/api/attachments/../config.json", "data:image/png;base64,AAAA"]) {
+      expect(() => parseConfigPatch({ profile: { avatarUrl: outside } }), outside).toThrow();
+    }
+  });
   it("validates context budgets and keeps changes independent of provider reload", () => {
     const context = { autoCompact: false, compactAt: 0.7, rebuildBytes: 32_000 };
     expect(parseStoredConfig({ context })).toEqual({ context });
@@ -87,6 +93,17 @@ describe("configuration boundaries", () => {
     }
     for (const value of [512, 1_024.1, 1_000_001]) {
       expect(() => parseConfigPatch({ context: { rebuildBytes: value } })).toThrow();
+    }
+  });
+  it("accepts the replay tool-history switch as a boolean, without reloading providers", () => {
+    for (const replayToolHistory of [true, false]) {
+      const context = { replayToolHistory };
+      expect(parseStoredConfig({ context })).toEqual({ context });
+      expect(parseConfigPatch({ context })).toEqual({ context });
+      expect(reloaded({ context })).toEqual([]);
+    }
+    for (const value of ["1", 1, "true", null]) {
+      expect(() => parseConfigPatch({ context: { replayToolHistory: value } })).toThrow();
     }
   });
   it("keeps Fish Audio and ElevenLabs voice credentials separate", () => {
@@ -588,6 +605,11 @@ describe("configuration boundaries", () => {
     );
   });
 
+  it("accepts only off, ask and auto for sharing learned skills", () => {
+    expect(parseConfigPatch({ features: { shareLearnedSkills: "off" } })).toEqual({ features: { shareLearnedSkills: "off" } });
+    expect(() => parseConfigPatch({ features: { shareLearnedSkills: "always" } })).toThrow("features.shareLearnedSkills");
+  });
+
   it("keeps computer sharing off unless config.json explicitly turns it on", () => {
     expect(sharedComputersEnabled({})).toBe(false);
     expect(sharedComputersEnabled({ features: {} })).toBe(false);
@@ -602,12 +624,10 @@ describe("configuration boundaries", () => {
     );
   });
 
-  it("keeps routine runs in a hidden thread unless the conversation option is on", () => {
-    expect(routinesInConversationEnabled({})).toBe(false);
-    expect(parseConfigPatch({ features: { routinesInConversation: true } })).toEqual({
-      features: { routinesInConversation: true },
+  it("drops the retired routines-in-conversation switch instead of refusing the config", () => {
+    expect(parseConfigPatch({ features: { routinesInConversation: true, showToolCalls: true } })).toEqual({
+      features: { showToolCalls: true },
     });
-    expect(routinesInConversationEnabled({ features: { routinesInConversation: true } })).toBe(true);
   });
 
   it("keeps tool-call chips off by default and accepts an explicit opt-in", () => {
@@ -1271,9 +1291,12 @@ describe("credential env narrowing", () => {
     expect(own.claude.environment).toEqual({});
     for (const anthropic of [{ key: "SECRET-ANT" }, { key: "SECRET-ANT", everyClaudeBot: true }]) {
       const every = instanceConfigs({ anthropic });
-      expect(every.claude.environment).toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
-      expect(every.claudeApi.environment).toEqual({});
+      expect(every.claude.environment, "a plain Claude bot runs on the key").toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
+      expect(every.claudeApi.environment, "a bot already set to Claude (API key) keeps running on it").toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
     }
+    const routed = instanceConfigs({ anthropic: { key: "SECRET-ANT", url: "https://gateway.example.test", everyClaudeBot: true } });
+    expect(routed.claudeApi.environment).toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT", ANTHROPIC_BASE_URL: "https://gateway.example.test" });
+    expect(instanceConfigs({ anthropic: { everyClaudeBot: true } }).claudeApi.environment, "no key, nothing injected").toEqual({});
   });
 
   it("keeps the built-in routing of a provider instance in a saved fleet", () => {
@@ -1500,6 +1523,13 @@ describe("credential env preference", () => {
     saveConfig({ context: { rebuildBytes: 32_000, autoCompact: false } });
     saveConfig({ context: { compactAt: 0.75 } });
     expect(loadConfig().context).toEqual({ rebuildBytes: 32_000, autoCompact: false, compactAt: 0.75 });
+  });
+
+  it("persists the replay tool-history switch beside the other context preferences", () => {
+    saveConfig({ context: { rebuildBytes: 32_000 } });
+    expect(loadConfig().context?.replayToolHistory).toBeUndefined();
+    saveConfig({ context: { replayToolHistory: true } });
+    expect(loadConfig().context).toEqual({ rebuildBytes: 32_000, replayToolHistory: true });
   });
 
   it("falls back to the config file when the env var is unset (dev mode)", () => {
@@ -1902,7 +1932,7 @@ describe("changedInstanceIds", () => {
     expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral"]);
     expect(reloaded({ openaiCompat: { key: "c2", url: "https://compat.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ openaiCompat: { key: "c1", url: "https://other.example/v1" } }, saved)).toEqual(["openaiCompat"]);
-    expect(reloaded({ anthropic: { key: "a" } }, saved)).toEqual(["claude"]);
+    expect(reloaded({ anthropic: { key: "a" } }, saved), "Claude (API key) runs on the key too").toEqual(["claude", "claudeApi"]);
   });
   it("replaces nothing for sections no driver reads", () => {
     expect(reloaded({ onboarding: { hintsSeen: ["tour.composer"] } })).toEqual([]);
@@ -1943,15 +1973,6 @@ describe("customMcpServers with url entries", () => {
 });
 
 describe("live settings", () => {
-  it("defaults to a 5 minute idle hang-up and reading typed replies", () => {
-    expect(LIVE_IDLE_MINUTES_DEFAULT).toBe(5);
-    expect(liveSettingsFor({} as AppConfig)).toEqual({ configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 });
-  });
-  it("reports saved values and never the key", () => {
-    const settings = liveSettingsFor({ live: { key: "sk-test", voice: "sol", readTypedReplies: false, idleMinutes: 12 } } as AppConfig);
-    expect(settings).toEqual({ configured: true, voice: "sol", readTypedReplies: false, idleMinutes: 12 });
-    expect(JSON.stringify(settings)).not.toContain("sk-test");
-  });
   it("accepts idle minutes from 1 to 60 only", () => {
     expect(() => parseConfigPatch({ live: { idleMinutes: 0 } })).toThrow();
     expect(() => parseConfigPatch({ live: { idleMinutes: 61 } })).toThrow();
@@ -2170,4 +2191,27 @@ describe("a value derived from config.json", () => {
       }
     },
   );
+});
+
+describe("X research's included relay token", () => {
+  it("still loads a config.json saved with the old own treg token, and keeps that token out of the config", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 25, warnAtPercent: 70 }, treg: { token: "treg_old" } }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const loaded = loadConfig();
+      expect(loaded.budgets).toEqual({ monthlyUsd: 25, warnAtPercent: 70 });
+      expect(JSON.stringify(loaded)).not.toContain("treg_old");
+      expect(warn.mock.calls.some(([line]) => String(line).includes("ignoring"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps the plan's research token and the person's own treg key as workspace credentials that never reach an engine", () => {
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_X_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TREG_KEY");
+  });
 });

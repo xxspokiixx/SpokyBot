@@ -7,21 +7,24 @@ import type { ToolScope } from "./tool-scope.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
-import type { MascotBodyId } from "./mascot-bodies.ts";
+import type { BotBodyId } from "./bot-body.ts";
+import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
+import type { WebhookRequestCardData } from "./webhook-request.ts";
+import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
-import type { RoutineRunCardData } from "./routine-run.ts";
+import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
 import type { AppFromRef, AppPayload } from "./app.ts";
 import type { GroupGoalRunCardData } from "./group-goal-run.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
-import type { Notification } from "./notification.ts";
+import type { NotificationLogEntry } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 
@@ -50,9 +53,15 @@ export type CloudBackend = "box" | "vps";
 /** A place a bot can act. `cloud` covers both cloud backends. */
 export type Surface = "cloud" | "vm" | "local" | "browser";
 
-export type MausColor =
-  | "green" | "blue" | "red" | "orange" | "purple" | "cyan" | "pink"
-  | "yellow" | "teal" | "coral";
+export const MAUS_COLOR_NAMES = [
+  "green", "blue", "red", "orange", "purple", "cyan", "pink",
+  "yellow", "teal", "coral",
+] as const;
+export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
+
+export function isMausColor(value: unknown): value is MausColor {
+  return typeof value === "string" && (MAUS_COLOR_NAMES as readonly string[]).includes(value);
+}
 
 /** The face a bot rests on, as one of the engine's state names. */
 export type MausExpression = string;
@@ -75,6 +84,8 @@ export interface TaskOpenedBy {
   /** The opener's own conversation this "work" thread was opened from.
    * Everything that conversation later sends this bot continues here. */
   threadId?: string;
+  /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
+  roomLane?: true;
   at: number;
 }
 
@@ -132,6 +143,7 @@ export interface WireTask {
   /** Epoch ms of the newest message, or createdAt when the thread has none.
    * Server-derived. Clients must not write it. */
   updatedAt?: number;
+  lastThreadOrderAt?: number;
   /** 0 means "until new activity"; a future epoch ms means "until then", and
    * an expired value reads as absent. Absent = not snoozed. */
   snoozedUntil?: number;
@@ -232,6 +244,9 @@ export const CONNECTOR_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,80}$/;
 /** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`. */
 export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 
+/** Fails closed: only an absent switch or a strict true allows the helper model; a hand-edited "false" or 0 reads as never. */
+export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => bot.helperModel === undefined || bot.helperModel === true;
+
 /** A bot as a client may see it. avatarUrl is always present (null when the
  * bot has none). */
 export interface WireBot {
@@ -257,7 +272,7 @@ export interface WireBot {
   notifications: boolean;
   color: MausColor;
   mascotExpression?: MausExpression | null;
-  mascotBody?: MascotBodyId | null;
+  mascotBody?: BotBodyId | null;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;
@@ -280,6 +295,9 @@ export interface WireBot {
   cloudBackend?: CloudBackend;
   /** Auto mode may prepare/start this bot's managed VPS container. */
   autoStartVps?: boolean;
+  /** This bot's own SSH config alias for its managed VPS computer; absent
+   * means the default server from Settings → API keys. */
+  vpsAlias?: string;
   /** where NEW tasks run their shell tools; absent = home folder. */
   cwd?: string;
   /** Auto mode: the bot approves its own tool permissions. */
@@ -290,11 +308,17 @@ export interface WireBot {
   alwaysAllow?: string[];
   /** Speak this bot's replies aloud as they settle, without being asked. */
   speakReplies?: boolean;
+  /** How replies are shaped. Absent = "default". */
+  replyStyle?: ReplyStyle;
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */
   voice?: string;
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
   voiceNotes?: boolean;
+  /** Whether this bot may use the X research tools (x_search, x_user_posts,
+   * x_post, x_profile), which spend the workspace's treg balance.
+   * Absent/false = off: the person turns it on per bot. */
+  xResearch?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
@@ -337,6 +361,8 @@ export interface WireBot {
   /** Prompt-cache keep-warm for this bot's Claude threads: true or false
    * overrides the workspace setting; absent follows it. */
   cacheKeepWarm?: boolean;
+  /** false: the workspace's helper model never writes this bot's background texts. Absent or true: allowed. */
+  helperModel?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
   mcpServers?: string[];
   /** Owner-selected original tool identities. An empty allowlist permits none. */
@@ -379,8 +405,9 @@ export type CardAnswerer = (
   | { kind: "loopback" }
   | { kind: "worker" }
 ) & {
-  /** "call": decided by voice on a Live call, not tapped. */
-  via?: "call";
+  /** "call": decided by voice on a Live call; "reaction": by a 👍 or 👎 on the
+   * card. Absent: tapped. */
+  via?: "call" | "reaction";
 };
 
 /** One transcript line, serialized as stored. */
@@ -419,6 +446,7 @@ export interface WireMessage {
   signIn?: SignInRequestCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
+  automation?: AutomationLine;
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
   /** call rows (kind "call"): the finished Live call this row records. */
@@ -431,6 +459,8 @@ export interface WireMessage {
     claudeUpdate?: boolean;
   /** error rows: the place this turn could not use. */
     place?: PlaceRow;
+    /** error rows: epoch ms when the usage limit that stopped the turn resets. */
+    limitResetsAt?: number;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private
@@ -438,7 +468,8 @@ export interface WireMessage {
     fullResult?: boolean;
   };
   /** A bot line a "post" webhook wrote: whoever called the webhook chose
-   * its words. */
+   * its words. On a room line this also carries `from`, so the room renders
+   * the webhook's bot as the speaker. */
   webhookPost?: boolean;
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
@@ -474,6 +505,7 @@ export interface WireMessage {
   requestPending?: boolean;
   /** The last assistant text item from a settled provider turn. */
   turnTerminal?: boolean;
+  turnCompletedAt?: number;
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
   mime?: string;
@@ -494,13 +526,22 @@ export interface WireMessage {
    * with how sure it was. Absent on every other message; clients that do
    * not know it ignore it. */
   routedBy?: { provider: "jev" | "openrouter"; probability: number };
+  /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
+  quickModel?: string;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
-   * Team incidents report about that bot's broken run in `threadId`, not its
-   * words; `notified`: that failure already buzzed the person. */
+   * Team incidents report or Team escalations notice about that bot's thread
+   * in `threadId`, not its words; `notified`: the person was already buzzed. */
   peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean } };
-  /** emoji reactions; by = "user" or a member botId. */
-  reactions?: Array<{ emoji: string; by: string }>;
+  /** One reaction per person (shared/reactions.ts REACTIONS). `by` is "user"
+   * on a workspace one person uses, otherwise that person's opaque key, the
+   * one GET /api/auth/session returns as `reactor`. `name` is attribution
+   * only; `at` is when they chose it. */
+  reactions?: Array<{ emoji: string; by: string; name?: string; at?: number }>;
+  /** user lines a 👍 or 👎 made: the person reacted with this emoji to
+   * `replyToId` instead of typing. Clients show the reaction on that message
+   * and draw no bubble for this line. */
+  reaction?: string;
   /** comm chips: "Messaged @X", linking to the bot-bot channel. */
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
   /** thread chips: "Opened thread #Title on @X". */
@@ -516,10 +557,41 @@ export interface WireMessage {
   queueId?: string;
 }
 
+export const movesThreadToTop = (message: Pick<WireMessage, "role" | "kind" | "peerAsk" | "turnId" | "turnTerminal">): boolean =>
+  message.role === "user" ? !message.peerAsk : message.kind === "text" && (message.turnTerminal === true || !message.turnId);
+
+export function orderedThreadList<T extends { pinned?: boolean; lastThreadOrderAt?: number; createdAt?: number }>(tasks: readonly T[]): T[] {
+  return tasks
+    .map((task, index) => ({ task, index }))
+    .sort((a, b) => {
+      const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
+      if (pin) return pin;
+      const recency = (b.task.lastThreadOrderAt ?? b.task.createdAt ?? 0) - (a.task.lastThreadOrderAt ?? a.task.createdAt ?? 0);
+      if (recency) return recency;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.task);
+}
+
+/** 0 is the "until new activity" sentinel. The event stream never drops an expired snooze, so check the clock too. */
+export const isSnoozed = (task: Pick<WireTask, "snoozedUntil">, now = Date.now()): boolean =>
+  task.snoozedUntil !== undefined && (task.snoozedUntil === 0 || task.snoozedUntil > now);
+
+type OpenThreadCandidate = Pick<WireTask, "routineRunId" | "archivedAt" | "closedBy" | "openedBy" | "snoozedUntil" | "pinned" | "lastThreadOrderAt" | "createdAt">;
+
+/** The top row of the bot's thread list, so deleting the open thread never pulls a hidden one into view. */
+export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[], now = Date.now()): T | undefined {
+  const own = tasks.filter((task) => !task.routineRunId);
+  const open = own.filter((task) => task.archivedAt === undefined);
+  const listed = open.filter((task) => task.pinned === true || !(task.closedBy || task.openedBy || isSnoozed(task, now)));
+  return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
+}
+
 export interface OptionCardData {
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
-  teamMemoryRequest?: { section: string; entryId: string; kind: string };
+  /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */
+  teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
   title: string;
   subtitle: string;
   options: string[];
@@ -560,6 +632,10 @@ export interface OptionCardData {
   undone?: boolean;
   /** A durable chat-created routine proposal. */
   routineRequest?: RoutineRequestCardData;
+  /** A webhook trigger a bot made or changed from chat. */
+  webhookRequest?: WebhookRequestCardData;
+  /** An app-event automation a bot made or changed from chat. */
+  appTriggerRequest?: AppTriggerRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
   /** A durable default-model proposal (propose_model). */
@@ -569,6 +645,17 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
   questionRequest?: QuestionRequestCardData;
+  /** The options are the whole answer: clients offer no free-text reply. */
+  fixedOptions?: boolean;
+  quotaSwitch?: QuotaSwitchCardData;
+}
+
+/** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
+ * message to resend, `rootId` the failed request's job-runtime root. */
+export interface QuotaSwitchCardData {
+  engines: Array<{ instanceId: string; name: string }>;
+  messageId?: string;
+  rootId?: string;
 }
 
 /** Which app holds the microphone of a Live call: the desktop app (its own
@@ -615,9 +702,14 @@ export interface LiveCallRecord {
   title?: string;
 }
 
+/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key. */
+export type LiveKeySource = "live" | "openai";
+
 /** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
 export interface LiveSettings {
+  /** A Live call has a key to use (`keySource` says which); never the key itself. */
   configured: boolean;
+  keySource?: LiveKeySource;
   voice: string;
   readTypedReplies: boolean;
   idleMinutes: number;
@@ -679,8 +771,9 @@ export interface SignInRequestCardData {
   /** A newer request for the same site in this conversation replaced this
    * card; it no longer offers Done or Cancel. */
   superseded?: boolean;
-  /** Answered by saving a login: the exact host it was saved for, which the
-   * bot then fills with fill_login. */
+  /** Answered by saving a login: the site it was saved for (and a sign-in
+   * host on another site the person confirmed), which the bot then fills
+   * with fill_login. */
   savedLogin?: string;
   resumed?: boolean;
   error?: string;
@@ -724,6 +817,7 @@ export interface GroupTask {
   turnTimeoutMinutes?: number;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
+  lastThreadOrderAt?: number;
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a room the person may have retitled. */
   titleFromFirstMessage?: true;
@@ -786,6 +880,20 @@ export interface WireGroup {
   /** Room messages addressed to a member while it was held, by bot id;
    * its next turn is shown them, then they are cleared. */
   heldMessages?: Record<string, RoomHeldMessage[]>;
+  /** transient: who waits in each of the room's threads, and on whom; absent or empty when nobody waits. */
+  queue?: RoomQueueEntry[];
+}
+
+export interface RoomQueueEntry {
+  botId: string;
+  threadId: string;
+  state: "running" | "queued";
+  /** 1-based place in that thread's line; `of` counts the whole line. */
+  position: number;
+  of: number;
+  /** Who a queued member waits on: the member running now, else the one speaking (or the one ahead). */
+  waitingForBotId?: string;
+  assignmentId?: string;
 }
 
 /** One member's hold in a room: when the person stopped it, and whether the
@@ -839,7 +947,7 @@ export type ServerFrame =
   | { kind: "thread"; threadId: string; activeLeafId: string }
   | { kind: "bot"; bot: WireBot }
   | { kind: "group"; group: WireGroup }
-  | { kind: "notify"; notification: Notification }
+  | { kind: "notify"; notification: NotificationLogEntry }
   | { kind: "group.deleted"; groupId: string }
   | { kind: "routine"; routine: Routine }
   | { kind: "routine.deleted"; routineId: string }
@@ -847,8 +955,13 @@ export type ServerFrame =
   | { kind: "webhook"; webhook: WebhookTrigger }
   | { kind: "webhook.attempt"; attempt: WebhookAttempt }
   | { kind: "webhook.deleted"; webhookId: string }
+  | { kind: "app-trigger"; botId: string; trigger: AppTrigger }
+  | { kind: "app-trigger.attempt"; botId: string; attempt: AppEventAttempt }
+  | { kind: "app-trigger.deleted"; triggerId: string }
+  | { kind: "app-trigger.service"; service: AppTriggerService }
   | { kind: "runtime"; event: RuntimeEvent }
-  | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string }
+  /** `surface` names what the frame shows: the bot's desktop (`computer`) or its built-in browser. */
+  | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string; surface?: "browser" | "computer" }
   /** A bot's computer is being set up or woken for a turn; the chat shows
    * one progress line until its first screen frame. `place` names a cloud
    * computer (absent: a Local VM). */

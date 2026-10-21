@@ -14,7 +14,8 @@ vi.mock("@/lib/interface-mode", async (original) => ({
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
+import { BotDeleteMenuItem } from "./BotMenuDelete";
+import { BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
@@ -43,6 +44,55 @@ afterEach(() => {
 });
 
 describe("BotListItem", () => {
+  it("makes a bot waiting for you louder than a preview", () => {
+    const opening = (markup: string, testId: string) => {
+      const tag = markup.match(new RegExp(`<span[^>]*data-testid="${testId}"[^>]*>`))?.[0];
+      expect(tag, testId).toBeTruthy();
+      return tag ?? "";
+    };
+    const waiting = renderRow(bot({ activity: "waiting-on-you" }));
+    const badge = opening(waiting, "waiting-dot");
+    expect(badge).toContain('role="status"');
+    expect(badge).toContain('aria-label="Waiting for you…"');
+    expect(badge).toContain('title="Waiting for you…"');
+    expect(badge).toContain("size-4");
+    expect(badge).toContain("bg-warning");
+    expect(badge).toContain("border-2");
+    expect(badge).toContain("border-panel");
+    expect(badge).not.toContain("size-2.5");
+    expect(badge).not.toContain("size-3");
+    expect(waiting).toContain('aria-hidden="true">!</span>');
+    expect(waiting).toContain('class="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] font-semibold text-warning"');
+    expect(waiting).toContain('class="truncate">Waiting for you…</span>');
+
+    const icons = opening(renderRow(bot({ activity: "waiting-on-you" }), false, "icons"), "waiting-dot");
+    expect(icons).toContain("size-5");
+    expect(icons).toContain("bg-warning");
+    expect(icons).not.toContain("size-4");
+    expect(icons).not.toContain("size-2.5");
+
+    const teammate = renderRow(bot({ waitingForTeammates: true }));
+    const teammateDot = opening(teammate, "teammate-wait-dot");
+    expect(teammateDot).toContain("size-2.5");
+    expect(teammateDot).not.toContain("size-4");
+    expect(teammate).toContain('class="truncate">Waiting on a teammate…</span>');
+    expect(teammate).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
+    expect(teammate).not.toContain("font-semibold text-warning");
+
+    const working = renderRow(bot({ busy: true }));
+    expect(opening(working, "working-dot")).toContain("size-2.5");
+    expect(working).not.toContain("waiting-dot");
+    expect(working).not.toContain("font-semibold text-warning");
+
+    const preview = renderRow(bot({
+      messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt", at: 2 }] as Bot["messages"],
+    }));
+    expect(preview).toContain('class="truncate">Created notes.txt</span>');
+    expect(preview).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
+    expect(preview).not.toContain("text-warning");
+    expect(preview).not.toContain("waiting-dot");
+  });
+
   it("offers direct New thread and New folder icons and a keyboard-accessible bot menu", () => {
     const markup = renderRow(bot());
     expect(markup).toContain('aria-label="New thread"');
@@ -324,9 +374,9 @@ describe("archive / delete confirmation", () => {
 
     expect(copy.title).toContain("Willow");
     expect(copy.body).toMatch(/permanently/i);
-    expect(copy.body).toMatch(/any computer it owns/i);
+    expect(copy.body).toMatch(/any desktop it owns/i);
     expect(copy.body).toMatch(/files and browser sign-ins/i);
-    expect(copy.body).toMatch(/shared team computers remain/i);
+    expect(copy.body).toMatch(/shared team desktops stay/i);
     expect(copy.tone).toBe("danger");
   });
 
@@ -353,8 +403,8 @@ describe("bot deletion feedback", () => {
       onClick: vi.fn(),
     }));
 
-    expect(markup).toContain("Deleting bot and owned computer…");
-    expect(markup).toContain('title="Deleting this bot and any computer it owns"');
+    expect(markup).toContain("Deleting the bot and its desktop…");
+    expect(markup).toContain('title="Deleting this bot and any desktop it owns"');
     expect(markup).toContain('disabled=""');
     expect(markup).toContain('aria-busy="true"');
   });

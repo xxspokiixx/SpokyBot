@@ -26,11 +26,34 @@ describe("describeTool", () => {
     expect(describeTool("GMAIL_SEND_EMAIL")).toEqual({ app: "Gmail", label: "Send email" });
     expect(describeTool("mcp__composio__GITHUB_CREATE_AN_ISSUE")).toEqual({ app: "GitHub", label: "Create an issue" });
     expect(describeTool("GOOGLESHEETS_BATCH_UPDATE")).toEqual({ app: "Google Sheets", label: "Batch update" });
+    expect(describeTool("mcp__highlevel__HIGHLEVEL_ADD_NOTE")).toEqual({ app: "HighLevel", label: "Add note" });
+    expect(describeTool("HIGHLEVEL_UPDATE_CONTACT")).toEqual({ app: "HighLevel", label: "Update contact" });
   });
 
   it("treats the bot's computer and its teammates as apps too", () => {
     expect(describeTool("mcp__computer__click")).toEqual({ app: "Computer", label: "Click" });
     expect(describeTool("mcp__agents__delegate_bot")).toEqual({ app: "Team", label: "Delegate bot" });
+  });
+
+  it("files the X research tools under X, not Team", () => {
+    expect(describeTool("mcp__agents__x_search")).toEqual({ app: "X", label: "Searched X" });
+    expect(describeTool("mcp__agents__x_user_posts")).toEqual({ app: "X", label: "Read X posts" });
+    expect(describeTool("mcp__agents__x_post")).toEqual({ app: "X", label: "Read an X post" });
+    expect(describeTool("mcp__agents__x_profile")).toEqual({ app: "X", label: "Looked up an X profile" });
+    expect(describeTool("mcp__agents__delegate_bot")).toEqual({ app: "Team", label: "Delegate bot" });
+  });
+
+  it("files research under Research, a call by the kind of thing it looked up and never the vendor", () => {
+    expect(describeTool("mcp__agents__research_search")).toEqual({ app: "Research", label: "Searched research tools" });
+    expect(describeTool("mcp__agents__research_endpoint")).toEqual({ app: "Research", label: "Read a research tool" });
+    const call = (input: unknown) => describeTool("mcp__agents__research_call", input);
+    expect(call({ id: "apollo.people.search" })).toEqual({ app: "Research", label: "Looked up people" });
+    expect(call('{"id":"crunchbase.companies.lookup","params":{}}')).toEqual({ app: "Research", label: "Looked up companies" });
+    expect(call({ name: "research_call", arguments: { id: "tikhub.tiktok.user.profile" } })).toEqual({ app: "Research", label: "Looked up social data" });
+    expect(call({ id: "anyapi.x.search.posts" })).toEqual({ app: "X", label: "Searched X" });
+    expect(call({ id: "newsapi.news.everything" })).toEqual({ app: "Research", label: "Read the news" });
+    expect(call({ id: "people.vendor.thing" })).toEqual({ app: "Research", label: "Ran a research call" });
+    expect(call(undefined)).toEqual({ app: "Research", label: "Ran a research call" });
   });
 
   it("falls back to spacing out an unknown name rather than showing it raw", () => {

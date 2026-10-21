@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { activeLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { ArrowDown, Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, Pause, Pin, Plus, Search, Square, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, Pause, Pin, Plus, Search, Square, X } from "lucide-react";
 import {
   api,
   useStore,
@@ -24,13 +24,16 @@ import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { roomActivityVisible } from "@/lib/room-activity";
 import { StatusActivityRow } from "@/components/StatusActivityRow";
-import { MAUS_COLOR_NAMES, normalizeState, type MausColor } from "@/lib/mascot";
+import { normalizeState } from "@/lib/mascot";
 import { botTextShowsSpeaker, laterTextOwns, runShowsSpeaker } from "@/lib/room-speaker";
 import { defaultResponderName, effectiveDefaultResponder, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { CopyButton, FailedTurnRow, MessageBoundary, ReplyAction } from "./ChatView";
-import { MESSAGE_ROW, MessageActions, messageActionClass } from "./MessageActions";
-import { useBotMessageMenu, userMessageMenu, type PinAction } from "./message-menu";
+import { FailedTurnRow, MessageBoundary, SIMPLE_BUBBLE } from "./ChatView";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "./MessageActions";
+import { ReactAction, ReactionChips, useCanReact } from "./Reactions";
+import { ClusterLabel } from "./RoomClusterLabel";
+import { roomPin, useBotMessageMenu, userMessageMenu } from "./message-menu";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { SpeakButton } from "./SpeakButton";
 import { useSpeech } from "@/lib/tts/useSpeech";
@@ -59,7 +62,7 @@ import { GoalRunCard } from "./GoalRunCard";
 import { AttachmentGallery, MessageAttachmentGallery, replyAttachmentGroup } from "./AttachmentGallery";
 import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { OptionCard } from "./OptionCard";
-import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
+import { GroupCallOverlay, RoomHeaderCallButton } from "./GroupCallView";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
@@ -89,6 +92,9 @@ import { DataResultChip } from "./DataResultChip";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { dayLabel, localDay } from "@/lib/transcript-derivations";
 import { roomSpeakerIds, roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
+import { RoomQueueList, RoutedByLine, roomMemberQueueTitle } from "./RoomQueueList";
+import { JumpToLatestButton } from "./JumpToLatestButton";
+import { Select } from "./Select";
 
 export function RoomToolChip({ message, roomId }: { message: Message; roomId?: string }) {
   const { state, dispatch } = useStore();
@@ -138,41 +144,6 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
   );
 }
 
-function isPaletteColor(color: string): color is MausColor {
-  return (MAUS_COLOR_NAMES as readonly string[]).includes(color);
-}
-
-function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: string }) {
-  const known = isPaletteColor(color);
-  return (
-    <div className="mt-1 flex items-center gap-1.5 pl-0.5">
-      <BotAvatar
-        bot={bot ?? { name, color: color as Bot["color"] }}
-        state={normalizeState(bot?.mascotExpression) ?? "happy"}
-        size={16}
-        motion="none"
-        motionKey={0}
-        animated={false}
-        readable={known}
-      />
-      <span
-        className={cn("text-[11px] font-medium", known ? "bot-identity" : "text-ink-secondary")}
-        data-bot-color={known ? color : undefined}
-      >{name}</span>
-    </div>
-  );
-}
-
-function roomPin(group: Group, message: Message, dispatch: ReturnType<typeof useStore>["dispatch"]): PinAction | undefined {
-  if (window.ogb?.remoteClient?.active) return undefined;
-  const pinned = group.pinnedMessageId === message.id;
-  return {
-    pinned,
-    hint: t("room.pinHint"),
-    onToggle: () => dispatch({ type: "patchGroup", groupId: group.id, patch: { pinnedMessageId: pinned ? "" : message.id } }),
-  };
-}
-
 const USER_COLLAPSE_CHARS = 600;
 const USER_COLLAPSE_LINES = 8;
 
@@ -184,6 +155,7 @@ function RoomTextMessage({
   emerging,
   eager,
   onReply,
+  canReact,
 }: {
   group: Group;
   message: Message;
@@ -192,6 +164,7 @@ function RoomTextMessage({
   emerging: boolean;
   eager: boolean;
   onReply: (message: Message) => void;
+  canReact: boolean;
 }) {
   const { state, dispatch } = useStore();
   const user = m.role === "user";
@@ -206,9 +179,8 @@ function RoomTextMessage({
   const focus = state.focusMessage;
   const focusedSearch = focus?.messageId === m.id && Boolean(focus.matchText) && focus.threadId === group.threadId;
   const collapsible = user && !expanded && (display.length > USER_COLLAPSE_CHARS || display.split("\n").length > USER_COLLAPSE_LINES);
-  useEffect(() => {
-    if (focusedSearch && collapsible) setExpanded(true);
-  }, [focusedSearch, collapsible, focus?.nonce]);
+  useEffect(() => { if (focusedSearch && collapsible) setExpanded(true); }, [focusedSearch, collapsible, focus?.nonce]);
+  const simple = !useAdvancedMode();
   const speakerBot = members.find((member) => member.id === m.from?.botId);
   const botText = rawText;
   const pin = roomPin(group, m, dispatch);
@@ -237,11 +209,11 @@ function RoomTextMessage({
         <div
           data-chat-bubble
           className={cn(
-            "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-relaxed",
+            "w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",
             !user && emerging && "turn-answer",
             !user && !m.text?.trim() && !m.replyToId && m.attachments?.length
               ? "text-ink"
-              : user ? "chat-text whitespace-pre-wrap bg-bubble-user px-4 py-2.5 text-ink" : "bg-card px-4 py-2.5 text-ink",
+              : cn(user ? "chat-text whitespace-pre-wrap bg-bubble-user px-4 py-2.5 text-ink" : "bg-card px-4 py-2.5 text-ink", simple && SIMPLE_BUBBLE),
           )}
           title={new Date(m.at).toLocaleString()}
         >
@@ -307,7 +279,7 @@ function RoomTextMessage({
               {viewRaw && botText ? (
                 <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><RawMarkdownView text={botText} /></div>
               ) : botText ? (
-                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} /></div>
+                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={members} everyone={!group.dm} mentionPerson={{ profileName: state.config?.profile?.name }} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} /></div>
               ) : null}
               {replyGroup && <AttachmentGallery images={replyGroup.images} files={replyGroup.files} message={{ threadId: group.threadId, messageId: m.id }} eager={eager} beneath />}
             </MessageBoundary>
@@ -316,6 +288,7 @@ function RoomTextMessage({
         {!user && (
           <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={botMenu}>
             <ReplyAction onReply={() => onReply(m)} />
+            {canReact && m.from && <ReactAction threadId={group.threadId} message={m} />}
             {botText && <CopyButton text={botText} className={messageActionClass} />}
             {botText && viewRaw && <RawToggleAction active onToggle={() => setViewRaw(false)} className={messageActionClass} />}
             {botText && speaking && (
@@ -327,6 +300,7 @@ function RoomTextMessage({
           {formatTime(m.at)}
         </span>
       </div>
+      <ReactionChips threadId={group.threadId} message={m} bots={members} align={user ? "end" : "start"} canReact={canReact} />
       {!user && m.routedBy && <RoutedByLine routedBy={m.routedBy} />}
     </div>
   );
@@ -356,6 +330,7 @@ export const Transcript = memo(function Transcript({
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const showToolCalls = showToolCallsEnabled(state.config);
+  const canReact = useCanReact(group.threadId);
   const memberOf = (id?: string) => members.find((b) => b.id === id);
   const folds = useMemo(() => roomTurnFolds(messages), [messages, locale]);
   const items = useMemo(() => groupActivityRuns(messages.filter(message =>
@@ -499,6 +474,7 @@ export const Transcript = memo(function Transcript({
                 emerging={m.id === emergingId}
                 eager={m.id === newestMessageId || m.id === newestUserMessageId}
                 onReply={onReply}
+                canReact={canReact}
               />
             )
           ) : null;
@@ -533,6 +509,7 @@ export const Transcript = memo(function Transcript({
                       emerging={false}
                       eager={false}
                       onReply={onReply}
+                      canReact={canReact}
                     />
                   </div>
                 ))}
@@ -570,15 +547,6 @@ export function RoomHoldsBanner({ group, members }: { group: Group; members: Bot
   );
 }
 
-export function RoutedByLine({ routedBy }: { routedBy: NonNullable<Message["routedBy"]> }) {
-  const percent = Math.round(Math.min(1, Math.max(0, routedBy.probability)) * 100);
-  return (
-    <div data-testid="routed-by" className="mt-1 px-1 text-[11px] text-ink-secondary">
-      {t(routedBy.provider === "openrouter" ? "room.routedBy.openrouter" : "room.routedBy", { percent: String(percent) })}
-    </div>
-  );
-}
-
 export function DefaultResponderSelect({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
   const jevOn = jevRoomRoutingOn(state.config);
@@ -606,32 +574,28 @@ export function DefaultResponderSelect({ group, members }: { group: Group; membe
   };
 
   return (
-    <div className="relative shrink-0" title={title}>
-      <select
-        aria-label={t("room.responder.aria")}
-        value={value}
-        onChange={(event) => change(event.target.value)}
-        className="h-8 max-w-[190px] appearance-none truncate rounded-full border border-hairline/40 bg-raised/60 py-1 pl-3 pr-7 text-[12.5px] font-medium text-ink outline-none hover:bg-raised focus:border-accent"
-      >
-        <optgroup label={t("room.responder.groupLead")}>
-          {members.map((member) => (
-            <option key={member.id} value={`member:${member.id}`}>
-              {t("room.responder.leadOption", { name: member.name })}
-            </option>
-          ))}
-        </optgroup>
-        <optgroup label={t("room.responder.groupBehavior")}>
-          <option value="auto">{jevOn ? t("room.responder.autoOption") : t("room.responder.autoOptionOff")}</option>
-          <option value="everyone">{t("room.responder.everyoneOption")}</option>
-          <option value="mentions">{t("room.responder.mentionsOption")}</option>
-        </optgroup>
-      </select>
-      <ChevronDown
-        size={13}
-        aria-hidden="true"
-        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-secondary"
-      />
-    </div>
+    <Select
+      variant="pill"
+      size="sm"
+      className="shrink-0 max-w-[190px]"
+      title={title}
+      aria-label={t("room.responder.aria")}
+      value={value}
+      onChange={(event) => change(event.target.value)}
+    >
+      <optgroup label={t("room.responder.groupLead")}>
+        {members.map((member) => (
+          <option key={member.id} value={`member:${member.id}`}>
+            {t("room.responder.leadOption", { name: member.name })}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label={t("room.responder.groupBehavior")}>
+        <option value="auto">{jevOn ? t("room.responder.autoOption") : t("room.responder.autoOptionOff")}</option>
+        <option value="everyone">{t("room.responder.everyoneOption")}</option>
+        <option value="mentions">{t("room.responder.mentionsOption")}</option>
+      </optgroup>
+    </Select>
   );
 }
 
@@ -1263,6 +1227,7 @@ export function GroupView({ group }: { group: Group }) {
   const contextWarnings = roomContextWarnings(group, members);
   const memberMauses = members.map((b) => {
     const busy = group.busyBotId === b.id;
+    const queueTitle = busy ? undefined : roomMemberQueueTitle(group, members, b);
     const contextWarning = contextWarnings.find((warning) => warning.bot.id === b.id);
     const busyElsewhere = !busy && speakersElsewhere.has(b.id);
     const held = !group.dm && Boolean(group.holds?.[b.id]);
@@ -1276,14 +1241,15 @@ export function GroupView({ group }: { group: Group }) {
         title={
           held
             ? t("room.holds.avatarHeld", { name: b.name })
-            : busyElsewhere
+            : queueTitle ?? (busyElsewhere
               ? t("room.memberWorkingElsewhere", { name: b.name })
-              : `${b.name}${busy ? " — working…" : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`
+              : `${b.name}${busy ? " — working…" : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
         }
         className={cn(
           "relative inline-flex rounded-full",
           busy && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
           busyElsewhere && "ring-1 ring-hairline ring-offset-1 ring-offset-app",
+          queueTitle && !busyElsewhere && "ring-1 ring-accent/30 ring-offset-1 ring-offset-app",
         )}
       >
         <span className={cn("inline-flex", held && "opacity-50 grayscale")}>
@@ -1362,7 +1328,7 @@ export function GroupView({ group }: { group: Group }) {
             isGroup
           />
           {!setupPending && <ConversationTurnLimit group={group} />}
-          <GroupCallButton group={group} members={members} />
+          <RoomHeaderCallButton group={group} members={members} />
           <GroupUsageChip usage={group.usage} />
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
@@ -1500,7 +1466,7 @@ export function GroupView({ group }: { group: Group }) {
         ) : (
         <div
           ref={transcriptRef}
-          className="glass-scroller-content relative flex w-full flex-col gap-3"
+          className="glass-scroller-content chat-column relative flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
           aria-live="off"
@@ -1576,6 +1542,7 @@ export function GroupView({ group }: { group: Group }) {
               since={speaker ? group.turnStartedAt ?? null : null}
             />
           )}
+          <RoomQueueList group={group} members={members} />
           {threadSpeaker && !group.dm && members.length > 1 && !group.holds?.[threadSpeaker.id] && (
             <div className="flex justify-start pl-12">
               <button
@@ -1597,17 +1564,10 @@ export function GroupView({ group }: { group: Group }) {
       <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
 
       {!following && (
-        <button
-          onClick={jumpToLatest}
-          aria-label={t("chat.jumpToLatestAria")}
-          className="animate-pop-in absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink shadow-lg hover:bg-raised-hover"
-          style={{ bottom: composerDock.height }}
-        >
-          <ArrowDown size={13} /> {t("chat.jumpToLatest")}
-        </button>
+        <JumpToLatestButton onClick={jumpToLatest} style={{ bottom: composerDock.height }} />
       )}
 
-      <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
+      <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
       <Composer
         key={group.threadId}
         group={group}

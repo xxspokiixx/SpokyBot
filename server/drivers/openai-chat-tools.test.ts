@@ -157,6 +157,78 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   };
 }
 
+describe("bounded action announcement recovery", () => {
+  const later = `${"The terminal output is absent; the launch receipt only confirms the process. ".repeat(7)}\n\nLet me execute the commands to create the file and read it back.`;
+
+  it("recovers a later long announcement after the first nudge and preserves earlier results", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) answer(response, "I'll open the terminal.");
+      else if (round === 3) answer(response, later);
+      else if (round === 2 || round === 4) sse(response, [chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${round}`, value: "done" }), `call-${round}`)] }, "tool_calls")]);
+      else answer(response, "Both receipts are verified.");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(5);
+    expect(f.effects().map(effect => effect.name)).toEqual(["step-2", "step-4"]);
+    expect(f.requests[3].messages).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "call-2" }));
+    expect(f.requests[3].messages.at(-1)).toMatchObject({ content: expect.stringContaining("Never repeat") });
+  });
+
+  it("fails after three nudges even when each recovery makes tool progress", async () => {
+    const f = await fixture((_body, response, round) => round % 2
+      ? answer(response, "I'll inspect the next result.")
+      : sse(response, [chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${round}`, value: "done" }), `call-${round}`)] }, "tool_calls")]));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(7);
+    expect(f.effects()).toHaveLength(3);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining("3 announcement nudges") }));
+  });
+
+  it("stops on a second announcement without tool progress", async () => {
+    const f = await fixture((_body, response) => answer(response, "I'll inspect the terminal."));
+    await f.start();
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.effects()).toEqual([]);
+  });
+
+  it("does not nudge after a denied operation", async () => {
+    const f = await fixture((_body, response, round) => round === 1
+      ? sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")])
+      : answer(response, "I'll write the receipt now."));
+    await f.start();
+    await f.decide("deny");
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.effects()).toEqual([]);
+  });
+
+  it("does not use an announcement to bypass a failed operation", async () => {
+    const f = await fixture((_body, response, round) => round === 1
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_fail")] }, "tool_calls")])
+      : answer(response, "I'll write the receipt now."));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.effects()).toEqual([]);
+  });
+
+  // Whether to run an operation again is the model's call under the engine's own permissions: the nudge only asks it not to.
+  it("leaves a repeated operation after a nudge to the model and the turn's permissions", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 2) answer(response, "I'll write the receipt now.");
+      else if (round === 1 || round === 3) sse(response, [chunk({ tool_calls: [toolCall("audit_write", round === 1 ? '{"name":"receipt","value":"done"}' : '{"value":"done","name":"receipt"}', `call-${round}`)] }, "tool_calls")]);
+      else answer(response, "Receipt verified.");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(4);
+    expect(f.effects()).toHaveLength(2);
+  });
+});
+
 describe("a searched MCP catalog", () => {
   it("asks about the tool call_tool runs, and never about a search", async () => {
     const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300) });
@@ -1155,5 +1227,25 @@ describe("structured tool execution boundaries", () => {
     const pending = f.recorder.events.find((event) => event.type === "request.opened");
     if (pending) expect(await f.instance.adapter.respondToRequest(f.threadId, pending.requestId!, { behavior: "allow" })).toBe("unavailable");
     expect(f.recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+  });
+});
+
+describe("a configured MCP server that cannot mount", () => {
+  it("is skipped with a notice, and the turn runs with the remaining servers", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    const broken = join(f.directory, "broken-mcp.mjs");
+    // Answers initialize with an error, as a server needing sign-in or refusing its credential (401) does.
+    writeFileSync(broken, `process.stdin.setEncoding("utf8");let b="";process.stdin.on("data",(c)=>{b+=c;let n;while((n=b.indexOf("\\n"))!==-1){const m=JSON.parse(b.slice(0,n));b=b.slice(n+1);if(m.id!==undefined)process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:m.id,error:{code:-32001,message:"401 Unauthorized"}})+"\\n");}});`);
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: { custom: { ...f.integrations!.custom, slack: { command: process.execPath, args: [broken], env: {} } } } });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice", message: expect.stringContaining(`MCP server "slack" was skipped`) }));
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toContain("audit_write");
+    expect(names.some((name) => name.startsWith("slack_"))).toBe(false);
   });
 });
