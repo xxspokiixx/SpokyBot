@@ -41,7 +41,7 @@ describe("Chief of Staff finishes a Grok Bot setup", () => {
   it("writes one message with the link, the apps to connect, the tools with no match and the left-out routines verbatim", () => {
     const message = grokSetupMessage("Overheard 2", notes());
     expect(message).toContain("I just added Overheard 2, imported from the Grok Bot at https://x.ai/bot/NIEguoGUjA648fUPle8F5.");
-    expect(message).toContain("Apps to connect (Composio): Gmail (gmail), Slack (slack).");
+    expect(message).toContain("Apps to connect: Gmail (gmail), Slack (slack).");
     expect(message).toContain("Grok Bot tools with no match here: X search.");
     expect(message).toContain("Routines that did not come over, with what they said:\n- Routine “On mention”: it starts on an event, not a clock.\n  When: When someone mentions the brand on X\n  Flag it.");
     expect(message).toContain("Also left out:\n- Skill “empty”: the export had no text for it.");

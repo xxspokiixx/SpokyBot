@@ -153,7 +153,7 @@ it("after a copy from a PC, one line says which of its folders and files stayed 
   const site = "C:\\Users\\Ada\\Projects\\site";
   expect(moveNextSteps(done(CLOUD, { bots: 2, paths: [site, "C:\\Users\\Ada\\Desktop\\x.docx"] }))).toEqual([
     `2 bots used folders on this computer, like ${site}. Those files didn't come over, so those bots now start in their own folder on My Cloud. Upload what they need there. `
-      + "Or turn on Let My Cloud use this computer in Settings → MausBot Cloud, so My Cloud can reach them here.",
+      + "Or turn on Let Cloud bots use this computer in Settings → MausBot Cloud, so Cloud bots can reach them here.",
     expect.stringContaining("To use My Cloud from your phone"),
   ]);
   expect(moveNextSteps(done(VPS, { bots: 1, paths: [site] }))[0])
@@ -176,12 +176,12 @@ it("after a move to My Cloud, offers to share the folders left on this computer 
   expect(leftBehindToShare(done({ action: "restore" }))).toBeNull();
   expect(leftBehindToShare(done({ phase: "failed" }))).toBeNull();
   await ready(settings());
-  expect(render(settings()).html).not.toContain("Share them with My Cloud");
+  expect(render(settings()).html).not.toContain("Share them with the Cloud");
   push(done());
   const view = render(settings());
-  expect(view.html).toContain("Share them with My Cloud");
+  expect(view.html).toContain("Share them with the Cloud");
   expect(view.nodes.find(node => node.type === OpenFilesButton)?.props.suggest).toEqual(left.paths);
-  OpenFilesButton({ label: "Share them with My Cloud", suggest: left.paths }).props.onClick();
+  OpenFilesButton({ label: "Share them with the Cloud", suggest: left.paths }).props.onClick();
   expect(dispatch).toHaveBeenCalledWith({ type: "showFiles", suggest: left.paths });
   vi.stubGlobal("window", { ogb: { platform: "darwin", cloudMove: bridge, remoteClient: { active: true }, cloudAccount: { files } } });
   expect(leftBehindToShare(done())).toBeNull();
@@ -197,11 +197,11 @@ it("every state reads as one sentence and one next step, for the Cloud and any o
     action: null, message: { tone: "note", text: expect.stringMatching(/ already has bots and chats, so nothing was copied over them\.$/) } });
   const blocked = (reason: CloudMoveOverview["blocked"], extra: Partial<CloudMoveOverview> = {}) => view({}, { destination: VPS, blocked: reason, ...extra });
   expect(blocked("owner_needed")).toMatchObject({ message: { text: "This app isn't signed in to bots.example.test as its owner. Pair it again with an owner code (openmausbot pair), then copy." }, action: { kind: "open", label: "Open bots.example.test" } });
-  expect(blocked("shared_workspace")).toMatchObject({ message: { text: "bots.example.test is shared with other people, so it can't receive this computer's bots and chats. Copy to a server only you use." }, action: null });
-  expect(blocked("same_computer")).toMatchObject({ message: { text: "bots.example.test is this computer's own server." }, action: null });
+  expect(blocked("shared_workspace")).toMatchObject({ message: { text: "bots.example.test is shared with other people, so it can't receive this computer's bots and chats. Copy to one only you use." }, action: null });
+  expect(blocked("same_computer")).toMatchObject({ message: { text: "bots.example.test is this computer itself." }, action: null });
   expect(blocked("outdated", { cloud: { ...emptyCloud, appVersion: "0.1.90" } })).toMatchObject({ message: { text: "bots.example.test runs 0.1.90; this computer runs 0.1.96. Update bots.example.test, then copy again." }, action: { kind: "check", label: "Check again" } });
   expect(blocked("outdated", { cloud: null }).message?.text).toBe("Update OpenMausBot on bots.example.test, then copy again.");
-  expect(view({}, { destination: CLOUD, blocked: "outdated", cloud: null }).message?.text).toBe("My Cloud has not updated to a version that can receive a move yet. Try again once it has.");
+  expect(view({}, { destination: CLOUD, blocked: "outdated", cloud: null }).message?.text).toBe("The Cloud has not updated to a version that can receive a move yet. Try again once it has.");
   expect(blocked("unreachable")).toMatchObject({ message: { text: "bots.example.test didn't answer. Check that it's running, then try again." }, action: { kind: "check" } });
   expect(blocked("busy_elsewhere", { busyWith: "My Cloud" })).toMatchObject({ message: { text: "A copy to My Cloud is running. Wait for it to finish." }, action: null });
   expect(failed({ code: "restart_timeout", message: "" }, VPS)).toMatchObject({
@@ -238,15 +238,15 @@ it("every state reads as one sentence and one next step, for the Cloud and any o
 it("the Cloud's own limits stay the Cloud's: its plan's disk, and growing it", () => {
   const GB = 1024 ** 3;
   expect(failed({ code: "cloud_grow_unavailable", message: "", maxBytes: 100 * GB }).message?.text)
-    .toBe("My Cloud's disk grows as it fills, up to 100 GB, but it could not make room for this move just now. Nothing was moved. Try again in a few minutes; if it still can't, tell us through Send Feedback and we'll make room.");
+    .toBe("The Cloud's disk grows as it fills, up to 100 GB, but it could not make room for this move just now. Nothing was moved. Try again in a few minutes; if it still can't, tell us through Send Feedback and we'll make room.");
   expect(failed({ code: "cloud_full", message: "", freeBytes: 9 * GB, neededBytes: 11 * GB, maxBytes: 10 * GB }).message?.text)
-    .toBe("This move needs about 11 GB of room on My Cloud while it installs, and your plan's disk holds 10 GB. Nothing was moved. A plan with a larger disk can take it: see your Plan page.");
+    .toBe("This move needs about 11 GB of room in the Cloud while it installs, and your plan's disk holds 10 GB. Nothing was moved. A plan with a larger disk can take it: see your Plan page.");
   expect(failed({ code: "cloud_full", message: "", freeBytes: 15 * GB, neededBytes: 19.8 * GB, maxBytes: 50 * GB }).message?.text)
     .toBe("My Cloud has 15 GB free and this copy needs about 19.8 GB. Nothing was copied. Make room on My Cloud (for example, remove large files there), then try again.");
   const largest = failed({ code: "cloud_full", message: "", freeBytes: 90 * GB, neededBytes: 120 * GB, maxBytes: 100 * GB, largest: true }).message!.text;
   expect(largest).toContain("the largest there is"); expect(largest).toContain("Send Feedback"); expect(largest).not.toContain("larger disk");
   const unsupported = failed({ code: "cloud_grow_unsupported", message: "", freeBytes: 9 * GB, neededBytes: 20 * GB, maxBytes: 100 * GB }).message!.text;
-  expect(unsupported).toBe("This move needs about 20 GB of room on My Cloud while it installs, more than My Cloud can make room for yet. Nothing was moved. Tell us through Send Feedback and we'll make room.");
+  expect(unsupported).toBe("This move needs about 20 GB of room in the Cloud while it installs, more than the Cloud can make room for yet. Nothing was moved. Tell us through Send Feedback and we'll make room.");
   expect(failed({ code: "cloud_grow_unsupported", message: "" }).message?.text).not.toMatch(/try again/i);
   expect(failed({ code: "cloud_full", message: "", freeBytes: 8.9 * GB, neededBytes: 10.5 * GB, volumeBytes: 10 * GB }).message?.text).toBe(unsupported.replace("20 GB", "10.5 GB"));
   expect(failed({ code: "cloud_full", message: "", freeBytes: 2 * GB, neededBytes: 5 * GB, volumeBytes: 10 * GB }).message?.text).toContain("Make room on My Cloud");
@@ -418,9 +418,9 @@ it("This computer's page says in one line that its bots live on My Cloud once co
   await ready(note, { ...overview(), destination: null, movedHome: true });
   expect(bridge.state).toHaveBeenCalledWith();
   const view = render(note);
-  expect(view.html).toContain("Your bots now live on My Cloud. Chats here stay on this computer.");
+  expect(view.html).toContain("Your bots now live in the Cloud. Chats here stay on this computer.");
   expect(view.html).toContain("role=\"note\"");
-  button(note, "Open My Cloud")!.props.onClick!(); await flush();
+  button(note, "Open the Cloud")!.props.onClick!(); await flush();
   expect(connectHome).toHaveBeenCalledTimes(1);
   expect(dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
   f.values = [];

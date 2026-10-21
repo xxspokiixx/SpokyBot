@@ -157,7 +157,7 @@ describe("the card after the update", () => {
   it("offers the free trial to someone signed out who has used the app before, in the Admin's numbers, with Start free trial and Show me how", async () => {
     returning();
     const html = await launch();
-    const words = [INTRO, "Free for 7 days", "MausBot Cloud is your own always-on computer in the cloud.", "Routines run on time, day and night",
+    const words = [INTRO, "Free for 7 days", "MausBot Cloud runs your bots for you in the cloud, always on.", "Routines run on time, day and night",
       "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start", "Then from $29/month + tax. Cancel any time.",
       "14-day money-back on every plan.", "Start free trial", "Show me how", "Sign in to your Cloud plan", "Not now"];
     for (const text of words) expect(html).toContain(text);
@@ -185,7 +185,7 @@ describe("the card after the update", () => {
     offer = null; expect(await launch()).not.toContain(INTRO);
     offer = { ...TRIAL_OFFER, refundDays: undefined, creditUsd: undefined };
     html = await launch();
-    expect(html).toContain(INTRO); expect(html).toContain("Cloud computers and voice included");
+    expect(html).toContain(INTRO); expect(html).toContain("Cloud desktops and voice included");
     expect(html).not.toContain("money-back"); expect(html).not.toContain("Claude credit");
   });
 
@@ -325,8 +325,8 @@ describe("This computer's My Cloud card and the star", () => {
   it("someone with a ready My Cloud is told once where the always-on bots are; Not now is kept", async () => {
     account = paid({ machine: ready }); returning();
     const html = await launch();
-    expect(html).toContain("Your always-on bots are on My Cloud"); expect(html).not.toContain(STAR);
-    press("Open My Cloud"); await flush();
+    expect(html).toContain("Your always-on bots are in the Cloud"); expect(html).not.toContain(STAR);
+    press("Open the Cloud"); await flush();
     expect(bridges.cloud.connectHome).toHaveBeenCalledOnce();
     press("Not now");
     expect(storage.get(CLOUD_NOTICE_DISMISSED)).toBe("1"); expect(hints()).toContain(CLOUD_NOTICE_DISMISSED);
@@ -335,7 +335,7 @@ describe("This computer's My Cloud card and the star", () => {
 
   it("an ended sign-in on a paid plan asks to sign in again; the star comes last and is for good", async () => {
     account = { status: "reauth-required", message: "expired", lastPlan: { tier: "pro", active: true } }; returning();
-    expect(await launch()).toContain("Sign in again to reach My Cloud");
+    expect(await launch()).toContain("Sign in again to reach the Cloud");
     press("Sign in again"); await flush();
     expect(bridges.cloud.signInAgain).toHaveBeenCalledOnce();
     account = { ...free }; offer = { ...PLAIN_OFFER };
@@ -353,12 +353,12 @@ describe("the Product Hunt launch card", () => {
     fresh(); account = paid({ machine: ready });
     const html = await launch();
     expect(html).toContain(PH); expect(html).toContain("Upvote on Product Hunt");
-    expect(html).not.toContain(STAR); expect(html).not.toContain("Your always-on bots are on My Cloud");
+    expect(html).not.toContain(STAR); expect(html).not.toContain("Your always-on bots are in the Cloud");
     press("Upvote on Product Hunt"); await flush();
     expect(window.ogb?.openExternal).toHaveBeenCalledWith(PRODUCT_HUNT_URL);
     expect(vi.mocked(track)).toHaveBeenCalledWith("product_hunt_card", { action: "upvote" });
     expect(storage.get(PRODUCT_HUNT_NOTICE)).toBe("1"); expect(hints()).toContain(PRODUCT_HUNT_NOTICE);
-    expect(await launch()).toContain("Your always-on bots are on My Cloud");
+    expect(await launch()).toContain("Your always-on bots are in the Cloud");
   });
 
   it("Not now, the X and Escape end it for good too", async () => {
@@ -428,7 +428,7 @@ describe("the Cloud Pro popup after the update", () => {
   it("every install gets it once, before every other card, as a modal dialog with the Admin's offer; Start free trial opens Add a Cloud from it", async () => {
     returning(); storage.delete(PRODUCT_HUNT_NOTICE);
     const html = await launch();
-    const words = [POPUP, "Free for 7 days", "MausBot Cloud is your own always-on computer in the cloud.", "Routines run on time, day and night",
+    const words = [POPUP, "Free for 7 days", "MausBot Cloud runs your bots for you in the cloud, always on.", "Routines run on time, day and night",
       "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start", "Then from $29/month + tax. Cancel any time.",
       "14-day money-back on every plan.", "Start free trial", "Compare plans", "OpenMausBot on this computer stays free and open source.", "Not now"];
     for (const text of words) expect(html).toContain(text);
@@ -571,7 +571,7 @@ describe("the Cloud Pro popup after the update", () => {
       [{ status: "paid", tier: "pro", trial: trial("active") }, "trial", true, "Pro free trial · verified by MausBot Cloud"],
       [{ status: "paid", tier: "max" }, "max", true, "Max active · verified by MausBot Cloud"],
       [{ status: "attention", tier: "pro" }, "none", true, "Pro · not active right now"],
-      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use My Cloud on this computer. Your plan is not affected."],
+      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use the Cloud on this computer. Your plan is not affected."],
     ];
     for (const [plan, name, signedIn, line] of cases) {
       vi.clearAllMocks(); fresh(); onMyCloud(plan);
