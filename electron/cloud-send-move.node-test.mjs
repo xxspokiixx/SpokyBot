@@ -307,6 +307,26 @@ test("a move sends what only it carries last, after the chats and their settings
   assert.deepEqual(move.deps.store.value.clouds[CLOUD].on, { "routine:r1": true, "app-event:e1": false }, "what was on here is kept for the switch, after this computer let go");
 });
 
+test("what a move carries last is never taken for removed on My Cloud, so a routine changed here before the final pass still goes", async () => {
+  // Seen in the real app on Oct 22: after a plain move, cloud-send.json had every routine and webhook it had just carried
+  // as "removed", because the pass's closing plan read My Cloud before the automations went.
+  const routine = (def) => ({ key: "routine:r1", kind: "routine", label: "Digest", id: "r1", bot: "ember", parts: { def } });
+  const here = [bot("ember", { soul: "s" }), routine("d1")];
+  const put = [];
+  const move = sides({ here, there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } },
+    onCall: (method, route, body, cloud) => {
+      if (method === "PUT" && route === "/api/cloud-send/kind") { put.push(body.key); cloud.set(body.key, here.find((item) => item.key === body.key)); return reply(200, { v: 1, ok: true }); }
+      return null;
+    } });
+  const send = createCloudSend(move.deps);
+  await send.send({ reason: "move" });
+  assert.deepEqual(put, ["routine:r1"]);
+  assert.equal(move.deps.store.value.clouds[CLOUD].off["routine:r1"], undefined, "it went, it is not removed there");
+  here[1] = routine("d2");
+  await send.send({ reason: "move", final: true });
+  assert.deepEqual(put, ["routine:r1", "routine:r1"], "changed here since, it goes again in the final pass");
+});
+
 test("a bot's fields only a move carries go over My Cloud's move route, absent ones as cleared; any other send never carries them", async () => {
   const fields = [];
   const make = () => sides({ here: [bot("ember", { soul: "s", pinned: "p1", projects: "j1" })], there: [bot("ember", { soul: "s", pinned: "-", projects: "-" })], bots: { ember: { soul: "s" } },
