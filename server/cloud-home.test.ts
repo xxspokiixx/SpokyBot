@@ -512,7 +512,11 @@ it("a Team Cloud's pairing binds the Admin's member claim to the session it open
   expect(JSON.parse(readFileSync(join(root, "sessions.json"), "utf8")).sessions.find((session: { email?: string }) => session.email === "ada@acme.test")).toMatchObject({ membershipAuthority: "team" });
   sessions.revalidateEmailSessions();
   expect(sessions.list().filter((session) => session.email).length).toBe(3);
-  now += 3_600_000 - 1;
+  now += 3_000_000;
+  // Used all along, it still ends at the hour: renewing never moves a team session's end.
+  expect(sessions.renew(record.id)).toBe(false);
+  expect(sessions.list().find((session) => session.id === record.id)!.expiresAt).toBe(record.expiresAt);
+  now += 600_000 - 1;
   expect(sessions.authenticate((paired as { token: string }).token)).toBeTruthy();
   now += 2;
   expect(sessions.authenticate((paired as { token: string }).token)).toBeNull();

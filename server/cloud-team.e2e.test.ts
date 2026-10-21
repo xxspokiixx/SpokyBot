@@ -136,8 +136,9 @@ it("a member's private chat with a team bot reads her notes and the team's, neve
   expect(JSON.stringify((await team.as(cleo, "GET", "/api/search?q=Kumquat")).body)).not.toContain(adaThread);
   expect(JSON.stringify((await team.as(ada, "GET", "/api/search?q=Kumquat")).body)).toContain(adaThread);
   // Only she and the admins change what she started.
-  expect((await team.as(cleo, "POST", `/api/bots/${bot.id}/tasks/${adaThread}/title`, { title: "x" })).status).toBe(403);
-  expect((await team.as(ada, "POST", `/api/bots/${bot.id}/tasks/${adaThread}/title`, { title: "Ada and Scout" })).status).toBe(200);
+  expect((await team.as(cleo, "PATCH", `/api/bots/${bot.id}/tasks/${adaThread}`, { title: "x" })).status).not.toBe(200);
+  expect((await team.as(ada, "PATCH", `/api/bots/${bot.id}/tasks/${adaThread}`, { title: "Ada and Scout" })).status).toBe(200);
+  expect((await team.as(admin, "PATCH", `/api/bots/${bot.id}/tasks/${adaThread}`, { title: "Ada and Scout" })).status).toBe(200);
 }, hostTimeout(120_000));
 
 it("a room's turn reads the room's layer and the team's, never a member's notes, and both members see its answer", async () => {
@@ -176,6 +177,15 @@ it("recall never crosses: a room's fact never surfaces in a private chat and a p
   // The team's fact reaches both.
   expect((await search(adaThread, "Fernando plant")).memoryHits.map((hit) => hit.snippet).join("\n")).toContain("Fernando");
   expect((await search(roomThread, "Fernando plant")).memoryHits.map((hit) => hit.snippet).join("\n")).toContain("Fernando");
+  // list_threads names only the conversations a turn may read: a title is words too.
+  const listed = async (threadId: string) => {
+    const token = await team.capability(bot.id, threadId);
+    const answer = await fetch(`${team.base}/api/internal/threads?fromBotId=${bot.id}`, { headers: { authorization: `Bearer ${token}` } });
+    expect(answer.status).toBe(200);
+    return ((await answer.json()) as { threads: Array<{ threadId: string }> }).threads.map((row) => row.threadId);
+  };
+  expect(await listed(bot.mainThreadId)).not.toContain(adaThread);
+  expect(await listed(adaThread)).toContain(adaThread);
   // Each conversation's own fact reaches itself.
   expect((await search(adaThread, "oolong tea")).memoryHits.map((hit) => hit.snippet).join("\n")).toContain("oolong");
   expect((await search(roomThread, "Tuesday launch")).memoryHits.map((hit) => hit.snippet).join("\n")).toContain("Tuesday");

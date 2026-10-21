@@ -242,9 +242,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       teamPort, [], false, onePasswordToken, 0, team.engine ?? "", true);
     let teamServer = await startTeam();
     const as: CloudTeamFixture["as"] = async (token, method, path, body, headers = {}) => {
-      const response = await remember(await fetch(`${teamBase}${path}`, { method, headers: { ...EDGE, authorization: `Bearer ${token}`, ...headers,
-        ...(body === undefined || body instanceof Uint8Array ? {} : { "content-type": "application/json" }) },
-      body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body) }));
+      const init: RequestInit = { method, headers: { ...EDGE, authorization: `Bearer ${token}`, ...headers,
+        ...(body === undefined || body instanceof Uint8Array ? {} : { "content-type": "application/json" }) } };
+      if (body !== undefined) init.body = body instanceof Uint8Array ? body : JSON.stringify(body);
+      const response = await remember(await fetch(`${teamBase}${path}`, init));
       return { status: response.status, body: parse(await response.text()) };
     };
     teamFixture = {

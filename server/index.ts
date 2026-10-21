@@ -14331,7 +14331,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (await dispatchRoutes([createInternalThreadRoutes({
         store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
         ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
-        shown: cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true,
+        shown: CLOUD_TEAM ? teamHost.readableFrom(internalCapability.threadId) : cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true,
         threadBusy, queuedThreadPosition,
       })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/attach-file") {
