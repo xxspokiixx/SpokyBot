@@ -1740,7 +1740,13 @@ screen's note.
 - **The dialog** (`components/CloudAddDialog.tsx`, one state→view function,
   `lib/cloud-plan` `cloudAddView`) covers the buying journey only: the offer
   (the Admin's plans, Pro preselected and marked most popular, each row
-  leading with cloud computers at once and storage; the trial's timeline with
+  with its promise and its cloud desktop hours a month, how many cloud
+  desktops at once only as small print; under them the chosen plan's card in
+  the website's words (with the app's "cloud desktop" for the website's
+  "cloud computer"), every number from the Admin's `allowances`: always on (or
+  sleeping), cloud desktops as many as the bots need with the month's hours,
+  voice, apps, the phone, the machine with its swap, storage with its backup
+  days, and what it adds over the plan listed before it; the trial's timeline with
   the reminder line only while the Admin sends one; the Claude credit;
   money-back beside the button; prices plus tax), the sign-in (its last step
   names the checkout only when the sign-in is on the way to one), the next
@@ -1773,7 +1779,8 @@ screen's note.
 - **Desktop session** `GET /api/cloud/desktop/session`, beside `cloud`:
   `offer: {plans, recommended?, trialDays?, creditUsd?, reminderDays?, refundDays?, checkout?}`,
   only while this account can buy. `plans[]` are the catalog entries on sale
-  (`{tier, label, price: {currency: "USD", amount, interval: "month"}, allowances?, trialDays?}`):
+  (`{tier, label, price: {currency: "USD", amount, interval: "month"}, allowances?, trialDays?}`;
+  `allowances` may carry `cpuKind`, `swapMb` and `snapshotDays`, each said only when present and valid):
   a plan's own `trialDays` is its trial; with none on any plan, a top-level
   `trialDays` is every plan's. `creditUsd` and `reminderDays` (days before the
   end that the reminder email goes out, sent only while it does) count only

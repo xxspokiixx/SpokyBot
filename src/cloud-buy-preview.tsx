@@ -1,5 +1,5 @@
 // Dev-only gallery of the Cloud buying sheet, served at /cloud-buy-preview.html; not in the packaged app.
-// ?state=choose|sign-in-email|sign-in-code|sign-in-sso|pay|pay-late|setup|ready|has-cloud|unreachable&skin=midnight&staging=1&reduced=1
+// ?state=choose|sign-in-email|sign-in-code|sign-in-sso|pay|pay-late|setup|ready|has-cloud|unreachable&skin=midnight&staging=1&reduced=1&plan=starter&lang=de
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Cloud, FolderOpen, MessageSquare, Repeat } from "lucide-react";
@@ -11,12 +11,13 @@ import { SKIN_IDS, type SkinId } from "@/lib/skins";
 import "./styles.css";
 
 const NOW = Date.now(), DAY = 86_400_000;
-const allowances = (cpus: number, diskGb: number, maxDiskGb: number, computers: number, computerHours: number) =>
-  ({ cpus, memoryMb: cpus * 1024, diskGb, maxDiskGb, computers, computerHours, voiceCharacters: 100_000 });
+const allowances = (cpus: number, swapGb: number, maxDiskGb: number, computers: number, computerHours: number, voiceCharacters: number, snapshotDays: number) =>
+  ({ cpus, cpuKind: "shared" as const, memoryMb: cpus * 1024, ...(swapGb ? { swapMb: swapGb * 1024 } : {}), diskGb: 10, maxDiskGb, computers, computerHours, voiceCharacters, snapshotDays });
 const OFFER: CloudOffer = { recommended: "pro", creditUsd: 5, reminderDays: 1, refundDays: 14, plans: [
-  { tier: "personal", label: "Personal", amount: 2900, trialDays: 3, allowances: allowances(2, 20, 20, 1, 50) },
-  { tier: "pro", label: "Pro", amount: 4900, trialDays: 3, allowances: allowances(4, 50, 50, 2, 200) },
-  { tier: "max", label: "Max", amount: 9900, trialDays: 3, allowances: allowances(8, 100, 200, 4, 500) },
+  { tier: "starter", label: "Starter", amount: 1500, trialDays: 3, allowances: { ...allowances(2, 0, 10, 15, 30, 10_000, 7), sleeps: true } },
+  { tier: "personal", label: "Personal", amount: 2900, trialDays: 3, allowances: allowances(2, 3, 20, 15, 100, 30_000, 14) },
+  { tier: "pro", label: "Pro", amount: 4900, trialDays: 3, allowances: allowances(4, 4, 100, 15, 300, 60_000, 14) },
+  { tier: "max", label: "Max", amount: 9900, trialDays: 3, allowances: allowances(8, 4, 100, 15, 800, 180_000, 14) },
 ] };
 const started = { tier: "pro", trial: { state: "active" as const, tier: "pro", endsAt: NOW + 3 * DAY, amount: 4900, chargeAt: NOW + 3 * DAY, holdUntil: null, deleteAt: null, keep: "none" as const },
   credit: { grantedUsd: 5, remainingUsd: 5, state: "active" as const } };
@@ -58,10 +59,10 @@ function Preview() {
   const skin = (SKIN_IDS as readonly string[]).includes(params.get("skin") ?? "") ? params.get("skin") as SkinId : "midnight";
   document.documentElement.dataset.skin = skin;
   if (params.get("reduced") === "1") document.documentElement.dataset.reducedMotion = "true";
-  setLocale("en");
+  setLocale(params.get("lang") ?? "en");
   const state = params.get("state") ?? "choose";
   const view = VIEWS[state] ?? VIEWS.choose!;
-  const ui: CloudAddUi = { chosen: null, offerShown: OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
+  const ui: CloudAddUi = { chosen: params.get("plan"), offerShown: OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
     email: "maya@studio.co", code: state === "sign-in-code" ? "4820" : "", profileEmail: "maya@studio.co",
     look: { typed: "My Cloud", name: "My Cloud", color: "blue" }, counting: state === "ready" ? 3 : null, copied: false, payFailed: false, interest: null };
   return <div className="relative h-screen overflow-hidden">
