@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { EMPTY, itemKey } from "./cloud-send-parts.mjs";
 import { createCloudSend, sendNotice } from "./cloud-send.mjs";
+import { manifestGaps, noGaps } from "./cloud-send-check.mjs";
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
 
 const CLOUD = "https://omb-u-1.fly.dev";
@@ -168,6 +169,24 @@ test("each item is recorded from My Cloud's own answer as soon as it went, so a 
   cutAtEnd = false;
   const row = (await send.compare()).rows.find((entry) => entry.key === itemKey.bot("juno"));
   assert.equal(row.state, "on-both", "what My Cloud took is in step, not My Cloud's own change");
+});
+
+test("a move keeps My Cloud's version of a part both sides hold otherwise with nothing recorded, and records it, so its check never calls it missing", async () => {
+  // The same bot on both sides with no send ever recorded (an earlier whole-workspace Copy, or a lost cloud-send.json),
+  // and its approval changed on My Cloud since: §2.2 keeps My Cloud's. Seen in the real app on Oct 22: the check called
+  // `access` missing on every pass, so the move froze, thawed and tried again every hour without end.
+  const here = [bot("ember", { soul: "s1", access: EMPTY })], there = [bot("ember", { soul: "s1", access: "a-full" })];
+  const move = sides({ here, bots: { ember: { soul: "s1" } }, there });
+  const send = createCloudSend(move.deps);
+  await send.send({ reason: "move" });
+  assert.ok(!move.calls.includes("PATCH /api/bots/ember"), `My Cloud's is kept, nothing goes: ${move.calls.join(", ")}`);
+  const sent = move.deps.store.value.clouds[CLOUD].sent;
+  assert.deepEqual(sent[itemKey.bot("ember")].access, [EMPTY, "a-full"], "the move's decision is recorded");
+  assert.equal(noGaps(manifestGaps({ items: here }, { items: there }, { sent })), true, "the check agrees with the plan");
+
+  const button = sides({ here, bots: { ember: { soul: "s1" } }, there });
+  await createCloudSend(button.deps).send();
+  assert.equal(button.deps.store.value.clouds[CLOUD].sent[itemKey.bot("ember")].access, undefined, "Send everything still leaves it to the person");
 });
 
 test("Settings learns how many conversations are still to go, and a pass says how many did not all go", async () => {

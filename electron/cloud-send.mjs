@@ -262,6 +262,17 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     let changed = false;
     for (const [key, parts] of Object.entries(planned.baseline)) { kept.sent[key] = { ...kept.sent[key], ...parts }; changed = true; }
     for (const key of planned.removed) { kept.off[key] = "removed"; delete kept.sent[key]; delete kept.created[key]; changed = true; }
+    if (everything) {
+      // A move has nobody to ask: a part both sides hold otherwise is My Cloud's (§2.2), and recorded as settled, so the
+      // move's check (manifestGaps) agrees with this plan instead of calling it missing on every pass.
+      const here = new Map((mine?.items ?? []).map((item) => [item.key, item])), there = new Map((theirs?.items ?? []).map((item) => [item.key, item]));
+      for (const row of planned.rows) {
+        for (const part of row.differs ?? []) {
+          kept.sent[row.key] = { ...kept.sent[row.key], [part]: [here.get(row.key).parts[part], there.get(row.key)?.parts[part] ?? EMPTY] };
+          changed = true;
+        }
+      }
+    }
     if (changed) persist();
     return planned;
   }
