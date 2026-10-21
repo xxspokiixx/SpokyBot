@@ -610,7 +610,10 @@ with no confirmation. The switch and the chosen scopes are the consent.
   Screen Recording; the Cloud never does). This is broad by nature, since it
   reaches anything those apps can, and the switch says so. It needs local
   computer control set up first.
-- **No terminal.** The shell grant of maintainer sharing is never offered here.
+- **Terminal** (off by default): bots run commands on this computer as the person, on macOS, Linux and Windows, with no
+  limit on what a command can do. It is a separate checkbox in this computer's own Settings (never from My Cloud's page,
+  never in the default grant), it asks before turning on, and it is not kept when the switch is turned off. Every command is
+  listed under Activity.
 
 The switch can be turned on before the first **Open My Cloud**; lending
 starts once this Mac is signed in to the Cloud. Lending runs while the app is

@@ -113,9 +113,9 @@ const until = async (check, what, ms = 5000) => {
   assert.fail(`timed out waiting for ${what}`);
 };
 
-test("lends to the person's own Cloud with the maintainer flag off; never a terminal", async t => {
+test("lends to the person's own Cloud with the maintainer flag off; no terminal unless it is asked for", async t => {
   const { folderPath, home, sharing, maintainerChecks, summaries } = await lendingFixture(t);
-  const lent = await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false, terminal: true });
+  const lent = await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
   assert.equal(lent.enabled, true);
   await connected(sharing, 1, home);
   assert.equal(home.connects[0].terminal, false);
@@ -128,6 +128,27 @@ test("lends to the person's own Cloud with the maintainer flag off; never a term
   assert.equal(maintainerChecks(), 0, "a Cloud grant never consults the maintainer flag");
   assert.ok(summaries.some(summary => summary.lending.includes(env.id)));
   assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", false], ["read_file", true]]);
+});
+
+test("the terminal is lent only when asked for with exactly true: the bots can then run commands here, it is listed in Activity, and it does not outlive the switch", async t => {
+  const { folderPath, home, sharing } = await lendingFixture(t);
+  const folders = [{ id: randomUUID(), path: folderPath, write: false }];
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false, terminal: "true" })).terminal, false, "only a real true counts");
+  const lent = await sharing.saveCloud(env, { folders, screen: false, terminal: true });
+  assert.equal(lent.terminal, true);
+  await connected(sharing, 2, home);
+  assert.equal(home.connects.at(-1).terminal, true);
+  home.push({ action: "run_command", command: "echo fixture-terminal" });
+  await until(() => home.results.length === 1, "the command result");
+  assert.notEqual(home.results[0].isError, true);
+  assert.match(home.results[0].content[0].text, /fixture-terminal/);
+  assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", true]]);
+  // The terminal alone is a grant; turning lending off reports no terminal, and a plain save never brings it back.
+  assert.equal((await sharing.saveCloud(env, { folders: [], screen: false, terminal: true })).enabled, true);
+  sharing.revoke(env);
+  assert.equal(sharing.cloudState(env).terminal, false);
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false })).terminal, false);
+  await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), /terminal/);
 });
 
 test("refuses to lend unless the Cloud sign-in is verified for this exact machine, and never to a server that is not a Cloud home", async t => {

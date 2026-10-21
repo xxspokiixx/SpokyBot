@@ -511,7 +511,6 @@
   "lending.status.machineChanged": "因 Cloud 已移至新機器，共用已停止。請再次開啟以與它共用。",
   "lending.status.accessOff": "已透過「Computer access」共用，但這台電腦上已關閉此功能，因此 Cloud 無法存取。請改在這裡選擇要共用的內容。",
   "lending.viaAccess": "已透過「設定 → 伺服器」中的「Computer access」共用。在這裡選擇會改為只共用你挑選的資料夾、應用程式與畫面。",
-  "lending.viaAccessTerminal": "已透過「設定 → 伺服器」中的「Computer access」共用，包含終端機。在這裡選擇會改為只共用你挑選的資料夾、應用程式與畫面，絕不包含終端機。",
   "lending.stopped.you": "自 {date} 起關閉：你關閉了它。",
   "lending.stopped.signedOut": "自 {date} 起關閉，當時你登出了 MausBot Cloud。",
   "lending.stopped.accountChanged": "自 {date} 起關閉，當時另一個 Cloud 帳戶登入。",

@@ -34,6 +34,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_IMAGE", "OMB_PUBLIC_URL", "OMB_WEBHOOK_PUBLIC_URL",
   "OMB_CLOUD_TEAM_ID", "OMB_CLOUD_TEAM_NAME", "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_AI_URL", "OMB_CLOUD_X_URL", "OMB_TTS_DEFAULT_VOICE",
   "OMB_HIGHLEVEL_RELAY_URL", "OMB_COMPOSIO_BROKER_URL",
+  // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
+  "OMB_BOT_BOX",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");

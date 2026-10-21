@@ -549,7 +549,6 @@
   "lending.status.machineChanged": "Việc chia sẻ đã dừng vì Cloud đã chuyển sang một máy mới. Hãy bật lại để chia sẻ với Cloud.",
   "lending.status.accessOff": "Được chia sẻ qua “Computer access”, nhưng tùy chọn này đang tắt trên máy tính này nên Cloud không thể truy cập. Thay vào đó, hãy chọn những gì cần chia sẻ tại đây.",
   "lending.viaAccess": "Được chia sẻ qua “Computer access” trong Cài đặt → Máy chủ. Chọn tại đây sẽ thay thế bằng đúng các thư mục, ứng dụng và màn hình bạn chọn.",
-  "lending.viaAccessTerminal": "Được chia sẻ qua “Computer access” trong Cài đặt → Máy chủ, gồm cả terminal. Chọn tại đây sẽ thay thế bằng đúng các thư mục, ứng dụng và màn hình bạn chọn, không bao giờ gồm terminal.",
   "lending.stopped.you": "Đã tắt từ {date}: bạn đã tắt.",
   "lending.stopped.signedOut": "Đã tắt từ {date}, khi bạn đăng xuất khỏi MausBot Cloud.",
   "lending.stopped.accountChanged": "Đã tắt từ {date}, khi một tài khoản Cloud khác đăng nhập.",
