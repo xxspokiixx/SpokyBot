@@ -2,9 +2,8 @@
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
-import { WIDGET_TOOL_DEFINITIONS } from "./agents-widget-tools.ts";
+import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
-import { PAGE_TOOL_DEFINITIONS } from "./agents-pages-tools.ts";
 
 /** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
 export interface CatalogProfile {
@@ -362,7 +361,7 @@ const TOOL_DEFINITIONS = [
       required: ["path"],
     },
   },
-  ...WIDGET_TOOL_DEFINITIONS, ...PAGE_TOOL_DEFINITIONS,
+  ...CHAT_CARD_TOOL_DEFINITIONS,
   {
     name: "post_to_room",
     description:
