@@ -3011,10 +3011,6 @@
       "settings.newBotEffort.default": "352a25678fb9c8a3bdf12f4c0106a9c4f62f36e2398c1b3a39558935dcdf66cf",
       "settings.newBotEffort.aria": "3de28c2d8f0f0e8d047ba6d7b887ce684fdbd3fff36ecde282f9cf5186463fc7",
       "settings.newBotEffort.error": "5c3a736a2219eb3d57baeb52f88e2878c4b373bf6ca992072f825b623d2a61f9",
-      "settings.routinesInConversation.title": "45d101bc60a986648fd3580e6d9908bd236975bfe0a74bf0e632d4f3826bce31",
-      "settings.routinesInConversation.subtitle": "e8a7933d906a02cf6bd92b8e512badc1452898519f3fe763601d1c5a22000bd8",
-      "settings.routinesInConversation.aria": "7deb14f1abea8312a2fd49d3c7d3732504e2cd01badad39d0d15088b29ad9a19",
-      "settings.routinesInConversation.error": "c13e25a59209b31f3dde28ad6b6ff0754b4fa2241b602b9a603bd777a3685563",
       "settings.toolCalls.title": "da5122dc0f97b158bfbd27c5bd479322f34e0916a0cd4626d42c03bb0000e4b4",
       "settings.toolCalls.subtitle": "68f4504d50af56ecdd03aae38ac96f085db556b42b7ab1cbd9a908f4be70b4ee",
       "settings.toolCalls.show": "49bd043e2562994a7b35616a7630c3d4da6c65a908c11e78d208914651a11540",
@@ -7050,7 +7046,12 @@
       "botOverview.preference.cloud": "eb8b6f29f7611d29204c821ed448a08ebc06eb73b80fb02213d4d4c9acb904f4",
       "botOverview.preference.vm": "06d07776bf9bbe136fd93622a960fcb8b088e0f516d1d80363daf432d5cd9d9e",
       "grokFinish.messageApps": "f5c3a401ffdc50f904f6c189e3289983ac9746cf1c8d7918dc3a465b6d40a651",
-      "app.loading.connecting": "84c492affb87427b2f52738a122d95db30011917dfeb0f387a02231a9cfc472b"
+      "app.loading.connecting": "84c492affb87427b2f52738a122d95db30011917dfeb0f387a02231a9cfc472b",
+      "chat.automation.openRun": "ac401288608ed0c8e6b55a7cbfa6934a4e26ddc5008fc961c3cf3017bfb0cda3",
+      "chat.automation.openRunFor": "551ca4cfd657913c5e84c96ccb6671adec40eabe1978f64614cf5eaedf967a2e",
+      "chat.automation.needsYou": "db4113f70adb90b517605b89729ecfea135ef1306c48c6bb5527a5f3c8aa4a10",
+      "chat.automation.failed": "39544c4c681a25ba0f5c6550f2cbfbb32aea23cb9557a425f004cda9d8694880",
+      "automations.run.nothingNew": "cb239d61e3071ebc7033039780e0dd95480a4b1f5b48a118437eee298e87ac1f"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -11942,10 +11943,6 @@
       "settings.newBotEffort.default": "352a25678fb9c8a3bdf12f4c0106a9c4f62f36e2398c1b3a39558935dcdf66cf",
       "settings.newBotEffort.aria": "3de28c2d8f0f0e8d047ba6d7b887ce684fdbd3fff36ecde282f9cf5186463fc7",
       "settings.newBotEffort.error": "5c3a736a2219eb3d57baeb52f88e2878c4b373bf6ca992072f825b623d2a61f9",
-      "settings.routinesInConversation.title": "45d101bc60a986648fd3580e6d9908bd236975bfe0a74bf0e632d4f3826bce31",
-      "settings.routinesInConversation.subtitle": "e8a7933d906a02cf6bd92b8e512badc1452898519f3fe763601d1c5a22000bd8",
-      "settings.routinesInConversation.aria": "7deb14f1abea8312a2fd49d3c7d3732504e2cd01badad39d0d15088b29ad9a19",
-      "settings.routinesInConversation.error": "c13e25a59209b31f3dde28ad6b6ff0754b4fa2241b602b9a603bd777a3685563",
       "settings.toolCalls.title": "da5122dc0f97b158bfbd27c5bd479322f34e0916a0cd4626d42c03bb0000e4b4",
       "settings.toolCalls.subtitle": "68f4504d50af56ecdd03aae38ac96f085db556b42b7ab1cbd9a908f4be70b4ee",
       "settings.toolCalls.show": "49bd043e2562994a7b35616a7630c3d4da6c65a908c11e78d208914651a11540",
@@ -16558,7 +16555,12 @@
       "history.empty": "0dbc9c4de60a9ee1f7e3fe863f4ee69ec5338c845dac151f1a3ffa8715ffbd95",
       "history.refreshError": "e7758a6440760f6fc1d6262cd5a3edd9062e678454d35465d94f75bfc4d434aa",
       "history.undo": "c1497e901b9e70aa938edfbd2d99841e49e00458d40816da793c6a1af625677d",
-      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e"
+      "history.restoreUnavailable": "2d272762ebacd385aead54c56b9597070130fcc0fe95b3ccfe3e6ea8ffad730e",
+      "chat.automation.openRun": "ac401288608ed0c8e6b55a7cbfa6934a4e26ddc5008fc961c3cf3017bfb0cda3",
+      "chat.automation.openRunFor": "551ca4cfd657913c5e84c96ccb6671adec40eabe1978f64614cf5eaedf967a2e",
+      "chat.automation.needsYou": "db4113f70adb90b517605b89729ecfea135ef1306c48c6bb5527a5f3c8aa4a10",
+      "chat.automation.failed": "39544c4c681a25ba0f5c6550f2cbfbb32aea23cb9557a425f004cda9d8694880",
+      "automations.run.nothingNew": "cb239d61e3071ebc7033039780e0dd95480a4b1f5b48a118437eee298e87ac1f"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -17750,10 +17752,6 @@
       "settings.newBotEffort.default": "352a25678fb9c8a3bdf12f4c0106a9c4f62f36e2398c1b3a39558935dcdf66cf",
       "settings.newBotEffort.aria": "3de28c2d8f0f0e8d047ba6d7b887ce684fdbd3fff36ecde282f9cf5186463fc7",
       "settings.newBotEffort.error": "5c3a736a2219eb3d57baeb52f88e2878c4b373bf6ca992072f825b623d2a61f9",
-      "settings.routinesInConversation.title": "45d101bc60a986648fd3580e6d9908bd236975bfe0a74bf0e632d4f3826bce31",
-      "settings.routinesInConversation.subtitle": "e8a7933d906a02cf6bd92b8e512badc1452898519f3fe763601d1c5a22000bd8",
-      "settings.routinesInConversation.aria": "7deb14f1abea8312a2fd49d3c7d3732504e2cd01badad39d0d15088b29ad9a19",
-      "settings.routinesInConversation.error": "c13e25a59209b31f3dde28ad6b6ff0754b4fa2241b602b9a603bd777a3685563",
       "settings.toolCalls.title": "da5122dc0f97b158bfbd27c5bd479322f34e0916a0cd4626d42c03bb0000e4b4",
       "settings.toolCalls.subtitle": "68f4504d50af56ecdd03aae38ac96f085db556b42b7ab1cbd9a908f4be70b4ee",
       "settings.toolCalls.show": "49bd043e2562994a7b35616a7630c3d4da6c65a908c11e78d208914651a11540",
@@ -22437,7 +22435,12 @@
       "cloudSend.strip.arrived": "267496f10a730c080423e0b47ae2be3ddedc388c38161f93aef01955c495600e",
       "cloudSend.strip.allHere": "38020d5d386b81c2cace228726768bf05cf167cc19c0bd9048c812a98af0fb06",
       "cloudSend.strip.close": "7d9eb7acb13e24625c404401d8e88b2350e32162455885f18276cf802f7701ed",
-      "settings.logins.eachSide": "5ba04fd01e861b730fbb237874a6116d0f41f0dbb37c377a5588e0b0453836ab"
+      "settings.logins.eachSide": "5ba04fd01e861b730fbb237874a6116d0f41f0dbb37c377a5588e0b0453836ab",
+      "chat.automation.openRun": "ac401288608ed0c8e6b55a7cbfa6934a4e26ddc5008fc961c3cf3017bfb0cda3",
+      "chat.automation.openRunFor": "551ca4cfd657913c5e84c96ccb6671adec40eabe1978f64614cf5eaedf967a2e",
+      "chat.automation.needsYou": "db4113f70adb90b517605b89729ecfea135ef1306c48c6bb5527a5f3c8aa4a10",
+      "chat.automation.failed": "39544c4c681a25ba0f5c6550f2cbfbb32aea23cb9557a425f004cda9d8694880",
+      "automations.run.nothingNew": "cb239d61e3071ebc7033039780e0dd95480a4b1f5b48a118437eee298e87ac1f"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -25960,10 +25963,6 @@
       "settings.newBotEffort.default": "352a25678fb9c8a3bdf12f4c0106a9c4f62f36e2398c1b3a39558935dcdf66cf",
       "settings.newBotEffort.aria": "3de28c2d8f0f0e8d047ba6d7b887ce684fdbd3fff36ecde282f9cf5186463fc7",
       "settings.newBotEffort.error": "5c3a736a2219eb3d57baeb52f88e2878c4b373bf6ca992072f825b623d2a61f9",
-      "settings.routinesInConversation.title": "45d101bc60a986648fd3580e6d9908bd236975bfe0a74bf0e632d4f3826bce31",
-      "settings.routinesInConversation.subtitle": "e8a7933d906a02cf6bd92b8e512badc1452898519f3fe763601d1c5a22000bd8",
-      "settings.routinesInConversation.aria": "7deb14f1abea8312a2fd49d3c7d3732504e2cd01badad39d0d15088b29ad9a19",
-      "settings.routinesInConversation.error": "c13e25a59209b31f3dde28ad6b6ff0754b4fa2241b602b9a603bd777a3685563",
       "settings.toolCalls.title": "da5122dc0f97b158bfbd27c5bd479322f34e0916a0cd4626d42c03bb0000e4b4",
       "settings.toolCalls.subtitle": "68f4504d50af56ecdd03aae38ac96f085db556b42b7ab1cbd9a908f4be70b4ee",
       "settings.toolCalls.show": "49bd043e2562994a7b35616a7630c3d4da6c65a908c11e78d208914651a11540",
@@ -32329,10 +32328,6 @@
       "settings.newBotEffort.default": "352a25678fb9c8a3bdf12f4c0106a9c4f62f36e2398c1b3a39558935dcdf66cf",
       "settings.newBotEffort.aria": "3de28c2d8f0f0e8d047ba6d7b887ce684fdbd3fff36ecde282f9cf5186463fc7",
       "settings.newBotEffort.error": "5c3a736a2219eb3d57baeb52f88e2878c4b373bf6ca992072f825b623d2a61f9",
-      "settings.routinesInConversation.title": "45d101bc60a986648fd3580e6d9908bd236975bfe0a74bf0e632d4f3826bce31",
-      "settings.routinesInConversation.subtitle": "e8a7933d906a02cf6bd92b8e512badc1452898519f3fe763601d1c5a22000bd8",
-      "settings.routinesInConversation.aria": "7deb14f1abea8312a2fd49d3c7d3732504e2cd01badad39d0d15088b29ad9a19",
-      "settings.routinesInConversation.error": "c13e25a59209b31f3dde28ad6b6ff0754b4fa2241b602b9a603bd777a3685563",
       "settings.toolCalls.title": "da5122dc0f97b158bfbd27c5bd479322f34e0916a0cd4626d42c03bb0000e4b4",
       "settings.toolCalls.subtitle": "68f4504d50af56ecdd03aae38ac96f085db556b42b7ab1cbd9a908f4be70b4ee",
       "settings.toolCalls.show": "49bd043e2562994a7b35616a7630c3d4da6c65a908c11e78d208914651a11540",
@@ -35987,7 +35982,11 @@
       "botOverview.preference.cloud": "eb8b6f29f7611d29204c821ed448a08ebc06eb73b80fb02213d4d4c9acb904f4",
       "botOverview.preference.vm": "06d07776bf9bbe136fd93622a960fcb8b088e0f516d1d80363daf432d5cd9d9e",
       "grokFinish.messageApps": "f5c3a401ffdc50f904f6c189e3289983ac9746cf1c8d7918dc3a465b6d40a651",
-      "app.loading.connecting": "84c492affb87427b2f52738a122d95db30011917dfeb0f387a02231a9cfc472b"
+      "app.loading.connecting": "84c492affb87427b2f52738a122d95db30011917dfeb0f387a02231a9cfc472b",
+      "chat.automation.openRun": "ac401288608ed0c8e6b55a7cbfa6934a4e26ddc5008fc961c3cf3017bfb0cda3",
+      "chat.automation.openRunFor": "551ca4cfd657913c5e84c96ccb6671adec40eabe1978f64614cf5eaedf967a2e",
+      "chat.automation.needsYou": "db4113f70adb90b517605b89729ecfea135ef1306c48c6bb5527a5f3c8aa4a10",
+      "chat.automation.failed": "39544c4c681a25ba0f5c6550f2cbfbb32aea23cb9557a425f004cda9d8694880"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36866,10 +36865,6 @@
       "settings.newBotEffort.default": "352a25678fb9c8a3bdf12f4c0106a9c4f62f36e2398c1b3a39558935dcdf66cf",
       "settings.newBotEffort.aria": "3de28c2d8f0f0e8d047ba6d7b887ce684fdbd3fff36ecde282f9cf5186463fc7",
       "settings.newBotEffort.error": "5c3a736a2219eb3d57baeb52f88e2878c4b373bf6ca992072f825b623d2a61f9",
-      "settings.routinesInConversation.title": "45d101bc60a986648fd3580e6d9908bd236975bfe0a74bf0e632d4f3826bce31",
-      "settings.routinesInConversation.subtitle": "e8a7933d906a02cf6bd92b8e512badc1452898519f3fe763601d1c5a22000bd8",
-      "settings.routinesInConversation.aria": "7deb14f1abea8312a2fd49d3c7d3732504e2cd01badad39d0d15088b29ad9a19",
-      "settings.routinesInConversation.error": "c13e25a59209b31f3dde28ad6b6ff0754b4fa2241b602b9a603bd777a3685563",
       "settings.toolCalls.title": "da5122dc0f97b158bfbd27c5bd479322f34e0916a0cd4626d42c03bb0000e4b4",
       "settings.toolCalls.subtitle": "68f4504d50af56ecdd03aae38ac96f085db556b42b7ab1cbd9a908f4be70b4ee",
       "settings.toolCalls.show": "49bd043e2562994a7b35616a7630c3d4da6c65a908c11e78d208914651a11540",
@@ -40524,7 +40519,11 @@
       "botOverview.preference.cloud": "eb8b6f29f7611d29204c821ed448a08ebc06eb73b80fb02213d4d4c9acb904f4",
       "botOverview.preference.vm": "06d07776bf9bbe136fd93622a960fcb8b088e0f516d1d80363daf432d5cd9d9e",
       "grokFinish.messageApps": "f5c3a401ffdc50f904f6c189e3289983ac9746cf1c8d7918dc3a465b6d40a651",
-      "app.loading.connecting": "84c492affb87427b2f52738a122d95db30011917dfeb0f387a02231a9cfc472b"
+      "app.loading.connecting": "84c492affb87427b2f52738a122d95db30011917dfeb0f387a02231a9cfc472b",
+      "chat.automation.openRun": "ac401288608ed0c8e6b55a7cbfa6934a4e26ddc5008fc961c3cf3017bfb0cda3",
+      "chat.automation.openRunFor": "551ca4cfd657913c5e84c96ccb6671adec40eabe1978f64614cf5eaedf967a2e",
+      "chat.automation.needsYou": "db4113f70adb90b517605b89729ecfea135ef1306c48c6bb5527a5f3c8aa4a10",
+      "chat.automation.failed": "39544c4c681a25ba0f5c6550f2cbfbb32aea23cb9557a425f004cda9d8694880"
     }
   }
 }
