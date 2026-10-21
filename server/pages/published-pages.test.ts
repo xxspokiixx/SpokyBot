@@ -52,6 +52,18 @@ describe("publishing a page", () => {
     expect(f.cards).toEqual([]);
   });
 
+  it("says publishing isn't turned on yet, never \"sign in\", when this signed-in desktop's Admin offers no pages", async () => {
+    const f = setup();
+    applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: null, offered: false });
+    writeSite(join(f.work, "site"));
+    const outcome = await f.publish({ path: "site" });
+    expect(outcome.text).toBe("Publishing pages isn't turned on for this account yet.");
+    expect(f.service.minted).toEqual([]);
+    expect(f.cards).toEqual([]);
+    applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: null });
+    expect((await f.publish({ path: "site" })).text).toMatch(/^Publishing a page needs a MausBot account/u);
+  });
+
   it("publishes a folder to a new link with a card showing the link and the usage, and remembers it", async () => {
     const f = setup();
     signIn();
