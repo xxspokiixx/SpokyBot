@@ -103,8 +103,9 @@ const addCounts = (total, sent) => countsOf({ ...Object.fromEntries(COUNTED.map(
   chats: { conversations: total.chats.conversations + (sent.chats?.conversations ?? 0), messages: total.chats.messages + (sent.chats?.messages ?? 0) } });
 
 /** The state main keeps in its own folder: per Cloud what was sent, what the person kept here, the bots a send made
- * there whose fields still wait to be recorded (`created`), and the sign-ins My Cloud took that this computer still
- * holds (`release`). */
+ * there whose fields still wait to be recorded (`created`), the sign-ins My Cloud took that this computer still holds
+ * (`release`), the bot files a move put there (`files`, path to sha256), and whether each automation a move carried was
+ * on here (`on`). */
 export function parseSendState(value) {
   const clouds = {};
   if (record(value?.clouds)) {
@@ -122,6 +123,7 @@ export function parseSendState(value) {
         created: record(entry.created) ? Object.fromEntries(Object.entries(entry.created).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
         release: Array.isArray(entry.release) ? entry.release.filter((held) => record(held) && typeof held.id === "string" && typeof held.digest === "string").slice(0, 200) : [],
         files: record(entry.files) ? Object.fromEntries(Object.entries(entry.files).filter(([path, sha]) => typeof sha === "string" && /^[a-f0-9]{64}$/u.test(sha) && path.length <= 4096)) : {},
+        on: record(entry.on) ? Object.fromEntries(Object.entries(entry.on).filter(([key, on]) => /^(?:routine|call|webhook|app-event):[\w-]{1,128}$/u.test(key) && typeof on === "boolean")) : {},
       };
     }
   }
@@ -197,7 +199,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
   function persist() { try { store.write(saved); } catch {} }
-  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, release: [], files: {} });
+  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, release: [], files: {}, on: {} });
   /** What a move ignores of what the person kept here: everything goes but what was removed on My Cloud. */
   const removedOnly = (off) => Object.fromEntries(Object.entries(off).filter(([, why]) => why === "removed"));
   const connectionLocal = { json: (route) => localJson(route), handoff: (what) => handoff(what) };
@@ -853,6 +855,11 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const origin = cloud.origin();
       if (origin && typeof signature === "string") { entry(origin).dismissed = signature.slice(0, 20_000); persist(); }
       return publish();
+    },
+    /** Each automation a move carried, by key, and whether it was on here when it went: what the switch turns on there. */
+    switches() {
+      const origin = cloud.origin();
+      return origin ? { ...entry(origin).on } : {};
     },
     /** For the native menu: what is waiting, from the last comparison, without asking anyone. */
     waiting() {

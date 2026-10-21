@@ -2,7 +2,7 @@
 // imported and library skills and the bot fields My Cloud sets by its own move route (server/cloud-send-kinds.ts), the
 // bots' memory and the person's learned facts and teams (server/cloud-send-memory.ts), each conversation's own settings,
 // and the bots' files (server/cloud-send-files.ts) once My Cloud has room for them.
-import { MOVE_BOT_PARTS } from "./cloud-send-parts.mjs";
+import { AUTOMATION_KINDS, MOVE_BOT_PARTS } from "./cloud-send-parts.mjs";
 import { moveFit, growToFit } from "./cloud-space.mjs";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -13,6 +13,7 @@ const FILE_PATH = /^(?:workspaces\/[\w-]{1,128}|task-workspaces\/[\w-]{1,128}\/[
 /** A part of a file, as My Cloud takes one (server/cloud-send-files.ts). */
 const FILE_PART_BYTES = 8 * 1024 * 1024;
 const SETTINGS_BATCH = 500;
+const AUTOMATIONS = new Set(AUTOMATION_KINDS);
 const ATTACHMENT_NAMES = 2000;
 
 /** The name a file arriving beside My Cloud's own different one takes: "notes (MacBook Air).md". */
@@ -58,7 +59,7 @@ const parseFiles = (value) => list(value?.files).filter((file) => record(file) &
  *   localJson(route: string): Promise<any>,
  *   localBytes(route: string): Promise<Uint8Array | null>,
  *   localSend(method: string, route: string): Promise<{ ok: boolean, status: number }>,
- *   entry(origin: string): { files: Record<string, string> },
+ *   entry(origin: string): { files: Record<string, string>, on: Record<string, boolean> },
  *   persist(): void,
  *   progress(value: { done: number, total: number } | null): void,
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
@@ -68,13 +69,17 @@ const parseFiles = (value) => list(value?.files).filter((file) => record(file) &
 export function createMoveKinds({ localJson, localBytes, localSend, entry, persist, progress, space, refusal }) {
   const failed = (ctx, key, kind, label, error, final = false) => ctx.result.failed.push({ key, kind, label, error: sentence(error) ?? "It did not move.", ...(final ? { final: true } : {}) });
 
-  /** One item only a move carries, as this computer holds it; an app event this computer then lets go of, so only My
-   * Cloud collects it from then on. */
+  /** One item only a move carries, as this computer holds it; an automation's switch here is kept (`on`) for the switch
+   * that turns on there what was on here; an app event this computer then lets go of, so only My Cloud collects it. */
   async function sendKind(ctx, row) {
     const held = await localJson(`/api/cloud-send/kind?key=${encodeURIComponent(row.key)}`);
     if (!record(held) || !("record" in held)) throw Object.assign(new Error("It could not be read on this computer."), { code: "local" });
     const answer = await ctx.session.call("PUT", "/api/cloud-send/kind", { v: 1, key: row.key, dataDir: held.dataDir, record: held.record, ...(Array.isArray(held.runs) ? { runs: held.runs } : {}) });
     if (!answer.ok) throw Object.assign(new Error(refusal(answer, "My Cloud could not take it.")), answer.status === 400 || answer.status === 403 ? { final: true } : {});
+    if (AUTOMATIONS.has(row.kind) && record(held.record)) {
+      entry(ctx.origin).on[row.key] = row.kind === "call" ? held.record.nextRunAt !== null && held.record.nextRunAt !== undefined : held.record.enabled === true;
+      persist();
+    }
     if (row.kind === "app-event") {
       const released = await localSend("DELETE", `/api/cloud-send/kind?key=${encodeURIComponent(row.key)}`).catch(() => null);
       if (!released?.ok) throw new Error("My Cloud has this app event, but this computer could not stop collecting it yet. It tries again next time.");

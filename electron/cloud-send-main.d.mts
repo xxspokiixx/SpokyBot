@@ -28,5 +28,6 @@ export function installCloudSend(deps: {
   receive(proc: unknown, message: unknown): boolean;
   move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
   check(): Promise<CloudMoveCheck>;
+  switches(): Record<string, boolean>;
   menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
 };

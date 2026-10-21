@@ -1,8 +1,9 @@
 // GET /api/cloud-send: Send to My Cloud's comparison of this server (server/cloud-send.ts), or of one item with `item`;
 // /api/cloud-send/chats/*: its chats, by row (server/cloud-send-chats.ts); GET /api/cloud-send/manifest: all a move
 // carries, to check it by (server/cloud-send-manifest.ts); on a Cloud home, POST /api/cloud-send/verify-secrets: the
-// credentials' fingerprints (server/cloud-send-verify.ts). Admin scope (request-auth's default): the owner's app reads
-// them on this computer and on their own Cloud.
+// credentials' fingerprints (server/cloud-send-verify.ts); a move's own kinds, memory and bot files
+// (server/cloud-send-kinds.ts, cloud-send-memory.ts, cloud-send-files.ts). Admin scope (request-auth's default): the
+// owner's app reads them on this computer and on their own Cloud.
 import { z } from "zod";
 
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";

@@ -182,6 +182,8 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
      * stops, and the check of what arrived. */
     move: (options) => send.send({ reason: "move", final: options?.final === true }),
     check: () => send.check(),
+    /** Each automation the move carried, and whether it was on here when it went. */
+    switches: () => send.switches(),
     /** The switcher: what waits, from the last comparison (refreshed in the background), and its Send. */
     menu: () => {
       void fresh();

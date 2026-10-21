@@ -8,8 +8,9 @@ shows where each login is.
 ## Two real servers
 
 ```sh
-pnpm exec vitest run server/cloud-send.e2e.test.ts server/cloud-send-move.e2e.test.ts server/cloud-send.test.ts
-node --test electron/cloud-send.node-test.mjs electron/cloud-send-move.node-test.mjs electron/cloud-send-check.node-test.mjs
+pnpm exec vitest run server/cloud-send.e2e.test.ts server/cloud-send-move.e2e.test.ts server/cloud-send-kinds.e2e.test.ts server/cloud-send-store.e2e.test.ts server/cloud-send.test.ts
+pnpm exec vitest run server/cloud-send-kinds.test.ts server/cloud-send-memory.test.ts server/cloud-send-files.test.ts server/cloud-send-attachments.test.ts server/cloud-send-settings.test.ts
+node --test electron/cloud-send.node-test.mjs electron/cloud-send-move.node-test.mjs electron/cloud-send-check.node-test.mjs electron/cloud-send-kinds.node-test.mjs
 ```
 
 `scripts/testing/cloud-send-fixture.ts` starts this computer's server as the
@@ -54,6 +55,24 @@ account (a fake broker) arrive, with equal credential fingerprints; the move's
 session counts as someone using My Cloud; a moved conversation may use a lent
 Mac and feeds its bot's memory on My Cloud; and a move run again changes
 nothing there.
+
+`server/cloud-send-kinds.e2e.test.ts` runs what only a move carries, then the
+check, then the move again: a routine naming this computer's folder, with a
+finished run, arrives switched off under its id, as the owner's, naming My
+Cloud's folder; a scheduled call arrives unscheduled; a webhook arrives off
+with an address and secret of its own; an app event goes only in the final
+pass, and this computer stops collecting it. Bot files arrive by path and
+bytes, a file My Cloud has another version of is kept beside it, and nothing
+under `node_modules` goes. Memory on both sides merges with each fact once,
+daily logs and the journal included, as do what bots learned about the person
+and a team's context and memory. Archived, pinned, Chief, projects and fallback
+models reach the bot; a conversation's project, model, approval and snooze and a
+room conversation's time limit reach it too. A reply over 1 MB arrives whole,
+imported, Claude Code and library skills arrive, and a model on the home network
+stays here. `check()` is ok, and a move run again changes nothing.
+`server/cloud-send-store.e2e.test.ts` fills My Cloud's attachment store: the
+attachment is refused in plain words, its chat still goes, no partial file is
+left, and the check names the attachment.
 
 `server/cloud-send-chats.test.ts` covers the row cursor (pages, a deleted row
 starting a conversation over, each page's own leaf, a page never ending between

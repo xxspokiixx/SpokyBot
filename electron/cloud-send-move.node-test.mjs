@@ -61,7 +61,7 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
       if (route.startsWith("/api/cloud-send/memory?bot=")) return json({ v: 1, files: [], journal: [] });
       if (route === "/api/cloud-send/memory") return json({ v: 1, about: { learned: [], removed: [] }, teams: [] });
       if (route === "/api/cloud-send/files") return json({ v: 1, files: [] });
-      if (route.startsWith("/api/cloud-send/kind?key=")) return json({ v: 1, dataDir: "/desk/.openmausbot", record: {} });
+      if (route.startsWith("/api/cloud-send/kind?key=")) return json({ v: 1, dataDir: "/desk/.openmausbot", record: route.includes("routine") ? { enabled: true } : route.includes("app-event") ? { enabled: false } : {} });
       if (route === "/api/cloud-send/chats?attachments=1") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations, attachments: [] });
       if (route === "/api/bots?messages=0") return json({ bots: Object.entries(bots).map(([id, fields]) => ({ id, threadId: `t-${id}`, name: id, ...fields })) });
       if (/^\/api\/bots\/[\w-]+\/skills$/u.test(route)) return json({ skills: [] });
@@ -291,6 +291,7 @@ test("a move sends what only it carries last, after the chats and their settings
   const first = await send.send({ reason: "move" });
   assert.deepEqual(first.result.failed, []);
   assert.deepEqual(put, ["imported-skill:tidy", "routine:r1"], "an app event waits for the final pass");
+  assert.deepEqual(send.switches(), { "routine:r1": true });
   const at = (call) => move.calls.indexOf(call);
   assert.ok(at("PUT /api/cloud-send/kind") > -1 && move.calls.lastIndexOf("PUT /api/cloud-send/kind") > at("POST /api/cloud-send/chats"), "the routine went after the chats");
   assert.ok(move.calls.lastIndexOf("PUT /api/cloud-send/kind") > at("POST /api/cloud-send/chats/settings"), "and after their settings");
@@ -304,6 +305,7 @@ test("a move sends what only it carries last, after the chats and their settings
   assert.deepEqual(put.slice(2), ["app-event:e1"]);
   assert.ok(move.calls.includes(`HERE DELETE /api/cloud-send/kind?key=${encodeURIComponent("app-event:e1")}`));
   assert.equal(final.result.moved, 1);
+  assert.deepEqual(move.deps.store.value.clouds[CLOUD].on, { "routine:r1": true, "app-event:e1": false }, "what was on here is kept for the switch, after this computer let go");
 });
 
 test("a bot's fields only a move carries go over My Cloud's move route, absent ones as cleared; any other send never carries them", async () => {
