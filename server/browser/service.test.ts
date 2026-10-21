@@ -350,6 +350,25 @@ describe("browsers on one computer", () => {
     expect(backend.chromes).toHaveLength(2);
   });
 
+  it("closes a running browser at once when nothing uses it, and never one a person holds", async () => {
+    const { service, call, text, target, backend } = setup();
+    expect(service.runs(target.session)).toBe(false);
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    expect(service.runs(target.session)).toBe(true);
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => {
+      if (output.type === "frame") output.ack();
+    });
+    await viewer.input({ type: "takeControl" });
+    expect(await service.closeUnused(target.session)).toBe(false);
+    await viewer.input({ type: "releaseControl" });
+    await viewer.close();
+    expect(await service.closeUnused(target.session)).toBe(true);
+    expect(service.runs(target.session)).toBe(false);
+    expect(await service.closeUnused(target.session)).toBe(false);
+    expect(text(await call("agent_browser_status"))).toContain("Your browser sat unused and was closed to free memory");
+    expect(backend.chromes).toHaveLength(2);
+  });
+
   it("closes a browser people only watch once it sat unused, leaving their view asleep until the bot's next call wakes it", async () => {
     const { service, call, text, target, backend } = setup();
     await call("agent_browser_open", { url: "https://example.com/form" });

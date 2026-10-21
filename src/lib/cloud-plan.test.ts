@@ -19,12 +19,12 @@ describe("a free trial, in one message and at most one next step per state", () 
   it("active: when it ends, what is charged and when, how to cancel, and nothing to do", () => {
     const view = cloudTrialView(trial("active", { chargeAt: ENDS }), credit);
     expect(view.title).toBe("Your free trial ends on Oct 15");
-    expect(view.body).toBe("Then Pro is $49/month plus tax, charged on Oct 15. My Cloud keeps running, so there's nothing to do. To cancel, choose Manage subscription before then.");
+    expect(view.body).toBe("Then Pro is $49/month plus tax, charged on Oct 15. The Cloud keeps running, so there's nothing to do. To cancel, choose Manage subscription before then.");
     expect(view.credit).toBe("Includes $5 of Claude credit: $3.20 left.");
     expect(view.action).toEqual({ kind: "manage", label: "Manage subscription" });
     expect(view.body).toContain(view.action!.label);
     const unpriced = cloudTrialView(trial("active", { amount: null, tier: "max" }));
-    expect(unpriced.body).toBe("Then Max is charged monthly, plus tax, from Oct 15. My Cloud keeps running, so there's nothing to do. To cancel, choose Manage subscription before then.");
+    expect(unpriced.body).toBe("Then Max is charged monthly, plus tax, from Oct 15. The Cloud keeps running, so there's nothing to do. To cancel, choose Manage subscription before then.");
     expect(unpriced.credit).toBeUndefined();
     expect(cloudTrialView(trial("active"), { ...credit, remainingUsd: 0, state: "used_up" }).credit).toBeUndefined();
     expect(cloudTrialView(trial("active", { tier: "team-2027" })).body).toContain("Then Cloud is $49/month");
@@ -35,31 +35,31 @@ describe("a free trial, in one message and at most one next step per state", () 
   it("ending with renewal off: when it stops, when its files go, and Subscribe to keep it", () => {
     const view = cloudTrialView(trial("ending", { deleteAt: ENDS + 3 * DAY, keep: "portal" }), credit);
     expect(view).toEqual({ state: "ending", title: "Your free trial ends on Oct 15",
-      body: "Renewal is off, so My Cloud stops then and its files are deleted on Oct 18.", action: { kind: "subscribe", label: "Subscribe to keep it" } });
-    expect(cloudTrialView(trial("ending", { keep: "portal" })).body).toBe("Renewal is off, so My Cloud stops then, and its files are deleted a few days later.");
+      body: "Renewal is off, so the Cloud stops then and its files are deleted on Oct 18.", action: { kind: "subscribe", label: "Subscribe to keep it" } });
+    expect(cloudTrialView(trial("ending", { keep: "portal" })).body).toBe("Renewal is off, so the Cloud stops then, and its files are deleted a few days later.");
   });
 
   it("cancelled outright before it ends: nothing to buy until it has stopped (a checkout now would stop the running Cloud)", () => {
     for (const keep of ["none", "checkout"] as const) {
       const view = cloudTrialView(trial("ending", { deleteAt: ENDS + 3 * DAY, keep }));
-      expect(view.body, keep).toBe("Your subscription was cancelled, so My Cloud stops then and its files are deleted on Oct 18. To keep it, subscribe again once it has stopped.");
+      expect(view.body, keep).toBe("Your subscription was cancelled, so the Cloud stops then and its files are deleted on Oct 18. To keep it, subscribe again once it has stopped.");
       expect(view.action, keep).toBeNull();
     }
   });
 
   it("processing, late and ended each say what happens to My Cloud and its files", () => {
     expect(cloudTrialView(trial("processing", { chargeAt: ENDS, holdUntil: ENDS + 3 * DAY }))).toEqual({ state: "processing",
-      title: "Your first payment is processing", body: "My Cloud keeps running meanwhile, so there's nothing to do.", action: null });
+      title: "Your first payment is processing", body: "The Cloud keeps running meanwhile, so there's nothing to do.", action: null });
     expect(cloudTrialView(trial("late", { deleteAt: ENDS + 6 * DAY, keep: "portal" }))).toEqual({ state: "late",
       title: "Your first payment is taking longer",
-      body: "My Cloud is paused until it goes through, and comes back by itself. Its files are kept until Oct 21.",
+      body: "The Cloud is paused until it goes through, and comes back by itself. Its files are kept until Oct 21.",
       action: { kind: "status", label: "Check payment status" } });
     for (const keep of ["portal", "checkout"] as const) {
       expect(cloudTrialView(trial("ended", { deleteAt: ENDS + 3 * DAY, keep }))).toEqual({ state: "ended", title: "Your free trial has ended",
-        body: "My Cloud is stopped. Its files are kept until Oct 18, then deleted.", action: { kind: "subscribe", label: "Subscribe to keep it" } });
+        body: "The Cloud is stopped. Its files are kept until Oct 18, then deleted.", action: { kind: "subscribe", label: "Subscribe to keep it" } });
     }
-    expect(cloudTrialView(trial("ended")).body).toBe("My Cloud is stopped, and its files are deleted soon.");
-    expect(cloudTrialView(trial("late")).body).toBe("My Cloud is paused until it goes through, and comes back by itself.");
+    expect(cloudTrialView(trial("ended")).body).toBe("The Cloud is stopped, and its files are deleted soon.");
+    expect(cloudTrialView(trial("late")).body).toBe("The Cloud is paused until it goes through, and comes back by itself.");
   });
 
   it("the notice shows only the state main says is due, never another or an older one", () => {
@@ -84,9 +84,9 @@ describe("the plan line and the credit", () => {
   });
 
   it("says what is left, or that it is used up and what to do", () => {
-    expect(cloudCreditLine(credit)).toBe("Trial Claude credit: $3.20 of $5 left. Bots on My Cloud use it until you sign in there with your own Claude or ChatGPT account, or add an API key.");
+    expect(cloudCreditLine(credit)).toBe("Trial Claude credit: $3.20 of $5 left. Cloud bots use it until you sign in there with your own Claude or ChatGPT account, or add an API key.");
     expect(cloudCreditLine({ grantedUsd: 5, remainingUsd: 0, state: "used_up" }))
-      .toBe("Your $5 trial Claude credit is used up. To keep your bots working, sign in on My Cloud with your own Claude or ChatGPT account, or add an API key.");
+      .toBe("Your $5 trial Claude credit is used up. To keep your bots working, sign in with your own Claude or ChatGPT account in the Cloud, or add an API key there.");
     expect([usd(5), usd(3.2), usd(0.004), usd(49), usd(58.31)]).toEqual(["$5", "$3.20", "$0", "$49", "$58.31"]);
   });
 
@@ -119,11 +119,11 @@ describe("what is for sale, as the Admin says", () => {
     expect(CLOUD_SOURCES, "the welcome's Cloud beat").toContain("app_onboarding");
   });
 
-  it("each plan card: its name, the Admin's price, cloud computers at once and three allowance chips; Most popular is the Admin's recommended plan", () => {
+  it("each plan card: its name, the Admin's price, cloud desktops at once and three allowance chips; Most popular is the Admin's recommended plan", () => {
     expect(PLANS.map(plan => planRow(plan, OFFER.recommended))).toEqual([
-      { tier: "personal", name: "Personal", price: "$29", popular: false, line: "1 cloud computer at once", sleeps: null, chips: ["1 CPU · 1 GB", "10 GB storage", "50 h cloud computers"] },
-      { tier: "pro", name: "Pro", price: "$49", popular: true, line: "Up to 4 cloud computers at once", sleeps: null, chips: ["4 CPU · 4 GB", "40–50 GB storage", "200 h cloud computers"] },
-      { tier: "max", name: "Max", price: "$99", popular: false, line: "Up to 8 cloud computers at once", sleeps: null, chips: ["8 CPU · 8 GB", "80–100 GB storage", "400 h cloud computers"] },
+      { tier: "personal", name: "Personal", price: "$29", popular: false, line: "1 cloud desktop at once", sleeps: null, chips: ["1 CPU · 1 GB", "10 GB storage", "50 h cloud desktops"] },
+      { tier: "pro", name: "Pro", price: "$49", popular: true, line: "Up to 4 cloud desktops at once", sleeps: null, chips: ["4 CPU · 4 GB", "40–50 GB storage", "200 h cloud desktops"] },
+      { tier: "max", name: "Max", price: "$99", popular: false, line: "Up to 8 cloud desktops at once", sleeps: null, chips: ["8 CPU · 8 GB", "80–100 GB storage", "400 h cloud desktops"] },
     ]);
     expect(PLANS.map(plan => planRow(plan, "max").popular), "never Pro by itself").toEqual([false, false, true]);
     expect(PLANS.map(plan => planRow(plan).popular)).toEqual([false, false, false]);
@@ -193,7 +193,7 @@ describe("what is for sale, as the Admin says", () => {
       points: ["Routines run on time, day and night", "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start"],
       price: "Then from $29/month + tax. Cancel any time.", moneyBack: "14-day money-back on every plan." });
     const bare = cloudIntroView({ ...OFFER, creditUsd: undefined, refundDays: undefined })!;
-    expect(bare.points[2]).toBe("Cloud computers and voice included"); expect(bare.moneyBack).toBeNull();
+    expect(bare.points[2]).toBe("Cloud desktops and voice included"); expect(bare.moneyBack).toBeNull();
     expect(cloudIntroView(noTrial(OFFER))).toBeNull(); expect(cloudIntroView(null)).toBeNull(); expect(cloudIntroView(undefined)).toBeNull();
     expect(JSON.stringify(cloudIntroView(OFFER))).not.toMatch(/launch|\$89|first 100/i);
     const partial: CloudOffer = { ...OFFER, plans: OFFER.plans.map(plan => plan.tier === "personal" ? { ...plan, trialDays: undefined } : plan) };
@@ -296,7 +296,7 @@ describe("the buying sheet, one view per state", () => {
 
 describe("This computer's My Cloud card", () => {
   const view = (account: CloudAccountState) => cloudNoticeKind(cloudPlanView(account), account);
-  it("says My Cloud is ready to someone with a plan (in a trial too), and sign in again where the sign-in ended", () => {
+  it("says The Cloud is ready to someone with a plan (in a trial too), and sign in again where the sign-in ended", () => {
     const base = { status: "connected" as const, account: { id: "a", email: "p@example.test" } };
     const ready = { status: "ready" as const, origin: "https://omb-u-1.fly.dev" };
     expect(view({ ...base, entitlement: { plan: "pro", status: "active", expiresAt: NOW + DAY, version: 1 }, machine: ready })).toBe("my-cloud");

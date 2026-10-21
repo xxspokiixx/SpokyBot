@@ -83,7 +83,7 @@ export function engineFailureMessage(
   const code = http ? `HTTP ${http}` : null;
   switch (what) {
     case "credits": return `Your ${provider} account is out of credits${detail(says)}. Add credits with ${provider}, then run it again.`;
-    case "usage_limit": return `This ${provider} account has reached its usage limit${detail(says)}. Wait for it to reset, or switch this bot to another engine.`;
+    case "usage_limit": return `This ${provider} account has reached its usage limit${detail(says)}. Wait for it to reset, or switch this bot to another AI.`;
     case "rate_limit": return `${provider} hit a rate limit${detail(code, says)}. Wait a minute, then run it again.`;
     case "overloaded": return `${provider} is overloaded right now${detail(code, says)}. This is usually temporary, so try again in a few minutes.`;
     case "server": return `${provider} had a temporary server problem${detail(code, says)}. Try again in a few minutes.`;
