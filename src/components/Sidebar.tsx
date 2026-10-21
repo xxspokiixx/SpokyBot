@@ -1701,7 +1701,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             {t("sidebar.newChat.title")}
           </button>
           <button
-            onClick={() => { setPlusOpen(false); addBot(dispatch, state.bots, showThreads, advanced); }}
+            onClick={() => { setPlusOpen(false); addBot(dispatch); }}
             className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
           >
             <BotIcon size={16} className="text-ink-secondary" />
@@ -2252,7 +2252,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           anchor={sidebarRef.current}
           style={windowNoDragStyle}
           onClose={() => setNewChatOpen(false)}
-          onNewBot={() => { setNewChatOpen(false); addBot(dispatch, state.bots, showThreads, advanced); }}
+          onNewBot={() => { setNewChatOpen(false); addBot(dispatch); }}
           onNewGroup={() => { setNewChatOpen(false); setNewRoom(true); }}
         />,
         document.body,
