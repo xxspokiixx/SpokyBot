@@ -880,7 +880,6 @@
   "lending.status.machineChanged": "Cloud が新しいマシンに移ったため、共有を停止しました。共有するには、もう一度オンにしてください。",
   "lending.status.accessOff": "「Computer access」で共有されていますが、このコンピューターではオフのため、Cloud からアクセスできません。代わりに、ここで共有する内容を選んでください。",
   "lending.viaAccess": "「設定 → サーバー」の「Computer access」で共有されています。ここで選ぶと、選んだフォルダー、アプリ、画面だけに置き換わります。",
-  "lending.viaAccessTerminal": "「設定 → サーバー」の「Computer access」で、ターミナルを含めて共有されています。ここで選ぶと、選んだフォルダー、アプリ、画面だけに置き換わり、ターミナルは含まれません。",
   "lending.stopped.you": "{date} からオフ：あなたがオフにしました。",
   "lending.stopped.signedOut": "{date} からオフ：MausBot Cloud からサインアウトしたためです。",
   "lending.stopped.accountChanged": "{date} からオフ：別の Cloud アカウントでサインインしたためです。",

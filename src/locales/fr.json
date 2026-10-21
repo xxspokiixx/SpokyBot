@@ -290,7 +290,6 @@
   "lending.status.machineChanged": "Le partage s'est arrêté parce que le Cloud a été déplacé vers une nouvelle machine. Réactivez-le pour partager avec lui.",
   "lending.status.accessOff": "Partagé via « Computer access », qui est désactivé sur cet ordinateur : le Cloud ne peut donc pas le joindre. Choisissez plutôt ici ce que vous partagez.",
   "lending.viaAccess": "Partagé via « Computer access » dans Paramètres → Servers. Choisir ici le remplace uniquement par les dossiers, apps et écran que vous sélectionnez.",
-  "lending.viaAccessTerminal": "Partagé via « Computer access » dans Paramètres → Servers, terminal compris. Choisir ici le remplace uniquement par les dossiers, apps et écran que vous sélectionnez, jamais le terminal.",
   "lending.stopped.you": "Désactivé depuis le {date} : vous l’avez désactivé.",
   "lending.stopped.signedOut": "Désactivé depuis le {date}, quand vous vous êtes déconnecté de MausBot Cloud.",
   "lending.stopped.accountChanged": "Désactivé depuis le {date}, quand un autre compte Cloud s’est connecté.",

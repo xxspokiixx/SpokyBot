@@ -290,7 +290,6 @@
   "lending.status.machineChanged": "साझा करना रुक गया क्योंकि Cloud एक नई मशीन पर चला गया। उसके साथ साझा करने के लिए इसे फिर चालू करें।",
   "lending.status.accessOff": "“Computer access” से साझा किया गया, जो इस कंप्यूटर पर बंद है, इसलिए Cloud उस तक नहीं पहुँच सकता। इसके बजाय यहाँ चुनें कि क्या साझा करना है।",
   "lending.viaAccess": "सेटिंग्स → Servers में “Computer access” से साझा किया गया। यहाँ चुनने से यह सिर्फ़ आपके चुने फ़ोल्डर, ऐप्स और स्क्रीन से बदल जाता है।",
-  "lending.viaAccessTerminal": "सेटिंग्स → Servers में “Computer access” से, टर्मिनल सहित, साझा किया गया। यहाँ चुनने से यह सिर्फ़ आपके चुने फ़ोल्डर, ऐप्स और स्क्रीन से बदल जाता है, टर्मिनल कभी नहीं।",
   "lending.stopped.you": "{date} से बंद: आपने इसे बंद किया।",
   "lending.stopped.signedOut": "{date} से बंद, जब आपने MausBot Cloud से साइन आउट किया।",
   "lending.stopped.accountChanged": "{date} से बंद, जब किसी दूसरे Cloud खाते ने साइन इन किया।",

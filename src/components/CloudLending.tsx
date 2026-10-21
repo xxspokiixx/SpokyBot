@@ -55,11 +55,11 @@ export const lendsLine = (what: string, device: Device = thisDevice()) => t(LEND
 
 /** "the internet connection and Desktop, Documents and Downloads (read only)", or each folder with whether bots may edit
  * it, and apps and screen. */
-export function lentWhat(folders: ReadonlyArray<{ name: string; write: boolean }>, screen: boolean, internet = false): string {
+export function lentWhat(folders: ReadonlyArray<{ name: string; write: boolean }>, screen: boolean, internet = false, terminal = false): string {
   const readOnly = folders.length > 0 && folders.every((folder) => !folder.write);
   const lentFolders = readOnly ? [`${listOf(folders.map((folder) => folder.name))} (${t("lending.page.readOnly")})`]
     : folders.map((folder) => folder.write ? `${folder.name} (${t("lending.page.canEdit")})` : folder.name);
-  return listOf([...(internet ? [t("lending.page.internet")] : []), ...lentFolders, ...(screen ? [t("lending.cloudSide.screen")] : [])]);
+  return listOf([...(internet ? [t("lending.page.internet")] : []), ...lentFolders, ...(screen ? [t("lending.cloudSide.screen")] : []), ...(terminal ? [t("lending.cloudSide.terminal")] : [])]);
 }
 
 /** Why it is off and since when, kept across restarts: an off switch never hides that it was on. */
@@ -95,6 +95,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   const [folders, setFolders] = useState<SharedFolder[]>([]);
   const [screen, setScreen] = useState(false);
   const [internet, setInternet] = useState(false);
+  const [terminal, setTerminal] = useState(false);
   const [working, setWorking] = useState(false);
   const [failed, setFailed] = useState<LocaleKey | null>(null);
   const [more, setMore] = useState(false);
@@ -102,7 +103,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   const accept = (next: CloudLendingSnapshot) => {
     if (!mounted.current) return;
     setSnapshot(next);
-    if (!pending.current && next.state) { setFolders(next.state.folders); setScreen(next.state.screen); setInternet(next.state.internet === true); }
+    if (!pending.current && next.state) { setFolders(next.state.folders); setScreen(next.state.screen); setInternet(next.state.internet === true); setTerminal(next.state.terminal === true && next.state.via !== "access"); }  // a Computer access terminal is not carried into a choice made here
   };
   useEffect(() => {
     mounted.current = true;
@@ -118,9 +119,17 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
     catch (cause) { if (mounted.current) setFailed(lendingFailureKey(cause)); }
     finally { pending.current = false; if (mounted.current) setWorking(false); }
   };
-  const lend = (nextFolders: SharedFolder[], nextScreen: boolean, nextInternet: boolean) => {
-    setFolders(nextFolders); setScreen(nextScreen); setInternet(nextInternet);
-    void perform(() => nextFolders.length || nextScreen || nextInternet ? bridge.save({ folders: nextFolders, screen: nextScreen, internet: nextInternet }) : bridge.stop());
+  /** What is lent, as the bridge takes it: the terminal is named only when it is on, so main never sees it by accident. */
+  const choiceOf = (nextFolders: SharedFolder[], nextScreen: boolean, nextInternet: boolean, nextTerminal: boolean) =>
+    ({ folders: nextFolders, screen: nextScreen, internet: nextInternet, ...(nextTerminal ? { terminal: true } : {}) });
+  const lend = (nextFolders: SharedFolder[], nextScreen: boolean, nextInternet: boolean, nextTerminal = terminal) => {
+    setFolders(nextFolders); setScreen(nextScreen); setInternet(nextInternet); setTerminal(nextTerminal);
+    void perform(() => nextFolders.length || nextScreen || nextInternet || nextTerminal ? bridge.save(choiceOf(nextFolders, nextScreen, nextInternet, nextTerminal)) : bridge.stop());
+  };
+  /** The terminal runs any command as this person, so turning it on asks first, here and nowhere else. */
+  const chooseTerminal = async (wanted: boolean) => {
+    if (wanted && !(await window.ogb?.confirm?.(t("lending.terminalConfirm")))) return;
+    if (mounted.current) lend(folders, screen, internet, wanted);
   };
   const enabled = snapshot?.state?.enabled === true;
   const on = enabled || draftOn;
@@ -128,12 +137,14 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   const toggle = () => {
     if (on) { setDraftOn(false); void perform(() => bridge.stop()); return; }
     setDraftOn(true);
-    void perform(() => bridge.save({ folders, screen, internet }));
+    // The terminal is never carried over: after Off it has to be ticked again.
+    setTerminal(false);
+    void perform(() => bridge.save(choiceOf(folders, screen, internet, false)));
   };
   if (!snapshot?.available) return null;
   const status = lendingStatusKey(snapshot, on);
   const updating = enabled && snapshot.state?.link === "unsupported";
-  const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen, snapshot.state.internet === true && !updating) : "";
+  const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen, snapshot.state.internet === true && !updating, snapshot.state.terminal === true) : "";
   const stopped = on ? null : lendingStoppedLine(snapshot.state);
   const lastUsed = lendingLastUsedLine(snapshot);
   const via = snapshot.state?.via === "access" ? t(snapshot.state.terminal ? "lending.viaAccessTerminal" : "lending.viaAccess") : null;
@@ -167,7 +178,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
         <button type="button" disabled={folders.length >= 20} onClick={() => void perform(async () => {
           const folder = await bridge.chooseFolder();
           const next = folder && !folders.some(entry => entry.path === folder.path) ? [...folders, folder] : folders;
-          if (next !== folders) { setFolders(next); return bridge.save({ folders: next, screen, internet }); }
+          if (next !== folders) { setFolders(next); return bridge.save(choiceOf(next, screen, internet, terminal)); }
           return bridge.state();
         })} className="ui-button flex w-fit items-center gap-2"><FolderPlus size={14} />{t("lending.addFolder")}</button>
       </fieldset>
@@ -182,6 +193,12 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
         <label className="flex items-start gap-2">
           <input className="mt-1" type="checkbox" data-lending-internet-choice checked={internet} onChange={event => lend(folders, screen, event.target.checked)} />
           <span className="text-[13px] text-ink">{t("lending.internet")}<span className="mt-1 block text-[12px] text-ink-secondary">{t("lending.internetHelp")}</span></span>
+        </label>
+      </fieldset>
+      <fieldset disabled={working} className="flex flex-col gap-1 disabled:opacity-60">
+        <label className="flex items-start gap-2">
+          <input className="mt-1" type="checkbox" data-lending-terminal-choice checked={terminal} onChange={event => void chooseTerminal(event.target.checked)} />
+          <span className="text-[13px] text-ink">{t("lending.terminal")}<span className="mt-1 block text-[12px] text-ink-secondary">{t("lending.terminalHelp")}</span></span>
         </label>
       </fieldset>
       <p className="text-[12px] text-ink-secondary">{t("lending.ownConversations")}</p>

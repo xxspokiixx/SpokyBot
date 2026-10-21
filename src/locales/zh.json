@@ -437,7 +437,6 @@
   "lending.status.machineChanged": "因 Cloud 已迁移到新机器，共享已停止。请再次开启以与它共享。",
   "lending.status.accessOff": "已通过“Computer access”共享，但这台电脑上已关闭该功能，因此 Cloud 无法访问。请改为在这里选择要共享的内容。",
   "lending.viaAccess": "已通过“设置 → 服务器”中的“Computer access”共享。在这里选择会改为只共享你挑选的文件夹、应用和屏幕。",
-  "lending.viaAccessTerminal": "已通过“设置 → 服务器”中的“Computer access”共享，包括终端。在这里选择会改为只共享你挑选的文件夹、应用和屏幕，绝不包括终端。",
   "lending.stopped.you": "自 {date} 起关闭：你关闭了它。",
   "lending.stopped.signedOut": "自 {date} 起关闭，当时你退出了 MausBot Cloud。",
   "lending.stopped.accountChanged": "自 {date} 起关闭，当时另一个 Cloud 账户登录。",

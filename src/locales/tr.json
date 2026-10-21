@@ -655,7 +655,6 @@
   "lending.status.machineChanged": "Cloud yeni bir makineye taşındığı için paylaşım durduruldu. Onunla paylaşmak için tekrar açın.",
   "lending.status.accessOff": "“Computer access” üzerinden paylaşıldı, ancak bu bilgisayarda kapalı olduğu için Cloud ona ulaşamıyor. Bunun yerine burada neyin paylaşılacağını seçin.",
   "lending.viaAccess": "Ayarlar → Sunucular bölümündeki “Computer access” üzerinden paylaşıldı. Burada seçim yapmak, onu yalnızca seçtiğiniz klasörler, uygulamalar ve ekranla değiştirir.",
-  "lending.viaAccessTerminal": "Ayarlar → Sunucular bölümündeki “Computer access” üzerinden, terminal dahil paylaşıldı. Burada seçim yapmak, onu yalnızca seçtiğiniz klasörler, uygulamalar ve ekranla değiştirir, terminali asla değil.",
   "lending.stopped.you": "{date} tarihinden beri kapalı: siz kapattınız.",
   "lending.stopped.signedOut": "{date} tarihinden beri kapalı; o sırada MausBot Cloud oturumunu kapattınız.",
   "lending.stopped.accountChanged": "{date} tarihinden beri kapalı; o sırada başka bir Cloud hesabı giriş yaptı.",

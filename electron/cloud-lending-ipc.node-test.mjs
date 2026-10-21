@@ -17,7 +17,7 @@ function setup({ enabled = false, kept = { folders: [], screen: false }, screenA
     cloudPage: (channel, handler) => (event, ...args) => { if (!event.page) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     snapshot: async () => ({ available: true, screenAvailable, state }),
     environment: () => ({ id: "cloud" }),
-    save: async (_env, choice) => { calls.push(["save", choice]); state = { ...state, enabled: true, connected: true, folders: choice.folders, screen: choice.screen, internet: choice.internet }; },
+    save: async (_env, choice) => { calls.push(["save", choice]); state = { ...state, enabled: true, connected: true, folders: choice.folders, screen: choice.screen, internet: choice.internet, terminal: choice.terminal === true }; },
     stop: () => { calls.push(["stop"]); state = { ...state, enabled: false, connected: false, stopped: { reason: "you", at: 1 } }; },
     chooseFolder: async () => null,
     confirmScreen: async () => { calls.push(["confirm"]); return confirm; },
@@ -45,6 +45,23 @@ test("the internet connection alone is a grant: nothing else is added to it", as
   const { handlers, calls } = setup();
   await handlers.get("lending:save")({ page: "local" }, { folders: [], screen: false, internet: true });
   assert.deepEqual(calls, [["save", { folders: [], screen: false, internet: true }]]);
+});
+
+test("the terminal is chosen only from this computer's own Settings: alone it is a grant, and My Cloud's page and the move's default never turn it on", async () => {
+  const alone = setup();
+  await alone.handlers.get("lending:save")({ page: "local" }, { folders: [], screen: false, terminal: true });
+  assert.deepEqual(alone.calls, [["save", { folders: [], screen: false, internet: false, terminal: true }]], "nothing else is added to a terminal-only grant");
+  const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
+  const both = setup();
+  await both.handlers.get("lending:save")({ page: "local" }, { folders: plans, screen: false, terminal: "yes" });
+  assert.deepEqual(both.calls, [["save", { folders: plans, screen: false, internet: false }]], "only a real true counts");
+  await assert.rejects(async () => alone.handlers.get("lending:save")({ page: "cloud" }, { folders: [], screen: false, terminal: true }), /only available/);
+  const page = setup({ kept: { folders: plans, screen: false, terminal: true } });
+  await page.handlers.get("cloud-lending:set")({ page: "cloud" }, true);
+  assert.ok(!("terminal" in page.calls[0][1]), "My Cloud's page turns lending on without a terminal, whatever was kept");
+  const moved = setup();
+  await moved.lending.lendByDefault({ projects: [] });
+  assert.ok(!("terminal" in moved.calls[0][1]), "the default grant never includes a terminal");
 });
 
 test("My Cloud's page turns lending on in place with no native confirmation, says it lends the internet connection, and off at once", async () => {
