@@ -262,6 +262,8 @@ afterAll(async () => {
 
 let mac: ReturnType<typeof lend>;
 let gate = 0;
+/** A bot's turn needs the fixture engine and browser engine, scripts started by their #! line, which Windows does not run. */
+const posixOnly = it.skipIf(process.platform === "win32");
 
 it("My Cloud offers the device link, and this Mac lends its internet connection with nothing else", async () => {
   expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities).toMatchObject({ sharedComputers: true, deviceLink: true });
@@ -272,7 +274,7 @@ it("My Cloud offers the device link, and this Mac lends its internet connection 
   expect(known).toEqual([expect.objectContaining({ online: true, lent: true, scopes: { folders: 0, terminal: false, screen: false, internet: true } })]);
 }, hostTimeout(30_000));
 
-it("a bot's browser on My Cloud reaches Instagram from the Mac's own connection: the website sees the Mac, not My Cloud", async () => {
+posixOnly("a bot's browser on My Cloud reaches Instagram from the Mac's own connection: the website sees the Mac, not My Cloud", async () => {
   ({ gate } = await botTurn("Browser bot"));
   const page = await throughGate(gate, "www.instagram.com", 443);
   expect(page.code).toBe(0);
@@ -295,7 +297,7 @@ it("a bot's browser on My Cloud reaches Instagram from the Mac's own connection:
   }
 }, hostTimeout(60_000));
 
-it("every other site loads straight from My Cloud: the Mac is never asked, nor looks it up", async () => {
+posixOnly("every other site loads straight from My Cloud: the Mac is never asked, nor looks it up", async () => {
   const before = { visits: visits.length, sockets: macSockets.size, lookups: macLookups.length };
   for (const host of ["en.wikipedia.org", "static.cdninstagram.com", "api.ipify.org"]) {
     const page = await throughGate(gate, host, 443);
@@ -307,7 +309,7 @@ it("every other site loads straight from My Cloud: the Mac is never asked, nor l
   expect(visits.length).toBe(before.visits);
 }, hostTimeout(30_000));
 
-it("a page that reaches for the Mac's home network, the Mac itself, a metadata service, NAT64 or another port is refused on the Mac", async () => {
+posixOnly("a page that reaches for the Mac's home network, the Mac itself, a metadata service, NAT64 or another port is refused on the Mac", async () => {
   const before = { visits: visits.length, sockets: macSockets.size };
   for (const [host, targetPort] of [["router.google.com", 443], ["mac.google.com", 443], ["metadata.googlevideo.com", 80], ["nat64.instagram.com", 443], ["own.youtube.com", 443],
     ["neighbour.google.com", 443], ["home.instagram.com", 443], ["www.instagram.com", 8080], ["www.instagram.com", 25]] as const) {
@@ -319,7 +321,7 @@ it("a page that reaches for the Mac's home network, the Mac itself, a metadata s
   expect(visits.length).toBe(before.visits);
 }, hostTimeout(30_000));
 
-it("a 2 MiB file on the Mac reads whole through My Cloud, under its 4 MB body", async () => {
+posixOnly("a 2 MiB file on the Mac reads whole through My Cloud, under its 4 MB body", async () => {
   const folderPath = realpathSync(mkdtempSync(join(tmpdir(), "omb-use-my-mac-folder-")));
   const bytes = randomBytes(2 * 1024 * 1024);
   writeFileSync(join(folderPath, "photo.bin"), bytes);
@@ -335,7 +337,7 @@ it("a 2 MiB file on the Mac reads whole through My Cloud, under its 4 MB body", 
   rmSync(folderPath, { recursive: true, force: true });
 }, hostTimeout(60_000));
 
-it("when the Mac goes away, a page in flight ends at once, My Cloud says it is away, and the next page goes My Cloud's own way without waiting", async () => {
+posixOnly("when the Mac goes away, a page in flight ends at once, My Cloud says it is away, and the next page goes My Cloud's own way without waiting", async () => {
   const slow = await new Promise<{ socket: Socket; closed: Promise<number> }>((resolve) => {
     const name = Buffer.from("slow.youtube.com");
     const socket = tcpConnect(gate, "127.0.0.1", () => socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0, 3, name.length]), name, Buffer.from([1, 187])])));

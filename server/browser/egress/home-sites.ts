@@ -1,8 +1,8 @@
 // The sites that turn away connections from data centres. While the person lends their computer's internet connection,
 // a bot's browser on My Cloud opens only these through it; every other site loads straight from My Cloud, which is much
-// faster than a round trip through a home connection (measured for PR #3201 with a Frankfurt Cloud and a Mac on a home
-// connection in India: pages took 1.7 to 30 times as long through the Mac). The list lives on My Cloud alone, so a new
-// site needs only a Cloud update.
+// faster than a round trip through a home connection (with a Frankfurt Cloud and a Mac on a home connection in India,
+// pages took 1.7 to 30 times as long through the Mac). The list lives on My Cloud alone, so a new site needs only a
+// Cloud update.
 
 /** Each name covers its subdomains too. */
 export const HOME_SITES = [
