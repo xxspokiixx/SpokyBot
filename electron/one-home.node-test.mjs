@@ -148,6 +148,11 @@ test("a check that still fails after three passes lifts the freeze and tries aga
   assert.equal(w.journal.retryAt, w.now() + FROZEN_RETRY_MS);
   await w.home.kick();
   assert.equal(w.passes.length, 4, "not before the hour is up");
+  w.cloud.ready = false;
+  await w.home.kick();
+  w.cloud.ready = true;
+  await w.home.kick();
+  assert.equal(w.passes.length, 4, "not before the hour is up, even when My Cloud comes back: this computer is not frozen again sooner");
 
   w.advance(FROZEN_RETRY_MS);
   await w.tick();
@@ -277,6 +282,10 @@ test("a newer app tops up once from the frozen copy, which is deleted 30 days af
   await w.relaunch().kick();
   assert.equal(w.passes.length, 3, "once per version");
 
+  w.cloud.paid = true;
+  await w.home.kick();
+  assert.equal(w.server.forgot, 0, "kept for 30 days after the move, paid or not");
+  w.cloud.paid = false;
   w.advance(KEPT_MS);
   await w.home.kick();
   assert.equal(w.server.forgot, 0, "kept until My Cloud has been paid for");
@@ -306,4 +315,33 @@ test("automations switch on through their own routes, and the done line counts o
   assert.deepEqual(arrivedCounts({ items: [{ key: "bot:a", kind: "bot" }, { key: "bot:b", kind: "bot" }, { key: "1password", kind: "1password" }], conversations: [{ threadId: "t1" }, { threadId: "t2" }] },
     { items: [{ key: "bot:a", kind: "bot" }, { key: "1password", kind: "1password" }], conversations: [{ threadId: "t1" }] }),
   { bots: 1, skills: 0, logins: 0, onePassword: true, chats: 1, routines: 0 });
+});
+
+test("a move left off while My Cloud was away goes on as soon as it is back; a switch that fails waits before it tries again", async () => {
+  const w = world({ moves: [Object.assign(new Error("My Cloud did not answer."), { status: 503 })] });
+  await w.home.kick();
+  assert.equal(w.journal.phase, "copy");
+  assert.ok(w.journal.retryAt > w.now());
+  await w.home.kick();
+  assert.deepEqual(w.passes, ["copy"], "not again at once, however often the app looks");
+  w.cloud.ready = false;
+  await w.home.kick();
+  w.cloud.ready = true;
+  await w.home.kick();
+  assert.equal(w.journal.phase, "done", "it goes on as soon as My Cloud is back");
+
+  const s = world();
+  let refusing = true;
+  s.cloudAnswer = (method) => (refusing && method === "PATCH" ? reply(503, { error: "Bad gateway" }) : null);
+  await s.home.kick();
+  assert.equal(s.journal.phase, "switch");
+  const tried = s.switchedOn().length;
+  await s.home.kick();
+  await s.home.kick();
+  assert.equal(s.switchedOn().length, tried, "each look of the app is not another try");
+  refusing = false;
+  s.advance(2 * 60_000 + 1);
+  await s.tick();
+  assert.equal(s.journal.phase, "done");
+  assert.equal(s.server.unfreezes, 0, "never lifted after the switch");
 });

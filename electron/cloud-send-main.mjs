@@ -6,7 +6,7 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { BACKGROUND_HEADERS } from "./cloud-power.mjs";
 import { createLoginHandoffClient, handoffWhat } from "./cloud-logins.mjs";
-import { MOVE_LINE } from "./cloud-send-parts.mjs";
+import { MOVE_LINE, resultKey } from "./cloud-send-parts.mjs";
 import { createCloudSend, sendNotice } from "./cloud-send.mjs";
 
 const SESSION_LABEL = "Send to My Cloud";
@@ -165,7 +165,12 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
     return notice(send.snapshot());
   }));
   ipcMain.handle("cloud-send:dismiss", onPage("cloud-send:dismiss", (_event, signature) => {
-    if (String(signature) === MOVE_LINE) { move()?.seen(); return notice(send.snapshot()); }
+    if (String(signature) === MOVE_LINE) {
+      // The done line says what the move brought; the move's own send result is not said again after it.
+      move()?.seen();
+      const last = send.snapshot().last;
+      return notice(last ? send.dismiss(resultKey(last)) : send.snapshot());
+    }
     return notice(send.dismiss(String(signature)));
   }));
   // The move's Try again, after a day of failing.

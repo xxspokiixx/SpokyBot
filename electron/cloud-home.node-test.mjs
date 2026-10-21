@@ -11,6 +11,13 @@ const NOW = 1_800_000_000_000;
 const origin = "https://omb-u-1a2b3c4d5e6f.fly.dev";
 const code = "ABCD-EFGH-JK23";
 
+test("the Admin says whether this account may move to its Cloud, and when an ended Cloud it still holds is deleted", () => {
+  assert.deepEqual(parseCloudSummary({ state: "ready", origin, moves: true }), { status: "ready", origin, moves: true });
+  assert.deepEqual(parseCloudSummary({ state: "ready", origin, moves: "yes" }), { status: "ready", origin });
+  assert.deepEqual(parseCloudSummary({ state: "stopped", hold: { until: NOW + 86_400_000 } }), { status: "stopped", hold: { until: NOW + 86_400_000 } });
+  assert.deepEqual(parseCloudSummary({ state: "stopped", hold: { until: "soon" } }), { status: "stopped" });
+});
+
 test("the Admin's cloud summary becomes one plain machine state", () => {
   assert.deepEqual(parseCloudSummary({ state: "ready", origin, pairingAvailable: true }), { status: "ready", origin });
   assert.deepEqual(parseCloudSummary({ state: "setting_up", origin, pairingAvailable: false }), { status: "provisioning", origin });

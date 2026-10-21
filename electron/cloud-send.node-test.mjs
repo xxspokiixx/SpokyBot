@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 
@@ -581,3 +583,31 @@ test("an owner session that could not open says whether nothing answered or My C
   assert.equal(unanswered(await opening(async () => { throw Object.assign(new Error("Cloud request failed."), { status: 429 }); }, 200)), false);
 });
 
+
+test("closing the move's done line closes the move's own send result with it, so My Cloud's page says it once", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-move-line-"));
+  const file = join(dir, "cloud-send.json");
+  const result = { bots: ["Ember"], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], chats: null, failed: [], notes: [] };
+  writeFileSync(file, JSON.stringify({ v: 1, clouds: { [CLOUD]: { sent: {}, off: {}, dismissed: "", last: { at: 7, reason: "move", result }, whole: null, chats: {}, created: {}, release: [], files: {}, on: {} } } }));
+  const handlers = new Map();
+  let seen = 0;
+  let line = { phase: "done", phone: false, held: [] };
+  installCloudSend({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: (_channel, handler) => handler, cloudPage: () => "cloud",
+    server: () => null, local: async () => new Response("{}", { status: 503 }),
+    home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) }),
+    cookieFetch: async () => new Response("", { status: 503 }), reconnect: async () => false, power: { asleep: () => false },
+    file: () => file, window: () => null, localOrigin: () => LOCAL, openSettings() {},
+    move: () => ({ view: () => line, seen: () => { seen++; line = null; }, retry: async () => {} }),
+  });
+  try {
+    const before = await handlers.get("cloud-send:dismiss")({}, "elsewhere");
+    assert.equal(before.move.phase, "done");
+    assert.equal(before.last.seen, false);
+    const after = await handlers.get("cloud-send:dismiss")({}, "one-home");
+    assert.equal(seen, 1);
+    assert.equal(after.move, undefined);
+    assert.equal(after.last.seen, true, "the move's own result is not said again after the done line");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

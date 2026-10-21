@@ -127,3 +127,31 @@ Send to My Cloud's call main's real wiring through `/__send`. The switcher's
 native menu is drawn from main's own template, since a page can't show a native
 menu. Drive either page with any browser automation; nothing reaches the
 user's app, data or a real Cloud.
+
+## The move to My Cloud, by itself
+
+```sh
+pnpm exec vitest run server/one-home.e2e.test.ts server/one-home-retry.e2e.test.ts server/one-home-trial-key.e2e.test.ts
+pnpm exec vitest run server/move-freeze.test.ts server/cloud-send-arrived.test.ts server/cloud-held-keys.test.ts
+node --test electron/one-home.node-test.mjs
+```
+
+The same two servers, with main's move wiring (`electron/one-home-main.mjs`)
+and a fake MausBot Cloud sign-in whose word the test sets (`fx.account`). The
+fixture can kill and start again either server on its own data (`fx.relaunch`),
+and can fail any request main sends My Cloud (`fx.intercept`). The e2e checks:
+
+- a new buyer's move ends with home on My Cloud and its own check passing, with
+  the app killed and opened again the moment each phase would be written down;
+- §2.2's merge rules, the done line's counts, the webhook bot's one line, and
+  this computer lent, its phone link stopped and My Cloud opened, once each;
+- the frozen computer refuses turns and webhooks, never starts a routine (one
+  that runs at every start included) through its restarts, and no routine
+  occurrence runs on both sides;
+- a check that can't pass lifts the freeze, switches nothing on, and tries again
+  in an hour; after a day the line offers Try again, which finishes the move;
+- when My Cloud ends, this computer is home again at once, then restores the
+  held Cloud's backup (started export-only), its later chats included, and
+  switches on what was on there;
+- on a trial, a moved key is saved and checked but unused while the credit
+  lasts (a stub plays the Admin's credit relay), and used once it runs out.

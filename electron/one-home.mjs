@@ -100,7 +100,7 @@ export function createOneHome(deps) {
   const now = deps.now ?? Date.now;
   const timers = deps.timers ?? { set: (work, ms) => { const timer = setTimeout(work, ms); timer.unref?.(); return timer; }, clear: (timer) => clearTimeout(timer) };
   const log = deps.log ?? (() => {});
-  let running = null, again = false, timer = null, closed = false, waitingFor = null;
+  let running = null, again = false, timer = null, closed = false, waitingFor = null, wasReady = null;
 
   const read = () => parseJournal(deps.journal.read());
   const publish = () => { try { deps.onChange?.(view()); } catch {} };
@@ -139,7 +139,7 @@ export function createOneHome(deps) {
     log(`one home: ${journal.phase} failed (${said})`);
     const tries = (journal.tries ?? 0) + 1;
     const next = write({ ...journal, phase: "copy", passes: 0, tries, error: said, failingSince: journal.failingSince ?? now(),
-      retryAt: now() + (frozen ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), ...(frozen ? { thaw: true } : {}) });
+      retryAt: now() + (frozen ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), hourly: frozen || undefined, ...(frozen ? { thaw: true } : {}) });
     if (frozen) await thaw(next);
     return null;
   }
@@ -148,7 +148,7 @@ export function createOneHome(deps) {
     waitingFor = null;
     try { await deps.send.move(); }
     catch (error) { return failed(journal, error, false); }
-    return write({ ...journal, phase: "wait", retryAt: undefined });
+    return write({ ...journal, phase: "wait", retryAt: undefined, hourly: undefined });
   }
 
   async function wait(journal) {
@@ -220,8 +220,8 @@ export function createOneHome(deps) {
       if (!arrived.ok) throw Object.assign(new Error(sentence(arrived.body?.error) ?? "My Cloud did not finish the move."), { status: arrived.status });
     } catch (error) {
       log(`one home: switching over goes on later (${error?.message ?? error})`);
-      write({ ...journal, switched, error: sentence(error?.message) ?? undefined });
-      later(MINUTE);
+      const next = write({ ...journal, switched, error: sentence(error?.message) ?? undefined, retryAt: now() + 2 * MINUTE });
+      later(next.retryAt - now());
       return null;
     } finally { await session?.close().catch(() => {}); }
     const held = (deps.send.snapshot?.()?.whole?.result?.notes ?? []).filter((note) => note?.kind === "held" && typeof note.connection === "string").map((note) => note.connection);
@@ -253,12 +253,12 @@ export function createOneHome(deps) {
 
   /** Home is My Cloud: tops up what a newer app learned to move, deletes this computer's copy once it is old enough and
    * My Cloud was paid for, and comes home if My Cloud ends. */
-  async function steady(journal, cloud) {
+  async function steady(journal, cloud, waiting) {
     let next = await settle(journal);
     if (cloud?.ended) return homeAgain(next);
-    if (!next.forgot && deps.version && next.version !== deps.version && cloud?.ready) {
-      try { await deps.send.move({ final: true }); next = write({ ...next, version: deps.version }); }
-      catch (error) { log(`one home: the top-up waits (${error?.message ?? error})`); }
+    if (!waiting && !next.forgot && deps.version && next.version !== deps.version && cloud?.ready) {
+      try { await deps.send.move({ final: true }); next = write({ ...next, version: deps.version, retryAt: undefined }); }
+      catch (error) { log(`one home: the top-up waits (${error?.message ?? error})`); next = write({ ...next, retryAt: now() + HOUR }); }
     }
     if (!next.forgot && cloud?.paid && now() - next.doneAt >= KEPT_MS && deps.local.forget) {
       try { await deps.local.forget(); next = write({ ...next, forgot: true }); }
@@ -278,12 +278,13 @@ export function createOneHome(deps) {
       deps.openLocal?.();
     }
     if (!deps.again || next.forgot) return write({ ...next, phase: "back", lost: true });
+    const retry = (ms) => { write({ ...next, retryAt: now() + ms }); later(ms); return null; };
     let brought;
     try { brought = await deps.again.bring(); }
-    catch (error) { log(`one home: bringing My Cloud's things back waits (${error?.message ?? error})`); later(5 * MINUTE); return null; }
-    if ("later" in brought) { later(brought.later); return null; }
+    catch (error) { log(`one home: bringing My Cloud's things back waits (${error?.message ?? error})`); return retry(5 * MINUTE); }
+    if ("later" in brought) return retry(brought.later);
     if ("deleted" in brought) return write({ ...next, phase: "back", lost: true });
-    write({ ...next, phase: "back", restoreId: brought.restored, switchBack: brought.switches });
+    write({ ...next, phase: "back", restoreId: brought.restored, switchBack: brought.switches, retryAt: undefined });
     deps.restart?.();
     return null;
   }
@@ -307,6 +308,10 @@ export function createOneHome(deps) {
   async function run() {
     let journal = read();
     const cloud = deps.cloud();
+    // A move left off while My Cloud was away goes on as soon as it is back, unless it failed frozen: that waits its hour.
+    const cameBack = cloud?.ready === true && wasReady === false;
+    wasReady = cloud ? cloud.ready : null;
+    const waiting = () => journal.retryAt > now() && !(cameBack && !journal.hourly);
     if (journal && cloud && cloud.account !== journal.cloud.account) {
       // Another account's Cloud never moves this computer's copy, nor lifts its freeze once the move is done.
       if (FROZEN.has(journal.phase)) await failed(journal, new Error("Another MausBot Cloud account signed in."), true);
@@ -321,8 +326,12 @@ export function createOneHome(deps) {
     }
     if (journal.thaw && !(await thaw(journal))) return;
     journal = read() ?? journal;
-    if (journal.phase === "done") return void await steady(journal, cloud);
-    if (journal.phase === "home-again" || journal.phase === "switch" && cloud?.ended) return void await homeAgain(journal);
+    if (journal.phase === "done") return void await steady(journal, cloud, waiting());
+    if (journal.phase === "home-again" || journal.phase === "switch" && cloud?.ended) {
+      if (journal.phase === "home-again" && waiting()) return void later(journal.retryAt - now());
+      return void await homeAgain(journal);
+    }
+    if (journal.phase === "switch" && waiting()) return void later(journal.retryAt - now());
     if (journal.phase !== "switch") {
       if (cloud?.ended || cloud && !cloud.moves) {
         // My Cloud ended, or moves were switched off (the Admin's kill switch), before the switch: a frozen server lifts.
@@ -335,7 +344,7 @@ export function createOneHome(deps) {
         return;
       }
       if (journal.paused) journal = write({ ...journal, paused: undefined });
-      if (journal.phase === "copy" && journal.retryAt > now()) { later(journal.retryAt - now()); return; }
+      if (journal.phase === "copy" && waiting()) { later(journal.retryAt - now()); return; }
     }
     for (let step = 0; journal && step < 12 && !closed; step++) {
       if (journal.phase === "copy") journal = await copy(journal);
@@ -371,7 +380,7 @@ export function createOneHome(deps) {
     /** Try again, after a day of failing: now, not at the next hourly try. */
     retry() {
       const journal = read();
-      if (journal?.phase === "copy") write({ ...journal, retryAt: undefined });
+      if (journal?.phase === "copy") write({ ...journal, retryAt: undefined, hourly: undefined });
       return kick();
     },
     /** The done line, or the one about coming home, was closed. */
