@@ -1,6 +1,7 @@
 // What Settings → MausBot Cloud and My Cloud's strip say about Send to My Cloud (electron/cloud-send.mjs), in words.
 import { failedSummary, pendingRows } from "../../electron/cloud-send-parts.mjs";
 import type { CloudSendCounts, CloudSendFailure, CloudSendNotice, CloudSendOutcome, CloudSendSnapshot } from "../../electron/cloud-send.mjs";
+import type { OneHomeCounts, OneHomeView } from "../../electron/one-home.mjs";
 import type { LocaleKey } from "@/locales";
 import { activeLocale, t } from "@/lib/i18n";
 
@@ -70,7 +71,8 @@ export function resultLines(outcome: CloudSendOutcome): { text: string; failed: 
     note.kind === "model" ? t("cloudSend.result.model", { bot: note.bot ?? "" })
       : note.kind === "settings" ? t("cloudSend.result.settings", { bot: note.bot ?? "" })
         : note.kind === "memory" ? t("cloudSend.result.memory", { bot: note.bot ?? "" })
-          : t("cloudSend.result.narrowed")))];
+          : note.kind === "held" ? t("cloudSend.result.held", { key: note.connection ?? "" })
+            : t("cloudSend.result.narrowed")))];
   return { text, failed: Boolean(failure), notes };
 }
 
@@ -158,4 +160,40 @@ export function stripLine(notice: CloudSendNotice, sending: boolean, unanswered:
   if (!ARRIVING.has(last.reason)) return null;
   const list = countedList(last.sent);
   return { kind: "done", text: list.length ? t("cloudSend.strip.arrived", { list: listOf(list) }) : t("cloudSend.strip.allHere") };
+}
+
+/** "4 bots, 2 skills, 2 logins, 1Password, 148 chats and 2 routines": what the move checked on both sides. */
+export function arrivedList(counts: OneHomeCounts): string[] {
+  return [
+    ...(counts.bots ? [counted(counts.bots, "cloudSend.list.botOne", "cloudSend.list.bots")] : []),
+    ...(counts.skills ? [counted(counts.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
+    ...(counts.logins ? [counted(counts.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
+    ...(counts.onePassword ? [t("cloudSend.list.onePassword")] : []),
+    ...(counts.chats ? [counted(counts.chats, "cloudSend.list.chatOne", "cloudSend.list.chats")] : []),
+    ...(counts.routines ? [counted(counts.routines, "cloudSend.list.routineOne", "cloudSend.list.routines")] : []),
+  ];
+}
+
+/** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
+ * day (with Try again), what arrived (on My Cloud's page, once), or coming home. `page`: which page shows it. */
+export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true } | null {
+  if (move.phase === "done") {
+    if (page !== "cloud") return null;
+    const list = move.counts ? arrivedList(move.counts) : [];
+    return { kind: "done", text: list.length ? t("cloudSend.move.done", { list: listOf(list) }) : t("cloudSend.move.doneAll"),
+      extra: move.held.map((key) => t("cloudSend.result.held", { key })), ...(move.phone ? { phone: true as const } : {}) };
+  }
+  if (move.phase === "home-again" || move.phase === "back") {
+    if (page !== "local") return null;
+    return { kind: "done", text: t(move.phase === "home-again" ? "cloudSend.move.homeAgain" : move.lost ? "cloudSend.move.backLost" : "cloudSend.move.back"), extra: [] };
+  }
+  const failing = "failing" in move ? move.failing : undefined;
+  if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: failing.error }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
+  if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };
+  if (move.phase === "wait") {
+    return { kind: "sending", text: move.waitingFor ? t("cloudSend.move.waiting", { name: move.waitingFor }) : t("cloudSend.move.waitingAny"), extra: [] };
+  }
+  const chats = move.phase === "copy" ? move.chats : undefined;
+  const key = page === "cloud" ? (chats ? "cloudSend.move.bringingChats" : "cloudSend.move.bringing") : (chats ? "cloudSend.move.copyChats" : "cloudSend.move.copy");
+  return { kind: "sending", text: t(key, chats ? { done: chats.done, total: chats.total } : {}), extra: [] };
 }

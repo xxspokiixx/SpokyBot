@@ -198,12 +198,14 @@ test("the bridge: Settings → MausBot Cloud only on this computer's page; My Cl
   const page = preload({ remote: true });
   assert.equal(page.bridge.cloudSend, undefined);
   assert.equal(page.bridge.cloudLogins, undefined);
-  assert.deepEqual(JSON.parse(JSON.stringify(Object.keys(page.bridge.cloudSendPage))), ["notice", "send", "dismiss", "onNotice"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(Object.keys(page.bridge.cloudSendPage))), ["notice", "send", "dismiss", "moveRetry", "onNotice"]);
   await assert.rejects(page.bridge.cloudSendPage.send(), /Bring them over/);
+  await assert.rejects(page.bridge.cloudSendPage.moveRetry(), /Try again/);
   assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send")), []);
   const clicked = preload({ remote: true, activation: true });
   await clicked.bridge.cloudSendPage.send();
-  assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send")))), [["cloud-send:page-send"]]);
+  await clicked.bridge.cloudSendPage.moveRetry();
+  assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send")))), [["cloud-send:page-send"], ["cloud-send:move-retry"]]);
 });
 
 test("Also use on My Cloud says plainly when My Cloud is too old to receive a login, instead of losing the login", async () => {

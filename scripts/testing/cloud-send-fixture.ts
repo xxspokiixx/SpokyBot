@@ -1,17 +1,20 @@
 // Two real servers for Send to My Cloud: this computer's, started as the desktop app starts it (its private
 // utility-process port emulated over Node's IPC, the owner's capability delivered through it), and the person's Cloud
-// home, paired the way the Admin pairs it. Main's own wiring (electron/cloud-send-main.mjs) sits between them with a fake
-// ipcMain. Disposable homes, a synthetic Claude CLI and a fake 1Password SDK; no network.
+// home, paired the way the Admin pairs it. Main's own wiring (electron/one-home-main.mjs, which installs
+// cloud-send-main.mjs) sits between them with a fake ipcMain and a fake MausBot Cloud sign-in. Either server can be
+// killed and started again on its own data, as an app that quits or crashes is. Disposable homes, a synthetic Claude CLI
+// and a fake 1Password SDK; no network.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLoginHandoffClient, type ConnectionAsk } from "../../electron/cloud-logins.mjs";
 import { createCloudMove } from "../../electron/cloud-move.mjs";
-import { installCloudSend } from "../../electron/cloud-send-main.mjs";
 import type { CloudMoveCheck, CloudSendOutcome } from "../../electron/cloud-send.mjs";
+import { installOneHome } from "../../electron/one-home-main.mjs";
+import type { OneHomeView } from "../../electron/one-home.mjs";
 import { cloudPairingSignature } from "../../server/cloud-home.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
 import { freePortBlock } from "../../server/testing/ports.ts";
@@ -56,6 +59,20 @@ export interface CloudSendFixture {
   desktopInstallation: { id: string; token: string; userId: string } | null;
   /** This computer's server's private port, asked as main asks it (cloud-logins.mjs). */
   handoff(what: ConnectionAsk): Promise<any>;
+  /** The one-time move (one-home.mjs), as main runs it in the app that is open now. */
+  oneHome: { kick(): Promise<void>; view(): OneHomeView | null; away(): boolean };
+  /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, and its export of a held one. */
+  account: { state: Record<string, any>; exportHome(): Promise<any> };
+  /** Its journal (userData/one-home.json), and a look at each write before it lands: throwing there is the app killed. */
+  journalFile: string;
+  beforeJournalWrite: ((value: any) => void) | null;
+  /** An answer of its own for a request main sends My Cloud, in place of My Cloud's: a network that fails, say. */
+  intercept: ((url: string, init: RequestInit) => Response | null) | null;
+  /** What main asked for besides: lending, the phone link, which home the window opened, and an app relaunch. */
+  spies: { lent: string[][]; phoneStops: number; phoneStarts: number; opened: string[]; relaunches: number };
+  /** The app quits or is killed: its main wiring stops, this computer's server is killed, and both start again on the
+   * same data. With `cloud`, My Cloud's server is started again too, with more of its environment. */
+  relaunch(options?: { kill?: boolean; cloud?: NodeJS.ProcessEnv }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -81,7 +98,7 @@ exports.createClient = async ({ auth }) => {
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
  * `env`: more of both servers' environment (a fake HighLevel and its relay). `cloudEngine`: lines run at the start of My
  * Cloud's synthetic Claude CLI, to script its turns (fake-claude-cli.ts). */
-export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space }: {
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
   broker?: { url: string; install(): Promise<{ id: string; token: string; userId: string }> };
   env?: NodeJS.ProcessEnv;
@@ -92,6 +109,8 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
   desktopEngine?: string;
   /** My Cloud's plan disk and the Admin's grow, as main gives them to a move. */
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
+  /** False: My Cloud's own Claude is signed out, as on a new Cloud. */
+  cloudSignedIn?: boolean;
 }): Promise<CloudSendFixture> {
   const root = mkdtempSync(join(tmpdir(), "omb-cloud-send-"));
   const secret = randomBytes(32).toString("base64url");
@@ -99,23 +118,23 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
   const answers: string[] = [];
   const labels: string[] = [];
   let logs = "";
-  const children: ChildProcess[] = [];
+  const children = new Set<ChildProcess>();
   const remember = async (response: Response) => { answers.push(await response.clone().text()); return response; };
 
-  async function start(name: string, own: NodeJS.ProcessEnv, port: number, extra: string[] = [], ipc = false, acceptedToken = onePasswordToken, calls = 0, engine = ""): Promise<ChildProcess> {
+  async function start(name: string, own: NodeJS.ProcessEnv, port: number, extra: string[] = [], ipc = false, acceptedToken = onePasswordToken, calls = 0, engine = "", signedIn = true): Promise<ChildProcess> {
     const home = join(root, name);
     const dataDir = join(home, ".openmausbot");
     mkdirSync(dataDir, { recursive: true });
     const cli = join(home, "fixture-claude.mjs");
     const tools = calls ? JSON.stringify(Array.from({ length: calls }, (_, i) => ({ name: "Bash", input: { command: `echo step ${i}` } }))) : "";
     writeFileSync(cli, `#!/usr/bin/env node
-if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" })); process.exit(0); }
+if (process.argv[2] === "auth") { console.log(JSON.stringify(${signedIn ? '{ loggedIn: true, email: "person@example.test" }' : '{ loggedIn: false, authMethod: "none" }'})); process.exit(0); }
 process.env.FAKE_CLAUDE_VERSION = "2.1.284";
 ${tools ? `process.env.FAKE_CLAUDE_TOOL_CALLS = ${JSON.stringify(tools)};` : ""}
 ${engine}
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ instances: {
+    if (!existsSync(join(dataDir, "config.json"))) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ instances: {
       ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])),
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
     } }));
@@ -126,7 +145,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken), ...env, ...own },
       stdio: ["ignore", "pipe", "pipe", ...(ipc ? ["ipc" as const] : [])],
     });
-    children.push(child);
+    children.add(child);
+    child.on("close", () => children.delete(child));
     child.stdout?.on("data", (chunk) => { logs += chunk; });
     child.stderr?.on("data", (chunk) => { logs += chunk; });
     const deadline = Date.now() + 30_000;
@@ -150,13 +170,18 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const desktopPort = await freePortBlock([0, 1]);
   const desktopBase = `http://127.0.0.1:${desktopPort}`;
   const desktopInstallation = broker ? await broker.install() : null;
-  const desktop = await start("desktop", { OMB_DESKTOP_PARENT: "1",
-    ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
-  desktop.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability });
+  const startDesktop = async () => {
+    const child = await start("desktop", { OMB_DESKTOP_PARENT: "1",
+      ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
+    child.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability });
+    return child;
+  };
+  let desktop = await startDesktop();
   const cloudPort = await freePortBlock([0, 1]);
   const cloudBase = `http://127.0.0.1:${cloudPort}`;
-  await start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
-    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...cloudEnv }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine);
+  const startCloud = (more: NodeJS.ProcessEnv = {}) => start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...cloudEnv, ...more }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine, cloudSignedIn);
+  let cloud = await startCloud();
 
   const mintCode = async (label: string) => {
     const body = JSON.stringify({ label, ttlSeconds: 300 });
@@ -165,8 +190,11 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}` }, body });
     return ((await response.json()) as { code: string }).code;
   };
-  const paired = await fetch(`${cloudBase}/api/auth/pair`, { method: "POST", headers: { ...EDGE, "content-type": "application/json" }, body: JSON.stringify({ code: await mintCode("OpenMausBot app (Cloud)") }) });
-  const owner = ((await paired.json()) as { token: string }).token;
+  const pairOwner = async () => {
+    const paired = await fetch(`${cloudBase}/api/auth/pair`, { method: "POST", headers: { ...EDGE, "content-type": "application/json" }, body: JSON.stringify({ code: await mintCode("OpenMausBot app (Cloud)") }) });
+    return ((await paired.json()) as { token: string }).token;
+  };
+  let owner = await pairOwner();
 
   const local = async (method: string, path: string, body?: unknown) => {
     const response = await remember(await fetch(`${desktopBase}${path}`, { method, headers: {
@@ -183,9 +211,19 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
 
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const port = { postMessage: (message: unknown) => { desktop.send(message as object); } };
+  const journalFile = join(root, "one-home.json");
+  const account: CloudSendFixture["account"] = {
+    state: { status: "connected", account: { id: "acct-fixture", email: "person@example.test" }, entitlement: { plan: "pro", status: "active", expiresAt: null, version: 1 },
+      machine: { status: "ready", origin: cloudBase } },
+    exportHome: async () => ({ notHeld: true }),
+  };
+  const spies: CloudSendFixture["spies"] = { lent: [], phoneStops: 0, phoneStarts: 0, opened: [], relaunches: 0 };
+  const fixture = { beforeJournalWrite: null as CloudSendFixture["beforeJournalWrite"], intercept: null as CloudSendFixture["intercept"] };
   const chatRequests: CloudSendFixture["chatRequests"] = [];
   const sessions: CloudSendFixture["sessions"] = [];
   const throughEdge = (bearer: string | null) => async (url: string | URL | Request, init: RequestInit = {}) => {
+    const forged = fixture.intercept?.(String(url), init);
+    if (forged) return forged;
     if (String(url).endsWith("/api/cloud-send/chats") && init.method === "POST" && typeof init.body === "string") {
       chatRequests.push((JSON.parse(init.body) as { conversations: Array<{ threadId: string; rows: unknown[] }> }).conversations.map((entry) => ({ threadId: entry.threadId, rows: entry.rows.length })));
     }
@@ -202,7 +240,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...EDGE } })) as typeof fetch,
     tempRoot: join(root, "send-move-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
   });
-  const main = installCloudSend({
+  const wire = () => installOneHome({
     ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler); } },
     localOnly: (channel, handler) => ((event: { page?: string }, ...args: unknown[]) => {
       if (event?.page !== "local") throw new Error(`${channel} is only available in this app's window`);
@@ -210,7 +248,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     }) as typeof handler,
     cloudPage: (event) => (event as { page?: "local" | "cloud" })?.page ?? null,
     server: () => port,
-    local: async (route, init) => remember(await fetch(`${desktopBase}${route}`, { method: init?.method ?? "GET", headers: { "x-openmausbot-desktop-owner": ownerCapability } })),
+    localRequest: async (route, init = {}) => remember(await fetch(`${desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": ownerCapability } })),
     home: () => ({ origin: cloudBase, grant: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)") }) }),
     cookieFetch: throughEdge(owner) as typeof fetch,
     reconnect: async () => false,
@@ -223,13 +261,50 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     bringChats: () => move.bring({ id: "cloud", name: "My Cloud", origin: cloudBase, kind: "cloud", grant: async () => ({ origin: cloudBase, code: await mintCode("Copy from desktop") }) }),
     engineWaitMs: 2_000,
     ...(space ? { space } : {}),
+    account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: () => account.exportHome() }),
+    journalFile: () => journalFile,
+    journal: {
+      read: () => { try { return JSON.parse(readFileSync(journalFile, "utf8")); } catch { return null; } },
+      write: (value: unknown) => { fixture.beforeJournalWrite?.(value); writeFileSync(`${journalFile}.tmp`, JSON.stringify(value ?? null)); renameSync(`${journalFile}.tmp`, journalFile); },
+    },
+    tempRoot: () => join(root, "one-home-temp"),
+    lend: async (projects) => { spies.lent.push(projects); },
+    phone: { paired: () => true, stop: async () => { spies.phoneStops++; }, start: async () => { spies.phoneStarts++; } },
+    openHome: () => { spies.opened.push("cloud"); },
+    openLocal: () => { spies.opened.push("local"); },
+    restart: () => { spies.relaunches++; },
+    version: "0.1.120",
+    log: (line: string) => { logs += `[main] ${line}\n`; },
   });
-  desktop.on("message", (message) => main.receive(port, message));
+  let main = wire();
   const asks = createLoginHandoffClient();
-  desktop.on("message", (message) => { asks.receive(port, message); });
+  const listen = () => {
+    desktop.on("message", (message) => main.receive(port, message));
+    desktop.on("message", (message) => { asks.receive(port, message); });
+  };
+  listen();
 
   return {
-    root, desktopBase, cloudBase, owner, ownerCapability, edge: EDGE, answers, labels, logs: () => logs, local, onCloud, desktopInstallation,
+    root, desktopBase, cloudBase, get owner() { return owner; }, ownerCapability, edge: EDGE, answers, labels, logs: () => logs, local, onCloud, desktopInstallation,
+    account, journalFile, spies,
+    get beforeJournalWrite() { return fixture.beforeJournalWrite; },
+    set beforeJournalWrite(hook) { fixture.beforeJournalWrite = hook; },
+    get intercept() { return fixture.intercept; },
+    set intercept(hook) { fixture.intercept = hook; },
+    oneHome: { kick: () => main.kick(), view: () => main.view(), away: () => main.away() },
+    async relaunch({ kill = true, cloud: cloudMore } = {}) {
+      main.close();
+      await waitForExit(desktop, { signal: kill ? "SIGKILL" : "SIGTERM" });
+      if (cloudMore) {
+        await waitForExit(cloud, { signal: "SIGTERM" });
+        cloud = await startCloud(cloudMore);
+        owner = await pairOwner();
+      }
+      desktop = await startDesktop();
+      for (let tries = 0; (await local("GET", "/api/bots")).status !== 200 && tries < 50; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
+      main = wire();
+      listen();
+    },
     handoff: (what) => asks.request(port, what),
     async picture(bytes) {
       const response = await fetch(`${desktopBase}/api/attachments`, { method: "POST", headers: { "x-openmausbot-desktop-owner": ownerCapability, "content-type": "image/png" }, body: bytes });
@@ -243,6 +318,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     chatRequests,
     grant: async (label) => ({ origin: cloudBase, code: await mintCode(label), expiresAt: Date.now() + 300_000 }),
     async close() {
+      main.close();
       await move.close();
       for (const child of children) await waitForExit(child, { signal: "SIGTERM" });
       await removeTempDir(root);

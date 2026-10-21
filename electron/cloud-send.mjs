@@ -371,7 +371,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const localItems = new Map(mine.items.map((item) => [item.key, item]));
       const cloudItems = new Map(theirs.items.map((item) => [item.key, item]));
       const ctx = { origin, session, result, cloudBots, localItems, cloudItems, planned: new Map(planned.rows.map((row) => [row.key, row])), bots: null, skillLists: new Map(),
-        sentKeys: new Set(), sentParts: {}, recorded: new Set(), move, summaryRoute };
+        sentKeys: new Set(), sentParts: {}, recorded: new Set(), move, summaryRoute, computer: computer?.label ?? null };
       const order = { "library-skill": 0, "imported-skill": 0, bot: 1, skill: 2, setting: 3, login: 4, "1password": 5 };
       const automations = new Set(AUTOMATION_KINDS);
       const goRow = async (row) => {
@@ -434,6 +434,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       onProgress: (step) => { progress = { done: step.done, total: step.total }; publish(); } });
     result.connections += moved.moved.length + moved.runsHere.length;
     for (const failure of moved.failed) failed(failure.id, failure.label, failure.message, failure.final);
+    for (const held of moved.held ?? []) result.notes.push({ kind: "held", connection: held.label });
     if (moved.release.length) {
       kept.release = [...kept.release.filter((held) => !moved.release.some((next) => next.id === held.id)), ...moved.release];
       persist();
@@ -647,11 +648,21 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     return set.ok ? null : refusal(set, "My Cloud could not use the picture.");
   }
 
+  /** A move keeps both of two different bots of one name: the one arriving is named after this computer. */
+  async function arrivingName(ctx, bot) {
+    if (!ctx.move || !ctx.computer) return bot.name;
+    ctx.cloudNames ??= ctx.session.call("GET", "/api/bots?messages=0")
+      .then((listed) => (Array.isArray(listed.body?.bots) ? listed.body.bots : []).filter(record), () => []);
+    const same = (name) => typeof name === "string" && name.trim().toLocaleLowerCase() === bot.name.trim().toLocaleLowerCase();
+    const taken = (await ctx.cloudNames).some((theirs) => theirs.id !== bot.id && same(theirs.name));
+    return taken ? `${bot.name} (${ctx.computer})`.slice(0, 80) : bot.name;
+  }
+
   async function addBot(ctx, row) {
     const bot = (await localBots(ctx)).get(row.id);
     if (!bot) throw new CloudSendError("gone", "This bot is no longer on this computer.");
     const model = record(bot.modelSelection) ? pick(bot.modelSelection, ["instanceId", "model", "effort", "variant"]) : null;
-    const base = { id: bot.id, threadId: bot.threadId, name: bot.name, useDefaults: false };
+    const base = { id: bot.id, threadId: bot.threadId, name: await arrivingName(ctx, bot), useDefaults: false };
     let created = await ctx.session.call("POST", "/api/bots", { ...base, ...(model ? { modelSelection: model, requireAvailableModel: true } : {}) });
     let modelKept = Boolean(model) && created.ok;
     if (!created.ok && model && created.status === 400) {

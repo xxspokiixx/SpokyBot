@@ -20,9 +20,10 @@ const JOURNAL_ROWS = 500;
  * What of this computer's manifest My Cloud's lacks: items, memory, rooms, connections and conversations it does not
  * have, and parts of items it holds otherwise than it took them; the pieces of a memory note, a team's context or memory,
  * a learned fact, a journal row, a bot file, a routine's finished run or a conversation's own setting it lacks. A part
- * counts as carried when it is equal on both sides or is what My Cloud held right after it took it (`sent`, as
- * cloud-send.mjs keeps it). Left out: what was removed on My Cloud (`removed`, by key or conversation id), and what this
- * computer never sends (`skip`).
+ * counts as carried when it is equal on both sides, or when, since it last went (`sent`: what each side held then, as
+ * cloud-send.mjs keeps it), this computer did not change it or My Cloud did (then My Cloud's is kept).
+ * Left out: what was removed on My Cloud (`removed`, by key or conversation id), and what this computer never sends
+ * (`skip`).
  */
 export function manifestGaps(here, there, { sent = {}, removed = new Set(), skip = new Set() } = {}) {
   const gaps = { items: [], parts: [], memory: [], rooms: [], connections: [], conversations: [], files: [], runs: [], journal: [], learned: [], teams: [], settings: [] };
@@ -41,7 +42,8 @@ export function manifestGaps(here, there, { sent = {}, removed = new Set(), skip
     const differs = Object.entries(item.parts ?? {}).filter(([part, hash]) => {
       const cloud = on.parts?.[part] ?? EMPTY;
       const pair = sent[item.key]?.[part];
-      return hash !== cloud && !(Array.isArray(pair) && pair[0] === hash && pair[1] === cloud);
+      // Missing only when this computer changed it since it last went, and My Cloud did not: that change should have gone.
+      return hash !== cloud && !(Array.isArray(pair) && (pair[0] === hash || pair[1] !== cloud));
     }).map(([part]) => part);
     if (differs.length) gaps.parts.push({ key: item.key, label: item.label, parts: differs });
   }

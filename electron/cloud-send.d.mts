@@ -24,8 +24,9 @@ export interface CloudSendResult {
   memory?: number;
   files?: { sent: number; kept: number };
   conversationSettings?: number;
-  /** model: kept My Cloud's engine; settings: a setting My Cloud refused; narrowed: a login kept to bots My Cloud lacks; memory: notes not copied. */
-  notes: Array<{ kind: "model" | "settings" | "narrowed" | "memory"; bot?: string; login?: string }>;
+  /** model: kept My Cloud's engine; settings: a setting My Cloud refused; narrowed: a login kept to bots My Cloud lacks; memory: notes not copied;
+   * held: a key a trial's Cloud keeps unused while its Claude credit lasts. */
+  notes: Array<{ kind: "model" | "settings" | "narrowed" | "memory" | "held"; bot?: string; login?: string; connection?: string }>;
 }
 /** `error`: the send failed as a whole (nothing after that point went), in words for the person. */
 export interface CloudSendOutcome { at: number; reason: string; result: CloudSendResult; error?: string }
@@ -81,6 +82,8 @@ export interface CloudSendNotice {
   whole?: CloudSendTold | null;
   /** What reached My Cloud from this computer, all sends together; absent from an older desktop. */
   arrived?: CloudSendArrived;
+  /** The one-time move's own line, while there is one; absent from an older desktop. */
+  move?: import("./one-home.mjs").OneHomeView;
 }
 export type CloudSendTold = { at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean } & CloudSendFailure;
 export interface CloudSendArrived extends CloudSendCounts { chats: { conversations: number; messages: number } }
@@ -100,12 +103,16 @@ export interface CloudSendPageBridge {
   notice(): Promise<CloudSendNotice>;
   send(): Promise<CloudSendNotice>;
   dismiss(signature: string): Promise<CloudSendNotice>;
+  /** The move's Try again, after a day of failing; absent from an older desktop. */
+  moveRetry?(): Promise<CloudSendNotice>;
   onNotice(listener: (notice: CloudSendNotice) => void): () => void;
 }
 
 export interface CloudSendSession {
   call(method: string, route: string, body?: unknown): Promise<{ status: number; ok: boolean; body: any }>;
   upload(route: string, bytes: Uint8Array, type: string): Promise<{ status: number; ok: boolean; body: any }>;
+  /** The answer as it came, for a download; only the owner sessions main opens have it. */
+  fetch?(route: string, init?: RequestInit): Promise<Response>;
   close(): Promise<void>;
 }
 

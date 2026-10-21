@@ -5,6 +5,7 @@ import { hostname } from "node:os";
 
 import { answerConnection, connectionFingerprints, highlevelDigest, launchersOnPath, listConnections, releaseConnection, signInDigest } from "./cloud-connections.ts";
 import { createConnectionPrompt, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
+import { movedFrom } from "./cloud-send-arrived.ts";
 import * as composio from "./composio.ts";
 import { adoptComposioShare, adoptOwnComposio, composioIdentity, composioShareCode } from "./composio-share.ts";
 import type { AppConfig } from "./config.ts";
@@ -24,6 +25,10 @@ export interface CloudConnectionsHostDeps {
   highlevel: Pick<HighLevelService, "store" | "connected" | "adopt" | "disconnect">;
   /** The engines (instance ids) ready to run here now. */
   engines(): Promise<string[]>;
+  /** A trial's moved keys, unused while its Claude credit lasts. */
+  heldKeys?: { hold(engines: readonly string[]): boolean } | null;
+  /** This server's data folder, where a Cloud home keeps the computer its bots moved from. */
+  dataDir?: string;
 }
 
 export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
@@ -35,7 +40,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
   const composioConnected = async (slugs: string[]) =>
     Object.fromEntries(Object.entries(await composio.connectionStatus(deps.config(), slugs)).map(([slug, state]) => [slug, state.connected]));
   const prompt = deps.cloudHome ? createConnectionPrompt({ mcpServers: () => deps.config().mcpServers, mcpAuth,
-    highlevelConnected: () => deps.highlevel.connected(), composioConnected }, deps.cloudHome.publicOrigin) : null;
+    highlevelConnected: () => deps.highlevel.connected(), composioConnected, movedFrom: () => (deps.dataDir ? movedFrom(deps.dataDir)?.computer ?? null : null) }, deps.cloudHome.publicOrigin) : null;
   const connections = async () => {
     const cfg = deps.config();
     return listConnections({ config: cfg, mcpAuth, composio: await composioIdentity(cfg).catch(() => null), highlevel: () => deps.highlevel.store.get() });
@@ -60,6 +65,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
         return { ok: true, outcome: deps.mcpOAuth.adopt(name, parsed.server.url, record, replaces ? (current) => signInDigest(current.tokens) === replaces : undefined) };
       },
       adoptHighLevel: (connection, replaces) => ({ ok: true, outcome: deps.highlevel.adopt(connection, replaces ? (current) => highlevelDigest(current) === replaces : undefined) }),
+      holdKeys: (engines) => deps.heldKeys?.hold(engines) ?? false,
     }),
 
     /** The private port's ask: one connection's secrets, a code for the person's Cloud to act as this computer's

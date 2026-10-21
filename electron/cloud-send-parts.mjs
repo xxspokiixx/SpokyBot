@@ -36,6 +36,8 @@ export const MOVE_KINDS = Object.freeze([...AUTOMATION_KINDS, "imported-skill", 
 export const KINDS = Object.freeze(["bot", "skill", "login", "1password", "setting", ...MOVE_KINDS]);
 /** A part a server has no value for. */
 export const EMPTY = "-";
+/** What either page closes the one-time move's own line by (cloud-send:dismiss). */
+export const MOVE_LINE = "one-home";
 /** Logins and 1Password are compared by when they changed, never by their secrets: two sides that both have one were
  * set up on their own, and from then on a change here goes. */
 const CONTENT_COMPARED = new Set(["bot", "skill", "setting", ...MOVE_KINDS]);

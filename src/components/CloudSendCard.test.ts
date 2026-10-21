@@ -143,10 +143,30 @@ it("the move: the strip shows it arriving with progress, then what came, until c
   expect(render(strip()).html).toBe("");
 });
 
-it("the strip stays away on any page but My Cloud's", async () => {
+it("on this computer's page the strip shows only the one-time move's own line", async () => {
   await onCloud({ ...notice, running: true, runningReason: "move" }, false);
-  expect(render(strip(false)).html).toBe("");
-  expect(page.notice).not.toHaveBeenCalled();
+  expect(render(strip(false)).html, "a send's progress is My Cloud's to show").toBe("");
+  f.values = [];
+  await onCloud({ ...notice, move: { phase: "wait", waitingFor: "Scout" } }, false);
+  expect(render(strip(false)).html).toContain("Moving your bots to My Cloud… waiting for Scout to finish");
+  expect(tree(strip(false)).some((node) => node.type === "button"), "nothing to press while it goes").toBe(false);
+  f.values = [];
+  await onCloud({ ...notice, move: { phase: "copy", failing: { error: "My Cloud did not answer." } } }, false);
+  page.moveRetry = vi.fn().mockResolvedValue({ ...notice, move: { phase: "finishing" } });
+  tree(strip(false)).find((node) => node.type === "button" && text(node) === "Try again")!.props.onClick!(); await flush();
+  expect(page.moveRetry).toHaveBeenCalledTimes(1);
+  expect(page.send).not.toHaveBeenCalled();
+});
+
+it("My Cloud's page says once what arrived, with the phone to pair, until closed", async () => {
+  const pair = vi.fn();
+  await onCloud({ ...notice, move: { phase: "done", counts: { bots: 4, skills: 2, logins: 2, onePassword: true, chats: 148, routines: 2 }, phone: true, held: [] } });
+  const shown = () => () => CloudSendStrip({ cloudHome: true, onPairPhone: pair });
+  expect(render(shown()).html).toContain("Everything from this computer is here: 4 bots, 2 skills, 2 logins, 1Password, 148 chats, and 2 routines.");
+  tree(shown()).find((node) => node.type === "button" && text(node) === "Pair your phone with My Cloud")!.props.onClick!();
+  expect(pair).toHaveBeenCalledTimes(1);
+  tree(shown()).find((node) => node.type === "button" && text(node) === "Close")!.props.onClick!(); await flush();
+  expect(page.dismiss).toHaveBeenCalledWith("one-home");
 });
 
 it("My Cloud's strip says what could not be brought over and why, with one Try again", async () => {

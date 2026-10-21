@@ -370,6 +370,8 @@ const bridge = {
     send: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:page-send") : Promise.reject(new Error("Choose Bring them over to send.")),
     dismiss: signature => ipcRenderer.invoke("cloud-send:dismiss", String(signature)),
+    moveRetry: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-retry") : Promise.reject(new Error("Choose Try again to move.")),
     onNotice: cb => {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);

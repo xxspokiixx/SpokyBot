@@ -28,6 +28,15 @@ test("a move's check finds nothing missing when My Cloud holds all this computer
   assert.deepEqual(manifestGaps(here, there).parts, [{ key: "bot:ember", label: "Ember", parts: ["team"] }], "the same part never recorded as taken is not");
 });
 
+test("a part changed on both sides since it last went keeps My Cloud's, and so does one only My Cloud changed; one only this computer changed is missing", () => {
+  const here = manifest({ items: manifest().items.map((item) => item.key === "bot:ember" ? { ...item, parts: { soul: "s1", team: "t-here" } } : item) });
+  const there = manifest({ items: manifest().items.map((item) => item.key === "bot:ember" ? { ...item, parts: { soul: "s1", team: "t-there" } } : item) });
+  assert.equal(noGaps(manifestGaps(here, there, { sent: { "bot:ember": { team: ["t-sent", "t-sent"] } } })), true, "changed on both: My Cloud's is kept");
+  assert.equal(noGaps(manifestGaps(here, there, { sent: { "bot:ember": { team: ["t-here", "t-sent"] } } })), true, "changed only on My Cloud");
+  assert.deepEqual(manifestGaps(here, there, { sent: { "bot:ember": { team: ["t-sent", "t-there"] } } }).parts, [{ key: "bot:ember", label: "Ember", parts: ["team"] }],
+    "changed only here, and not on My Cloud: it should have gone");
+});
+
 test("a move's check names what My Cloud lacks: items, parts, memory, rooms, connections and conversations, leaving out what was removed there", () => {
   const here = manifest();
   const there = manifest({ items: here.items.filter((item) => item.key !== "skill:ember:notes" && item.key !== "bot:juno").map((item) => item.key === "bot:ember" ? { ...item, parts: { soul: "s2", team: "t1" } } : item),

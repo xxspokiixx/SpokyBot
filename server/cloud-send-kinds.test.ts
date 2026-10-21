@@ -66,6 +66,11 @@ describe("what a move compares", () => {
     expect([ranAgain.parts.def, ranAgain.parts.runs === mine!.parts.runs]).toEqual([mine!.parts.def, false]);
   });
 
+  it("tells the move whether a routine is on here, for the switch that turns it on there", () => {
+    const record = (enabled: boolean) => kindRecord(deps(HERE, { routines: () => routinesHeld([routine({ enabled })]) }), "routine", "r1")!.record as { enabled?: boolean };
+    expect([record(true).enabled, record(false).enabled]).toEqual([true, false]);
+  });
+
   it("carries automations only of the bots a move carries", () => {
     const items = moveItems(deps(HERE, { routines: () => routinesHeld([routine(), routine({ id: "r2", botId: "starter" })]) }), new Set(["b1"]));
     expect(items.map((item) => item.key)).toEqual([itemKey.moved("routine", "r1")]);

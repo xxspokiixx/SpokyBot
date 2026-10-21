@@ -64,4 +64,13 @@ describe("what a bot on My Cloud is told about connections that need the person"
     expect(prompt(bot)).toBe("");
     expect(asked).toBe(1);
   });
+
+  it("once its bots moved here, each bot knows what stayed on the computer they came from, and nobody is told before", () => {
+    const quiet = { mcpServers: () => ({}), mcpAuth: () => "none" as const, highlevelConnected: () => false, composioConnected: async () => ({}) };
+    expect(createConnectionPrompt({ ...quiet, movedFrom: () => null }, ORIGIN)({})).toBe("");
+    const line = createConnectionPrompt({ ...quiet, movedFrom: () => "MacBook Air" }, ORIGIN)({});
+    expect(line).toContain("You moved to My Cloud from the person's computer MacBook Air");
+    expect(line).toContain("passkeys");
+    expect(line).toContain("say in plain words that it stayed there");
+  });
 });

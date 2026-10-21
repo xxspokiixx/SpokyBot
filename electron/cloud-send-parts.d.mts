@@ -35,6 +35,7 @@ export type SentRecord = Record<string, Record<string, [string, string]>>;
 export type OffReason = "you" | "removed";
 
 export declare const BOT_PARTS: Readonly<Record<string, readonly string[]>>;
+export declare const MOVE_LINE: string;
 export declare const MOVE_BOT_PARTS: Readonly<Record<string, readonly string[]>>;
 export declare const AUTOMATION_KINDS: readonly MoveKind[];
 export declare const MOVE_KINDS: readonly MoveKind[];

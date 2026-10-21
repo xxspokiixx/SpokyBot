@@ -43,7 +43,7 @@ export const MOVE_BOT_FIELDS: readonly string[] = Object.values(MOVE_BOT_PARTS).
 
 export interface MoveKindsDeps {
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "group" | "patchBot" | "setChiefOfStaff">;
+  store: Pick<Store, "bots" | "bot" | "group" | "patchBot" | "setChiefOfStaff" | "appendMessage">;
   routines(): Pick<RoutineManager, "listRoutines" | "listRuns" | "adopt"> | null;
   calls(): Pick<CalendarCallManager, "list" | "adopt"> | null;
   webhooks(): Pick<WebhookManager, "list" | "adopt"> | null;
@@ -195,7 +195,8 @@ export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { recor
   if (kind === "routine") {
     const routines = deps.routines();
     const routine = routines?.listRoutines().find((candidate) => candidate.id === id);
-    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS) }, runs: finishedRuns(routines!, id) } : null;
+    // Its switch goes along for the switch that turns on there what was on here; My Cloud takes it switched off.
+    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS), enabled: routine.enabled }, runs: finishedRuns(routines!, id) } : null;
   }
   if (kind === "call") { const call = deps.calls()?.list().find((candidate) => candidate.id === id); return call ? { record: call } : null; }
   if (kind === "webhook") { const webhook = deps.webhooks()?.list().find((candidate) => candidate.id === id); return webhook ? { record: webhook } : null; }

@@ -41,6 +41,8 @@ export interface ConnectionsMoved {
   release: HeldSignIn[];
   /** Sign-ins that refresh themselves, left here for a later pass (`signIns: false`). */
   later: Array<{ id: string; label: string }>;
+  /** Keys a trial's Cloud keeps unused while its Claude credit lasts. */
+  held: Array<{ id: string; label: string }>;
 }
 
 export class ConnectionMoveError extends Error {

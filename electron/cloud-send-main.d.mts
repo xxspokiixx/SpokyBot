@@ -24,10 +24,13 @@ export function installCloudSend(deps: {
   bringChats?: (() => Promise<{ phase: string; action?: string; brought?: { conversations: number; messages: number }; error?: { message?: string } }>) | null;
   engineWaitMs?: number;
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
+  move?: () => { view(): unknown; seen(): unknown; retry(): Promise<unknown> } | null;
 }): {
   receive(proc: unknown, message: unknown): boolean;
   move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
   check(): Promise<CloudMoveCheck>;
   switches(): Record<string, boolean>;
+  snapshot(): CloudSendSnapshot;
+  publish(): void;
   menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
 };

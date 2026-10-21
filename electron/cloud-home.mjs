@@ -52,7 +52,9 @@ export function parseCloudSummary(input) {
   const unreachable = status === "ready" && record(input.unreachable) && CLOUD_UNREACHABLE_CAUSES.includes(input.unreachable.cause) && moment(input.unreachable.since)
     ? { cause: input.unreachable.cause, since: input.unreachable.since } : null;
   const power = parseCloudPower(input.power);
-  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}) };
+  const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until } : null;
+  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
+    ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}) };
 }
 
 const UNREACHABLE_TEXT = Object.freeze({
