@@ -83,6 +83,8 @@ describe("publishing a page", () => {
     expect(f.service.pages.size).toBe(1);
     expect(f.service.pages.get(page!)!.files.get("index.html")).toBe("<h1>Tomorrow's menu</h1>");
     writeSite(join(f.work, "other"), { "index.html": "<p>Other</p>" });
+    // A page id from the link updates that page even when this app didn't publish it (the same account elsewhere).
+    f.pages.store.forget(page!);
     await f.publish({ path: "other", pageId: page });
     expect(f.service.minted.at(-1)).toEqual({ action: "update", pageId: page, caller: "desktop" });
     expect(f.service.pages.get(page!)!.files.get("index.html")).toBe("<p>Other</p>");
