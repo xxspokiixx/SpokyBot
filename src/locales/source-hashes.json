@@ -1619,7 +1619,17 @@
       "onboarding.reel.terminal.body": "45717037e6999c20bf69c25fb1a5bdeb6ccfadd9f513b7d85878fc85d671040a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -6705,7 +6715,17 @@
       "onboarding.tour.computer-simple": "c7fa600916d3fa88e9903d2ae4550107cf659c3ac008dc2624f23c0767690855",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -8307,7 +8327,17 @@
       "onboarding.reel.terminal.body": "45717037e6999c20bf69c25fb1a5bdeb6ccfadd9f513b7d85878fc85d671040a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -9909,7 +9939,17 @@
       "onboarding.reel.terminal.body": "45717037e6999c20bf69c25fb1a5bdeb6ccfadd9f513b7d85878fc85d671040a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -15649,7 +15689,17 @@
       "botPanel.noAi": "6bb0929b2412c5f3075de447c388193535b380014498e1ee598db8fa00e688f7",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -21482,7 +21532,17 @@
       "onboarding.tour.computer-simple": "c7fa600916d3fa88e9903d2ae4550107cf659c3ac008dc2624f23c0767690855",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -24005,7 +24065,17 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27761,7 +27831,17 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -29872,7 +29952,17 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -34291,7 +34381,17 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -38710,7 +38810,17 @@
       "onboarding.cloud.body": "982247351d268a1f95471a649472e2cb3916d799f766e579f6b8dde1f4c6df0a",
       "onboarding.bot.chiefTitle": "b7ac2e85de084f6a9c94eab54e9106032a1b447c9abd0e6aaed54829aecc28c5",
       "onboarding.bot.chiefIntro": "77f17b91dee4bd64ef00860847057411a467d60e6a3c7a9ff1a890259ab92f28",
-      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250"
+      "chief.addBotStarter": "1a38c59437985040d33c0647386121e49cac7523a8f46f686612c4b0c1a4c250",
+      "chat.react": "d97239a628a7c4715ef06c865556a7681e7e5dd96c418e4f8634360ca97722c8",
+      "chat.reactions": "8a7ede6b5f07f7929a403b2ed23a46ce481878555c3859676eb22a888aecfc5b",
+      "chat.reaction.yes": "701796000877acc5eabfe156ebdaf4a695865a663f93b0ea2db38bfa65e1da53",
+      "chat.reaction.no": "099c60af3b58bf2e1f5437960eb1d0351e5badb32cf023f7c50251bc9608b047",
+      "chat.reaction.love": "770af9d180375fa9c3d29a50c124a04f538b277e1ed94ec20be8e244820d6534",
+      "chat.reaction.laugh": "bdc19fef526416471235e7be05fd5d7dd22026fda0ad5e0109602f5ea658986c",
+      "chat.reaction.celebrate": "169381e6fc21b70bfab26db6f6201fc33206f4831890def67f4c2665c4ea70bf",
+      "chat.reaction.looking": "a39e9d9816a99fc02aa43c5d6e8041f841f130abbe4224bf8f4504a57fb9e3c3",
+      "chat.reaction.chip": "8c850598bce1be16f2eca2d4a32370e882fb9ec8b5379a3219ca7c6cf1868cf6",
+      "approval.status.byReaction": "2dc25d680153171b472c68e6e8048e48302bbbb927d347b581d2c28a55428b6b"
     }
   }
 }

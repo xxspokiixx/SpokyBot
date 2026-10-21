@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { claudeSignedIn } from "./claude-auth-status.ts";
 import { claudeAuthFailure } from "./claude-auth-recovery.ts";
 import { claudeResultError, claudeVersionTooOld } from "./claude.ts";
-import { claudeApiErrorMessage, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit } from "./claude-limits.ts";
+import { claudeApiErrorMessage, claudeEngineReset, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit } from "./claude-limits.ts";
 import { classifyError } from "./retry.ts";
 
 describe("claudeSignedIn", () => {
@@ -92,6 +92,29 @@ describe("Claude usage limits", () => {
     expect(claudeLimitRefusal({ ...WEEKLY, status: "allowed" })).toBeNull();
     expect(claudeLimitRefusal({ ...WEEKLY, isUsingOverage: true })).toBeNull();
     expect(claudeLimitRefusal(undefined)).toBeNull();
+  });
+
+  // Captured from a refused Fable call while the 5-hour window was allowed at 18%: the model ran on extra usage.
+  const OUT_OF_CREDITS = { status: "rejected", resetsAt: 1793491200, overageDisabledReason: "out_of_credits", isUsingOverage: false, errorCode: "credits_required" };
+
+  it("tells used-up extra-usage credits apart from a plan window, and holds the engine only for a window every model shares", () => {
+    const credits = claudeLimitRefusal(OUT_OF_CREDITS);
+    expect(credits).toEqual({ window: null, resetsAt: 1793491200, credits: true });
+    expect(claudeLimitRefusal({ status: "rejected", overageDisabledReason: "out_of_credits" })?.credits).toBe(true);
+    expect(claudeEngineReset(credits)).toBeUndefined();
+    expect(claudeEngineReset(claudeLimitRefusal({ ...WEEKLY, rateLimitType: "seven_day_opus" }))).toBeUndefined();
+    expect(claudeEngineReset(claudeLimitRefusal({ ...WEEKLY, rateLimitType: "seven_day_fable" }))).toBeUndefined();
+    expect(claudeEngineReset(claudeLimitRefusal(WEEKLY))).toEqual({ limitResetsAt: 1791795600_000 });
+    expect(claudeEngineReset(claudeLimitRefusal({ ...WEEKLY, rateLimitType: "seven_day_overage_included" }))).toEqual({ limitResetsAt: 1791795600_000 });
+    expect(claudeEngineReset(null)).toBeUndefined();
+  });
+
+  it("says a model's credits ran out, with no countdown to the billing reset", () => {
+    const message = claudeLimitMessage(claudeLimitRefusal(OUT_OF_CREDITS), undefined, BEFORE_RESET, "America/Los_Angeles");
+    expect(message).toContain("runs on extra usage for your account, and those credits are used up");
+    expect(message).toContain("switch this bot to a model your plan includes");
+    expect(message).not.toMatch(/reached its|resets|Oct 31/);
+    expect(claudeLimitMessage(claudeLimitRefusal({ ...WEEKLY, rateLimitType: "seven_day_fable" }), undefined, BEFORE_RESET, "UTC")).toContain("choose another model for this bot");
   });
 
   it("knows the refused call by its code, its words or a refused account", () => {
