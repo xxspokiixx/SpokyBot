@@ -11,9 +11,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createComputerSharing } from "../electron/computer-sharing.mjs";
-import { createCloudMove } from "../electron/cloud-move.mjs";
 import { itemKey } from "../electron/cloud-send-parts.mjs";
-import type { CloudSendOutcome } from "../electron/cloud-send.mjs";
 import { launchCloudSendFixture, type CloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
 import { FAKE_LOCATION_ID, startFakeHighLevel, startFakeRelay, type FakeHighLevel, type FakeRelay } from "./testing/fake-highlevel.ts";
@@ -112,22 +110,15 @@ function everythingArrived(report: Awaited<ReturnType<CloudSendFixture["check"]>
   return report.ok;
 }
 
-/** Bring newer chats, as 0.1.117 to 0.1.119 copied a computer's chats to My Cloud: the rows arrive naming nobody. */
-async function bring() {
-  const copy = createCloudMove({
-    localRequest: (route, init) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": fx.ownerCapability } }),
-    fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...fx.edge } })) as typeof fetch,
-    tempRoot: join(fx.root, "bring-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
-  });
-  try {
-    const once = () => copy.bring({ id: "cloud", name: "My Cloud", origin: fx.cloudBase, kind: "cloud", grant: () => fx.grant("Copy from desktop") });
-    let brought = await once();
-    // A bot's turn can still be wrapping up after its reply; a backup refuses "busy" until it has.
-    for (let tries = 0; brought.error?.code === "busy" && tries < 40; tries++) { await new Promise((resolve) => setTimeout(resolve, 250)); brought = await once(); }
-    expect(brought.phase, JSON.stringify(brought)).toBe("done");
-  } finally {
-    await copy.close();
-  }
+/** As a Bring in 0.1.117 to 0.1.119 left a computer's chats on My Cloud: its owner's lines there name nobody. My Cloud
+ * starts again over its own data with those lines stripped of who wrote them, before anything reads them. */
+async function asABringLeftThem(threadIds: string[]) {
+  const strip = `import { DatabaseSync } from "node:sqlite"; import { join } from "node:path";
+const db = new DatabaseSync(join(process.env.OMB_DATA_DIR, "messages.db"));
+const forget = db.prepare("UPDATE messages SET json = json_remove(json, '$.sender') WHERE thread_id = ? AND role = 'user'");
+for (const id of ${JSON.stringify(threadIds)}) forget.run(id);
+db.close(); delete process.env.NODE_OPTIONS;`;
+  await fx.relaunch({ kill: false, cloud: { NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(strip).replaceAll("'", "%27")}` } });
 }
 
 let archie: { id: string; threadId: string }, cleo: { id: string; threadId: string }, pip: { id: string; threadId: string }, ember: { id: string; threadId: string };
@@ -151,14 +142,14 @@ async function turnDump(botId: string, threadId: string, seen: Set<string>) {
 
 it("lines My Cloud already held of this computer's become its owner's when the move names them, at once for what its bots recall", async () => {
   const { local, onCloud } = fx;
-  // Kai's and Lux's conversations reached My Cloud before My Cloud kept its owner's lines as theirs, as any send or Bring
-  // before this one left them. The move (next) names Kai's; Lux's are named here, over the owner's own session.
+  // Kai's and Lux's conversations reached My Cloud before My Cloud kept its owner's lines as theirs, as an older app's send
+  // or Bring left them. The move (next) names Kai's; Lux's are named here, over the owner's own session.
   kai = await newBot("Kai");
   await turn(local, kai, "Keep the Acme notes.");
   const lux = await newBot("Lux");
   await turn(local, lux, "Draft the launch memo.");
-  expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(kai.id), itemKey.bot(lux.id)] })).result.bots.sort()).toEqual(["Kai", "Lux"]);
-  await bring();
+  expect((await fx.olderSend({ keys: [itemKey.bot(kai.id), itemKey.bot(lux.id)] })).result.bots.sort()).toEqual(["Kai", "Lux"]);
+  await asABringLeftThem([kai.threadId, lux.threadId]);
   for (const bot of [kai, lux]) {
     const brought = (await history(onCloud, bot.threadId)).rows.filter((row) => row.role === "user");
     expect(brought.map((row) => row.sender?.id ?? null), "the line came over naming nobody").toEqual([null]);
@@ -207,8 +198,6 @@ it("a move carries everything, apps and keys first, and its check finds every ro
   expect((await local("PUT", `/api/bots/${ember.id}/memory/file`, { path: "memory/clients.md", text: "Acme pays on the 5th.\n" })).status).toBe(200);
   expect((await local("POST", "/api/logins", { site: "accounts.example.test", username: "alice", password: PASSWORD, totp: "JBSWY3DPEHPK3PXP", bots: [ember.id] })).status).toBe(201);
   expect((await local("POST", "/api/logins/1password", { token: TOKEN })).status).toBe(200);
-  // Kept here once with the switch that used to send by itself: a move takes it anyway.
-  expect((await fx.call("cloud-send:item", "local", itemKey.bot(ember.id), false))).toBeTruthy();
 
   // Apps and keys: an MCP server's key and another's header token, a sign-in of its own, an AI key, HighLevel by its token,
   // and the connected-apps account.

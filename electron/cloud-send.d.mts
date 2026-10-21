@@ -92,16 +92,8 @@ export interface CloudSendCounts {
   chats: { conversations: number; messages: number } | null;
 }
 
-export interface CloudSendBridge {
-  state(): Promise<CloudSendSnapshot>;
-  refresh(): Promise<CloudSendSnapshot>;
-  send(options?: { keys?: string[]; force?: string[] }): Promise<CloudSendOutcome>;
-  setItem(key: string, on: boolean): Promise<CloudSendSnapshot>;
-  onState(listener: (snapshot: CloudSendSnapshot) => void): () => void;
-}
 export interface CloudSendPageBridge {
   notice(): Promise<CloudSendNotice>;
-  send(): Promise<CloudSendNotice>;
   dismiss(signature: string): Promise<CloudSendNotice>;
   /** The move's Try again, after a day of failing; absent from an older desktop. */
   moveRetry?(): Promise<CloudSendNotice>;
@@ -165,7 +157,6 @@ export function createCloudSend(deps: {
   };
   handoff(what: { kind: string; [key: string]: unknown }): Promise<any>;
   /** Bring newer chats' copy, for a Cloud too old to take chats by row. */
-  bringChats?: (() => Promise<{ conversations: number; messages: number }>) | null;
   store: { read(): unknown; write(value: unknown): void };
   onChange?(snapshot: CloudSendSnapshot): void;
   now?(): number;

@@ -31,7 +31,8 @@ export function createMoveFreezeRoutes({ freeze, busy, restart }: MoveFreezeRout
       if (auth.kind !== "loopback") return json(res, 403, { error: "Only OpenMausBot on this computer can do this." });
       if (method === "GET") {
         const who = busy();
-        return json(res, 200, { frozen: freeze.frozen(), ...(who === null ? {} : { busy: who }) });
+        const cloud = freeze.cloud();
+        return json(res, 200, { frozen: freeze.frozen(), ...(freeze.frozen() && cloud ? { cloud } : {}), ...(who === null ? {} : { busy: who }) });
       }
       if (method === "POST") {
         const body = freezeBody.safeParse(await readBody(req, 4096));

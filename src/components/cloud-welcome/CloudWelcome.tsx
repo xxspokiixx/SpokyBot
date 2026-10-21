@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
-import { useCloudMove } from "@/components/CloudMove";
 import { useCloudSendNotice } from "@/components/CloudSendStrip";
 import { countedList } from "@/lib/cloud-send";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -58,13 +57,12 @@ export function CloudWelcome() {
   const [view, setView] = useState<WelcomeView>(() => requestedView(takeWelcomeRequest()) ?? welcomeView(record));
   const heading = useRef<HTMLHeadingElement>(null);
   const navigated = useRef(false);
-  const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudMove;
-  const move = useCloudMove(bridge);
-  const copied = move.state.phase === "done" && move.state.action !== "restore";
   const visible = state.bots.filter((bot) => !bot.hidden);
   const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
-  const cloudHasWork = move.overview?.cloud ? !move.overview.cloud.empty : visible.length > 1 || state.groups.length > 0;
+  const cloudHasWork = visible.length > 1 || state.groups.length > 0;
   const sendBridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSendPage;
+  // An older app still offers Copy this computer by hand: it moves bots here by itself only once updated.
+  const older = Boolean(sendBridge && window.ogb && "cloudMove" in window.ogb);
   const [notice] = useCloudSendNotice(sendBridge);
   const sent = sentHere(notice);
   // Main answers at once; until it does, no choice is shown that it may take back a moment later.
@@ -123,10 +121,7 @@ export function CloudWelcome() {
     remember(ids);
     go(welcomeViewAfter(withEarlyHints(record, ids), step), focus);
   };
-  const finishBring = (outcome: BringOutcome) => {
-    if (outcome === "copied" || outcome === "skipped") void bridge?.dismiss().catch(() => {});
-    finish("bring", outcome === "skipped" ? [CLOUD_SETUP_MOVE_SKIPPED] : []);
-  };
+  const finishBring = (outcome: BringOutcome) => finish("bring", outcome === "skipped" ? [CLOUD_SETUP_MOVE_SKIPPED] : []);
   const end = (reason: "done" | "skipped") => {
     track("cloud_welcome_ended", { reason, at: view });
     remember([CLOUD_WELCOME_DONE]);
@@ -149,7 +144,7 @@ export function CloudWelcome() {
   let content;
   if (view === "bring" && asking) content = null;
   else if (view === "bring") {
-    content = <WelcomeBring name={name} move={bridge ? move : null} cloudHasWork={cloudHasWork} sent={sent && { state: sent.state, arrived: sent.state === "sent" && sent.last ? countedList(sent.last.sent) : null }} headingRef={heading}
+    content = <WelcomeBring name={name} desktop={Boolean(sendBridge)} older={older} cloudHasWork={cloudHasWork} sent={sent && { state: sent.state, arrived: sent.state === "sent" && sent.last ? countedList(sent.last.sent) : null }} headingRef={heading}
       onTeam={() => { reanchor.current = true; }}
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;
@@ -165,7 +160,7 @@ export function CloudWelcome() {
         <div className="mt-3 flex items-center justify-between gap-2 @2xl/welcome:mt-4 @2xl/welcome:flex-1 @2xl/welcome:flex-col @2xl/welcome:items-stretch @2xl/welcome:justify-start">
           <ol className="flex min-w-0 gap-1 @2xl/welcome:flex-col @2xl/welcome:gap-1.5">
             {WELCOME_STEPS.map((step, index) => {
-              const finished = welcomeStepFinished(record, step) || (step === "bring" && (copied || sent?.state === "sent"));
+              const finished = welcomeStepFinished(record, step) || (step === "bring" && sent?.state === "sent");
               const bringing = step === "bring" && !finished && sent?.state === "sending";
               const current = view === step;
               return <li key={step} className="min-w-0">

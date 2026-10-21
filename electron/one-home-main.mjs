@@ -73,6 +73,15 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   const watched = new WeakSet();
   const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home });
   const journal = kept ?? jsonFile(journalFile);
+  /** When the person last typed or clicked in the window. */
+  const typed = () => {
+    const win = sendDeps.window?.();
+    if (win && !win.isDestroyed?.() && !watched.has(win.webContents)) {
+      watched.add(win.webContents);
+      win.webContents.on?.("before-input-event", () => { lastInput = Date.now(); });
+    }
+    return lastInput;
+  };
 
   const local = {
     call: async (method, route, body) => answer(await localRequest(route, { method, signal: AbortSignal.timeout(120_000),
@@ -132,14 +141,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     session: () => openOwnerSession(target(), fetchImpl, { label: MOVE_LABEL, background: false }),
     lend, phone, openHome, openLocal, restart, version, log,
     again,
-    lastInput: () => {
-      const win = sendDeps.window?.();
-      if (win && !win.isDestroyed?.() && !watched.has(win.webContents)) {
-        watched.add(win.webContents);
-        win.webContents.on?.("before-input-event", () => { lastInput = Date.now(); });
-      }
-      return lastInput;
-    },
+    lastInput: typed,
     onChange: () => send.publish(),
   });
 
@@ -152,5 +154,10 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     view: () => home.view(),
     close: () => home.close(),
     oneHome: home,
+    /** The journal as it is on disk. */
+    journal: () => journal.read(),
+    /** This computer's server's freeze marker: `{ frozen, cloud? }`. */
+    marker: () => local.json("/api/move/freeze"),
+    lastInput: typed,
   };
 }

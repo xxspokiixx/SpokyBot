@@ -1,5 +1,5 @@
-// The private ask for one login's secrets, which Send to My Cloud (cloud-send.mjs) carries to the person's own Cloud, or
-// for one connection's, which a move carries (cloud-connections.mjs).
+// The private ask for one login's secrets, or one connection's (cloud-connections.mjs), which the one-time move
+// (cloud-send.mjs) carries to the person's own Cloud.
 //
 // The secret leaves this computer's server only over Electron's private utility-process port (server/login-handoff.ts)
 // and is answered only to the process it was asked of; nothing here keeps or logs it.
@@ -7,17 +7,9 @@ import { randomUUID } from "node:crypto";
 
 const REQUEST = "openmausbot:login-handoff";
 const RESULT = "openmausbot:login-handoff-result";
-const LOGIN_ID = /^[\w-]{1,128}$/;
 
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = value => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
-
-/** Only "1password" or one saved login, by id: a page never names a destination, a field or a value. */
-export function handoffWhat(input) {
-  if (record(input) && input.kind === "1password") return { kind: "1password" };
-  if (record(input) && input.kind === "login" && typeof input.id === "string" && LOGIN_ID.test(input.id)) return { kind: "login", id: input.id };
-  return null;
-}
 
 /** Main's half of the private ask: each answer is taken only from the server process it was asked of. */
 export function createLoginHandoffClient({ timeoutMs = 10_000, randomId = randomUUID } = {}) {

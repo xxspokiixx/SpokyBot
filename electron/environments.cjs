@@ -65,11 +65,12 @@ function workspaceSummary(state) {
   return { local: false, name: active.name, origin: active.origin, ...(cleanColor(active.color) ? { color: active.color } : {}) };
 }
 
-/** Native identity must not depend on a hosted renderer's version/title. */
-function workspaceWindowTitle(state, companion) {
+/** Native identity must not depend on a hosted renderer's version/title. `homeOrigin`: My Cloud once it is the person's
+ * only home, which is simply the app. */
+function workspaceWindowTitle(state, companion, homeOrigin = null) {
   if (companion) return `OpenMausBot — Connected to: ${companion.serverName} (${new URL(companion.endpoint).host})`;
   const active = activeEnvironment(state);
-  if (active && active.kind !== "local") return `OpenMausBot — Hosted: ${active.name} (${new URL(active.origin).host})`;
+  if (active && active.kind !== "local" && active.origin !== homeOrigin) return `OpenMausBot — Hosted: ${active.name} (${new URL(active.origin).host})`;
   return "OpenMausBot";
 }
 
@@ -95,8 +96,9 @@ function workspaceSenderAllowed(event, contents, state, localOrigin) {
 /** Native menu choices, never renderer-supplied destinations or callbacks. `iconFor`: a saved colour's small dot, when main can draw one.
  * `places`: the one line saying which side has which bots, shown first; `copyToCloud`: the send line under the list. `foldSublabels`: where menus show no sublabels (Windows, Linux), My Cloud's status line
  * joins its name instead of vanishing. */
-function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false }) {
+function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false, homeOrigin = null }) {
   const active = activeEnvironment(state);
+  if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin });
   return [
     ...(places ? [{ id: "workspace-places", label: places, enabled: false }, { type: "separator" }] : []),
     { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
@@ -115,6 +117,29 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
     { id: "workspace-connect", label: "Connect to a server…", click: onConnect },
     ...(active ? [{ id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
   ];
+}
+
+/** Once My Cloud is the person's home: My Cloud and the other saved servers, each a whole place of its own; this computer
+ * is not one of them, and nothing here sends or copies. */
+function homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin }) {
+  const active = activeEnvironment(state);
+  const places = state.environments.filter((entry) => entry.kind !== "local").sort((a, b) => (b.origin === homeOrigin) - (a.origin === homeOrigin));
+  return [
+    ...places.map((entry) => {
+      const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
+      const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : null;
+      return {
+        id: `workspace-${entry.id}`, label: foldSublabels && status ? `${entry.name} · ${status}` : entry.name, sublabel: status ?? new URL(entry.origin).host,
+        ...(icon ? { icon } : {}), type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
+      };
+    }),
+    ...(active && active.origin !== homeOrigin ? [{ type: "separator" }, { id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
+  ];
+}
+
+/** Places besides My Cloud the window can show once My Cloud is home: saved team or self-hosted servers. */
+function otherPlaces(state, homeOrigin) {
+  return state.environments.filter((entry) => entry.kind !== "local" && entry.origin !== homeOrigin).length;
 }
 
 /** "Ember", "Ember and Juno", "Ember, Juno and 2 more". */
@@ -336,6 +361,7 @@ module.exports = {
   allowedOrigins,
   bootEnvironmentDir,
   normalizeOrigin,
+  otherPlaces,
   parseEnvironments,
   parsePairingLink,
   parseHostedWorkspaceLink,

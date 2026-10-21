@@ -13,7 +13,7 @@ vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capab
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [{ name: "Ember" }] }, dispatch: vi.fn() }) }));
 import { CloudAccountSettings, CloudPlanOnCloud, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
 import { LentComputersCard } from "./LentComputers";
-type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; "data-cloud-start-over"?: boolean }>;
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 function render(props?: { linkRequest?: number; cloudHome?: boolean; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
   const html = renderToStaticMarkup(createElement(Capture)); return { html, nodes: nodes(tree) }; }
@@ -200,22 +200,24 @@ it("setting up shows the Cloud page's steps, a slow setup and a failed setup's n
   push({ ...paid, machine: { status: "failed", retryAt: Date.UTC(2026, 9, 2, 12, 30) } });
   html = render().html; all(html, ["Nothing was lost", "tried again automatically at"]);
 });
-it("on the person's own Cloud, Settings shows the plan read only, with Manage and Switch to this computer", async () => {
-  const plan = { state: vi.fn().mockResolvedValue({ status: "paid", tier: "max" }), manage: vi.fn().mockResolvedValue(undefined), useThisComputer: vi.fn().mockResolvedValue(undefined) };
+it("on the person's own Cloud, Settings shows the plan read only, with Manage, and Sign in again once this computer's sign-in ended", async () => {
+  const plan = { state: vi.fn().mockResolvedValue({ status: "paid", tier: "max" }), manage: vi.fn().mockResolvedValue(undefined), signIn: vi.fn().mockResolvedValue(undefined) };
   vi.stubGlobal("window", { ogb: { cloudPlan: plan } });
   const settings = render({ cloudHome: true }).html; expect(settings).not.toContain("local desktop app");
   expect(render().html).toContain("local desktop app"); expect(render().html).not.toContain("Manage in your browser");
   const view = () => { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudPlanOnCloud({ bridge: plan }); return tree; }
     return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) }; };
   view(); f.effects[0](); await flush();
-  all(view().html, ["Max active · verified by MausBot Cloud", "Manage in your browser", "Switch to this computer"]); none(view().html, BUY);
+  all(view().html, ["Max active · verified by MausBot Cloud", "Manage in your browser"]); none(view().html, [...BUY, "Switch to this computer", "Sign in again"]);
   view().nodes.find(node => node.type === "button" && node.props.children === "Manage in your browser")!.props.onClick!();
-  view().nodes.find(node => node.type === "button" && node.props.children === "Switch to this computer")!.props.onClick!();
-  await flush(); expect(plan.manage).toHaveBeenCalledExactlyOnceWith(); expect(plan.useThisComputer).toHaveBeenCalledExactlyOnceWith();
+  await flush(); expect(plan.manage).toHaveBeenCalledExactlyOnceWith();
   plan.state.mockResolvedValueOnce({ status: "checking", tier: "pro" }); f.values = []; view(); f.effects[0](); await flush();
   expect(view().html).toContain("Pro · checking with MausBot Cloud…");
   plan.state.mockResolvedValueOnce({ status: "signin", tier: "max" }); f.values = []; view(); f.effects[0](); await flush();
-  all(view().html, ["Max plan", "This computer needs to sign in to MausBot Cloud again", "Switch to this computer"]); none(view().html, [...BUY, "Could not complete"]);
+  all(view().html, ["Max plan", "This computer needs to sign in to MausBot Cloud again"]); none(view().html, [...BUY, "Could not complete", "Switch to this computer"]);
+  expect(view().nodes.filter(node => node.type === "button" && node.props.children === "Sign in again")).toHaveLength(1);
+  view().nodes.find(node => node.type === "button" && node.props.children === "Sign in again")!.props.onClick!();
+  await flush(); expect(plan.signIn).toHaveBeenCalledExactlyOnceWith();
   plan.state.mockRejectedValueOnce(new Error("cloud-plan:state is only available in this app's window")); f.values = []; view(); f.effects[0](); await flush();
   const refused = view();
   expect(refused.html).toContain("Your plan is managed in the OpenMausBot app on your computer.");
@@ -403,7 +405,7 @@ it("is not offered without a paid plan", async () => {
   push({ status: "signed-out" }); expect(render().html).not.toContain(PHONE);
 });
 it("on the Cloud itself, opens this Cloud's phone pairing directly; never where this app cannot vouch for it", async () => {
-  const plan = { state: vi.fn().mockResolvedValue({ status: "paid", tier: "pro" }), manage: vi.fn(), useThisComputer: vi.fn() };
+  const plan = { state: vi.fn().mockResolvedValue({ status: "paid", tier: "pro" }), manage: vi.fn() };
   const onConnectPhone = vi.fn();
   const view = (props: { onConnectPhone?: () => void }) => { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudPlanOnCloud({ bridge: plan, ...props }); return tree; }
     return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) }; };
@@ -421,29 +423,6 @@ it("on the Cloud itself, opens this Cloud's phone pairing directly; never where 
   expect(view({}).html).not.toContain(PHONE);
   plan.state.mockRejectedValueOnce(new Error("cloud-plan:state is only available in this app's window")); f.values = []; view({ onConnectPhone }); f.effects[0](); await flush();
   expect(view({ onConnectPhone }).nodes.some(node => node.type === "button")).toBe(false);
-});
-
-it("once the Cloud is ready, offers Copy this computer here for the Cloud itself", async () => {
-  const move = { state: vi.fn().mockResolvedValue({ phase: "idle", local: null, suggest: false, destination: { id: "cloud", name: "My Cloud", origin, kind: "cloud" }, blocked: null,
-    cloud: { contents: { bots: 3, rooms: 0, chats: 9 }, empty: false, freeBytes: 10 ** 10, previous: null, heldBytes: 0 } }),
-    start: vi.fn(), cancel: vi.fn(), restorePrevious: vi.fn(), dismiss: vi.fn(), onState: vi.fn(() => () => {}) };
-  vi.stubGlobal("window", { ogb: { cloudAccount: bridge, cloudMove: move } });
-  vi.mocked(bridge.state).mockResolvedValue(readyCloud);
-  await ready(readyCloud);
-  render();
-  for (const effect of f.effects) effect();
-  await flush();
-  // Rare, and it replaces everything on My Cloud: behind a link, and no Bring newer chats, which happens by itself.
-  expect(render().html).not.toContain("Copy this computer&#x27;s bots and chats");
-  render().nodes.find(node => node.type === "button" && node.props["data-cloud-start-over"])!.props.onClick!();
-  render();
-  for (const effect of f.effects) effect();
-  await flush();
-  expect(move.state.mock.calls).toContainEqual(["cloud"]);
-  expect(render().html).toContain("Copy this computer&#x27;s bots and chats");
-  expect(render().html).not.toContain("Bring newer chats");
-  // What lives where is said once, by This computer and My Cloud at the top of the page.
-  expect(render().html).not.toContain("live on each side");
 });
 
 const ENDS = new Date(2026, 9, 15, 12).getTime(), DAY = 86_400_000;
@@ -494,7 +473,7 @@ it("signed out or with no plan, the Add a Cloud button names the trial only when
 });
 it("on My Cloud, Settings shows the trial and its credit, and its button names the trial's next step", async () => {
   const plan = { state: vi.fn().mockResolvedValue({ status: "paid", tier: "pro", trial: onTrial("active", { chargeAt: ENDS }), credit }),
-    manage: vi.fn().mockResolvedValue(undefined), useThisComputer: vi.fn() };
+    manage: vi.fn().mockResolvedValue(undefined) };
   const view = () => { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudPlanOnCloud({ bridge: plan }); return tree; }
     return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) }; };
   view(); f.effects[0](); await flush();

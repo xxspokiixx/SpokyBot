@@ -53,8 +53,6 @@
   "server/cloud-guest-shell.e2e.test.ts": 28,
   "server/cloud-lending-memory.e2e.test.ts": 107,
   "server/cloud-lending.e2e.test.ts": 16,
-  "server/cloud-move.e2e.test.ts": 81,
-  "server/cloud-move.test.ts": 10,
   "server/cloud-personal.e2e.test.ts": 43,
   "server/codex-review.e2e.test.ts": 7,
   "server/command-allowlist.e2e.test.ts": 7,

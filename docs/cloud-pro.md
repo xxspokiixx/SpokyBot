@@ -47,24 +47,19 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    turn, before the welcome ever showed there). The first time it shows, it
    says so in the Cloud's record (`cloud-welcome-shown`), so a chat that
    finishes before its first step (from a phone, say) does not end it.
-   1. **Bring your stuff** comes first, before anything starts a chat: a copy
-      from the Cloud's own page goes only into an empty Cloud (its starter bot
-      at most, no rooms, no chat with a message from the person), so a first
-      chat would leave only Replace. In the desktop app it offers **Everything
-      from this Mac** ("this computer" elsewhere), counting this computer's
-      bots, chats and routines and its size, chosen when this computer has work
-      to bring and the copy can run (the checks in docs/copy-workspace.md, not
-      whether its one-time card was put off), and **Start fresh**, which opens
-      the team library. **Copy to {name}** runs the copy in place, with its
-      progress, **Stop the copy**, and its errors and notes as in Settings; once
-      it lands, what came over and what arrived paused. **Skip for now** keeps
-      the copy's card from coming back (`cloud-setup-move-skipped`). In a
-      browser, on a phone, or in a desktop app that is another server's client,
-      it offers Start fresh and says that the desktop app brings bots from a
-      computer. On a Cloud that already has bots or chats of its own (a copy
-      made before, a chat from a phone), it offers neither: it says **Your bots
-      are already here**, and **Continue** moves on. A backup file is
-      imported from Settings → Backups, as on any server.
+   1. **Bring your stuff** comes first, before anything starts a chat. In the
+      desktop app, this computer's things come over by themselves with the
+      one-time move: while they come, the step says so in one line and the
+      welcome moves on to the AI, ticking the step once they arrived. Otherwise
+      it offers **Start fresh** (the team library in Advanced mode, the
+      assistant in Simple mode); **Skip for now** is kept
+      (`cloud-setup-move-skipped`). An older desktop app that still copies by
+      hand is told to update, so it brings the bots by itself. In a browser, on
+      a phone, or in a desktop app that is another server's client, it offers
+      Start fresh and says that the desktop app brings bots from a computer. On
+      a Cloud that already has bots or chats of its own (a chat from a phone,
+      say), it says **Your bots are already here**, and **Continue** moves on.
+      A backup file is imported from Settings → Backups, as on any server.
    2. **Connect your AI**: the engine sign-in's own tiles and sign-in panel
       (below), with **Connected** on one that can run. While the trial's Claude
       credit lasts and nothing of the person's own can run, a line says so
@@ -219,8 +214,8 @@ upgrade is revoked and stays nobody's.
 
 Routines fail closed. A routine is the owner's only with proof: the owner's
 key as its writer, the owner's fingerprint on it (a routine they wrote
-from their own device), or a restore the owner started (Copy this computer
-here, or a backup restored in Settings); a routine made from the owner's bot template,
+from their own device), a routine the one-time move brought, or a restore the
+owner started (a backup restored in Settings); a routine made from the owner's bot template,
 or a proposal the owner approved, is recorded as theirs when it is made.
 Every other routine is nobody's: it runs confined, like a guest's, and
 reports into a conversation that is nobody's. An owner's routine reports
@@ -332,11 +327,10 @@ a Cloud that opens already done shows nothing. Each step's state comes from
 the Cloud or the app, never from a box the person ticks.
 
 It is the welcome's steps in short, never a second checklist beside it: while
-the welcome fills the window the card does not show (nor does the one-time
-Copy this computer here card). When the person steps away from the welcome,
-the card lists **Create your Cloud** (done from the start), **Bring your
-stuff** (done after a copy or a team from the library, skipped after Start
-fresh or Skip for now), **Connect your AI** (done once the welcome's step was
+the welcome fills the window the card does not show. When the person steps
+away from the welcome, the card lists **Create your Cloud** (done from the
+start), **Bring your stuff** (done once this computer's things came over or
+after a team from the library, skipped after Start fresh or Skip for now), **Connect your AI** (done once the welcome's step was
 passed with an engine that can run, the trial's credit included; skipped when
 passed without one) and **Files and apps**, and the step that leads offers
 **Continue setup**, which opens the welcome on that step. After the welcome
@@ -362,13 +356,6 @@ bot has finished a turn there) keeps the first-job checklist:
    exists, the job's bot's and made after the job was sent (this device
    remembers which bot got it, `omb.cloudIntent.sent`; another device counts
    any routine). **Open the chat** goes to that bot.
-5. **Bring your bots from your computer**: only in the desktop app, while the
-   Copy this computer here card would be offered (an empty Cloud, a computer
-   with work to bring; docs/copy-workspace.md). **Copy to My Cloud** opens that
-   offer in place (the size, what stays, **Copy** and **Not now**). Done after
-   a copy; skipped after **Not now**,
-   which the Cloud keeps (`cloud-setup-move-skipped` in its onboarding record)
-   and which also hides the one-time card.
 
 A job counts as given the moment it is sent, before the Cloud's record
 answers, so no step flickers back. When the main pane already shows the step that leads (the question, or the
@@ -380,16 +367,13 @@ settings…**.
 
 **Hide setup** is the only dismiss. The Cloud keeps it (`cloud-setup-hidden`
 in its onboarding record), so it holds on every device and after browser
-storage is cleared, and it is the move's **Not now** and the welcome's end
-too. The card also goes
+storage is cleared, and it is the welcome's end too. The card also goes
 away by itself once an engine can run and the Cloud has done something: with
 a first job given, its routine exists (the bot's first turn only asks its
 questions, so a finished turn is not enough); without one, the welcome has
 ended, or on a Cloud set up before it, a bot has finished a turn there. With a routine, **Your Cloud is ready** names it and its next
 run, and **Run it now** starts it at once so the first result need not wait
 for the schedule. Nothing asks for confirmation.
-After the card, the one-time Copy this computer here card behaves as on any
-other server.
 
 While a window shows a Cloud home, the sidebar's server switcher reads **My
 Cloud · always on**; in a browser, a plain label says the same.
@@ -998,7 +982,7 @@ volume with data on it, is refused), and runs two children as `maus`: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
 `:8080`. It stays a small root supervisor: if either child exits, both stop
 and Fly restarts the machine. The one exception: after a restore commits
-(Copy this computer here, below), the server exits with code 75
+(a backup restored in Settings), the server exits with code 75
 (`server/restart.ts`) and the launcher starts only the server again.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
@@ -1908,55 +1892,19 @@ and `surface` (`local` or `server`) on every event, and count the card, its
 actions, the tip, the dialog's views and checkouts opened, with no content.
 [docs/analytics.md](analytics.md) lists every event and property.
 
-## Copy this computer to your Cloud
+## This computer's bots move to your Cloud
 
-The Cloud receives this computer's workspace the way every server the person
-adds does: **docs/copy-workspace.md** is the one reference (where it is, what
-moves and what stays, how it copies, Swap back, the restart, security). This
-section is only what the Cloud adds.
-
-- **The Admin's grant.** Main signs in to the Cloud through the Admin: it
-  opens a single-use pairing window for the signed-in owner
-  (`POST /api/cloud/desktop/pairing`, `pairHome`), so **Settings → MausBot Cloud**
-  can copy before the Cloud was ever opened in this app. No session in the
-  window yet is therefore not a block on the Cloud, as it is on other servers.
-  A saved "My Cloud" entry that is not this account's verified Cloud is copied
-  to like any other server.
-- **Settings → MausBot Cloud**, under My Cloud once it is Ready, opens the same
-  panel as Settings → Servers, named "My Cloud".
-- **The setup checklist.** While the Cloud's setup checklist is up, the copy
-  offer is its second step instead of a card (Setup checklist, above).
-- **Its own page starts the copy.** Because main verified this Cloud through
-  the Admin (`cloudPageSenderAllowed`), not on the Cloud's own word, its card
-  and checklist step start the copy at once, only into an empty Cloud. Any
-  other server's page leads to this computer's Settings instead
-  (docs/copy-workspace.md, Security).
-- **Disk growth.** Every Cloud starts at 10 GB; a plan whose disk grows grows
-  it as it fills, up to the plan's maximum. Before anything is exported the app
-  measures the copy (`moveFit`, with the Cloud's own `volumeBytes` from
-  `GET /api/cloud-move`) against the plan's largest disk only when the Admin
-  says how far it grows (`cloud.disk`): if it fits only once the disk grows, it
-  asks the Admin to grow it now (`POST /api/cloud/desktop/disk {sizeGb}`,
-  answered `{disk: {gb, maxGb}}`; `404` means this Admin cannot, so the app
-  says "tell us and we'll make room" with no "try again"; `409`/`422` over the
-  plan) and waits until the Cloud reports the room (only a timeout or no answer
-  says "try again"). Not enough room says "make room on your Cloud" when the
-  disk could hold it, "a plan with a larger disk" only when the copy is larger
-  than the plan's whole disk, and never that on Max, the largest. No other
-  server's disk is grown or measured against a plan.
-- **The restart.** The Cloud's launcher (`server/cloud-home-start.ts`) starts
-  only the server again on exit 75, and startup settles who owns what came
-  (`server/cloud-owner.ts`): a copied routine is the owner's.
-- **Bring newer chats.** On a Cloud with work of its own, the same panel offers
-  **Bring newer chats to My Cloud**, which adds only the conversations and
-  messages it lacks and replaces nothing (docs/copy-workspace.md, Bring newer
-  chats).
-- **After the copy.** My Cloud becomes the server this app opens, and this
-  computer's page says in one line that the bots now live on My Cloud, with
-  **Open My Cloud**, so the two are not used side by side by accident.
-- **Older Clouds.** A Cloud from before Copy to My Cloud answers `404` and the app
-  says it has not updated yet; one from before any server could receive a copy
-  still receives one from this app (its routes are the same).
+Once the Cloud is ready (and the Admin's `moves` switch lets this account
+move), the desktop app moves everything from this computer to it, once, by
+itself, and from then on opens the Cloud as its only home
+(`electron/one-home.mjs`, `electron/home-window.mjs`). The move carries each
+thing by id over one owner session (`electron/cloud-send.mjs`), checks that it
+all arrived, and freezes this computer's copy so nothing runs in two places
+(`server/move-freeze.ts`). An older desktop's Copy this computer here gets
+`410` with "Update OpenMausBot to bring your bots here by itself."
+(`server/cloud-move-http.ts`); a backup file still restores from Settings →
+Backups. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
+tests.
 
 ## Security summary
 

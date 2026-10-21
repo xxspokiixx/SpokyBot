@@ -384,3 +384,22 @@ test("parseEnvironments dedups local dirs on the same normalized key", () => {
     { id: "l2", kind: "local", name: "B", dataDir: "/Users/me/.openmausbot-b" },
   ]).length, 2);
 });
+
+test("once My Cloud is home the switcher lists whole places only: My Cloud first, then each saved server, never this computer", () => {
+  const home = "https://omb-t-1.fly.dev";
+  const state = { environments: [{ id: "o", kind: "remote", name: "Office", origin: "https://office.example.test" }, { id: "c", kind: "remote", name: "My Cloud", origin: home },
+    { id: "l", kind: "local", name: "Lab", dataDir: "/lab" }], activeId: "c" };
+  const switched = [], forgot = [];
+  const items = env.workspaceMenuTemplate(state, { onSwitch: (id) => switched.push(id), onConnect() {}, onForget: (id) => forgot.push(id), onAddCloud() {}, places: "x", copyToCloud: { label: "Send" }, homeOrigin: home });
+  assert.deepEqual(items.map((item) => [item.label, item.checked]), [["My Cloud", true], ["Office", false]]);
+  items[1].click();
+  assert.deepEqual(switched, ["o"]);
+  const away = env.workspaceMenuTemplate({ ...state, activeId: "o" }, { onSwitch() {}, onConnect() {}, onForget: (id) => forgot.push(id), homeOrigin: home });
+  assert.deepEqual(away.map((item) => item.label ?? item.type), ["My Cloud", "Office", "separator", "Forget “Office”…"]);
+  away.at(-1).click();
+  assert.deepEqual(forgot, ["o"]);
+  assert.equal(env.otherPlaces(state, home), 1);
+  assert.equal(env.otherPlaces({ ...state, environments: state.environments.filter((entry) => entry.id !== "o") }, home), 0, "My Cloud alone: no switcher");
+  assert.equal(env.workspaceWindowTitle(state, null, home), "OpenMausBot", "the window onto home is simply the app");
+  assert.equal(env.workspaceWindowTitle({ ...state, activeId: "o" }, null, home), "OpenMausBot — Hosted: Office (office.example.test)");
+});
