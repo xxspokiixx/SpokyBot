@@ -105,7 +105,8 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   hidden("other-bot-folder-hidden", join(spec.otherWorkspace, "MEMORY.md"));
   hidden("other-task-folder-hidden", join(spec.otherTaskWorkspace, "notes.md"));
   add("fly-api-hidden", !existsSync("/.fly"), existsSync("/.fly") ? "/.fly visible" : "absent");
-  const inEnv = Object.entries(env).filter(([, value]) => value?.includes(spec.marker)).map(([name]) => name);
+  // The spec itself names the marker; every other value must not.
+  const inEnv = Object.entries(env).filter(([name, value]) => name !== PROBE_SPEC_ENV && value?.includes(spec.marker)).map(([name]) => name);
   add("secret-not-in-env", inEnv.length === 0, inEnv.length ? `in ${inEnv.join(",")}` : "absent");
   const onDisk = scanForMarker(spec.dataDir, spec.marker, { files: 5_000 }) + scanForMarker("/tmp", spec.marker, { files: 5_000 }) + scanForMarker(spec.cwd, spec.marker, { files: 5_000 });
   add("secret-not-on-disk", onDisk === 0, `${onDisk} hits`);

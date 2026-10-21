@@ -54,6 +54,14 @@ describe("the box plan", () => {
     expect(text).not.toContain("--new-session");
   });
 
+  it("TMPDIR never puts the host's /tmp back; another temp folder is put back", () => {
+    const plan = planBox(setup(), { command: "/usr/bin/x", args: [], cwd, env: { TMPDIR: "/tmp" } });
+    expect(visibleInBox(plan, "/tmp/other-turn/mcp.json")).toBe("none");
+    expect(visibleInBox(plan, "/tmp")).toBe("none");
+    const elsewhere = planBox(setup(), { command: "/usr/bin/x", args: [], cwd, env: { TMPDIR: "/data/scratch" } });
+    expect(visibleInBox(elsewhere, "/data/scratch/x")).toBe("rw");
+  });
+
   it("a shared-network box (a browser) has no bridges and no network namespace", () => {
     const plan = planBox(setup(), { command: "/opt/chrome", args: [], env: {}, net: "shared", rw: ["/data/.openmausbot/browser/profiles/p1"] });
     expect(plan.net).toBe("shared");

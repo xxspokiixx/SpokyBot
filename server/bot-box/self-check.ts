@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { BOX_PROBE_SCRIPT, BoxRunner, BOX_EGRESS_PORT, defaultCodeRoots, type BoxChecks } from "./box.ts";
+import { existsSync } from "node:fs";
 import type { BridgeTools } from "./bridge.ts";
 import { openBoxEgressGate } from "./egress-gate.ts";
 import { openHarnessGate } from "./harness-gate.ts";
@@ -24,6 +25,8 @@ export interface SelfCheckOptions {
   root: string;
   denyEnv: ReadonlySet<string>;
   codeRoots?: readonly string[];
+  /** The probe script (box-probe.ts) to run inside the box; the bundled one by default. */
+  probeScript?: string;
   mutate?: ReadonlySet<BoxMutation>;
   /** `host:port` on the public internet; null skips that check; undefined tries example.com:443 and skips when the host itself cannot reach it. */
   publicTarget?: string | null;
@@ -71,23 +74,28 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   writeFileSync(join(otherWorkspace, "MEMORY.md"), `other bot ${marker}`);
   writeFileSync(join(otherTask, "notes.md"), `other turn ${marker}`);
   writeFileSync(join(botFolder, "MEMORY.md"), "own bot");
-  const hostTmpFile = join(tmpdir(), `omb-box-check-${randomBytes(6).toString("hex")}`);
+  // The box's private /tmp is what is checked, so the host file goes to /tmp itself where there is one.
+  const hostTmpFile = join(existsSync("/tmp") ? "/tmp" : tmpdir(), `omb-box-check-${randomBytes(6).toString("hex")}`);
   writeFileSync(hostTmpFile, "host tmp");
 
   const canary = spawn("sleep", ["120"], { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", OMB_BOX_CANARY: marker }, stdio: "ignore" });
-  const upstream = createServer((req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ path: req.url })); });
+  const answer = (req: { url?: string }, res: { writeHead(code: number, headers: Record<string, string>): unknown; end(body: string): void }) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ path: req.url })); };
+  // Two fixture listeners on the host's loopback: the "server" the harness gate forwards to, and a private one that is
+  // bridged nowhere, so reaching it from the box would mean the box shares the host's network.
+  const upstream = createServer(answer), privateServer = createServer(answer);
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
-  const privatePort = (upstream.address() as { port: number }).port;
+  await new Promise<void>((resolve) => privateServer.listen(0, "127.0.0.1", resolve));
+  const serverPort = (upstream.address() as { port: number }).port, privatePort = (privateServer.address() as { port: number }).port;
   const egressSocket = join(sockets, "egress.sock"), harnessSocket = join(sockets, "harness.sock");
   const egress = await openBoxEgressGate({ socketPath: egressSocket });
-  const harness = await openHarnessGate({ socketPath: harnessSocket, port: privatePort });
+  const harness = await openHarnessGate({ socketPath: harnessSocket, port: serverPort });
   const skipped: string[] = [];
   let publicTarget: string | null = options.publicTarget === undefined ? "example.com:443" : options.publicTarget;
   if (publicTarget && (await hostConnect(egressSocket, publicTarget)) !== "200") { skipped.push("egress-public-allowed"); publicTarget = null; }
 
   const bridges: BoxBridge[] = [
     { name: "egress", port: BOX_EGRESS_PORT, socket: egressSocket },
-    { name: "harness", port: privatePort, socket: harnessSocket },
+    { name: "harness", port: serverPort, socket: harnessSocket },
     ...(options.broker ? [{ name: "broker", port: options.broker.port, socket: options.broker.socket }] : []),
   ];
   const runner = new BoxRunner({
@@ -98,11 +106,11 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const spec: ProbeSpec = {
     dataDir: data, cwd, botFolder, messagesDb: join(data, "messages.db"), configJson: join(data, "config.json"), serverFiles,
     otherWorkspace, otherTaskWorkspace: otherTask, marker, canaryPid: canary.pid ?? 0, serverPid: process.pid, hostTmpFile,
-    harnessPort: privatePort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
+    harnessPort: serverPort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
     ...(options.broker ? { broker: { port: options.broker.port, token: options.broker.token, provider: options.broker.provider, path: options.broker.path, keyNames: options.broker.keyNames } } : {}),
   };
   const wrapped = runner.wrap({
-    command: process.execPath, args: [BOX_PROBE_SCRIPT], cwd, botId: "probe",
+    command: process.execPath, args: [options.probeScript ?? BOX_PROBE_SCRIPT], cwd, botId: "probe",
     env: {
       PATH: process.env.PATH, HOME: home, LANG: process.env.LANG, TMPDIR: "/tmp",
       [PROBE_SPEC_ENV]: JSON.stringify(spec),
@@ -124,7 +132,7 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
     });
   });
   canary.kill("SIGKILL");
-  await Promise.all([egress.close(), harness.close(), new Promise<void>((resolve) => upstream.close(() => resolve()))]);
+  await Promise.all([egress.close(), harness.close(), new Promise<void>((resolve) => upstream.close(() => resolve())), new Promise<void>((resolve) => privateServer.close(() => resolve()))]);
   rmSync(root, { recursive: true, force: true });
   rmSync(hostTmpFile, { force: true });
   const durationMs = Date.now() - startedAt;

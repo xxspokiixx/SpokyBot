@@ -15,8 +15,8 @@ describe("the in-box bridge command", () => {
     expect(command).toBe("/bin/sh");
     expect(args[0]).toBe("-c");
     const script = args[1]!;
-    expect(script).toContain("'/usr/bin/socat' TCP4-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:'/run/omb/egress.sock' &");
-    expect(script).toContain("'/usr/bin/socat' TCP4-LISTEN:8799,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:'/run/omb/harness.sock' &");
+    expect(script).toContain("'/usr/bin/socat' TCP4-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:'/run/omb/egress.sock' </dev/null >/dev/null 2>&1 &");
+    expect(script).toContain("'/usr/bin/socat' TCP4-LISTEN:8799,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:'/run/omb/harness.sock' </dev/null >/dev/null 2>&1 &");
     expect(script).toContain("TCP4:127.0.0.1:3128,connect-timeout=0.2");
     expect(script.trimEnd().endsWith('exec "$0" "$@"')).toBe(true);
     expect(args.slice(2)).toEqual(["/usr/local/bin/claude", "-p", "it's", "--x=1"]);

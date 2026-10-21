@@ -1,12 +1,12 @@
 // `node dist-server/bot-box/box-check.js [--mutate=bind-data,share-pid] [--public=host:port|none] [--root=DIR]`
 // Runs the box self-check (self-check.ts) on this machine and prints its JSON: what the Admin's `checks: n/n` counts,
 // runnable by hand on a Cloud home or a test machine, with mutations to prove each check has teeth.
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { BOX_BRIDGE_SCRIPT } from "./box.ts";
+import { defaultCodeRoots } from "./box.ts";
 import { detectBox } from "./detect.ts";
 import { BOX_MUTATIONS, type BoxMutation } from "./plan.ts";
 import { runBoxSelfCheck } from "./self-check.ts";
@@ -32,8 +32,13 @@ export async function boxCheckMain(argv: readonly string[], env: Record<string, 
     return 2;
   }
   mkdirSync(root, { recursive: true, mode: 0o700 });
+  // This entry is bundled into its own file beside the bridge and the probe, so they are found next to it, not through
+  // the server root the inlined proxy-paths would compute from here.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sibling = (name: string) => existsSync(join(here, `${name}.ts`)) ? join(here, `${name}.ts`) : join(here, `${name}.js`);
   const result = await runBoxSelfCheck({
-    bwrap: detection.tools.bwrap, bridge: { socat: detection.tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
+    bwrap: detection.tools.bwrap, bridge: { socat: detection.tools.socat, bridgeScript: sibling("box-bridge"), node: process.execPath },
+    probeScript: sibling("box-probe"), codeRoots: [dirname(dirname(here)), ...defaultCodeRoots()],
     root, denyEnv: CHECK_DENY_ENV, mutate, publicTarget,
   });
   process.stdout.write(`${JSON.stringify({ box: detection.box, bridge: detection.tools.socat ? "socat" : "node", mutate: [...mutate], ...result })}\n`);

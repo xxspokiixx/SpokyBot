@@ -97,6 +97,9 @@ export function argvPaths(args: readonly string[]): string[] {
 /** Environment values that name folders the engine writes: its own config and caches. */
 export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "TMPDIR"] as const;
 
+/** Folders the box always has its own copy of, so no setting may put the host's back. */
+const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
+
 export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const mutate = setup.mutate ?? new Set<BoxMutation>();
   const dataDir = resolve(setup.dataDir), home = resolve(setup.home);
@@ -152,7 +155,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   }
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
-    if (value && isAbsolute(value) && !covered(resolve(value))) rw(resolve(value));
+    // A temp folder stays the box's own private one; anything else the engine writes is put back.
+    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) rw(resolve(value));
   }
   for (const path of request.rw ?? []) if (!covered(resolve(path))) rw(resolve(path));
   const readOnly = new Set<string>();
