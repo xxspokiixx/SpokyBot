@@ -217,6 +217,7 @@ export interface FollowupPayload {
   mode?: "chat" | "goal";
   via?: "api" | "call";
   callId?: string;
+  fromApp?: Message["fromApp"];
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
   origin?: WorkOrigin;
@@ -666,6 +667,11 @@ export function optionCardsForTools(tools: readonly string[]): Array<{ threadId:
     .prepare(`SELECT thread_id, id FROM messages WHERE kind = 'options' AND json_extract(json, '$.card.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY rowid`)
     .all(...tools) as Array<{ thread_id: string; id: string }>;
   return rows.map((row) => ({ threadId: row.thread_id, messageId: row.id }));
+}
+
+export function appDocRefs(): string[] {
+  const rows = db().prepare("SELECT DISTINCT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app'").all() as Array<{ doc: unknown }>;
+  return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 
 export function threadsReferencing(fragment: string): string[] {

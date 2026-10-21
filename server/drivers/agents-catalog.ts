@@ -2,6 +2,7 @@
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
+import { APP_TOOL_DEFINITIONS } from "./agents-app-tools.ts";
 import { WIDGET_TOOL_DEFINITIONS } from "./agents-widget-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 
@@ -361,7 +362,7 @@ const TOOL_DEFINITIONS = [
       required: ["path"],
     },
   },
-  ...WIDGET_TOOL_DEFINITIONS,
+  ...WIDGET_TOOL_DEFINITIONS, ...APP_TOOL_DEFINITIONS,
   {
     name: "post_to_room",
     description:
