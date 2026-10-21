@@ -48,8 +48,9 @@ export function pageLendingLine(lending: PageLending): string {
   if (lending.status === "busy") return t("lending.status.busy");
   if (lending.status && lending.status !== "lent" && lending.status !== "starting") return t(lendingProblemKey(lending.status) ?? "lending.status.starting");
   if (lending.status === "starting") return t("lending.status.starting");
-  if (lending.link === "unsupported") return t("lending.internetUnsupported");
-  const what = lentWhat(lending.folders, lending.screen, lending.internet === true);
+  const updating = lending.link === "unsupported";
+  const what = lentWhat(lending.folders, lending.screen, lending.internet === true && !updating);
+  if (updating) return what ? `${lendsLine(what)} ${t("lending.internetUnsupported")}` : t("lending.internetUnsupported");
   return what ? lendsLine(what) : t("lending.status.lent");
 }
 

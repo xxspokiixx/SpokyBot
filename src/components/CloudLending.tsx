@@ -132,8 +132,8 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
   };
   if (!snapshot?.available) return null;
   const status = lendingStatusKey(snapshot, on);
-  const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen, snapshot.state.internet === true) : "";
   const updating = enabled && snapshot.state?.link === "unsupported";
+  const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen, snapshot.state.internet === true && !updating) : "";
   const stopped = on ? null : lendingStoppedLine(snapshot.state);
   const lastUsed = lendingLastUsedLine(snapshot);
   const via = snapshot.state?.via === "access" ? t(snapshot.state.terminal ? "lending.viaAccessTerminal" : "lending.viaAccess") : null;
