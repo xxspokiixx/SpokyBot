@@ -1,5 +1,5 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
-import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTrial, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
@@ -187,7 +187,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         throw Object.assign(new Error("Cloud identity changed."), { status: 401, code: "invalid_token" });
       }
       const access = entitlement(result.entitlement);
-      const machine = parseCloudSummary(result.cloud);
+      const machine = parseCloudSummary(result.cloud), teams = parseCloudTeams(result.teams);
       const purchase = parseCloudPurchase(result.cloud?.purchase);
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
       const hint = access.plan === "pro" ? { ...(access.tier ? { tier: access.tier } : {}), active: access.status === "active" } : null;
@@ -209,7 +209,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       verifiedUntil = Math.min(grant.expiresAt, now() + STEADY_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
-      publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(purchase ? { purchase } : {}),
+      publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
         ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), verifiedAt: now(), verifiedUntil });
       const settingUp = machine?.status === "provisioning" || (access.status === "active" && !machine) || Boolean(purchase);
       const delay = watching() && machine?.status !== "ready" ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : awaitingWake() ? ASLEEP_REFRESH_MS : REFRESH_MS;
@@ -488,6 +488,23 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         throw why ? new Error(why) : error;
       }
       const pairing = parsePairingGrant(result, target.origin, now());
+      if (!pairing) throw new Error("Invalid Cloud pairing response.");
+      return pairing;
+    },
+    /** A one-time code for a team's Cloud, signed by the Admin with this person's membership: main only, for one
+     * navigation. The Admin answers 404 once they are no longer in the team (`gone`), 409 while its Cloud isn't running. */
+    async pairTeam(teamId) {
+      const current = grant, team = value.status === "connected" ? value.teams?.find(entry => entry.id === teamId) ?? null : null;
+      if (!current || !team) throw Object.assign(new Error("You're no longer in this team."), { gone: true });
+      const origin = team.machine?.origin;
+      if (!origin || !CLOUD_MACHINE_CONNECTABLE.includes(team.machine.status)) throw new Error(`${team.name} isn't ready to open yet.`);
+      let result;
+      try { result = await request(`teams/${encodeURIComponent(teamId)}/pairing`, { method: "POST", body: {}, token: current.token }); } catch (error) {
+        if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`You're no longer in ${team.name}.`), { gone: true }); }
+        if (error?.status === 409) throw new Error(`${team.name} isn't running right now.`);
+        throw error;
+      }
+      const pairing = parsePairingGrant(result, origin, now());
       if (!pairing) throw new Error("Invalid Cloud pairing response.");
       return pairing;
     },

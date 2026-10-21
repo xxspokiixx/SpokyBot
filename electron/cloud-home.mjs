@@ -218,6 +218,28 @@ export function savedCloudHomeOrigin(state) {
   return (saved.find((entry) => entry?.home === true) ?? saved.find((entry) => entry?.name === CLOUD_HOME_NAME))?.origin ?? null;
 }
 
+/** The Admin's role words on the wire (owner, admin, member), and the three words the app shows for them. */
+export const CLOUD_TEAM_ROLES = environments.TEAM_ROLES;
+export const teamRoleLabel = environments.teamRoleLabel;
+const TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const MAX_TEAMS = 50;
+/** The teams this account is in, from the verified session only: each with its role and its Cloud as `parseCloudSummary`
+ * reads it (null while the team has no machine). A malformed team is left out, never trusted in part; the same team
+ * twice is read once. */
+export function parseCloudTeams(input) {
+  if (!Array.isArray(input)) return [];
+  const teams = [], seen = new Set();
+  for (const team of input.slice(0, MAX_TEAMS)) {
+    if (!record(team) || typeof team.id !== "string" || !TEAM_ID.test(team.id) || seen.has(team.id) || !CLOUD_TEAM_ROLES.includes(team.role)) continue;
+    const name = typeof team.name === "string" ? team.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    if (!name) continue;
+    const machine = team.machine === null || team.machine === undefined ? null : parseCloudSummary(team.machine);
+    seen.add(team.id);
+    teams.push({ id: team.id, name, role: team.role, machine });
+  }
+  return teams;
+}
+
 export function parsePairingGrant(input, origin, now) {
   if (!input || typeof input !== "object" || input.cloudContractVersion !== 1 || input.origin !== origin) return null;
   if (typeof input.code !== "string" || !CODE.test(input.code)) return null;

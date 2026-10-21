@@ -100,6 +100,13 @@ export declare const CLOUD_SETUP_STEPS: readonly CloudSetupStep[];
 export declare const CLOUD_UNREACHABLE_CAUSES: readonly CloudUnreachableCause[];
 export declare function parseCloudPower(input: unknown): import("./cloud-power.mjs").CloudPower | null;
 export declare function parseCloudSummary(input: unknown): CloudMachine | null;
+export type CloudTeamRole = "owner" | "admin" | "member";
+/** A team this account is in, from the verified session: its Cloud as the Admin describes it, null while it has none. */
+export interface CloudTeam { id: string; name: string; role: CloudTeamRole; machine: CloudMachine | null }
+export declare const CLOUD_TEAM_ROLES: readonly CloudTeamRole[];
+/** owner → Super admin, admin → Admin, member → User. */
+export declare function teamRoleLabel(role: string | null | undefined): "Super admin" | "Admin" | "User";
+export declare function parseCloudTeams(input: unknown): CloudTeam[];
 export declare function cloudUnreachableText(state: unknown, origin?: string | null): string | null;
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];

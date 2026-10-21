@@ -19,6 +19,8 @@ export interface CloudAccountState {
   lastPlan?: { tier?: string; active: boolean };
   /** The person's Cloud home machine, when their plan has one. */
   machine?: import("./cloud-home.mjs").CloudMachine;
+  /** Connected: the teams this account is in, each with its Cloud; absent while it is in none. */
+  teams?: import("./cloud-home.mjs").CloudTeam[];
   /** A payment OMB Cloud received and is still linking to this account. */
   purchase?: import("./cloud-home.mjs").CloudPurchase;
   /** Connected: the free trial on this account's Cloud, when the Admin says (display only). */
@@ -175,6 +177,9 @@ export interface CloudAccountClient {
   wakeHome(): Promise<"awake" | "waking" | null>;
   setWaking(on: boolean): void;
   pairHome(): Promise<import("./cloud-home.mjs").CloudHomeGrant>;
+  /** A one-time code for a team's Cloud, signed by the Admin with this person's membership (POST
+   * /api/cloud/desktop/teams/<id>/pairing). Rejects with `gone: true` once they are no longer in the team. */
+  pairTeam(teamId: string): Promise<import("./cloud-home.mjs").CloudHomeGrant>;
   /** A Cloud that ended and that the Admin still holds, started for its owner's export only. */
   exportHome(): Promise<{ starting: true } | { notHeld: true } | { deleted: true } | { grant: import("./cloud-home.mjs").CloudHomeGrant }>;
   growDisk(sizeGb: number): Promise<{ supported: false } | { supported: true; refused: true } | { supported: true; disk: { gb: number; maxGb: number } }>;

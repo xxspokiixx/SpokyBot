@@ -86,6 +86,7 @@ const bridge = {
   workspaces: {
     state: () => ipcRenderer.invoke("workspaces:state"),
     menu: (options) => ipcRenderer.invoke("workspaces:menu", ...(options?.from === "howto" ? ["howto"] : [])),
+    line: () => ipcRenderer.invoke("workspaces:line"),
   },
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   onCapabilitiesChanged: (cb) => {
