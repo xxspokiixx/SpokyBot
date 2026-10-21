@@ -174,25 +174,58 @@ const DEFS: Def[] = [
 
 const quote = (s: string) => JSON.stringify(s)
 
-function emit(): string {
-  const entries = DEFS.map((def) => {
-    const eyes: Eyes = { ...def.eyes, mouth: def.eyes.mouth ?? true, mouthInk: def.eyes.mouthInk ?? def.eyes.ink, mouthY: def.eyes.mouthY ?? null }
-    const parts = def.parts.map(([field, fill]) => `      { fill: ${quote(fill)}, d: ${quote(toPath(field))} },`)
+interface Baked {
+  id: string
+  name: string
+  paint: Def["paint"]
+  bone: string | null
+  eyes: Eyes
+  clip: string
+  parts: Array<{ fill: Fill; d: string }>
+}
+
+const BAKED: Baked[] = DEFS.map((def) => ({
+  id: def.id,
+  name: def.name,
+  paint: def.paint,
+  bone: def.bone,
+  eyes: { ...def.eyes, mouth: def.eyes.mouth ?? true, mouthInk: def.eyes.mouthInk ?? def.eyes.ink, mouthY: def.eyes.mouthY ?? null },
+  clip: toPath(def.face),
+  parts: def.parts.map(([field, fill]) => ({ fill, d: toPath(field) })),
+}))
+
+/** Long path data on several lines; both phone parsers read newlines as separators. */
+function wrap(d: string, pad: string, width = 100): string {
+  const lines: string[] = []
+  let line = ""
+  for (const token of d.split(" ")) {
+    if (line && line.length + 1 + token.length > width) {
+      lines.push(pad + line)
+      line = token
+    } else line = line ? `${line} ${token}` : token
+  }
+  if (line) lines.push(pad + line)
+  return lines.join("\n")
+}
+
+function emitTs(): string {
+  const entries = BAKED.map((body) => {
+    const parts = body.parts.map((part) => `      { fill: ${quote(part.fill)}, d: ${quote(part.d)} },`)
     return [
-      `  ${def.id}: {`,
-      `    id: ${quote(def.id)},`,
-      `    name: ${quote(def.name)},`,
-      `    paint: ${quote(def.paint)},`,
-      `    bone: ${def.bone ? quote(def.bone) : "null"},`,
-      `    eyes: ${JSON.stringify(eyes).replace(/"(\w+)":/g, "$1: ").replace(/,(?=\w)/g, ", ")},`,
-      `    clip: ${quote(toPath(def.face))},`,
+      `  ${body.id}: {`,
+      `    id: ${quote(body.id)},`,
+      `    name: ${quote(body.name)},`,
+      `    paint: ${quote(body.paint)},`,
+      `    bone: ${body.bone ? quote(body.bone) : "null"},`,
+      `    eyes: ${JSON.stringify(body.eyes).replace(/"(\w+)":/g, "$1: ").replace(/,(?=\w)/g, ", ")},`,
+      `    clip: ${quote(body.clip)},`,
       `    parts: [`,
       ...parts,
       `    ],`,
       `  },`,
     ].join("\n")
   })
-  const ids = DEFS.map((def) => quote(def.id)).join(", ")
+  const ids = BAKED.map((body) => quote(body.id)).join(", ")
   return `/**
  * The Halloween bodies a bot can wear.
  *
@@ -247,6 +280,171 @@ ${entries.join("\n")}
 `
 }
 
+const swiftNumber = (n: number | null) => (n === null ? "nil" : String(n))
+
+function emitSwift(): string {
+  const entries = BAKED.map((body) => {
+    const e = body.eyes
+    const parts = body.parts.map((part) => [
+      `                Part(fill: ${quote(part.fill)}, path: """`,
+      wrap(part.d, "                "),
+      `                """),`,
+    ].join("\n"))
+    return [
+      `        ${quote(body.id)}: Body(`,
+      `            id: ${quote(body.id)},`,
+      `            name: ${quote(body.name)},`,
+      `            paint: ${quote(body.paint)},`,
+      `            bone: ${body.bone ? quote(body.bone) : "nil"},`,
+      `            eyes: Eyes(cx: ${e.cx}, cy: ${e.cy}, dx: ${e.dx}, w: ${e.w}, h: ${e.h}, round: ${e.round}, ink: ${quote(e.ink)}, mouth: ${e.mouth}, mouthInk: ${quote(e.mouthInk)}, mouthY: ${swiftNumber(e.mouthY)}),`,
+      `            clip: """`,
+      wrap(body.clip, "            "),
+      `            """,`,
+      `            parts: [`,
+      ...parts,
+      `            ]`,
+      `        ),`,
+    ].join("\n")
+  })
+  return `// The Halloween bodies a bot can wear — the phone's half of \`shared/halloween-bodies.ts\`.
+//
+// GENERATED FILE — do not hand-edit. Run \`pnpm gen:halloween --swift <file>\` to rebuild it
+// from \`scripts/gen-halloween-bodies.ts\`.
+//
+// Paths are absolute \`M\`, \`C\`, \`Z\` only, in a 240-unit square centred on x = 120, with
+// newlines as separators — what \`MausSilhouette.parse\` reads.
+import CoreGraphics
+
+enum HalloweenBodies {
+    struct Eyes {
+        let cx: CGFloat
+        let cy: CGFloat
+        let dx: CGFloat
+        let w: CGFloat
+        let h: CGFloat
+        let round: CGFloat
+        let ink: String
+        let mouth: Bool
+        let mouthInk: String
+        let mouthY: CGFloat?
+    }
+
+    /// \`fill\` is "body" (the bot's paint), "accent" (the bot's colour) or a literal hex colour.
+    struct Part {
+        let fill: String
+        let path: String
+    }
+
+    struct Body {
+        let id: String
+        let name: String
+        /// "bot", "pale" or "bone".
+        let paint: String
+        let bone: String?
+        let eyes: Eyes
+        let clip: String
+        let parts: [Part]
+    }
+
+    static let order: [String] = [${BAKED.map((body) => quote(body.id)).join(", ")}]
+
+    static let all: [String: Body] = [
+${entries.join("\n")}
+    ]
+
+    static func body(_ id: String?) -> Body? {
+        guard let id else { return nil }
+        return all[id]
+    }
+}
+`
+}
+
+const kotlinFloat = (n: number) => `${n}f`
+
+function emitKotlin(): string {
+  const entries = BAKED.map((body) => {
+    const e = body.eyes
+    const parts = body.parts.map((part) => [
+      `                Part(fill = ${quote(part.fill)}, path = """`,
+      wrap(part.d, "                "),
+      `                """),`,
+    ].join("\n"))
+    return [
+      `        ${quote(body.id)} to Body(`,
+      `            id = ${quote(body.id)},`,
+      `            name = ${quote(body.name)},`,
+      `            paint = ${quote(body.paint)},`,
+      `            bone = ${body.bone ? quote(body.bone) : "null"},`,
+      `            eyes = Eyes(cx = ${kotlinFloat(e.cx)}, cy = ${kotlinFloat(e.cy)}, dx = ${kotlinFloat(e.dx)}, w = ${kotlinFloat(e.w)}, h = ${kotlinFloat(e.h)}, round = ${kotlinFloat(e.round)}, ink = ${quote(e.ink)}, mouth = ${e.mouth}, mouthInk = ${quote(e.mouthInk)}, mouthY = ${e.mouthY === null ? "null" : kotlinFloat(e.mouthY)}),`,
+      `            clip = """`,
+      wrap(body.clip, "            "),
+      `            """,`,
+      `            parts = listOf(`,
+      ...parts,
+      `            ),`,
+      `        ),`,
+    ].join("\n")
+  })
+  return `package com.openmausbot.companion.ui
+
+/**
+ * The Halloween bodies a bot can wear — the Android half of \`shared/halloween-bodies.ts\`.
+ *
+ * GENERATED FILE — do not hand-edit. Run \`pnpm gen:halloween --kotlin <file>\` to rebuild it
+ * from \`scripts/gen-halloween-bodies.ts\`.
+ *
+ * Paths are absolute \`M\`, \`C\`, \`Z\` only, in a 240-unit square centred on x = 120, with
+ * newlines as separators — what [MausSilhouette] parses.
+ */
+internal object HalloweenBodies {
+    data class Eyes(
+        val cx: Float,
+        val cy: Float,
+        val dx: Float,
+        val w: Float,
+        val h: Float,
+        val round: Float,
+        val ink: String,
+        val mouth: Boolean,
+        val mouthInk: String,
+        val mouthY: Float?,
+    )
+
+    /** [fill] is "body" (the bot's paint), "accent" (the bot's colour) or a literal hex colour. */
+    data class Part(val fill: String, val path: String)
+
+    data class Body(
+        val id: String,
+        val name: String,
+        /** "bot", "pale" or "bone". */
+        val paint: String,
+        val bone: String?,
+        val eyes: Eyes,
+        val clip: String,
+        val parts: List<Part>,
+    )
+
+    val order: List<String> = listOf(${BAKED.map((body) => quote(body.id)).join(", ")})
+
+    val all: Map<String, Body> = mapOf(
+${entries.join("\n")}
+    )
+
+    fun body(id: String?): Body? = id?.let { all[it] }
+}
+`
+}
+
 const out = fileURLToPath(new URL("../shared/halloween-bodies.ts", import.meta.url))
-writeFileSync(out, emit())
-console.log(`wrote ${DEFS.length} Halloween bodies to shared/halloween-bodies.ts`)
+writeFileSync(out, emitTs())
+console.log(`wrote ${BAKED.length} Halloween bodies to shared/halloween-bodies.ts`)
+
+for (const [flag, emitNative] of [["--swift", emitSwift], ["--kotlin", emitKotlin]] as const) {
+  const at = process.argv.indexOf(flag)
+  if (at === -1) continue
+  const nativeOut = process.argv[at + 1]
+  if (!nativeOut) throw new Error(`${flag} needs an output file`)
+  writeFileSync(nativeOut, emitNative())
+  console.log(`wrote ${nativeOut}`)
+}
