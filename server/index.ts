@@ -609,7 +609,9 @@ import { createUndoRoutes } from "./routes/undo.ts";
 import { createDesktopViewer, desktopViewerUrl } from "./routes/desktop-viewer.ts";
 import { createUpgrades } from "./routes/upgrades.ts";
 import { createBrowserViewerRoutes } from "./routes/browser-viewers.ts";
-import { localDesktopTarget, localVmViewerStatus, viewerTargetId } from "./desktop-viewer-targets.ts";
+import { localDesktopTarget, localVmViewerStatus } from "./desktop-viewer-targets.ts";
+import { viewerTargetId } from "../shared/desktop-viewer.ts";
+import { createComputerPreviews } from "./computer-previews.ts";
 import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.ts";
 import { createAntigravityAccountRoutes } from "./routes/antigravity-accounts.ts";
 import { createConfigRoutes } from "./routes/config.ts";
@@ -6140,7 +6142,7 @@ function vpsThreadEnded(botId: string, threadId: string): void {
   if (!threads.size) activeVpsThreads.delete(botId);
 }
 const boatLifecycleBusyBots = new Set<string>();
-const vpsPreviewRequests = new Map<string, ReturnType<typeof vps.vpsComputerScreenshot>>();
+const computerPreviews = createComputerPreviews();
 const vpsJoinRequests = new Map<string, Promise<void>>();
 const orphanBoatLifecycleBusyIds = new Set<string>();
 const boatInventoryRequestsBusyIds = new Set<string>();
@@ -6466,7 +6468,7 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
   if (managedBoatOwners().some((owner) => owner.inUse)) {
     return `stop active bot work and computer control before changing ${provider === "box" ? "the Boat account" : "the VPS connection"}`;
   }
-  if (boatLifecycleBusyBots.size > 0 || vpsPreviewRequests.size > 0) {
+  if (boatLifecycleBusyBots.size > 0 || computerPreviews.size > 0) {
     return "wait for cloud computer actions to finish before changing provider settings";
   }
   if (provider === "box") {
@@ -6673,7 +6675,7 @@ function claimBotComputerLifecycle(botId: string, allowPreview = false): () => v
   if (boatLifecycleBusyBots.has(botId)) {
     throw Object.assign(new Error("this bot's cloud computer is being changed — wait for it to finish"), { status: 409 });
   }
-  if (!allowPreview && vpsPreviewRequests.has(botId)) {
+  if (!allowPreview && computerPreviews.has(botId)) {
     throw Object.assign(new Error("a screen preview is still refreshing — wait before changing this computer"), { status: 409 });
   }
   boatLifecycleBusyBots.add(botId);
@@ -13168,7 +13170,7 @@ const workspaceBackupAccess = {
     idle: () => !providerFleetReloading && !providerAuthSessions.active && !browserEngineInstall &&
       !routines?.isTicking && !calendarCalls?.isTicking &&
       !localVmImageBusy && !localVmProvisionBusy && !localVmModeChangeBusy &&
-      !localVmLifecycleBusy.size && !boatLifecycleBusyBots.size && !vpsPreviewRequests.size && !orphanBoatLifecycleBusyIds.size &&
+      !localVmLifecycleBusy.size && !boatLifecycleBusyBots.size && !computerPreviews.size && !orphanBoatLifecycleBusyIds.size &&
       !computerProviderConfigTransitions.size &&
       teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
@@ -16704,27 +16706,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (m[2] === "provision" || m[2] === "remove") return json(res, 409, { error: "Manage this shared computer from the Team map" });
         if (m[2] === "exec") return json(res, 409, { error: "Use the bot's scoped computer tools for this shared desktop" });
         if (m[2] === "join" && !computerControl.snapshot(key).held) return json(res, 409, { error: "Take control before opening this shared desktop" });
-        const release = m[2] === "sleep" ? claimTeamComputerLifecycle(teamComputer) : claimBotComputerLifecycle(key);
+        if (m[2] === "screenshot") {
+          res.setHeader("cache-control", "private, no-store");
+          try { return json(res, 200, await computerPreviews.capture(key, () => boat.screenshotBoat(cfg, key))); }
+          finally { cloudComputerPower.used(key); }
+        }
+        const release = m[2] === "sleep" ? claimTeamComputerLifecycle(teamComputer) : claimBotComputerLifecycle(key, true);
         try {
           if (m[2] === "join") return json(res, 200, await boat.joinReadyBoat(cfg, key));
-          if (m[2] === "screenshot") {
-            res.setHeader("cache-control", "private, no-store");
-            return json(res, 200, await boat.screenshotBoat(cfg, key));
-          }
           return json(res, 200, await boat.sleepBoat(cfg, key));
         } finally { release(); if (m[2] !== "sleep") cloudComputerPower.used(key); }
       }
       if (bot.cloudBackend === "vps") {
         if (m[2] === "screenshot") {
-          let preview = vpsPreviewRequests.get(botId);
-          if (!preview) {
-            preview = vps.vpsComputerScreenshot(vpsConfigForBot(cfg, bot), botId).finally(() => {
-              vpsPreviewRequests.delete(botId);
-            });
-            vpsPreviewRequests.set(botId, preview);
-          }
           res.setHeader("cache-control", "private, no-store");
-          return json(res, 200, await preview);
+          return json(res, 200, await computerPreviews.capture(botId, () => vps.vpsComputerScreenshot(vpsConfigForBot(cfg, bot), botId)));
         }
         const releaseComputerLifecycle = claimBotComputerLifecycle(botId, m[2] === "join");
         // Settles only after the lane is released, so a waiter can claim it.
@@ -16780,7 +16776,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (m[2] === "remove") {
         return json(res, 409, { error: "a cloud computer has no container to remove — put it to sleep instead" });
       }
-      const releaseComputerLifecycle = claimBotComputerLifecycle(botId);
+      if (m[2] === "screenshot") {
+        res.setHeader("cache-control", "private, no-store");
+        try { return json(res, 200, await computerPreviews.capture(botId, () => boat.screenshotBoat(cfg, botId))); }
+        finally { cloudComputerPower.used(botId); }
+      }
+      const releaseComputerLifecycle = claimBotComputerLifecycle(botId, m[2] === "join");
       try {
         switch (m[2]) {
           case "provision":
@@ -16791,9 +16792,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, 200, await boat.sleepBoat(cfg, botId));
           case "exec":
             return json(res, 200, await boat.execOnBoat(cfg, botId, boatCommand ?? ""));
-          case "screenshot":
-            res.setHeader("cache-control", "private, no-store");
-            return json(res, 200, await boat.screenshotBoat(cfg, botId));
         }
       } finally {
         releaseComputerLifecycle();
