@@ -15,7 +15,7 @@ import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
-import { cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
+import { captureCliTree, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
 import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
 
@@ -918,6 +918,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // "codex exited null (signal SIGTERM) before turn/completed".
       let interruptRequested = false;
       const stop = async () => {
+        captureCliTree(child);
         stopRequested = true;
         stopSignal.abort();
         if (!state.settled && !interruptRequested && codexThreadId && codexTurnId &&
