@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
 import type { CloudAccountBridge, CloudAccountState, CloudPlanBridge, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudMachine, CloudTrial } from "../../electron/cloud-home.mjs";
-import { CloudMoveSettings } from "./CloudMove";
-import { CloudSendCard } from "./CloudSendCard";
 import { cloudFilesBridge } from "@/lib/cloud-files";
 import { activeLocale, t } from "@/lib/i18n";
 import { buyOfferAllowed, cloudCreditLine, cloudPlanLabel, cloudPlanLine, cloudPlanView, cloudTrialView, moneyBackLine, offerTrialDays, trialRunning, type CloudPlanView } from "@/lib/cloud-plan";
@@ -159,8 +156,8 @@ export function CloudPlanOnCloud({ bridge, onConnectPhone }: { bridge: CloudPlan
       {plan?.status === "signin" && <p className="text-[13px] text-ink-secondary">{t("cloudAccount.onCloudSignIn")}</p>}
       {trialLines(plan?.trial, plan?.credit)}
       <div className="flex flex-wrap gap-2">
+        {plan?.status === "signin" && bridge.signIn && <button type="button" className="ui-button ui-button-primary" onClick={() => act(() => bridge.signIn!())}>{t("cloudAccount.signInAgain")}</button>}
         <button type="button" className="ui-button" onClick={() => act(() => bridge.manage())}>{(plan?.trial && cloudTrialView(plan.trial).action?.label) || t("cloudAccount.manageInBrowser")}</button>
-        <button type="button" className="ui-button" onClick={() => act(() => bridge.useThisComputer())}>{t("cloudAccount.useThisComputer")}</button>
         {plan && onConnectPhone && <button type="button" className="ui-button" onClick={onConnectPhone}>{t("cloudPhone.action")}</button>}
       </div>
       {failed && <p role="alert" className="text-[13px] text-danger">{t("cloudAccount.actionFailed")}</p>}
@@ -178,8 +175,6 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(false), [confirm, setConfirm] = useState(false);
   const [homeFailed, setHomeFailed] = useState(false), [phoneFailed, setPhoneFailed] = useState(false);
-  // Copy this computer's bots and chats over My Cloud's: rare, and it replaces everything there, so it waits behind a link.
-  const [startOver, setStartOver] = useState(false);
   const generation = useRef(0), revision = useRef(0), pending = useRef(false);
   const link = useRef({ request: 0, arrived: false, connected: false });
   useEffect(() => {
@@ -248,7 +243,6 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
   </div>;
   return <>
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudAccount.optional")}</p>
-    {machine?.status === "ready" && <CloudSendCard />}
     <Card title={t("settings.section.cloudAccount")} subtitle={t("cloudAccount.separate")}>
       {account?.staging && <StagingMark className="mb-3" />}
       {(!account || view.kind === "unknown") && <p role="status" className="text-[13px] text-ink-secondary">{t("cloudAccount.loading")}</p>}
@@ -296,10 +290,5 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
     </Card>
     {machine && cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: connectHome, lending: bridge.lending, trial: Boolean(account?.trial), waking: account?.waking === true })}
     {signed && view.kind === "paid" && cloudPhoneCard({ ready: machine?.status === "ready", busy, failed: phoneFailed, onUse: openOnPhone })}
-    {machine?.status === "ready" && (startOver
-      ? <CloudMoveSettings destination="cloud" bring={false} onClose={() => setStartOver(false)} />
-      : <button type="button" data-cloud-start-over className="inline-flex w-fit items-center gap-1 text-[12.5px] text-ink-secondary hover:text-ink" onClick={() => setStartOver(true)}>
-        <ChevronRight size={13} aria-hidden="true" />{t("cloudMove.more")}
-      </button>)}
   </>;
 }

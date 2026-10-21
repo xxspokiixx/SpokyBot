@@ -384,3 +384,70 @@ test("parseEnvironments dedups local dirs on the same normalized key", () => {
     { id: "l2", kind: "local", name: "B", dataDir: "/Users/me/.openmausbot-b" },
   ]).length, 2);
 });
+
+test("once My Cloud is home the switcher lists whole places only: My Cloud first, then each saved server, never this computer", () => {
+  const home = "https://omb-t-1.fly.dev";
+  const state = { environments: [{ id: "o", kind: "remote", name: "Office", origin: "https://office.example.test" }, { id: "c", kind: "remote", name: "My Cloud", origin: home },
+    { id: "l", kind: "local", name: "Lab", dataDir: "/lab" }], activeId: "c" };
+  const switched = [], forgot = [];
+  const items = env.workspaceMenuTemplate(state, { onSwitch: (id) => switched.push(id), onConnect() {}, onForget: (id) => forgot.push(id), onAddCloud() {}, places: "x", copyToCloud: { label: "Send" }, homeOrigin: home });
+  assert.deepEqual(items.map((item) => [item.label, item.checked]), [["My Cloud", true], ["Office", false]]);
+  items[1].click();
+  assert.deepEqual(switched, ["o"]);
+  const away = env.workspaceMenuTemplate({ ...state, activeId: "o" }, { onSwitch() {}, onConnect() {}, onForget: (id) => forgot.push(id), homeOrigin: home });
+  assert.deepEqual(away.map((item) => item.label ?? item.type), ["My Cloud", "Office", "separator", "Forget “Office”…"]);
+  away.at(-1).click();
+  assert.deepEqual(forgot, ["o"]);
+  assert.equal(env.otherPlaces(state, home), 1);
+  assert.equal(env.otherPlaces({ ...state, environments: state.environments.filter((entry) => entry.id !== "o") }, home), 0, "My Cloud alone: no switcher");
+  assert.equal(env.workspaceWindowTitle(state, null, home), "OpenMausBot — My Cloud", "with another place besides, the window names the one it shows");
+  assert.equal(env.workspaceWindowTitle({ ...state, environments: state.environments.filter((entry) => entry.id !== "o") }, null, home), "OpenMausBot", "the window onto home alone is simply the app");
+  assert.equal(env.workspaceWindowTitle({ ...state, activeId: "o" }, null, home), "OpenMausBot — Hosted: Office (office.example.test)");
+});
+
+const TEAM = "https://omb-u-acme.fly.dev";
+const acme = (extra = {}) => ({ id: "team-acme", name: "Acme", role: "admin", machine: { status: "ready", origin: TEAM }, ...extra });
+
+test("the switcher lists My Cloud first, then each team from the session with this person's role, then saved servers; a team has no Forget", () => {
+  const home = "https://omb-t-1.fly.dev";
+  const state = { environments: [{ id: "o", kind: "remote", name: "Office", origin: "https://office.example.test" }, { id: "t", kind: "remote", name: "Acme", origin: TEAM, team: { id: "team-acme", role: "owner" } },
+    { id: "c", kind: "remote", name: "My Cloud", origin: home, home: true }], activeId: "t" };
+  const items = env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: home });
+  assert.deepEqual(items.map((item) => [item.label, item.sublabel, item.checked]), [["My Cloud", "omb-t-1.fly.dev", false], ["Acme", "Super admin", true], ["Office", "office.example.test", false]]);
+  assert.deepEqual(env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: home, foldSublabels: true }).map((item) => item.label), ["My Cloud", "Acme · Super admin", "Office"]);
+  for (const [role, label] of [["owner", "Super admin"], ["admin", "Admin"], ["member", "User"], ["other", "User"]]) assert.equal(env.teamRoleLabel(role), label, role);
+  assert.equal(env.workspaceWindowTitle(state, null, home), "OpenMausBot — Acme");
+  assert.deepEqual(env.workspaceSummary(state), { local: false, name: "Acme", origin: TEAM, role: "Super admin" });
+  // Before the move (or a Team Owner, whose home is this computer): This computer, then each team with its role (no Forget), then servers as saved.
+  const before = env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {} });
+  assert.deepEqual(before.filter((item) => item.type === "radio").map((item) => [item.label, item.sublabel]), [["This computer", undefined], ["Acme", "Super admin"], ["Office", "office.example.test"], ["My Cloud", "omb-t-1.fly.dev"]]);
+  assert.equal(before.some((item) => item.id === "workspace-forget"), false, "a team is the Admin's to remove");
+  assert.equal(env.otherPlaces(state, home), 2);
+  const serialized = env.parseEnvironments(env.serializeEnvironments(state));
+  assert.deepEqual(serialized.environments.find((entry) => entry.id === "t").team, { id: "team-acme", role: "owner" }, "a team entry survives the file");
+  assert.equal(env.parseEnvironments({ version: 2, environments: [{ id: "x", kind: "remote", name: "X", origin: TEAM, team: { id: "team-acme", role: "god" } }], activeId: "x" }).environments[0].team, undefined, "an unknown role is no team");
+  assert.equal(env.parseEnvironments({ version: 2, environments: [{ id: "x", kind: "remote", name: "X", origin: TEAM, home: true, team: { id: "team-acme", role: "admin" } }], activeId: "x" }).environments[0].team, undefined, "My Cloud's entry is never a team's");
+});
+
+test("the session's teams become saved places, named and roled as the Admin says; one it no longer lists is gone, with its name, and the window falls back to My Cloud", () => {
+  const home = "https://omb-t-1.fly.dev";
+  let ids = 0;
+  const makeId = () => `id-${++ids}`;
+  const base = { environments: [{ id: "c", kind: "remote", name: "My Cloud", origin: home, home: true }, { id: "o", kind: "remote", name: "Office", origin: "https://office.example.test" }], activeId: "c" };
+  const joined = env.reconcileTeams(base, [acme(), { id: "team-none", name: "No machine yet", role: "member", machine: null }, { id: "bad", name: "", role: "member", machine: { status: "ready", origin: "https://x.example" } }], makeId, home);
+  assert.deepEqual(joined.left, []);
+  assert.deepEqual(joined.state.environments.map((entry) => [entry.name, entry.team ?? null]), [["My Cloud", null], ["Office", null], ["Acme", { id: "team-acme", role: "admin" }]], "only a team with a Cloud to open is a place; a malformed one is left out");
+  assert.equal(joined.state.activeId, "c");
+  assert.equal(env.reconcileTeams(joined.state, [acme()], makeId, home).state, joined.state, "nothing changed: the same state");
+  const renamed = env.reconcileTeams(joined.state, [acme({ name: " Acme  Inc ", role: "owner" })], makeId, home).state;
+  assert.deepEqual(renamed.environments.at(-1), { id: "id-1", kind: "remote", origin: TEAM, name: "Acme Inc", team: { id: "team-acme", role: "owner" } }, "the name and role follow the Admin");
+  const showing = { ...joined.state, activeId: "id-1" };
+  const removed = env.reconcileTeams(showing, [], makeId, home);
+  assert.deepEqual(removed.left, ["Acme"]);
+  assert.deepEqual(removed.state.environments.map((entry) => entry.id), ["c", "o"]);
+  assert.equal(removed.state.activeId, "c", "the window shown Acme: My Cloud again");
+  assert.equal(env.reconcileTeams({ ...showing, environments: showing.environments.filter((entry) => entry.id !== "c") }, [], makeId, home).state.activeId, env.LOCAL_ID, "without My Cloud: this computer");
+  assert.equal(env.reconcileTeams(showing, null, makeId, home).state, showing, "no word from the Admin changes nothing");
+  const saved = { environments: [{ id: "s", kind: "remote", name: "Acme (saved by hand)", origin: TEAM }], activeId: "s" };
+  assert.deepEqual(env.reconcileTeams(saved, [acme()], makeId, home).state.environments, [{ id: "s", kind: "remote", name: "Acme", origin: TEAM, team: { id: "team-acme", role: "admin" } }], "a server saved by hand at the team's address becomes the team's entry");
+});

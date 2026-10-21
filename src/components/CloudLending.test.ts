@@ -13,7 +13,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 import { CloudLending, lendingFailureKey, lendingStatusKey, lendingStoppedLine, lendingTitle, lentWhat, thisDevice } from "./CloudLending";
 
-type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean; "data-lending-more"?: boolean }>;
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean; "data-lending-more"?: boolean; "data-lending-terminal-choice"?: boolean; "data-lending-internet-choice"?: boolean; }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 let bridge: CloudLendingBridge;
 function render() { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudLending({ bridge }); return tree; }
@@ -200,7 +200,6 @@ it("the words that name other controls name them as the person sees them, in eve
     ["lending.explain", ["lending.more"]],
     ["lending.cloudSide.empty", ["lending.title.computer", "settings.title"]],
     ["computer.worksOnHintCloudHome", ["lending.title.computer", "settings.title"]],
-    ["cloudMove.leftBehindLend", ["lending.title.computer", "settings.title"]],
     ["browser.passkey.lendPc", ["lending.title.pc", "settings.title"]],
   ];
   const unseen = localeChoices.flatMap(({ code }) => {
@@ -211,4 +210,58 @@ it("the words that name other controls name them as the person sees them, in eve
   });
   setLocale("en");
   expect(unseen).toEqual([]);
+});
+
+const terminalBox = () => render().nodes.find(node => node.props["data-lending-terminal-choice"])!;
+const withConfirm = (answer: boolean) => { const confirm = vi.fn().mockResolvedValue(answer); vi.stubGlobal("window", { confirm: vi.fn(), ogb: { confirm } }); return confirm; };
+
+it("the terminal is a choice of its own, off by default, that asks before it turns on and is saved only when confirmed", async () => {
+  await ready(lent);
+  more();
+  const html = render().html;
+  expect(html).toContain("Terminal");
+  expect(html).toContain("run any command on this computer as you");
+  expect(terminalBox().props.checked).toBe(false);
+  // Declined: nothing is saved and the box stays unticked.
+  const declined = withConfirm(false);
+  terminalBox().props.onChange!({ target: { checked: true } }); await flush();
+  expect(declined).toHaveBeenCalledOnce();
+  expect(bridge.save).not.toHaveBeenCalled();
+  expect(terminalBox().props.checked).toBe(false);
+  // Confirmed: the terminal is named in the save, and nothing else changes.
+  const accepted = withConfirm(true);
+  terminalBox().props.onChange!({ target: { checked: true } }); await flush();
+  expect(accepted).toHaveBeenCalledOnce();
+  expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder], screen: false, internet: false, terminal: true });
+});
+
+it("turning the terminal off needs no question, and it is not kept when lending is switched off and on again", async () => {
+  const terminalLent: CloudLendingSnapshot = { ...lent, state: { ...lent.state!, terminal: true } };
+  await ready(terminalLent);
+  more();
+  expect(terminalBox().props.checked).toBe(true);
+  expect(render().html).toContain("on this computer");
+  const confirm = withConfirm(true);
+  terminalBox().props.onChange!({ target: { checked: false } }); await flush();
+  expect(confirm).not.toHaveBeenCalled();
+  expect(bridge.save).toHaveBeenLastCalledWith({ folders: [folder], screen: false, internet: false });
+  // Off, then on: the terminal must be ticked again.
+  vi.mocked(bridge.save).mockClear();
+  await ready({ ...off, state: { ...off.state!, folders: [folder], terminal: true } });
+  toggle().props.onClick!(); await flush();
+  expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder], screen: false, internet: false });
+});
+
+it("a lent terminal is named in what is lent, in the same words as the Cloud's list", () => {
+  expect(lentWhat([], false, false, true)).toBe("terminal");
+  expect(lentWhat([{ name: "Plans", write: true }], true, true, true)).toBe("the internet connection, Plans (can edit), apps and screen, and terminal");
+});
+
+it("a terminal lent through Computer access is not carried into what is chosen here: the box starts unticked and a change saves without it", async () => {
+  await ready({ ...lent, state: { ...lent.state!, via: "access", terminal: true } });
+  more();
+  expect(render().html).toContain("terminal included");
+  expect(terminalBox().props.checked).toBe(false);
+  render().nodes.find(node => node.props["data-lending-internet-choice"])!.props.onChange!({ target: { checked: true } }); await flush();
+  expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder], screen: false, internet: true });
 });

@@ -178,7 +178,6 @@ export function BotSettingsDialog({ bot, overlay = false }: {
             bot={bot}
             derived={derived}
             headerClassName={padClass}
-            slackUrl={slackUrl}
             linkedSection={linkedSection}
             onClose={() => dispatch({ type: "toggleSettings", open: false })}
           />

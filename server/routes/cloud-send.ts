@@ -35,6 +35,8 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   connectionFingerprints?(nonce: string): Record<string, string>;
   /** What only a move carries: automations, skill extras and bot fields, memory, and bot files. */
   move?: MoveKindsDeps & Omit<MoveMemoryDeps, "bot" | "owner">;
+  /** A team's server: nothing of one person's computer moves in, and every send or move route answers this. */
+  refusal?: string;
 }
 
 export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
@@ -59,6 +61,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
   const move = deps.move;
   return async (ctx) => {
     const { req, res, path, method, url, json, readBody } = ctx;
+    if (deps.refusal && (path === "/api/cloud-send" || path.startsWith("/api/cloud-send/"))) { req.resume(); return json(res, 403, { error: deps.refusal }); }
     if (deps.chats && await cloudSendChatsRoute(deps.chats, ctx)) return;
     if (move && await moveKindsRoute(move, ctx)) return;
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;

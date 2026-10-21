@@ -36,6 +36,7 @@ export interface CloudLendingState {
   error?: string;
   /** Lent through Settings → Servers → Computer access rather than this switch; that grant may include the terminal. */
   via?: "access";
+  /** Commands may be run on this computer: ticked in Settings (only while lent), or part of a Computer access grant. */
   terminal?: boolean;
   /** Why and when lending last stopped, kept across restarts: "you" (the switch or Stop lending), or what stopped it. */
   stopped?: { reason: string; at: number };
@@ -51,7 +52,7 @@ export interface CloudLendingSnapshot {
 export interface CloudLendingBridge {
   state(): Promise<CloudLendingSnapshot>;
   chooseFolder(): Promise<SharedFolder | null>;
-  save(input: { folders: SharedFolder[]; screen: boolean; internet?: boolean }): Promise<CloudLendingSnapshot>;
+  save(input: { folders: SharedFolder[]; screen: boolean; internet?: boolean; terminal?: boolean }): Promise<CloudLendingSnapshot>;
   stop(): Promise<CloudLendingSnapshot>;
 }
 export type CloudLendingVerdict = { allow: true } | { pause: string } | { stop: "signed-out" | "account-changed" | "machine-changed" };
@@ -98,7 +99,7 @@ export function createComputerSharing(options: {
   forget(env: Workspace): void;
   cloudState(env: Workspace | null | undefined): CloudLendingState;
   lendingToCloud(): boolean;
-  saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean; internet?: boolean }): Promise<CloudLendingState>;
+  saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean; internet?: boolean; terminal?: boolean }): Promise<CloudLendingState>;
   cloudChanged(): void;
   start(options?: { maintainer?: boolean }): void;
   close(): void;

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { Surface } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
+import { parseMemberClaim, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
 
 /** Any of these switches the server into Cloud home mode; then all are required. */
@@ -31,7 +32,13 @@ export const CLOUD_PAIRING_NONCE_MS = 10 * 60_000;
 const MAX_NONCES = 10_000;
 export const CLOUD_HOME_MARKER = ".omb-cloud-home.json";
 
+export type CloudHomeRole = "home" | "team";
+
 export interface CloudHomeConfig {
+  /** `home`: one person's My Cloud. `team`: a Team Cloud several people use (docs/team-cloud.md). */
+  role: CloudHomeRole;
+  /** The team this machine is the home of; null on a My Cloud. */
+  team: CloudTeam | null;
   machineId: string;
   adminOrigin: string;
   publicOrigin: string;
@@ -64,7 +71,9 @@ export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): Cl
   if (!cloudHomeConfigured(env)) return null;
   if (env.OMB_DESKTOP_PARENT === "1") invalid("the desktop app cannot run as a Cloud home machine");
   if (hostedWorkspaceConfigured(env)) invalid("a Cloud home is not a hosted team workspace; remove OMB_ADMIN_URL, OMB_ADMIN_WORKSPACE and OMB_ADMIN_MEMBERSHIP");
-  if (env.OMB_CLOUD_ROLE !== "home") invalid('OMB_CLOUD_ROLE must be "home"; this image runs the home machine');
+  const role = env.OMB_CLOUD_ROLE;
+  if (role !== "home" && role !== "team") invalid('OMB_CLOUD_ROLE must be "home" or "team"; this image runs the home machine');
+  const team = role === "team" ? cloudTeamConfiguration(env) : null;
   const machineId = env.OMB_CLOUD_MACHINE_ID ?? "";
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/.test(machineId)) invalid("OMB_CLOUD_MACHINE_ID must be the Admin's machine id (letters, digits, dashes)");
   const adminOrigin = exactHttpsOrigin(env.OMB_CLOUD_ADMIN_URL, "OMB_CLOUD_ADMIN_URL");
@@ -74,7 +83,20 @@ export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): Cl
   const warnings: string[] = [];
   const ignored = CLOUD_IGNORED_KEYS.filter((key) => env[key] !== undefined);
   if (ignored.length) warnings.push(`ignoring ${ignored.join(", ")}: Cloud Pro includes no AI; people sign in with their own Claude or ChatGPT account, or an API key`);
-  return { machineId, adminOrigin, publicOrigin, bootstrapSecret, warnings };
+  return { role, team, machineId, adminOrigin, publicOrigin, bootstrapSecret, warnings };
+}
+
+const TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+// oxlint-disable-next-line no-control-regex
+const TEAM_NAME = /^[^\x00-\x1f\x7f]{1,80}$/;
+
+/** A Team Cloud boots with the Admin's team id and the team's name, and answers by that name. */
+function cloudTeamConfiguration(env: NodeJS.ProcessEnv): CloudTeam {
+  const id = env.OMB_CLOUD_TEAM_ID ?? "";
+  if (!TEAM_ID.test(id)) invalid("OMB_CLOUD_TEAM_ID must be the Admin's team id (letters, digits, dashes)");
+  const name = (env.OMB_CLOUD_TEAM_NAME ?? "").trim();
+  if (!TEAM_NAME.test(name)) invalid("OMB_CLOUD_TEAM_NAME must be the team's name (1 to 80 characters)");
+  return { id, name };
 }
 
 export { CLOUD_HOME_SECRET_KEYS, CLOUD_SECRETS_FD_ENV, cloudHomeSecrets, takeCloudSecrets, withoutCloudSecrets } from "./cloud-secrets.ts";
@@ -146,6 +168,8 @@ type PairingSessions = Pick<SessionRegistry, "openPairing" | "attemptAllowed" | 
 export function createCloudPairing(options: {
   secret: string;
   sessions: PairingSessions;
+  /** The team this machine serves: then every pairing body must carry the Admin's `member` claim. */
+  team?: CloudTeam | null;
   now?: () => number;
 }) {
   const { sessions } = options;
@@ -162,7 +186,12 @@ export function createCloudPairing(options: {
       let parsed: unknown;
       try { parsed = input.body.length ? JSON.parse(input.body.toString("utf8")) : {}; } catch { return { status: 400, body: { error: "invalid_body" } }; }
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { status: 400, body: { error: "invalid_body" } };
-      const { label, ttlSeconds, purpose, owner } = parsed as { label?: unknown; ttlSeconds?: unknown; purpose?: unknown; owner?: unknown };
+      const { label, ttlSeconds, purpose, owner, team: claimedTeam, member: claimedMember } = parsed as { label?: unknown; ttlSeconds?: unknown; purpose?: unknown; owner?: unknown; team?: unknown; member?: unknown };
+      // A My Cloud is one person's: a team claim has no meaning there and is refused rather than ignored.
+      if (!options.team && (claimedTeam !== undefined || claimedMember !== undefined)) return { status: 400, body: { error: "not_a_team" } };
+      const claim = options.team ? parseMemberClaim(parsed as Record<string, unknown>, options.team) : null;
+      if (claim && !claim.ok) return { status: 400, body: { error: claim.error } };
+      const member = claim?.ok ? claim.member : null;
       // oxlint-disable-next-line no-control-regex
       if (label !== undefined && (typeof label !== "string" || label.length > 80 || /[\x00-\x1f\x7f]/.test(label))) return { status: 400, body: { error: "invalid_label" } };
       if (ttlSeconds !== undefined && (!Number.isSafeInteger(ttlSeconds) || (ttlSeconds as number) < 1)) return { status: 400, body: { error: "invalid_ttl" } };
@@ -174,11 +203,12 @@ export function createCloudPairing(options: {
       }
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
       const opened = sessions.openPairing({
-        scopes: ["admin", "client"],
+        scopes: member ? teamRoleScopes(member.role) : ["admin", "client"],
         label: typeof label === "string" && label.trim() ? label.trim() : "MausBot Cloud",
         ttlMs: ttl * 1000,
         browser,
         ...(browser ? { owner: owner as string } : {}),
+        ...(member ? { member } : {}),
       });
       // Saying `purpose` back tells the Admin this machine made a browser sign-in; an older machine ignores it.
       if (browser) return { status: 200, body: { credential: opened.credential, expiresAt: opened.expiresAt, purpose: "browser" } };

@@ -37,7 +37,6 @@ const VAULT_ID = /^[\w-]{1,128}$/u;
 const CHAT_REASONS = new Set(["button", "my-cloud", "menu", "move"]);
 /** Bring newer chats' copy of the whole workspace, for a Cloud too old to take chats by row: never a move, which such a
  * Cloud refuses. */
-const BRING_REASONS = new Set(["button", "my-cloud", "menu"]);
 const OUTDATED_FOR_MOVE = "My Cloud is updating. Your bots move there by themselves when it's done.";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -103,7 +102,8 @@ const addCounts = (total, sent) => countsOf({ ...Object.fromEntries(COUNTED.map(
   chats: { conversations: total.chats.conversations + (sent.chats?.conversations ?? 0), messages: total.chats.messages + (sent.chats?.messages ?? 0) } });
 
 /** The state main keeps in its own folder: per Cloud what was sent, what the person kept here, the bots a send made
- * there whose fields still wait to be recorded (`created`), the sign-ins My Cloud took that this computer still holds
+ * there whose fields still wait to be recorded (`created`), the bots a send asked My Cloud to make and has not heard back
+ * about (`creating`), the sign-ins My Cloud took that this computer still holds
  * (`release`), the bot files a move put there (`files`, path to sha256), and whether each automation a move carried was
  * on here (`on`). */
 export function parseSendState(value) {
@@ -121,6 +121,7 @@ export function parseSendState(value) {
         chats: record(entry.chats) ? Object.fromEntries(Object.entries(entry.chats).filter(([threadId, cursor]) => /^[\w-]{1,200}$/u.test(threadId)
           && (cursor === "removed" || (record(cursor) && Number.isSafeInteger(cursor.after) && typeof cursor.id === "string")))) : {},
         created: record(entry.created) ? Object.fromEntries(Object.entries(entry.created).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
+        creating: record(entry.creating) ? Object.fromEntries(Object.entries(entry.creating).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
         release: Array.isArray(entry.release) ? entry.release.filter((held) => record(held) && typeof held.id === "string" && typeof held.digest === "string").slice(0, 200) : [],
         files: record(entry.files) ? Object.fromEntries(Object.entries(entry.files).filter(([path, sha]) => typeof sha === "string" && /^[a-f0-9]{64}$/u.test(sha) && path.length <= 4096)) : {},
         on: record(entry.on) ? Object.fromEntries(Object.entries(entry.on).filter(([key, on]) => /^(?:routine|call|webhook|app-event):[\w-]{1,128}$/u.test(key) && typeof on === "boolean")) : {},
@@ -182,7 +183,6 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  *       upload(route: string, bytes: Uint8Array, type: string): Promise<{ status: number, ok: boolean, body: any }>, close(): Promise<void> }>,
  *   },
  *   handoff: (what: { kind: string, [key: string]: unknown }) => Promise<any>,
- *   bringChats?: () => Promise<{ conversations: number, messages: number }>,
  *   store: { read(): unknown, write(value: unknown): void },
  *   onChange?: (snapshot: unknown) => void,
  *   now?: () => number,
@@ -192,14 +192,14 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  * move waits for My Cloud to run the engines whose keys it just took. `local(route, { method })`: a change on this
  * computer's server (an app event My Cloud now collects). `space`: My Cloud's plan disk and the Admin's grow.
  */
-export function createCloudSend({ local, cloud, handoff, bringChats = null, store, onChange = () => {}, now = Date.now, engineWaitMs, space }) {
+export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
   let running = null, progress = null;
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
   function persist() { try { store.write(saved); } catch {} }
-  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, release: [], files: {}, on: {} });
+  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, creating: {}, release: [], files: {}, on: {} });
   /** What a move ignores of what the person kept here: everything goes but what was removed on My Cloud. */
   const removedOnly = (off) => Object.fromEntries(Object.entries(off).filter(([, why]) => why === "removed"));
   const connectionLocal = { json: (route) => localJson(route), handoff: (what) => handoff(what) };
@@ -264,6 +264,17 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     let changed = false;
     for (const [key, parts] of Object.entries(planned.baseline)) { kept.sent[key] = { ...kept.sent[key], ...parts }; changed = true; }
     for (const key of planned.removed) { kept.off[key] = "removed"; delete kept.sent[key]; delete kept.created[key]; changed = true; }
+    if (everything) {
+      // A move has nobody to ask: a part both sides hold otherwise is My Cloud's (§2.2), and recorded as settled, so the
+      // move's check (manifestGaps) agrees with this plan instead of calling it missing on every pass.
+      const here = new Map((mine?.items ?? []).map((item) => [item.key, item])), there = new Map((theirs?.items ?? []).map((item) => [item.key, item]));
+      for (const row of planned.rows) {
+        for (const part of row.differs ?? []) {
+          kept.sent[row.key] = { ...kept.sent[row.key], [part]: [here.get(row.key).parts[part], there.get(row.key)?.parts[part] ?? EMPTY] };
+          changed = true;
+        }
+      }
+    }
     if (changed) persist();
     return planned;
   }
@@ -318,14 +329,6 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
     const withChats = !keys && CHAT_REASONS.has(reason);
     const latest = await sendItems(origin, mine, result, { keys, force, job, withChats });
-    // A Cloud too old to take rows: Bring newer chats, after the items' session is signed out, since it opens its own
-    // for as long as the upload takes.
-    if (withChats && !latest.chats && bringChats && BRING_REASONS.has(reason)) {
-      job.chats = true;
-      publish();
-      try { result.chats = await bringChats(); }
-      catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
-    }
     const outcome = { at: now(), reason, result };
     const kept = entry(origin);
     kept.last = outcome;
@@ -360,6 +363,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
         await assertTakesMove(session);
         computer = await moveConnections(origin, session, result, job.final);
       }
+      settleCreating(origin, theirs);
       const planned = plan(origin, mine, theirs, force, { everything: move });
       const wanted = keys ? new Set(keys) : null;
       const rows = pendingRows(planned).filter((row) => !wanted || wanted.has(row.key) || (row.bot && wanted.has(itemKey.bot(row.bot))))
@@ -403,7 +407,11 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       if (move) {
         try { result.conversationSettings = await kinds.moveSettings(ctx); }
         catch (error) { result.failed.push({ key: "conversation-settings", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats' settings could not be added." }); }
-        for (const row of rows.filter((entry) => automations.has(entry.kind))) await goRow(row);
+        const last = rows.filter((entry) => automations.has(entry.kind));
+        for (const row of last) await goRow(row);
+        // The pass's closing plan reads My Cloud as it is now: read before the automations went, it would take each one
+        // just carried for one removed there.
+        if (last.length) return parseSendSummary((await session.call("GET", summaryRoute)).body) ?? latest;
       }
       return latest;
     } finally {
@@ -589,6 +597,20 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     persist();
   }
 
+  /** A bot a send asked My Cloud to make and never heard back about: one My Cloud has is that send's own, so all its
+   * fields go (`created`); one it lacks was never made, and goes as new. */
+  function settleCreating(origin, theirs) {
+    const kept = entry(origin);
+    const waiting = Object.keys(kept.creating ?? {});
+    if (!waiting.length) return;
+    const there = new Set(theirs.items.map((item) => item.key));
+    for (const key of waiting) {
+      if (there.has(key)) { kept.sent[key] ??= {}; kept.created[key] = true; }
+      delete kept.creating[key];
+    }
+    persist();
+  }
+
   const done = (ctx, key, parts = null) => { ctx.sentKeys.add(key); if (parts) ctx.sentParts[key] = parts; };
   /** A bot this send made on My Cloud: its fields go whatever My Cloud's defaults are, until they are recorded, and it
    * counts as sent before, so one removed there before then stays removed. */
@@ -596,6 +618,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     const kept = entry(ctx.origin);
     kept.sent[key] ??= {};
     kept.created[key] = true;
+    delete kept.creating[key];
     persist();
   }
 
@@ -663,6 +686,9 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     if (!bot) throw new CloudSendError("gone", "This bot is no longer on this computer.");
     const model = record(bot.modelSelection) ? pick(bot.modelSelection, ["instanceId", "model", "effort", "variant"]) : null;
     const base = { id: bot.id, threadId: bot.threadId, name: await arrivingName(ctx, bot), useDefaults: false };
+    // Kept before asking: a send cut short while My Cloud makes the bot still knows the bot is its own (settleCreating).
+    entry(ctx.origin).creating[row.key] = true;
+    persist();
     let created = await ctx.session.call("POST", "/api/bots", { ...base, ...(model ? { modelSelection: model, requireAvailableModel: true } : {}) });
     let modelKept = Boolean(model) && created.ok;
     if (!created.ok && model && created.status === 400) {

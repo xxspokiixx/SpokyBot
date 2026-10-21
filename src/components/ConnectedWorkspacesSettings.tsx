@@ -2,13 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Cloud, Laptop, Loader2, Trash2 } from "lucide-react";
 import { Card } from "./SettingsPrimitives";
 import { ComputerSharingSettings } from "./ComputerSharingSettings";
-import { CloudMoveSettings } from "./CloudMove";
 import { lendingTitle } from "./CloudLending";
 import { CloudTile } from "./cloud-buy/parts";
 import { cloudColor } from "@/lib/cloud-look";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
-import { t } from "@/lib/i18n";
 
 type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 
@@ -23,8 +21,6 @@ export function ConnectedWorkspacesSettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [computerId, setComputerId] = useState<string | null>(() => new URLSearchParams(window.location?.search ?? "").get("share-computer"));
-  const copyOffered = Boolean(window.ogb?.cloudMove) && !window.ogb?.remoteClient?.active;
-  const [copyId, setCopyId] = useState<string | null>(() => new URLSearchParams(window.location?.search ?? "").get("copy-to"));
   const [envName, setEnvName] = useState("");
   const [envDir, setEnvDir] = useState("");
   const [envForget, setEnvForget] = useState<string | null>(null);
@@ -39,11 +35,10 @@ export function ConnectedWorkspacesSettings() {
     return () => { generation.current++; };
   }, [bridge]);
   useEffect(() => {
-    const consume = (id?: string | null, panel?: "copy") => {
-      if (id) (panel === "copy" ? setCopyId : setComputerId)(id);
+    const consume = (id?: string | null) => {
+      if (id) setComputerId(id);
       const url = new URL(window.location.href);
       url.searchParams.delete("share-computer");
-      url.searchParams.delete("copy-to");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     };
     consume();
@@ -156,7 +151,6 @@ export function ConnectedWorkspacesSettings() {
               {active ? <span className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary"><Check size={13} />Current</span> :
                 <button type="button" disabled={busy} aria-label={`Switch to ${entry.name}`} onClick={() => void perform(async () => { await bridge.switch(entry.id); return true; })}
                   className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">Switch</button>}
-              {entry.id !== "local" && copyOffered && <button type="button" disabled={busy} aria-label={`${t("cloudMove.here")}: ${entry.name}`} onClick={() => setCopyId(entry.id)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">{t("cloudMove.here")}</button>}
               {/* My Cloud has one control for what it may use: Let my bots use this Mac, in Settings → MausBot Cloud. */}
               {entry.id !== "local" && "home" in entry && entry.home && window.ogb?.cloudLending && <button type="button" disabled={busy} data-cloud-lending-link onClick={() => void window.ogb?.cloudLending?.open().catch(() => {})} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">{lendingTitle()}</button>}
               {entry.id !== "local" && !("home" in entry && entry.home) && sharingOffered && <button type="button" disabled={busy} aria-label={`Computer access for ${entry.name}`} onClick={() => setComputerId(entry.id)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">Computer access</button>}
@@ -166,7 +160,6 @@ export function ConnectedWorkspacesSettings() {
           })}
         </ul>}
     </Card>
-    {copyOffered && copyId && saved?.environments.some(entry => entry.id === copyId) && <CloudMoveSettings key={copyId} destination={copyId} onClose={() => setCopyId(null)} />}
     {sharingOffered && computerWorkspace && <ComputerSharingSettings key={computerWorkspace.id} workspace={computerWorkspace} onClose={() => setComputerId(null)} />}
     <Card title="Connect to a server" subtitle="Already running OpenMausBot on a VPS, server, or another computer? Connect it here.">
       <form className="flex flex-col gap-3" onSubmit={(event) => {

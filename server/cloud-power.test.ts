@@ -239,3 +239,20 @@ describe("the Admin's signed power routes", () => {
     expect(await handle({ req, res: {} as ServerResponse, url, path: url.pathname, method: "GET" })).toBe(false);
   });
 });
+
+describe("a Team Cloud", () => {
+  it("never sleeps: the Admin's sleep request is refused as busy with the team, however idle it is", () => {
+    let clock = START;
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-cloud-power-team-"));
+    dirs.push(dataDir);
+    const power = createCloudPower({ dataDir, team: true, now: () => clock, broadcast: () => {}, probes: {
+      turn: () => false, run: () => false, liveCall: () => false, computer: () => false, maintenance: () => false, nextDueAt: () => null,
+    } });
+    powers.push(power);
+    for (let left = CLOUD_IDLE_AWAKE_MS; left > 0; left -= 5_000) { clock += 5_000; power.tick(); }
+    expect(power.report()).toMatchObject({ idle: true, busy: [] });
+    expect(power.prepareSleep()).toEqual({ ok: false, busy: ["team"] });
+    expect(power.sleeping()).toBe(false);
+    expect(existsSync(join(dataDir, "cloud-sleep.json"))).toBe(false);
+  });
+});

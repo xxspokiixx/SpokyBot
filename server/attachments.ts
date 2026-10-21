@@ -29,7 +29,7 @@ export function attachmentsMaxBytes(env: NodeJS.ProcessEnv = process.env): numbe
   const raw = env.OMB_ATTACHMENTS_MAX_BYTES?.trim();
   const parsed = raw ? Number(raw) : NaN;
   if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
-  return env.OMB_CLOUD_ROLE === "home" ? CLOUD_HOME_ATTACHMENTS_MAX_BYTES : DEFAULT_ATTACHMENTS_MAX_BYTES;
+  return env.OMB_CLOUD_ROLE === "home" || env.OMB_CLOUD_ROLE === "team" ? CLOUD_HOME_ATTACHMENTS_MAX_BYTES : DEFAULT_ATTACHMENTS_MAX_BYTES;
 }
 
 /** Never evict: prompts refer to attachment paths, so at this ceiling a new upload gets an explicit 507. */

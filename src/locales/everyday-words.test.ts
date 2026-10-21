@@ -19,7 +19,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   ],
   "MausBot Cloud: buying it, setting it up, moving to it and sharing with it": [
     "cloudBuy.", "cloudIntro.", "cloudTrial.", "cloudSetup.", "cloudIntent.", "cloudNotice.", "cloudHowTo.", "cloudScene.", "cloudProPopup.",
-    "cloudCredit.", "cloudPower.", "cloudSignIn.", "cloudAdd.", "cloudHome.", "cloudPhone.", "cloudAccount.", "cloudMove.", "pro.", "lending.",
+    "cloudCredit.", "cloudPower.", "cloudSignIn.", "cloudAdd.", "cloudHome.", "cloudPhone.", "cloudAccount.", "pro.", "lending.",
     "files.",
   ],
   "routines and automations": ["routines.", "automations."],
@@ -81,7 +81,6 @@ const ALLOWED: Record<string, string> = {
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",
   "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
-  "cloudMove.thisServer": "the name a self-hosted destination gets when it has none of its own",
   "lending.viaAccess": "points at the Settings → Servers page by its label",
   "lending.viaAccessTerminal": "points at the Settings → Servers page by its label",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",

@@ -438,6 +438,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       enabled: lent?.enabled === true,
       folders: lent && Array.isArray(lent.folders) ? lent.folders : [],
       screen: lent?.computer === true,
+      // Only while lent: an off switch never keeps a terminal choice to be turned on again with it.
+      terminal: lent?.enabled === true && lent.terminal === true,
       ...internetState(env, lent),
       busy: Boolean(env && executing?.env === env.id),
       ...(access ? { via: "access", terminal: access.terminal === true, ...(running.has(env.id) ? {} : { problem: "access-off" }) } : {}),
@@ -476,17 +478,18 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     cloudState,
     /** Lending to My Cloud is running, so it calls My Cloud whenever it is awake. */
     lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)),
-    /** Folders, apps and screen, and the internet connection, never a terminal; the Cloud account and its machine must
-     * be verified now. The internet connection alone is a grant too. */
+    /** Folders, apps and screen, the internet connection and, only when the person ticks it in this computer's own
+     * Settings, a terminal (unrestricted commands as this user; off unless `input.terminal === true`); the Cloud account
+     * and its machine must be verified now. The internet connection alone is a grant too. */
     async saveCloud(env, input) {
       if (closed) throw new Error("Lending is unavailable while the app is closing.");
       const current = cloud();
       if (current?.status !== "connected" || !current.accountId || current.origin !== env.origin) throw Object.assign(new Error("Open My Cloud first."), { problem: "connect-first" });
       const folders = await validateSharedFolders(input?.folders);
-      if (!folders.length && input?.screen !== true && input?.internet !== true) throw new Error("Choose at least one folder, apps and screen, or the internet connection.");
+      if (!folders.length && input?.screen !== true && input?.internet !== true && input?.terminal !== true) throw new Error("Choose at least one folder, apps and screen, the internet connection, or the terminal.");
       let info = { sessionId: null, environmentId: null };
       try { info = await cloudIdentity(env); } catch (error) { if (error.problem !== "connect-first") throw error; }
-      const grant = { ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: false, computer: input.screen === true,
+      const grant = { ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: input.terminal === true, computer: input.screen === true,
         internet: input.internet === true, cloud: { accountId: current.accountId, origin: env.origin } };
       disconnect(env, records[env.id]);
       store({ ...records, [env.id]: grant }); run(env, grant); changed();

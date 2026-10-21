@@ -100,6 +100,13 @@ export declare const CLOUD_SETUP_STEPS: readonly CloudSetupStep[];
 export declare const CLOUD_UNREACHABLE_CAUSES: readonly CloudUnreachableCause[];
 export declare function parseCloudPower(input: unknown): import("./cloud-power.mjs").CloudPower | null;
 export declare function parseCloudSummary(input: unknown): CloudMachine | null;
+export type CloudTeamRole = "owner" | "admin" | "member";
+/** A team this account is in, from the verified session: its Cloud as the Admin describes it, null while it has none. */
+export interface CloudTeam { id: string; name: string; role: CloudTeamRole; machine: CloudMachine | null }
+export declare const CLOUD_TEAM_ROLES: readonly CloudTeamRole[];
+/** owner → Super admin, admin → Admin, member → User. */
+export declare function teamRoleLabel(role: string | null | undefined): "Super admin" | "Admin" | "User";
+export declare function parseCloudTeams(input: unknown): CloudTeam[];
 export declare function cloudUnreachableText(state: unknown, origin?: string | null): string | null;
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];
@@ -122,4 +129,5 @@ export declare function myCloudOrigin(known: {
 export declare function isCloudHomeEntry(entry: { origin?: string } | null | undefined, known?: { homeOrigin?: string | null; remembered?: RememberedCloudHome | null }): boolean;
 export declare function parsePairingGrant(input: unknown, origin: string, now: number): CloudHomeGrant | null;
 export declare function withCloudHome<T extends { environments: Array<{ id: string; name: string; origin: string; color?: string; home?: true }>; activeId: string }>(state: T, machine: CloudMachine | null | undefined, makeId: () => string, look?: { name?: string | null; color?: string | null } | null): T;
-export declare function cloudHomeConnectUrl(target: CloudHomeTarget, now: number, open?: "phone" | null): string;
+export declare function cloudHomeConnectUrl(target: CloudHomeTarget, now: number, open?: "phone" | null, route?: string | null): string;
+export declare function cloudPageSenderAllowed(event: unknown, context: { contents: unknown; homeOrigin: string | null; activeOrigin: string | null | undefined }): boolean;

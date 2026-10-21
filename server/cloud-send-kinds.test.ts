@@ -84,9 +84,9 @@ describe("My Cloud takes a routine", () => {
     const d = deps(cloud, { routines: () => held });
     const runs = [run("run-1", "completed"), run("run-2", "running"), run("run-3", "failed", { routineId: "r9" })];
     expect((await take(d, itemKey.moved("routine", "r1"), { ...routine() }, runs)).status).toBe(200);
-    expect(held.routines).toEqual([expect.objectContaining({ id: "r1", enabled: false, nextRunAt: null, prompt: `Read ${cloud}/workspaces/b1/notes.md` })]);
+    expect(held.routines).toEqual([expect.objectContaining({ id: "r1", enabled: false, nextRunAt: null, prompt: `Read ${join(cloud, "workspaces", "b1", "notes.md")}` })]);
     expect((held.routines[0]!.attachments as Array<{ path: string }>)[0]!.path).toBe(join(cloud, "attachments", "plan.md"));
-    expect(held.runs.map((entry) => [entry.id, entry.output])).toEqual([["run-1", `Wrote ${cloud}/workspaces/b1/out.md`]]);
+    expect(held.runs.map((entry) => [entry.id, entry.output])).toEqual([["run-1", `Wrote ${join(cloud, "workspaces", "b1", "out.md")}`]]);
     expect(d.owned).toEqual([["r1", OWNER.person]]);
 
     held.routines[0]!.enabled = true;

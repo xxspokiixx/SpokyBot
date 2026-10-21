@@ -42,7 +42,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
   const power = useCloudPower(cloudHome);
   const onLine = t(power.sleeps ? "cloudSetup.sleepsWhenIdle" : "cloudSetup.alwaysOn");
   const waking = power.waking ? t("cloudHome.waking") : "";
-  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string } | null>(null);
+  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean } | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -50,8 +50,9 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
     void bridge?.state().then((state) => { if (alive) setCurrent(state); }).catch(() => {});
     return () => { alive = false; };
   }, [bridge]);
-  if (!bridge) {
-    if (!cloudHome) return null;
+  // This window's home is My Cloud: it opens nothing else, so there is nothing to switch.
+  if (!bridge || current?.home === true) {
+    if (!cloudHome && !current?.home) return null;
     const whose = owner ? t("sidebar.cloudOwner", { email: owner }) : "";
     const label = `${t("cloudSetup.myCloud")} · ${onLine}${whose ? ` · ${whose}` : ""}`;
     if (rail) return <div data-cloud-home-indicator data-workspace-switcher="rail" role="img" aria-label={label} title={label} className="flex size-9 items-center justify-center text-ink-secondary">

@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { createCloudAccountClient } from "./cloud-account.mjs";
-import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, isCloudHomeEntry, openSleepingCloud, parseCloudCredit, parseCloudOffer, parseCloudPower, parseCloudPurchase, parseCloudSummary, parseCloudTrial, parsePairingGrant, parsePublicOffer, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, isCloudHomeEntry, openSleepingCloud, parseCloudCredit, parseCloudOffer, parseCloudPower, parseCloudPurchase, parseCloudSummary, parseCloudTeams, teamRoleLabel, CLOUD_TEAM_ROLES, parseCloudTrial, parsePairingGrant, parsePublicOffer, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome, withoutTrial } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 
 const NOW = 1_800_000_000_000;
@@ -462,20 +462,51 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
     openLendingSettings: async () => { calls.push("settings"); },
     persistEnvironments: next => { calls.push(`active:${next.activeId}`); context.environmentsState = next; }, withActive: environments.withActive,
     navigateMainWindow: url => calls.push(`navigate:${url}`), activeOrigin: () => context.environmentsState.environments.find(e => e.id === context.environmentsState.activeId)?.origin,
+    homeWindow: { cloudOrigin: () => null }, showHome: async (options) => { calls.push(options ? `home:${JSON.stringify(options)}` : "home"); },
+    homePlaces: { remember: (place) => calls.push(`remember:${JSON.stringify(place)}`) },
   });
   vm.runInContext(`${source.slice(start, end)}; this.switchEnvironment = switchEnvironment; this.remember = value => { rememberedHome = value; };`, context);
   await context.switchEnvironment("cloud");
-  assert.deepEqual(calls, ["connect"]);
+  assert.deepEqual(calls, ["remember:null", "connect"]);
   calls.length = 0; await context.switchEnvironment("vps");
-  assert.deepEqual(calls, ["active:vps", `navigate:${other.origin}`]);
+  assert.deepEqual(calls, ["remember:null", "active:vps", `navigate:${other.origin}`], "another server: the remembered team is let go");
+  const acme = { id: "acme", name: "Acme", origin: "https://omb-u-acme.fly.dev", team: { id: "team-acme", role: "member" } };
+  context.environmentsState = { environments: [entry, other, acme], activeId: environments.LOCAL_ID };
+  calls.length = 0; await context.switchEnvironment("acme");
+  assert.deepEqual(calls, ['home:{"place":{"team":"team-acme","name":"Acme"}}'], "a team opens through the home window's team pairing, never a plain navigation");
+  context.environmentsState = { environments: [entry, other, acme], activeId: "acme" };
+  context.homeWindow = { cloudOrigin: () => origin };
+  calls.length = 0; await context.switchEnvironment("cloud");
+  assert.deepEqual(calls, ["remember:null", 'home:{"place":"cloud"}'], "back to My Cloud from a team: My Cloud itself, remembered");
+  context.homeWindow = { cloudOrigin: () => null };
+  context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   context.cloudAccount = { homeTarget: () => null }; context.remember({ accountId: "a1", origin });
   connect = async () => { calls.push("connect"); throw new Error("Your Cloud is not ready to connect yet."); };
   calls.length = 0; await context.switchEnvironment("cloud");
-  assert.deepEqual(calls, ["connect", "settings"], "not signed in there: Settings → OMB Cloud says what to do next");
+  assert.deepEqual(calls, ["remember:null", "connect", "settings"], "not signed in there: Settings → OMB Cloud says what to do next");
   signedIn = true; calls.length = 0; await context.switchEnvironment("cloud");
-  assert.deepEqual(calls, ["connect", "active:cloud", `navigate:${origin}`], "signed in there already: it opens as any server does");
+  assert.deepEqual(calls, ["remember:null", "connect", "active:cloud", `navigate:${origin}`], "signed in there already: it opens as any server does");
   context.cloudAccount = null; context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   calls.length = 0; await context.switchEnvironment("cloud");
-  assert.deepEqual(calls, ["active:cloud", `navigate:${origin}`]);
+  assert.deepEqual(calls, ["remember:null", "active:cloud", `navigate:${origin}`]);
+  context.homeWindow = { cloudOrigin: () => origin }; context.environmentsState = { environments: [entry, other], activeId: "vps" };
+  calls.length = 0; await context.switchEnvironment("cloud");
+  assert.deepEqual(calls, ["remember:null", 'home:{"place":"cloud"}'], "once My Cloud is home, choosing it shows home the one way every window does");
+});
+
+test("the session's teams are read with their role and their Cloud as the machine summary; a malformed team is left out whole, and a team twice is read once", () => {
+  const team = { id: "team-1", name: "Acme", role: "admin", machine: { state: "ready", origin, pairingAvailable: true, status: "ready" } };
+  assert.deepEqual(parseCloudTeams([team]), [{ id: "team-1", name: "Acme", role: "admin", machine: { status: "ready", origin } }]);
+  assert.deepEqual(parseCloudTeams([{ ...team, machine: null }]), [{ id: "team-1", name: "Acme", role: "admin", machine: null }], "no machine yet");
+  assert.deepEqual(parseCloudTeams([{ ...team, machine: { state: "stopped", origin: null, hold: { until: NOW + 1 } } }])[0].machine, { status: "stopped", hold: { until: NOW + 1 } });
+  assert.deepEqual(parseCloudTeams([{ ...team, machine: { state: "what" } }])[0].machine, null, "a malformed machine is no machine, never the team's loss");
+  assert.deepEqual(parseCloudTeams([{ ...team, name: "  Acme   Inc  " }])[0].name, "Acme Inc");
+  assert.deepEqual(parseCloudTeams([team, { ...team, name: "Again" }]).length, 1, "the same id twice");
+  for (const bad of [{ ...team, role: "god" }, { ...team, name: "" }, { ...team, id: "" }, { ...team, id: "../x" }, { ...team, id: 7 }, { ...team, name: 7 }, null, "team", []]) {
+    assert.deepEqual(parseCloudTeams([bad]), [], JSON.stringify(bad));
+  }
+  for (const none of [undefined, null, {}, "x", 3]) assert.deepEqual(parseCloudTeams(none), [], String(none));
+  assert.deepEqual(CLOUD_TEAM_ROLES, ["owner", "admin", "member"]);
+  assert.deepEqual(["owner", "admin", "member", "x", undefined].map(teamRoleLabel), ["Super admin", "Admin", "User", "User", "User"]);
 });

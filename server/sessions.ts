@@ -4,6 +4,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, un
 import { dirname } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
+import { teamSessionExpiresAt, type TeamMember, type TeamRole } from "./cloud-team.ts";
 
 export type Scope = "admin" | "client";
 export const SCOPES: readonly Scope[] = ["admin", "client"];
@@ -46,8 +47,11 @@ const sessionSchema = z.object({
   expiresAt: z.number(),
   userId: z.string().max(256).optional(),
   email: z.string().max(320).optional(),
-  /** Set only by the internal verified-portal issuance path, never by email or pairing input. */
-  membershipAuthority: z.literal("portal").optional(),
+  /** `portal`: set only by the internal verified-portal issuance path. `team`: the Admin's signed member claim on a
+   * Team Cloud. Never by email or pairing input. */
+  membershipAuthority: z.enum(["portal", "team"]).optional(),
+  /** A Team Cloud session's role in the team, from the Admin's claim. */
+  teamRole: z.enum(["owner", "admin", "member"]).optional(),
   /** A browser sign-in (PairingCode `browser`): accepted only as its browser's cookie, never as a bearer token. */
   cookieOnly: z.literal(true).optional(),
   owner: z.string().max(254).optional(),
@@ -67,6 +71,7 @@ export interface PublicSession {
   expiresAt: number;
   email?: string;
   owner?: string;
+  teamRole?: TeamRole;
 }
 
 export interface PairingCode {
@@ -80,6 +85,8 @@ export interface PairingCode {
   /** Only a browser sign-in redeems it, only by its credential, and a browser sign-in redeems no other window. */
   browser?: true;
   owner?: string;
+  /** A Team Cloud's pairing: the Admin's signed member claim, bound to the session it opens. */
+  member?: TeamMember;
 }
 
 export interface PublicPairing {
@@ -155,6 +162,7 @@ function publicSession(record: SessionRecord): PublicSession {
   };
   if (record.email) view.email = record.email;
   if (record.owner) view.owner = record.owner;
+  if (record.teamRole) view.teamRole = record.teamRole;
   return view;
 }
 
@@ -288,7 +296,7 @@ export class SessionRegistry {
     if (this.personal(scopes)) throw Object.assign(new Error(this.adminOnly!), { status: 403, code: "cloud_personal" });
   }
 
-  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; browser?: boolean; owner?: string } = {}): { id: string; code: string; credential: string; expiresAt: number } {
+  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; browser?: boolean; owner?: string; member?: TeamMember } = {}): { id: string; code: string; credential: string; expiresAt: number } {
     this.prune();
     const now = this.now();
     const code = generatePairingCode();
@@ -304,6 +312,7 @@ export class SessionRegistry {
       createdAt: now,
       expiresAt: now + (input.ttlMs ?? PAIRING_CODE_TTL_MS),
       ...(input.browser ? { browser: true as const, ...(input.owner ? { owner: input.owner } : {}) } : {}),
+      ...(input.member ? { member: input.member } : {}),
     };
     this.pairings.push(pairing);
     return { id: pairing.id, code, credential, expiresAt: pairing.expiresAt };
@@ -391,8 +400,9 @@ export class SessionRegistry {
       scopes: [...pairing.scopes],
       createdAt: now,
       lastSeenAt: now,
-      expiresAt: now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+      expiresAt: pairing.member ? teamSessionExpiresAt(now, now + SESSION_TTL_MS) : now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
       ...(pairing.browser ? { cookieOnly: true as const, ...(pairing.owner ? { owner: pairing.owner } : {}) } : {}),
+      ...(pairing.member ? { email: pairing.member.email, teamRole: pairing.member.role, membershipAuthority: "team" as const } : {}),
     };
     this.sessions.push(record);
     this.lastSeenWrites.set(record.id, now);
@@ -453,7 +463,8 @@ export class SessionRegistry {
   /** Email membership is live: losing any scope revokes the token and its streams; promotions never widen existing credentials. */
   revalidateEmailSessions(): void {
     if (this.closed) throw new Error("Session registry is closed.");
-    const eligible = this.sessions.filter(session => session.email !== undefined && !(this.options.portalMembership && session.membershipAuthority === "portal"));
+    // A team session's membership is the Admin's signed claim, checked at each pairing (cloud-team.ts), never the sign-in list.
+    const eligible = this.sessions.filter(session => session.email !== undefined && session.membershipAuthority !== "team" && !(this.options.portalMembership && session.membershipAuthority === "portal"));
     if (!eligible.length) return;
     let resolveScopes = this.options.emailScopes;
     try {
@@ -504,7 +515,8 @@ export class SessionRegistry {
     const now = this.now();
     if (!record || record.expiresAt <= now) return false;
     if (record.expiresAt - now > SESSION_RENEW_WHEN_LEFT_MS) return false;
-    const next = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
+    const proposed = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
+    const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(record.createdAt, proposed) : proposed;
     if (next <= record.expiresAt) return false;
     record.expiresAt = next;
     record.lastSeenAt = now;

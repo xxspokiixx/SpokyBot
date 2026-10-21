@@ -103,11 +103,16 @@ WORKDIR /app
 
 FROM runtime AS cloud-home
 # Tools bots reach for in their shell on a My Cloud: Python, pdftotext and
-# unzip (about 28 MB unpacked). Their own layer, so the Chrome layers beneath
-# stay cached.
+# unzip (about 28 MB unpacked), and the bot box (server/bot-box): bubblewrap
+# runs every bot turn in its own namespaces, socat bridges a box's loopback
+# ports to the server's gates. Their own layer, so the Chrome layers beneath
+# stay cached. pnpm, so a bot's shell can install what its project asks for.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 poppler-utils unzip \
-  && rm -rf /var/lib/apt/lists/*
+  && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat \
+  && rm -rf /var/lib/apt/lists/* \
+  && HOME=/tmp/omb-build-home npm install -g pnpm@10.33.0 \
+  && rm -rf /tmp/omb-build-home /tmp/node-compile-cache \
+  && bwrap --version && socat -V | head -1 && pnpm --version
 # Caddy and Grok are pinned, so they sit beneath the engines, which change
 # more often.
 COPY --from=edge /caddy /usr/local/bin/caddy

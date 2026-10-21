@@ -37,6 +37,8 @@ const EXCLUDED = new Set([
   "sync",
   // "Also use my Claude Code skills": a link to the person's own ~/.claude/skills, made again on each turn.
   "claude-user-skills",
+  // The bot box's live sockets and seccomp filter (bot-box/box.ts), made again each time the server starts.
+  "box",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
