@@ -1,6 +1,7 @@
 // The device link end to end in one process: the real shared-computers routes behind a real HTTP server's upgrades,
 // My Cloud's DeviceLinks, and the computer's own link client with its own check on each connection.
 import { randomUUID } from "node:crypto";
+import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { connect as tcpConnect, createServer as createTcpServer, type AddressInfo, type Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
@@ -175,6 +176,21 @@ describe("the device link", () => {
     await fetch(`${home.base}/api/shared-computers/${id}/disconnect`, { method: "POST", headers: { authorization: "Bearer session-owner", "content-type": "application/json", "x-omb-computer-secret": secret }, body: "{}" });
     expect((await second.ended).code).toBe(LINK_ENDED);
     expect(home.links.route(PERSON)).toBeNull();
+  });
+
+  it("leaves no sleep listener behind when a link ends, however often the computer reconnects while My Cloud stays awake", async () => {
+    const sleep = new AbortController();
+    const home = await cloud({ sleep });
+    const site = await website();
+    const id = await home.register();
+    for (let round = 0; round < 5; round++) {
+      const mac = link(home.base, id, site.port);
+      await until(() => mac.opens() === 1, "the link");
+      mac.stop.abort();
+      await mac.ended;
+      await until(() => home.links.route(PERSON) === null, "the link to end on My Cloud");
+    }
+    await until(() => getEventListeners(sleep.signal, "abort").length === 0, "every ended link's sleep listener to go", 2_000);
   });
 
   it("closes as asleep when My Cloud agrees to sleep, and refuses a new link while it sleeps", async () => {

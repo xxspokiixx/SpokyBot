@@ -62,13 +62,15 @@ export class DeviceLinks {
         mux.receive(text);
       });
       ws.on("error", () => ws.terminate());
+      const sleep = power?.sleepSignal();
+      const asleep = () => ws.close(LINK_ASLEEP, "asleep");
+      sleep?.addEventListener("abort", asleep, { once: true });
       ws.once("close", () => {
         clearInterval(link.ping);
+        sleep?.removeEventListener("abort", asleep);
         mux.close();
         if (this.#links.get(computer.key) === link) this.#links.delete(computer.key);
       });
-      const sleep = power?.sleepSignal();
-      sleep?.addEventListener("abort", () => ws.close(LINK_ASLEEP, "asleep"), { once: true });
     });
   }
 
