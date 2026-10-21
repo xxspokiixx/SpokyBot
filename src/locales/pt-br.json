@@ -762,7 +762,6 @@
   "lending.status.machineChanged": "O compartilhamento foi interrompido porque o Cloud mudou para uma nova máquina. Ative de novo para compartilhar com ele.",
   "lending.status.accessOff": "Compartilhado pelo “Computer access”, que está desligado neste computador, então o Cloud não consegue acessá-lo. Escolha aqui o que compartilhar.",
   "lending.viaAccess": "Compartilhado pelo “Computer access” em Configurações → Servidores. Escolher aqui o substitui só pelas pastas, apps e tela que você escolher.",
-  "lending.viaAccessTerminal": "Compartilhado pelo “Computer access” em Configurações → Servidores, incluindo o terminal. Escolher aqui o substitui só pelas pastas, apps e tela que você escolher, nunca o terminal.",
   "lending.stopped.you": "Desligado desde {date}: você o desligou.",
   "lending.stopped.signedOut": "Desligado desde {date}, quando você saiu do MausBot Cloud.",
   "lending.stopped.accountChanged": "Desligado desde {date}, quando outra conta do Cloud entrou.",
