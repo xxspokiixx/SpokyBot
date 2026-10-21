@@ -30,7 +30,7 @@
     // is listed in secrets.required below (as is this JSON when it is a
     // secret) so every deploy keeps it. To stop new endpoints going to an
     // account and keep its own, set its "newEndpoints": false.
-    // Supamaus account, zone mausbot.si. dnsRecordLimit 200 is the Free
+    // Supamaus account, zone mausbot.si. dnsRecordLimit 3500 is the Pro (upgraded Oct 21; was 200 on Free)
     // plan's record quota for a zone added after Sep 2024; on Pro it is 3,500
     // (set it here once the zone is on Pro), and the tunnel quota (1,000)
     // binds first. Desktop apps accept mausbot.si hostnames from 0.1.104 (#2582).
@@ -41,7 +41,7 @@
         "companionHostSuffix": "mausbot.si",
         "apiTokenSecret": "CLOUDFLARE_API_TOKEN_MAUSBOT_SI",
         "tunnelLimit": 1000,
-        "dnsRecordLimit": 200,
+        "dnsRecordLimit": 3500,
         "minAppVersion": "0.1.104"
       }
     ],
