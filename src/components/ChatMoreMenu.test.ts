@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   return {
     advanced: false,
+    threadsChosen: true,
     menus: [] as { ariaLabel: string; items: SidebarMenuItem[]; placement?: string; openOnHover?: boolean; trigger: string }[],
     dispatch: vi.fn(),
     inspectorOpen: false,
@@ -19,6 +20,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   return { ...original, useStore: () => ({ state: { ...original.initialState, inspectorOpen: fixture.inspectorOpen }, dispatch: fixture.dispatch }) };
 });
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
+vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced && fixture.threadsChosen }));
 vi.mock("@/lib/chat-find", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/chat-find")>(),
   requestChatFind: fixture.find,
@@ -60,6 +62,7 @@ const keys = (items: SidebarMenuItem[]) => items.map((item) => item.key);
 
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.threadsChosen = true;
   fixture.inspectorOpen = false;
   fixture.dispatch.mockClear();
   fixture.find.mockClear();
@@ -146,5 +149,13 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
   it("has no thread items even if rendered by ChatMoreMenu in Advanced mode", () => {
     fixture.advanced = true;
     expect(keys(menuOf(createElement(ChatMoreMenu, { bot })).items)).not.toContain("threads");
+  });
+
+  it("lists the threads when the Threads setting hides them from the sidebar", () => {
+    fixture.advanced = true;
+    fixture.threadsChosen = false;
+    const items = menuOf(createElement(ChatHeaderMenu, { bot })).items;
+    expect(keys(items)).toEqual(expect.arrayContaining(["new-thread", "threads"]));
+    expect(items.find((item) => item.key === "threads")!.submenu).toHaveLength(3);
   });
 });
