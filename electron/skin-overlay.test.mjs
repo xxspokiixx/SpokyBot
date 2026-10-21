@@ -56,4 +56,9 @@ describe("skin overlay chrome", () => {
     expect(skinChrome("pop")).toEqual({ color: "#fdf5ea", symbolColor: "#3a322d" });
     expect(isKnownSkin("pop")).toBe(true);
   });
+
+  it("paints Halloween's plum ground behind the caption buttons", () => {
+    expect(skinChrome("halloween")).toEqual({ color: "#110d16", symbolColor: "#c2b3cc" });
+    expect(isKnownSkin("halloween")).toBe(true);
+  });
 });

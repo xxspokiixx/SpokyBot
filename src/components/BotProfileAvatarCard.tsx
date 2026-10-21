@@ -11,6 +11,8 @@ import {
 } from "@/lib/mascot";
 import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
+import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
+import type { BotBodyId } from "../../shared/bot-body";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
@@ -164,22 +166,15 @@ export function BotProfileAvatarCard({
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {MASCOT_BODY_IDS.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  disabled={busy}
-                  aria-pressed={(bot.mascotBody ?? "cursor") === id}
-                  aria-label={`Use the ${MASCOT_BODIES[id].name} body`}
-                  onClick={() => onPatch({ mascotBody: id })}
-                  className={cn(
-                    "flex items-center justify-center rounded-lg py-1.5 disabled:opacity-50",
-                    (bot.mascotBody ?? "cursor") === id
-                      ? "bg-control text-ink"
-                      : "text-ink-secondary hover:bg-control/60",
-                  )}
-                >
-                  <MausAvatar color={bot.color} bodyId={id} size={34} animated={false} trackPointer={false} />
-                </button>
+                <BodyButton key={id} id={id} name={MASCOT_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
+              ))}
+            </div>
+            <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+              {t("botPanel.avatar.halloween")}
+            </div>
+            <div className="grid grid-cols-5 gap-1.5" data-halloween-bodies>
+              {HALLOWEEN_BODY_IDS.map((id) => (
+                <BodyButton key={id} id={id} name={HALLOWEEN_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
               ))}
             </div>
           </>
@@ -196,5 +191,30 @@ export function BotProfileAvatarCard({
         {error && <div role="alert" className="mt-3 text-[12px] text-danger">{error}</div>}
       </div>
     </div>
+  );
+}
+
+function BodyButton({ id, name, bot, busy, onPatch }: {
+  id: BotBodyId;
+  name: string;
+  bot: Bot;
+  busy: boolean;
+  onPatch: (patch: AvatarPatch) => void;
+}) {
+  const selected = (bot.mascotBody ?? "cursor") === id;
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      aria-pressed={selected}
+      aria-label={`Use the ${name} body`}
+      onClick={() => onPatch({ mascotBody: id })}
+      className={cn(
+        "flex items-center justify-center rounded-lg py-1.5 disabled:opacity-50",
+        selected ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60",
+      )}
+    >
+      <MausAvatar color={bot.color} bodyId={id} size={34} animated={false} trackPointer={false} />
+    </button>
   );
 }
