@@ -79,6 +79,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     if (win && !win.isDestroyed?.() && !watched.has(win.webContents)) {
       watched.add(win.webContents);
       win.webContents.on?.("before-input-event", () => { lastInput = Date.now(); });
+      // A watch set up just now has seen nothing yet: it counts as a key now, never as "typed long ago".
+      lastInput = Math.max(lastInput, Date.now());
     }
     return lastInput;
   };

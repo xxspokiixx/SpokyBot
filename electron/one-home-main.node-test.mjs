@@ -30,3 +30,20 @@ test("the move's quiet moment counts keys pressed before it first asks, so it ne
     assert.ok(main.lastInput() >= before, `a key pressed once the move has looked is counted: ${main.lastInput()}`);
   } finally { main.close(); }
 });
+
+test("a key watch set up only as it is first asked knows nothing yet, so it counts as a key just now and the reload or freeze waits its quiet time", () => {
+  // The window can open after the launch's first look; then My Cloud's version reload asks first. Seen in the real app:
+  // the reload came 2 s after a key, mid-sentence, and the draft was lost.
+  const win = fakeWindow();
+  let kept = null;
+  const main = installOneHome({
+    ipcMain: { handle: () => {} }, cloudPage: () => "local", server: () => null, home: () => null, cookieFetch: async () => json({}, 401),
+    reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => win, localOrigin: () => "http://127.0.0.1:4100",
+    fetch: async () => json({}, 404), localRequest: async () => json({}, 404), account: () => null, journalFile: () => "/nonexistent/one-home.json",
+    tempRoot: () => "/nonexistent", journal: { read: () => kept, write: (value) => { kept = value; } },
+  });
+  try {
+    const before = Date.now();
+    assert.ok(main.lastInput() >= before, `never "typed long ago": ${main.lastInput()}`);
+  } finally { main.close(); }
+});
