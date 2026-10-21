@@ -36,6 +36,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_HIGHLEVEL_RELAY_URL", "OMB_COMPOSIO_BROKER_URL",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
+  "OMB_CLOUD_EXPORT_ONLY",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
