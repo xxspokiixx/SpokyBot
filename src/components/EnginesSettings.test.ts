@@ -86,7 +86,7 @@ describe("Settings → Engines → Grok", () => {
 
   it("says Grok is connected once it is, in Grok's words", () => {
     const html = renderGrok(true);
-    expect(html).toContain("Grok connected on this server");
+    expect(html).toContain("Grok connected");
     expect(html).not.toContain("ChatGPT");
     expect(html).not.toContain("Sign in to Grok");
   });
@@ -183,14 +183,14 @@ describe("Settings → Engines → setup cards", () => {
       snapshot: { state: "unavailable" }, models: { default: "model", options: [] },
       install: { server: { package: "kimi-fixture" }, command: { linux: "npm install -g kimi-fixture" } },
     }];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("Install Kimi on this server");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("Install Kimi here");
     fixture.instances[0].snapshot = {
       state: "available", authenticated: true,
       update: { title: "Kimi update available", message: "A newer version is available.", command: "npm install -g kimi-fixture@latest" },
     };
     const html = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(html).toContain("Update Kimi on this server");
-    expect(html).not.toContain("Install Kimi on this server");
+    expect(html).toContain("Update Kimi here");
+    expect(html).not.toContain("Install Kimi here");
   });
 
   it("shows a standing warning from the snapshot without a command to run", () => {

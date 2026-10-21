@@ -7,8 +7,8 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onSt
   const menu = busy => Menu.buildFromTemplate([
     { label: busy ? `Your bots are using this ${device} now` : `Your bots can use this ${device}`, enabled: false },
     { type: "separator" },
-    { label: "Turn off", click: () => onStop() },
-    { label: "Settings…", click: () => onOpen() },
+    { label: "Stop sharing", click: () => onStop() },
+    { label: "Sharing settings…", click: () => onOpen() },
   ]);
   return {
     update({ lending, busy }) {

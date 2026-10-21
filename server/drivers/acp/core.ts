@@ -453,7 +453,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
   const DENY_TIMEOUT_NOTE =
     "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
   const QUESTION_NO_MATCH_NOTE =
-    "That answer isn't one of the choices this engine can take, so the question was closed and the turn stopped. Ask again and pick one of the options.";
+    "That answer isn't one of the choices this AI can take, so the question was closed and the turn stopped. Ask again and pick one of the options.";
 
   return {
     driverKind: DRIVER_KIND,

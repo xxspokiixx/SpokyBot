@@ -113,7 +113,7 @@ it("while lent, says so, shows this computer's activity, and removing the last c
   await ready({ ...lent, state: { ...lent.state!, busy: true }, activity: [{ at: 1_790_000_000_000, server: "My Cloud", origin: "https://c.test", action: "read_file", detail: "Plans/todo.md", ok: true }] });
   more();
   const view = render();
-  expect(view.html).toContain("My Cloud is using this computer now.");
+  expect(view.html).toContain("Cloud bots are using this computer now.");
   expect(view.html).toContain("Plans/todo.md");
   expect(view.html).toContain("Read a file");
   view.nodes.find(node => node.props["aria-label"] === "Remove Plans")!.props.onClick!();
@@ -133,7 +133,7 @@ it("a site opened through this computer's internet connection is activity too, a
   expect(html).toContain("www.instagram.com");
   expect(html).toContain("Opened a website · refused");
   expect(html).not.toContain("Other request");
-  expect(html).toContain("My Cloud last used this computer 1 minute ago.");
+  expect(html).toContain("Cloud bots last used this computer 1 minute ago.");
 });
 
 it("turning the switch off stops lending at once", async () => {
@@ -178,10 +178,10 @@ it("says how it is lent when Computer access lent it, terminal included, and whe
   expect(lendingStatusKey(viaAccess, true)).toBe("lending.status.accessOff");
   await ready(viaAccess);
   const html = render().html;
-  expect(html).toContain("Lent through Computer access in Settings → Servers, terminal included.");
-  expect(html).toContain("My Cloud last used this computer 3 minutes ago.");
+  expect(html).toContain("Shared through Computer access in Settings → Servers, terminal included.");
+  expect(html).toContain("Cloud bots last used this computer 3 minutes ago.");
   await ready({ ...lent, activity: [] });
-  expect(render().html).toContain("My Cloud hasn&#x27;t used this computer yet.");
+  expect(render().html).toContain("Cloud bots haven&#x27;t used this computer yet.");
 });
 
 it("names a refusal main explains in plain words, and keeps Try again for the rest", () => {

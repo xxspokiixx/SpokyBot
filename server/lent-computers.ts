@@ -115,7 +115,7 @@ export function awayNotice(known: LentComputer[], online: ReadonlySet<string>): 
   const latest = away[0]!;
   const device = deviceWord(latest.platform);
   const say = latest.stoppedAt === null
-    ? `Their ${device} ${latest.name} is lent to My Cloud but offline (last online ${dateText(latest.lastSeenAt)}): OpenMausBot on it is closed, or the ${device} is asleep or off. Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`
-    : `Their ${device} ${latest.name} is no longer lent to My Cloud: lending was turned off on it. They can turn on Let my bots use this ${device} under Settings → MausBot Cloud in OpenMausBot on that ${device}.`;
+    ? `Their ${device} ${latest.name} is shared with the Cloud but offline (last online ${dateText(latest.lastSeenAt)}): OpenMausBot on it is closed, or the ${device} is asleep or off. Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`
+    : `Their ${device} ${latest.name} is no longer shared with the Cloud: sharing was turned off on it. They can turn on Let my bots use this ${device} under Settings → MausBot Cloud in OpenMausBot on that ${device}.`;
   return { offline, say };
 }

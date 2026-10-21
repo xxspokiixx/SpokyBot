@@ -1068,8 +1068,8 @@ function confinedWhy(threadId: string): string {
 }
 function guestEngineRefusal(threadId: string): string {
   const why = confinedWhy(threadId);
-  return why !== CONVERSATION_FROM_BEFORE ? `This bot's engine can't run it that way. ${why}`
-    : "This conversation is from before My Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.";
+  return why !== CONVERSATION_FROM_BEFORE ? `This bot's AI can't run it that way. ${why}`
+    : "This conversation is from before the Cloud was only yours, and this bot's AI can't work in it. Start a new conversation.";
 }
 
 /** A webhook or app event drove this conversation: its run, a payload posted into it, or a conversation that handed it the work. */
@@ -6540,8 +6540,8 @@ async function selectableComputers(bot: BotRecord) {
     let canStart = false;
     let canCreate = false;
     let reason = CLOUD_HOME && surface === "cloud"
-      ? "The cloud computer is not set up or running. Open the Computer panel to set it up."
-      : "This computer is not configured or running. Open the Computer panel to set it up.";
+      ? "The cloud desktop is not set up or running. Open the Screen panel to set it up."
+      : "This computer is not configured or running. Open the Screen panel to set it up.";
     try {
       if (off) reason = "Computer access is Off in this bot's settings.";
       else if (toolsLeaveOut && surface !== "browser") reason = toolsLeaveOut;
@@ -6846,7 +6846,7 @@ bus.subscribe((event: RuntimeEvent) => {
     broadcast({ kind: "runtime", event: publicEvent });
   }
   const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(event) ?? null);
-  if (event.type === "runtime.error") limitClock.noteRefusal(runningTurnEngines.get(event.threadId)?.instanceId, event.limitResetsAt);
+  limitClock.noteRuntimeEvent(runningTurnEngines.get(event.threadId)?.instanceId, event);
   const ownerBot = store.botByThread(event.threadId);
   const bot = ownerBot ? botForThread(ownerBot.id, event.threadId) ?? undefined : undefined;
   const group = bot ? undefined : store.groupByThread(event.threadId);
@@ -8651,7 +8651,7 @@ async function startTurn(
       const attachLocalVm = async (strict: boolean): Promise<boolean> => {
         if (!mountsComputerMcp) {
           if (!strict) return false;
-          throw new Error("this model cannot use the Local VM — choose Claude or an ACP model provider, or select another computer destination");
+          throw new Error("this model can't use the private desktop — choose a model that can, such as Claude, or pick another place for it to work");
         }
         if (!strict && localVmMode(cfg) === "pool") {
           const poolCandidate = poolLocalVmTarget(localVmSeatPool.candidate(threadId, localVmPoolSeatHolder));
@@ -9125,7 +9125,7 @@ async function startTurn(
         directTurnBots.delete(threadId);
         const checked = checkedTaskModelSwitch(current, backup, false, false, true);
         const target = checked.ok ? registry.get(checked.selection.instanceId) : null;
-        const refusal = !checked.ok ? checked.error : !target || !target.enabled ? "The backup engine is unavailable."
+        const refusal = !checked.ok ? checked.error : !target || !target.enabled ? "The backup AI is unavailable."
           : !store.taskByThread(bot.id, threadId)?.cwd ? "This older thread has no pinned working folder. Choose its backup manually."
           : policyModelRefusal(target) ?? recoveryCapabilityError(
             { driverKind: instance.driverKind, capabilities: instance.adapter.capabilities },
@@ -13533,7 +13533,7 @@ ROUTES.push(createBrowserViewerRoutes({
     if (!bot) return { status: 404, error: "no such bot" };
     if (!builtInBrowserEnabled(cfg) || bot.browser === false) return { status: 409, error: "Enable this bot's browser in its profile first." };
     const browser = await browserIntegration(bot.id, bot.browserProfile);
-    return browser ? { botId: bot.id, session: browser.session, spec: browser.spec } : { status: 503, error: "Install the browser engine first." };
+    return browser ? { botId: bot.id, session: browser.session, spec: browser.spec } : { status: 503, error: "Install the browser first." };
   },
   authorize: async (req, auth) => !HOSTED_WORKSPACE || auth.kind !== "session" ? null
     : workspaceAccess ? workspaceAccess.authorize(req, auth) : { status: 503, error: "Workspace sign-in is unavailable." },
@@ -14144,7 +14144,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const startsOnFirstCall = claim?.owner.generation === internalCapability.generation && claim.startsComputer === true && !claim.failed;
         const picked = pickComputer(options, requested, current, startsOnFirstCall);
         const option = picked.option;
-        if (!option?.available) return json(res, 409, { error: option?.reason ?? "No configured computer or browser is available. Open the Computer panel to set one up.", options });
+        if (!option?.available) return json(res, 409, { error: option?.reason ?? "No configured computer or browser is available. Open the Screen panel to set one up.", options });
         if (source!.selected) {
           if (source!.selected !== option.surface) return json(res, 409, { error: "A computer switch is already pending. End this turn to continue there." });
         } else {

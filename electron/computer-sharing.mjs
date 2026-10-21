@@ -326,7 +326,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             changed();
             const jobAbort = new AbortController();
             const jobSignal = AbortSignal.any([signal, jobAbort.signal]);
-            let leasing = false;
+            let leasing = false, ended = false, renewal = null;
             let control;
             const lease = async () => {
               if (leasing) return;
@@ -334,9 +334,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
               try {
                 await gate();
                 if (!(await call("lease", { jobId: job.id })).active) jobAbort.abort();
-                await control?.renew();
+                if (!ended) await (renewal = control?.renew());
               } catch { jobAbort.abort(); }
-              finally { leasing = false; }
+              finally { leasing = false; renewal = null; }
             };
             const heartbeat = setInterval(() => void lease(), 1000);
             let result;
@@ -358,7 +358,12 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
                 return live.cua;
               });
             } catch (error) { result = sharedComputerError(error); live.cua?.close(); live.cua = null; }
-            finally { clearInterval(heartbeat); await control?.release().catch(() => {}); executing = null; changed(); }
+            finally {
+              clearInterval(heartbeat); ended = true;
+              await renewal?.catch(() => {});
+              await control?.release().catch(() => {});
+              executing = null; changed();
+            }
             activity.record({
               env, action: job.operation.action, detail: describeSharedOperation(grant, job.operation), ok: result?.isError !== true,
               error: result?.isError === true ? result?.content?.[0]?.text : undefined,

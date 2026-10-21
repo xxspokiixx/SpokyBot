@@ -163,10 +163,10 @@ type BotRecord = {
     await evaluate("document.querySelector('summary[aria-label=\"Add to team map\"]').focus(); true");
     await ui("press", "--keys", "Enter");
     await click("Cloud computer");
-    await expect.poll(snapshot).toContain("Connect your Boat account before creating a cloud computer.");
+    await expect.poll(snapshot).toContain("Connect your Boat account before creating a cloud desktop.");
     await expect.poll(snapshot).toContain("Your Boat plan and usage charges apply.");
     const inputRefs = (await ui("snapshot")).refs as Record<string, { role: string; name: string }>;
-    const nameInput = Object.entries(inputRefs).filter(([, entry]) => entry.role === "textbox" && entry.name === "New cloud computer");
+    const nameInput = Object.entries(inputRefs).filter(([, entry]) => entry.role === "textbox" && entry.name === "New cloud desktop");
     expect(nameInput).toHaveLength(1);
     await ui("type", "--ref", `@${nameInput[0][0]}`, "--text", "Fixture desktop");
     expect(await evaluate("document.querySelector('[aria-label=\"Team computers\"] button[type=submit]').disabled")).toBe(true);
@@ -174,7 +174,7 @@ type BotRecord = {
     await click("Cancel");
     await click("Close computers");
     expect(await evaluate("Boolean(document.querySelector('[aria-label=\"Team computers\"]'))")).toBe(false);
-    receipts.unconfiguredComputerCreation = "Explicit Add entry shows cost disclosure and keeps Create cloud computer disabled without credentials.";
+    receipts.unconfiguredComputerCreation = "Explicit Add entry shows cost disclosure and keeps Create cloud desktop disabled without credentials.";
 
     await evaluate(`(() => {
       const card = document.querySelector(${JSON.stringify(`[data-bot-id=${JSON.stringify(ben.id)}]`)});

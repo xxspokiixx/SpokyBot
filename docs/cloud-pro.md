@@ -375,7 +375,7 @@ answers, so no step flickers back. When the main pane already shows the step tha
 sign-in in the chat view), the card says **You're on this step** instead of
 repeating it. With every listed step done but no turn finished yet, the card says the bot
 is setting itself up in the chat. Lending this Mac to the Cloud is not a step;
-it stays in Settings → MausBot Cloud and the menu-bar item's **Lending
+it stays in Settings → MausBot Cloud and the menu-bar item's **Sharing
 settings…**.
 
 **Hide setup** is the only dismiss. The Cloud keeps it (`cloud-setup-hidden`
@@ -678,7 +678,7 @@ the folder of that name in the home folder is lent instead; one that can't be
 found is left out. A refusal a person can act on (the whole home folder or a
 disk, a file, more than 20 folders) is said in plain words; only a failure
 that trying again can fix says Try again. A computer that lends its internet
-connection shows **Lends: internet connection, …**, and while it is away
+connection shows **Shares: internet connection, …**, and while it is away
 **While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own
 connection and may turn your bots away.**
 
@@ -691,11 +691,11 @@ takes away, and never undoes the person's own Off: lending they turned off
 (`stopped.reason "you"`) stays off, across restarts too.
 
 While lending is on, a menu-bar item shows it (**In use** while bots use this
-Mac: running something on it or browsing through it) with **Turn off**, and the
+Mac: running something on it or browsing through it) with **Stop sharing**, and the
 app opens at login, out of sight (`electron/open-at-login.mjs`: a login item on
 macOS and Windows, an XDG autostart entry on Linux; only one this app added is
 ever removed, and only such a launch starts hidden). Turning the switch off or
-choosing **Turn off** stops at once: the Cloud is told, a running action
+choosing **Stop sharing** stops at once: the Cloud is told, a running action
 is cancelled (the computer-control transport is closed and the screen lease
 released), and nothing more runs. An action an app had already started may
 still finish.
