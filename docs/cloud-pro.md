@@ -1820,25 +1820,33 @@ screen's note.
   the menu is.
 - **The dialog** (`components/CloudAddDialog.tsx`, one state→view function,
   `lib/cloud-plan` `cloudAddView`) covers the buying journey only: the offer
-  (the Admin's plans, Pro preselected and marked most popular, each row
-  with its promise and its cloud desktop hours a month, how many cloud
-  desktops at once only as small print; under them the chosen plan's card in
-  the website's words (with the app's "cloud desktop" for the website's
-  "cloud computer"), every number from the Admin's `allowances`: always on (or
-  sleeping), cloud desktops as many as the bots need with the month's hours,
-  voice, apps, the phone, the machine with its swap, storage with its backup
-  days, and what it adds over the plan listed before it; the trial's timeline with
-  the reminder line only while the Admin sends one; the Claude credit;
-  money-back beside the button; prices plus tax), the sign-in (its last step
+  (one card per plan the Admin sells, side by side on a wide sheet and
+  stacked in a narrow window, from `lib/cloud-plan` `planCards`: its name,
+  "Most popular" on the Admin's recommended plan only, the price per month,
+  its promise, its own button (Start free trial, or Get {plan} without a
+  trial) with its terms in one line under it, then the same rows in the same
+  order on every card in the website's words (with the app's "cloud
+  desktop" for the website's "cloud computer"), every number from the
+  Admin's `allowances`: always on (or sleeping), cloud desktops as many as
+  the bots need (how many at once only as small print), the month's hours,
+  CPUs and memory (swap as small print), storage and what it grows to,
+  voice, and daily backups' days. The card of the plan the account already
+  has says **Your plan** instead of a button (`current`, from the verified
+  entitlement's tier); a plan no longer on sale, such as a Personal
+  subscriber's, shows only for that subscriber when the screen is given it
+  (`own`). Under the cards, when every plan has the same trial, the trial's
+  timeline with the reminder line only while the Admin sends one, and the
+  Claude credit; money-back; prices plus tax. No launch or struck-through
+  price: the Admin's `regularAmount` is not read), the sign-in (its last step
   names the checkout only when the sign-in is on the way to one), the next
   step in the browser (the checkout open there, or, signed in on the way to
   one, the Admin's page after approval, which leads to it), the payment
   received, My Cloud starting, and My Cloud ready (**Open My Cloud**; never
   for someone who already had My Cloud before this sign-in). When a step
   ended without going on (the sign-in code expired or the sign-in ended, a
-  checkout already being prepared), the offer says why. The plan picker is a
-  radio group with one tab stop and arrow keys, and each new step takes focus
-  at its heading. A payment problem, an ended sign-in or a Cloud that can't
+  checkout already being prepared), the offer says why. A screen reader
+  hears each card's button with its plan's name, and each new step takes
+  focus at its heading. A payment problem, an ended sign-in or a Cloud that can't
   be reached go to Settings → MausBot Cloud instead.
 - **Checkout runs in the default browser, never the app.** Signed in, main
   asks the Admin for this account's checkout (`POST /api/cloud/desktop/checkout`
@@ -1861,7 +1869,7 @@ screen's note.
   `offer: {plans, recommended?, trialDays?, creditUsd?, reminderDays?, refundDays?, checkout?}`,
   only while this account can buy. `plans[]` are the catalog entries on sale
   (`{tier, label, price: {currency: "USD", amount, interval: "month"}, allowances?, trialDays?}`;
-  a `personal` entry, which an older Admin may still list, is left out here, so it is never listed, preselected or
+  a `personal` entry, which an older Admin may still list, is left out here, so it is never listed, marked Most popular or
   checked out, a `recommended: "personal"` falls back to Pro (else the first plan left), and a `checkout` of it is not
   watched; Personal subscribers keep their plan and see it named Personal;
   `allowances` may carry `cpuKind`, `swapMb` and `snapshotDays`, each said only when present and valid):
