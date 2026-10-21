@@ -2420,5 +2420,11 @@
   "cloudBuy.row.storageGrows": "{gb} ГБ сховища, зростає до {max} ГБ",
   "cloudBuy.row.backups": "Щоденні резервні копії, зберігаються {days} дн.",
   "cloudBuy.trialTerms": "Потрібна картка, але нічого не списується, доки не закінчиться безкоштовний період. Скасувати можна в застосунку будь-коли.",
-  "cloudBuy.timeline.firstPayment": "Перший платіж"
+  "cloudBuy.timeline.firstPayment": "Перший платіж",
+  "homeScreen.openingNamed": "Відкриваємо {name}…",
+  "homeScreen.offlineNamed": "Зараз не вдається зв'язатися з {name}.",
+  "homeScreen.signInNamed": "Увійдіть, щоб відкрити {name}",
+  "homeScreen.planNamed": "{name} не працює",
+  "homeLine.left": "Ви більше не в {name}.",
+  "homeLine.privateChats": "Чати в {name} приватні для інших учасників. Адміністратори {name} можуть їх бачити."
 }

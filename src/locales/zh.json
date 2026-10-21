@@ -2823,5 +2823,11 @@
   "cloudBuy.row.storageGrows": "{gb} GB 存储空间，最多可增至 {max} GB",
   "cloudBuy.row.backups": "每日备份，保留 {days} 天",
   "cloudBuy.trialTerms": "需要绑定银行卡，但试用结束前不会收费。随时可在应用中取消。",
-  "cloudBuy.timeline.firstPayment": "首次付款"
+  "cloudBuy.timeline.firstPayment": "首次付款",
+  "homeScreen.openingNamed": "正在打开 {name}…",
+  "homeScreen.offlineNamed": "目前无法连接到 {name}。",
+  "homeScreen.signInNamed": "登录以打开 {name}",
+  "homeScreen.planNamed": "{name} 未在运行",
+  "homeLine.left": "你已不在 {name} 中。",
+  "homeLine.privateChats": "{name} 中的聊天对其他成员保密。{name} 的管理员可以看到。"
 }

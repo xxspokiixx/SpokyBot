@@ -5741,5 +5741,11 @@
   "homeScreen.signInEnded": "O login deste computador no MausBot Cloud terminou. Seus bots e conversas estão seguros no My Cloud.",
   "homeScreen.signInOther": "Este computador está conectado ao MausBot Cloud com outra conta. Entre com a conta a que o My Cloud pertence.",
   "homeScreen.signInButton": "Entrar",
-  "homeScreen.plan": "O My Cloud não está funcionando"
+  "homeScreen.plan": "O My Cloud não está funcionando",
+  "homeScreen.openingNamed": "Abrindo {name}…",
+  "homeScreen.offlineNamed": "Não foi possível conectar a {name} agora.",
+  "homeScreen.signInNamed": "Entre para abrir {name}",
+  "homeScreen.planNamed": "{name} não está em execução",
+  "homeLine.left": "Você não faz mais parte de {name}.",
+  "homeLine.privateChats": "As conversas em {name} são privadas para os outros membros. Os administradores de {name} podem vê-las."
 }

@@ -1922,5 +1922,11 @@
   "cloudBuy.row.storageGrows": "{gb} Go de stockage, jusqu'à {max} Go",
   "cloudBuy.row.backups": "Sauvegardes quotidiennes, conservées {days} jours",
   "cloudBuy.trialTerms": "Carte requise, rien n'est facturé avant la fin de votre essai. Résiliable dans l'app à tout moment.",
-  "cloudBuy.timeline.firstPayment": "Premier paiement"
+  "cloudBuy.timeline.firstPayment": "Premier paiement",
+  "homeScreen.openingNamed": "Ouverture de {name}…",
+  "homeScreen.offlineNamed": "Impossible de joindre {name} pour le moment.",
+  "homeScreen.signInNamed": "Connectez-vous pour ouvrir {name}",
+  "homeScreen.planNamed": "{name} n'est pas en marche",
+  "homeLine.left": "Vous ne faites plus partie de {name}.",
+  "homeLine.privateChats": "Les discussions dans {name} sont privées vis-à-vis des autres membres. Les administrateurs de {name} peuvent les voir."
 }

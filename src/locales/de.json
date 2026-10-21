@@ -1940,5 +1940,11 @@
   "cloudBuy.row.storageGrows": "{gb} GB Speicher, wächst bis {max} GB",
   "cloudBuy.row.backups": "Tägliche Backups, {days} Tage aufbewahrt",
   "cloudBuy.trialTerms": "Karte nötig, berechnet wird nichts, bis deine Testphase endet. Jederzeit in der App kündbar.",
-  "cloudBuy.timeline.firstPayment": "Erste Zahlung"
+  "cloudBuy.timeline.firstPayment": "Erste Zahlung",
+  "homeScreen.openingNamed": "{name} wird geöffnet…",
+  "homeScreen.offlineNamed": "{name} ist gerade nicht erreichbar.",
+  "homeScreen.signInNamed": "Anmelden, um {name} zu öffnen",
+  "homeScreen.planNamed": "{name} läuft nicht",
+  "homeLine.left": "Du bist nicht mehr in {name}.",
+  "homeLine.privateChats": "Chats in {name} sind für andere Mitglieder privat. Die Admins von {name} können sie sehen."
 }

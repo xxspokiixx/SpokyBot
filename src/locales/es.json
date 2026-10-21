@@ -5035,5 +5035,11 @@
   "homeScreen.signInEnded": "La sesión de este ordenador en MausBot Cloud ha terminado. Tus bots y chats están a salvo en My Cloud.",
   "homeScreen.signInOther": "Este ordenador tiene la sesión de MausBot Cloud iniciada con otra cuenta. Inicia sesión con la cuenta a la que pertenece My Cloud.",
   "homeScreen.signInButton": "Iniciar sesión",
-  "homeScreen.plan": "My Cloud no está en marcha"
+  "homeScreen.plan": "My Cloud no está en marcha",
+  "homeScreen.openingNamed": "Abriendo {name}…",
+  "homeScreen.offlineNamed": "No se puede conectar con {name} ahora mismo.",
+  "homeScreen.signInNamed": "Inicia sesión para abrir {name}",
+  "homeScreen.planNamed": "{name} no está en marcha",
+  "homeLine.left": "Ya no formas parte de {name}.",
+  "homeLine.privateChats": "Los chats en {name} son privados para los demás miembros. Los administradores de {name} pueden verlos."
 }

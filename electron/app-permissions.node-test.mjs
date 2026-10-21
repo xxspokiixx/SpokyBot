@@ -240,7 +240,7 @@ test("the app installs these handlers, with its one rule for My Cloud and a wait
   assert.match(main, /^  appPermissions = appPermissionHandlers\(\{$/m);
   assert.doesNotMatch(main, /(const|let|var) appPermissions = appPermissionHandlers/);
   assert.match(main, /cloudHomeOrigin: myCloud,\n/);
-  assert.match(main, /homeOrigin: \(\) => homeWindow\.cloudOrigin\(\),\n/);
+  assert.match(main, /homeOrigin: \(\) => homeWindow\.placeOrigin\(\),\n/, "notifications on the page the window shows: My Cloud's, or a team's Cloud's");
   assert.match(main, /cloudHomeRestoring: \(\) => cloudAccountRestoring \? cloudAccountRestored\(\) : null,\n/);
   assert.equal(main.match(/myCloudOrigin\(/g)?.length, 1);
   assert.match(main, /cloudPageSenderAllowed\(event, \{ contents, homeOrigin: myCloud\(\),/);

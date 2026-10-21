@@ -45,11 +45,11 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
     nova = (await fx.onCloud("POST", "/api/bots", { name: "Nova", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot.id;
     const tools = await ensureUiBrowser(process.env);
     if (!tools.chrome) throw new Error("This harness needs the pinned Chrome for Testing");
-    const ports = await Promise.all([freePortBlock([0, 1]), freePortBlock([0, 1]), freePortBlock([0])]) as [number, number, number];
+    const ports = await Promise.all([freePortBlock([0, 1]), freePortBlock([0, 1]), freePortBlock([0]), freePortBlock([0, 1])]) as [number, number, number, number];
     world = await launchHomeWorld(fx, { chrome: tools.chrome, ports });
     shots = shotsDir(fx.root);
     // Each page's dev server bundles what it imports on the first visit, then reloads it once: done before anything counts.
-    for (const url of [`${world.localOrigin}/`, `${world.cloudOrigin}/`]) {
+    for (const url of [`${world.localOrigin}/`, `${world.cloudOrigin}/`, `${world.teamOrigin}/`]) {
       await world.window.loadURL(url).catch(() => {});
       await new Promise((resolve) => setTimeout(resolve, 8_000));
     }
@@ -193,5 +193,94 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
     await until(() => page<boolean>("window.__sameLoad === true"), (same) => same === false, 30_000, "the page to reload");
     await onCloudPage();
     expect(await page("fetch('/.well-known/openmausbot/environment').then((response) => response.json()).then((env) => env.version)")).toBe("0.1.999");
+  }, hostTimeout(180_000));
+
+  // T3: the team switcher. The session lists a team; its Cloud is the team server at world.teamOrigin.
+  const ACME = () => ({ id: "team-acme", name: "Acme", role: "admin", machine: { status: "ready", origin: world.teamOrigin } });
+  const onTeamPage = () => until(() => page<boolean>("Boolean(document.querySelector('textarea[aria-label^=\"Message\"]'))"), Boolean, 60_000, "the team's page")
+    .then(() => expect(new URL(world.window.url).origin).toBe(world.teamOrigin));
+  const homeLine = () => page<string | null>("document.querySelector('[data-home-line]')?.textContent ?? null");
+  const bridgeState = () => page<Record<string, unknown>>("window.ogb.workspaces.state()");
+
+  it("with a team in the session the switcher lists My Cloud and Acme; choosing Acme pairs through the Admin's team route, opens the team's page with its one line, and is remembered after a relaunch", async () => {
+    await onCloudPage();
+    expect((await bridgeState()).home, "My Cloud alone: no switcher").toBe(true);
+    world.account.state.teams = [ACME()];
+    await world.sync();
+    await onCloudPage();
+    expect(world.menu().map((item) => [item.label, item.sublabel])).toEqual([["My Cloud", new URL(world.cloudOrigin).host], ["Acme", "Admin"]]);
+    expect((await bridgeState()).home, "two places: the switcher shows").toBeUndefined();
+    expect(await homeLine()).toBeNull();
+    await world.home.show({ place: { team: "team-acme" } });
+    await onTeamPage();
+    expect(world.admin.teamPairings).toEqual(["team-acme"]);
+    expect(world.places.remembered()).toMatchObject({ team: "team-acme", name: "Acme", origin: world.teamOrigin });
+    expect(await bridgeState()).toMatchObject({ local: false, name: "Acme", origin: world.teamOrigin, role: "Admin" });
+    await until(() => homeLine(), (text) => text === "Chats in Acme are private from other members. Acme's admins can see them.", 20_000, "the team's first-open line");
+    expect(await page("Notification.permission"), "notifications on the team's page").toBe("granted");
+    await world.window.screenshot(join(shots, "8-team-first-open.png"));
+    // Relaunch: the team again, on the window's own session, no new pairing, no line.
+    await blank();
+    await world.launch();
+    await onTeamPage();
+    expect(world.admin.teamPairings).toEqual(["team-acme"]);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(await homeLine(), "said once per team per device").toBeNull();
+    await until(async () => world.splash?.destroyed ?? true, Boolean, 15_000, "the startup screen to close");
+  }, hostTimeout(180_000));
+
+  it("a lapsed cookie on the team's page signs in again through the team route, and the team's Cloud being unreachable shows the screen named Acme while My Cloud keeps working", async () => {
+    await onTeamPage();
+    const sessions = (await fx.onCloud("GET", "/api/auth/sessions")).body.sessions as Array<{ id: string; label: string }>;
+    // The window's sessions (the page labels them itself); the fixture's own owner sessions stay.
+    for (const session of sessions.filter((entry) => !entry.label.startsWith("OpenMausBot app (Cloud)"))) await fx.onCloud("DELETE", `/api/auth/sessions/${session.id}`);
+    expect(await page("fetch('/api/auth/session').then((response) => response.status)")).toBe(401);
+    const pairings = world.admin.teamPairings.length;
+    world.window.webContents.reload();
+    await until(() => page<string>("fetch('/api/auth/session').then((response) => response.json()).then((session) => session.kind)"), (kind) => kind === "session", 30_000, "a new team session");
+    await onTeamPage();
+    expect(world.admin.teamPairings.slice(pairings)).toEqual(["team-acme"]);
+    await blank();
+    world.network.teamDown = true;
+    void world.home.show({ place: { team: "team-acme" } });
+    await until(() => screen(), (value) => value === "offline", 3_000, "the offline screen within 3 s");
+    expect(await page<string>("document.body.innerText")).toContain("Can't reach Acme right now.");
+    await world.window.screenshot(join(shots, "9-team-offline.png"));
+    await world.home.show({ place: "cloud" });
+    await onCloudPage();
+    world.network.teamDown = false;
+    await world.home.show({ place: { team: "team-acme" } });
+    await onTeamPage();
+  }, hostTimeout(180_000));
+
+  it("signed out, the team shows one Sign in named Acme", async () => {
+    const signedIn = world.account.state, pairings = world.admin.teamPairings.length;
+    world.account.state = { status: "signed-out" };
+    try {
+      await blank();
+      await world.home.show({ place: { team: "team-acme" } });
+      await until(() => screen(), (value) => value === "signin");
+      expect(await page<string>("document.body.innerText")).toContain("Sign in to open Acme");
+      expect(world.admin.teamPairings.length, "no pairing asked while signed out").toBe(pairings);
+    } finally { world.account.state = signedIn; }
+  }, hostTimeout(60_000));
+
+  it("removed from the team: after the next session check Acme is gone from the switcher, My Cloud opens, and one line says so", async () => {
+    await world.home.show({ place: { team: "team-acme" } });
+    await onTeamPage();
+    world.account.state.teams = [];
+    await world.sync();
+    await onCloudPage();
+    await until(() => homeLine(), (text) => text === "You're no longer in Acme.", 20_000, "the one line");
+    await world.window.screenshot(join(shots, "10-team-left.png"));
+    expect(world.environments().environments.some((entry: any) => entry.team)).toBe(false);
+    expect(world.menu().map((item) => item.label)).toEqual(["My Cloud"]);
+    expect(world.places.remembered()).toBeNull();
+    expect((await bridgeState()).home, "My Cloud alone again: no switcher").toBe(true);
+    world.window.webContents.reload();
+    await onCloudPage();
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(await homeLine(), "said once").toBeNull();
+    delete world.account.state.teams;
   }, hostTimeout(180_000));
 });
