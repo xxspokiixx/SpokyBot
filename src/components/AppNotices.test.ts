@@ -35,7 +35,7 @@ import { api } from "@/state/store";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 9, 12).getTime();
 const plans = [
-  { tier: "personal", label: "Personal", amount: 2900, trialDays: 7 },
+  { tier: "starter", label: "Starter", amount: 1500, trialDays: 7 },
   { tier: "pro", label: "Pro", amount: 4900, trialDays: 7 },
   { tier: "max", label: "Max", amount: 9900, trialDays: 7 },
 ];
@@ -158,7 +158,7 @@ describe("the card after the update", () => {
     returning();
     const html = await launch();
     const words = [INTRO, "Free for 7 days", "MausBot Cloud runs your bots for you in the cloud, always on.", "Routines run on time, day and night",
-      "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start", "Then from $29/month + tax. Cancel any time.",
+      "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start", "Then from $15/month + tax. Cancel any time.",
       "14-day money-back on every plan.", "Start free trial", "Show me how", "Sign in to your Cloud plan", "Not now"];
     for (const text of words) expect(html).toContain(text);
     for (let i = 1; i < words.length; i++) expect(html.indexOf(words[i - 1]!), words[i]).toBeLessThan(html.indexOf(words[i]!));
@@ -288,11 +288,13 @@ describe("the card after the update", () => {
 
 describe("the free trial's notice, here and on My Cloud", () => {
   it("shows the notice main says is due, tells main once, and stays up until it is closed", async () => {
-    account = paid({ trial: trial("active") }); snapshot = { status: "paid", tier: "pro", trial: trial("active"), notice: "active", credit: { grantedUsd: 5, remainingUsd: 3.2, state: "active" } };
+    const running = trial("active", { switchTo: { tier: "starter", amount: 1500 } });
+    account = paid({ trial: running }); snapshot = { status: "paid", tier: "pro", trial: running, notice: "active", credit: { grantedUsd: 5, remainingUsd: 3.2, state: "active" } };
     offer = { ...PLAIN_OFFER };
     const html = await launch();
     expect(html).toContain("Your free trial ends on"); expect(html).toContain("Includes $5 of Claude credit: $3.20 left.");
-    expect(html).toContain("Prefer Personal at $29?");
+    expect(html).toContain("Prefer Starter at $15?");
+    expect(bridges.cloud.offer, "the trial's notice needs nothing from the offer").not.toHaveBeenCalled();
     expect(bridges.plan.noticeSeen).toHaveBeenCalledOnce();
     snapshot = { ...snapshot, notice: undefined };
     expect(await settle()).toContain("Your free trial ends on");
@@ -429,7 +431,7 @@ describe("the Cloud Pro popup after the update", () => {
     returning(); storage.delete(PRODUCT_HUNT_NOTICE);
     const html = await launch();
     const words = [POPUP, "Free for 7 days", "MausBot Cloud runs your bots for you in the cloud, always on.", "Routines run on time, day and night",
-      "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start", "Then from $29/month + tax. Cancel any time.",
+      "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start", "Then from $15/month + tax. Cancel any time.",
       "14-day money-back on every plan.", "Start free trial", "Compare plans", "OpenMausBot on this computer stays free and open source.", "Not now"];
     for (const text of words) expect(html).toContain(text);
     for (let i = 1; i < words.length; i++) expect(html.indexOf(words[i - 1]!), words[i]).toBeLessThan(html.indexOf(words[i]!));
@@ -479,7 +481,7 @@ describe("the Cloud Pro popup after the update", () => {
   it("someone signed in with no plan: each click is tied to their Cloud account's email before it is counted, and only once across reloads", async () => {
     account = free; offer = { ...PLAIN_OFFER };
     const html = await launch();
-    expect(html).toContain("Upgrade to Cloud Pro"); expect(html).toContain("MausBot Cloud plans from $29/month + tax.");
+    expect(html).toContain("Upgrade to Cloud Pro"); expect(html).toContain("MausBot Cloud plans from $15/month + tax.");
     for (const gone of ["Free for", "Start free trial", "Claude credit"]) expect(html).not.toContain(gone);
     expect(popupEvents("shown")).toEqual([event("shown", "none", true, "local")]);
     expect(identifyEmail).not.toHaveBeenCalled();

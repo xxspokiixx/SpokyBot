@@ -7,7 +7,7 @@ import { api, useStore } from "@/state/store";
 import { APP_REPOSITORY } from "@/lib/app-links";
 import { track } from "@/lib/analytics";
 import { brandStatus } from "@/lib/brand";
-import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays, personalAmount } from "@/lib/cloud-plan";
+import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits } from "@/lib/corner-popup";
@@ -97,7 +97,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const seenHere = local && (noticeSeen(record, CLOUD_PRO_UPDATE_NOTICE) || onboardingCloudOffered(record));
   const popupPending = popupHere && !seenHere && (!desktopState
     || (desktopState.cloud && !desktopState.seen.includes(CLOUD_PRO_UPDATE_NOTICE)));
-  const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done") || trialDue?.state === "active"
+  const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done")
     || (popupPending && view !== null && buyOfferAllowed(view)));
   const offerKey = wantOffer ? `${view?.kind}:${JSON.stringify(account?.offer ?? null)}` : null;
   useEffect(() => {
@@ -204,7 +204,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       onDismiss={() => { done("close"); setToast(t("cloudIntro.later")); }} />;
   }
   if (notice === CLOUD_TRIAL_NOTICE && trial) {
-    const shown = cloudTrialView(trial, plan?.credit, { personal: personalAmount(offer) });
+    const shown = cloudTrialView(trial, plan?.credit);
     const act = () => { setFailed(false); void planBridge?.manage().then(close, () => setFailed(true)); };
     return <CloudTrialNoticeCard view={shown} failed={failed} onAction={act} onClose={close} />;
   }
