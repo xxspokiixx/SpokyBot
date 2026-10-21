@@ -3438,7 +3438,7 @@
   "botPanel.library.pagesEmpty": "Pages and apps {name} makes in chat show up here.",
   "botPanel.library.writeCommand": "Write a command",
   "botPanel.screen.idle": "Idle",
-  "botPanel.screen.working": "Working on a task",
+  "botPanel.screen.working": "Working on a task. Its screen shows here soon; open full view to watch it live.",
   "botPanel.openFullView": "Open full view",
   "botPanel.openFullComputer": "Open the full view",
   "botPanel.fullViewHint": "Take control, sleep and setup controls are in the full view.",

@@ -150,9 +150,10 @@ const mintCapability = async (botId: string, threadId: string): Promise<string> 
 };
 
 const hideSeededBot = async () => {
-  // Otherwise the seeded bot joins the unsectioned team and the roster assertions depend on install order.
+  // Otherwise the seeded bot joins the unsectioned team and the roster assertions depend on install order. It is that
+  // team's Chief (Chief first), and a Chief is only hidden once it steps down.
   const seeded = (await api("GET", "/api/bots?messages=0")).body.bots[0];
-  await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+  expect((await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false, hidden: true })).status).toBe(200);
 };
 
 const peerNames = async (selfId: string, token: string) => {

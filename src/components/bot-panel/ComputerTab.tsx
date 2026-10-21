@@ -83,7 +83,7 @@ export function ComputerTab({ bot, derived, onOpen }: { bot: Bot; derived: Deriv
         ) : (
           <>
             <span className="opacity-55"><BotAvatar bot={bot} size={52} animated={false} /></span>
-            <span className="text-[12.5px] text-ink-secondary">{t(bot.busy ? "botPanel.screen.working" : "botPanel.screen.idle")}</span>
+            <span className="max-w-[80%] text-center text-[12.5px] text-ink-secondary">{t(bot.busy ? "botPanel.screen.working" : "botPanel.screen.idle")}</span>
           </>
         )}
         <button

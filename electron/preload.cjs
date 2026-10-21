@@ -343,6 +343,8 @@ const bridge = {
     state: () => ipcRenderer.invoke("cloud-lending:state"),
     set: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-lending:set", on === true) : Promise.reject(new Error("Turn on the switch to lend this computer.")),
+    screen: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-lending:screen", on === true) : Promise.reject(new Error("Tick Apps and screen to lend them.")),
   } : undefined,
   // This computer's Settings only (never a remote page): what of Logins My Cloud has, and Also use on My Cloud.
   cloudLogins: process.argv.includes("--omb-company-desktop=1") && isLocalPage ? {

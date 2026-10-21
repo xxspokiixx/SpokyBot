@@ -3295,7 +3295,7 @@
   "botPanel.library.pagesEmpty": "{name}がチャットで作成したページとアプリがここに表示されます。",
   "botPanel.library.writeCommand": "コマンドを作成",
   "botPanel.screen.idle": "待機中",
-  "botPanel.screen.working": "タスクを実行中",
+  "botPanel.screen.working": "タスクを実行中です。画面はまもなくここに表示されます。ライブで見るにはフルビューを開いてください。",
   "botPanel.openFullView": "フルビューを開く",
   "botPanel.openFullComputer": "フルビューを開く",
   "botPanel.fullViewHint": "操作の引き継ぎ、スリープ、セットアップの操作は、フルビューにあります。",

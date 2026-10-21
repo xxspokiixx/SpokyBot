@@ -669,10 +669,14 @@ the desktop app it starts with this computer's own **Let my bots use this Mac**
 switch and its one line (electron/cloud-lending-ipc.mjs), so nobody leaves My
 Cloud to change it: the page learns only on/off, how it is going and folder
 names, never a path; turning it on needs the person's real click on the switch
-(the preload bridge checks it), and nothing else asks. Turned on with nothing
-chosen (here or on this computer), lending lends the internet connection and
-Desktop, Documents and Downloads, read only; other folders, editing and the
-screen wait under **Choose what's lent** on this computer. Where the system
+(the preload bridge checks it), and nothing else asks. While it is on, the page
+also has **Apps and screen**: ticking it needs a real click too, and main then
+asks in a native dialog of its own, because a page served by the Cloud must
+never grant control of the computer alone. Turned on with nothing chosen (here
+or on this computer), lending lends the internet connection and Desktop,
+Documents and Downloads, read only; other folders and editing wait under
+**Choose what's lent** on this computer. A bot that finds apps and screen not
+lent is told where to tick it, in the refusal and in list_shared_computers. Where the system
 names the home folder itself for one of them (Linux without user-dirs.dirs),
 the folder of that name in the home folder is lent instead; one that can't be
 found is left out. A refusal a person can act on (the whole home folder or a
@@ -1502,7 +1506,10 @@ resume, someone's use, or 120 s (a sleep the Admin never carried out):
   its stream, stops its polls, shows "My Cloud is asleep" and stays quiet until
   the person clicks, types or focuses it, which wakes the home
   (`src/lib/cloud-power.ts`): Fly wakes a machine for **any** inbound request,
-  so a page that kept polling would keep it awake;
+  so a page that kept polling would keep it awake. The frame is live only: a
+  stream that resumes from before it never gets it again. The wake is one
+  ordinary request (`GET /api/auth/session`), so it also ends a sleep the
+  Admin has not carried out yet;
 - held `GET /api/sync/changes` and `POST /api/shared-computers/<id>/poll`
   answer `503 {"error":"asleep"}` with `x-omb-cloud-power: asleep`, and new
   ones get the same, so the desktop's Files sync and lending pause instead of

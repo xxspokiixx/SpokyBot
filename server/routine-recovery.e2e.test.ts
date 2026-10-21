@@ -47,6 +47,10 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   ].join("\n"), { mode: 0o700 });
   engine("happy");
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
+  // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn of
+  // its own on the same engine. Stepped down, what these runs tell the owner is theirs alone.
+  const starter = (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.chiefOfStaff);
+  await api("PATCH", `/api/bots/${starter.id}`, { chiefOfStaff: false });
   const bot = (await runControlOmb(["new-bot", "--name", "Inbox bot", "--url", url]) as any).bot;
   events = await openSse(`${url}/api/events`, { origin: url });
   const routine = async (name = "Inbox brief") => (await api("POST", "/api/routines", {
