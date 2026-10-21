@@ -8,7 +8,7 @@ export interface EnvironmentDescriptor {
 
 export type SessionState =
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[] }
+  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -32,6 +32,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       label: typeof record.label === "string" ? record.label : "",
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
+      ...(typeof record.reactor === "string" ? { reactor: record.reactor } : {}),
       ...(record.cloudGuest === true ? {
         cloudGuest: true as const,
         openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [],
