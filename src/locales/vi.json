@@ -4497,5 +4497,16 @@
   "mcp.apps.desc": "Khi một công cụ của nó có ứng dụng, ứng dụng sẽ mở trong đoạn chat.",
   "mcp.apps.toggleAria": "Hiện ứng dụng từ {name} trong đoạn chat",
   "team.privateChats": "Các cuộc trò chuyện trong {team} được giữ riêng tư với các thành viên khác. Quản trị viên của {team} có thể xem chúng.",
-  "team.privateHeader": "Riêng tư · quản trị viên có thể xem"
+  "team.privateHeader": "Riêng tư · quản trị viên có thể xem",
+  "chat.page.usage": "{pages}/{limit} trang",
+  "chat.page.copyLink": "Sao chép liên kết",
+  "chat.page.copied": "Đã sao chép",
+  "chat.page.open": "Mở",
+  "chat.page.unpublish": "Gỡ xuống",
+  "chat.page.unpublished": "Đã gỡ xuống. Liên kết không còn mở được.",
+  "chat.page.unpublishFailed": "Không gỡ được trang này. Hãy thử lại sau giây lát.",
+  "chat.page.freeLimit": "Bạn đã dùng hết {limit} trang miễn phí. MausBot Cloud cho bạn thêm trang, và trang không có huy hiệu.",
+  "chat.page.planLimit": "Bạn đã dùng hết {limit} trang của gói {plan}. Gỡ một trang xuống để có chỗ.",
+  "chat.page.morePages": "Thêm trang",
+  "chat.activity.publishPage": "Đang xuất bản trang"
 }

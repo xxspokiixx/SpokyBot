@@ -2848,5 +2848,16 @@
   "mcp.apps.desc": "当它的某个工具带有应用时，该应用会在聊天中打开。",
   "mcp.apps.toggleAria": "在聊天中显示 {name} 的应用",
   "team.privateChats": "你在 {team} 中的聊天对其他成员保密。{team} 的管理员可以查看。",
-  "team.privateHeader": "私密 · 管理员可以查看"
+  "team.privateHeader": "私密 · 管理员可以查看",
+  "chat.page.usage": "已用 {pages}/{limit} 个页面",
+  "chat.page.copyLink": "拷贝链接",
+  "chat.page.copied": "已拷贝",
+  "chat.page.open": "打开",
+  "chat.page.unpublish": "取消发布",
+  "chat.page.unpublished": "已取消发布。这个链接已打不开。",
+  "chat.page.unpublishFailed": "无法取消发布这个页面。请稍后再试。",
+  "chat.page.freeLimit": "你已用完 {limit} 个免费页面。MausBot Cloud 能给你更多页面，而且页面不带标记。",
+  "chat.page.planLimit": "你已用完 {plan} 方案的全部 {limit} 个页面。取消发布一个页面即可腾出空间。",
+  "chat.page.morePages": "获取更多页面",
+  "chat.activity.publishPage": "正在发布页面"
 }

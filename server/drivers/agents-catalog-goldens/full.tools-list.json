@@ -481,6 +481,52 @@
       }
     },
     {
+      "name": "publish_page",
+      "description": "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The file or folder, in your working folder."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "A short name for the page."
+          },
+          "page_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]{20,63}$",
+            "description": "The page's id, the first part of its link."
+          }
+        },
+        "required": [
+          "path",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "unpublish_page",
+      "description": "Take a published page down when the person asks; its link stops working. Pass page_id, or the path it was published from.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]{20,63}$",
+            "description": "The page's id, the first part of its link."
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "post_to_room",
       "description": "Put one message into a shared room you belong to, for example when the user asks you to tell the team something. Get group_id from list_rooms. This posts and returns: no room member's turn starts, nobody replies, and nothing comes back except confirmation — so never use it to ask a question or hand out work (use coordinate_bots for those). Post once, say it in full, and tell the user what you posted. Set attach_voice_note true to attach this turn's voice note. If a post is refused, do not retry it: say what you wanted to post in your reply instead.",
       "inputSchema": {

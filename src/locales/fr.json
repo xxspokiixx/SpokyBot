@@ -1947,5 +1947,16 @@
   "mcp.apps.desc": "Quand l'un de ses outils a une app, celle-ci s'ouvre dans la conversation.",
   "mcp.apps.toggleAria": "Afficher les apps de {name} dans la conversation",
   "team.privateChats": "Les discussions dans {team} sont privées pour les autres membres. Les administrateurs de {team} peuvent les voir.",
-  "team.privateHeader": "Privé · les administrateurs peuvent le voir"
+  "team.privateHeader": "Privé · les administrateurs peuvent le voir",
+  "chat.page.usage": "{pages} pages sur {limit}",
+  "chat.page.copyLink": "Copier le lien",
+  "chat.page.copied": "Copié",
+  "chat.page.open": "Ouvrir",
+  "chat.page.unpublish": "Retirer",
+  "chat.page.unpublished": "Page retirée. Le lien ne s’ouvre plus.",
+  "chat.page.unpublishFailed": "Impossible de retirer cette page. Réessayez dans un instant.",
+  "chat.page.freeLimit": "Vous avez utilisé vos {limit} pages gratuites. MausBot Cloud vous en donne plus, et des pages sans le badge.",
+  "chat.page.planLimit": "Vous avez utilisé les {limit} pages de votre forfait {plan}. Retirez une page pour faire de la place.",
+  "chat.page.morePages": "Obtenir plus de pages",
+  "chat.activity.publishPage": "Publie une page"
 }

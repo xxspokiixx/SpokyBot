@@ -4497,5 +4497,16 @@
   "mcp.apps.desc": "Araçlarından birinin uygulaması varsa uygulama sohbette açılır.",
   "mcp.apps.toggleAria": "{name} uygulamalarını sohbette göster",
   "team.privateChats": "{team} içindeki sohbetler diğer üyelere kapalıdır. {team} yöneticileri bunları görebilir.",
-  "team.privateHeader": "Özel · yöneticiler görebilir"
+  "team.privateHeader": "Özel · yöneticiler görebilir",
+  "chat.page.usage": "{pages}/{limit} sayfa",
+  "chat.page.copyLink": "Bağlantıyı kopyala",
+  "chat.page.copied": "Kopyalandı",
+  "chat.page.open": "Aç",
+  "chat.page.unpublish": "Yayından kaldır",
+  "chat.page.unpublished": "Yayından kaldırıldı. Bağlantı artık açılmıyor.",
+  "chat.page.unpublishFailed": "Bu sayfa yayından kaldırılamadı. Birazdan tekrar deneyin.",
+  "chat.page.freeLimit": "{limit} ücretsiz sayfanızı kullandınız. MausBot Cloud size daha fazlasını verir, üstelik rozetsiz sayfalar.",
+  "chat.page.planLimit": "{plan} planınızdaki {limit} sayfanın hepsini kullandınız. Yer açmak için bir sayfayı yayından kaldırın.",
+  "chat.page.morePages": "Daha fazla sayfa alın",
+  "chat.activity.publishPage": "Bir sayfa yayımlıyor"
 }

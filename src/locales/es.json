@@ -5020,5 +5020,16 @@
   "mcp.apps.desc": "Cuando una de sus herramientas tiene una app, la app se abre en el chat.",
   "mcp.apps.toggleAria": "Mostrar apps de {name} en el chat",
   "team.privateChats": "Los chats en {team} son privados para los demás miembros. Los administradores de {team} pueden verlos.",
-  "team.privateHeader": "Privado · los administradores pueden verlo"
+  "team.privateHeader": "Privado · los administradores pueden verlo",
+  "chat.page.usage": "{pages} de {limit} páginas",
+  "chat.page.copyLink": "Copiar enlace",
+  "chat.page.copied": "Copiado",
+  "chat.page.open": "Abrir",
+  "chat.page.unpublish": "Dejar de publicar",
+  "chat.page.unpublished": "Ya no está publicada. El enlace ya no se abre.",
+  "chat.page.unpublishFailed": "No se pudo dejar de publicar esta página. Inténtalo de nuevo en un momento.",
+  "chat.page.freeLimit": "Ya usaste tus {limit} páginas gratis. MausBot Cloud te da más, y páginas sin la insignia.",
+  "chat.page.planLimit": "Ya usaste las {limit} páginas de tu plan {plan}. Deja de publicar una para hacer sitio.",
+  "chat.page.morePages": "Conseguir más páginas",
+  "chat.activity.publishPage": "Publicando una página"
 }
