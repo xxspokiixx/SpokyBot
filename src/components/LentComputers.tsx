@@ -54,9 +54,12 @@ export function pageLendingLine(lending: PageLending): string {
   return what ? lendsLine(what) : t("lending.status.lent");
 }
 
-/** In the desktop app on My Cloud's own page: "Let my bots use this Mac" right here, one switch and one line, so nobody
- * has to leave My Cloud. Turning it on takes a real click on the switch, and nothing else asks. */
-function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending> } }) {
+type PageLendingBridge = { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending>; screen?(on: boolean): Promise<PageLending> };
+
+/** In the desktop app on My Cloud's own page: "Let my bots use this Mac" right here, one switch, one line and Apps and
+ * screen, so nobody has to leave My Cloud. Turning either on takes a real click; Apps and screen also asks in a dialog of
+ * this app's own. */
+function LendThisComputer({ bridge }: { bridge: PageLendingBridge }) {
   const [lending, setLending] = useState<PageLending | null>(null);
   const [working, setWorking] = useState(false);
   const [failed, setFailed] = useState<LocaleKey | null>(null);
@@ -68,16 +71,24 @@ function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>;
     return () => { alive = false; clearInterval(timer); };
   }, [bridge]);
   if (!lending?.available) return null;
-  const toggle = () => {
+  const perform = (action: () => Promise<PageLending>) => {
     setWorking(true); setFailed(null);
-    void bridge.set(!lending.on).then(setLending).catch((cause: unknown) => setFailed(lendingFailureKey(cause))).finally(() => setWorking(false));
+    void action().then(setLending).catch((cause: unknown) => setFailed(lendingFailureKey(cause))).finally(() => setWorking(false));
   };
+  const toggle = () => perform(() => bridge.set(!lending.on));
+  const lendScreen = bridge.screen;
   return <div data-lend-this-computer={lending.on ? "on" : "off"} className="flex flex-col gap-1.5 rounded-lg bg-raised/60 p-3">
     <div className="flex items-start justify-between gap-3">
       <p id="lend-this-computer" className="text-[13px] font-medium text-ink">{lendingTitle()}</p>
       <Switch checked={lending.on} disabled={working} aria-labelledby="lend-this-computer" onClick={toggle} />
     </div>
     <p role="status" className="text-[12.5px] text-ink-secondary">{pageLendingLine(lending)}</p>
+    {lending.on && lendScreen && <label data-lend-screen={lending.screen ? "on" : "off"} className="mt-1 flex items-start gap-2">
+      <input className="mt-1" type="checkbox" checked={lending.screen} disabled={working || (!lending.screen && !lending.screenAvailable)}
+        onChange={(event) => perform(() => lendScreen(event.target.checked))} />
+      <span className="text-[12.5px] text-ink">{t("lending.screen")}<span className="mt-0.5 block text-[12px] text-ink-secondary">
+        {t(lending.screen || lending.screenAvailable ? "lending.screenHelp" : "lending.screenUnavailable")}</span></span>
+    </label>}
     {failed && <p role="alert" data-lending-failed={failed} className="text-[12.5px] text-danger">{t(failed)}</p>}
   </div>;
 }
@@ -98,7 +109,7 @@ export function LentComputersCard() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
   const lending = window.ogb?.cloudLending;
-  const here = lending?.state && lending.set ? { state: lending.state, set: lending.set } : null;
+  const here = lending?.state && lending.set ? { state: lending.state, set: lending.set, screen: lending.screen } : null;
   return <Card title={t("lending.cloudSide.title")}>
     <div data-lent-computers={known === null ? "loading" : known.length} className="flex flex-col gap-3">
       {here && <LendThisComputer bridge={here} />}
