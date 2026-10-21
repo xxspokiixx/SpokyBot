@@ -7,8 +7,8 @@ export interface CloudAccountState {
   expiresAt?: number;
   /** Only a current server-verified session can include an entitlement
    * (verified within the last few minutes; a failed re-check keeps it).
-   * `plan` "pro" means any paid plan; `tier` names it ("personal", "pro",
-   * "max", or one newer than this app) when the Admin sends one. */
+   * `plan` "pro" means any paid plan; `tier` names it ("starter", "personal",
+   * "pro", "max", or one newer than this app) when the Admin sends one. */
   entitlement?: { plan: "free" | "pro"; tier?: string; status: "active" | "inactive"; expiresAt: number | null; version: number };
   verifiedAt?: number;
   verifiedUntil?: number;

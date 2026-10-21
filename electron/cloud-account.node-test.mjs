@@ -206,7 +206,7 @@ test("a free trial and its AI credit come with a verified session, for display o
 });
 
 const plans = () => [
-  { tier: "personal", label: "Personal", price: { currency: "USD", amount: 2900, interval: "month" }, allowances: null },
+  { tier: "starter", label: "Starter", price: { currency: "USD", amount: 1500, interval: "month" }, allowances: null },
   { tier: "pro", label: "Pro", price: { currency: "USD", amount: 4900, interval: "month" }, allowances: null },
 ];
 test("what this person may buy: the session's own offer when signed in, else the public plans, read with no sign-in or cookie at most every 10 minutes", async t => {
@@ -216,7 +216,7 @@ test("what this person may buy: the session's own offer when signed in, else the
   assert.equal(await f.client.offer(), null); assert.equal(asked().length, 1, "a failed ask counts for 30 seconds");
   f.now += 30_000; f.publicConfig = { status: 200, body: { name: "OpenMausBot", surface: "cloud", plans: plans(), trial: { days: 7, holdDays: 3, creditUsd: 5 }, refundDays: 14 } };
   const [first, second] = await Promise.all([f.client.offer(), f.client.offer()]);
-  assert.deepEqual(first.plans.map(plan => [plan.tier, plan.amount, plan.trialDays]), [["personal", 2900, 7], ["pro", 4900, 7]]);
+  assert.deepEqual(first.plans.map(plan => [plan.tier, plan.amount, plan.trialDays]), [["starter", 1500, 7], ["pro", 4900, 7]]);
   assert.deepEqual([first.recommended, first.creditUsd, first.refundDays], ["pro", 5, 14]);
   assert.deepEqual(second, first); assert.equal(asked().length, 2, "one ask at a time");
   f.now += 9 * 60_000; await f.client.offer(); assert.equal(asked().length, 2, "an answer counts for 10 minutes");
@@ -317,9 +317,9 @@ test("the purchase is over once its Cloud was opened, announced or shown ready: 
 
 test("after a restart mid-checkout, the checkout the Admin still holds is watched from first sight like this app's own", async t => {
   const f = await fixture(t); await f.connect();
-  f.offer = { plans: plans(), recommended: "pro", trialDays: 7, checkout: { plan: "personal", openUntil: f.now + 3600_000 } };
+  f.offer = { plans: plans(), recommended: "pro", trialDays: 7, checkout: { plan: "starter", openUntil: f.now + 3600_000 } };
   const seen = await f.client.refresh();
-  assert.deepEqual(seen.checkout, { plan: "personal", startedAt: f.now }, "no page is kept: no link");
+  assert.deepEqual(seen.checkout, { plan: "starter", startedAt: f.now }, "no page is kept: no link");
   assert.equal(f.client.checkoutPending(), true, "watched: focus reads the session at once");
   assert.equal(f.delay, 3_000, "every 3 seconds");
   f.now += 10 * 60_000; await f.client.refresh();
@@ -329,7 +329,7 @@ test("after a restart mid-checkout, the checkout the Admin still holds is watche
   f.browsers = []; const DODO = "https://test.checkout.dodopayments.com/session/cks_held";
   f.checkout = { status: 200, body: { cloudContractVersion: 1, url: DODO } };
   assert.equal((await f.client.reopenCheckout("pro", "app_card")).outcome, "opened");
-  assert.deepEqual(JSON.parse(f.requests.findLast(row => row.route === "/api/cloud/desktop/checkout").body), { plan: "personal", source: "app_card" },
+  assert.deepEqual(JSON.parse(f.requests.findLast(row => row.route === "/api/cloud/desktop/checkout").body), { plan: "starter", source: "app_card" },
     "the plan the Admin holds, under the page's source");
   assert.deepEqual(f.browsers, [DODO]);
   const paid = await fixture(t); await paid.connect();

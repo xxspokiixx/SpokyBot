@@ -23,7 +23,7 @@ it("says one plain thing, names OpenAI, and offers only the way to Settings → 
   expect(html).toContain(">Open API keys</button>");
   expect(html.match(/<button/g)).toHaveLength(1);
   expect(html).toContain("The OpenAI key stays on your computer.");
-  for (const gone of ["Pro", "plan", "<input", "$29"]) expect(html).not.toContain(gone);
+  for (const gone of ["Pro", "plan", "<input", "$15"]) expect(html).not.toContain(gone);
   f.cloudHome = true;
   expect(renderToStaticMarkup(createElement(LiveKeyNeeded))).toContain("The OpenAI key stays in the Cloud.");
 });

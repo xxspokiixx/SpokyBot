@@ -1,6 +1,6 @@
 # OMB Cloud: the home machine
 
-OMB Cloud (the Personal, Pro and Max plans) gives one person an always-on
+OMB Cloud (the Starter, Pro and Max plans) gives one person an always-on
 OpenMausBot server of their own (a plan may instead sleep when idle: see
 [Sleeping homes](#sleeping-homes-the-power-read-and-the-sleep-handshake)). The plans differ in machine size, disk and
 included allowances; everything on this page applies to all of them. Each
@@ -1564,7 +1564,7 @@ without them works as before; a malformed one is dropped, never the machine):
 - `cloud.purchase: {state: "confirming" | "held", plan, paidAt}`: a payment
   received but not yet linked to this account. While it is there, the app shows
   "payment received" and offers nothing to buy. It never activates anything.
-- `cloud.trial: {state, tier, endsAt, amount, chargeAt, holdUntil, deleteAt, keep, personalAmount?}`:
+- `cloud.trial: {state, tier, endsAt, amount, chargeAt, holdUntil, deleteAt, keep, switchTo?, personalAmount?}`:
   a free trial on this account's Cloud (`electron/cloud-home.mjs`
   `parseCloudTrial`). `state` is `active`, `ending` (renewal off, or cancelled),
   `processing` (the first charge is being taken), `late` or `ended`; `endsAt`
@@ -1573,10 +1573,18 @@ without them works as before; a malformed one is dropped, never the machine):
   `keep` what keeps the Cloud on the Cloud page: `portal` (turn renewal back
   on; for `ending`, renewal is off), `checkout` (subscribe again once ended),
   or `none` (nothing: renewing, or, for `ending`, cancelled outright).
-  `personalAmount`, while it runs on a plan above Personal, is Personal's price
-  in US cents, so the way down reads the same on every page of the app. An
-  unknown state is no trial; a malformed date or amount is left out. It is
-  display only: the entitlement still decides everything.
+  `switchTo: {tier, amount}` is the plan this trial can switch to from its
+  Plan page and that plan's price before tax in US cents, sent only while a
+  switch is the way down (`{tier: "starter", amount: 1500}` for a Pro or Max
+  trial), so the way down reads the same on every page of the app. `tier` is
+  one the app knows by name (`starter`, `personal`, `pro`, `max`) and `amount`
+  a whole, positive number of cents; anything else drops `switchTo`.
+  `personalAmount` is Personal's price in US cents, the only way down an older
+  Admin names: with no `switchTo`, the app reads it as `switchTo: {tier:
+  "personal", amount}`. An Admin that still sells Personal sends both. With
+  neither, the trial says nothing about switching. An unknown state is no
+  trial; a malformed date or amount is left out. It is display only: the
+  entitlement still decides everything.
 - `cloud.credit: {grantedUsd, remainingUsd, state}`: the trial's Claude
   credit (`active` or `used_up`), shown in Settings here and on the Cloud.
 - `offer` (top level, beside `cloud`): what this account may buy now, only
@@ -1589,9 +1597,9 @@ without them works as before; a malformed one is dropped, never the machine):
 the notice and for Settings (here and on My Cloud), with the same facts as the
 Cloud page. Each state has one message and at most one next step, which opens
 the Cloud page (`openDashboard`): **Manage subscription** (active, with the
-date, the price after it and how to cancel; in its last two days on a plan
-above Personal, also how to step down to Personal, with its price when the
-app knows it), **Subscribe to keep it** (ending with renewal off, `keep`
+date, the price after it and how to cancel; in its last two days, while the
+Admin names a cheaper plan to switch to, also how to step down to it, with
+its price, and nothing about switching when it names none), **Subscribe to keep it** (ending with renewal off, `keep`
 `portal`, or ended: when My Cloud stops and when its files are deleted),
 **Check payment status** (late), or nothing to do (processing; a trial
 cancelled outright, `ending` with any other `keep`, which offers nothing to
@@ -1645,8 +1653,8 @@ time, and none after one closes until another launch:
    - **On this computer's page**, with no plan, **Start free trial** (while
      the Admin offers one) or **Upgrade to Cloud Pro** opens the Add a Cloud
      dialog (source `update_popup`), and so does **Compare plans** (the dialog
-     lists every plan); on any plan (a trial, Personal, Pro, Max or one that
-     needs attention) **Manage plan** opens Settings → MausBot Cloud, and
+     lists every plan); on any plan (a trial, Starter, Personal, Pro, Max or
+     one that needs attention) **Manage plan** opens Settings → MausBot Cloud, and
      there is no Compare plans. Personal → Pro is not self-serve yet, so
      Personal gets Manage plan rather than an Upgrade that would end at
      "write to us". Its numbers are the Admin's.
@@ -1796,7 +1804,7 @@ sleeps: true}`; `cloud.state` stays `ready`. Without `cloud.power`, nothing belo
   your Cloud…" after 1.5 s, and gives its sign-in check 30 s instead of 5 (a stopped machine takes about 20 s), so a slow
   wake never causes a needless new pairing.
 - **Copy:** the menu and the server switcher say "Sleeps when idle" instead of "Always on" for such a Cloud; the buy sheet
-  shows the line for a plan whose allowances say `sleeps`; analytics know the `starter` plan.
+  shows the line for a plan whose allowances say `sleeps`.
 - **App events:** the connected-apps broker asks the Admin to wake a Cloud when it queues an event for one that isn't
   polling (`cloudflare/composio-broker`, off until `CLOUD_ADMIN_URL` and `CLOUD_GRANT_SECRET` are set).
 
@@ -1869,6 +1877,9 @@ screen's note.
   `offer: {plans, recommended?, trialDays?, creditUsd?, reminderDays?, refundDays?, checkout?}`,
   only while this account can buy. `plans[]` are the catalog entries on sale
   (`{tier, label, price: {currency: "USD", amount, interval: "month"}, allowances?, trialDays?}`;
+  a `personal` entry, which an older Admin may still list, is left out here, so it is never listed, preselected or
+  checked out, a `recommended: "personal"` falls back to Pro (else the first plan left), and a `checkout` of it is not
+  watched; Personal subscribers keep their plan and see it named Personal;
   `allowances` may carry `cpuKind`, `swapMb` and `snapshotDays`, each said only when present and valid):
   a plan's own `trialDays` is its trial; with none on any plan, a top-level
   `trialDays` is every plan's. `creditUsd` and `reminderDays` (days before the

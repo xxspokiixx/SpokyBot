@@ -61,7 +61,7 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   const handlers = new Map(), calls = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
   localOrigin.setLocalOrigin(origin);
   let allowed = true;
-  const offer = { plans: [{ tier: "personal", amount: 2900 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
+  const offer = { plans: [{ tier: "starter", amount: 1500 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
   const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, CHECKOUT_SOURCES, cloudOffersReady: async () => allowed,

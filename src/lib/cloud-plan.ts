@@ -4,7 +4,11 @@ import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
 const PLAN_LABEL: Record<string, string> = { starter: "Starter", personal: "Personal", pro: "Pro", max: "Max" };
-const ABOVE_PERSONAL: ReadonlySet<string> = new Set(["pro", "max"]);
+const CHEAPEST_FIRST: readonly string[] = ["starter", "personal", "pro", "max"];
+function switchesDown(tier: string | undefined, target: string): boolean {
+  const below = CHEAPEST_FIRST.indexOf(target);
+  return tier !== undefined && below >= 0 && CHEAPEST_FIRST.indexOf(tier) > below;
+}
 export function cloudPlanLabel(tier?: string): string {
   return tier === undefined ? "Pro" : Object.hasOwn(PLAN_LABEL, tier) ? PLAN_LABEL[tier] : "Cloud";
 }
@@ -87,8 +91,8 @@ export interface CloudTrialView {
   action: { kind: CloudTrialAction; label: string } | null;
 }
 
-export function cloudTrialView(trial: CloudTrial, credit?: CloudCredit, { personal = null }: { personal?: number | null } = {}): CloudTrialView {
-  personal = trial.personalAmount ?? personal;
+export function cloudTrialView(trial: CloudTrial, credit?: CloudCredit): CloudTrialView {
+  const switchTo = trial.switchTo ?? (trial.personalAmount ? { tier: "personal", amount: trial.personalAmount } : null);
   const plan = trial.tier ? cloudPlanLabel(trial.tier) : t("cloudTrial.yourPlan");
   const ends = shortDate(trial.endsAt), deleted = trial.deleteAt ? shortDate(trial.deleteAt) : null;
   const subscribe = { kind: "subscribe" as const, label: t("cloudTrial.subscribe") };
@@ -98,9 +102,8 @@ export function cloudTrialView(trial: CloudTrial, credit?: CloudCredit, { person
       body: trial.amount === null ? t("cloudTrial.activeNoPrice", { plan, date: shortDate(trial.chargeAt ?? trial.endsAt) })
         : t("cloudTrial.active", { plan, price: usd(trial.amount / 100), date: shortDate(trial.chargeAt ?? trial.endsAt) }),
       ...(credit?.state === "active" ? { credit: t("cloudTrial.credit", { granted: usd(credit.grantedUsd), left: usd(credit.remainingUsd) }) } : {}),
-      ...(trial.tier && ABOVE_PERSONAL.has(trial.tier) ? { switchPlan: personal
-        ? t("cloudTrial.preferPersonal", { price: usd(personal / 100), date: ends })
-        : t("cloudTrial.preferPersonalNoPrice", { date: ends }) } : {}),
+      ...(switchTo && switchesDown(trial.tier, switchTo.tier)
+        ? { switchPlan: t("cloudTrial.preferPlan", { plan: cloudPlanLabel(switchTo.tier), price: usd(switchTo.amount / 100), date: ends }) } : {}),
       action: { kind: "manage", label: t("cloudTrial.manage") },
     };
     case "ending": return trial.keep === "portal"
@@ -125,10 +128,6 @@ export function cloudCreditLine(credit: CloudCredit): string {
   return credit.state === "used_up"
     ? t("cloudCredit.usedUp", { granted: usd(credit.grantedUsd) })
     : t("cloudCredit.left", { left: usd(credit.remainingUsd), granted: usd(credit.grantedUsd) });
-}
-
-export function personalAmount(offer: CloudOffer | null | undefined): number | null {
-  return offer?.plans.find(plan => plan.tier === "personal")?.amount ?? null;
 }
 
 
@@ -168,7 +167,7 @@ export interface CloudPlanRow {
   tier: string; name: string; price: string; popular: boolean; promise: string | null;
   line: string | null; limit: string | null; sleeps: string | null; benefits: CloudPlanBenefit[]; adds: string | null;
 }
-const PROMISE: Record<string, LocaleKey> = { starter: "cloudBuy.promise.starter", personal: "cloudBuy.promise.personal", pro: "cloudBuy.promise.pro", max: "cloudBuy.promise.max" };
+const PROMISE: Record<string, LocaleKey> = { starter: "cloudBuy.promise.starter", pro: "cloudBuy.promise.pro", max: "cloudBuy.promise.max" };
 const amount = (value: number) => new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: 1 }).format(value);
 const gb = (mb: number) => amount(Math.round(mb / 102.4) / 10);
 const times = (value: number, base: number) => `${amount(Math.round((value / base) * 10) / 10)}×`;
