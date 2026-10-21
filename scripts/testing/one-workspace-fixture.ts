@@ -478,8 +478,11 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     for (const line of response.headers.getSetCookie()) {
       const [pair = "", ...attributes] = line.split(";").map((part) => part.trim());
       const at = pair.indexOf("="), path = attributes.find((part) => /^path=/i.test(part))?.slice(5) || "/";
-      if (at > 0) await cdp.request("Network.setCookie", { name: pair.slice(0, at), value: pair.slice(at + 1), url: new URL(url).origin + path, path,
-        httpOnly: attributes.some((part) => /^httponly$/i.test(part)) }, win.sessionId);
+      if (at <= 0) continue;
+      const name = pair.slice(0, at), cookieUrl = new URL(url).origin + path;
+      // A cookie the answer clears (Max-Age=0) is deleted, never kept with an empty value, as Electron's session does.
+      if (attributes.some((part) => /^max-age=(0|-\d+)$/i.test(part))) await cdp.request("Network.deleteCookies", { name, url: cookieUrl }, win.sessionId);
+      else await cdp.request("Network.setCookie", { name, value: pair.slice(at + 1), url: cookieUrl, path, httpOnly: attributes.some((part) => /^httponly$/i.test(part)) }, win.sessionId);
     }
     return response;
   };

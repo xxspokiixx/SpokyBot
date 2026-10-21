@@ -429,6 +429,8 @@ export function createHomeWindow(deps) {
       const origin = placeOrigin(), win = window();
       if (statusCode !== 401 || !origin || !win || win.isDestroyed() || webContentsId !== win.webContents.id) return;
       try { const at = new URL(url); if (at.origin !== origin || !at.pathname.startsWith("/api/")) return; } catch { return; }
+      // The place's own sign-in page is the new session on its way: its 401s until it redeems the code start nothing.
+      try { const page = new URL(win.webContents.getURL()); if (page.origin === origin && page.pathname === "/pair") return; } catch {}
       void repair();
     },
     /** The main frame went somewhere: the place's own sign-in page means its session ended; any other page of it is
