@@ -267,14 +267,6 @@ export function openLiveEvents(
       const frame = parseLiveFrame(event.data);
       if (!frame) return;
 
-      if (sleepingFrame(frame as LiveFrame & { state?: unknown })) {
-        // The home agreed to sleep: close quietly (not a lost connection) and stay closed until the person is back.
-        clearRetry();
-        closeSource();
-        markCloudAsleep();
-        return;
-      }
-
       if (isLivePing(frame)) {
         // An open event only proves a handshake; a ping proves the stream stayed usable.
         retryAttempt = 0;
@@ -322,6 +314,15 @@ export function openLiveEvents(
         } else {
           cursor = event.lastEventId;
         }
+      }
+
+      if (sleepingFrame(frame as LiveFrame & { state?: unknown })) {
+        // The home agreed to sleep: close quietly (not a lost connection) and stay closed until the person is back. The
+        // cursor is past this frame by now, so waking never resumes before it: a Cloud that replays it would close us again.
+        clearRetry();
+        closeSource();
+        markCloudAsleep();
+        return;
       }
 
       if (frame.kind !== "hello") {

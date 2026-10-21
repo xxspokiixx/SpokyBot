@@ -7,6 +7,7 @@
  * using it (server/cloud-power.ts `countsAsActivity`). */
 export const BACKGROUND_HEADER = "x-omb-background";
 export const CLOUD_POWER_HEADER = "x-omb-cloud-power";
+const WAKE_PATH = "/api/auth/session";
 
 type Listener = (asleep: boolean) => void;
 const listeners = new Set<Listener>();
@@ -28,8 +29,12 @@ function set(next: boolean) {
   for (const listener of listeners) listener(next);
 }
 
-/** The person is back: wake the Cloud by using it. */
+/** The person is back: wake the Cloud by using it. One request the home counts as someone using it (the event stream
+ * reconnecting is not one) also ends a sleep it agreed to but has not carried out, so its held polls stop answering
+ * "asleep". */
 export function markCloudAwake(): void {
+  if (!asleep) return;
+  void fetch(WAKE_PATH).catch(() => {});
   detach?.();
   detach = null;
   set(false);
