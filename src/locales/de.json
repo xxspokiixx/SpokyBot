@@ -326,7 +326,6 @@
   "lending.status.machineChanged": "Das Teilen wurde beendet, weil die Cloud auf einen neuen Rechner umgezogen ist. Schalte es wieder ein, um mit ihr zu teilen.",
   "lending.status.accessOff": "Geteilt über „Computer access“, das auf diesem Computer aus ist, deshalb erreicht die Cloud ihn nicht. Wähle stattdessen hier, was geteilt wird.",
   "lending.viaAccess": "Geteilt über „Computer access“ unter Einstellungen → Servers. Wenn du hier auswählst, wird es durch genau die Ordner, Apps und den Bildschirm ersetzt, die du wählst.",
-  "lending.viaAccessTerminal": "Geteilt über „Computer access“ unter Einstellungen → Servers, einschließlich Terminal. Wenn du hier auswählst, wird es durch genau die Ordner, Apps und den Bildschirm ersetzt, die du wählst, nie das Terminal.",
   "lending.stopped.you": "Aus seit {date}: Du hast es ausgeschaltet.",
   "lending.stopped.signedOut": "Aus seit {date}, als du dich von MausBot Cloud abgemeldet hast.",
   "lending.stopped.accountChanged": "Aus seit {date}, als sich ein anderes Cloud-Konto angemeldet hat.",
