@@ -39,6 +39,7 @@ let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, openLogsFolder, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionHandlers, externalWebUrl } from "./app-permissions.mjs";
+import { appFrameNavigationAllowed } from "./app-frame-guard.mjs";
 import { writeClipboardText } from "./clipboard-write.mjs";
 import {
   ensureManagedComposioCredentials,
@@ -90,7 +91,7 @@ import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, cloudTarget, cr
 import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
-import { createDesktopIncludedX } from "./included-x.mjs";
+import { createDesktopIncludedX } from "./included-x.mjs"; import { createDesktopIncludedPages } from "./included-pages.mjs";
 import { cloudHomeConnectUrl, cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
@@ -328,7 +329,7 @@ let companyBackupClientStateRequest = null;
 let companyRestoreCommitting = false;
 let companyBackupConfigurationRevision = 0;
 const managedDesktopRelay = createManagedDesktopRelay();
-const includedX = createDesktopIncludedX({ account: () => cloudAccount, server: () => serverProc, log: slog });
+const includedX = createDesktopIncludedX({ account: () => cloudAccount, server: () => serverProc, log: slog }), includedPages = createDesktopIncludedPages({ account: () => cloudAccount, server: () => serverProc, log: slog });
 const cloudPower = createCloudPowerGate({ power: () => cloudAccount?.power() ?? null, wanted: () => Boolean(cloudSync?.running() || computerSharing?.lendingToCloud()) });
 const utilityServerExits = new WeakMap();
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
@@ -345,7 +346,7 @@ const serverSupervisor = createServerSupervisor({
     serverStartConflictOnly = false;
     slog(`server ready pid=${proc.pid} port=${SERVER_PORT}`);
     void readCloudOfferBrand();
-    syncManagedComposioCredentials(); includedX.serverStarted();
+    syncManagedComposioCredentials(); includedX.serverStarted(); includedPages.serverStarted();
     reportOwnListeners(proc);
     orgLibrary?.runtimeReady();
     if (managedDesktop) void managedDesktop.refresh().catch(() => {});
@@ -877,7 +878,7 @@ function ensureCloudAccount() {
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       sendUpdaterState();
       cloudPower.changed(); computerSharing?.cloudChanged(); try { void oneHome.kick(); void homeWindow.changed(); } catch {}
-      void includedX.onState(state);
+      void includedX.onState(state); void includedPages.onState(state);
       refreshCloudMenus();
       announceCloudReady(state);
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`) &&
@@ -1499,7 +1500,6 @@ function desktopWorkspaceForEvent(event, create = false) {
   return create ? ensureDesktopWorkspace(owner) : desktopWorkspaceManager;
 }
 
-
 ipcMain.on("screen:preview-intent", localOnlySync("screen:preview-intent", (event) => {
   event.returnValue = displayMediaGuard.begin(event.senderFrame);
 }));
@@ -1622,7 +1622,6 @@ const environmentsStore = createEnvironmentsFile({ file: environmentsFile, fs, p
 function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
 }
-
 
 function refreshApplicationMenu() {
   Menu.setApplicationMenu(
@@ -2173,6 +2172,7 @@ function createWindow({ deferNavigation = false } = {}) {
   // No page may embed the local server, or any saved server, in this preload-bearing window.
   win.webContents.on("will-frame-navigate", (details) => {
     if (details.isMainFrame) return;
+    if (!appFrameNavigationAllowed(details)) return void details.preventDefault();
     let target = null;
     let page = null;
     try {

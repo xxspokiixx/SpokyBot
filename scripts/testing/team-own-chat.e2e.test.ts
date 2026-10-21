@@ -1,6 +1,6 @@
 // Clicking a team bot opens the person's own conversation with it (src/state/team-chats.ts), checked against a real
 // Team Cloud (T2: OMB_CLOUD_ROLE=team, members paired with the Admin's signed claims, per-conversation audiences). Runs
-// once the cloud fixture can start a Team Cloud (T2, #3259); until then it is skipped.
+// once the cloud fixture can start a Team Cloud (T2); until then it is skipped.
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

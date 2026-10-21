@@ -314,6 +314,14 @@ it("holds requests at the edge while the server starts only when the Admin asked
   expect(edgeHold(" 045s ")).toBe("45s");
 });
 
+it("hands the server the Admin's export-only switch, so an ended Cloud started for its owner's export runs frozen", () => {
+  // Seen on a real staging test Cloud on Oct 22: the Admin booted the held Cloud with OMB_CLOUD_EXPORT_ONLY=1, the log said
+  // "not passed to the server: … OMB_CLOUD_EXPORT_ONLY …", and it ran its routines every 5 minutes for the whole export
+  // window while the computers that came home ran the same ones.
+  const config = cloudHomeConfiguration(withGateway())!;
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CLOUD_EXPORT_ONLY: "1" }, "/data").server).toMatchObject({ OMB_CLOUD_EXPORT_ONLY: "1" });
+});
+
 it("gives the server only an allow-listed environment: a secret added later, a test's key or anything unknown never reaches it", () => {
   const config = cloudHomeConfiguration(contract())!;
   const env = { ...contract(), PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",

@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createServer as createNetServer } from "node:net";
 import { gzipSync } from "node:zlib";
 import { Header } from "tar";
 import { browserProfilesRoot } from "./browser-engine.ts";
@@ -393,6 +394,25 @@ describe("encrypted full workspace backups", () => {
     for (const path of paths) {
       if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toContain("SOURCE_TURN_BEARER");
     }
+  });
+
+  it("leaves the bot box's live sockets and filter out, so a Cloud home with the box on can still be backed up and brought home", async () => {
+    // Seen in the real app on Oct 22: a Cloud that ended could not bring its chats home, because its export stopped at
+    // "Cannot back up special or live runtime file: box/broker.sock" (the T0 credential broker's socket).
+    const source = directory();
+    mkdirSync(join(source, "box"), { mode: 0o700 });
+    writeFileSync(join(source, "box", "seccomp.bpf"), Buffer.from([0x20, 0, 0, 0]), { mode: 0o600 });
+    const broker = createNetServer();
+    await new Promise<void>((resolve) => broker.listen(join(source, "box", "broker.sock"), resolve));
+    try {
+      mkdirSync(join(source, "attachments"));
+      writeFileSync(join(source, "attachments", "note.txt"), "ordinary user file");
+      const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+      const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+      const paths: string[] = readJson(join(source, ".backups", staged.id, "staged", "manifest.json")).entries.map((entry: { path: string }) => entry.path);
+      expect(paths).toContain("attachments/note.txt");
+      expect(paths.filter((path) => path === "box" || path.startsWith("box/"))).toEqual([]);
+    } finally { await new Promise<void>((resolve) => broker.close(() => resolve())); }
   });
 
   it("leaves the Organization library's downloaded catalog and release files out, and keeps what the runtime added", async () => {

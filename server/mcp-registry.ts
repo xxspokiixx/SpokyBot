@@ -17,6 +17,8 @@ export interface StoredStdioMcpServer extends StdioMcpSpec {
   /** Characters of one tool result allowed into context; 0 = never trim, absent = OMB_MCP_RESULT_BUDGET, else 8,000. */
   resultBudget?: number;
   runsOn?: McpRunsOn;
+  /** "Show its apps in chat": stored only as `false`; on by default. */
+  apps?: false;
 }
 /** An app pre-registered with the server's authorization server; its secret is a credential, never listed. */
 export interface McpOAuthClientConfig {
@@ -29,6 +31,8 @@ export interface StoredRemoteMcpServer extends RemoteMcpSpec {
   oauth?: McpOAuthClientConfig;
   resultBudget?: number;
   runsOn?: McpRunsOn;
+  /** "Show its apps in chat": stored only as `false`; on by default. */
+  apps?: false;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
 
@@ -41,6 +45,7 @@ export interface StdioMcpServerListing {
   enabled: boolean;
   resultBudget?: number;
   runsOn?: McpRunsOn;
+  apps: boolean;
 }
 export interface RemoteMcpServerListing {
   name: string;
@@ -49,6 +54,7 @@ export interface RemoteMcpServerListing {
   headerKeys: string[];
   enabled: boolean;
   resultBudget?: number;
+  apps: boolean;
   oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
   runsOn?: McpRunsOn;
 }
@@ -139,6 +145,7 @@ const stdioEntrySchema = z.object({
   enabled: z.boolean().optional(),
   resultBudget: resultBudgetSchema.optional(),
   runsOn: runsOnSchema.optional(),
+  apps: z.boolean().optional(),
 }).strict();
 
 /** `runsOn: null` says it runs here after all; left out, an edit keeps the computer it runs on. */
@@ -168,6 +175,7 @@ const remoteEntrySchema = z.object({
   enabled: z.boolean().optional(),
   resultBudget: resultBudgetSchema.optional(),
   runsOn: runsOnSchema.optional(),
+  apps: z.boolean().optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
@@ -256,6 +264,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
       ...(parsed.data.resultBudget !== undefined ? { resultBudget: parsed.data.resultBudget } : {}),
       ...runsOnFor(parsed.data.runsOn, mutation, existing),
+      ...appsFor(parsed.data.apps, mutation, existing),
     },
   };
 }
@@ -287,6 +296,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
       ...(parsed.data.resultBudget !== undefined ? { resultBudget: parsed.data.resultBudget } : {}),
       ...runsOnFor(parsed.data.runsOn, mutation, existing),
+      ...appsFor(parsed.data.apps, mutation, existing),
     },
   };
 }
@@ -299,6 +309,11 @@ function runsOnFor(value: McpRunsOn | null | undefined, mutation: boolean, exist
 function enabledFor(value: boolean | undefined, mutation: boolean, existing?: StoredMcpServer): boolean {
   if (!mutation) return value !== false;
   return existing ? (value ?? existing.enabled) : false;
+}
+
+function appsFor(value: boolean | undefined, mutation: boolean, existing?: StoredMcpServer): { apps?: false } {
+  const on = value ?? (mutation && existing ? existing.apps !== false : true);
+  return on ? {} : { apps: false };
 }
 
 export function parseStoredMcpServer(name: string, raw: unknown): Parsed {
@@ -376,6 +391,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         headerKeys: Object.keys(server.headers).sort(),
         enabled: server.enabled,
         ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
+        apps: server.apps !== false,
         ...(server.oauth ? {
           oauth: { clientId: server.oauth.clientId, scopes: server.oauth.scopes ?? [], clientSecretConfigured: Boolean(server.oauth.clientSecret) },
         } : {}),
@@ -390,6 +406,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
       enabled: server.enabled,
       ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
       ...(server.runsOn ? { runsOn: server.runsOn } : {}),
+      apps: server.apps !== false,
     }];
   });
 }

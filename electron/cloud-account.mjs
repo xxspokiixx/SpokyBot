@@ -28,7 +28,7 @@ const CHECKING_AFTER = 2;
 const MAX_ENROLL_SECONDS = 1800;
 const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
 const CHECKOUT_WATCH_MS = 30 * 60_000, CHECKOUT_KEPT_MS = 24 * 3600_000;
-export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"]);
+export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "update_popup", "app_onboarding"]);
 const CHECKOUT_ORIGIN = "https://checkout.dodopayments.com", TEST_CHECKOUT_ORIGIN = "https://test.checkout.dodopayments.com";
 /** Only Dodo's own HTTPS checkout origin, with no credentials and no fragment; anything else is never opened. Staging's
  * Admin sells in Dodo's test mode, so its checkouts are only Dodo's test page. */
@@ -539,6 +539,22 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       try { relay = typeof result?.url === "string" ? new URL(result.url) : null; } catch { relay = null; }
       if (result?.cloudContractVersion !== 1 || !relay || relay.origin !== origin || typeof result.token !== "string" || !/^omb_xd_[A-Za-z0-9_-]{43}$/.test(result.token)) {
         throw new Error("Invalid Cloud X research response.");
+      }
+      return { url: result.url, token: result.token };
+    },
+    /** This sign-in's own pages token, for any plan: `{ url, token }` for the local server (electron/included-pages.mjs),
+     * or null when there is no sign-in or the Admin does not offer pages yet (404). Never kept on disk. The token route
+     * must be on the Cloud's own origin: the token goes nowhere else. */
+    async pagesAccess() {
+      const current = grant;
+      if (!current) return null;
+      let result;
+      try { result = await request("services/pages", { method: "POST", body: {}, token: current.token }); }
+      catch (error) { if (error?.status === 404) return null; throw error; }
+      let target = null;
+      try { target = typeof result?.url === "string" ? new URL(result.url) : null; } catch { target = null; }
+      if (result?.cloudContractVersion !== 1 || !target || target.origin !== origin || typeof result.token !== "string" || !/^omb_pd_[A-Za-z0-9_-]{43}$/.test(result.token)) {
+        throw new Error("Invalid Cloud pages response.");
       }
       return { url: result.url, token: result.token };
     },
