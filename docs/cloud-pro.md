@@ -597,14 +597,16 @@ with no confirmation. The switch and the chosen scopes are the consent.
   computer, so they see the person's home connection; every other site loads
   straight from My Cloud (see "The internet connection" below). It can be the
   only thing lent.
-- **Folders**: chosen with the folder picker. Read-only by default; **Can
+- **Folders and drives**: chosen with the folder picker. A whole drive can be chosen too (an external disk under /Volumes on macOS, a drive letter on Windows, a mounted data disk such as /data or /mnt/backup on Linux). Read-only by default; **Can
   edit** lets bots create files and overwrite them, but only after reading the
   current version (the overwrite is checked against its hash). Nothing is ever
   deleted. A read takes a file of up to 2 MiB (text whose escaping would not fit
   the Cloud's 4 MB request body is refused with "read it as base64"); a write is
-  at most 256 KiB. No symbolic or hard links. The home folder and anything
-  above it cannot be chosen. A lent folder deleted since is left out; the rest
-  keeps working.
+  at most 256 KiB. No symbolic or hard links. The home folder itself can be
+  chosen after a warning, and is always read only: everything in it becomes
+  readable, while the places that hold keys, passwords and browser data (see
+  "What folders never reach" below) stay private inside it too. The system
+  disk and the folders above home cannot be chosen. A lent folder deleted since is left out; the rest keeps working.
 - **Apps and screen**: bots see the screen and use apps as the person, through
   this app's own computer control (the signed app holds Accessibility and
   Screen Recording; the Cloud never does). This is broad by nature, since it
@@ -764,7 +766,8 @@ On the Mac (the authority; `electron/computer-sharing.mjs`,
 - **Every operation is checked against the grant here**, whatever the server
   says: the folder must be lent, writes need **Can edit**, screen actions need
   apps and screen. Jobs are validated against the server's schema first.
-- **What folders never reach**, read-only or not: this app's data and grants,
+- **What folders never reach**, read-only or not, and with the whole home
+  folder lent too: this app's data and grants,
   keys and sign-in stores (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
   `~/.claude`, `~/.codex`, `~/.cua`, keychains, browser profiles and cookies…;
   on Windows also Chrome's, Edge's and Brave's user data, Mozilla, the

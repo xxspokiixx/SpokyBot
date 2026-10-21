@@ -31,6 +31,8 @@ export function pagesAuthHeaders(access: PagesAccess, body: string, now = Date.n
 }
 
 let desktopPages: { url: string; token: string } | null = null;
+/** The desktop is signed in, but its Admin offers no pages for that sign-in yet. */
+let desktopPagesNotOffered = false;
 
 /** Security: the pages token goes only to the Admin over https, or to a loopback stand-in in development and tests. */
 function adminUrl(value: unknown): string | null {
@@ -50,13 +52,20 @@ export function applyIncludedPagesMessage(message: unknown): boolean {
   const access = (message as { access?: unknown }).access;
   if (access === null) {
     desktopPages = null;
+    desktopPagesNotOffered = (message as { offered?: unknown }).offered === false;
     return true;
   }
   const { url, token } = (access && typeof access === "object" ? access : {}) as { url?: unknown; token?: unknown };
   const target = adminUrl(url);
   if (typeof token !== "string" || !/^omb_pd_[A-Za-z0-9_-]{43}$/.test(token) || !target) throw new Error("invalid pages access");
   desktopPages = { url: target, token };
+  desktopPagesNotOffered = false;
   return true;
+}
+
+/** True when this desktop is signed in but its Admin offers no pages yet: the bot says so instead of asking to sign in. */
+export function pagesNotOffered(home: unknown): boolean {
+  return !home && !desktopPages && desktopPagesNotOffered;
 }
 
 /** A Cloud home's own credential, else a signed-in desktop's; null when this server is signed in to no MausBot account. */

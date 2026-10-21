@@ -24,6 +24,7 @@ interface Minted {
 
 export const SIGN_IN_MESSAGE = "Publishing a page needs a MausBot account. Sign in to MausBot in the app's Settings, then ask again.";
 const UNAVAILABLE = "Publishing isn't available right now. Try again in a few minutes.";
+const NOT_TURNED_ON = "Publishing pages isn't turned on for this account yet.";
 const TOKEN_TIMEOUT_MS = 15_000, UPLOAD_TIMEOUT_MS = 60_000;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -52,12 +53,12 @@ const readJson = async (response: Response): Promise<Record<string, unknown>> =>
 };
 const said = (body: Record<string, unknown>, fallback: string) => typeof body.message === "string" && body.message.trim() ? body.message.trim().slice(0, 500) : fallback;
 
-export function createPagesClient(options: { access: () => PagesAccess | null; fetch?: typeof fetch; now?: () => number }) {
+export function createPagesClient(options: { access: () => PagesAccess | null; notOffered?: () => boolean; fetch?: typeof fetch; now?: () => number }) {
   const http = options.fetch ?? fetch, now = options.now ?? Date.now;
 
   const mint = async (action: "create" | "update" | "delete", pageId?: string): Promise<Minted | PagesFailure> => {
     const access = options.access();
-    if (!access) return fail("sign_in", SIGN_IN_MESSAGE);
+    if (!access) return options.notOffered?.() ? fail("unavailable", NOT_TURNED_ON) : fail("sign_in", SIGN_IN_MESSAGE);
     const body = JSON.stringify(pageId ? { action, pageId } : { action });
     let response: Response;
     try {
@@ -76,7 +77,7 @@ export function createPagesClient(options: { access: () => PagesAccess | null; f
     if (response.status === 429) return fail("rate_limited", said(answer, "You've published a lot this hour. Try again in a few minutes."));
     const uploadUrl = safeUrl(answer.uploadUrl)?.href.replace(/\/+$/, ""), pageUrl = safeUrl(answer.pageUrl)?.href;
     if (!response.ok || typeof answer.token !== "string" || typeof answer.pageId !== "string" || !uploadUrl || !pageUrl || !answer.limits) {
-      return fail("unavailable", response.status === 404 ? "Publishing pages isn't turned on for this account yet." : UNAVAILABLE);
+      return fail("unavailable", response.status === 404 ? NOT_TURNED_ON : UNAVAILABLE);
     }
     const limit = answer.limit as Minted["limit"];
     return { token: answer.token, pageId: answer.pageId, uploadUrl, pageUrl, limits: answer.limits as Minted["limits"], ...(typeof answer.plan === "string" ? { plan: answer.plan } : {}),

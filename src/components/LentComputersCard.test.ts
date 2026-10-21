@@ -102,7 +102,7 @@ it("a refused folder says why plainly, with no Try again; only a failure trying 
   };
   await flip();
   const said = host.querySelector('[role="alert"]')!.textContent!;
-  expect(said).toBe("Choose a folder inside your home folder, not the whole home folder or a whole disk.");
+  expect(said).toBe("The system disk and the folders above your home folder can't be shared. Choose your home folder itself, a folder inside it, or a separate drive.");
   expect(said).not.toContain("Try again");
   await flip();
   expect(host.querySelector('[role="alert"]')!.textContent).toBe("Could not change what is shared. Try again.");

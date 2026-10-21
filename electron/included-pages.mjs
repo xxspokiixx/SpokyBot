@@ -13,10 +13,11 @@ export function createDesktopIncludedPages({ account, server, log }) {
   return createIncludedXSync({
     device: signedInDevice,
     fetchAccess: () => account()?.pagesAccess() ?? Promise.resolve(null),
-    send: (access) => {
+    send: (access, note) => {
       const proc = server();
       if (!proc) return;
-      try { proc.postMessage({ type: "openmausbot:included-pages", access }); }
+      // `offered: false`: signed in, but the Admin has no pages for this sign-in yet (not "sign in").
+      try { proc.postMessage({ type: "openmausbot:included-pages", access, ...(note?.offered === false ? { offered: false } : {}) }); }
       catch (error) { log(`Pages access sync failed: ${error?.message ?? error}`); }
     },
   });

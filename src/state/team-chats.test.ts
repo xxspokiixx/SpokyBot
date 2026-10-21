@@ -10,7 +10,7 @@ vi.mock("./api", () => ({
 }));
 
 import { openBot } from "./thread-navigation";
-import { openOwnTeamChat, ownChatOf, rememberOwnChat, setTeamChats } from "./team-chats";
+import { openOwnTeamChat, ownChatOf, setTeamChats } from "./team-chats";
 
 const MEMBER = { teamId: "team-acme", member: true }, ADMIN = { teamId: "team-acme", member: false };
 const scout = (tasks: Array<Record<string, unknown>>) => ({ id: "scout", threadId: "scout-main", mainThreadId: "scout-main", tasks: [{ threadId: "scout-main", createdAt: 1 }, ...tasks] as never });
@@ -31,19 +31,16 @@ it("a Member's click opens their own newest conversation with the bot, never the
   expect(ownChatOf(scout([]), MEMBER), "none yet: one is made").toBeNull();
 });
 
-it("an Admin, who also sees members' private chats, gets only the one this device opened for them, or a new one", () => {
-  const bot = scout([{ threadId: "ada-chat", private: true, createdAt: 5 }]);
+it("an Admin, who also sees members' private chats, gets only one the server says they opened, on any device, or a new one", () => {
+  const bot = scout([{ threadId: "ada-chat", private: true, createdAt: 5 }, { threadId: "ben-old", private: true, createdAt: 2 }, { threadId: "ben-new", private: true, createdAt: 3 }]);
   expect(ownChatOf(bot, ADMIN), "never a member's chat").toBeNull();
-  rememberOwnChat("team-acme", "scout", "ben-chat");
-  expect(ownChatOf(bot, ADMIN), "remembered, but no longer listed").toBeNull();
-  const listed = scout([{ threadId: "ada-chat", private: true, createdAt: 5 }, { threadId: "ben-chat", private: true, createdAt: 4 }]);
-  expect(ownChatOf(listed, ADMIN)).toBe("ben-chat");
-  expect(ownChatOf(listed, { teamId: "team-beta", member: false }), "kept per team").toBeNull();
-  expect(ownChatOf(listed, MEMBER), "what this device opened comes first").toBe("ben-chat");
+  expect(ownChatOf(bot, { ...ADMIN, opened: ["ben-old", "ben-new", "ben-gone"] }), "their newest the server names").toBe("ben-new");
+  expect(ownChatOf(bot, { ...ADMIN, opened: ["ben-gone"] }), "named, but no longer listed").toBeNull();
+  expect(ownChatOf(bot, MEMBER), "a Member sees only their own: their newest").toBe("ada-chat");
 });
 
 it("with none yet, a click makes one through the server's new-conversation route, opens it and keeps it; a second click while it is made makes no second", async () => {
-  setTeamChats(ADMIN);
+  setTeamChats({ teamId: "team-gamma", member: false });
   const dispatch = vi.fn();
   server.answer = { bot: { id: "scout", threadId: "ben-chat" }, task: { threadId: "ben-chat", private: true } };
   const bot = scout([{ threadId: "ada-chat", private: true, createdAt: 5 }]);
@@ -52,7 +49,7 @@ it("with none yet, a click makes one through the server's new-conversation route
   await settle();
   expect(server.calls).toEqual([["/api/bots/scout/tasks", { method: "POST", body: "{}" }]]);
   expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "taskSwitched", bot: server.answer && (server.answer as { bot: unknown }).bot }, { type: "select", id: "scout" }]);
-  expect(JSON.parse(localStorage.getItem("omb.team-own-chats.team-acme")!)).toEqual({ scout: "ben-chat" });
+  expect(stored.size, "nothing kept in this device's storage: the server says whose it is").toBe(0);
   dispatch.mockClear();
   openBot(dispatch, scout([{ threadId: "ada-chat", private: true, createdAt: 5 }, { threadId: "ben-chat", private: true, createdAt: 6 }]), false);
   expect(dispatch.mock.calls.map(([action]) => action), "next time it opens, nothing is made").toEqual([{ type: "switchTask", botId: "scout", threadId: "ben-chat" }]);
