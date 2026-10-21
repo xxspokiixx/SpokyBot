@@ -667,7 +667,7 @@ function cardCopy(
   const nextRunAt = nextForOperation(operation, manager, now, engines);
   const scheduleTimeZone = definition.schedule.type === "cron" ? definition.schedule.timeZone : timeZone;
   const when = operation.action === "run_now" ? "Now" : scheduleText(definition.schedule, timeZone, engines);
-  const destination = definition.runOn === "cloud" ? "Bot’s current model on its cloud computer" : "Bot’s current model and configured computer";
+  const destination = definition.runOn === "cloud" ? "Bot’s current model on its cloud desktop" : "Bot’s current model, where it usually works";
   const current = operation.action === "create"
     ? null
     : manager.listRoutines().find((routine) => routine.id === operation.routineId) ?? null;
@@ -701,7 +701,7 @@ function cardCopy(
     detail: [
       `Action: ${actionCopy.detail}`,
       `Name: ${name}`,
-      ...(forBot ? [`For: @${redactSecretsInText(forBot.name)} — each run uses that bot's engine and permissions`] : []),
+      ...(forBot ? [`For: @${redactSecretsInText(forBot.name)} — each run uses that bot's AI and permissions`] : []),
       `Schedule: ${when}`,
       `Next run: ${nextDescription}`,
       ...(definition.schedule.type === "cron" && nextRunAt !== null && operation.action !== "run_now"
@@ -1207,7 +1207,7 @@ export class RoutineRequestService {
     }
     if (readiness.ready) return;
     throw new RoutineRequestError(
-      readiness.reason?.trim() || "Cloud execution is not configured yet. Set up a cloud computer first.",
+      readiness.reason?.trim() || "Running in the cloud isn't set up yet. Set up a cloud desktop first.",
       409,
     );
   }

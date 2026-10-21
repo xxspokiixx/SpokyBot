@@ -249,7 +249,7 @@ describe("calling a bot off the Mac", () => {
   it("on My Cloud in the Mac app, the call is Live, and Take turns says it works on This computer", async () => {
     open(desktopApp("darwin", "my-cloud"));
     chat(CLOUD);
-    expectTurnsDisabled("Calls where you take turns work on This computer. They listen with your Mac's own speech recognition, which only This computer can use.");
+    expectTurnsDisabled("Calls where you take turns work with bots on this Mac. They listen with your Mac's own speech recognition, which only bots on this Mac can use.");
     await firstLiveCall();
   });
 

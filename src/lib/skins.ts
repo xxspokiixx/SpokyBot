@@ -11,6 +11,7 @@ export const SKIN_IDS = [
   "daylight",
   "meadow",
   "pop",
+  "halloween",
 ] as const;
 export type SkinId = (typeof SKIN_IDS)[number];
 
@@ -31,6 +32,7 @@ export const SKINS: readonly Skin[] = [
   { id: "daylight", name: "Daylight", tagline: "Midnight in reverse. Near-white, ink-black bubbles." },
   { id: "meadow", name: "Meadow", tagline: "Fresh white with a calm green. The MausBot look." },
   { id: "pop", name: "Pop", tagline: "Cream paper, thick ink outlines, hard shadows. Chunky and cheerful." },
+  { id: "halloween", name: "Halloween", tagline: "Plum after dark, lit in pumpkin orange. Bats optional." },
 ];
 
 export const DEFAULT_SKIN: SkinId = "meadow";

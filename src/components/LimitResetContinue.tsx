@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Hourglass } from "lucide-react";
 
 import { t } from "@/lib/i18n";
-import { limitLine, nearLimit, resetTime, useEngineLimits } from "@/lib/limit-resets";
+import { limitLine, loadLimits, nearLimit, resetTime, useEngineLimits } from "@/lib/limit-resets";
 import type { Routine } from "@/lib/routines";
 import { api, useStore } from "@/state/store";
 
@@ -30,15 +30,19 @@ export function useLimitResetContinue(botId: string | undefined, threadId: strin
   };
 }
 
-/** A compact line in the bot's chat when its engine is nearly out of usage: "Claude: 92% used · resets 3:40 PM". */
+/** A compact line in the bot's chat when its engine is nearly out of usage: "Claude: 92% used · resets 3:40 PM".
+ * Clicking it checks the engine's usage again. */
 export function EngineLimitNotice({ engine }: { engine: string | undefined }) {
   const limit = useEngineLimits().find((candidate) => candidate.engine === engine);
+  const [checking, setChecking] = useState(false);
   if (!limit || !nearLimit(limit)) return null;
+  const hint = limit.blocked ? t("limits.blockedHint", { engine: limit.name }) : t("limits.chatHint");
   return (
-    <span role="status" data-testid="engine-limit-notice" title={t("limits.chatHint")}
-      className="flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[12.5px] text-ink">
-      <Hourglass size={13} className="shrink-0 text-warning" aria-hidden="true" />
+    <button type="button" data-testid="engine-limit-notice" title={hint} aria-label={`${limitLine(limit)}. ${hint}`}
+      disabled={checking} onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
+      className="flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[12.5px] text-ink hover:bg-warning/15 disabled:cursor-wait">
+      <Hourglass size={13} className={checking ? "shrink-0 animate-pulse text-warning" : "shrink-0 text-warning"} aria-hidden="true" />
       <span className="tabular-nums">{limitLine(limit)}</span>
-    </span>
+    </button>
   );
 }

@@ -586,6 +586,40 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     }
   }, 60_000);
 
+  it("keeps each person's reaction their own, sends each as that person's reply, and tells a session which are its", async () => {
+    expect((await api("POST", `/api/bots/${ids.pub}/messages`, { text: "Shall we open the desk early?", threadId: ids.pubThread }, BOSS)).status).toBe(202);
+    const replied = await settledReply(ids.pubThread, "Shall we open the desk early?");
+    expect(replied, log.slice(-2_000)).not.toBeNull();
+    const answer = (replied as Array<{ id: string; role: string; kind: string; text?: string }>)
+      .findLast((message) => message.role === "bot" && message.kind === "text" && message.text)!;
+    const react = (as: string, emoji: string) =>
+      api("POST", `/api/threads/${ids.pubThread}/messages/${answer.id}/reactions`, { emoji, on: true }, as);
+    const ada = await react(ADA, "👍");
+    expect(ada.status, JSON.stringify(ada.body)).toBe(200);
+    expect(ada.body.delivery).toBe("started");
+    const bob = await react(BOB, "👍");
+    expect(bob.status, JSON.stringify(bob.body)).toBe(200);
+    const keyOf = async (as: string) => (await api("GET", "/api/auth/session", undefined, as)).body.reactor as string;
+    const [adaKey, bobKey] = [await keyOf(ADA), await keyOf(BOB)];
+    expect(adaKey).toMatch(/^p_[\w-]{22}$/);
+    expect(bobKey).toMatch(/^p_[\w-]{22}$/);
+    expect(adaKey).not.toBe(bobKey);
+    expect(bob.body.message.reactions).toEqual([
+      { emoji: "👍", by: adaKey, name: ADA, at: expect.any(Number) },
+      { emoji: "👍", by: bobKey, name: BOB, at: expect.any(Number) },
+    ]);
+    const changed = await react(ADA, "👎");
+    expect(changed.body.message.reactions.map((reaction: any) => [reaction.by, reaction.emoji])).toEqual([[bobKey, "👍"], [adaKey, "👎"]]);
+    const lines = await waitFor(async () => {
+      const bot = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((candidate: any) => candidate.id === ids.pub);
+      const reactions = ((await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages as any[])
+        .filter((message) => message.reaction && message.replyToId === answer.id);
+      return !bot.busy && reactions.length === 3 ? reactions : null;
+    });
+    const thread = (await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages;
+    expect(lines?.map((line: any) => [line.reaction, line.sender?.name]), JSON.stringify(thread.map((m: any) => [m.role, m.kind, m.text?.slice(0, 60), m.reaction]))).toEqual([["👍", ADA], ["👍", BOB], ["👎", ADA]]);
+  }, 90_000);
+
   it("keeps bots with different audiences from reaching each other", async () => {
     // Payroll (Ada), Benefits (Ada) and Board (admins) share a team. Only the
     // two with the same audience are teammates to each other.

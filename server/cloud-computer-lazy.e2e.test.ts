@@ -322,7 +322,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
     const before = requests.length;
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "hi" });
     const row = await failedRow(bot.id);
-    expect(row.tool.name).toBe("error: What Scribe can use doesn't include a computer. Change what Scribe can use in its settings.");
+    expect(row.tool.name).toBe("error: What Scribe can use doesn't include a desktop. Change what Scribe can use in its settings.");
     expect(row.tool.place).toEqual({ state: "cc-tools-off", params: { bot: "Scribe" }, source: "works-on" });
     await idle(bot.id);
     expect(requests.slice(before)).toEqual([]);
@@ -335,7 +335,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
       headers: { authorization: `Bearer ${upstream.OMB_COMMS_TOKEN}` },
     }).then(response => response.json() as Promise<any>);
     expect(selection.options.find((option: { surface: string }) => option.surface === "cloud")).toMatchObject({
-      available: false, reason: "What Scribe can use doesn't include a computer. Change what Scribe can use in its settings.",
+      available: false, reason: "What Scribe can use doesn't include a desktop. Change what Scribe can use in its settings.",
     });
     await finish(bot.id);
     expect(requests.slice(before)).toEqual([]);
@@ -373,7 +373,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
       const rows = await errorRows(group.threadId);
       expect(rows).toHaveLength(1);
       expect(rows[0].from).toMatchObject({ botId: bot.id, name: "Roomie" });
-      expect(rows[0].tool.name).toBe("error: This month's cloud computer hours are used up. See your plan on the Plan page.");
+      expect(rows[0].tool.name).toBe("error: This month's cloud desktop hours are used up. See your plan on the Plan page.");
       expect(rows[0].tool.place).toEqual({ state: "cc-no-hours", params: { bot: "Roomie" }, source: "room" });
       await apiOk("DELETE", `/api/groups/${group.id}`);
       await apiOk("DELETE", `/api/bots/${bot.id}`);
@@ -401,7 +401,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
       expect(rows).toHaveLength(1);
       expect(finished.status).toBe("failed");
       expect(`error: ${finished.error}`).toBe(rows[0].tool.name);
-      expect(finished.error).toBe("This month's cloud computer hours are used up. See your plan on the Plan page.");
+      expect(finished.error).toBe("This month's cloud desktop hours are used up. See your plan on the Plan page.");
       expect(rows[0].tool.place).toEqual({ state: "cc-no-hours", params: { bot: "Runner" }, source: "routine" });
       await until(() => task(bot.id), current => current?.busy === false && current.tasks.every((entry: any) => !entry.busy));
       await apiOk("DELETE", `/api/routines/${routine.id}`);

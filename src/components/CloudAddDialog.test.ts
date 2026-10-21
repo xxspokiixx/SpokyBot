@@ -73,10 +73,10 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); setLocale("en"); })
 describe("each screen of the sheet says one thing and offers one next step", () => {
   it("Choose: what Cloud is, the Admin's plans with its recommended one preselected and Most popular, the money in one line, Start free trial", () => {
     const { html, tree, handlers } = panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null });
-    inOrder(text(html), ["MausBot Cloud", "Your bots, always on.", "A private computer in the cloud that runs your bots 24/7, even when this computer is off.",
+    inOrder(text(html), ["MausBot Cloud", "Your bots, always on.", "Runs your bots 24/7 in the cloud, even when this computer is off.",
       "Works while you're away", "Private to you", "Reach it from anywhere", "A real browser and desktop", "Bring everything over",
-      "Choose your plan", "Personal", "$29", "per month", "1 cloud computer at once", "2 CPU · 2 GB", "20 GB storage", "50 h cloud computers",
-      "Pro", "Most popular", "$49", "Up to 2 cloud computers at once", "Max", "$99", "100–200 GB storage",
+      "Choose your plan", "Personal", "$29", "per month", "1 cloud desktop at once", "2 CPU · 2 GB", "20 GB storage", "50 h cloud desktops",
+      "Pro", "Most popular", "$49", "Up to 2 cloud desktops at once", "Max", "$99", "100–200 GB storage",
       "Due today", "$0.00", "Card needed, nothing charged for 7 days. Then $49/month + tax. Cancel in the app any time.",
       "Today", "Trial starts, with $5 of Claude credit", "Oct 13", "Reminder email", "Oct 15", "$49/month begins",
       "Start free trial", "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "14-day money-back", "Already have a plan? Sign in"]);

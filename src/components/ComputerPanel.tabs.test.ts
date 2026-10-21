@@ -120,7 +120,7 @@ describe("Computer panel tab", () => {
 
   it("stays on Data through a model change and follows a conversation change", async () => {
     await open(makeBot());
-    expect(selected()).toBe("Computer");
+    expect(selected()).toBe("Screen");
     flushSync(() => tab("Data").click());
     await settle();
     expect(selected()).toBe("Data");
@@ -131,7 +131,7 @@ describe("Computer panel tab", () => {
     expect(document.querySelector('[data-testid="data-panel"]')).not.toBeNull();
 
     await open(makeBot({ threadId: "thread-2", tasks: [{ threadId: "thread-2", title: "Second", createdAt: 2, approvalMode: "ask" }] } as Partial<Bot>));
-    expect(selected()).toBe("Computer");
+    expect(selected()).toBe("Screen");
   });
 
   it("marks the selected trigger and only that one", async () => {
@@ -145,9 +145,9 @@ describe("Computer panel tab", () => {
 
   it("keeps one Tab stop and moves it with the arrow, Home and End keys", async () => {
     await open(makeBot());
-    expect(tabStops()).toEqual(["Computer"]);
+    expect(tabStops()).toEqual(["Screen"]);
 
-    press("Computer", "ArrowRight");
+    press("Screen", "ArrowRight");
     await settle();
     expect(selected()).toBe("Routines");
     expect(tabStops()).toEqual(["Routines"]);
@@ -155,41 +155,41 @@ describe("Computer panel tab", () => {
 
     press("Routines", "ArrowLeft");
     await settle();
-    expect(selected()).toBe("Computer");
-    expect(document.activeElement).toBe(tab("Computer"));
+    expect(selected()).toBe("Screen");
+    expect(document.activeElement).toBe(tab("Screen"));
 
     // Wraps around the row's ends.
-    press("Computer", "ArrowLeft");
+    press("Screen", "ArrowLeft");
     await settle();
     expect(selected()).toBe("Data");
     press("Data", "ArrowRight");
     await settle();
-    expect(selected()).toBe("Computer");
+    expect(selected()).toBe("Screen");
 
-    press("Computer", "End");
+    press("Screen", "End");
     await settle();
     expect(selected()).toBe("Data");
     expect(document.activeElement).toBe(tab("Data"));
     press("Data", "Home");
     await settle();
-    expect(selected()).toBe("Computer");
-    expect(document.activeElement).toBe(tab("Computer"));
+    expect(selected()).toBe("Screen");
+    expect(document.activeElement).toBe(tab("Screen"));
   });
 
   it("leaves the vertical arrows to the page's scrolling", async () => {
     await open(makeBot());
-    flushSync(() => tab("Computer").focus());
-    expect(press("Computer", "ArrowDown").defaultPrevented).toBe(false);
-    expect(press("Computer", "ArrowUp").defaultPrevented).toBe(false);
+    flushSync(() => tab("Screen").focus());
+    expect(press("Screen", "ArrowDown").defaultPrevented).toBe(false);
+    expect(press("Screen", "ArrowUp").defaultPrevented).toBe(false);
     await settle();
-    expect(selected()).toBe("Computer");
-    expect(document.activeElement).toBe(tab("Computer"));
+    expect(selected()).toBe("Screen");
+    expect(document.activeElement).toBe(tab("Screen"));
   });
 
   it("moves over an Android tab that appeared", async () => {
     fixture.android = true;
     await open(makeBot());
-    expect(tabLabels()).toEqual(["Computer", "Routines", "Android", "Browser", "Data"]);
+    expect(tabLabels()).toEqual(["Screen", "Routines", "Android", "Browser", "Data"]);
     press("Routines", "ArrowRight");
     await settle();
     expect(selected()).toBe("Android");
@@ -205,14 +205,14 @@ describe("Computer panel tab", () => {
     fixture.android = false;
     await open(makeBot());
     expect(tabLabels()).not.toContain("Android");
-    expect(selected()).toBe("Computer");
+    expect(selected()).toBe("Screen");
   });
 
   it("stops on the Files tab in Simple mode", async () => {
     fixture.advanced = false;
     await open(makeBot());
-    expect(tabLabels()).toEqual(["Computer", "Browser", "Data", "Files"]);
-    press("Computer", "End");
+    expect(tabLabels()).toEqual(["Screen", "Browser", "Data", "Files"]);
+    press("Screen", "End");
     await settle();
     expect(selected()).toBe("Files");
     expect(document.activeElement).toBe(tab("Files"));
@@ -220,7 +220,7 @@ describe("Computer panel tab", () => {
 
   it("points every selected trigger at its panel and the panel back", async () => {
     await open(makeBot());
-    for (const label of ["Computer", "Routines", "Browser", "Data"]) {
+    for (const label of ["Screen", "Routines", "Browser", "Data"]) {
       flushSync(() => tab(label).click());
       await settle();
       const trigger = tab(label);
@@ -232,7 +232,7 @@ describe("Computer panel tab", () => {
 
   it("puts every selected panel in the tab sequence", async () => {
     await open(makeBot());
-    for (const label of ["Computer", "Routines", "Browser", "Data"]) {
+    for (const label of ["Screen", "Routines", "Browser", "Data"]) {
       flushSync(() => tab(label).click());
       await settle();
       const panel = document.getElementById(tab(label).getAttribute("aria-controls")!);

@@ -1,5 +1,6 @@
 // The real Cloud home server with synthetic engines: a routine a Full access bot makes in the owner's own conversation
-// runs at Full access, whatever else the bot posted there, on Claude and on Codex.
+// runs at Full access, whatever else the bot posted there, on Claude and on Codex. What a webhook's run made stays
+// confined, and what a bot asks to change in a conversation a guest left behind waits for the owner.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { connect } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -314,4 +315,34 @@ it("gives the owner back a routine their bot made in their chat that an earlier 
   }, { timeout: hostTimeout(15_000) }).toBe("This routine was made before this update. Open it and save it once to run it with full access.");
   socket.destroy();
   await release(bot.id);
+}, hostTimeout(90_000));
+
+it("in a conversation a guest left behind, a Chief's new specialist waits for the owner's card, and the owner's answer continues the Chief once", async () => {
+  const chief = await newBot("Guest chief", "claude");
+  expect((await api("PATCH", `/api/bots/${chief.id}`, { token: owner, body: { chiefOfStaff: true } })).status).toBe(200);
+  const conversation = (await api("POST", `/api/bots/${chief.id}/tasks`, { token: owner, body: { title: "From before" } })).body.task.threadId as string;
+  await restart(() => markLeftBehind(dataDir, { threadIds: [conversation] }));
+  const call = await ownerAsks({ id: chief.id, threadId: conversation }, "Add a bot named Scout that researches every new lead.");
+  expect(await call("create_bot", { name: "Scout", role: "Lead researcher", instructions: "Research every new lead." })).toContain("@Scout has not been created yet");
+  const messages = async () => (await api("GET", `/api/threads/${conversation}/messages`, { token: owner })).body.messages as any[];
+  const card = async () => (await messages()).find((message) => message.card?.teamSetupRequest?.operations?.[0]?.fields?.name === "Scout")?.card;
+  const scout = async () => ((await api("GET", "/api/bots", { token: owner })).body.bots as any[]).some((bot) => bot.name === "Scout");
+  const requestId = (await card())?.requestId as string;
+  expect(requestId, "the owner sees one card").toBeTruthy();
+  expect(await scout(), "nothing is added before the owner answers").toBe(false);
+  await release(chief.id);
+  rmSync(claudeDump(), { force: true });
+
+  const answered = await api("POST", `/api/threads/${conversation}/respond`, { token: owner, body: { requestId, behavior: "allow" } });
+  expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+  expect(answered.body.result.state).toBe("applied");
+  expect(await scout()).toBe(true);
+  await expect.poll(() => existsSync(claudeDump()) && JSON.stringify(JSON.parse(readFileSync(claudeDump(), "utf8")).prompt).includes(`team setup decision ${requestId}:`),
+    { timeout: hostTimeout(15_000) }).toBe(true);
+  await release(chief.id);
+  expect((await card()).teamSetupRequest).toMatchObject({ resumed: true, result: { state: "applied" } });
+  rmSync(claudeDump(), { force: true });
+  expect((await api("POST", `/api/threads/${conversation}/respond`, { token: owner, body: { requestId, behavior: "allow" } })).body.alreadySettled).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  expect(existsSync(claudeDump()), "a settled answer continues the Chief only once").toBe(false);
 }, hostTimeout(90_000));

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, BookOpen, Box, Loader2, Monitor, Network, Plus, Save, Users, X } from "lucide-react";
+import { ArrowRight, BookOpen, Box, Loader2, Monitor, Plus, Save, Users, UsersRound, X } from "lucide-react";
 
 import { api, formatTime, openBot, openThread, useStore, type Bot } from "@/state/store";
 import {
@@ -350,7 +350,7 @@ export function TeamMapPage() {
       <header {...dragProps} className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
         <div>
           <div className="flex items-center gap-2.5">
-            <Network size={18} className="text-ink-secondary" />
+            <UsersRound size={18} className="text-ink-secondary" />
             <h1 className="text-[17px] font-semibold">{t("canvas.title")}</h1>
             <span className="ml-1 text-[11px] text-ink-secondary">{teamMapBotCount(bots.length)}</span>
           </div>
