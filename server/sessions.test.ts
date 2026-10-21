@@ -630,8 +630,9 @@ describe("a member's own phone on a Team Cloud", () => {
     const record = registry.authenticate(phone.token)!;
     expect(record).toMatchObject({ email: ADA.email, teamRole: "member", membershipAuthority: "team", scopes: ["client"], memberCheckedAt: desktop.createdAt });
     expect(record.expiresAt).toBe(desktop.createdAt + HOUR);
-    clock = desktop.createdAt + HOUR - SESSION_TTL_MS;
+    clock = record.expiresAt - 60_000;
     expect(registry.renew(record.id), "renewing never moves past the Admin's check").toBe(false);
+    expect(registry.authenticate(phone.token)?.expiresAt).toBe(desktop.createdAt + HOUR);
     clock = desktop.createdAt + HOUR;
     expect(registry.authenticate(phone.token)).toBeNull();
   });

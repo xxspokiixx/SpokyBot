@@ -83,7 +83,7 @@ describe("the launcher of a Team Cloud's boxed browsers", () => {
     folders.push(folder);
     const bwrap = join(folder, "bwrap");
     // A stand-in for bubblewrap: what it was asked, and whether descriptor 9 holds the filter.
-    writeFileSync(bwrap, `#!/bin/sh\nprintf '%s\\0' "$@" > "$ARGV_OUT"\ncat <&9 > "$ARGV_OUT.fd9" 2>/dev/null || printf none > "$ARGV_OUT.fd9"\n`, { mode: 0o755 });
+    writeFileSync(bwrap, `#!/bin/sh\nprintf '%s\\0' "$@" > "$ARGV_OUT"\ncat <&9 > "$ARGV_OUT.fd9" 2>/dev/null || printf none > "$ARGV_OUT.fd9"\nps -o args= -p $PPID > "$ARGV_OUT.parent"\n`, { mode: 0o755 });
     const filter = join(folder, "seccomp.bpf");
     writeFileSync(filter, "FILTER");
     const path = launcherPath(join(folder, "data"), "linux");
@@ -96,6 +96,8 @@ describe("the launcher of a Team Cloud's boxed browsers", () => {
     expect(argv).toEqual(["--unshare-user", "--seccomp", "9", "--ro-bind", "/usr", "/usr", "--bind", profile, profile, "--setenv", "HOME", "/tmp", "--", "/opt/chrome/chrome", ...engine, ...launcherFlags(settings, "linux")]);
     expect(statSync(profile).isDirectory(), "the profile exists before bubblewrap binds it").toBe(true);
     expect(readFileSync(`${out}.fd9`, "utf8")).toBe("FILTER");
+    // bubblewrap's --die-with-parent follows the thread that started it; the launcher, not agent-browser's thread, is its parent.
+    expect(readFileSync(`${out}.parent`, "utf8"), "the launcher stays bubblewrap's parent").toContain("chrome-launcher.sh");
     // Without a profile (the launcher's own check), still boxed, binding nothing of the disk.
     execFileSync(path, ["--version"], { env: { PATH: "/usr/bin:/bin", ARGV_OUT: out } });
     const bare = readFileSync(out, "utf8").split("\0").slice(0, -1);

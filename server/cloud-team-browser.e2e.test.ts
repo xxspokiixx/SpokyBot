@@ -32,7 +32,8 @@ const stub = REAL_BROWSER ? null : (() => {
   const engine = join(dir, "agent-browser"), log = join(dir, "commands.log");
   writeFileSync(engine, ["#!/bin/sh", `printf '%s %s\\n' "$AGENT_BROWSER_SESSION" "$1" >> '${log}'`,
     `if [ "$1" = session ]; then printf '{"success":true,"data":{"sessions":[]}}\\n'; fi`, "exit 0"].join("\n"), { mode: 0o755 });
-  return { dir, engine, sessions: () => (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").map((line) => line.split(" ")[0]!).filter(Boolean) };
+  const lines = () => (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").filter(Boolean);
+  return { dir, engine, lines, sessions: () => lines().map((line) => line.split(" ")[0]!).filter(Boolean) };
 })();
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
@@ -104,6 +105,11 @@ it.skipIf(!stub)("drives each member's private chat, the group chat and the team
   for (const [token, threadId] of [[admin, cleoThread], [ada, undefined]] as const) await liveView(token, threadId);
   const viewed = stub!.sessions().slice(before).filter((name) => name.startsWith("bot-"));
   expect([...new Set(viewed)], "Ben's view of Cleo's chat reached Cleo's browser; Ada's own view, hers").toEqual([CLEO, ADA]);
+  // A tool call from Ada's turn goes through the harness to her own browser, the one her turn was given.
+  const mark = stub!.lines().length;
+  const called = await browserTurn(ada, adaThread, "Which tabs are open?", [{ server: "browser", name: "agent_browser_tab_list", input: {} }]);
+  expect(stub!.lines().slice(mark), "the tool call ran in Ada's own browser").toContain(`${ADA} mcp`);
+  expect(called).toContain("agent_browser_tab_list");
 }, hostTimeout(240_000));
 
 it("pairs a member's phone with a code she made: her address and role, her chats, an end no later than her desktop's", async () => {

@@ -350,6 +350,14 @@ describe("a Team Cloud's browsers, one per audience", () => {
     expect(host.temporaryBrowserSessions.size, "a deleted bot's temporary browsers go for every audience").toBe(0);
   });
 
+  it("names a shared profile's saved sign-ins by audience on agent-browser too", () => {
+    const { host } = setup(undefined, { audienceOf: teamAudiences });
+    expect(host.currentBrowserSession("scout", "work", "member:p_ada")).toBe(`p-work${ADA}`);
+    expect(host.currentBrowserSession("scout", "work", "room:launch")).toBe(`p-work${ROOM}`);
+    expect(host.currentBrowserSession("scout", "work", "team")).toBe("p-work");
+    expect(host.currentBrowserSession("scout", undefined, "member:p_ada")).toBe(`bot-scout${ADA}`);
+  });
+
   it("names every browser as before off a team, whoever's conversation it is", async () => {
     const { host } = setup("chrome");
     const browser = await host.browserIntegration("scout", undefined, at("ada-chat"));
