@@ -171,6 +171,32 @@ test("each item is recorded from My Cloud's own answer as soon as it went, so a 
   assert.equal(row.state, "on-both", "what My Cloud took is in step, not My Cloud's own change");
 });
 
+test("a bot My Cloud made as this computer stopped, before the answer came, is the move's own: all its fields go when it goes on", async () => {
+  // Seen in the real app on Oct 22: killed mid-move, My Cloud made "Otto" 70 ms later, and the move went on taking it for
+  // My Cloud's own bot: its colour never went, and the check called it missing on every pass.
+  let dying = true;
+  const move = sides({ here: [bot("ember", { soul: "h:mine" })], bots: { ember: { soul: "mine" } },
+    onCall: (method, route, body, cloud) => {
+      if (dying && method === "POST" && route === "/api/bots") { cloud.set(itemKey.bot(body.id), bot(body.id, { soul: "starter" })); throw new TypeError("fetch failed"); }
+    } });
+  await createCloudSend(move.deps).send({ reason: "move" });
+  assert.equal(move.cloud.get(itemKey.bot("ember")).parts.soul, "starter", "My Cloud made it, this computer never heard");
+  dying = false;
+  move.calls.length = 0;
+  await createCloudSend(move.deps).send({ reason: "move" });
+  assert.equal(move.cloud.get(itemKey.bot("ember")).parts.soul, "h:mine", `this computer's fields went: ${move.calls.join(", ")}`);
+  assert.ok(!move.calls.includes("POST /api/bots"), "the bot is not made twice");
+
+  let lost = true;
+  const never = sides({ here: [bot("juno", { soul: "h:j" })], bots: { juno: { soul: "j" } },
+    onCall: (method, route) => { if (lost && method === "POST" && route === "/api/bots") throw new TypeError("fetch failed"); } });
+  await createCloudSend(never.deps).send({ reason: "move" });
+  lost = false;
+  const again = await createCloudSend(never.deps).send({ reason: "move" });
+  assert.deepEqual(again.result.bots, ["juno"], "one My Cloud never made goes now, and never counts as removed there");
+  assert.equal(never.cloud.get(itemKey.bot("juno")).parts.soul, "h:j");
+});
+
 test("a move keeps My Cloud's version of a part both sides hold otherwise with nothing recorded, and records it, so its check never calls it missing", async () => {
   // The same bot on both sides with no send ever recorded (an earlier whole-workspace Copy, or a lost cloud-send.json),
   // and its approval changed on My Cloud since: §2.2 keeps My Cloud's. Seen in the real app on Oct 22: the check called
