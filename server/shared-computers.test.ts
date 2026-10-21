@@ -227,7 +227,7 @@ describe("status for the next step's placement", () => {
     const docs = { id: randomUUID(), name: "Docs", write: true };
     const mac = registration({ computer: true, folders: [docs] }); broker.register(mac, alice, secret);
     broker.register(registration({ terminal: true }), bob, other);
-    expect(broker.status(alice.person)).toEqual([{ id: mac.id, name: "Desktop", online: true, busy: false, lastSeenAt: expect.any(Number), scopes: { folders: [docs], terminal: false, screen: true } }]);
+    expect(broker.status(alice.person)).toEqual([{ id: mac.id, name: "Desktop", online: true, busy: false, lastSeenAt: expect.any(Number), scopes: { folders: [docs], terminal: false, screen: true, internet: false } }]);
     expect(broker.status(null)).toEqual([]);
     expect(JSON.stringify(broker.status(alice.person))).not.toContain(secret);
     await vi.advanceTimersByTimeAsync(40_001);

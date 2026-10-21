@@ -329,7 +329,7 @@ test("quitting the app pauses lending; it never switches it off, even mid-reconn
   assert.equal(after.cloudState(env).enabled, true, "the next launch still lends");
 });
 
-test("the menu-bar indicator exists only while lending, says when the Cloud is using the Mac, and stops lending", () => {
+test("the menu-bar indicator exists only while lending, reads In use while bots use the Mac, and turns lending off", () => {
   const trays = [];
   class Tray {
     constructor() { this.destroyed = false; this.title = ""; this.menu = null; trays.push(this); }
@@ -339,17 +339,17 @@ test("the menu-bar indicator exists only while lending, says when the Cloud is u
   const Menu = { buildFromTemplate: items => items };
   const nativeImage = { createFromPath: () => ({ resize: () => ({}) }) };
   let stops = 0, opens = 0;
-  const indicator = createLendingIndicator({ Tray, Menu, nativeImage, iconPath: "icon.png", onStop: () => stops++, onOpen: () => opens++ });
+  const indicator = createLendingIndicator({ Tray, Menu, nativeImage, iconPath: "icon.png", onStop: () => stops++, onOpen: () => opens++, device: "Mac" });
   indicator.update({ lending: false, busy: false });
   assert.equal(trays.length, 0, "nothing in the menu bar while nothing is lent");
   indicator.update({ lending: true, busy: false });
   assert.equal(trays.length, 1);
   assert.equal(trays[0].title, "");
-  assert.match(trays[0].menu[0].label, /can use this computer/);
+  assert.equal(trays[0].menu[0].label, "Your bots can use this Mac");
   indicator.update({ lending: true, busy: true });
   assert.equal(trays.length, 1);
   assert.equal(trays[0].title, "In use");
-  assert.match(trays[0].menu[0].label, /using this computer now/);
+  assert.equal(trays[0].menu[0].label, "Your bots are using this Mac now");
   trays[0].menu.find(item => item.label === "Stop sharing").click();
   trays[0].menu.find(item => item.label === "Sharing settings…").click();
   assert.deepEqual([stops, opens], [1, 1]);

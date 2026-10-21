@@ -60,6 +60,7 @@ Use only mapped, tested commands:
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Computer panel focus hand-off](computer-panel-focus.md)
+- [Taking control of a bot's computer](take-control.md)
 - [Native dictation retention and send-to-stop](dictation.md)
 - [The Today page](today.md)
 - [Chat widgets](widgets.md)
@@ -239,6 +240,11 @@ using the real renderer and an isolated fake-engine server.
 
 The [interval restrictions recipe](interval-restrictions.md) checks weekday and
 time-window limits on scheduled routines in that same disposable fixture.
+
+The [automation reports recipe](automation-reports.md) checks that every run
+reports into the bot's chat as one captioned bot message, that quiet runs write
+nothing, that a run's question is answered in that chat, and the concurrency
+rule with the person's own turn, in the real renderer and end to end.
 
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.

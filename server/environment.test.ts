@@ -133,6 +133,10 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
       .toEqual({ remoteSessions: true, cloudHome: true, selfUpdate: "operator", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
+    // A lent computer may lend its internet connection only to a Cloud home that lends at all.
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true, sharedComputers: true }).capabilities)
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, deviceLink: true, cloudHome: true, selfUpdate: "operator", emailSignIn: false, jobs: true });
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities).not.toHaveProperty("deviceLink");
   });
 
   it("falls back to the checkout's package.json version, then to unknown", () => {

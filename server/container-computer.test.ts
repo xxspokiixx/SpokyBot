@@ -40,6 +40,7 @@ import {
   type LocalVmTarget,
   autoLocalVmAttachable,
 } from "./container-computer.ts";
+import { PIDS_LIMIT } from "./container-limits.ts";
 
 function runner(responses: Record<string, string | Error>) {
   const calls: string[] = [];
@@ -664,6 +665,40 @@ describe("containerComputerStatus", () => {
     expect(fake.calls.some(call => call.startsWith("docker exec"))).toBe(false);
   });
 
+  it("raises the process cap of a desktop made under an older, lower one, in place and once", async () => {
+    const statusOf = async (botId: string, pids: number | null, targetLabel?: string) => {
+      const target = perBotLocalVmTarget(botId);
+      const detail = JSON.parse(perBotReadyInspect(botId, 49152, targetLabel))[0];
+      detail.HostConfig.PidsLimit = pids;
+      const update = `docker update --pids-limit ${PIDS_LIMIT} ${target.containerName}`;
+      const fake = runner({
+        "/usr/bin/which docker": "docker\n",
+        "/usr/bin/which podman": new Error("missing"),
+        "docker info --format {{.ServerVersion}}": "29\n",
+        [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+        [`docker inspect ${target.containerName}`]: JSON.stringify([detail]),
+        [update]: target.containerName,
+      });
+      const read = async () => {
+        await containerComputerStatus(fake.run, "linux", target, { probeDesktop: false });
+        await new Promise((resolve) => setImmediate(resolve));
+      };
+      await read();
+      const first = fake.calls.filter((call) => call === update).length;
+      await read();
+      return { first, total: fake.calls.filter((call) => call === update).length };
+    };
+
+    expect(PIDS_LIMIT, "Firefox alone needs about 430 threads for seven tabs").toBeGreaterThanOrEqual(4096);
+    expect(await statusOf("pids-old", 512), "a VM made under the 512 cap keeps crashing Firefox").toEqual({ first: 1, total: 1 });
+    expect(await statusOf("pids-current", PIDS_LIMIT)).toEqual({ first: 0, total: 0 });
+    expect(await statusOf("pids-unlimited", -1)).toEqual({ first: 0, total: 0 });
+    expect(await statusOf("pids-unset", null)).toEqual({ first: 0, total: 0 });
+    expect(await statusOf("pids-chosen", 1024), "a cap someone chose stays").toEqual({ first: 0, total: 0 });
+    expect(await statusOf("pids-foreign", 512, perBotLocalVmTarget("someone-else").label), "never another container")
+      .toEqual({ first: 0, total: 0 });
+  });
+
   it("reports the bounded desktop startup error instead of waiting forever", async () => {
     const errorProbe =
       `docker exec ${CONTAINER} tail -n 4 /var/log/supervisor/cua-driver.error.log`;
@@ -1031,7 +1066,7 @@ describe("setupCommands", () => {
   it("limits resources and retains only the sandbox supervisor's identity-switch caps", () => {
     const command = setupCommands("docker", "linux").run!;
     expect(command).toContain("--memory 4g --memory-swap 4g");
-    expect(command).toContain("--cpus 2 --pids-limit 512");
+    expect(command).toContain("--cpus 2 --pids-limit 4096");
     expect(command).toContain("--ipc private --cgroupns private");
     expect(command).toContain("--cap-drop ALL --cap-add SETUID --cap-add SETGID");
     expect(command).toContain(`--label ${MANAGED_LABEL}=1`);

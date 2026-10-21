@@ -47,6 +47,10 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   ].join("\n"), { mode: 0o700 });
   engine("happy");
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
+  // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn of
+  // its own on the same engine. Stepped down, what these runs tell the owner is theirs alone.
+  const starter = (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.chiefOfStaff);
+  await api("PATCH", `/api/bots/${starter.id}`, { chiefOfStaff: false });
   const bot = (await runControlOmb(["new-bot", "--name", "Inbox bot", "--url", url]) as any).bot;
   events = await openSse(`${url}/api/events`, { origin: url });
   const routine = async (name = "Inbox brief") => (await api("POST", "/api/routines", {
@@ -193,11 +197,13 @@ it("keeps an ACP engine's run that a graceful shutdown cut off, and starts it on
 it("waits for the conversation it joins to be free instead of failing, then runs there", async () => {
   const s = await server();
   s.engine("hang", { FAKE_CLAUDE_RELEASE: join(s.dataDir, "release") });
-  await s.api("PATCH", "/api/config", { features: { routinesInConversation: true } });
   await runControlOmb(["send", "--bot", s.bot.id, "--task", s.bot.activeTaskId, "--text", "Draft the weekly update.", "--url", s.url]);
   await expect.poll(async () => (await s.api("GET", "/api/bots")).bots.find((bot: any) => bot.id === s.bot.id)?.busy, { timeout: hostTimeout(15_000) }).toBe(true);
 
-  const { id } = await s.runNow((await s.routine()).id);
+  const { routine } = await s.api("POST", "/api/routines", {
+    name: "Inbox brief", prompt: "Summarise my inbox.", botId: s.bot.id, schedule: { type: "limit_reset", engine: "claude" },
+  });
+  const { id } = await s.runNow(routine.id);
   await expect.poll(() => s.run(id), { timeout: hostTimeout(15_000) }).toMatchObject({
     status: "queued", threadId: s.bot.activeTaskId, deferredAt: expect.any(Number),
     attention: "Waiting to start: this thread is already working — interrupt it first",

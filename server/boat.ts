@@ -367,17 +367,17 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
 
 // Boat desktop access: VNC (POST /desktop?vnc=1) first, a plain WebSocket that survives P2P-blocking networks and answers
 // {provisioning:true} until ready; WebRTC (POST /desktop) is a STUN-only fallback that can hang. The sandbox's desktopUrl is not usable alone.
-async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000 } = {}) {
+async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000, requestMs = 30_000 } = {}) {
   assertBoatNotDeleting(boxId);
   const t0 = Date.now();
   while (Date.now() - t0 < vncBudgetMs) {
     assertBoatNotDeleting(boxId);
-    const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop?vnc=1`, { method: "POST" });
+    const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop?vnc=1`, { method: "POST", signal: AbortSignal.timeout(requestMs) });
     if (body?.desktopUrl) return body.desktopUrl;
     if (!body?.provisioning) break;
     await new Promise((r) => setTimeout(r, 3000));
   }
-  const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop`, { method: "POST" });
+  const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop`, { method: "POST", signal: AbortSignal.timeout(requestMs) });
   return body?.desktopUrl ?? null;
 }
 

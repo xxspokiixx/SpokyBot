@@ -62,6 +62,14 @@ export interface RoutineContextAttachment {
 
 export type RoutineRunTrigger = "schedule" | "manual" | "webhook" | "startup";
 
+/** What a finished run left in the chat it reports to: nothing, because it
+ * found nothing to tell; a report waiting for a turn there to end; or the bot
+ * message it wrote. */
+export type RoutineRunReport =
+  | { state: "quiet" }
+  | { state: "pending" }
+  | { state: "posted"; threadId: string; messageId: string };
+
 export type RoutineRunStatus =
   | "queued"
   | "running"
@@ -158,6 +166,7 @@ export interface RoutineRun {
   attention?: string;
   cost?: number | null;
   denials?: string[];
+  report?: RoutineRunReport;
   createdAt: number;
   seenAt?: number;
 }

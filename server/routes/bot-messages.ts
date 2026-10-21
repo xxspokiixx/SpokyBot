@@ -107,6 +107,8 @@ export interface BotMessageRouteDeps {
   harnessCardOutcome(threadId: string, requestId: string, behavior: Behavior, message: unknown): Promise<string | undefined>;
   /** Shows a 👍 or 👎 relayed from another app on the message it answered, as that person's reaction. */
   relayedReaction(threadId: string, messageId: string, person: { email?: string; name?: string }, emoji: string): void;
+  /** The conversation an answer to this card belongs to: a run's own, for the copy its automation posted in a chat. */
+  answeredIn(threadId: string, requestId: string): string;
 }
 
 /** External interfaces (the Slack worker) opt in. `onBehalfOf`, advertised by /api/health as
@@ -137,7 +139,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
     resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
     deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
-    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, relayedReaction,
+    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, relayedReaction, answeredIn,
   } = deps;
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** widget -> sendId of a press on its way in: a second tap before acceptance must not send a second answer. */
@@ -410,11 +412,12 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     if (m && method === "POST") {
       const body = await readBody(req);
       const selected = requestedTaskBot(m[1], body.threadId);
-      const bot = botForThread(selected.id, selected.threadId)!;
+      const bot = botForThread(selected.id, answeredIn(selected.threadId, String(body.requestId)))!;
       const behavior = requestBehavior(body.behavior);
       const reviewedSha256 = typeof body.reviewedSha256 === "string" ? body.reviewedSha256 : undefined;
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
-      const refusal = cardAnswerRefusal(auth, bot.threadId, String(body.requestId), behavior);
+      const refusal = cardAnswerRefusal(auth, selected.threadId, String(body.requestId), behavior) ??
+        (selected.threadId === bot.threadId ? null : cardAnswerRefusal(auth, bot.threadId, String(body.requestId), behavior));
       if (refusal) return json(res, 403, { error: refusal });
       if (body.rememberCommand === true) {
         const refusal = commandRememberRefusal(auth, bot.threadId, String(body.requestId), behavior);
@@ -477,13 +480,13 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     }
     m = path.match(/^\/api\/threads\/([\w-]+)\/respond$/);
     if (m && method === "POST") {
-      const threadId = m[1];
       const body = await readBody(req);
       const behavior = requestBehavior(body.behavior);
       const reviewedSha256 = typeof body.reviewedSha256 === "string" ? body.reviewedSha256 : undefined;
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
       const requestId = String(body.requestId);
-      const refusal = cardAnswerRefusal(auth, threadId, requestId, behavior);
+      const threadId = answeredIn(m[1], requestId);
+      const refusal = cardAnswerRefusal(auth, m[1], requestId, behavior) ?? (threadId === m[1] ? null : cardAnswerRefusal(auth, threadId, requestId, behavior));
       if (refusal) return json(res, 403, { error: refusal });
       if (body.rememberCommand === true) {
         const refusal = commandRememberRefusal(auth, threadId, requestId, behavior);

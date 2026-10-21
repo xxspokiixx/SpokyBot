@@ -47,8 +47,9 @@ it("gives the address to the owning bot and its Chief, never to a teammate, anot
     const vera = (await cli("new-bot", "--name", "Vera", "--section", "Finance")).bot;
     await api("PATCH", `/api/bots/${vera.id}`, { chiefOfStaff: true, managedSections: ["Operations"], acknowledgePeerScope: true });
     await api("PATCH", `/api/bots/${vera.id}`, { visibility: { people: ["ada@example.test"] } });
+    // Chief first: the fixture's starter is the Chief of its own, unsectioned team.
     const roster = (await api("GET", "/api/bots")).bots as any[];
-    expect(roster.filter((bot) => bot.chiefOfStaff).map((bot) => bot.name).sort()).toEqual(["Clive", "Vera"]);
+    expect(roster.filter((bot) => bot.chiefOfStaff).map((bot) => bot.name).sort()).toEqual(["Clive", "Fixture Starter", "Vera"]);
 
     // 1. Creating it hands the owner the address, which works; a careless reply repeating it is masked in the transcript.
     const created = await turn(courier, "Set up an address my WhatsApp watcher can send new messages to, and connect it yourself.", [
