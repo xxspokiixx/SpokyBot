@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { codexLimitResetsAt } from "./drivers/codex-errors.ts";
 import { engineLimitFromUsage, LimitResetClock, nearLimitNote } from "./limit-resets.ts";
+import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import { parseClaudeUsage, parseCodexUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
@@ -195,5 +196,46 @@ describe("nearLimitNote", () => {
     expect(nearLimitNote(limit, "Claude", "UTC")).toBe(" Claude's usage limit is 92% used; it resets Mon 3:40 PM (UTC).");
     expect(nearLimitNote({ ...limit, usedPercent: 89 }, "Claude", "UTC")).toBe("");
     expect(nearLimitNote(undefined, "Claude", "UTC")).toBe("");
+  });
+});
+
+describe("LimitResetClock and the turns that follow a refusal", () => {
+  const accounts = [{ id: "claude", name: "Claude", driver: "claude" as const, environment: {} }];
+  const base = { eventId: "e", provider: "claudeAgent", createdAt: "2026-10-19T10:00:00Z" };
+  const started = (threadId: string) => ({ ...base, threadId, type: "turn.started" }) as RuntimeEvent;
+  const refused = (threadId: string, limitResetsAt?: number) => ({ ...base, threadId, type: "runtime.error", message: "limit", ...(limitResetsAt ? { limitResetsAt } : {}) }) as RuntimeEvent;
+  const completed = (threadId: string, ok: boolean) => ({ ...base, threadId, type: "turn.completed", ok }) as RuntimeEvent;
+  const clock = (onChange = vi.fn()) => ({ onChange, instance: new LimitResetClock({ accounts: () => accounts, now: () => NOW, onChange }) });
+
+  it("ends the hold when a later turn on the same engine works, even after the engine's turn map forgot it", () => {
+    const { instance, onChange } = clock();
+    instance.noteRuntimeEvent("claude", started("t1"));
+    instance.noteRuntimeEvent(undefined, refused("t1", NOW + 11 * 24 * HOUR));
+    instance.noteRuntimeEvent(undefined, completed("t1", false));
+    expect(instance.blockedUntil("claude")).toBe(NOW + 11 * 24 * HOUR);
+    onChange.mockClear();
+    instance.noteRuntimeEvent("claude", started("t2"));
+    instance.noteRuntimeEvent(undefined, completed("t2", true));
+    expect(instance.blockedUntil("claude")).toBeNull();
+    expect(instance.report().engines).toEqual([]);
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the hold through a failed turn, a working turn on another engine, or a turn whose engine is unknown", () => {
+    const { instance } = clock();
+    instance.noteRuntimeEvent("claude", refused("t1", NOW + HOUR));
+    instance.noteRuntimeEvent("claude", started("t2"));
+    instance.noteRuntimeEvent(undefined, completed("t2", false));
+    instance.noteRuntimeEvent("codex", started("t3"));
+    instance.noteRuntimeEvent(undefined, completed("t3", true));
+    instance.noteRuntimeEvent(undefined, completed("t4", true));
+    expect(instance.blockedUntil("claude")).toBe(NOW + HOUR);
+  });
+
+  it("holds nothing for a refusal without an engine-wide reset", () => {
+    const { instance } = clock();
+    instance.noteRuntimeEvent("claude", started("t1"));
+    instance.noteRuntimeEvent(undefined, refused("t1"));
+    expect(instance.blockedUntil("claude")).toBeNull();
   });
 });

@@ -29,7 +29,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => null }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
-const { setLocale } = await import("@/lib/i18n");
+const { setLocale, t } = await import("@/lib/i18n");
 const limits = await import("@/lib/limit-resets");
 const { automationSentence, isDone, statusLine } = await import("@/lib/automations");
 const { LimitWarnings } = await import("./automations/LimitWarnings");
@@ -138,6 +138,25 @@ describe("the chat", () => {
     root!.unmount();
     root = null;
     expect(mount(createElement(EngineLimitNotice, { engine: "codex" })).innerHTML).toBe("");
+  });
+
+  it("explains on hover why a blocked engine is shown, and how it clears", () => {
+    const near = mount(createElement(EngineLimitNotice, { engine: "claude" })).querySelector("button")!;
+    expect(near.title).toBe(t("limits.chatHint"));
+    root!.unmount();
+    limits.rememberLimits({ checkedAt: NOW, engines: [claude(100, true)] });
+    const blocked = mount(createElement(EngineLimitNotice, { engine: "claude" })).querySelector("button")!;
+    expect(blocked.textContent).toBe("Claude: at its limit · resets 3:40 PM");
+    expect(blocked.title).toContain("clears by itself once a reply on Claude works again");
+    expect(blocked.getAttribute("aria-label")).toContain("Claude: at its limit");
+  });
+
+  it("checks the engine's usage again when clicked", async () => {
+    const notice = mount(createElement(EngineLimitNotice, { engine: "claude" })).querySelector("button")!;
+    fixture.api.mockClear();
+    flushSync(() => notice.click());
+    await settle();
+    expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets?refresh=1");
   });
 
   it("offers Continue on a turn its limit stopped, which sets up the automation in this conversation", async () => {
