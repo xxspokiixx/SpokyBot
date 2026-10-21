@@ -38,11 +38,13 @@ export function parseCloudPower(input) {
 const wholeGb = value => Number.isSafeInteger(value) && value >= 1 && value <= 10_000;
 
 const DEVICE_NAME_MAX = 100;
-/** An ended My Cloud's `hold.homecoming`: the Admin's id for the one computer its things come home to, and its name. */
+/** A computer's installation id, as one-home-main.mjs `installationOf` derives it and the Admin keeps it. */
+export const INSTALLATION_ID = /^[A-Za-z0-9_-]{22,64}$/u;
+/** An ended My Cloud's `hold.homecoming`: the one computer its things come home to, by installation, and its name. */
 function parseHomecoming(input) {
-  if (!record(input) || typeof input.deviceId !== "string" || !/^[\w-]{1,128}$/u.test(input.deviceId) || typeof input.name !== "string") return null;
+  if (!record(input) || typeof input.installationId !== "string" || !INSTALLATION_ID.test(input.installationId) || typeof input.name !== "string") return null;
   const name = input.name.trim();
-  return name && name.length <= DEVICE_NAME_MAX && !/\p{Cc}/u.test(name) ? { deviceId: input.deviceId, name } : null;
+  return name && name.length <= DEVICE_NAME_MAX && !/\p{Cc}/u.test(name) ? { installationId: input.installationId, name } : null;
 }
 
 /** A malformed summary is no machine, never a partly trusted one; a malformed optional extra is dropped. */

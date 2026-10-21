@@ -2,6 +2,7 @@ import type { installCloudSend } from "./cloud-send-main.mjs";
 import type { OneHomeCloud, OneHomeView, createOneHome } from "./one-home.mjs";
 
 export function oneHomeCloud(state: unknown): OneHomeCloud | null;
+export function installationOf(environmentId: string): string;
 
 type SendDeps = Parameters<typeof installCloudSend>[0];
 
@@ -9,7 +10,8 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move"> & {
   /** This computer's server, as its owner. */
   localRequest(route: string, init?: RequestInit & { duplex?: "half" }): Promise<Response>;
   /** The MausBot Cloud sign-in (cloud-account.mjs). */
-  account(): { state(): any; pairHome(): Promise<{ origin: string; code: string; expiresAt?: number }>; exportHome(): Promise<any> } | null;
+  account(): { state(): any; pairHome(): Promise<{ origin: string; code: string; expiresAt?: number }>; exportHome(options?: { installation?: string }): Promise<any>;
+    reportMove?(options: { installation: string }): Promise<boolean> } | null;
   journalFile(): string;
   tempRoot(): string;
   lend?(projects: string[]): Promise<unknown>;

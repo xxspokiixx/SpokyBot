@@ -14,8 +14,10 @@ export interface OneHomeCounts { bots: number; skills: number; logins: number; o
 
 export interface OneHomeCloud {
   origin: string | null; account: string; machine: string | null; ready: boolean; moves: boolean; ended: boolean; paid: boolean;
-  /** An ended Cloud's things come home to this computer (`here`) or to the one named. */
-  homecoming?: { name: string; here: boolean };
+  /** The computer an ended Cloud's things come home to, by installation (one-home-main.mjs `installationOf`). */
+  homecoming?: { installationId: string; name: string };
+  /** This app's sign-in (the Admin's device id), while connected. */
+  signIn?: string;
 }
 type Answer = { ok: boolean; status: number; body: any };
 
@@ -48,6 +50,10 @@ export function createOneHome(deps: {
   openLocal?(): void;
   lastInput?(): number;
   again?: { bring(): Promise<{ restored: string; switches: Record<string, boolean> } | { deleted: true } | { later: number }> };
+  /** This computer's installation id; null while it can't be known. */
+  installation?(): Promise<string | null>;
+  /** Tells the Admin this computer's move is done; false when it can't take it yet. */
+  reportMove?(): Promise<boolean>;
   restart?(): void;
   version?: string;
   onChange?(view: OneHomeView | null): void;

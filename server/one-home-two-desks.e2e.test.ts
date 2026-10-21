@@ -64,12 +64,22 @@ it("My Cloud ends after two computers moved to it: everything comes home to the 
   await expect.poll(() => idle(air), { timeout: 60_000, interval: 200 }).toBe(true);
   await expect.poll(() => idle(imac), { timeout: 60_000, interval: 200 }).toBe(true);
 
-  // Both move to the same My Cloud, one after the other.
+  // Both move to the same My Cloud, one after the other; each tells the Admin once, as itself, that its move is done.
+  const reports = { air: [] as string[], imac: [] as string[] };
+  fx.account.reportMove = async ({ installation }) => { reports.air.push(installation); return true; };
+  studio.account.reportMove = async ({ installation }) => { reports.imac.push(installation); return true; };
   const movable = { status: "ready", origin: fx.cloudBase, moves: true };
   fx.account.state = { ...fx.account.state, deviceId: "device-air", machine: movable };
   await moveUntilDone(fx.oneHome, fx.journalFile);
   studio.account.state = { ...studio.account.state, deviceId: "device-imac", machine: movable };
   await moveUntilDone(studio.oneHome, studio.journalFile);
+  expect([reports.air.length, reports.imac.length]).toEqual([1, 1]);
+  expect(reports.air[0]).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  expect(reports.air[0]).not.toBe(reports.imac[0]);
+  // The Air signs out and in again: a new sign-in, the same computer, told again.
+  fx.account.state = { ...fx.account.state, deviceId: "device-air-2" };
+  await fx.oneHome.kick();
+  expect(reports.air).toEqual([reports.air[0], reports.air[0]]);
   const imacCopy = read(studio.journalFile)!.frozenAt!;
   expect([(await air("GET", "/api/move/freeze")).body.frozen, (await imac("GET", "/api/move/freeze")).body.frozen]).toEqual([true, true]);
   // On My Cloud since: a turn with each computer's bot.
@@ -77,13 +87,15 @@ it("My Cloud ends after two computers moved to it: everything comes home to the 
   await turn(fx.onCloud, pip, "From My Cloud: order more paper.");
   const cloudRows = { scout: (await rows(fx.onCloud, scout.threadId)).map((row) => row.id), pip: (await rows(fx.onCloud, pip.threadId)).map((row) => row.id) };
 
-  // The trial ends unpaid: the Admin holds My Cloud and names the Air, used most recently, as where things come home.
-  const hold = { until: Date.now() + 3 * 86_400_000, homecoming: { deviceId: "device-air", name: "MacBook Air" } };
-  fx.account.state = { ...fx.account.state, machine: { status: "stopped", hold } };
+  // The trial ends unpaid: the Admin holds My Cloud and names the Air, the moved computer used most recently, as where
+  // things come home; it signs in again once more meanwhile.
+  const hold = { until: Date.now() + 3 * 86_400_000, homecoming: { installationId: reports.air[0], name: "MacBook Air" } };
+  fx.account.state = { ...fx.account.state, deviceId: "device-air-3", machine: { status: "stopped", hold } };
   studio.account.state = { ...studio.account.state, machine: { status: "stopped", hold } };
   const asked = { air: 0, imac: 0 };
-  fx.account.exportHome = async () => {
+  fx.account.exportHome = async (options) => {
     asked.air++;
+    expect(options?.installation, "the Air asks as itself").toBe(reports.air[0]);
     return { grant: { origin: fx.cloudBase, code: (await fx.grant("Bring My Cloud home")).code, expiresAt: Date.now() + 300_000 } };
   };
   studio.account.exportHome = async () => { asked.imac++; throw Object.assign(new Error("Your bots came back to MacBook Air."), { status: 403, code: "not_homecoming" }); };

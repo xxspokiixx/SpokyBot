@@ -66,8 +66,9 @@ export interface CloudSendFixture {
   handoff(what: ConnectionAsk): Promise<any>;
   /** The one-time move (one-home.mjs), as main runs it in the app that is open now. */
   oneHome: { kick(): Promise<void>; view(): OneHomeView | null; away(): boolean };
-  /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, and its export of a held one. */
-  account: { state: Record<string, any>; exportHome(): Promise<any> };
+  /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, its export of a held one, and (when a
+   * test sets it) the Admin taking a computer's word that its move is done. */
+  account: CloudSendAccount;
   /** Its journal (userData/one-home.json), and a look at each write before it lands: throwing there is the app killed. */
   journalFile: string;
   beforeJournalWrite: ((value: any) => void) | null;
@@ -87,13 +88,19 @@ export interface CloudSendFixture {
   close(): Promise<void>;
 }
 
+export interface CloudSendAccount {
+  state: Record<string, any>;
+  exportHome(options?: { installation?: string }): Promise<any>;
+  reportMove?(options: { installation: string }): Promise<boolean>;
+}
+
 /** One more of the person's computers (CloudSendFixture `addDesk`): what the fixture has for its own, for this one. */
 export interface CloudSendDesk {
   base: string;
   dataDir: string;
   local(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>;
   oneHome: { kick(): Promise<void>; view(): OneHomeView | null; away(): boolean };
-  account: { state: Record<string, any>; exportHome(): Promise<any> };
+  account: CloudSendAccount;
   journalFile: string;
   spies: { lent: string[][]; phoneStops: number; phoneStarts: number; opened: string[]; relaunches: number };
   /** The app quits or is killed, and opens again; its server too, on the same data. */
@@ -347,7 +354,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     fetch: throughEdge(null) as typeof fetch,
     engineWaitMs: 2_000,
     ...(space ? { space } : {}),
-    account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: () => account.exportHome() }),
+    account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => account.exportHome(options),
+      reportMove: async (options) => (account.reportMove ? account.reportMove(options) : false) }),
     journalFile: () => journalFile,
     journal: {
       read: () => { try { return JSON.parse(readFileSync(journalFile, "utf8")); } catch { return null; } },
@@ -415,7 +423,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       localOrigin: () => base,
       fetch: throughEdge(null) as typeof fetch,
       engineWaitMs: 2_000,
-      account: () => ({ state: () => deskAccount.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: () => deskAccount.exportHome() }),
+      account: () => ({ state: () => deskAccount.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => deskAccount.exportHome(options),
+        reportMove: async (options) => (deskAccount.reportMove ? deskAccount.reportMove(options) : false) }),
       journalFile: () => journalFile,
       tempRoot: () => join(root, `${name}-one-home-temp`),
       lend: async (projects) => { spies.lent.push(projects); },
