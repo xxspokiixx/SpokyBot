@@ -740,6 +740,7 @@
   "lending.screenUnavailable": "Primeiro configure o controle do computador para este app (Acessibilidade e Gravação de Tela) e depois escolha esta opção.",
   "lending.stopHelp": "Desativar isto encerra o compartilhamento na hora e cancela tudo o que estiver em execução. Uma ação que um app já começou ainda pode terminar.",
   "lending.failed": "Não foi possível alterar o que está compartilhado. Tente novamente.",
+  "lending.drivesHelp": "Para compartilhar uma unidade inteira, como um disco externo, um pendrive ou um segundo disco do computador, escolha a própria unidade em vez de escolher as pastas uma a uma. Sua pasta pessoal também pode ser escolhida: ela é sempre somente leitura, e os lugares dentro dela que guardam chaves, senhas e dados do navegador continuam privados. O disco do sistema não pode ser compartilhado, e uma unidade fica somente leitura a menos que você marque “Pode editar”.",
   "lending.refused.notFolder": "Escolha uma pasta, não um arquivo.",
   "lending.refused.tooMany": "Empreste no máximo 20 pastas.",
   "lending.status.lent": "Compartilhado. Os bots do Cloud podem usar este computador enquanto ele estiver ativo.",

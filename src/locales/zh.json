@@ -377,6 +377,7 @@
   "lending.internetUnsupported": "My Cloud 正在更新。更新完成后，你的机器人就能使用这台电脑的网络连接。",
   "lending.stopHelp": "关闭后会立即停止共享，并取消所有正在运行的操作。应用已开始的操作可能仍会完成。",
   "lending.failed": "无法更改共享的内容，请重试。",
+  "lending.drivesHelp": "要共享整个驱动器（例如外置硬盘、U 盘或电脑中的第二块硬盘），请直接选择该驱动器，而不是逐个选择其中的文件夹。也可以选择你的主目录：它始终为只读，其中存放密钥、密码和浏览器数据的位置仍然保密。系统盘无法共享；除非勾选“可编辑”，驱动器均为只读。",
   "lending.refused.notFolder": "请选择文件夹，而不是文件。",
   "lending.refused.tooMany": "最多出借 20 个文件夹。",
   "lending.status.lent": "已共享。这台电脑处于唤醒状态时，Cloud 上的机器人即可使用。",

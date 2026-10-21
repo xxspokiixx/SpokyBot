@@ -230,6 +230,7 @@
   "lending.internetUnsupported": "My Cloud est en cours de mise à jour. Vos bots pourront utiliser la connexion internet de cet ordinateur une fois la mise à jour terminée.",
   "lending.stopHelp": "Le désactiver arrête aussitôt le partage et annule tout ce qui est en cours. Une action qu'une app a déjà commencée peut quand même se terminer.",
   "lending.failed": "Impossible de modifier ce qui est partagé. Réessayez.",
+  "lending.drivesHelp": "Pour partager un disque entier, comme un disque externe, une clé USB ou un second disque de l’ordinateur, choisissez le disque lui-même plutôt que ses dossiers un par un. Votre dossier personnel peut aussi être choisi : il est toujours en lecture seule, et les emplacements qui y contiennent les clés, les mots de passe et les données des navigateurs restent privés. Le disque système ne peut pas être partagé, et un disque est en lecture seule sauf si vous cochez « Peut modifier ».",
   "lending.refused.notFolder": "Choisissez un dossier, pas un fichier.",
   "lending.refused.tooMany": "Prêtez au plus 20 dossiers.",
   "lending.status.lent": "Partagé. Les bots du Cloud peuvent utiliser cet ordinateur tant qu'il est éveillé.",

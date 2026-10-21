@@ -310,6 +310,7 @@
   "lending.internetUnsupported": "My Cloud wird gerade aktualisiert. Deine Bots können die Internetverbindung dieses Computers nutzen, sobald das erledigt ist.",
   "lending.stopHelp": "Wenn du das ausschaltest, endet das Teilen sofort und alles Laufende wird abgebrochen. Eine Aktion, die eine App schon begonnen hat, kann trotzdem noch fertig werden.",
   "lending.failed": "Was geteilt wird, konnte nicht geändert werden. Versuch es noch einmal.",
+  "lending.drivesHelp": "Um ein ganzes Laufwerk zu teilen, etwa eine externe Festplatte, einen USB-Stick oder eine zweite Festplatte im Computer, wähle das Laufwerk selbst statt seiner Ordner einzeln. Auch dein Home-Ordner kann gewählt werden: Er ist immer nur lesbar, und die Orte darin, an denen Schlüssel, Passwörter und Browserdaten liegen, bleiben privat. Die Systemfestplatte kann nicht geteilt werden, und ein Laufwerk ist nur lesbar, solange du „Darf bearbeiten“ nicht ankreuzt.",
   "lending.refused.notFolder": "Wähle einen Ordner, keine Datei.",
   "lending.refused.tooMany": "Gib höchstens 20 Ordner frei.",
   "lending.status.lent": "Geteilt. Cloud-Bots können diesen Computer nutzen, solange er wach ist.",
