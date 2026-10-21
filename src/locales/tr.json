@@ -533,7 +533,6 @@
   "lending.internetUnsupported": "Cloud'unuz güncelleniyor. Güncelleme bitince botlarınız bu bilgisayarın internet bağlantısını kullanabilecek.",
   "lending.stopHelp": "Bunu kapatmak, paylaşımı derhal durdurur ve çalışan her şeyi iptal eder. Bir uygulamanın başlatmış olduğu bir eylem yine de tamamlanabilir.",
   "lending.failed": "Paylaşılanlar değiştirilemedi. Tekrar deneyin.",
-  "lending.refused.homeOrRoot": "Ana klasörünüzün tamamını ya da bir diskin tamamını değil, ana klasörünüzün içindeki bir klasörü seçin.",
   "lending.refused.notFolder": "Dosya değil, klasör seçin.",
   "lending.refused.tooMany": "En fazla 20 klasör ödünç verin.",
   "lending.status.lent": "Paylaşıldı. Bu bilgisayar uyanık olduğu sürece Cloud botları onu kullanabilir.",

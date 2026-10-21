@@ -230,7 +230,6 @@
   "lending.internetUnsupported": "My Cloud est en cours de mise à jour. Vos bots pourront utiliser la connexion internet de cet ordinateur une fois la mise à jour terminée.",
   "lending.stopHelp": "Le désactiver arrête aussitôt le partage et annule tout ce qui est en cours. Une action qu'une app a déjà commencée peut quand même se terminer.",
   "lending.failed": "Impossible de modifier ce qui est partagé. Réessayez.",
-  "lending.refused.homeOrRoot": "Choisissez un dossier dans votre dossier personnel, pas tout le dossier personnel ni un disque entier.",
   "lending.refused.notFolder": "Choisissez un dossier, pas un fichier.",
   "lending.refused.tooMany": "Prêtez au plus 20 dossiers.",
   "lending.status.lent": "Partagé. Les bots du Cloud peuvent utiliser cet ordinateur tant qu'il est éveillé.",

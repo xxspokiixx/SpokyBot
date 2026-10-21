@@ -694,7 +694,6 @@
   "lending.screenUnavailable": "Primero configura el control del equipo para esta app (Accesibilidad y Grabación de pantalla) y luego elige esta opción.",
   "lending.stopHelp": "Al desactivarlo, se deja de compartir de inmediato y se cancela todo lo que esté en curso. Una acción que una app ya haya empezado puede terminar igualmente.",
   "lending.failed": "No se pudo cambiar lo que se comparte. Inténtalo de nuevo.",
-  "lending.refused.homeOrRoot": "Elige una carpeta dentro de tu carpeta personal, no toda la carpeta personal ni un disco entero.",
   "lending.refused.notFolder": "Elige una carpeta, no un archivo.",
   "lending.refused.tooMany": "Presta 20 carpetas como máximo.",
   "lending.status.lent": "Compartido. Los bots de la Cloud pueden usar este equipo mientras esté despierto.",

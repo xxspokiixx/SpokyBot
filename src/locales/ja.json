@@ -746,7 +746,6 @@
   "lending.internetUnsupported": "My Cloud を更新しています。完了すると、ボットはこのコンピューターのインターネット接続を使えるようになります。",
   "lending.stopHelp": "オフにすると共有がすぐに止まり、実行中の処理が取り消されます。アプリがすでに開始した操作は、そのまま完了する場合があります。",
   "lending.failed": "共有する内容を変更できませんでした。もう一度お試しください。",
-  "lending.refused.homeOrRoot": "ホームフォルダー全体やディスク全体ではなく、ホームフォルダー内のフォルダーを選んでください。",
   "lending.refused.notFolder": "ファイルではなくフォルダーを選んでください。",
   "lending.refused.tooMany": "貸し出せるフォルダーは 20 個までです。",
   "lending.status.lent": "共有中です。このコンピューターがスリープしていない間、Cloud のボットが使えます。",
