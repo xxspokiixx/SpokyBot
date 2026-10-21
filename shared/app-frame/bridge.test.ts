@@ -340,6 +340,20 @@ describe("engagement and limits", () => {
     expect((await h.request("ui/update-model-context", { content: "not a list" }))?.error?.code).toBe(RPC_INVALID_PARAMS);
   });
 
+  it("hands a waiting context update over before a message, so the bot reads the message against the latest view", async () => {
+    const h = harness();
+    await h.connect();
+    const update = (text: string) => h.request("ui/update-model-context", { content: [{ type: "text", text }] });
+    await update("1 cup");
+    await update("2 cups");
+    expect(h.calls.contexts).toHaveLength(1);
+    expect((await h.request("ui/message", { role: "user", content: [{ type: "text", text: "I had 2 cups" }] }))?.result).toEqual({});
+    expect(h.calls.contexts.at(-1)).toEqual({ content: [{ type: "text", text: "2 cups" }] });
+    expect(h.calls.messages).toEqual(["I had 2 cups"]);
+    await h.advance(1_000);
+    expect(h.calls.contexts).toHaveLength(2);
+  });
+
   it("honours `can`: a frame that may not message, open links or set context is refused", async () => {
     const h = harness({ ...botDoc(), can: { serverTools: false, serverResources: false, message: false, openLinks: false, modelContext: false } });
     const init = await h.request("ui/initialize", {});

@@ -253,6 +253,17 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
     Promise.resolve().then(() => adapter.setContext(update)).catch(() => {});
   };
 
+  /** A message goes after what the View last said about itself, so it is never read against an older view. */
+  const flushContextNow = async () => {
+    if (contextTimer === null || !contextLatest) return;
+    timers.clear(contextTimer);
+    contextTimer = null;
+    const update = contextLatest;
+    contextLatest = null;
+    contextSentAt = now();
+    try { await adapter.setContext(update); } catch { /* the message still goes */ }
+  };
+
   const afterInitialized = () => {
     if (mcp && !toolNotificationsSent) {
       toolNotificationsSent = true;
@@ -321,6 +332,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
         if (text === null) return fail(id, RPC_INVALID_PARAMS, `Only text messages of 1 to ${APP_LIMITS.messageText} characters can be sent.`);
         if (!rates.message.take()) return fail(id, RPC_HOST_REFUSED, "Too many messages from this app. Wait a moment.");
         try {
+          await flushContextNow();
           await adapter.sendMessage(text);
           return respond(id, {});
         } catch (error) {
