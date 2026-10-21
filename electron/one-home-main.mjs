@@ -118,7 +118,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
 
   home = createOneHome({
     journal,
-    cloud: () => oneHomeCloud(account()?.state()),
+    // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
+    cloud: () => { typed(); return oneHomeCloud(account()?.state()); },
     send,
     local: {
       ...local,
