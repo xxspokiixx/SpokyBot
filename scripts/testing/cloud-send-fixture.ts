@@ -11,8 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLoginHandoffClient, type ConnectionAsk } from "../../electron/cloud-logins.mjs";
-import { createCloudMove } from "../../electron/cloud-move.mjs";
-import type { CloudMoveCheck, CloudSendOutcome } from "../../electron/cloud-send.mjs";
+import { createCloudSend, type CloudMoveCheck, type CloudSendOutcome, type CloudSendSnapshot } from "../../electron/cloud-send.mjs";
+import { openOwnerSession } from "../../electron/cloud-send-main.mjs";
+import { BACKGROUND_HEADERS } from "../../electron/cloud-power.mjs";
 import { installOneHome } from "../../electron/one-home-main.mjs";
 import type { OneHomeView } from "../../electron/one-home.mjs";
 import { cloudPairingSignature, cloudRequestSignature } from "../../server/cloud-home.ts";
@@ -46,8 +47,11 @@ export interface CloudSendFixture {
   labels: string[];
   /** The Admin's one-time code for this Cloud, as pairHome() gives it. */
   grant(label: string): Promise<{ origin: string; code: string; expiresAt: number }>;
-  /** The switcher's send line, as main builds it. */
-  menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
+  /** What an older desktop's Send everything did, over the same cloud-send.json: the app is then opened again, as an
+   * update after it would. */
+  olderSend(input?: { keys?: string[]; force?: string[] }): Promise<CloudSendOutcome>;
+  /** An older desktop's comparison of both sides. */
+  olderCompare(): Promise<CloudSendSnapshot>;
   /** A pass of the one-time move, through main's own wiring; `final`: the one after this computer stopped. */
   move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
   /** The move's check of what arrived, through main's own wiring. */
@@ -311,18 +315,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     }
     return remember(await fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...EDGE, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } }));
   };
-  // Bring newer chats, as main.mjs gives it to Send to My Cloud.
-  const move = createCloudMove({
-    localRequest: (route, init) => fetch(`${desktopBase}${route}`, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": ownerCapability } }),
-    fetchImpl: ((url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...EDGE } })) as typeof fetch,
-    tempRoot: join(root, "send-move-temp"), availableBytes: async () => Number.MAX_SAFE_INTEGER, pollMs: 150, retryDelaysMs: [100, 300],
-  });
   const wire = () => installOneHome({
     ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler); } },
-    localOnly: (channel, handler) => ((event: { page?: string }, ...args: unknown[]) => {
-      if (event?.page !== "local") throw new Error(`${channel} is only available in this app's window`);
-      return handler(event, ...args);
-    }) as typeof handler,
     cloudPage: (event) => (event as { page?: "local" | "cloud" })?.page ?? null,
     server: () => port,
     localRequest: async (route, init = {}) => remember(await fetch(`${desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": ownerCapability } })),
@@ -333,9 +327,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     file: () => join(root, "cloud-send.json"),
     window: () => null,
     localOrigin: () => desktopBase,
-    openSettings: () => {},
     fetch: throughEdge(null) as typeof fetch,
-    bringChats: () => move.bring({ id: "cloud", name: "My Cloud", origin: cloudBase, kind: "cloud", grant: async () => ({ origin: cloudBase, code: await mintCode("Copy from desktop") }) }),
     engineWaitMs: 2_000,
     ...(space ? { space } : {}),
     account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: () => account.exportHome() }),
@@ -355,6 +347,21 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   });
   let main = wire();
   const asks = createLoginHandoffClient();
+  const older = () => createCloudSend({
+    local: async (route, init) => remember(await fetch(`${desktopBase}${route}`, { method: init?.method ?? "GET", headers: { "x-openmausbot-desktop-owner": ownerCapability } })),
+    cloud: {
+      origin: () => cloudBase,
+      asleep: () => false,
+      read: (route) => throughEdge(owner)(`${cloudBase}${route}`, { headers: { accept: "application/json", ...BACKGROUND_HEADERS } }),
+      open: () => openOwnerSession({ origin: cloudBase, grant: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)") }) }, throughEdge(null) as typeof fetch),
+    },
+    handoff: (what) => asks.request(port, what as ConnectionAsk),
+    store: {
+      read: () => { try { return JSON.parse(readFileSync(join(root, "cloud-send.json"), "utf8")); } catch { return null; } },
+      write: (value) => { const file = join(root, "cloud-send.json"); writeFileSync(`${file}.tmp`, JSON.stringify(value)); renameSync(`${file}.tmp`, file); },
+    },
+  });
+  const reopened = () => { main.close(); main = wire(); };
   const listen = () => {
     desktop.on("message", (message) => main.receive(port, message));
     desktop.on("message", (message) => { asks.receive(port, message); });
@@ -382,13 +389,16 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       main = wire();
       listen();
     },
-    handoff: (what) => asks.request(port, what),
+    handoff: (what) => asks.request(port, what as ConnectionAsk),
     async picture(bytes) {
       const response = await fetch(`${desktopBase}/api/attachments`, { method: "POST", headers: { "x-openmausbot-desktop-owner": ownerCapability, "content-type": "image/png" }, body: bytes });
       return `/api/attachments/${((await response.json()) as { path: string }).path.split(/[\\/]/).pop()}`;
     },
     call: <T>(channel: string, page: "local" | "cloud", ...args: unknown[]) => Promise.resolve(handlers.get(channel)!({ page }, ...args)) as Promise<T>,
-    menu: () => main.menu(),
+    async olderSend(input = {}) {
+      try { return await older().send({ ...input, reason: "button" }); } finally { reopened(); }
+    },
+    olderCompare: () => older().compare(),
     move: (options) => main.move(options),
     check: () => main.check(),
     sessions,
@@ -397,7 +407,6 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     grant: async (label) => ({ origin: cloudBase, code: await mintCode(label), expiresAt: Date.now() + 300_000 }),
     async close() {
       main.close();
-      await move.close();
       for (const child of children) await waitForExit(child, { signal: "SIGTERM" });
       await removeTempDir(root);
     },

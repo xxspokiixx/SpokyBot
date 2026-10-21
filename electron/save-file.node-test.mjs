@@ -149,7 +149,7 @@ describe("attachment download destination", () => {
     assert.notEqual(handler, -1);
     assert.match(main.slice(handler), /item\.setSavePath\(collisionFreeDownloadPath\(/);
     assert.match(main.slice(handler), /revealDownloadWhenDone\(item, /);
-    assert.ok(handler < main.indexOf("createWindow();"));
+    assert.ok(handler < main.indexOf("!deliveredCloudEntry) await showHome();"));
   });
 
   it("reveals only a completed download at its actual save path", () => {
@@ -284,9 +284,9 @@ describe("openLogsFolder", () => {
   });
 
   // The folder comes from main (app.getPath("logs")); the page asks with no path at all.
-  it("is wired in main to its own logs folder, for this computer's page only", () => {
+  it("is wired in main to its own logs folder, for this computer's page and My Cloud's once it is home", () => {
     const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
-    assert.match(main, /ipcMain\.handle\("desktop:open-logs", localOnly\("desktop:open-logs", \(\) => openLogsFolder\(LOG_DIR, \{ open: \(folder\) => shell\.openPath\(folder\) \}\)\)\);/);
+    assert.match(main, /ipcMain\.handle\("desktop:open-logs", localOrHome\("desktop:open-logs", \(\) => openLogsFolder\(LOG_DIR, \{ open: \(folder\) => shell\.openPath\(folder\) \}\)\)\);/);
     assert.match(main, /const LOG_DIR = app\.getPath\("logs"\);/);
   });
 });

@@ -55,7 +55,6 @@ const ALLOWED: ReadonlyArray<{ file: string; snippet?: string; why: string }> = 
   { file: "shared/credential-request.ts", snippet: "when Boat is selected", why: "the card that asks for a person's own Boat key" },
   { file: "server/boat-create-idempotency.ts", snippet: "unnamed Boat", why: "own-key repair: boat.dev's own name for a machine" },
   { file: "server/workspace-backup.ts", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
-  { file: "electron/cloud-move.mjs", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
   { file: "electron/company-backups.mjs", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
 ];
 
@@ -160,11 +159,10 @@ describe("one name per thing", () => {
       ["cloudPhone.step1", [myCloud!]],
       ["lending.status.connectFirst", [e["cloudHome.connect"]!]],
       ["computer.worksOnHintCloudHome", [e["lending.title.computer"]!, settings]],
-      ["cloudMove.leftBehindLend", [e["lending.title.computer"]!, settings]],
       ["lending.cloudSide.empty", [e["lending.title.computer"]!, settings]],
       ["browser.passkey.lendPc", [e["lending.title.pc"]!, settings]],
       ["lending.explain", [e["lending.more"]!]],
-      ["cloudAccount.onCloudSignIn", [e["cloudAccount.signInAgain"]!, settings]],
+      ["cloudAccount.onCloudSignIn", [e["cloudAccount.signInAgain"]!]],
       ["cloudAccount.storageFailed", [e["cloudAccount.signOut"]!]],
       ["cloudAccount.codeExpired", [e["cloudAccount.signIn"]!]],
       ["computer.routines.offWarning", [e["routines.runsOn.boat"]!]],

@@ -26,4 +26,7 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move"> & {
   view(): OneHomeView | null;
   close(): void;
   oneHome: ReturnType<typeof createOneHome>;
+  journal(): unknown;
+  marker(): Promise<{ frozen: boolean; cloud?: string; busy?: string }>;
+  lastInput(): number;
 };

@@ -67,8 +67,8 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   nova = (await local("POST", "/api/bots", { name: "Nova", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
   expect((await local("PATCH", `/api/bots/${nova.id}`, { soul: "You are Nova.", section: "Ops" })).status).toBe(200);
   await turn(local, nova, nova.threadId, "Hello Nova.");
-  // Nova reached My Cloud once before, with an earlier send: from then on each side keeps its own memory.
-  expect((await fx.call<CloudSendOutcome>("cloud-send:send", "local", { keys: [itemKey.bot(nova.id)] })).result.bots).toEqual(["Nova"]);
+  // Nova reached My Cloud once before, with an older app's Send: from then on each side keeps its own memory.
+  expect((await fx.olderSend({ keys: [itemKey.bot(nova.id)] })).result.bots).toEqual(["Nova"]);
 
   // Memory on both sides: one fact both have (dated and marked differently), one only each side has.
   const put = (side: Side, path: string, text: string) => side("PUT", `/api/bots/${nova.id}/memory/file`, { path, text });
@@ -175,7 +175,7 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   const there = (await onCloud("GET", "/api/routines")).body as { routines: Array<{ id: string; enabled: boolean; prompt: string; nextRunAt: number | null }>; runs: Array<{ id: string }> };
   const routineThere = there.routines.find((entry) => entry.id === routineId)!;
   expect(routineThere).toMatchObject({ enabled: false, nextRunAt: null });
-  expect(routineThere.prompt).toBe(`Read ${dataDir("cloud")}/workspaces/${nova.id}/notes.md and report.`);
+  expect(routineThere.prompt).toBe(`Read ${join(dataDir("cloud"), "workspaces", nova.id, "notes.md")} and report.`);
   expect(there.runs.map((run) => run.id)).toContain(finishedRun);
   const owner = (await rows(onCloud, plan.threadId)).find((row) => row.role === "user")!.sender!.id!;
   expect(owner).toMatch(/^p_/u);
