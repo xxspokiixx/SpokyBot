@@ -33,13 +33,15 @@ export interface BoxSetup {
   codeRoots: readonly string[];
   /** Host unix sockets bridged to loopback ports inside the box, when the box has its own network. */
   bridges: readonly BoxBridge[];
+  /** The descriptor number the box reads its seccomp filter from (`--seccomp FD`), or none. */
+  seccompFd?: number;
   /** Test knobs; production passes none. */
   mutate?: ReadonlySet<BoxMutation>;
 }
 
 /** Each removes one protection, so a test can prove the matching check fails without it. */
-export type BoxMutation = "bind-data" | "bind-otherws" | "share-pid" | "share-net" | "env-all" | "tmp-shared";
-export const BOX_MUTATIONS: readonly BoxMutation[] = ["bind-data", "bind-otherws", "share-pid", "share-net", "env-all", "tmp-shared"];
+export type BoxMutation = "bind-data" | "bind-otherws" | "share-pid" | "share-net" | "env-all" | "tmp-shared" | "no-seccomp";
+export const BOX_MUTATIONS: readonly BoxMutation[] = ["bind-data", "bind-otherws", "share-pid", "share-net", "env-all", "tmp-shared", "no-seccomp"];
 
 export interface BoxRequest {
   command: string;
@@ -171,6 +173,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];
   if (!mutate.has("share-pid")) options.push("--unshare-pid");
+  if (setup.seccompFd !== undefined && !mutate.has("no-seccomp")) options.push("--seccomp", String(setup.seccompFd));
   if (net === "isolated") {
     options.push("--unshare-net");
     mounts.push({ kind: "dir", target: IN_BOX_SOCKET_DIR });

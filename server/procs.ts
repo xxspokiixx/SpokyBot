@@ -9,7 +9,7 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
@@ -97,13 +97,20 @@ export function spawnCli(
   assertSafeCliArgv(resolved);
   const boxed = boxedSpawn(resolved, opts, owner);
   const { box: _box, ...spawnOpts } = opts;
+  // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
+  const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
     ...spawnOpts,
-    ...(boxed ? { env: boxed.env } : {}),
+    ...(boxed ? { env: boxed.env, stdio } : {}),
     // POSIX: own group so kill(-pid) reaps child MCP servers; Windows: taskkill /T does it.
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
-  const child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  try {
+    child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
+  } finally {
+    for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
+  }
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
   if (process.platform !== "win32") cliGroups.add(child);

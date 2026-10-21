@@ -2,8 +2,8 @@
 // edge on 0.0.0.0:8080, the only listener the network reaches, always forwarding X-Forwarded-*, so no remote request gets
 // loopback trust. Secrets never ride a child's environment (/proc/<pid>/environ stays readable by the same user): the
 // server reads them from an inherited pipe. Root runs and trusts only the image's code, never the volume's.
-import { spawn, type ChildProcess } from "node:child_process";
-import { chownSync, readFileSync, statSync, type Stats } from "node:fs";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { chmodSync, chownSync, existsSync, readFileSync, statSync, type Stats } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -65,6 +65,22 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
   return { server, edge, secrets: cloudHomeSecrets(env), dropped };
 }
 
+/** What root does to the machine before anything runs as `maus` (docs/bot-box.md, "What each layer stops"): /proc hides
+ * other users' processes (`hidepid=invisible`), so no `maus` process lists root's, and Fly's local API socket folder is
+ * root's alone. Each step is one command; a failure is logged, never fatal, and OMB_CLOUD_HARDEN=0 skips them all. */
+export function hardenHost(env: NodeJS.ProcessEnv, run: { exec: (command: string, args: string[]) => { status: number | null; stderr?: string }; chmod: (path: string, mode: number) => void; exists: (path: string) => boolean } = {
+  exec: (command, args) => spawnSync(command, args, { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8", timeout: 10_000 }), chmod: chmodSync, exists: existsSync,
+}): string[] {
+  if (env.OMB_CLOUD_HARDEN === "0") return ["hardening skipped (OMB_CLOUD_HARDEN=0)"];
+  const notes: string[] = [];
+  const remount = run.exec("mount", ["-o", "remount,hidepid=invisible", "/proc"]);
+  notes.push(remount.status === 0 ? "/proc: hidepid=invisible" : `/proc: hidepid not applied (${String(remount.stderr ?? "").trim().split("\n")[0] || `exit ${remount.status}`})`);
+  if (run.exists("/.fly")) {
+    try { run.chmod("/.fly", 0o700); notes.push("/.fly: root only"); } catch (error) { notes.push(`/.fly: left as is (${error instanceof Error ? error.message : String(error)})`); }
+  }
+  return notes;
+}
+
 /** Each file and every folder above it must be root's and not writable by others, and never on the `maus`-owned volume:
  * otherwise `maus` could rewrite what runs as root at the next start. */
 export function codeTrustProblem(files: readonly string[], home: string, stat: (path: string) => Pick<Stats, "uid" | "mode"> = statSync): string | null {
@@ -106,6 +122,7 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   if (process.getuid?.() === 0) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
     if (!ids) throw new Error(`The ${SERVICE_USER} user is missing from this image.`);
+    if (process.platform === "linux") for (const note of hardenHost(env)) console.log(`cloud home: ${note}`);
     // Only the mount point changes owner; anything inside keeps its owner.
     const stat = statSync(home);
     if (stat.uid !== ids.uid || stat.gid !== ids.gid) chownSync(home, ids.uid, ids.gid);

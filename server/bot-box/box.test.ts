@@ -1,9 +1,10 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BotBox, BoxRunner, BOX_EGRESS_PORT } from "./box.ts";
+import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
+import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
 
@@ -44,6 +45,41 @@ describe("BoxRunner.wrap", () => {
   });
 });
 
+describe("the box's hardening (T0c)", () => {
+  it("hands each box the seccomp filter on descriptor 3, and the no-seccomp mutation leaves it out", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-seccomp-"));
+    const file = join(dir, "seccomp.bpf");
+    writeFileSync(file, seccompBytes());
+    const setup = { dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], bridges: [] };
+    const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set(), seccompFile: file });
+    const wrapped = runner.wrap({ command: "/usr/bin/x", args: [], env: {} });
+    expect(wrapped.args).toContain("--seccomp");
+    expect(wrapped.args[wrapped.args.indexOf("--seccomp") + 1]).toBe("3");
+    expect(wrapped.extraFds).toHaveLength(1);
+    expect(readFileSync(wrapped.extraFds[0]!)).toEqual(seccompBytes());
+    for (const fd of wrapped.extraFds) closeSync(fd);
+    const mutated = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup: { ...setup, mutate: new Set(["no-seccomp" as const]) }, denyEnv: new Set(), seccompFile: file });
+    const plain = mutated.wrap({ command: "/usr/bin/x", args: [], env: {} });
+    expect(plain.args).not.toContain("--seccomp");
+    expect(plain.extraFds).toEqual([]);
+    const none = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() }).wrap({ command: "/usr/bin/x", args: [], env: {} });
+    expect(none.extraFds).toEqual([]);
+    expect(writeSeccompFile(dir)).toBe(process.platform === "linux" && process.arch === "x64" ? file : null);
+    expect(DENIED_SYSCALLS.length).toBeGreaterThan(30);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads the host's hidepid and Fly's socket folder mode", () => {
+    expect(procHidepid(() => "proc /proc proc rw,nosuid,nodev,noexec,relatime,hidepid=invisible 0 0\n")).toBe(true);
+    expect(procHidepid(() => "proc /proc proc rw,nosuid,nodev,noexec,relatime,hidepid=2 0 0\n")).toBe(true);
+    expect(procHidepid(() => "proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n")).toBe(false);
+    expect(procHidepid(() => { throw new Error("no /proc"); })).toBe(false);
+    expect(flyApiPrivate(() => ({ mode: 0o40700 }))).toBe(true);
+    expect(flyApiPrivate(() => ({ mode: 0o40755 }))).toBe(false);
+    expect(flyApiPrivate(() => { throw new Error("absent"); })).toBe(true);
+  });
+});
+
 describe("BotBox", () => {
   const dirs: string[] = [];
   const boxes: BotBox[] = [];
@@ -59,7 +95,7 @@ describe("BotBox", () => {
     const lines: string[] = [];
     expect((await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: (line) => lines.push(line) })).box).toBe("off");
     expect(box.wrap({ command: "claude", args: [], env: {} })).toBeNull();
-    expect(box.report()).toEqual({ box: "off", reason: "not-cloud", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 }, broker: { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] } });
+    expect(box.report()).toMatchObject({ box: "off", reason: "not-cloud", checks: null, bridge: null, boxed: 0, refused: { egress: 0, harness: 0 }, broker: { on: false, tokens: 0, forwarded: 0, refused: 0, unbrokered: [] }, hardening: { seccomp: "off", denied: 0 } });
     expect(lines).toEqual(["bot box: off (not-cloud)"]);
     expect(existsSync(join(dirs[0]!, "box"))).toBe(false);
   });
@@ -96,7 +132,8 @@ describe("BotBox", () => {
     expect(box.report().broker.tokens).toBe(0);
     box.noteChecks({ passed: 20, total: 21, failed: ["egress-public-allowed"], at: 1 });
     expect(box.report().checks).toEqual({ passed: 20, total: 21, failed: ["egress-public-allowed"], at: 1 });
-    expect(lines).toEqual(["bot box: on (bubblewrap, node bridges, credential broker)"]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^bot box: on \(bubblewrap, node bridges, credential broker, seccomp (on|unsupported here)\)$/);
   });
 });
 

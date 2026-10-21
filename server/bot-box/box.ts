@@ -2,7 +2,7 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
@@ -13,12 +13,15 @@ import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
+import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { bwrapArgs, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
 /** The loopback port inside a box that reaches the credential broker. */
 export const BOX_BROKER_PORT = 18080;
+/** The descriptor the box reads its seccomp filter from: the first after stdio. */
+export const BOX_SECCOMP_FD = 3;
 export const BOX_BRIDGE_SCRIPT = resolveProxy("bot-box/box-bridge");
 export const BOX_PROBE_SCRIPT = resolveProxy("bot-box/box-probe");
 
@@ -32,6 +35,8 @@ export interface WrappedSpawn {
   release(): void;
   /** Keys left raw in the environment because their CLI takes no base URL. */
   unbrokered: string[];
+  /** Descriptors to hand the child after stdio (the seccomp filter), in order from 3; the caller closes them after the spawn. */
+  extraFds: number[];
 }
 
 /** What the box runtime offers the broker's callers: mint a conversation-bound grant (an MCP server's headers). */
@@ -50,6 +55,8 @@ export interface RunnerOptions {
   /** Names refused in the box's environment whatever the allow-list says: the workspace credentials. */
   denyEnv: ReadonlySet<string>;
   egressPort?: number;
+  /** The seccomp filter file to hand each box on BOX_SECCOMP_FD; none loads no filter. */
+  seccompFile?: string | null;
   /** The broker to mint per-process tokens with; none leaves keys in the environment. */
   broker?: { port: number; mintForProcess(input: { botId?: string | null; threadId?: string | null; grants: Record<string, BrokerGrant> }): { token: string }; revoke(token: string): void } | null;
 }
@@ -63,7 +70,10 @@ export class BoxRunner {
   get setup(): BoxSetup { return this.options.setup; }
 
   wrap(request: BoxRequest): WrappedSpawn {
-    const plan = planBox(this.options.setup, request);
+    const extraFds: number[] = [];
+    const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
+    if (seccomp) extraFds.push(openSync(seccomp, "r"));
+    const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
     const mutate = this.options.setup.mutate;
     const env = mutate?.has("env-all")
       ? Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
@@ -77,7 +87,7 @@ export class BoxRunner {
     const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
     const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);
     const brokered = this.broker(env, plan, request);
-    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered: brokered.unbrokered };
+    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered: brokered.unbrokered, extraFds };
   }
 
   /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
@@ -109,6 +119,26 @@ export interface BoxReport {
   refused: { egress: number; harness: number };
   /** The credential broker: on with the box; live tokens, calls forwarded and refused, and key names left raw. */
   broker: { on: boolean; tokens: number; forwarded: number; refused: number; unbrokered: string[] };
+  /** The extra layers (T0c): the seccomp filter in every box, the host's /proc with hidepid, Fly's API socket root-only. */
+  hardening: { seccomp: "on" | "off" | "unsupported"; denied: number; hidepid: boolean; flyApiPrivate: boolean };
+}
+
+/** The filter file, written once at start (0600) and handed to each box on a read-only descriptor. */
+export function writeSeccompFile(dir: string): string | null {
+  if (!seccompSupported()) return null;
+  const file = join(dir, "seccomp.bpf");
+  writeFileSync(file, seccompBytes(), { mode: 0o600 });
+  return file;
+}
+
+/** Whether the host's /proc hides other users' processes (the Cloud supervisor remounts it so at boot). */
+export function procHidepid(mounts: () => string = () => readFileSync("/proc/mounts", "utf8")): boolean {
+  try { return /^proc \/proc proc [^\n]*\bhidepid=(?:2|invisible)\b/m.test(mounts()); } catch { return false; }
+}
+
+/** Whether Fly's local API socket folder is root's alone (no bits for group or others). */
+export function flyApiPrivate(stat: (path: string) => { mode: number } = statSync): boolean {
+  try { return (stat("/.fly").mode & 0o077) === 0; } catch { return true; }
 }
 
 export interface StartOptions {
@@ -137,6 +167,7 @@ export class BotBox {
   private egress: BoxEgressGate | null = null;
   private harness: HarnessGate | null = null;
   private credentials: CredentialBroker | null = null;
+  private seccompFile: string | null = null;
   private checks: BoxChecks | null = null;
   private boxed = 0;
   private unbrokered = new Set<string>();
@@ -159,6 +190,7 @@ export class BotBox {
     this.egress = await openBoxEgressGate({ socketPath: egressSocket });
     this.harness = await openHarnessGate({ socketPath: harnessSocket, port: options.port });
     this.credentials = await openCredentialBroker({ socketPath: brokerSocket });
+    this.seccompFile = writeSeccompFile(dir);
     const bridges: BoxBridge[] = [
       { name: "egress", port: BOX_EGRESS_PORT, socket: egressSocket },
       { name: "harness", port: options.port, socket: harnessSocket },
@@ -168,10 +200,10 @@ export class BotBox {
       bwrap: this.detection.tools.bwrap,
       bridge: { socat: this.detection.tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
       setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), bridges },
-      denyEnv: options.denyEnv,
+      denyEnv: options.denyEnv, seccompFile: this.seccompFile,
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
     });
-    log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker)`);
+    log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
     return this.detection;
   }
 
@@ -183,6 +215,9 @@ export class BotBox {
 
   /** The broker's socket, for a self-check that bridges it. */
   brokerSocket(): string | null { return this.credentials?.socketPath ?? null; }
+
+  /** The filter file each box gets, for a self-check. */
+  seccomp(): string | null { return this.seccompFile; }
 
   /** The box for one spawn, or null when turns are not boxed here. */
   wrap(request: BoxRequest): WrappedSpawn | null {
@@ -208,6 +243,10 @@ export class BotBox {
       boxed: this.boxed,
       refused: { egress: this.egress?.refused ?? 0, harness: this.harness?.refused ?? 0 },
       broker: { on: this.credentials !== null, ...(this.credentials?.stats() ?? { tokens: 0, forwarded: 0, refused: 0 }), unbrokered: [...this.unbrokered].sort() },
+      hardening: {
+        seccomp: this.runner ? (this.seccompFile ? "on" : "unsupported") : "off", denied: this.seccompFile ? DENIED_SYSCALLS.length : 0,
+        hidepid: process.platform === "linux" && procHidepid(), flyApiPrivate: process.platform === "linux" && existsSync("/.fly") ? flyApiPrivate() : true,
+      },
     };
   }
 
@@ -218,6 +257,7 @@ export class BotBox {
     this.egress = null;
     this.harness = null;
     this.credentials = null;
+    this.seccompFile = null;
     this.runner = null;
   }
 }

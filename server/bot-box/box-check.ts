@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { defaultCodeRoots } from "./box.ts";
+import { defaultCodeRoots, writeSeccompFile } from "./box.ts";
 import { detectBox } from "./detect.ts";
 import { BOX_MUTATIONS, type BoxMutation } from "./plan.ts";
 import { runBoxSelfCheck } from "./self-check.ts";
@@ -39,7 +39,7 @@ export async function boxCheckMain(argv: readonly string[], env: Record<string, 
   const result = await runBoxSelfCheck({
     bwrap: detection.tools.bwrap, bridge: { socat: detection.tools.socat, bridgeScript: sibling("box-bridge"), node: process.execPath },
     probeScript: sibling("box-probe"), codeRoots: [dirname(dirname(here)), ...defaultCodeRoots()],
-    root, denyEnv: CHECK_DENY_ENV, mutate, publicTarget,
+    root, denyEnv: CHECK_DENY_ENV, mutate, publicTarget, seccompFile: writeSeccompFile(root),
   });
   process.stdout.write(`${JSON.stringify({ box: detection.box, bridge: detection.tools.socat ? "socat" : "node", mutate: [...mutate], ...result })}\n`);
   return result.error || result.failed.length ? 1 : 0;
