@@ -1945,6 +1945,5 @@
   "homeScreen.offlineNamed": "{name} ist gerade nicht erreichbar.",
   "homeScreen.signInNamed": "Anmelden, um {name} zu öffnen",
   "homeScreen.planNamed": "{name} läuft nicht",
-  "homeLine.left": "Du bist nicht mehr in {name}.",
-  "homeLine.privateChats": "Chats in {name} sind für andere Mitglieder privat. Die Admins von {name} können sie sehen."
+  "homeLine.left": "Du bist nicht mehr in {name}."
 }

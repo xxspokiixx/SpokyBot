@@ -4517,6 +4517,5 @@
   "homeScreen.offlineNamed": "{name} şu anda ulaşılamıyor.",
   "homeScreen.signInNamed": "{name} açmak için oturum açın",
   "homeScreen.planNamed": "{name} çalışmıyor",
-  "homeLine.left": "Artık {name} içinde değilsiniz.",
-  "homeLine.privateChats": "{name} içindeki sohbetler diğer üyelere kapalıdır. {name} yöneticileri bunları görebilir."
+  "homeLine.left": "Artık {name} içinde değilsiniz."
 }

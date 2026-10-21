@@ -29,6 +29,7 @@ import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
+import { useTeamChats } from "@/state/team-chats";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -54,6 +55,7 @@ import { ChatNotice } from "@/components/ChatErrorBanner";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
+  useTeamChats(state.config);
   const showThreads = useShowThreads();
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();

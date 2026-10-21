@@ -27,44 +27,47 @@ test("a connected session's teams become saved places; the remembered team is ke
   assert.deepEqual(w.state.environments.map((entry) => [entry.name, entry.team?.id ?? null]), [["My Cloud", null], ["Acme", "team-acme"], ["Beta", "team-beta"]]);
   w.places.remember({ team: "team-acme" });
   assert.deepEqual(w.places.remembered(), { team: "team-acme", name: "Acme", origin: TEAM });
-  assert.deepEqual(w.saved, { team: "team-acme", told: [] });
+  assert.deepEqual(w.saved, { team: "team-acme" });
   w.places.remember({ team: "team-acme" });
   w.places.sync(connected([acme, beta]));
   assert.equal(w.persisted.length, 1, "the same teams again: nothing written");
-  assert.equal(w.places.line(HOME), null, "nothing to say on My Cloud's page");
+  assert.equal(w.places.line(), null, "nothing to say");
   // Shown Acme, then dropped from it: Acme is gone from the places, My Cloud is active, the line waits once.
   w.state = { ...w.state, activeId: "id-1" };
   w.places.sync(connected([beta]));
   assert.deepEqual(w.state.environments.map((entry) => entry.name), ["My Cloud", "Beta"]);
   assert.equal(w.state.activeId, "c");
   assert.equal(w.places.remembered(), null, "next launch opens My Cloud");
-  assert.deepEqual(w.places.line(HOME), { kind: "left", name: "Acme" });
-  assert.equal(w.places.line(HOME), null, "said once");
+  assert.deepEqual(w.places.line(), { kind: "left", name: "Acme" });
+  assert.equal(w.places.line(), null, "said once");
   w.places.sync(connected([beta]));
-  assert.equal(w.places.line(HOME), null, "and not again on the next check");
+  assert.equal(w.places.line(), null, "and not again on the next check");
 });
 
-test("a team's first open on this device gets its line once, on that team's page only; a team gone before being told is told nothing", () => {
+test("the Admin refusing a team's pairing drops it at once: gone from the switcher, My Cloud active, remembered no more, the line once; the next session check says nothing more", () => {
   const w = world();
   w.places.sync(connected([acme, beta]));
-  assert.equal(w.places.line(HOME), null);
-  assert.equal(w.places.line("https://evil.example"), null);
-  assert.deepEqual(w.places.line(TEAM), { kind: "private", name: "Acme" });
-  assert.equal(w.places.line(TEAM), null, "once");
-  assert.deepEqual(w.saved, { team: null, told: ["team-acme"] });
-  assert.deepEqual(w.places.line(OTHER), { kind: "private", name: "Beta" }, "each team on its own");
-  const again = world({ saved: w.saved, state: w.state });
-  assert.equal(again.places.line(TEAM), null, "remembered across launches");
-  w.places.left("Beta");
-  w.places.left("Beta");
-  assert.deepEqual(w.places.line(TEAM), { kind: "left", name: "Beta" }, "a team gone comes before anything else, once");
-  assert.equal(w.places.line(TEAM), null);
+  w.places.remember({ team: "team-acme" });
+  w.state = { ...w.state, activeId: "id-1" };
+  w.places.drop({ id: "team-acme", name: "Acme" });
+  assert.deepEqual(w.state.environments.map((entry) => entry.name), ["My Cloud", "Beta"]);
+  assert.equal(w.state.activeId, "c");
+  assert.equal(w.places.remembered(), null);
+  assert.deepEqual(w.places.line(), { kind: "left", name: "Acme" });
+  assert.equal(w.places.line(), null);
+  w.places.sync(connected([beta]));
+  assert.equal(w.places.line(), null, "the session catching up says it no second time");
+  w.places.drop({ id: "team-beta", name: "Beta" });
+  assert.equal(w.state.activeId, "c", "a team not on screen leaves the active place alone");
+  assert.deepEqual(w.places.line(), { kind: "left", name: "Beta" });
+  const alone = world({ state: { environments: [{ id: "t", kind: "remote", name: "Acme", origin: TEAM, team: { id: "team-acme", role: "member" } }], activeId: "t" } });
+  alone.places.drop({ id: "team-acme", name: "Acme" });
+  assert.equal(alone.state.activeId, "local", "no My Cloud: this computer");
 });
 
 test("a remembered team whose place is gone from the file is still remembered by id; a bad file is an empty one; a write that fails is logged, never thrown", () => {
-  const w = world({ saved: { team: "team-acme", told: ["x", 7, "y"] } });
+  const w = world({ saved: { team: "team-acme" } });
   assert.deepEqual(w.places.remembered(), { team: "team-acme" }, "no entry yet: the id alone");
-  assert.equal(w.places.line(TEAM), null, "no team entry at that address");
   const bad = world({ saved: "garbage" });
   assert.equal(bad.places.remembered(), null);
   bad.failWrite = true;

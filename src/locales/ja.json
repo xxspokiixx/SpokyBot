@@ -5721,6 +5721,5 @@
   "homeScreen.offlineNamed": "{name} に今は接続できません。",
   "homeScreen.signInNamed": "{name} を開くにはサインインしてください",
   "homeScreen.planNamed": "{name} は動いていません",
-  "homeLine.left": "あなたはもう {name} のメンバーではありません。",
-  "homeLine.privateChats": "{name} でのチャットは他のメンバーには非公開です。{name} の管理者は見ることができます。"
+  "homeLine.left": "あなたはもう {name} のメンバーではありません。"
 }

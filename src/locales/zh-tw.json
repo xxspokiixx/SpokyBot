@@ -3873,6 +3873,5 @@
   "homeScreen.offlineNamed": "目前無法連線到 {name}。",
   "homeScreen.signInNamed": "登入以開啟 {name}",
   "homeScreen.planNamed": "{name} 未在執行",
-  "homeLine.left": "你已不在 {name} 中。",
-  "homeLine.privateChats": "{name} 中的對話對其他成員保密。{name} 的管理員可以看到。"
+  "homeLine.left": "你已不在 {name} 中。"
 }

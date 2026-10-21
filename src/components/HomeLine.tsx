@@ -3,16 +3,16 @@ import { Users } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { setNotificationPlace } from "@/lib/notify";
 
-type Line = { kind: "left" | "private"; name: string };
+type Line = { kind: "left"; name: string };
 
-/** The words for main's one line: a team this person is no longer in, or a team's first open on this device. */
+/** The words for main's one line: a team this person is no longer in. */
 export function homeLineText(line: Line): string {
-  return line.kind === "left" ? t("homeLine.left", { name: line.name }) : t("homeLine.privateChats", { name: line.name });
+  return t("homeLine.left", { name: line.name });
 }
 
-/** In the desktop app, never in a browser: one plain line main has for this page, served once (home-places.mjs): on
- * My Cloud's page after a team dropped this person, that they are no longer in it; on a team's Cloud the first time on
- * this device, that its admins can see private chats with its bots. Nothing to press; it goes with the page. */
+/** In the desktop app, never in a browser: one plain line main has for the next page, served once (home-places.mjs):
+ * after a team dropped this person, that they are no longer in it. Nothing to press; it goes with the page. (Who can
+ * see a team's private chats is said in the chat itself, by the team's own page.) */
 export function HomeLine() {
   const bridge = !window.ogb?.remoteClient?.active ? window.ogb?.workspaces : undefined;
   const [line, setLine] = useState<Line | null>(null);

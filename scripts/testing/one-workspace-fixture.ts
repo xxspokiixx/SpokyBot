@@ -229,8 +229,9 @@ export interface HomeWorld {
   account: { state: Record<string, any>; power: { state: "awake" | "asleep" | "waking"; since: number; sleeps: true } | null; wakeMs: number; wakes: number; signIns: string[] };
   /** Down: every request on the way to My Cloud fails, the window's and main's alike; `teamDown`: the team's Cloud only. */
   network: { down: boolean; teamDown: boolean };
-  /** The fake Admin: each team pairing it signed, by team id. */
-  admin: { teamPairings: string[] };
+  /** The fake Admin: each team pairing it signed, by team id; `removed`: teams whose pairing it refuses (404), as for a
+   * member removed while the session still lists the team. */
+  admin: { teamPairings: string[]; removed: Set<string> };
   /** Main's places (home-places.mjs) and its saved servers, as the app keeps them. */
   places: ReturnType<typeof createHomePlaces>;
   environments(): { environments: any[]; activeId: string };
@@ -278,7 +279,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   const teamOrigin = `http://[::1]:${teamPort}`;
   const otherOrigin = ipcBase;
   const network = { down: false, teamDown: false };
-  const admin: HomeWorld["admin"] = { teamPairings: [] };
+  const admin: HomeWorld["admin"] = { teamPairings: [], removed: new Set() };
   const cloudRequests: HomeWorld["cloudRequests"] = [];
   const notifications = new Map<string, boolean>();
   const account: HomeWorld["account"] = {
@@ -351,7 +352,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     const teamPairing = /^\/api\/cloud\/desktop\/teams\/([^/]+)\/pairing$/.exec(req.url ?? "");
     if (teamPairing) {
       const id = decodeURIComponent(teamPairing[1]!);
-      const listed = req.method === "POST" && req.headers.authorization === "Bearer omc_fixture" && account.state.status === "connected" && (account.state.teams ?? []).some((team: any) => team.id === id);
+      const listed = req.method === "POST" && req.headers.authorization === "Bearer omc_fixture" && account.state.status === "connected" && (account.state.teams ?? []).some((team: any) => team.id === id) && !admin.removed.has(id);
       if (!listed) return reply(404, { error: "not_found" });
       admin.teamPairings.push(id);
       const grant = await fx.grant("OpenMausBot app (Team Cloud)");
@@ -379,7 +380,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     "desktop:capabilities": (event) => capabilities.desktopCapabilities({ remote: new URL(event.senderFrame.url).origin !== localOrigin, platform: "darwin", env: {}, packaged: true, localConnection: { mode: "unavailable", reason: "fixture" } }),
     "workspaces:state": (event) => ({ ...environments.workspaceSummary(envState), ...(homeAlone() && homeRef!.homePage(event) ? { home: true } : {}) }),
     "workspaces:menu": () => null,
-    "workspaces:line": (event) => homePlaces.line(new URL(event.senderFrame.url).origin),
+    "workspaces:line": () => homePlaces.line(),
     "desktop-notices:state": () => ({ seen: [...NOTICES], cloud: false }),
     "desktop-notices:seen": () => null, "desktop-notices:shown": () => false,
     "cloud-plan:state": () => ({ status: "paid", tier: "pro", home: true }),
@@ -468,11 +469,19 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     async signInAgain() { account.signIns.push("again"); },
     async begin() { account.signIns.push("begin"); },
   };
+  // The window's session's fetch: its cookies go along, and a cookie the answer sets is the window's from then on.
   const cookieFetch = async (url: string, init: RequestInit = {}) => {
     if (network.down || (network.teamDown && url.startsWith(teamOrigin))) throw new TypeError("fetch failed");
     const { cookies } = await cdp.request("Network.getCookies", { urls: [url] }, win.sessionId);
     const cookie = (cookies as Array<{ name: string; value: string }>).map((entry) => `${entry.name}=${entry.value}`).join("; ");
-    return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string>), ...(cookie ? { cookie } : {}) } });
+    const response = await fetch(url, { ...init, headers: { ...(init.headers as Record<string, string>), ...(cookie ? { cookie } : {}) } });
+    for (const line of response.headers.getSetCookie()) {
+      const [pair = "", ...attributes] = line.split(";").map((part) => part.trim());
+      const at = pair.indexOf("="), path = attributes.find((part) => /^path=/i.test(part))?.slice(5) || "/";
+      if (at > 0) await cdp.request("Network.setCookie", { name: pair.slice(0, at), value: pair.slice(at + 1), url: new URL(url).origin + path, path,
+        httpOnly: attributes.some((part) => /^httponly$/i.test(part)) }, win.sessionId);
+    }
+    return response;
   };
   const world = {
     splash: null as TabWindow | null,
@@ -487,7 +496,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     cookieFetch: cookieFetch as typeof fetch,
     power,
     go: (url: string, origin: string | null, place: unknown) => { activate(origin, place); return win.loadURL(url).catch(() => {}); },
-    remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left,
+    remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
     showLocal: (leaving: boolean) => (leaving || !/^https?:/.test(win.url) ? win.loadURL(`${localOrigin}/`).catch(() => {}) : undefined),
     splash: () => (world.splash && !world.splash.destroyed ? { status: (text: string) => startup?.status(text) } : null),
     publish: (view: unknown) => { if (new URL(win.url.startsWith("http") ? win.url : "about:blank").origin === localOrigin) win.webContents.send("home:state-changed", view); },

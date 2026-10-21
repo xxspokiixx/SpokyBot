@@ -1927,6 +1927,5 @@
   "homeScreen.offlineNamed": "{name} से अभी संपर्क नहीं हो पा रहा है।",
   "homeScreen.signInNamed": "{name} खोलने के लिए साइन इन करें",
   "homeScreen.planNamed": "{name} चल नहीं रहा है",
-  "homeLine.left": "अब आप {name} में नहीं हैं।",
-  "homeLine.privateChats": "{name} की चैट अन्य सदस्यों से निजी हैं। {name} के एडमिन उन्हें देख सकते हैं।"
+  "homeLine.left": "अब आप {name} में नहीं हैं।"
 }

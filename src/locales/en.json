@@ -6075,6 +6075,5 @@
   "homeScreen.offlineNamed": "Can't reach {name} right now.",
   "homeScreen.signInNamed": "Sign in to open {name}",
   "homeScreen.planNamed": "{name} isn't running",
-  "homeLine.left": "You're no longer in {name}.",
-  "homeLine.privateChats": "Chats in {name} are private from other members. {name}'s admins can see them."
+  "homeLine.left": "You're no longer in {name}."
 }

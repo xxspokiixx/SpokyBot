@@ -1927,6 +1927,5 @@
   "homeScreen.offlineNamed": "Impossible de joindre {name} pour le moment.",
   "homeScreen.signInNamed": "Connectez-vous pour ouvrir {name}",
   "homeScreen.planNamed": "{name} n'est pas en marche",
-  "homeLine.left": "Vous ne faites plus partie de {name}.",
-  "homeLine.privateChats": "Les discussions dans {name} sont privées vis-à-vis des autres membres. Les administrateurs de {name} peuvent les voir."
+  "homeLine.left": "Vous ne faites plus partie de {name}."
 }

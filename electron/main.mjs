@@ -2764,7 +2764,7 @@ const homePlaces = createHomePlaces({ store: jsonFile(path.join(app.getPath("use
 const homeWindow = createHomeWindow({ journal: oneHome.journal, frozen: oneHome.marker, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), restored: cloudAccountRestored,
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), ensureWindow: () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: true }); },
   localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, log: slog,
-  remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left,
+  remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
   go: (url, origin, place) => { if (place?.kind === "team") activateTeam(place); else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
   showLocal: leaving => {
@@ -2864,7 +2864,7 @@ ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", 
 // Once My Cloud is home the switcher lists only whole places, and shows only when there is more than My Cloud.
 const homeAlone = () => Boolean(homeWindow.cloudOrigin()) && !otherPlaces(environmentsState, homeWindow.cloudOrigin());
 ipcMain.handle("workspaces:state", workspaceOnly(event => ({ ...workspaceSummary(environmentsState), ...(homeAlone() && homeWindow.homePage(event) ? { home: true } : {}) })));
-ipcMain.handle("workspaces:line", workspaceOnly(event => homePlaces.line(new URL(event.senderFrame.url).origin)));
+ipcMain.handle("workspaces:line", workspaceOnly(() => homePlaces.line()));
 let workspaceMenuOpen = false;
 ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
   if (workspaceMenuOpen || homeAlone()) return;

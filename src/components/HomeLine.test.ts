@@ -19,13 +19,10 @@ const mount = async (line: ReturnType<typeof vi.fn>, remote = false, state: Reco
 beforeEach(() => { setLocale("en"); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); delete window.ogb; });
 
-it("says the one line main has for this page, in plain words, and nothing when there is none", async () => {
-  await mount(vi.fn().mockResolvedValue({ kind: "private", name: "Acme" }));
-  await vi.waitFor(() => expect(host.querySelector("[data-home-line='private']")?.textContent).toBe("Chats in Acme are private from other members. Acme's admins can see them."));
-  expect(host.querySelector("button")).toBeNull();
-  flushSync(() => root.unmount()); root = createRoot(host);
+it("says the one line main has for the next page, in plain words, and nothing when there is none", async () => {
   await mount(vi.fn().mockResolvedValue({ kind: "left", name: "Acme" }));
   await vi.waitFor(() => expect(host.querySelector("[data-home-line='left']")?.textContent).toBe("You're no longer in Acme."));
+  expect(host.querySelector("button")).toBeNull();
   flushSync(() => root.unmount()); root = createRoot(host);
   await mount(vi.fn().mockResolvedValue(null));
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -33,7 +30,7 @@ it("says the one line main has for this page, in plain words, and nothing when t
 });
 
 it("asks once; a later null (a strict-mode remount) never takes the line back, and a browser or an older app shows nothing", async () => {
-  const line = vi.fn().mockResolvedValueOnce({ kind: "private", name: "Acme" }).mockResolvedValue(null);
+  const line = vi.fn().mockResolvedValueOnce({ kind: "left", name: "Acme" }).mockResolvedValue(null);
   await mount(line);
   await vi.waitFor(() => expect(host.querySelector("[data-home-line]")).not.toBeNull());
   flushSync(() => root.render(createElement(HomeLine)));

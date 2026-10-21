@@ -5040,6 +5040,5 @@
   "homeScreen.offlineNamed": "No se puede conectar con {name} ahora mismo.",
   "homeScreen.signInNamed": "Inicia sesión para abrir {name}",
   "homeScreen.planNamed": "{name} no está en marcha",
-  "homeLine.left": "Ya no formas parte de {name}.",
-  "homeLine.privateChats": "Los chats en {name} son privados para los demás miembros. Los administradores de {name} pueden verlos."
+  "homeLine.left": "Ya no formas parte de {name}."
 }

@@ -144,9 +144,8 @@ const __APP_VERSION__: string;
         state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
-        /** One plain line for this page, served once: a team this person is no longer in (`left`), or on a team's page
-         * the first time on this device, that its admins can see private chats with its bots (`private`). */
-        line?: () => Promise<{ kind: "left" | "private"; name: string } | null>;
+        /** One plain line for the next page, served once: a team this person is no longer in. */
+        line?: () => Promise<{ kind: "left"; name: string } | null>;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */

@@ -2425,6 +2425,5 @@
   "homeScreen.offlineNamed": "Зараз не вдається зв'язатися з {name}.",
   "homeScreen.signInNamed": "Увійдіть, щоб відкрити {name}",
   "homeScreen.planNamed": "{name} не працює",
-  "homeLine.left": "Ви більше не в {name}.",
-  "homeLine.privateChats": "Чати в {name} приватні для інших учасників. Адміністратори {name} можуть їх бачити."
+  "homeLine.left": "Ви більше не в {name}."
 }

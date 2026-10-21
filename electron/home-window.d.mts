@@ -34,6 +34,9 @@ export declare const QUIET_MS: number;
 export declare const VERSION_EVERY_MS: number;
 export declare const SPLASH_HANDOFF_MS: number;
 export declare const SPLASH_TEXT: Readonly<{ opening: string; waking: string }>;
+export declare const TEAM_RENEW_MS: number;
+export declare const TEAM_RENEW_EARLY_MS: number;
+export declare const TEAM_RENEW_RETRY_MS: number;
 export function splashText(status: "opening" | "waking", name?: string | null): string;
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
@@ -61,6 +64,8 @@ export interface HomeWindow {
   failed(url: string): void;
   homePage(event: unknown): boolean;
   screenPage(event: unknown): boolean;
+  /** Signs the team on screen in again now, without moving the page. */
+  renew(): Promise<void>;
   close(): void;
 }
 
@@ -80,6 +85,7 @@ export function createHomeWindow(deps: {
   remembered?(): RememberedPlace;
   remember?(place: { team: string } | null): void;
   left?(name: string): void;
+  drop?(place: { id: string; name: string }): void;
   splash?(): { status(text: string): void } | null;
   lastInput?(): number;
   publish?(view: HomeView): void;

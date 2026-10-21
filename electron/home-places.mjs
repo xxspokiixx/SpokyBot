@@ -1,11 +1,9 @@
 // The places one window can show besides My Cloud: each team the verified session lists. Main keeps them as saved
 // places (environments.cjs `team` entries, so the window's navigation rules know their addresses) and here what else
-// the switcher needs: the place to open next time, which teams' first-open line this device has shown, and the one
-// line waiting for the next page (a team this person is no longer in). Nothing here comes from a page: the list of
-// teams is the Admin's session's, read by main.
+// the switcher needs: the place to open next time, and the one line waiting for the next page (a team this person is
+// no longer in). Nothing here comes from a page: the list of teams is the Admin's session's, read by main. Who can see a
+// team's private chats is said by the team's own page, in the chat (T2's TeamPrivateChatsLine), not here.
 import environments from "./environments.cjs";
-
-const MAX_TOLD = 200;
 
 /**
  * @param {{
@@ -15,8 +13,8 @@ const MAX_TOLD = 200;
  *   makeId(): string,
  *   homeOrigin(): string | null,
  *   log?(line: string): void,
- * }} deps `store`: this app's home-place.json (`{ team, told }`); `environments()` / `persist()`: the saved places and
- * their file; `homeOrigin()`: My Cloud's verified origin, the place the window falls back to.
+ * }} deps `store`: this app's home-place.json (`{ team }`); `environments()` / `persist()`: the saved places and their
+ * file; `homeOrigin()`: My Cloud's verified origin, the place the window falls back to.
  */
 export function createHomePlaces({ store, environments: read, persist, makeId, homeOrigin, log = () => {} }) {
   let cached = null;
@@ -24,9 +22,8 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
   function load() {
     try {
       const record = store.read();
-      const told = Array.isArray(record?.told) ? record.told.filter((id) => typeof id === "string").slice(-MAX_TOLD) : [];
-      return { team: typeof record?.team === "string" ? record.team : null, told };
-    } catch { return { team: null, told: [] }; }
+      return { team: typeof record?.team === "string" ? record.team : null };
+    } catch { return { team: null }; }
   }
   const current = () => (cached ??= load());
   function save(next) {
@@ -51,6 +48,18 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
     left(name) {
       if (typeof name === "string" && name && !pending.includes(name)) pending.push(name);
     },
+    /** The Admin refused the person's pairing with a team (404: they were removed): the team leaves the switcher now,
+     * not at the next session check, the window falls back to My Cloud, and the one line waits for its page. */
+    drop(place) {
+      const state = read(), entry = state.environments.find((candidate) => candidate.team?.id === place?.id) ?? null;
+      if (entry) {
+        const kept = state.environments.filter((candidate) => candidate !== entry);
+        const activeId = state.activeId !== entry.id ? state.activeId : kept.find((candidate) => candidate.origin === homeOrigin())?.id ?? environments.LOCAL_ID;
+        persist({ ...state, environments: kept, activeId });
+      }
+      places.left(entry?.name ?? place?.name);
+      if (current().team === place?.id) places.remember(null);
+    },
     /** The MausBot Cloud sign-in changed: a connected session's teams are the saved team places (one it no longer
      * lists is gone, with its name for the line); anything else changes nothing. */
     sync(state) {
@@ -61,14 +70,9 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
       for (const name of left) places.left(name);
       if (current().team && !teams.some((team) => team?.id === current().team)) places.remember(null);
     },
-    /** The one line for the page at `origin`, served once: that a team is gone (any page), or, on a team's page the
-     * first time on this device, that its admins can see private chats with its bots. */
-    line(origin) {
-      if (pending.length) return { kind: "left", name: pending.shift() };
-      const entry = origin ? read().environments.find((candidate) => candidate.team && candidate.origin === origin) ?? null : null;
-      if (!entry || current().told.includes(entry.team.id)) return null;
-      save({ ...current(), told: [...current().told, entry.team.id].slice(-MAX_TOLD) });
-      return { kind: "private", name: entry.name };
+    /** The one line for the next page, served once: a team this person is no longer in. */
+    line() {
+      return pending.length ? { kind: "left", name: pending.shift() } : null;
     },
   };
   return places;

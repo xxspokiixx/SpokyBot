@@ -4517,6 +4517,5 @@
   "homeScreen.offlineNamed": "Hiện không kết nối được với {name}.",
   "homeScreen.signInNamed": "Đăng nhập để mở {name}",
   "homeScreen.planNamed": "{name} không chạy",
-  "homeLine.left": "Bạn không còn trong {name} nữa.",
-  "homeLine.privateChats": "Các cuộc trò chuyện trong {name} là riêng tư với các thành viên khác. Quản trị viên của {name} có thể xem chúng."
+  "homeLine.left": "Bạn không còn trong {name} nữa."
 }
