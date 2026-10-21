@@ -1897,6 +1897,8 @@
   "task.unreadMany": "Các luồng chưa đọc",
   "task.deleteConfirm": "Xóa luồng?",
   "task.deleteBody": "“{title}” cùng toàn bộ nội dung trò chuyện sẽ bị xóa. Không thể hoàn tác thao tác này.",
+  "task.deleteAll": "Xóa tất cả luồng…",
+  "task.deleteAllConfirm": "Xóa tất cả luồng ({count})?",
   "folder.settings": "Cài đặt thư mục",
   "folder.markRead": "Đánh dấu thư mục là đã đọc",
   "folder.markingRead": "Đang đánh dấu thư mục là đã đọc…",

@@ -2220,6 +2220,8 @@
   "task.unreadMany": "Conversas não lidas",
   "task.deleteConfirm": "Excluir conversa?",
   "task.deleteBody": "“{title}” e as mensagens dela serão excluídas. Não dá para desfazer.",
+  "task.deleteAll": "Excluir todas as conversas…",
+  "task.deleteAllConfirm": "Excluir todas as conversas ({count})?",
   "folder.settings": "Configurações da pasta",
   "folder.markRead": "Marcar a pasta como lida",
   "folder.markingRead": "Marcando a pasta como lida…",
