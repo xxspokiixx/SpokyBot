@@ -81,11 +81,17 @@ exports.createClient = async ({ auth }) => {
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
  * `env`: more of both servers' environment (a fake HighLevel and its relay). `cloudEngine`: lines run at the start of My
  * Cloud's synthetic Claude CLI, to script its turns (fake-claude-cli.ts). */
-export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEngine = "" }: {
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
   broker?: { url: string; install(): Promise<{ id: string; token: string; userId: string }> };
   env?: NodeJS.ProcessEnv;
+  /** My Cloud's own environment only (a store limit, say). */
+  cloudEnv?: NodeJS.ProcessEnv;
   cloudEngine?: string;
+  /** The same for this computer's synthetic Claude CLI. */
+  desktopEngine?: string;
+  /** My Cloud's plan disk and the Admin's grow, as main gives them to a move. */
+  space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
 }): Promise<CloudSendFixture> {
   const root = mkdtempSync(join(tmpdir(), "omb-cloud-send-"));
   const secret = randomBytes(32).toString("base64url");
@@ -145,12 +151,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const desktopBase = `http://127.0.0.1:${desktopPort}`;
   const desktopInstallation = broker ? await broker.install() : null;
   const desktop = await start("desktop", { OMB_DESKTOP_PARENT: "1",
-    ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls);
+    ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
   desktop.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability });
   const cloudPort = await freePortBlock([0, 1]);
   const cloudBase = `http://127.0.0.1:${cloudPort}`;
   await start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
-    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}) }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine);
+    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...cloudEnv }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine);
 
   const mintCode = async (label: string) => {
     const body = JSON.stringify({ label, ttlSeconds: 300 });
@@ -204,7 +210,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     }) as typeof handler,
     cloudPage: (event) => (event as { page?: "local" | "cloud" })?.page ?? null,
     server: () => port,
-    local: async (route) => remember(await fetch(`${desktopBase}${route}`, { headers: { "x-openmausbot-desktop-owner": ownerCapability } })),
+    local: async (route, init) => remember(await fetch(`${desktopBase}${route}`, { method: init?.method ?? "GET", headers: { "x-openmausbot-desktop-owner": ownerCapability } })),
     home: () => ({ origin: cloudBase, grant: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)") }) }),
     cookieFetch: throughEdge(owner) as typeof fetch,
     reconnect: async () => false,
@@ -216,6 +222,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     fetch: throughEdge(null) as typeof fetch,
     bringChats: () => move.bring({ id: "cloud", name: "My Cloud", origin: cloudBase, kind: "cloud", grant: async () => ({ origin: cloudBase, code: await mintCode("Copy from desktop") }) }),
     engineWaitMs: 2_000,
+    ...(space ? { space } : {}),
   });
   desktop.on("message", (message) => main.receive(port, message));
   const asks = createLoginHandoffClient();

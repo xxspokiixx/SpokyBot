@@ -27,8 +27,8 @@ export interface ChatMergePlan extends ChatMergeResult { threads: ThreadMerge[] 
 export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messagesFor" | "activeLeaf" | "importTranscript" | "patchBot" | "patchGroup" | "createGroup">;
 
 const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
-  "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt"] as const;
-const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId"] as const;
+  "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt", "snoozedUntil"] as const;
+const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"] as const;
 export const ATTACHMENT_NAME = /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/;
 
 const ownerKey = (owner: Owner) => `${owner.kind}:${owner.id}`;
@@ -296,6 +296,7 @@ export interface SentRoom {
   section?: string;
   setupCompletedAt?: number | null;
   setupSkippedAt?: number | null;
+  audienceFloor?: GroupRecord["audienceFloor"];
 }
 export interface SentChatsResult {
   conversations: number;
@@ -347,7 +348,7 @@ function openRoom(store: ChatStore, conversation: SentConversation): GroupRecord
   const first = room.tasks?.find((task) => task.threadId === conversation.threadId);
   if (first && conversation.task) Object.assign(first, Object.fromEntries(GROUP_TASK_KEYS.filter((key) => (conversation.task as GroupTaskRecord)[key] !== undefined)
     .map((key) => [key, structuredClone((conversation.task as GroupTaskRecord)[key])])));
-  store.patchGroup(room.id, {});
+  store.patchGroup(room.id, info.audienceFloor ? { audienceFloor: info.audienceFloor } : {});
   return room;
 }
 

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { addSentChats, type SentConversation } from "./cloud-chat-merge.ts";
-import { chatHeads, chatIds, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROW_MAX, CHAT_ROWS_PAGE, fittedRow, inOrder, threadRowsAfter, verifyChats, VERIFY_IDS } from "./cloud-send-chats.ts";
+import { chatHeads, chatIds, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROWS_PAGE, CHATS_BODY_MAX, inOrder, threadRowsAfter, verifyChats, VERIFY_IDS } from "./cloud-send-chats.ts";
 import { DATA_DIR } from "./config.ts";
 import { deleteThread, threadHeads } from "./message-db.ts";
 import { Store, type Message } from "./store.ts";
@@ -55,7 +55,7 @@ describe("this computer's chats, by row", () => {
     expect(threadRowsAfter(bot.threadId, head.last, head.lastId, CHAT_ROWS_PAGE)).toMatchObject({ rows: [], last: head.last, lastId: head.lastId, more: false });
   });
 
-  it("keeps a page under its size by stored bytes, never under one row, and shortens one row too big to go whole", () => {
+  it("keeps a page under its size by stored bytes, never under one row, and sends a row over 1 MB whole, alone", () => {
     const store = fresh();
     const bot = store.createBot({ name: "Ava" }, { seedMessages: false });
     const big = "x".repeat(CHAT_PAGE_BYTES / 3);
@@ -63,19 +63,13 @@ describe("this computer's chats, by row", () => {
     const first = threadRowsAfter(bot.threadId, 0, null, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
     expect(first.rows.map((row) => row.id)).toEqual(lines.slice(0, 2).map((row) => row.id));
     expect(first.more).toBe(true);
-    const huge = say(store, bot.threadId, "y".repeat(CHAT_PAGE_BYTES * 2), 99);
+    const text = `${"y".repeat(CHAT_PAGE_BYTES * 2)}語`;
+    const huge = say(store, bot.threadId, text, 99);
     const alone = threadRowsAfter(bot.threadId, threadHeads().get(bot.threadId)!.last - 1, lines.at(-1)!.id, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES);
     expect(alone.rows.map((row) => row.id)).toEqual([huge.id]);
-    const fitted = fittedRow(alone.rows[0]!);
-    expect(JSON.stringify(fitted).length).toBeLessThan(CHAT_ROW_MAX);
-    expect(fitted).toMatchObject({ id: huge.id, role: "user", kind: "text" });
-    expect(fitted.text).toMatch(/^y+\n\n\[Shortened: this message was too long to copy to My Cloud\.\]$/u);
-    expect(fittedRow(lines[0]!)).toBe(lines[0]);
-    // Sizes are UTF-8 bytes: a row of three-byte characters under the limit in characters is still shortened.
-    const wide = say(store, bot.threadId, "語".repeat(CHAT_ROW_MAX / 2), 100);
-    expect(Buffer.byteLength(JSON.stringify(fittedRow(wide)), "utf8")).toBeLessThan(CHAT_ROW_MAX);
-    const wideRows = threadRowsAfter(bot.threadId, 0, null, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES).rows;
-    expect(Buffer.byteLength(JSON.stringify(wideRows.slice(1)), "utf8")).toBeLessThanOrEqual(CHAT_PAGE_BYTES);
+    const page = chatPage({ store, dataDir: "/data" } as never, bot.threadId, threadHeads().get(bot.threadId)!.last - 1, lines.at(-1)!.id)!;
+    expect(page.rows.map((row) => row.text), "never shortened").toEqual([text]);
+    expect(Buffer.byteLength(JSON.stringify(page), "utf8")).toBeLessThan(CHATS_BODY_MAX);
   });
 
   it("counts a page's size in UTF-8 bytes, as My Cloud's body limit does", () => {

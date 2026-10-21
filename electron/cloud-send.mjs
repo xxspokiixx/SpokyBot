@@ -15,12 +15,13 @@
 // redeemed at that Cloud alone, signed out after, as Copy does. A secret reaches main only over the server's private
 // port (server/login-handoff.ts) and goes only to that session.
 import { createHash } from "node:crypto";
-import { BOT_PARTS, EMPTY, PICTURE_PART, differenceSignature, failedSummary, itemKey, parseSendSummary, pendingRows, planSend, resultKey } from "./cloud-send-parts.mjs";
+import { AUTOMATION_KINDS, BOT_PARTS, EMPTY, MOVE_BOT_PARTS, MOVE_KINDS, PICTURE_PART, differenceSignature, failedSummary, itemKey, parseSendSummary, pendingRows, planSend, resultKey } from "./cloud-send-parts.mjs";
 import { collectConnections, releaseConnections, sendConnections } from "./cloud-connections.mjs";
+import { createMoveKinds } from "./cloud-send-kinds.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
 import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, rowIdChunks } from "./cloud-send-check.mjs";
 
-const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
+const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\?move=1|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\?attachments=1|cloud-send\/kind\?key=[\w%.-]{1,300}|cloud-send\/memory|cloud-send\/memory\?bot=[\w-]{1,128}|cloud-send\/files|cloud-send\/files\?path=[\w%.()~!*'-]{1,12000}&offset=\d{1,16}&length=\d{1,9}|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
 /** One request's chats: a few conversations' rows, well under My Cloud's body limit. */
 const CHATS_BATCH_BYTES = 4 * 1024 * 1024;
 const CHATS_BATCH_PAGES = 40;
@@ -120,6 +121,7 @@ export function parseSendState(value) {
           && (cursor === "removed" || (record(cursor) && Number.isSafeInteger(cursor.after) && typeof cursor.id === "string")))) : {},
         created: record(entry.created) ? Object.fromEntries(Object.entries(entry.created).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
         release: Array.isArray(entry.release) ? entry.release.filter((held) => record(held) && typeof held.id === "string" && typeof held.digest === "string").slice(0, 200) : [],
+        files: record(entry.files) ? Object.fromEntries(Object.entries(entry.files).filter(([path, sha]) => typeof sha === "string" && /^[a-f0-9]{64}$/u.test(sha) && path.length <= 4096)) : {},
       };
     }
   }
@@ -164,6 +166,8 @@ function sentCounts(result) {
 function emptyResult() {
   return { bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], connections: 0, chats: null, failed: [], notes: [] };
 }
+/** What a move carried beyond a send: automations and skill extras, memory merged, files, conversations' settings. */
+const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, conversationSettings: 0 });
 
 /**
  * @param {{
@@ -181,17 +185,19 @@ function emptyResult() {
  *   onChange?: (snapshot: unknown) => void,
  *   now?: () => number,
  *   engineWaitMs?: number,
+ *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  * }} deps `open({ move: true })`: the move's session, which counts as someone using My Cloud. `engineWaitMs`: how long a
- * move waits for My Cloud to run the engines whose keys it just took.
+ * move waits for My Cloud to run the engines whose keys it just took. `local(route, { method })`: a change on this
+ * computer's server (an app event My Cloud now collects). `space`: My Cloud's plan disk and the Admin's grow.
  */
-export function createCloudSend({ local, cloud, handoff, bringChats = null, store, onChange = () => {}, now = Date.now, engineWaitMs }) {
+export function createCloudSend({ local, cloud, handoff, bringChats = null, store, onChange = () => {}, now = Date.now, engineWaitMs, space }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
   let running = null, progress = null;
 
   function safeRead(source) { try { return source.read(); } catch { return null; } }
   function persist() { try { store.write(saved); } catch {} }
-  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, release: [] });
+  const entry = (origin) => (saved.clouds[origin] ??= { sent: {}, off: {}, dismissed: "", last: null, whole: null, arrived: countsOf(null), chats: {}, created: {}, release: [], files: {} });
   /** What a move ignores of what the person kept here: everything goes but what was removed on My Cloud. */
   const removedOnly = (off) => Object.fromEntries(Object.entries(off).filter(([, why]) => why === "removed"));
   const connectionLocal = { json: (route) => localJson(route), handoff: (what) => handoff(what) };
@@ -230,6 +236,14 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     if (!response.ok) return null;
     return new Uint8Array(await response.arrayBuffer());
   }
+  async function localSend(method, route) {
+    if (!LOCAL_ROUTE.test(route) || method !== "DELETE") throw new CloudSendError("invalid", "Unsupported local request.");
+    const response = await local(route, { method });
+    await response.body?.cancel();
+    return { ok: response.ok, status: response.status };
+  }
+  const kinds = createMoveKinds({ localJson, localBytes, localSend, entry, persist, refusal, space,
+    progress: (value) => { progress = value; publish(); } });
 
   async function readCloud() {
     let response;
@@ -297,8 +311,8 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   }
 
   async function sendTo(origin, job, { keys, force, reason }) {
-    const result = emptyResult();
-    const mine = parseSendSummary(await localJson("/api/cloud-send"));
+    const result = { ...emptyResult(), ...(reason === "move" ? movedResult() : {}) };
+    const mine = parseSendSummary(await localJson(reason === "move" ? "/api/cloud-send?move=1" : "/api/cloud-send"));
     if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
     const withChats = !keys && CHAT_REASONS.has(reason);
     const latest = await sendItems(origin, mine, result, { keys, force, job, withChats });
@@ -327,22 +341,27 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   }
 
   /** Every item that waits, and then the chats, over one owner session, always signed out; what My Cloud holds after. A
-   * move's apps and keys go first, so the bots that follow find their engines. */
+   * move's apps and keys go first, so the bots that follow find their engines; then the skills only a move carries, the
+   * bots, their memory and files, the chats with each conversation's settings, and last the automations, switched off. An
+   * app event goes only in the final pass, when this computer lets go of it. */
   async function sendItems(origin, mine, result, { keys, force, job, withChats }) {
     const move = job.reason === "move";
+    const summaryRoute = move ? "/api/cloud-send?move=1" : "/api/cloud-send";
     const session = await cloud.open(move ? { move: true } : undefined).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
     try {
-      const before = await session.call("GET", "/api/cloud-send");
+      const before = await session.call("GET", summaryRoute);
       if (before.status === 404) throw new CloudSendError("outdated", move ? OUTDATED_FOR_MOVE : "My Cloud needs an update before it can receive bots from this computer. It updates by itself; try again later.");
       const theirs = before.ok ? parseSendSummary(before.body) : null;
       if (!theirs) throw new CloudSendError("unreachable", refusal(before, "My Cloud did not answer. Try again."));
+      let computer = null;
       if (move) {
         await assertTakesMove(session);
-        await moveConnections(origin, session, result, job.final);
+        computer = await moveConnections(origin, session, result, job.final);
       }
       const planned = plan(origin, mine, theirs, force, { everything: move });
       const wanted = keys ? new Set(keys) : null;
-      const rows = pendingRows(planned).filter((row) => !wanted || wanted.has(row.key) || (row.bot && wanted.has(itemKey.bot(row.bot))));
+      const rows = pendingRows(planned).filter((row) => !wanted || wanted.has(row.key) || (row.bot && wanted.has(itemKey.bot(row.bot))))
+        .filter((row) => row.kind !== "app-event" || job.final);
       const total = rows.length;
       progress = total ? { done: 0, total } : null;
       publish();
@@ -350,16 +369,24 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       const localItems = new Map(mine.items.map((item) => [item.key, item]));
       const cloudItems = new Map(theirs.items.map((item) => [item.key, item]));
       const ctx = { origin, session, result, cloudBots, localItems, cloudItems, planned: new Map(planned.rows.map((row) => [row.key, row])), bots: null, skillLists: new Map(),
-        sentKeys: new Set(), sentParts: {}, recorded: new Set() };
-      const order = { bot: 0, skill: 1, setting: 2, login: 3, "1password": 4 };
-      for (const row of [...rows].sort((a, b) => order[a.kind] - order[b.kind])) {
+        sentKeys: new Set(), sentParts: {}, recorded: new Set(), move, summaryRoute };
+      const order = { "library-skill": 0, "imported-skill": 0, bot: 1, skill: 2, setting: 3, login: 4, "1password": 5 };
+      const automations = new Set(AUTOMATION_KINDS);
+      const goRow = async (row) => {
         try { await sendRow(ctx, row); }
         catch (error) { result.failed.push({ key: row.key, kind: row.kind, label: row.label, error: sentence(error?.message) ?? "It could not be sent.", ...(error?.final === true ? { final: true } : {}) }); }
         await recordItem(ctx, row.key).catch(() => {});
         if (progress) progress = { done: progress.done + 1, total };
         publish();
+      };
+      for (const row of rows.filter((entry) => !automations.has(entry.kind)).sort((a, b) => order[a.kind] - order[b.kind])) await goRow(row);
+      const moved = move ? await movedBots(ctx) : [];
+      if (move) {
+        await kinds.moveMemory(ctx, moved);
+        try { await kinds.moveFiles(ctx, moved, computer?.label); }
+        catch (error) { result.failed.push({ key: "files", kind: "files", label: "Files", error: sentence(error?.message) ?? "The files could not be sent." }); }
       }
-      const after = parseSendSummary((await session.call("GET", "/api/cloud-send")).body);
+      const after = parseSendSummary((await session.call("GET", summaryRoute)).body);
       if (after) remember(origin, ctx, after);
       const latest = after ?? theirs;
       if (withChats && latest.chats) {
@@ -371,10 +398,21 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
           if (move) await stampHeld(origin, session, latest);
         } catch (error) { result.failed.push({ key: "chats", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats could not be added." }); }
       }
+      if (move) {
+        try { result.conversationSettings = await kinds.moveSettings(ctx); }
+        catch (error) { result.failed.push({ key: "conversation-settings", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats' settings could not be added." }); }
+        for (const row of rows.filter((entry) => automations.has(entry.kind))) await goRow(row);
+      }
       return latest;
     } finally {
       try { await session.close(); } catch {}
     }
+  }
+
+  /** The bots of this computer's that My Cloud has now, with their names. */
+  async function movedBots(ctx) {
+    const bots = await localBots(ctx);
+    return [...ctx.cloudBots].filter((id) => bots.has(id) && ctx.localItems.has(itemKey.bot(id))).map((id) => ({ id, name: bots.get(id).name }));
   }
 
   /** This computer's apps and keys, MCP servers, HighLevel and connected apps, over the move's session. A sign-in that
@@ -389,7 +427,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     }
     let collected;
     try { collected = await collectConnections(connectionLocal); }
-    catch (error) { return void failed("connections", "Apps and keys", error?.message, false); }
+    catch (error) { failed("connections", "Apps and keys", error?.message, false); return null; }
     const moved = await sendConnections(collected, session, { local: connectionLocal, signIns: final, ...(engineWaitMs !== undefined ? { waitMs: engineWaitMs } : {}),
       onProgress: (step) => { progress = { done: step.done, total: step.total }; publish(); } });
     result.connections += moved.moved.length + moved.runsHere.length;
@@ -398,6 +436,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       kept.release = [...kept.release.filter((held) => !moved.release.some((next) => next.id === held.id)), ...moved.release];
       persist();
     }
+    return collected.computer;
   }
 
   /** The conversations whose newest row My Cloud has not taken, not answered in now: of bots My Cloud has and that are
@@ -443,7 +482,13 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
           const file = await localBytes(`/api/cloud-send/chats/attachment/${name}`);
           if (!file) continue;
           const stored = await session.upload(`/api/cloud-send/chats/attachment/${name}`, file, "application/octet-stream");
-          if (!stored.ok && stored.status !== 413) throw new CloudSendError("refused", refusal(stored, "My Cloud could not take an attachment of the chats."));
+          if (stored.status === 413 || stored.status === 507) {
+            result.failed.push({ key: `attachment:${name}`, kind: "chats", label: "Attachment", error: stored.status === 507
+              ? "My Cloud's room for attachments is full, so an attachment did not go. Its chat went without it."
+              : "An attachment is bigger than My Cloud takes, so it did not go. Its chat went without it.", ...(stored.status === 413 ? { final: true } : {}) });
+            continue;
+          }
+          if (!stored.ok) throw new CloudSendError("refused", refusal(stored, "My Cloud could not take an attachment of the chats."));
         }
       }
       const answer = await session.call("POST", "/api/cloud-send/chats", { v: 1, dataDir,
@@ -534,7 +579,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   async function recordItem(ctx, key) {
     const keys = [...ctx.sentKeys].filter((sent) => !ctx.recorded.has(sent));
     if (!keys.length) return;
-    const answer = await ctx.session.call("GET", `/api/cloud-send?item=${encodeURIComponent(key)}`);
+    const answer = await ctx.session.call("GET", `/api/cloud-send?item=${encodeURIComponent(key)}${ctx.move ? "&move=1" : ""}`);
     const after = answer.ok ? parseSendSummary(answer.body) : null;
     if (!after) return;
     remember(ctx.origin, ctx, after, keys);
@@ -567,6 +612,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
   }
 
   async function sendRow(ctx, row) {
+    if (MOVE_KINDS.includes(row.kind)) { await kinds.sendKind(ctx, row); ctx.result.moved++; return done(ctx, row.key); }
     if (row.kind === "bot") return row.state === "only-here" ? addBot(ctx, row) : updateBot(ctx, row);
     if (row.kind === "skill") return sendSkill(ctx, row);
     if (row.kind === "setting") return sendSetting(ctx, row);
@@ -615,6 +661,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     markCreated(ctx, row.key);
     const parts = Object.keys(BOT_PARTS).filter((part) => part !== "name" && (part !== "model" || modelKept));
     const refused = await patchBot(ctx, bot, parts);
+    if (ctx.move) Object.assign(refused, await kinds.sendBotFields(ctx, bot.id, Object.keys(MOVE_BOT_PARTS)));
     const picture = await sendPicture(ctx, bot);
     if (picture) refused[PICTURE_PART] = picture;
     done(ctx, row.key);
@@ -626,15 +673,17 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
       try { await putSkill(ctx, bot.id, item.id, false); done(ctx, key); ctx.result.skills++; }
       catch (error) { ctx.result.failed.push({ key, kind: "skill", label: item.label, error: sentence(error?.message) ?? "It could not be sent." }); }
     }
-    await sendMemory(ctx, bot.id).catch(() => ctx.result.notes.push({ kind: "memory", bot: bot.name }));
+    if (!ctx.move) await sendMemory(ctx, bot.id).catch(() => ctx.result.notes.push({ kind: "memory", bot: bot.name }));
   }
 
   async function updateBot(ctx, row) {
     const bot = (await localBots(ctx)).get(row.id);
     if (!bot) throw new CloudSendError("gone", "This bot is no longer on this computer.");
     const parts = row.parts ?? [];
-    const fields = parts.filter((part) => part !== PICTURE_PART);
+    const fields = parts.filter((part) => part !== PICTURE_PART && !MOVE_BOT_PARTS[part]);
     const refused = fields.length ? await patchBot(ctx, bot, fields) : {};
+    const moveParts = ctx.move ? parts.filter((part) => MOVE_BOT_PARTS[part]) : [];
+    if (moveParts.length) Object.assign(refused, await kinds.sendBotFields(ctx, bot.id, moveParts));
     if (parts.includes(PICTURE_PART)) {
       const picture = await sendPicture(ctx, bot);
       if (picture) refused[PICTURE_PART] = picture;
@@ -643,7 +692,7 @@ export function createCloudSend({ local, cloud, handoff, bringChats = null, stor
     if (Object.keys(refused).length < parts.length) ctx.result.updatedBots.push(bot.name);
     if (refused.model) ctx.result.notes.push({ kind: "model", bot: bot.name });
     if (Object.keys(refused).some((part) => part !== "model")) ctx.result.notes.push({ kind: "settings", bot: bot.name });
-    if (entry(ctx.origin).created[row.key]) await sendMemory(ctx, bot.id).catch(() => ctx.result.notes.push({ kind: "memory", bot: bot.name }));
+    if (entry(ctx.origin).created[row.key] && !ctx.move) await sendMemory(ctx, bot.id).catch(() => ctx.result.notes.push({ kind: "memory", bot: bot.name }));
   }
 
   /** The bot's own skill, by its SKILL.md: My Cloud's copy is replaced when the text changed here. */

@@ -68,7 +68,7 @@ export function loginsView(snapshot) {
  *   localOnly: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   cloudPage: (event: unknown) => "local" | "cloud" | null,
  *   server: () => { postMessage(message: unknown): void } | null | undefined,
- *   local: (route: string) => Promise<Response>,
+ *   local: (route: string, init?: { method?: string }) => Promise<Response>,
  *   home: () => { origin: string, grant: () => Promise<{ origin: string, code: string }> } | null,
  *   cookieFetch: typeof fetch,
  *   reconnect: (origin: string) => Promise<boolean>,
@@ -80,11 +80,13 @@ export function loginsView(snapshot) {
  *   fetch?: typeof fetch,
  *   bringChats?: () => Promise<{ phase: string, action?: string, brought?: { conversations: number, messages: number }, error?: { message?: string } }>,
  *   engineWaitMs?: number,
+ *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  * }} deps `bringChats`: Bring newer chats to My Cloud, as cloud-move.mjs's bring answers it. `engineWaitMs`: how long a
- * move waits for My Cloud's engines (cloud-connections.mjs).
+ * move waits for My Cloud's engines (cloud-connections.mjs). `space`: My Cloud's plan disk and the Admin's grow, so a
+ * move makes room for the files it carries.
  */
 export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin, openSettings,
-  fetch: fetchImpl = globalThis.fetch, bringChats = null, engineWaitMs }) {
+  fetch: fetchImpl = globalThis.fetch, bringChats = null, engineWaitMs, space }) {
   const handoff = createLoginHandoffClient();
   const pageOf = () => {
     const win = window();
@@ -132,6 +134,7 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
     },
     onChange: deliver,
     engineWaitMs,
+    space,
   });
   const fresh = () => send.compare().catch(() => send.snapshot());
   const options = (input) => ({

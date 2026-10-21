@@ -7,13 +7,17 @@ import { z } from "zod";
 
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import { readAttachment } from "../attachments.ts";
+import { moveFilesRoute } from "../cloud-send-files.ts";
+import { moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
 import { cloudSendManifest } from "../cloud-send-manifest.ts";
-import { cloudSendSummary, type CloudSendSources } from "../cloud-send.ts";
+import { moveMemoryRoute, type MoveMemoryDeps } from "../cloud-send-memory.ts";
+import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send.ts";
 import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
 import type { LoginStore } from "../login-store.ts";
 import { threadHeads } from "../message-db.ts";
+import type { BotRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" | "bots" | "skills"> {
@@ -26,6 +30,8 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   /** This server's connections (cloud-connections.ts), by id. */
   connections?(): Promise<ReadonlyArray<{ id: string }>>;
   connectionFingerprints?(nonce: string): Record<string, string>;
+  /** What only a move carries: automations, skill extras and bot fields, memory, and bot files. */
+  move?: MoveKindsDeps & Omit<MoveMemoryDeps, "bot" | "owner">;
 }
 
 export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
@@ -45,16 +51,21 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       return connectedAt === null ? null : { connectedAt, grants: deps.logins.onePasswordGrants() };
     },
     settings: () => { const { profile, language } = deps.config(); return { profile, language }; },
+    ...(deps.move ? { move: { items: (bots: ReadonlySet<string>) => moveItems(deps.move!, bots), botParts: (bot: BotRecord) => moveBotParts(bot, partHash) } } : {}),
   };
+  const move = deps.move;
   return async (ctx) => {
     const { req, res, path, method, url, json, readBody } = ctx;
     if (deps.chats && await cloudSendChatsRoute(deps.chats, ctx)) return;
+    if (move && await moveKindsRoute(move, ctx)) return;
+    if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
+    if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => move.store.bots, owner: move.owner }, ctx)) return;
     if (path === "/api/cloud-send/manifest") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       if (!deps.chats) return json(res, 404, { error: "not found" });
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, await cloudSendManifest({ summary: () => cloudSendSummary(sources), store: deps.chats.store, dataDir: deps.chats.dataDir,
-        connections: deps.connections ?? (async () => []), heads: threadHeads }));
+      return json(res, 200, await cloudSendManifest({ summary: () => cloudSendSummary(sources, { move: true }), store: deps.chats.store, dataDir: deps.chats.dataDir,
+        connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}) }));
     }
     if (path === "/api/cloud-send/verify-secrets") {
       if (!deps.cloudHome || !deps.connectionFingerprints) return json(res, 404, { error: "not found" });
@@ -67,7 +78,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (path !== "/api/cloud-send") return PASS;
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });
     res.setHeader("cache-control", "no-store");
-    const summary = cloudSendSummary(sources);
+    const summary = cloudSendSummary(sources, { move: url.searchParams.get("move") === "1" });
     const item = url.searchParams.get("item");
     const items = item === null ? summary.items : summary.items.filter((entry) => entry.key === item || (entry.kind === "skill" && item === `bot:${entry.bot}`));
     // `chats: 1`: this server takes chats by row.

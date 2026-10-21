@@ -11,7 +11,7 @@ export function installCloudSend(deps: {
   localOnly<T extends (...args: any[]) => unknown>(channel: string, handler: T): T;
   cloudPage(event: unknown): "local" | "cloud" | null;
   server(): { postMessage(message: unknown): void } | null | undefined;
-  local(route: string): Promise<Response>;
+  local(route: string, init?: { method?: string }): Promise<Response>;
   home(): CloudTarget | null;
   cookieFetch: typeof fetch;
   reconnect(origin: string): Promise<boolean>;
@@ -23,6 +23,7 @@ export function installCloudSend(deps: {
   fetch?: typeof fetch;
   bringChats?: (() => Promise<{ phase: string; action?: string; brought?: { conversations: number; messages: number }; error?: { message?: string } }>) | null;
   engineWaitMs?: number;
+  space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
 }): {
   receive(proc: unknown, message: unknown): boolean;
   move(options?: { final?: boolean }): Promise<CloudSendOutcome>;

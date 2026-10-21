@@ -104,14 +104,12 @@ async function turn(side: Side, bot: { id: string; threadId: string }, text: str
 }
 const newBot = async (name: string) => (await fx.local("POST", "/api/bots", { name, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot as { id: string; threadId: string };
 
-/** All arrived but the bots' daily logs here, which only a later part of the move carries: the check names each. */
-function onlyDailyLogsLeft(report: Awaited<ReturnType<CloudSendFixture["check"]>>): boolean {
-  const { memory, ...rest } = report.gaps;
-  expect(rest).toEqual({ items: [], parts: [], rooms: [], connections: [], conversations: [] });
-  expect(memory.map((note) => note.path).every((path) => /^memory\/log\/\d{4}-\d{2}-\d{2}\.md$/u.test(path)), JSON.stringify(memory)).toBe(true);
+/** Everything arrived, the bots' daily logs too: the check finds nothing missing. */
+function everythingArrived(report: Awaited<ReturnType<CloudSendFixture["check"]>>): boolean {
+  expect(report.gaps).toEqual({ items: [], parts: [], memory: [], rooms: [], connections: [], conversations: [], files: [], runs: [], journal: [], learned: [], teams: [], settings: [] });
   expect(report.chats.filter((entry) => entry.missing || entry.unstamped || entry.path === "broken")).toEqual([]);
   expect([report.attachments, report.secrets.differs, report.secrets.missing]).toEqual([[], [], []]);
-  return report.ok === (memory.length === 0);
+  return report.ok;
 }
 
 /** Bring newer chats, as 0.1.117 to 0.1.119 copied a computer's chats to My Cloud: the rows arrive naming nobody. */
@@ -252,7 +250,7 @@ it("a move carries everything, apps and keys first, and its check finds every ro
   expect((await onCloud("GET", "/api/connectors/connected")).body.services.gmail).toMatchObject({ connected: true, accounts: [expect.objectContaining({ id: gmail })] });
 
   const report = await fx.check();
-  expect(onlyDailyLogsLeft(report)).toBe(true);
+  expect(everythingArrived(report)).toBe(true);
   const path = Object.fromEntries(report.chats.map((entry) => [entry.threadId, entry]));
   expect(path[archie.threadId]).toEqual({ threadId: archie.threadId, missing: 0, unstamped: 0, path: "equal" });
   expect(path[room.threadId]).toEqual({ threadId: room.threadId, missing: 0, unstamped: 0, path: "equal" });
@@ -276,9 +274,10 @@ it("a move run again changes nothing on My Cloud, and its check still finds ever
   const manifest = async () => (await fx.onCloud("GET", "/api/cloud-send/manifest")).body;
   const before = await manifest();
   const again = await fx.move({ final: true });
-  expect(again.result).toMatchObject({ bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], failed: [], chats: { conversations: 0, messages: 0, left: 0 } });
+  expect(again.result).toMatchObject({ bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: [], failed: [], chats: { conversations: 0, messages: 0, left: 0 },
+    moved: 0, memory: 0, files: { sent: 0, kept: 0 }, conversationSettings: 0 });
   expect(await manifest()).toEqual(before);
-  expect(onlyDailyLogsLeft(await fx.check())).toBe(true);
+  expect(everythingArrived(await fx.check())).toBe(true);
 }, hostTimeout(300_000));
 
 /** The latest turn on My Cloud of a bot in a conversation: its agents tools, as the engine got them. */

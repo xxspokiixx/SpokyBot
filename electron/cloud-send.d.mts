@@ -17,7 +17,13 @@ export interface CloudSendResult {
   /** The chats My Cloud lacked, added by row or by Bring newer chats; null when this send did not bring chats. `left`:
    * conversations that did not all go this time (a bot answering in one, or My Cloud not taking a page yet). */
   chats: { conversations: number; messages: number; left?: number } | null;
-  failed: Array<{ key: string; kind: SendKind | "chats" | "connection"; label: string; error: string; final?: true }>;
+  failed: Array<{ key: string; kind: SendKind | "chats" | "connection" | "memory" | "files"; label: string; error: string; final?: true }>;
+  /** A move's own: automations and skill extras it carried, memory files and learned facts merged, bot files sent (`kept`:
+   * beside a different file of My Cloud's), and conversations whose own settings it set. */
+  moved?: number;
+  memory?: number;
+  files?: { sent: number; kept: number };
+  conversationSettings?: number;
   /** model: kept My Cloud's engine; settings: a setting My Cloud refused; narrowed: a login kept to bots My Cloud lacks; memory: notes not copied. */
   notes: Array<{ kind: "model" | "settings" | "narrowed" | "memory"; bot?: string; login?: string }>;
 }
@@ -123,6 +129,14 @@ export interface CloudMoveCheck {
     rooms: Array<{ id: string; name: string }>;
     connections: string[];
     conversations: string[];
+    /** Bot files by path, finished routine runs by id, bots whose journal rows, learned facts and teams whose pieces, and
+     * conversations whose own settings My Cloud lacks. */
+    files: string[];
+    runs: string[];
+    journal: string[];
+    learned: string[];
+    teams: string[];
+    settings: string[];
   };
   /** Per conversation: rows My Cloud lacks, lines of its owner's it holds that do not carry the owner yet, and whether
    * this computer's visible path is My Cloud's ("equal"), appears in order inside a longer one ("inside", both sides added
@@ -134,7 +148,7 @@ export interface CloudMoveCheck {
 }
 
 export function createCloudSend(deps: {
-  local(route: string): Promise<Response>;
+  local(route: string, init?: { method?: string }): Promise<Response>;
   cloud: {
     origin(): string | null;
     asleep(): boolean;
@@ -150,6 +164,8 @@ export function createCloudSend(deps: {
   now?(): number;
   /** How long a move waits for My Cloud to run the engines whose keys it just took. */
   engineWaitMs?: number;
+  /** My Cloud's plan disk and the Admin's grow, so a move makes room for the files it carries. */
+  space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
 }): {
   snapshot(): CloudSendSnapshot;
   compare(): Promise<CloudSendSnapshot>;

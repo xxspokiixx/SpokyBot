@@ -39,6 +39,7 @@ test("a move's check names what My Cloud lacks: items, parts, memory, rooms, con
     rooms: [{ id: "r1", name: "Launch" }],
     connections: ["mcp:docs"],
     conversations: ["t-ember", "t-juno", "t-room"],
+    files: [], runs: [], journal: [], learned: [], teams: [], settings: [],
   });
   const removed = new Set(["bot:juno", "t-room", "room:r1"]);
   const gaps = manifestGaps(here, there, { removed, skip: new Set(["mcp:docs", "skill:ember:notes"]) });
@@ -119,4 +120,38 @@ test("the attachments and credentials My Cloud lacks or holds otherwise are name
   const secrets = await checkSecrets({ handoff, session, skip: new Set(["1password"]) });
   assert.deepEqual(secrets, { equal: ["login:a|b"], differs: ["key:openrouter"], missing: ["mcp:docs"] });
   await assert.rejects(checkSecrets({ handoff: async () => ({}), session }), /could not be checked/u);
+});
+
+test("a move's check finds what only a move carries: memory pieces, journal rows, learned facts, teams, files kept beside, finished runs and conversations' settings", () => {
+  const here = manifest({
+    items: [...manifest().items, { key: "routine:r1", kind: "routine", label: "Morning", id: "r1", bot: "ember", parts: { def: "d" } }],
+    memory: [{ bot: "ember", path: "MEMORY.md", hash: "m1", lines: ["a", "b"] }],
+    journal: [{ bot: "ember", ids: ["j1", "j2"] }],
+    learned: ["Lives in Pune", "Hates spam"],
+    teams: [{ section: "Ops", context: ["c1"], memory: ["person:dana"] }],
+    files: [{ path: "workspaces/ember/notes.md", size: 4, sha256: "f1" }, { path: "workspaces/juno/x.md", size: 1, sha256: "f2" }],
+    runs: [{ id: "run-1", routine: "r1" }, { id: "run-9", routine: "r-starter" }],
+    conversations: manifest().conversations.map((head) => head.threadId === "t-ember" ? { ...head, settings: { snoozedUntil: 5, projectId: "p1" } } : head),
+  });
+  const there = {
+    ...here,
+    memory: [{ bot: "ember", path: "MEMORY.md", hash: "other", lines: ["c", "b", "a"] }],
+    journal: [{ bot: "ember", ids: ["j9", "j2", "j1"] }],
+    learned: ["Lives in Pune"], forgotten: ["Hates spam"],
+    teams: [{ section: "Ops", context: ["c0", "c1"], memory: ["person:dana", "term:po"] }],
+    files: [{ path: "workspaces/ember/notes.md", size: 5, sha256: "theirs" }, { path: "workspaces/ember/notes (Mac).md", size: 4, sha256: "f1" }],
+    runs: [{ id: "run-1", routine: "r1" }],
+    conversations: here.conversations.map((head) => head.threadId === "t-ember" ? { ...head, settings: { snoozedUntil: 1, projectId: "p1", approvalMode: "ask" } } : head),
+  };
+  const removed = new Set(["bot:juno", "t-juno"]);
+  assert.equal(noGaps(manifestGaps(here, there, { removed })), true, "merged, kept beside, removed there, or of a routine a move never carried: nothing is missing");
+  const gaps = manifestGaps(here, { ...there, memory: [{ bot: "ember", path: "MEMORY.md", hash: "m1", lines: ["a"] }], journal: [{ bot: "ember", ids: ["j1"] }], learned: [], forgotten: [],
+    teams: [{ section: "Ops", context: [], memory: [] }], files: [{ path: "workspaces/ember/notes (Mac).md", size: 4, sha256: "other" }], runs: [],
+    conversations: here.conversations.map((head) => head.threadId === "t-ember" ? { ...head, settings: { projectId: "p1" } } : head) }, { removed });
+  assert.deepEqual({ memory: gaps.memory, journal: gaps.journal, learned: gaps.learned, teams: gaps.teams, files: gaps.files, runs: gaps.runs, settings: gaps.settings }, {
+    memory: [{ bot: "ember", path: "MEMORY.md" }], journal: ["ember"], learned: ["Lives in Pune", "Hates spam"], teams: ["Ops"], files: ["workspaces/ember/notes.md"],
+    runs: ["run-1"], settings: ["t-ember"],
+  });
+  const full = { bot: "ember", ids: Array.from({ length: 500 }, (_, i) => `mine-${i}`) };
+  assert.deepEqual(manifestGaps(here, { ...there, journal: [full] }, { removed }).journal, [], "a journal showing its latest 500 rows of My Cloud's own may no longer show older ones");
 });

@@ -1,4 +1,5 @@
-export type SendKind = "bot" | "skill" | "login" | "1password" | "setting";
+export type MoveKind = "routine" | "call" | "webhook" | "app-event" | "imported-skill" | "library-skill";
+export type SendKind = "bot" | "skill" | "login" | "1password" | "setting" | MoveKind;
 
 export interface SendItem {
   key: string;
@@ -34,6 +35,9 @@ export type SentRecord = Record<string, Record<string, [string, string]>>;
 export type OffReason = "you" | "removed";
 
 export declare const BOT_PARTS: Readonly<Record<string, readonly string[]>>;
+export declare const MOVE_BOT_PARTS: Readonly<Record<string, readonly string[]>>;
+export declare const AUTOMATION_KINDS: readonly MoveKind[];
+export declare const MOVE_KINDS: readonly MoveKind[];
 export declare const PICTURE_PART: "picture";
 export declare const SETTINGS: readonly ["profile", "language"];
 export declare const KINDS: readonly SendKind[];
@@ -44,6 +48,7 @@ export declare const itemKey: Readonly<{
   login(site: string, username: string, exactHost?: string): string;
   onePassword(): string;
   setting(name: string): string;
+  moved(kind: MoveKind, id: string): string;
 }>;
 export declare function parseSendSummary(value: unknown): SendSummary | null;
 export declare function planSend(input: { local: SendSummary | null; cloud: SendSummary | null; sent?: SentRecord; off?: Record<string, OffReason>; force?: string[] }): SendPlan;

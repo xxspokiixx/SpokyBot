@@ -424,6 +424,31 @@ export class WebhookManager {
     return { webhook: publicTrigger(trigger), secret };
   }
 
+  /** Another server's webhook under its own id: a new one gets an address and secret of its own here and starts
+   * switched off; one already here keeps its address, secret and switch and takes the rest. */
+  adopt(record: WebhookTrigger): WebhookTrigger {
+    this.assertWritable();
+    const held = this.webhooks.find((candidate) => candidate.id === record.id);
+    const clean = cleanInput({ name: record.name, prompt: record.prompt, botId: record.botId, runOn: record.runOn, delivery: record.delivery,
+      groupId: record.groupId ?? null, enabled: held?.enabled ?? false, eventTypes: record.eventTypes, maxPendingRuns: record.maxPendingRuns ?? null });
+    if (this.options.botState(clean.botId) === "missing") fail(409, "Its bot is not on this server yet");
+    if (clean.groupId) this.assertRoomMember(clean.botId, clean.groupId);
+    const definition = { ...clean, ...(record.resultsThreadId ? { resultsThreadId: record.resultsThreadId } : {}) };
+    let trigger: StoredWebhookTrigger;
+    if (held) {
+      for (const key of ["delivery", "groupId", "eventTypes", "maxPendingRuns", "resultsThreadId"] as const) delete held[key];
+      trigger = Object.assign(held, definition, { verificationPending: held.verificationPending, updatedAt: this.now() });
+    } else {
+      const secret = newSecret();
+      trigger = { id: record.id, endpointId: newEndpointId(), ...definition, secretHash: hashSecret(secret), ...this.seal(secret),
+        createdAt: record.createdAt, updatedAt: this.now(), deliveryCount: 0 };
+      this.webhooks.unshift(trigger);
+    }
+    this.save();
+    this.emit(trigger);
+    return publicTrigger(trigger);
+  }
+
   update(id: string, value: JsonValue): WebhookTrigger | null {
     this.assertWritable();
     const trigger = this.webhooks.find((candidate) => candidate.id === id);

@@ -29,10 +29,12 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
       if (intercepted) return intercepted;
       if (route === "/.well-known/openmausbot/environment") return reply(200, { capabilities: takesMove ? { cloudHome: true, move: 1 } : { cloudHome: true } });
       if (route.startsWith("/api/cloud-send?item=")) {
-        const key = decodeURIComponent(route.slice("/api/cloud-send?item=".length));
+        const key = decodeURIComponent(route.slice("/api/cloud-send?item=".length).replace(/&move=1$/u, ""));
         return reply(200, summary([...cloud.values()].filter((item) => item.key === key || (item.kind === "skill" && key === itemKey.bot(item.bot)))));
       }
-      if (route === "/api/cloud-send") return reply(200, summary([...cloud.values()]));
+      if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return reply(200, summary([...cloud.values()]));
+      if (method === "GET" && route === "/api/cloud-send/files") return reply(200, { v: 1, files: [], space: { freeBytes: 1e12, volumeBytes: 1e12 } });
+      if (method === "GET" && route === "/api/cloud-send/chats") return reply(200, { v: 1, conversations: [] });
       if (route === "/api/cloud-connections") return reply(200, { computer: { environmentId: "env-cloud", label: "My Cloud" }, connections: [], engines: ["claude"], commands: ["node"] });
       if (method === "POST" && route === "/api/bots") {
         cloud.set(itemKey.bot(body.id), bot(body.id, { soul: "starter", title: EMPTY, name: "n" }));
@@ -53,8 +55,14 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
   const opened = [];
   const asked = [];
   const deps = {
-    local: async (route) => {
-      if (route === "/api/cloud-send") return json(summary(here));
+    local: async (route, init) => {
+      if (init?.method && init.method !== "GET") { calls.push(`HERE ${init.method} ${route}`); return json({ v: 1, removed: true }); }
+      if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return json(summary(here));
+      if (route.startsWith("/api/cloud-send/memory?bot=")) return json({ v: 1, files: [], journal: [] });
+      if (route === "/api/cloud-send/memory") return json({ v: 1, about: { learned: [], removed: [] }, teams: [] });
+      if (route === "/api/cloud-send/files") return json({ v: 1, files: [] });
+      if (route.startsWith("/api/cloud-send/kind?key=")) return json({ v: 1, dataDir: "/desk/.openmausbot", record: {} });
+      if (route === "/api/cloud-send/chats?attachments=1") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations, attachments: [] });
       if (route === "/api/bots?messages=0") return json({ bots: Object.entries(bots).map(([id, fields]) => ({ id, threadId: `t-${id}`, name: id, ...fields })) });
       if (/^\/api\/bots\/[\w-]+\/skills$/u.test(route)) return json({ skills: [] });
       if (/^\/api\/bots\/[\w-]+\/memory$/u.test(route)) return json({ topics: [] });
@@ -151,12 +159,12 @@ test("each item is recorded from My Cloud's own answer as soon as it went, so a 
     onCall: (method, route, _body, cloud) => {
       // My Cloud keeps the team without the bot it lacks: its own hash for what it took.
       if (method === "PATCH" && route === "/api/bots/juno") { cloud.get(itemKey.bot("juno")).parts.team = "p3"; return reply(200, {}); }
-      if (cutAtEnd && method === "GET" && route === "/api/cloud-send" && cloud.get(itemKey.bot("juno")).parts.team === "p3") throw new TypeError("fetch failed");
+      if (cutAtEnd && method === "GET" && route === "/api/cloud-send?move=1" && cloud.get(itemKey.bot("juno")).parts.team === "p3") throw new TypeError("fetch failed");
     } });
   move.deps.store = store;
   const send = createCloudSend(move.deps);
   await assert.rejects(send.send({ reason: "move" }), /fetch failed/u);
-  assert.ok(move.calls.includes(`GET /api/cloud-send?item=${encodeURIComponent(itemKey.bot("juno"))}`));
+  assert.ok(move.calls.includes(`GET /api/cloud-send?item=${encodeURIComponent(itemKey.bot("juno"))}&move=1`));
   cutAtEnd = false;
   const row = (await send.compare()).rows.find((entry) => entry.key === itemKey.bot("juno"));
   assert.equal(row.state, "on-both", "what My Cloud took is in step, not My Cloud's own change");
@@ -193,13 +201,13 @@ test("a move's session counts as someone using My Cloud, so it stays awake; any 
   const listing = { computer: { environmentId: "env", label: "Mac" }, connections: [], engines: [], commands: [] };
   const main = installCloudSend({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localOnly: (_channel, handler) => handler, cloudPage: () => "local", server: () => null,
-    local: async (route) => json(route === "/api/cloud-send" ? summary([]) : route === "/api/cloud-connections" ? listing : { v: 1, dataDir: "/d", conversations: [] }),
+    local: async (route) => json(route === "/api/cloud-send" || route === "/api/cloud-send?move=1" ? summary([]) : route === "/api/cloud-connections" ? listing : { v: 1, dataDir: "/d", conversations: [] }),
     home: () => target, cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false },
     file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => LOCAL, openSettings() {},
     fetch: async (url, init) => {
       const route = String(url).replace(CLOUD, "");
       if (route === "/api/auth/pair") { paired.push([JSON.parse(init.body).label, init.headers["x-omb-background"] ?? null]); return json({ token: "omb_sess_fake" }); }
-      return json(route === "/api/cloud-send" ? summary([]) : route === "/.well-known/openmausbot/environment" ? { capabilities: { move: 1 } } : route === "/api/cloud-connections" ? listing : {});
+      return json(route === "/api/cloud-send" || route === "/api/cloud-send?move=1" ? summary([]) : route === "/.well-known/openmausbot/environment" ? { capabilities: { move: 1 } } : route === "/api/cloud-connections" ? listing : {});
     },
   });
   assert.equal((await main.move()).reason, "move");
@@ -265,4 +273,50 @@ test("a move names at most 200 of the conversations My Cloud held a request, nev
   refuse = true;
   const refused = await createCloudSend(make().deps).send({ reason: "move" });
   assert.deepEqual(refused.result.failed.map((failure) => [failure.key, failure.error]), [["chats", "My Cloud said: the store is busy"]]);
+});
+
+test("a move sends what only it carries last, after the chats and their settings, switched off there; an app event only in the final pass, which this computer then lets go of", async () => {
+  const kind = (key, kindName, parts) => ({ key, kind: kindName, label: key, id: key.split(":")[1], bot: "ember", parts });
+  const conversations = [{ bot: "ember", threadId: "a", last: 1, lastId: "a-1", busy: false, settings: { snoozedUntil: 5 } }];
+  const put = [];
+  const move = sides({ here: [bot("ember", { soul: "s" }), kind("routine:r1", "routine", { def: "d1", runs: "x" }), kind("app-event:e1", "app-event", { def: "d2" }),
+    { key: "imported-skill:tidy", kind: "imported-skill", label: "tidy", id: "tidy", parts: { files: "f" } }], there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } }, conversations,
+  onCall: (method, route, body, cloud) => {
+    if (method === "PUT" && route === "/api/cloud-send/kind") { put.push(body.key); cloud.set(body.key, { key: body.key, kind: body.key.split(":")[0], label: body.key, id: body.key.split(":")[1], parts: body.key === "routine:r1" ? { def: "d1", runs: "x" } : body.key === "app-event:e1" ? { def: "d2" } : { files: "f" } }); return reply(200, { v: 1, ok: true }); }
+    if (method === "GET" && route === "/api/cloud-send/chats") return reply(200, { v: 1, conversations: [{ threadId: "a", settings: {} }] });
+    if (method === "POST" && route === "/api/cloud-send/chats/settings") return reply(200, { v: 1, changed: body.conversations.length });
+    return null;
+  } });
+  const send = createCloudSend(move.deps);
+  const first = await send.send({ reason: "move" });
+  assert.deepEqual(first.result.failed, []);
+  assert.deepEqual(put, ["imported-skill:tidy", "routine:r1"], "an app event waits for the final pass");
+  const at = (call) => move.calls.indexOf(call);
+  assert.ok(at("PUT /api/cloud-send/kind") > -1 && move.calls.lastIndexOf("PUT /api/cloud-send/kind") > at("POST /api/cloud-send/chats"), "the routine went after the chats");
+  assert.ok(move.calls.lastIndexOf("PUT /api/cloud-send/kind") > at("POST /api/cloud-send/chats/settings"), "and after their settings");
+  assert.ok(at("PUT /api/cloud-send/kind") < at("POST /api/cloud-send/chats"), "a skill goes before the chats");
+  assert.equal(first.result.conversationSettings, 1);
+  assert.equal(first.result.moved, 2);
+  assert.ok(!move.calls.some((call) => call.startsWith("HERE ")), "this computer lets go of nothing yet");
+
+  const final = await send.send({ reason: "move", final: true });
+  assert.deepEqual(final.result.failed, []);
+  assert.deepEqual(put.slice(2), ["app-event:e1"]);
+  assert.ok(move.calls.includes(`HERE DELETE /api/cloud-send/kind?key=${encodeURIComponent("app-event:e1")}`));
+  assert.equal(final.result.moved, 1);
+});
+
+test("a bot's fields only a move carries go over My Cloud's move route, absent ones as cleared; any other send never carries them", async () => {
+  const fields = [];
+  const make = () => sides({ here: [bot("ember", { soul: "s", pinned: "p1", projects: "j1" })], there: [bot("ember", { soul: "s", pinned: "-", projects: "-" })], bots: { ember: { soul: "s" } },
+    onCall: (method, route, body) => { if (method === "PUT" && route === "/api/cloud-send/kind") { fields.push(body); return reply(200, { v: 1, ok: true }); } return null; } });
+  const moving = make();
+  moving.deps.local = ((local) => async (route, init) => route.startsWith("/api/cloud-send/kind?key=")
+    ? json({ v: 1, dataDir: "/desk", record: { pinned: true, projects: [{ id: "p1", name: "Launch" }], hidden: true } }) : local(route, init))(moving.deps.local);
+  await createCloudSend(moving.deps).send({ reason: "move" });
+  assert.deepEqual(fields.map((body) => [body.key, body.record]), [["bot:ember", { pinned: true, projects: [{ id: "p1", name: "Launch" }] }]]);
+  fields.length = 0;
+  const sending = make();
+  await createCloudSend(sending.deps).send({ reason: "button" });
+  assert.deepEqual(fields, []);
 });

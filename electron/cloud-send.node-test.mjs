@@ -75,7 +75,7 @@ test("a bot's fields reach My Cloud without Custom approval and without naming b
   assert.ok(!Object.values(BOT_PARTS).flat().includes("cwd"), "a working folder is this computer's");
   assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" }, created: { "bot:x": true, "login:y": true }, release: [{ id: "mcp:a", digest: "d" }, { id: 3 }] } } }),
     { v: 1, clouds: { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } },
-      chats: {}, created: { "bot:x": true }, release: [{ id: "mcp:a", digest: "d" }] } } }, "nothing is kept of the switch that once sent by itself");
+      chats: {}, created: { "bot:x": true }, release: [{ id: "mcp:a", digest: "d" }], files: {} } } }, "nothing is kept of the switch that once sent by itself");
 });
 
 function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
@@ -84,7 +84,7 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
   const session = {
     call: async (method, route) => {
       calls.push(`${method} ${route}`);
-      if (route === "/api/cloud-send") return reply(200, summary(cloudItems));
+      if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return reply(200, summary(cloudItems));
       if (refuse[route]) return reply(refuse[route].status, { error: refuse[route].error });
       return reply(200, {});
     },
@@ -96,7 +96,7 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
     calls,
     deps: {
       local: async (route) => {
-        if (route === "/api/cloud-send") return localJson(summary(localItems));
+        if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return localJson(summary(localItems));
         if (route === "/api/bots?messages=0") return localJson({ bots: [{ id: "ember", threadId: "t-ember", name: "Ember", soul: "Be brief." }] });
         if (route === "/api/bots/ember/skills") return localJson({ skills: [] });
         if (route === "/api/bots/ember/memory") return localJson({ topics: [] });
