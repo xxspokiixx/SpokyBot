@@ -26,23 +26,20 @@ export function teamChats(): TeamChats | null {
   return current;
 }
 
-/** The conversations this page made, which the session it read before does not list yet. */
-const madeHere = new Map<string, string>();
-export function rememberOwnChat(teamId: string, botId: string, threadId: string) {
-  madeHere.set(`${teamId}\n${botId}`, threadId);
+/** A conversation this page just made: the person's own, which the session it read before does not list yet. */
+export function rememberOwnChat(teamId: string, threadId: string) {
+  if (current?.teamId === teamId && !current.opened?.includes(threadId)) current = { ...current, opened: [...(current.opened ?? []), threadId] };
 }
 
 /** A person's own conversation: private, open, and opened by a person (not a routine's report or a bot's thread). */
 const ownKind = (task: TaskLike) => task.private === true && !task.routineRunId && !task.openedBy && !task.archivedAt && !task.closedBy;
 const newest = (tasks: TaskLike[]) => [...tasks].sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))[0];
 
-/** The conversation clicking this team bot opens: the one this page made while it is still theirs, else their newest
- * (for an Admin, of those the server says they opened); null when there is none yet (one is made). Never the main chat,
- * and for an Admin never a chat only marked private. */
+/** The conversation clicking this team bot opens: the person's newest own (for an Admin, of those the server says they
+ * opened); null when there is none yet (one is made). Never the main chat, and for an Admin never a chat only marked
+ * private. */
 export function ownChatOf(bot: BotLike, team: TeamChats): string | null {
   const own = (bot.tasks ?? []).filter(ownKind);
-  const made = madeHere.get(`${team.teamId}\n${bot.id}`);
-  if (made && own.some((task) => task.threadId === made)) return made;
   const opened = new Set(team.opened ?? []);
   return newest(team.member ? own : own.filter((task) => opened.has(task.threadId)))?.threadId ?? null;
 }
@@ -59,7 +56,7 @@ export function openOwnTeamChat(dispatch: (action: Action) => void, bot: BotLike
   making.add(bot.id);
   void api<{ bot?: Bot; task?: { threadId?: string } }>(`/api/bots/${bot.id}/tasks`, { method: "POST", body: "{}" })
     .then((response) => {
-      if (typeof response?.task?.threadId === "string") rememberOwnChat(team.teamId, bot.id, response.task.threadId);
+      if (typeof response?.task?.threadId === "string") rememberOwnChat(team.teamId, response.task.threadId);
       if (!response?.bot) return;
       dispatch({ type: "taskSwitched", bot: response.bot });
       dispatch({ type: "select", id: bot.id });
