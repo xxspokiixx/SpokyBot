@@ -19,7 +19,7 @@ import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
-import type { RoutineRunCardData } from "./routine-run.ts";
+import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
 import type { GroupGoalRunCardData } from "./group-goal-run.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
@@ -441,6 +441,7 @@ export interface WireMessage {
   signIn?: SignInRequestCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
+  automation?: AutomationLine;
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
   /** call rows (kind "call"): the finished Live call this row records. */

@@ -182,4 +182,8 @@ describe("order and the grey line", () => {
     expect(runLine(run("completed", at(0, 9, 2), { output: "3 emails overnight.\nMore detail." }), NOW)).toEqual({ when: "Today 9:02 AM", mark: "✓", text: "3 emails overnight." });
     expect(runLine(run("failed", at(-1, 9), { error: "token expired, sign in again" }), NOW)).toMatchObject({ mark: "✗", text: "It's signed out. Sign in again so it can run." });
   });
+
+  it("says a run that found nothing to tell found nothing new, whatever its last words were", () => {
+    expect(runLine(run("completed", at(0, 9, 2), { output: "Checked 14 emails.\nNOTHING NEW", report: { state: "quiet" } }), NOW)).toEqual({ when: "Today 9:02 AM", mark: "✓", text: "Nothing new" });
+  });
 });
