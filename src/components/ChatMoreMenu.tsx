@@ -19,9 +19,6 @@ import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
 
-// A submenu cannot scroll, so it lists the most recent threads and the row says how many there are.
-const THREADS_LISTED = 12;
-
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. */
 function useChatMoreItems(profile: Bot): { items: SidebarMenuItem[]; on: boolean } {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
@@ -59,7 +56,7 @@ function useChatMoreItems(profile: Bot): { items: SidebarMenuItem[]; on: boolean
       label: t("task.switch"),
       icon: <MessagesSquare size={16} />,
       value: String(threads.length),
-      submenu: threads.slice(0, THREADS_LISTED).map((task) => ({
+      submenu: threads.map((task) => ({
         key: `thread:${task.threadId}`,
       label: localizedTaskTitle(task.title || t("task.newShort")),
         active: task.threadId === bot.threadId,
