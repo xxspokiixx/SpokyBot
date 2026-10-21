@@ -140,7 +140,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { addBot } from "@/lib/add-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
-import { ArchivedBotsPanel, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel";
+import { ArchivedBotsPanel, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel"; import { MovedBotRows, useMoveToTeam } from "./MoveToTeam";
 
 export { PinnedBotCircle, PinnedCircleThreadPanel, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 export { ArchivedBotRow, ArchivedBotsPanel, archivedDeleteAllCopy, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel";
@@ -676,7 +676,7 @@ export function BotContextMenu({
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const canChooseFolder = useOwnerOrAdmin();
-  const clearThreads = useDeleteAllThreads();
+  const clearThreads = useDeleteAllThreads(), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
   const menuRef = useRef<HTMLDivElement>(null);
@@ -739,7 +739,7 @@ export function BotContextMenu({
     };
   }, [menu, onClose]);
 
-  if (!motion.shown || !bot || !shown) return clearThreads.dialog;
+  if (!motion.shown || !bot || !shown) return <>{clearThreads.dialog}{moveToTeam.dialog}</>;
   const deleting = state.deletingBots[bot.id] === true;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
@@ -782,7 +782,7 @@ export function BotContextMenu({
   );
   const divider = (key: string) => <div key={key} className="mx-2 my-1 border-t border-hairline/40" />;
 
-  return <>{clearThreads.dialog}{createPortal(
+  return <>{clearThreads.dialog}{moveToTeam.dialog}{createPortal(
     <div
       ref={menuRef}
       data-bot-menu
@@ -852,7 +852,7 @@ export function BotContextMenu({
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
           void copyText(bot.threadId);
         }),
-        divider("d3"),
+        divider("d3"), ...moveToTeam.items(bot, item),
         item(
           <Archive size={16} className="text-ink-secondary" />,
           t("sidebar.bot.archive"),
@@ -1664,7 +1664,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     if (from && over) reorderSections(from, placeSection(sectionIds, from, over.id, over.place));
     resetSectionDrag();
   };
-  const archivedBots = state.bots.filter((bot) => bot.hidden);
+  const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
@@ -2070,7 +2070,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
               </div>
             );
           })}
-          <SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
+          <MovedBotRows bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
           {showPinnedCircleThreads && (
             <PinnedCircleThreadSection
               bots={pinnedBots}
