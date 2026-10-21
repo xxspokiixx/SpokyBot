@@ -3874,5 +3874,16 @@
   "cloudBuy.trialTerms": "需要綁定信用卡，但試用結束前不會收費。隨時可在應用程式中取消。",
   "cloudBuy.timeline.firstPayment": "首次付款",
   "team.privateChats": "你在 {team} 中的聊天對其他成員保密。{team} 的管理員可以查看。",
-  "team.privateHeader": "私密 · 管理員可以查看"
+  "team.privateHeader": "私密 · 管理員可以查看",
+  "chat.page.usage": "已用 {pages}/{limit} 個頁面",
+  "chat.page.copyLink": "複製連結",
+  "chat.page.copied": "已複製",
+  "chat.page.open": "開啟",
+  "chat.page.unpublish": "取消發佈",
+  "chat.page.unpublished": "已取消發佈。這個連結已無法開啟。",
+  "chat.page.unpublishFailed": "無法取消發佈這個頁面。請稍後再試。",
+  "chat.page.freeLimit": "你已用完 {limit} 個免費頁面。MausBot Cloud 能給你更多頁面，而且頁面不帶標記。",
+  "chat.page.planLimit": "你已用完 {plan} 方案的全部 {limit} 個頁面。取消發佈一個頁面就能騰出空間。",
+  "chat.page.morePages": "取得更多頁面",
+  "chat.activity.publishPage": "正在發佈頁面"
 }

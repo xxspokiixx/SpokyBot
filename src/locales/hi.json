@@ -1928,5 +1928,16 @@
   "cloudBuy.trialTerms": "कार्ड ज़रूरी है, पर ट्रायल खत्म होने तक कुछ चार्ज नहीं होता। ऐप में कभी भी रद्द करें।",
   "cloudBuy.timeline.firstPayment": "पहला भुगतान",
   "team.privateChats": "{team} में आपकी चैट दूसरे सदस्यों से निजी हैं। {team} के एडमिन उन्हें देख सकते हैं।",
-  "team.privateHeader": "निजी · एडमिन देख सकते हैं"
+  "team.privateHeader": "निजी · एडमिन देख सकते हैं",
+  "chat.page.usage": "{limit} में से {pages} पेज",
+  "chat.page.copyLink": "लिंक कॉपी करें",
+  "chat.page.copied": "कॉपी हो गया",
+  "chat.page.open": "खोलें",
+  "chat.page.unpublish": "पेज हटाएं",
+  "chat.page.unpublished": "पेज हटा दिया गया। अब यह लिंक नहीं खुलता।",
+  "chat.page.unpublishFailed": "यह पेज हटाया नहीं जा सका। थोड़ी देर में फिर कोशिश करें।",
+  "chat.page.freeLimit": "आपने अपने {limit} मुफ़्त पेज इस्तेमाल कर लिए हैं। MausBot Cloud में और पेज मिलते हैं, और बिना बैज वाले पेज भी।",
+  "chat.page.planLimit": "आपने अपने {plan} प्लान के सभी {limit} पेज इस्तेमाल कर लिए हैं। जगह बनाने के लिए कोई पेज हटाएं।",
+  "chat.page.morePages": "और पेज पाएं",
+  "chat.activity.publishPage": "पेज पब्लिश कर रहा है"
 }

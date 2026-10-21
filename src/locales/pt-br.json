@@ -5747,5 +5747,16 @@
   "homeScreen.signInButton": "Entrar",
   "homeScreen.plan": "O My Cloud não está funcionando",
   "team.privateChats": "As conversas em {team} são privadas para os outros membros. Os administradores de {team} podem vê-las.",
-  "team.privateHeader": "Privado · os administradores podem ver"
+  "team.privateHeader": "Privado · os administradores podem ver",
+  "chat.page.usage": "{pages} de {limit} páginas",
+  "chat.page.copyLink": "Copiar link",
+  "chat.page.copied": "Copiado",
+  "chat.page.open": "Abrir",
+  "chat.page.unpublish": "Tirar do ar",
+  "chat.page.unpublished": "Tirada do ar. O link não abre mais.",
+  "chat.page.unpublishFailed": "Não deu para tirar esta página do ar. Tente de novo daqui a pouco.",
+  "chat.page.freeLimit": "Você já usou suas {limit} páginas grátis. O MausBot Cloud dá mais, e páginas sem o selo.",
+  "chat.page.planLimit": "Você usou todas as {limit} páginas do seu plano {plan}. Tire uma página do ar para abrir espaço.",
+  "chat.page.morePages": "Ter mais páginas",
+  "chat.activity.publishPage": "Publicando uma página"
 }

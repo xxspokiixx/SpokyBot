@@ -65,7 +65,7 @@ import { sendsMessage, useSendKey } from "@/lib/send-key";
 import { useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { userBubbleStyle } from "@/lib/user-bubble-tone";
 import { ToolActivity } from "./ToolActivity";
-import { DataResultChip } from "./DataResultChip";
+import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard";
 import { ThreadRefText } from "./ThreadRefs";
 import { optionsCardRow } from "./OptionsCardRow";
 import { MessageBoundary } from "./MessageBoundary";
@@ -867,11 +867,10 @@ const MessagesList = memo(function MessagesList({
             case "screen":
               return <ScreenFrame threadId={threadId} message={m} />;
             default: {
+              if (m.publishedPage) return <PublishedPageCard message={m} />;
               const peer = peerLine(m) ?? peerRequest(m, botId);
               const user = m.role === "user" && !peer;
-              if (!user && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length) {
-                return null;
-              }
+              if (!user && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length) return null;
               return (
                 <Bubble
                   message={m}

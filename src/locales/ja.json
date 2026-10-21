@@ -5722,5 +5722,16 @@
   "homeScreen.signInButton": "サインイン",
   "homeScreen.plan": "My Cloud は停止しています",
   "team.privateChats": "{team} でのチャットは他のメンバーには非公開です。{team} の管理者は閲覧できます。",
-  "team.privateHeader": "非公開 · 管理者は閲覧できます"
+  "team.privateHeader": "非公開 · 管理者は閲覧できます",
+  "chat.page.usage": "{limit}ページ中{pages}ページ",
+  "chat.page.copyLink": "リンクをコピー",
+  "chat.page.copied": "コピーしました",
+  "chat.page.open": "開く",
+  "chat.page.unpublish": "公開を停止",
+  "chat.page.unpublished": "公開を停止しました。リンクはもう開けません。",
+  "chat.page.unpublishFailed": "このページの公開を停止できませんでした。少し待ってからもう一度お試しください。",
+  "chat.page.freeLimit": "無料の{limit}ページを使い切りました。MausBot Cloudならもっと作れて、バッジも付きません。",
+  "chat.page.planLimit": "{plan}プランの{limit}ページをすべて使いました。空きを作るには、どれかのページの公開を停止してください。",
+  "chat.page.morePages": "ページを増やす",
+  "chat.activity.publishPage": "ページを公開中"
 }

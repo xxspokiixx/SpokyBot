@@ -1946,5 +1946,16 @@
   "cloudBuy.trialTerms": "Karte nötig, berechnet wird nichts, bis deine Testphase endet. Jederzeit in der App kündbar.",
   "cloudBuy.timeline.firstPayment": "Erste Zahlung",
   "team.privateChats": "Chats in {team} sind für andere Mitglieder privat. Die Admins von {team} können sie sehen.",
-  "team.privateHeader": "Privat · Admins können es sehen"
+  "team.privateHeader": "Privat · Admins können es sehen",
+  "chat.page.usage": "{pages} von {limit} Seiten",
+  "chat.page.copyLink": "Link kopieren",
+  "chat.page.copied": "Kopiert",
+  "chat.page.open": "Öffnen",
+  "chat.page.unpublish": "Offline nehmen",
+  "chat.page.unpublished": "Offline genommen. Der Link öffnet sich nicht mehr.",
+  "chat.page.unpublishFailed": "Die Seite konnte nicht offline genommen werden. Versuche es gleich noch einmal.",
+  "chat.page.freeLimit": "Du hast deine {limit} kostenlosen Seiten aufgebraucht. MausBot Cloud gibt dir mehr, und Seiten ohne das Badge.",
+  "chat.page.planLimit": "Du hast alle {limit} Seiten deines {plan}-Tarifs genutzt. Nimm eine Seite offline, um Platz zu schaffen.",
+  "chat.page.morePages": "Mehr Seiten holen",
+  "chat.activity.publishPage": "Veröffentlicht eine Seite"
 }

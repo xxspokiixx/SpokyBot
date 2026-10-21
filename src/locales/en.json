@@ -6080,5 +6080,16 @@
   "homeScreen.signInButton": "Sign in",
   "homeScreen.plan": "My Cloud isn't running",
   "team.privateChats": "Chats in {team} are private from other members. {team}'s admins can see them.",
-  "team.privateHeader": "Private · admins can see"
+  "team.privateHeader": "Private · admins can see",
+  "chat.page.usage": "{pages} of {limit} pages",
+  "chat.page.copyLink": "Copy link",
+  "chat.page.copied": "Copied",
+  "chat.page.open": "Open",
+  "chat.page.unpublish": "Unpublish",
+  "chat.page.unpublished": "Unpublished. The link no longer opens.",
+  "chat.page.unpublishFailed": "Couldn’t unpublish this page. Try again in a moment.",
+  "chat.page.freeLimit": "You’ve used your {limit} free pages. MausBot Cloud gives you more, and pages without the badge.",
+  "chat.page.planLimit": "You’ve used all {limit} pages on your {plan} plan. Unpublish a page to make room.",
+  "chat.page.morePages": "Get more pages",
+  "chat.activity.publishPage": "Publishing a page"
 }
