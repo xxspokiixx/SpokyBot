@@ -277,6 +277,13 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       // move's check (manifestGaps) agrees with this plan instead of calling it missing on every pass.
       const here = new Map((mine?.items ?? []).map((item) => [item.key, item])), there = new Map((theirs?.items ?? []).map((item) => [item.key, item]));
       for (const row of planned.rows) {
+        // A routine's runs are history My Cloud adds by id and never drops: when they are all that differs, it goes.
+        if (row.kind === "routine" && row.differs?.includes("runs") && !row.differs.includes("def")) {
+          row.differs = row.differs.filter((part) => part !== "runs");
+          row.parts = [...(row.parts ?? []), "runs"];
+          row.state = "to-update";
+          if (!row.differs.length) delete row.differs;
+        }
         for (const part of row.differs ?? []) {
           kept.sent[row.key] = { ...kept.sent[row.key], [part]: [here.get(row.key).parts[part], there.get(row.key)?.parts[part] ?? EMPTY] };
           changed = true;
