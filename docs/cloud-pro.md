@@ -618,8 +618,8 @@ with no confirmation. The switch and the chosen scopes are the consent.
   current version (the overwrite is checked against its hash). Nothing is ever
   deleted. A read takes a file of up to 2 MiB (text whose escaping would not fit
   the Cloud's 4 MB request body is refused with "read it as base64"); a write is
-  at most 256 KiB. No symbolic or hard links. The home folder, the system
-  disk and anything above them cannot be chosen. A lent folder deleted since is left out; the rest
+  at most 256 KiB. No symbolic or hard links. The home folder itself can be
+  chosen after a warning; the system disk and the folders above home cannot. A lent folder deleted since is left out; the rest
   keeps working.
 - **Apps and screen**: bots see the screen and use apps as the person, through
   this app's own computer control (the signed app holds Accessibility and

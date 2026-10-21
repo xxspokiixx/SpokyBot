@@ -81,7 +81,7 @@ import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
-import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
+import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { switchLocalEnvironment } from "./environment-switch.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
@@ -2886,11 +2886,23 @@ ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_even
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
 }));
+// The home folder is lent only when it is picked here and confirmed here: the folders above it and the system disk never are.
+async function pickSharedFolder(title) {
+  const picked = await dialog.showOpenDialog(mainWindow, { title, properties: ["openDirectory"] });
+  if (picked.canceled || !picked.filePaths[0]) return null;
+  const folder = { id: randomUUID(), path: picked.filePaths[0], write: false };
+  if (await isHomeFolder(folder.path)) {
+    const { response } = await dialog.showMessageBox(mainWindow, { type: "warning", message: "Share your whole home folder?",
+      detail: "Everything inside it becomes available to the bots you allow, including documents, downloads and any keys or logins kept in hidden folders such as .ssh. It is shared read only. Choosing specific folders is safer.",
+      buttons: ["Share home folder", "Cancel"], defaultId: 1, cancelId: 1 });
+    if (response !== 0) return null;
+    folder.home = true;
+  }
+  return (await validateSharedFolders([folder]))[0];
+}
 ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
   await requireSharedComputers();
-  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder or drive to share", properties: ["openDirectory"] });
-  if (picked.canceled || !picked.filePaths[0]) return null;
-  return (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0];
+  return pickSharedFolder("Choose a folder or drive to share");
 }));
 ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", async (_event, id) => {
   await requireSharedComputers();
@@ -2908,7 +2920,7 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
   const folders = await validateSharedFolders(input?.folders);
   const detail = [
     `Server: ${env.origin}`,
-    ...folders.map(folder => `${folder.write ? "Read and write" : "Read only"}: ${folder.path}`),
+    ...folders.map(folder => `${folder.write ? "Read and write" : "Read only"}: ${folder.path}${folder.home ? " (your whole home folder)" : ""}`),
     input?.terminal === true ? "Terminal: UNRESTRICTED commands as your user. Can access files outside the folders above, including credentials." : "Terminal: off",
     input?.computer === true ? "Computer control: can view your screen and operate logged-in apps. Can access information outside the folders above." : "Computer control: off",
     "Shared content is sent to this server and may reach its model provider. Bots on this server can use these permissions until you revoke them. Closing the desktop stops access.",
@@ -2927,7 +2939,7 @@ async function lendingSnapshot() {
 }
 const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
-  chooseFolder: async () => { const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder or drive My Cloud can use", properties: ["openDirectory"] }); return picked.canceled || !picked.filePaths[0] ? null : (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0]; },
+  chooseFolder: () => pickSharedFolder("Choose a folder or drive My Cloud can use"),
   defaults: () => usualFolders(usualFolderPaths(name => app.getPath(name), os.homedir()), validateSharedFolders), validate: validateSharedFolders,
   confirmScreen: async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return false;

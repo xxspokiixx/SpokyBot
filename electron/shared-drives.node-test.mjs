@@ -40,3 +40,32 @@ test("shareableDrive fails closed when the Linux mount table is unreadable", asy
   assert.equal(await shareableDrive("/data", "linux", async () => []), false);
   assert.equal(await shareableDrive("/data", "linux", async () => parseMountInfo(MOUNTINFO)), true);
 });
+
+test("the home folder is lent only when asked for by the picker; its parents and the system disk never are", async () => {
+  const { mkdtempSync, mkdirSync, realpathSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { validateSharedFolders, isHomeFolder } = await import("./computer-sharing.mjs");
+  const base = realpathSync.native(mkdtempSync(path.join(tmpdir(), "omb-home-opt-in-")));
+  const home = path.join(base, "me");
+  mkdirSync(path.join(home, "Documents"), { recursive: true });
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  const id = "8b0c8d3e-1f2a-4b5c-8d6e-7f8091a2b3c4";
+  try {
+    process.env.HOME = home; process.env.USERPROFILE = home;
+    assert.equal(await isHomeFolder(home), true);
+    assert.equal(await isHomeFolder(path.join(home, "Documents")), false);
+    await assert.rejects(validateSharedFolders([{ id, path: home, write: false }]), { code: "HOME_OR_ROOT" }, "not without the request");
+    const [lent] = await validateSharedFolders([{ id, path: home, write: true, home: true }]);
+    assert.equal(lent.home, true);
+    assert.equal(lent.write, false, "the home folder is read only even when edits are asked for");
+    // The flag buys nothing for any other folder, for a parent of home, or for the system disk.
+    await assert.rejects(validateSharedFolders([{ id, path: base, write: false, home: true }]), { code: "HOME_OR_ROOT" });
+    await assert.rejects(validateSharedFolders([{ id, path: "/", write: false, home: true }]), { code: "HOME_OR_ROOT" });
+    const [docs] = await validateSharedFolders([{ id, path: path.join(home, "Documents"), write: false, home: true }]);
+    assert.equal(docs.home, undefined);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    rmSync(base, { recursive: true, force: true });
+  }
+});
