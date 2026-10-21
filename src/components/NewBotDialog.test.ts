@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), api: vi.fn(), create: vi.fn(), setDraft: vi.fn(), ready: false, hook: 0, admin: false,
-  profile: {} as Record<string, unknown>, track: vi.fn(), advanced: true }));
+  profile: {} as Record<string, unknown>, track: vi.fn(), advanced: true, appSettingsOpen: false }));
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
@@ -26,7 +26,7 @@ vi.mock("@/lib/create-configured-bot", async importOriginal => ({
 }));
 vi.mock("@/state/store", async importOriginal => {
   const store = await importOriginal<typeof import("@/state/store")>();
-  return { ...store, api: fixture.api, BotEditorStore: () => null, useStore: () => ({ state: store.initialState, dispatch: fixture.dispatch }) };
+  return { ...store, api: fixture.api, BotEditorStore: () => null, useStore: () => ({ state: { ...store.initialState, appSettingsOpen: fixture.appSettingsOpen }, dispatch: fixture.dispatch }) };
 });
 import { LocalNewBotDialog as NewBotDialog, CompanionNewBotDialog, NewBotDialog as RoutedNewBotDialog } from "./NewBotDialog";
 import { Select } from "./Select";
@@ -62,6 +62,7 @@ beforeEach(() => {
   fixture.effects = []; fixture.dispatch.mockReset(); fixture.api.mockReset();
   fixture.ready = false; fixture.admin = false; fixture.create.mockReset(); fixture.setDraft.mockReset(); fixture.profile = {};
   fixture.track.mockReset();
+  fixture.appSettingsOpen = false;
   fixture.api.mockReturnValue(new Promise(() => {}));
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -132,6 +133,12 @@ describe("bot draft dialog", () => {
     create.props.onClick!();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newBot", onCreated: expect.any(Function) });
     expect(fixture.api).not.toHaveBeenCalled();
+  });
+  it("steps aside while App settings, opened from inside it, is on top", () => {
+    expect(render().html).not.toMatch(/^<div[^>]* hidden/);
+    fixture.appSettingsOpen = true;
+    expect(render().html).toMatch(/^<div[^>]* hidden/);
+    expect(render(true).html).not.toMatch(/^<div[^>]* hidden/);
   });
   it("opens immediately with all sections and no creation request", () => {
     const result = render();
