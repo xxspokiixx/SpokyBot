@@ -132,13 +132,13 @@ describe("Settings in Simple mode", () => {
     expect(html).toContain("More providers for OpenCode bots");
   });
 
-  it("stacks Remote access, Servers, Local VM, the built-in browser and Logins on Computers", () => {
+  it("stacks Remote access, Servers, Bot desktops, the built-in browser and Logins on Devices", () => {
     fixture.section = "companion";
     const html = render();
     expect(currentPage(html)).toBe("computers");
     expect(blocks(html)).toEqual(["companion", "desktopWorkspaces", "computer", "browser", "logins"]);
     const headings = [...html.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["Remote access", "Servers", "Local VM", "Built-in browser", "Logins"]);
+    expect(headings).toEqual(["Remote access", "Servers", "Bot desktops", "Built-in browser", "Logins"]);
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
@@ -169,7 +169,7 @@ describe("Settings in Simple mode", () => {
     expect(pages(render())).toEqual(["general", "appearance", "ai", "computers"]);
   });
 
-  it("keeps a paired remote client's reduced set: Appearance, and Computers with Remote access and Servers", () => {
+  it("keeps a paired remote client's reduced set: Appearance, and Devices with Remote access and Servers", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, remoteClient: { active: true } } });
     fixture.section = "desktopWorkspaces";
     const html = render();
@@ -228,7 +228,7 @@ describe("Settings in Simple mode", () => {
 describe("the built-in browser switch", () => {
   const browserSwitch = () => fixture.switches.find((props) => props["aria-label"] === "Enable the built-in browser");
 
-  it.each([false, true])("writes features.browser from Computers (advanced: %s)", async (advanced) => {
+  it.each([false, true])("writes features.browser from Devices (advanced: %s)", async (advanced) => {
     fixture.advancedMode = advanced;
     fixture.section = "computer";
     const html = render();
@@ -256,7 +256,7 @@ describe("the built-in browser switch", () => {
     expect(browserSwitch()).toBeUndefined();
   });
 
-  it("is found by searching for the browser under Local VM in Advanced", () => {
+  it("is found by searching for the browser under Bot desktops in Advanced", () => {
     const computer = SECTIONS.find((entry) => entry.id === "computer")!;
     const experimental = SECTIONS.find((entry) => entry.id === "experimental")!;
     expect(computer.keywords).toContain("browser");

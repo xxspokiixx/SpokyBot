@@ -40,7 +40,7 @@ vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
     return props.renderTrigger({ open: false });
   },
 }));
-vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite, useReactor: () => "user" }));
 vi.mock("./CitationUI", async (importOriginal) => ({
   ...await importOriginal<typeof import("./CitationUI")>(),
   CitationSelectionToolbar: () => createElement("span", { "data-testid": "citation-toolbar" }),
@@ -171,8 +171,8 @@ describe("header name", () => {
     }));
     const button = (markup: string) => markup.match(/<button[^>]*data-tour="computer"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
     expect(button(working("browser", true))).toContain('data-testid="computer-button-live"');
-    expect(button(working("browser", true))).toContain('aria-label="Bot&#x27;s computer, In use now"');
-    expect(button(working("browser", false))).toContain('aria-label="Bot&#x27;s computer"');
+    expect(button(working("browser", true))).toContain('aria-label="Bot&#x27;s screen, In use now"');
+    expect(button(working("browser", false))).toContain('aria-label="Bot&#x27;s screen"');
     expect(button(working("browser", false))).not.toContain("computer-button-live");
     expect(button(working("local", true))).not.toContain("computer-button-live");
     const pinned = renderToStaticMarkup(createElement(ChatView, {

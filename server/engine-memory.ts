@@ -14,6 +14,9 @@ const ENGINE_MIN_BYTES = 300 * MB, ENGINE_MAX_BYTES = 1500 * MB;
 /** One more session in a running shared process: OpenCode 1.19.3 grew about 110 MB a session with three stdio MCP
  * servers after a prompt; more MCP servers cost more. */
 export const SESSION_BYTES = 200 * MB;
+/** One bot's browser (agent-browser's daemon and its Chrome) on a page or two: 270 to 390 MB per bot on an 8 GB Cloud home,
+ * 2026-10-21. It runs outside the engine's process group, so an engine's measured size never includes it. */
+export const BROWSER_BYTES = 400 * MB;
 /** A new engine's share is held back this long while it starts and grows; it is measured once it has run this long. */
 const RESERVE_MS = 90_000, SETTLED_MS = 30_000;
 const TICK_MS = 2_000, RELIEF_COOLDOWN_MS = 15_000, NOTICE_REPEAT_MS = 10 * 60_000, STOP_GRACE_MS = 5_000;
@@ -64,6 +67,14 @@ export const memoryWaitText = (count: number) => `Waiting for memory: ${running(
 export const memoryStillWaitingText = (count: number) => `Still waiting for memory: ${running(count)}.`;
 export const memoryStallText = (cause: string, count: number) => `${cause}. This Cloud ran out of memory while ${tasks(count)} ran at once (not a problem with the AI provider)`;
 
+/** The bots' browsers, which start during a turn rather than with its engine. */
+export interface EngineBrowsers {
+  /** Whether this thread's bot may browse and its browser is not running yet. */
+  starts(threadId: string): boolean;
+  /** This thread's engine was stopped for memory: its browser can close too once no turn holds it. */
+  stopped(threadId: string): void;
+}
+
 /** An engine process and the threads whose sessions it runs: one, or several when the driver shares processes. */
 interface Engine { child: ChildProcess; threads: Set<string>; startedAt: number; stopping: boolean }
 interface Waiter { wake: () => void }
@@ -90,7 +101,7 @@ export class EngineMemory {
   private readonly engines = new Map<number, Engine>();
   private readonly active = new Set<string>();
   /** Threads admitted in the last RESERVE_MS: when, and what they were let in for. */
-  private readonly reserved = new Map<string, { at: number; start: "process" | "session" }>();
+  private readonly reserved = new Map<string, { at: number; start: "process" | "session"; browser: boolean; browserSince?: number }>();
   private readonly queue: Waiter[] = [];
   /** Threads whose engine was stopped for memory: how many tasks ran then. */
   private readonly stops = new Map<string, number>();
@@ -99,6 +110,7 @@ export class EngineMemory {
   private oomKills: number | null = null;
   private lastRelief = -Infinity;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private browsers: EngineBrowsers | null = null;
 
   constructor(options: EngineMemoryOptions) {
     this.enabled = options.enabled;
@@ -109,6 +121,8 @@ export class EngineMemory {
     this.log = options.log ?? ((line) => console.warn(`memory: ${line}`));
     this.tickMs = options.tickMs ?? TICK_MS;
   }
+
+  useBrowsers(browsers: EngineBrowsers): void { this.browsers = browsers; }
 
   /** Runs `start` with the engine processes it spawns counted as this thread's (procs.ts spawnCli calls `track`). */
   within<T>(threadId: string, start: () => T): T {
@@ -187,7 +201,7 @@ export class EngineMemory {
         if (this.queue[0] === waiter) {
           const room = this.room(start, threadId);
           if (room === "admit") {
-            this.reserved.set(threadId, { at: this.now(), start });
+            this.reserved.set(threadId, { at: this.now(), start, browser: this.browserStarts(threadId) });
             this.arm();
             return true;
           }
@@ -242,8 +256,10 @@ export class EngineMemory {
     const victim = idle ?? (newest.length >= 2 ? newest[0]! : null);
     if (!victim) return;
     this.lastRelief = this.now();
-    if (!idle) for (const threadId of this.working(victim)) this.stops.set(threadId, count);
-    void this.stop(victim, idle ? "idle" : "relief");
+    if (idle) { void this.stop(victim, "idle"); return; }
+    const stopped = this.working(victim);
+    for (const threadId of stopped) this.stops.set(threadId, count);
+    void this.stop(victim, "relief").then(() => this.closeBrowsers(stopped));
   }
 
   /** How much of an idle engine's keep-alive memory allows: 1 with half the machine free above the floor, down to a tenth
@@ -278,15 +294,24 @@ export class EngineMemory {
     let held = 0;
     for (const [threadId, admitted] of this.reserved) {
       if (at - admitted.at >= RESERVE_MS) { this.reserved.delete(threadId); continue; }
+      // A browser grows as it starts and loads its first pages: its share is held until it has run SETTLED_MS.
+      if (admitted.browser) {
+        if (!this.browserStarts(threadId)) admitted.browserSince ??= at;
+        if (admitted.browserSince === undefined || at - admitted.browserSince < SETTLED_MS) held += BROWSER_BYTES;
+      }
       // A session's growth hides inside its shared process's total, so it stays held in full until it settles.
       if (admitted.start === "session") { held += SESSION_BYTES; continue; }
       const pid = live.find(([, engine]) => engine.threads.has(threadId))?.[0];
       held += Math.max(0, process - (pid === undefined ? 0 : groups.get(pid) ?? 0));
     }
-    const need = start === "session" ? SESSION_BYTES : process;
+    const need = (start === "session" ? SESSION_BYTES : process) + (this.browserStarts(threadId) ? BROWSER_BYTES : 0);
     if (this.free(memory) - this.floor(memory) - held >= need) return "admit";
     return this.idle() ?? (this.othersBusy(threadId) === 0 ? "admit" : "wait");
   }
+
+  private browserStarts(threadId: string): boolean { return this.browsers?.starts(threadId) === true; }
+
+  private closeBrowsers(threadIds: string[]): void { for (const threadId of threadIds) this.browsers?.stopped(threadId); }
 
   private async stop(engine: Engine, why: "idle" | "relief"): Promise<void> {
     const pid = engine.child.pid!, gone = () => engine.child.exitCode !== null || engine.child.signalCode !== null;
@@ -309,6 +334,7 @@ export class EngineMemory {
       if (kills !== null && this.oomKills !== null && kills > this.oomKills) {
         for (const threadId of working) this.stops.set(threadId, this.busy(threadId));
         this.log(`the kernel stopped an engine (pid ${pid}) for memory`);
+        this.closeBrowsers(working);
       }
       this.oomKills = kills ?? this.oomKills;
     }

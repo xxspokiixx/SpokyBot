@@ -19,7 +19,7 @@ const sentences: BotOverview = {
     soulLead: "Always cite primary sources and separate fact from inference.",
   },
   does: ["Daily at 9:00 AM: Morning brief. Next run 9:00 AM."],
-  reaches: ["Works in its private workspace.", "Has the built-in browser."],
+  reaches: ["Works in its own private folder.", "Has the built-in browser."],
   wont: [
     "Won't run commands without asking you first.",
     "Won't contact other bots without asking.",

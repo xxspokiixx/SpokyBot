@@ -53,7 +53,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
       init?.signal?.throwIfAborted();
       return json({ job });
     }
-    if (route.endsWith("/lease")) return json({ active: true });
+    if (route.endsWith("/lease")) { await state.leaseHeld; return json({ active: true }); }
     if (route.endsWith("/result")) { state.results.push(body.result); return json({ ok: true }); }
     if (route.endsWith("/disconnect")) { state.disconnects++; state.disconnectBodies.push(body); return json({ ok: true }); }
     throw new Error(`no route ${route}`);
@@ -61,7 +61,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
   return state;
 }
 
-/** A computer-control driver that records calls and never answers `drag`. */
+/** A computer-control driver that records calls, never answers `drag` and answers `list_windows` after 1.5 s. */
 async function hangingDriver(dir) {
   const calls = path.join(dir, "driver-calls.log");
   const pid = path.join(dir, "driver.pid");
@@ -69,8 +69,8 @@ async function hangingDriver(dir) {
   await writeFile(script, `import readline from 'node:readline'; import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(pid)}, String(process.pid));
 readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
 if(m.method==='tools/call'){ fs.appendFileSync(${JSON.stringify(calls)}, m.params.name+'\\n'); if(m.params.name==='drag') return; }
-const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'drag'},{name:'click'}]}:{content:[{type:'text',text:'ok'}]};
-process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'drag'},{name:'click'},{name:'list_windows'}]}:{content:[{type:'text',text:'ok'}]};
+const answer=()=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); if(m.params?.name==='list_windows') setTimeout(answer,1500); else answer(); });`);
   return { connection: { mcpCommand: process.execPath, mcpArgs: [script] }, calls, pid };
 }
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -93,7 +93,7 @@ async function lendingFixture(t, options = {}) {
     enabled: async () => { maintainerChecks++; return false; },
     cloud: () => cloud, home: path.join(dir, "home"),
     cuaConnection: async () => driver.connection,
-    hostControl: async id => { leases.push(`acquire:${id}`); return { renew: async () => {}, release: async () => { leases.push(`release:${id}`); } }; },
+    hostControl: options.hostControl ?? (async id => { leases.push(`acquire:${id}`); return { renew: async () => {}, release: async () => { leases.push(`release:${id}`); } }; }),
     onChange: summary => summaries.push(summary),
   });
   t.after(() => sharing.close());
@@ -211,6 +211,43 @@ test("signing out of OMB Cloud ends lending at once and cancels an action alread
   assert.equal(home.connects.length, 1);
 });
 
+/** This computer's screen lock as the desktop server keeps it, renewed with "acquire" as main renews it. */
+function screenLock() {
+  let holder = null;
+  const take = id => {
+    if (holder !== null && holder !== id) throw new Error("This computer is in use locally or held by a person. Wait, then observe it again before acting.");
+    holder = id;
+  };
+  const lock = {
+    renewHeld: undefined,
+    holder: () => holder,
+    hostControl: async id => { take(id); return { renew: async () => { await lock.renewHeld; take(id); }, release: async () => { if (holder === id) holder = null; } }; },
+  };
+  return lock;
+}
+
+for (const stalled of ["the Cloud's lease answer", "the renew"]) {
+  test(`a screen call that ends while ${stalled} is on its way leaves the screen free for the next call`, async t => {
+    const lock = screenLock();
+    const { home, sharing, driver } = await lendingFixture(t, { hostControl: lock.hostControl });
+    await sharing.saveCloud(env, { folders: [], screen: true });
+    await connected(sharing, 1, home);
+    home.push({ action: "computer_call", tool_name: "list_windows", arguments: {} });
+    await until(async () => (await readFile(driver.calls, "utf8").catch(() => "")).includes("list_windows"), "the slow call to start");
+    let answer;
+    const held = new Promise(resolve => { answer = resolve; });
+    if (stalled === "the renew") lock.renewHeld = held; else home.leaseHeld = held;
+    await delay(1600);
+    answer();
+    await until(() => home.results.length === 1, "the slow call to finish");
+    await delay(200);
+    home.push({ action: "computer_call", tool_name: "click", arguments: {} });
+    await until(() => home.results.length === 2, "the click");
+    assert.deepEqual(home.results.map(result => result.isError === true ? result.content[0].text : "ok"), ["ok", "ok"]);
+    assert.equal(lock.holder(), null, "the finished calls no longer hold the screen");
+  });
+}
+
 test("another Cloud account or another machine ends lending; a sign-in that needs renewing only pauses it", async t => {
   {
     const { folderPath, home, sharing, setCloud } = await lendingFixture(t);
@@ -292,7 +329,7 @@ test("quitting the app pauses lending; it never switches it off, even mid-reconn
   assert.equal(after.cloudState(env).enabled, true, "the next launch still lends");
 });
 
-test("the menu-bar indicator exists only while lending, says when the Cloud is using the Mac, and stops lending", () => {
+test("the menu-bar indicator exists only while lending, reads In use while bots use the Mac, and turns lending off", () => {
   const trays = [];
   class Tray {
     constructor() { this.destroyed = false; this.title = ""; this.menu = null; trays.push(this); }
@@ -302,19 +339,19 @@ test("the menu-bar indicator exists only while lending, says when the Cloud is u
   const Menu = { buildFromTemplate: items => items };
   const nativeImage = { createFromPath: () => ({ resize: () => ({}) }) };
   let stops = 0, opens = 0;
-  const indicator = createLendingIndicator({ Tray, Menu, nativeImage, iconPath: "icon.png", onStop: () => stops++, onOpen: () => opens++ });
+  const indicator = createLendingIndicator({ Tray, Menu, nativeImage, iconPath: "icon.png", onStop: () => stops++, onOpen: () => opens++, device: "Mac" });
   indicator.update({ lending: false, busy: false });
   assert.equal(trays.length, 0, "nothing in the menu bar while nothing is lent");
   indicator.update({ lending: true, busy: false });
   assert.equal(trays.length, 1);
   assert.equal(trays[0].title, "");
-  assert.match(trays[0].menu[0].label, /can use this computer/);
+  assert.equal(trays[0].menu[0].label, "Your bots can use this Mac");
   indicator.update({ lending: true, busy: true });
   assert.equal(trays.length, 1);
   assert.equal(trays[0].title, "In use");
-  assert.match(trays[0].menu[0].label, /using this computer now/);
-  trays[0].menu.find(item => item.label === "Stop lending").click();
-  trays[0].menu.find(item => item.label === "Lending settings…").click();
+  assert.equal(trays[0].menu[0].label, "Your bots are using this Mac now");
+  trays[0].menu.find(item => item.label === "Stop sharing").click();
+  trays[0].menu.find(item => item.label === "Sharing settings…").click();
   assert.deepEqual([stops, opens], [1, 1]);
   indicator.update({ lending: false, busy: true });
   assert.equal(trays[0].destroyed, true, "gone as soon as lending ends");

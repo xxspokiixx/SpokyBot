@@ -120,8 +120,8 @@ const __APP_VERSION__: string;
        * "cloud"); a server's own page is answered about itself only, and its
        * Copy opens this computer's Settings on that copy (the verified Cloud's starts it). */
       cloudMove?: import("../../electron/cloud-move.mjs").CloudMoveBridge;
-      /** "Let My Cloud use this computer", on My Cloud's own page in this app: its one switch and what is lent
-       * (electron/cloud-lending-ipc.mjs). `open` shows this computer's own Settings, leaving the page. */
+      /** "Let my bots use this Mac" (this PC, this computer), on My Cloud's own page in this app: its one switch and
+       * what is lent (electron/cloud-lending-ipc.mjs). `open` shows this computer's own Settings, leaving the page. */
       cloudLending?: { open(): Promise<void>; state?(): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; set?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending> };
       /** This computer's Settings → Logins only: what of Logins My Cloud has, and Also use on My Cloud. */
       cloudLogins?: import("../../electron/cloud-logins.mjs").CloudLoginsBridge;

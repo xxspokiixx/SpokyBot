@@ -112,7 +112,7 @@ describe("owner tool selection status", () => {
   it("explains native restrictions that the selected engine cannot enforce", () => {
     const engine = { driverKind: "claudeAgent" } as NonNullable<ReturnType<typeof useBotSettingsDerived>["engine"]>;
     const markup = render(makeBot({ toolScope: { allow: ["native:read"] } } as Partial<Bot>), makeDerived({ engine }));
-    expect(markup).toContain("This engine cannot limit native tools");
+    expect(markup).toContain("This AI cannot limit native tools");
     expect(markup).toContain("native:*");
     expect(markup).toContain("will stop before sending a prompt");
   });
@@ -193,14 +193,14 @@ describe("AccessSection Works on", () => {
   it("is one line and the way to the Computer panel, where the place is chosen", () => {
     const markup = render(makeBot());
     expect(markup).toContain("Where Scout works: Chooses for you");
-    expect(markup).toContain("Open Computer panel");
+    expect(markup).toContain("Open the Screen panel");
     expect([...markup.matchAll(/>(Auto|Cloud|Local VM|This computer|Browser|Off)<\/button>/g)]).toEqual([]);
     expect(render(makeBot({ computer: "off" }))).toContain("Where Scout works: No screen");
 
     let tree!: ReturnType<typeof AccessSection>;
     function Capture() { tree = AccessSection({ bot: makeBot(), derived: makeDerived() }); return tree; }
     renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
-    const open = nodes(tree).find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Open Computer panel"))!;
+    const open = nodes(tree).find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Open the Screen panel"))!;
     open.props.onClick!();
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "toggleSettings", open: false }],

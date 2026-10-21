@@ -86,6 +86,8 @@ describe("the home's idle verdict", () => {
     expect(h.power.begin("/api/sync/changes")).toBeTypeOf("function");
     h.power.begin("/api/events");
     h.power.begin("/api/shared-computers/abc/poll");
+    // A lent computer's device link stays open by design, like its poll: it never keeps the home awake.
+    h.power.begin("/api/shared-computers/abc/link");
     expect(h.power.report().busy).toEqual(["maintenance"]);
     done(); done();
     expect(h.power.report().busy).toEqual(["recent-work"]);

@@ -22,12 +22,12 @@ import { track } from "@/lib/analytics";
 import { showWelcome } from "@/lib/onboarding";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 8, 12).getTime();
-const allowances = (cpus: number, diskGb: number, maxDiskGb: number, computers: number, computerHours: number) =>
-  ({ cpus, memoryMb: cpus * 1024, diskGb, maxDiskGb, computers, computerHours, voiceCharacters: 100_000 });
+const allowances = (cpus: number, maxDiskGb: number, computers: number, computerHours: number, voiceCharacters: number) =>
+  ({ cpus, cpuKind: "shared" as const, memoryMb: cpus * 1024, swapMb: cpus === 2 ? 3072 : 4096, diskGb: 10, maxDiskGb, computers, computerHours, voiceCharacters, snapshotDays: 14 });
 const PLANS = [
-  { tier: "personal", label: "Personal", amount: 2900, allowances: allowances(2, 20, 20, 1, 50), trialDays: 7 },
-  { tier: "pro", label: "Pro", amount: 4900, allowances: allowances(4, 50, 50, 2, 200), trialDays: 7 },
-  { tier: "max", label: "Max", amount: 9900, allowances: allowances(8, 100, 200, 4, 500), trialDays: 7 },
+  { tier: "personal", label: "Personal", amount: 2900, allowances: allowances(2, 20, 15, 100, 30_000), trialDays: 7 },
+  { tier: "pro", label: "Pro", amount: 4900, allowances: allowances(4, 100, 15, 300, 60_000), trialDays: 7 },
+  { tier: "max", label: "Max", amount: 9900, allowances: allowances(8, 100, 15, 800, 180_000), trialDays: 7 },
 ];
 const TRIAL: CloudOffer = { plans: PLANS, recommended: "pro", creditUsd: 5, reminderDays: 2, refundDays: 14 };
 const PLAIN: CloudOffer = { plans: PLANS.map(({ trialDays: _days, ...plan }) => plan), recommended: "pro", refundDays: 14 };
@@ -71,12 +71,19 @@ beforeEach(() => { vi.clearAllMocks(); setLocale("en"); });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); setLocale("en"); });
 
 describe("each screen of the sheet says one thing and offers one next step", () => {
-  it("Choose: what Cloud is, the Admin's plans with its recommended one preselected and Most popular, the money in one line, Start free trial", () => {
+  it("Choose: what Cloud is, the Admin's plans sold on their cloud desktop hours with its recommended one preselected and Most popular, what it gives, the money in one line, Start free trial", () => {
     const { html, tree, handlers } = panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null });
-    inOrder(text(html), ["MausBot Cloud", "Your bots, always on.", "A private computer in the cloud that runs your bots 24/7, even when this computer is off.",
+    inOrder(text(html), ["MausBot Cloud", "Your bots, always on.", "Runs your bots 24/7 in the cloud, even when this computer is off.",
       "Works while you're away", "Private to you", "Reach it from anywhere", "A real browser and desktop", "Bring everything over",
-      "Choose your plan", "Personal", "$29", "per month", "1 cloud computer at once", "2 CPU · 2 GB", "20 GB storage", "50 h cloud computers",
-      "Pro", "Most popular", "$49", "Up to 2 cloud computers at once", "Max", "$99", "100–200 GB storage",
+      "Choose your plan", "Personal", "$29", "per month", "An always-on cloud for your personal workflows.", "100 cloud desktop hours a month", "up to 15 at once",
+      "Pro", "Most popular", "$49", "Your bots keep working 24/7, even when your laptop is closed.", "300 cloud desktop hours a month", "up to 15 at once",
+      "Max", "$99", "The biggest cloud machine, for bots that use computers all day.", "800 cloud desktop hours a month", "up to 15 at once",
+      // The chosen plan's card, in the website's words: benefits backed by the Admin's numbers, then what it adds over the plan before it.
+      "What Pro gives you", "Always on: automations run around the clock, even with your laptop off",
+      "Cloud desktops you can watch or take over: as many as your bots need, 300 hours a month", "Fair use: up to 15 at once",
+      "Voice replies: about an hour of speech a month", "Gmail, GitHub, Notion and hundreds more apps: sign in once",
+      "Your bots on your phone, anywhere, with alerts when one finishes or needs you", "Your own cloud machine for unlimited bots: 4 shared CPUs and 4 GB of memory, plus 4 GB of swap",
+      "Storage that grows as it fills, up to 100 GB, with daily backups kept 14 days", "Everything in Personal, plus 3× the cloud desktop hours, a machine twice the size and 2× the voice.",
       "Due today", "$0.00", "Card needed, nothing charged for 7 days. Then $49/month + tax. Cancel in the app any time.",
       "Today", "Trial starts, with $5 of Claude credit", "Oct 13", "Reminder email", "Oct 15", "$49/month begins",
       "Start free trial", "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "14-day money-back", "Already have a plan? Sign in"]);
@@ -84,11 +91,17 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     expect(html).toContain('role="radio" aria-checked="true" tabindex="0" data-plan="pro"');
     expect(html).toContain('role="radio" aria-checked="false" tabindex="-1" data-plan="max"');
     expect(html.match(/Most popular/g)).toHaveLength(1);
-    for (const gone of ["Compare plans", "launch", "$89", "Recommended", "AI credit", "this Mac"]) expect(text(html)).not.toContain(gone);
+    for (const gone of ["Compare plans", "launch", "$89", "Recommended", "AI credit", "this Mac", "a day", "computers at once", "14 days of snapshots"]) expect(text(html)).not.toContain(gone);
+    expect(html.match(/What Pro gives you/g), "only the chosen plan's card opens").toHaveLength(1);
     button(tree, "Start free trial")!.props.onClick(); expect(handlers.start).toHaveBeenCalledOnce();
     tree.find(node => node.props["data-plan"] === "max")!.props.onClick(); expect(handlers.choose).toHaveBeenCalledWith("max");
     button(tree, "Already have a plan? Sign in")!.props.onClick(); expect(handlers.signIn).toHaveBeenCalledOnce();
-    expect(text(panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null }, { chosen: "personal" }).html)).toContain("Then $29/month + tax.");
+    const personal = text(panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null }, { chosen: "personal" }).html);
+    expect(personal).toContain("Then $29/month + tax.");
+    // The first plan listed builds on none, and its card states its own numbers.
+    expect(personal).toContain("What Personal gives you");
+    expect(personal).toContain("Your own cloud machine for unlimited bots: 2 shared CPUs and 2 GB of memory, plus 3 GB of swap");
+    expect(personal).not.toContain("Everything in");
     const maxFirst = panel({ kind: "offer", offer: { ...TRIAL, recommended: "max" }, signedOut: false, notice: null }).html;
     expect(maxFirst).toContain('aria-checked="true" tabindex="0" data-plan="max"');
     expect(maxFirst.indexOf("Most popular"), "the Admin's recommended plan, not Pro by itself").toBeGreaterThan(maxFirst.indexOf("data-plan=\"max\""));

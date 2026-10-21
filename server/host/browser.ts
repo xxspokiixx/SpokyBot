@@ -2,6 +2,7 @@
 // the integration a turn mounts. browserEngine.engine picks agent-browser (the default) or the new Chrome engine; a
 // person's own Chrome (My Chrome) stays on agent-browser either way.
 import { existsSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import type { AppConfig } from "../config.ts";
 import { browserEngineAttachCdpUrl, browserProfilePartitionTarget, builtInBrowserEnabled, DATA_DIR } from "../config.ts";
@@ -9,10 +10,11 @@ import { BrowserRuntime, TransportError, attachesToChrome, browserRuntimeEnv, fo
 import { RelayTimeout, relay, relayCommand, relayInput } from "../browser-relay.ts";
 import { browserSteps } from "../browser-steps.ts";
 import { BrowserLive } from "../browser-live.ts";
-import { browserEgress } from "../browser/egress/registry.ts";
+import { browserEgress, type EgressSetup } from "../browser/egress/registry.ts";
 import {
   agentBrowserIntegration,
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
+  browserDaemonFile,
   browserEngineEncryptionKey,
   prepareBrowserSessionState,
   clearBrowserSessionState,
@@ -30,18 +32,19 @@ import { browserEngineKind, type BrowserEngineKind } from "../browser/config.ts"
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
 import { passkeyAnnotation } from "../browser/passkey-notice.ts";
+import type { EngineBrowsers } from "../engine-memory.ts";
 import { augmentedPath } from "../env-path.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "../proxy-paths.ts";
 import type { Store } from "../store.ts";
-import type { TurnResources } from "../turn-resources.ts";
+import type { TurnOwner, TurnResources } from "../turn-resources.ts";
 
 export interface BrowserHostDeps {
   cfg: AppConfig;
   /** The store is built after this host, so it is read when used. */
-  store(): Pick<Store, "bots" | "bot">;
-  turnResources: Pick<TurnResources, "free">;
+  store(): Pick<Store, "bots" | "bot" | "botByThread">;
+  turnResources: Pick<TurnResources, "free" | "holder">;
   activeInternalGenerationByThread: ReadonlyMap<string, string>;
   mintInternalCapability(capability: {
     botId: string; threadId: string; generation: string; browserSession: string; kind: "browser";
@@ -50,6 +53,23 @@ export interface BrowserHostDeps {
   DESKTOP_MANAGED: boolean;
   CLOUD_HOME: unknown;
   PORT: number;
+  /** A Cloud home's way out through the person's own lent computer. */
+  device?: EgressSetup["device"];
+  /** Whether a turn may use the person's lent computer (cloud-lending.ts). Without it, no browser a turn holds may. */
+  mayLend?(turn: TurnOwner): boolean;
+  /** The engine memory guard, told which browsers each thread's turn starts or holds. */
+  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void };
+}
+
+/** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
+ * turn to hold that browser may use the lent computer. A browser no turn has held is the person's own. */
+function lentDevice(device: NonNullable<EgressSetup["device"]>, holder: (session: string) => TurnOwner | undefined, mayLend: (turn: TurnOwner) => boolean) {
+  const lends = new Map<string, boolean>();
+  return (session: string) => {
+    const turn = holder(session);
+    if (turn) lends.set(session, mayLend(turn));
+    return lends.get(session) === false ? null : device(session);
+  };
 }
 
 type Spec = { command: string; args?: readonly string[]; env: Record<string, string> };
@@ -57,7 +77,8 @@ const BOT_SESSION = /^bot-[A-Za-z0-9_.-]+$/;
 
 export function createBrowserHost(deps: BrowserHostDeps) {
   const { cfg, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT } = deps;
-  const store: Pick<Store, "bots" | "bot"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id) };
+  const store: Pick<Store, "bots" | "bot" | "botByThread"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id),
+    botByThread: (threadId: string) => deps.store().botByThread(threadId) };
 
   const agentBrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
@@ -90,7 +111,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   });
   const browserLive = new LiveRouter(agentBrowserLive, chromeEngine);
   const usedBrowserSessions = new Map<string, Spec>();
-  browserEgress.configure({ host: DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server", config: () => cfg.browserEngine?.egress });
+  const device = deps.device && lentDevice(deps.device, (session) => turnResources.holder(`browser:${session}`), deps.mayLend ?? (() => false));
+  browserEgress.configure({ host: DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server", config: () => cfg.browserEngine?.egress, ...(device ? { device } : {}) });
   /** A live bot's, profile's or temporary browser of this data dir. */
   const belongs = (session: string) => isTemporaryBrowserSession(session) || store.bots.some((bot) => browserSessionId(bot.id, "") === session)
     || (cfg.browserProfiles ?? []).some((profile) => !usesMyChrome(profile.id) && currentBrowserSession("", profile.id) === session);
@@ -253,6 +275,38 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     if (browserEngineKind(cfg) !== "chrome") void chromeEngine.service.closeAll().catch(() => undefined);
     chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
   }
+  function browserRunning(session: string, spec: Spec | undefined): boolean {
+    if (chromeTarget(session, spec)) return chromeEngine.service.runs(session);
+    return existsSync(browserDaemonFile(browserRuntimeEnv({ ...spec?.env, AGENT_BROWSER_SESSION: session }), ".pid"));
+  }
+  /** The browser a thread's bot would start; a temporary one has no session until its first call. My Chrome is the person's own. */
+  function threadBrowser(threadId: string): { session: string | undefined; spec: Spec | undefined } | null {
+    const bot = store.botByThread(threadId);
+    if (!bot || bot.browser === false || bot.computer === "off" || !builtInBrowserEnabled(cfg) || usesMyChrome(bot.browserProfile)) return null;
+    const session = bot.browserProfile === "guest" ? temporaryBrowserSessions.get(bot.id) : currentBrowserSession(bot.id, bot.browserProfile);
+    return { session, spec: session === undefined ? undefined : usedBrowserSessions.get(session) };
+  }
+  /** Tried until no turn holds the browser and no call runs in it, or for 30 s: the stopped turn may still be settling. */
+  async function closeForMemory(session: string, spec: Spec): Promise<void> {
+    for (let attempt = 0; attempt < 15 && browserRunning(session, spec); attempt++) {
+      if (turnResources.free(`browser:${session}`) && await browserRuntime.closeUnused(session, spec)) {
+        console.info(`browser ${session}: closed to free memory after its bot was stopped`);
+        return;
+      }
+      await sleep(2_000);
+    }
+  }
+  const engineBrowsers: EngineBrowsers = {
+    starts: (threadId) => {
+      const browser = threadBrowser(threadId);
+      return browser !== null && (browser.session === undefined || !browserRunning(browser.session, browser.spec));
+    },
+    stopped: (threadId) => {
+      const browser = threadBrowser(threadId);
+      if (browser?.session !== undefined && browser.spec) void closeForMemory(browser.session, browser.spec);
+    },
+  };
+  deps.engineMemory?.useBrowsers(engineBrowsers);
   /** A deleted bot's or profile's browser on the new engine, whatever the flag says now. */
   function eraseChromeBrowser(request: { type: string; botId?: string; partitionId?: string }): Promise<boolean> {
     if (request.type === "openmausbot:browser-bot-deleted" && request.botId) return chromeEngine.erase({ kind: "bot", id: request.botId, partitionId: "" });
@@ -298,6 +352,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
-    eraseDeletedBrowser, engineSummary,
+    eraseDeletedBrowser, engineSummary, engineBrowsers,
   };
 }

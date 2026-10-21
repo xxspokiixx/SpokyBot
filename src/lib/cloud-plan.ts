@@ -1,6 +1,7 @@
 import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
-import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudSetupStep, CloudTrial, CloudTrialState } from "../../electron/cloud-home.mjs";
+import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudPlanAllowances, CloudSetupStep, CloudTrial, CloudTrialState } from "../../electron/cloud-home.mjs";
 import { activeLocale, t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 
 const PLAN_LABEL: Record<string, string> = { starter: "Starter", personal: "Personal", pro: "Pro", max: "Max" };
 const ABOVE_PERSONAL: ReadonlySet<string> = new Set(["pro", "max"]);
@@ -160,28 +161,57 @@ export function moneyBackLine(offer: CloudOffer | null | undefined): string | nu
   return offer?.refundDays ? t("cloudAdd.moneyBack", { days: offer.refundDays }) : null;
 }
 
-export function planDetails(plan: CloudOfferPlan): { main: string; machine: string } | null {
-  const a = plan.allowances;
-  if (!a) return null;
-  const computers = a.computers === 1 ? t("cloudAdd.oneComputer") : t("cloudAdd.computers", { count: a.computers });
-  const storage = a.maxDiskGb > a.diskGb ? t("cloudAdd.storageGrows", { gb: a.diskGb, max: a.maxDiskGb }) : t("cloudAdd.storage", { gb: a.diskGb });
-  const memory = Math.max(1, Math.round(a.memoryMb / 1024));
-  return { main: `${computers} · ${storage}`, machine: t("cloudAdd.machine", { cpus: a.cpus, memory, hours: a.computerHours }) };
+/** `note` is small print under the benefit. */
+export interface CloudPlanBenefit { text: string; note?: string }
+/** `limit` is how many cloud computers may run at once, said only as small print; plans sell on `line`, their hours. */
+export interface CloudPlanRow {
+  tier: string; name: string; price: string; popular: boolean; promise: string | null;
+  line: string | null; limit: string | null; sleeps: string | null; benefits: CloudPlanBenefit[]; adds: string | null;
 }
-
-/** One plan card: its name, the Admin's price, what differs (cloud computers at once), whether it sleeps when idle and
- * three allowance chips. */
-export interface CloudPlanRow { tier: string; name: string; price: string; popular: boolean; line: string | null; sleeps: string | null; chips: string[] }
-export function planRow(plan: CloudOfferPlan, recommended?: string): CloudPlanRow {
+const PROMISE: Record<string, LocaleKey> = { starter: "cloudBuy.promise.starter", personal: "cloudBuy.promise.personal", pro: "cloudBuy.promise.pro", max: "cloudBuy.promise.max" };
+const amount = (value: number) => new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: 1 }).format(value);
+const gb = (mb: number) => amount(Math.round(mb / 102.4) / 10);
+const times = (value: number, base: number) => `${amount(Math.round((value / base) * 10) / 10)}×`;
+/** About a thousand characters of speech a minute. */
+function voiceLine(characters: number): string {
+  const minutes = Math.max(1, Math.round(characters / 1000));
+  if (minutes < 60) return t("cloudBuy.plan.voiceMinutes", { minutes: amount(minutes) });
+  const hours = Math.round(minutes / 6) / 10;
+  return hours === 1 ? t("cloudBuy.plan.voiceHour") : t("cloudBuy.plan.voiceHours", { hours: amount(hours) });
+}
+function addsLine(a: CloudPlanAllowances, below: CloudOfferPlan): string | null {
+  const b = below.allowances;
+  if (!b || a.computerHours <= b.computerHours) return null;
+  const extras = [t("cloudBuy.plan.addsHours", { times: times(a.computerHours, b.computerHours) })];
+  const bigger = a.cpus > b.cpus || a.memoryMb > b.memoryMb, sameRatio = a.cpus / b.cpus === a.memoryMb / b.memoryMb;
+  if (b.sleeps && !a.sleeps) extras.push(t(bigger ? "cloudBuy.plan.addsAwakeBigger" : "cloudBuy.plan.addsAwake"));
+  else if (bigger) extras.push(!sameRatio ? t("cloudBuy.plan.addsBigger") : a.cpus === b.cpus * 2 ? t("cloudBuy.plan.addsTwice") : t("cloudBuy.plan.addsTimes", { times: times(a.cpus, b.cpus) }));
+  if (!b.sleeps && a.voiceCharacters > b.voiceCharacters) extras.push(t("cloudBuy.plan.addsVoice", { times: times(a.voiceCharacters, b.voiceCharacters) }));
+  // The website's English lists have no serial comma ("a, b and c").
+  const list = new Intl.ListFormat(activeLocale() === "en" ? "en-GB" : activeLocale(), { type: "conjunction" });
+  return t("cloudBuy.plan.adds", { plan: offerPlanLabel(below), extras: list.format(extras) });
+}
+export function planBenefits(a: CloudPlanAllowances): CloudPlanBenefit[] {
+  const cpus = a.cpuKind === "shared" ? t("cloudBuy.plan.cpusShared", { count: a.cpus }) : t("cloudBuy.plan.cpus", { count: a.cpus });
+  const storage = a.maxDiskGb > a.diskGb
+    ? a.snapshotDays ? t("cloudBuy.plan.storageGrowsBackups", { max: a.maxDiskGb, days: a.snapshotDays }) : t("cloudBuy.plan.storageGrows", { max: a.maxDiskGb })
+    : a.snapshotDays ? t("cloudBuy.plan.storageBackups", { gb: a.diskGb, days: a.snapshotDays }) : t("cloudBuy.plan.storage", { gb: a.diskGb });
+  return [
+    { text: a.sleeps ? t("cloudBuy.plan.sleeps") : t("cloudBuy.plan.alwaysOn") },
+    { text: t("cloudAdd.computers", { hours: amount(a.computerHours) }), note: t("cloudBuy.plan.limit", { count: a.computers }) },
+    { text: voiceLine(a.voiceCharacters) },
+    { text: t("cloudBuy.plan.apps") },
+    { text: t("cloudBuy.plan.phone") },
+    { text: a.swapMb ? t("cloudBuy.plan.machineSwap", { cpus, memory: gb(a.memoryMb), swap: gb(a.swapMb) }) : t("cloudBuy.plan.machine", { cpus, memory: gb(a.memoryMb) }) },
+    { text: storage },
+  ];
+}
+export function planRow(plan: CloudOfferPlan, recommended?: string, below?: CloudOfferPlan | null): CloudPlanRow {
   const a = plan.allowances;
-  const chips = a ? [
-    t("cloudBuy.chip.machine", { cpus: a.cpus, memory: Math.max(1, Math.round(a.memoryMb / 1024)) }),
-    a.maxDiskGb > a.diskGb ? t("cloudBuy.chip.storageGrows", { gb: a.diskGb, max: a.maxDiskGb }) : t("cloudAdd.storage", { gb: a.diskGb }),
-    t("cloudBuy.chip.hours", { hours: a.computerHours }),
-  ] : [];
   return { tier: plan.tier, name: offerPlanLabel(plan), price: usd(plan.amount / 100), popular: plan.tier === recommended,
-    line: a ? (a.computers === 1 ? t("cloudAdd.oneComputer") : t("cloudAdd.computers", { count: a.computers })) : null,
-    sleeps: a?.sleeps ? t("cloudBuy.sleeps") : null, chips };
+    promise: Object.hasOwn(PROMISE, plan.tier) ? t(PROMISE[plan.tier]!) : null,
+    line: a ? t("cloudAdd.hours", { hours: amount(a.computerHours) }) : null, limit: a ? t("cloudAdd.atOnce", { count: a.computers }) : null,
+    sleeps: a?.sleeps ? t("cloudBuy.sleeps") : null, benefits: a ? planBenefits(a) : [], adds: a && below ? addsLine(a, below) : null };
 }
 
 const DAY_MS = 86_400_000;
