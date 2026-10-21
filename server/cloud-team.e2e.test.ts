@@ -131,8 +131,12 @@ it("a member's private chat with a team bot reads her notes and the team's, neve
   expect((await messages(cleo, adaThread)).status).toBe(404);
   const cleoBots = (await team.as(cleo, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>;
   expect(cleoBots.find((entry) => entry.id === bot.id)!.tasks.map((task) => task.threadId)).not.toContain(adaThread);
-  const adaBots = (await team.as(ada, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>;
-  expect(adaBots.find((entry) => entry.id === bot.id)!.tasks.map((task) => task.threadId)).toContain(adaThread);
+  const adaBots = (await team.as(ada, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks: Array<{ threadId: string; private?: true }> }>;
+  const adaTasks = adaBots.find((entry) => entry.id === bot.id)!.tasks;
+  expect(adaTasks.map((task) => task.threadId)).toContain(adaThread);
+  // The app's "Private · admins can see" header reads this: her conversation is private, the bot's main chat is the team's.
+  expect(adaTasks.find((task) => task.threadId === adaThread)!.private).toBe(true);
+  expect(adaTasks.find((task) => task.threadId === bot.mainThreadId)?.private).toBeUndefined();
   expect(JSON.stringify((await team.as(cleo, "GET", "/api/search?q=Kumquat")).body)).not.toContain(adaThread);
   expect(JSON.stringify((await team.as(ada, "GET", "/api/search?q=Kumquat")).body)).toContain(adaThread);
   // Only she and the admins change what she started.
@@ -223,6 +227,13 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   expect(refused.status).toBe(403);
   expect(refused.body.error).toBe("Personal connections never enter Acme. Ask an admin to connect these apps for Acme.");
   expect((await team.as(owner, "PUT", "/api/cloud-connections/highlevel", { locationId: "loc", accessToken: "a", refreshToken: "r", expiresAt: 1 })).body.error).toContain("Personal connections never enter Acme");
+  // Nor anything of a computer's one-time move: every send and move route answers the same plain line.
+  for (const [method, route] of [["GET", "/api/cloud-send/manifest"], ["POST", "/api/cloud-send/chats"], ["GET", "/api/cloud-send?move=1"]] as const) {
+    const moved = await team.as(owner, method, route, method === "POST" ? { conversations: [] } : undefined);
+    expect(moved.status, route).toBe(403);
+    expect(moved.body.error).toBe("Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.");
+  }
+  expect((await fx.onCloud("GET", "/api/cloud-send/manifest")).status).toBe(200);
   // My Cloud still takes its owner's share (the one-time move), as before.
   expect((await fx.onCloud("POST", "/api/cloud-connections/connected-apps", { share: "not-a-real-code", apps: [] })).status).not.toBe(403);
   // The Team Cloud's own installation on the connected-apps service, registered as it started, is the team's: every member's view says connected apps are set up.

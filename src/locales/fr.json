@@ -1923,5 +1923,6 @@
   "cloudBuy.row.backups": "Sauvegardes quotidiennes, conservées {days} jours",
   "cloudBuy.trialTerms": "Carte requise, rien n'est facturé avant la fin de votre essai. Résiliable dans l'app à tout moment.",
   "cloudBuy.timeline.firstPayment": "Premier paiement",
-  "team.privateChats": "Les discussions dans {team} sont privées pour les autres membres. Les administrateurs de {team} peuvent les voir."
+  "team.privateChats": "Les discussions dans {team} sont privées pour les autres membres. Les administrateurs de {team} peuvent les voir.",
+  "team.privateHeader": "Privé · les administrateurs peuvent le voir"
 }

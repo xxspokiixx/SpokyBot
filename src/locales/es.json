@@ -5036,5 +5036,6 @@
   "homeScreen.signInOther": "Este ordenador tiene la sesión de MausBot Cloud iniciada con otra cuenta. Inicia sesión con la cuenta a la que pertenece My Cloud.",
   "homeScreen.signInButton": "Iniciar sesión",
   "homeScreen.plan": "My Cloud no está en marcha",
-  "team.privateChats": "Los chats en {team} son privados para los demás miembros. Los administradores de {team} pueden verlos."
+  "team.privateChats": "Los chats en {team} son privados para los demás miembros. Los administradores de {team} pueden verlos.",
+  "team.privateHeader": "Privado · los administradores pueden verlo"
 }

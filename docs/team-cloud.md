@@ -12,12 +12,13 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   app); a Member (User) chats with the team's bots, uses rooms and makes routines, and changes no bot's setup, connects
   no app and makes no webhook.
 - **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. "New conversation"
-  is yours: you and the Admins see it, other Members never do, in lists, searches, files or streams. A room is seen by
-  whoever sees the room. The app says it once, on the first open of a team: *"Chats in Acme are private from other
-  members. Acme's admins can see them."*
-- **Memory.** Each bot keeps three kinds of notes: the team's, a room's and a person's. A turn reads the team's notes and
+  is yours: you and the Admins see it, other Members never do, in lists, searches, files or streams. A group chat is seen
+  by whoever sees it. Every private chat says so in its header, *"Private · admins can see"*, and the first one on a
+  device also says it as a sentence: *"Chats in Acme are private from other members. Acme's admins can see them."* The
+  server marks such a conversation `private: true` on the wire (`WireTask.private`).
+- **Memory.** Each bot keeps three kinds of notes: the team's, a group chat's and a person's. A turn reads the team's notes and
   the notes of where it is, and saves into where it is. What you tell a bot privately never reaches a room or another
-  person's chat; what a room decides never reaches your private chat. "About you" is yours alone: `GET`/`PUT /api/me`
+  person's chat; what a group chat decides never reaches your private chat. "About you" is yours alone: `GET`/`PUT /api/me`
   (the app's Profile on a team), read into your own conversations only.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. A person's own connections have no way in: a share code,

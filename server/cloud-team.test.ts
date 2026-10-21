@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TEAM_SESSION_MAX_MS, isTeamRole, memberLoginRefusal, parseMemberClaim, personalConnectionRefusal, teamRoleScopes, teamSessionExpiresAt } from "./cloud-team.ts";
+import { TEAM_SESSION_MAX_MS, isTeamRole, memberLoginRefusal, parseMemberClaim, personalConnectionRefusal, personalMoveRefusal, teamRoleScopes, teamSessionExpiresAt } from "./cloud-team.ts";
 
 const ACME = { id: "team-1", name: "Acme" };
 
@@ -37,6 +37,7 @@ describe("the lines", () => {
   it("say what is refused and who to ask, in the team's name", () => {
     expect(personalConnectionRefusal(ACME, "Gmail")).toBe("Personal connections never enter Acme. Ask an admin to connect Gmail for Acme.");
     expect(personalConnectionRefusal(ACME)).toBe("Personal connections never enter Acme. Ask an admin to connect it for Acme.");
+    expect(personalMoveRefusal(ACME)).toBe("Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.");
     expect(memberLoginRefusal(ACME)).toBe("On Acme only an admin can save a login, and it is then used by every bot in Acme.");
   });
 });

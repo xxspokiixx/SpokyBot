@@ -6071,5 +6071,6 @@
   "homeScreen.signInOther": "This computer is signed in to MausBot Cloud with another account. Sign in with the account My Cloud belongs to.",
   "homeScreen.signInButton": "Sign in",
   "homeScreen.plan": "My Cloud isn't running",
-  "team.privateChats": "Chats in {team} are private from other members. {team}'s admins can see them."
+  "team.privateChats": "Chats in {team} are private from other members. {team}'s admins can see them.",
+  "team.privateHeader": "Private · admins can see"
 }

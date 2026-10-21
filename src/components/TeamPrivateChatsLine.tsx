@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Users } from "lucide-react";
+import { Lock } from "lucide-react";
 import { t } from "@/lib/i18n";
 
 const SEEN_KEY = (teamId: string) => `omb.team-private-chats.${teamId}`;
 
-/** Whether this team's line is still to be said here; saying it marks it said, so it is shown on one open only. */
+/** Whether this team's sentence is still to be said here; saying it marks it said, so it shows in one private chat only. */
 export function teamPrivateChatsLineDue(teamId: string, storage: Pick<Storage, "getItem" | "setItem"> | null): boolean {
   if (!storage) return true;
   try {
@@ -16,12 +16,16 @@ export function teamPrivateChatsLineDue(teamId: string, storage: Pick<Storage, "
   }
 }
 
-/** On a Team Cloud, once per team on this device: private chats with the team's bots are seen by the team's admins. */
-export function TeamPrivateChatsLine({ team }: { team: { id: string; name: string } | undefined }) {
-  const [due] = useState(() => (team ? teamPrivateChatsLineDue(team.id, typeof localStorage === "undefined" ? null : localStorage) : false));
-  if (!team || !due) return null;
-  return <div role="status" data-team-private-chats className="flex items-center justify-center gap-2 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[12.5px] text-ink-secondary">
-    <Users size={14} aria-hidden="true" />
-    <span>{t("team.privateChats", { team: team.name })}</span>
-  </div>;
+/** In every private chat with a team's bot, beside its name: who can see it. */
+export function TeamPrivateHeader() {
+  return <span data-chathead-private className="flex shrink-0 items-center gap-1 truncate text-[12px] text-ink-secondary">
+    <Lock size={12} aria-hidden="true" />{t("team.privateHeader")}
+  </span>;
+}
+
+/** Above the first private chat with any of the team's bots on this device, once: the same thing as a sentence. */
+export function TeamPrivateFirstLine({ team }: { team: { id: string; name: string } }) {
+  const [due] = useState(() => teamPrivateChatsLineDue(team.id, typeof localStorage === "undefined" ? null : localStorage));
+  if (!due) return null;
+  return <p role="status" data-team-private-chats className="mx-5 mb-2 text-[12.5px] text-ink-secondary">{t("team.privateChats", { team: team.name })}</p>;
 }

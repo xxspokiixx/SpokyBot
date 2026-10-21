@@ -1941,5 +1941,6 @@
   "cloudBuy.row.backups": "Tägliche Backups, {days} Tage aufbewahrt",
   "cloudBuy.trialTerms": "Karte nötig, berechnet wird nichts, bis deine Testphase endet. Jederzeit in der App kündbar.",
   "cloudBuy.timeline.firstPayment": "Erste Zahlung",
-  "team.privateChats": "Chats in {team} sind für andere Mitglieder privat. Die Admins von {team} können sie sehen."
+  "team.privateChats": "Chats in {team} sind für andere Mitglieder privat. Die Admins von {team} können sie sehen.",
+  "team.privateHeader": "Privat · Admins können es sehen"
 }

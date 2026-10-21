@@ -4513,5 +4513,6 @@
   "cloudBuy.row.backups": "Günlük yedekler, {days} gün saklanır",
   "cloudBuy.trialTerms": "Kart gerekir, deneme süreniz bitene kadar hiçbir ücret alınmaz. İstediğiniz zaman uygulamadan iptal edin.",
   "cloudBuy.timeline.firstPayment": "İlk ödeme",
-  "team.privateChats": "{team} içindeki sohbetler diğer üyelere kapalıdır. {team} yöneticileri bunları görebilir."
+  "team.privateChats": "{team} içindeki sohbetler diğer üyelere kapalıdır. {team} yöneticileri bunları görebilir.",
+  "team.privateHeader": "Özel · yöneticiler görebilir"
 }

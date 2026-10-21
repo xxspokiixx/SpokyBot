@@ -5717,5 +5717,6 @@
   "homeScreen.signInOther": "このコンピューターは別のアカウントで MausBot Cloud にサインインしています。My Cloud の持ち主のアカウントでサインインしてください。",
   "homeScreen.signInButton": "サインイン",
   "homeScreen.plan": "My Cloud は停止しています",
-  "team.privateChats": "{team} でのチャットは他のメンバーには非公開です。{team} の管理者は閲覧できます。"
+  "team.privateChats": "{team} でのチャットは他のメンバーには非公開です。{team} の管理者は閲覧できます。",
+  "team.privateHeader": "非公開 · 管理者は閲覧できます"
 }
