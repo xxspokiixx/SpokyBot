@@ -418,10 +418,13 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("picks one of the ten bodies, ten colors and a face for the mascot", () => {
+  it("picks one of the ten bodies, ten Halloween bodies, ten colors and a face for the mascot", () => {
     const bot = makeBot();
     const rendered = editor(bot);
-    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(10);
+    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(20);
+    expect(rendered.html).toContain(">Halloween<");
+    click(find(rendered, "aria-label", "Use the Pumpkin body"));
+    expect(patch).toHaveBeenLastCalledWith({ mascotBody: "pumpkin" });
     expect(rendered.html.match(/aria-label="Use \w+ mascot color"/g)).toHaveLength(10);
     expect(find(rendered, "aria-label", "Use the Cursor body").props["aria-pressed"]).toBe(true);
     click(find(rendered, "aria-label", "Use the Blob body"));
