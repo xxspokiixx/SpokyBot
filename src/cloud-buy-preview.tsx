@@ -1,10 +1,12 @@
 // Dev-only gallery of the Cloud buying sheet, served at /cloud-buy-preview.html; not in the packaged app.
 // ?state=choose|sign-in-email|sign-in-code|sign-in-sso|pay|pay-late|setup|ready|has-cloud|unreachable&skin=midnight&staging=1&reduced=1&plan=starter&lang=de
+// &current=pro (a subscriber's own plan says Your plan; current=personal shows a Personal subscriber's own card)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Cloud, FolderOpen, MessageSquare, Repeat } from "lucide-react";
 import type { CloudOffer } from "../electron/cloud-home.mjs";
 import { CloudAddPanel, CloudAddSheet, type CloudAddActions, type CloudAddUi } from "@/components/CloudAddDialog";
+import { ChooseScreen } from "@/components/cloud-buy/ChooseScreen";
 import type { CloudAddView } from "@/lib/cloud-plan";
 import { setLocale } from "@/lib/i18n";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
@@ -18,6 +20,7 @@ const OFFER: CloudOffer = { recommended: "pro", creditUsd: 5, reminderDays: 1, r
   { tier: "pro", label: "Pro", amount: 4900, trialDays: 3, allowances: allowances(4, 4, 100, 15, 300, 60_000, 14) },
   { tier: "max", label: "Max", amount: 9900, trialDays: 3, allowances: allowances(8, 4, 100, 15, 800, 180_000, 14) },
 ] };
+const PERSONAL = { tier: "personal", label: "Personal", amount: 2900, allowances: allowances(2, 3, 20, 15, 100, 30_000, 14) };
 const started = { tier: "pro", trial: { state: "active" as const, tier: "pro", endsAt: NOW + 3 * DAY, amount: 4900, chargeAt: NOW + 3 * DAY, holdUntil: null, deleteAt: null, keep: "none" as const },
   credit: { grantedUsd: 5, remainingUsd: 5, state: "active" as const } };
 const VIEWS: Record<string, CloudAddView> = {
@@ -61,12 +64,17 @@ function Preview() {
   setLocale(params.get("lang") ?? "en");
   const state = params.get("state") ?? "choose";
   const view = VIEWS[state] ?? VIEWS.choose!;
-  const ui: CloudAddUi = { chosen: params.get("plan"), offerShown: OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
+  const current = params.get("current");
+  const ui: CloudAddUi = { chosen: params.get("plan"), current, offerShown: OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
     email: "maya@studio.co", code: state === "sign-in-code" ? "4820" : "", profileEmail: "maya@studio.co",
     look: { typed: "My Cloud", name: "My Cloud", color: "blue" }, counting: state === "ready" ? 3 : null, copied: false, payFailed: false, interest: null };
   return <div className="relative h-screen overflow-hidden">
     <MockApp />
-    <CloudAddSheet kind={view.kind} staging={params.get("staging") === "1"} onClose={noop}><CloudAddPanel view={view} ui={ui} actions={actions} /></CloudAddSheet>
+    <CloudAddSheet kind={view.kind} staging={params.get("staging") === "1"} onClose={noop}>
+      {current === "personal" && view.kind === "offer"
+        ? <ChooseScreen offer={view.offer} current={current} own={PERSONAL} now={NOW} busy={false} signedOut={false} notice={null} onStart={noop} onSignIn={noop} />
+        : <CloudAddPanel view={view} ui={ui} actions={actions} />}
+    </CloudAddSheet>
   </div>;
 }
 
