@@ -138,7 +138,7 @@ if (!process.versions.electron) {
     const page = (html, title) => {
       const shown = apps.createAppCard({ bot: { id: "bot-probe", name: "Probe" }, threadId: "t-probe", input: { tool: "show_html", html, title } });
       assert.equal(shown.ok, true, JSON.stringify(shown));
-      const doc = apps.appDocument("t-probe", shown.messageId, "confirm");
+      const doc = apps.appDocument("t-probe", shown.messageId);
       assert.ok(doc, "the stored page is served as a document");
       return doc;
     };

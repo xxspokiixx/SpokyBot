@@ -13,7 +13,7 @@ const OTHER = { name: "some other window" };
 const botDoc = (): AppDocument => ({
   v: 1, messageId: "m1", rev: 0, srcdoc: "<!DOCTYPE html>", csp: BOT_HTML_CSP,
   network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
-  can: { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true }, approval: "confirm",
+  can: { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true },
 });
 
 const mcpDoc = (over: Partial<AppDocument> = {}): AppDocument => ({
@@ -22,7 +22,7 @@ const mcpDoc = (over: Partial<AppDocument> = {}): AppDocument => ({
   tool: { name: "get-time", title: "Get time", inputSchema: { type: "object" } },
   toolInput: { zone: "UTC" },
   toolResult: { content: [{ type: "text", text: "12:00" }], structuredContent: { time: "12:00" } },
-  can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true }, approval: "confirm",
+  can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true },
   ...over,
 });
 
@@ -32,13 +32,13 @@ function harness(doc: AppDocument = botDoc(), context: AppHostContext = { theme:
   const timers: Array<{ at: number; run: () => void; live: boolean }> = [];
   const sent: JsonRpcMessage[] = [];
   const calls = {
-    rpc: [] as Array<{ method: string; params: unknown; engaged: boolean }>,
+    rpc: [] as Array<{ method: string; params: unknown }>,
     messages: [] as string[], links: [] as string[], contexts: [] as unknown[], heights: [] as number[], teardowns: 0, logs: [] as unknown[],
   };
   let rpcAnswer: (method: string, params: Record<string, unknown>) => Promise<unknown> = async () => ({ content: [] });
   const adapter: AppBridgeAdapter = {
     post: (message) => { sent.push(message); },
-    callRpc: (method, params, info) => { calls.rpc.push({ method, params, engaged: info.engaged }); return rpcAnswer(method, params); },
+    callRpc: (method, params) => { calls.rpc.push({ method, params }); return rpcAnswer(method, params); },
     sendMessage: async (text) => { calls.messages.push(text); },
     openLink: (url) => { calls.links.push(url); },
     setContext: (update) => { calls.contexts.push(update); },
@@ -181,7 +181,7 @@ describe("the method table", () => {
     expect(h.calls.rpc).toEqual([]);
   });
 
-  it("relays an MCP app's server calls with the engagement at the time, and passes refusals through", async () => {
+  it("relays an MCP app's server calls, engaged or not, and passes refusals through", async () => {
     const h = harness(mcpDoc());
     await h.connect();
     h.answerRpc(async (method) => (method === "tools/list" ? { tools: [{ name: "get-time" }] } : { content: [{ type: "text", text: "13:00" }] }));
@@ -189,11 +189,11 @@ describe("the method table", () => {
     h.setEngaged(false);
     expect((await h.request("tools/list"))?.result).toEqual({ tools: [{ name: "get-time" }] });
     expect(h.calls.rpc).toEqual([
-      { method: "tools/call", params: { name: "get-time", arguments: {} }, engaged: true },
-      { method: "tools/list", params: {}, engaged: false },
+      { method: "tools/call", params: { name: "get-time", arguments: {} } },
+      { method: "tools/list", params: {} },
     ]);
-    h.answerRpc(async () => { throw { code: RPC_HOST_REFUSED, message: "The person declined." }; });
-    expect((await h.request("tools/call", { name: "save" }))?.error).toEqual({ code: RPC_HOST_REFUSED, message: "The person declined." });
+    h.answerRpc(async () => { throw { code: RPC_HOST_REFUSED, message: "This bot asks before it changes anything." }; });
+    expect((await h.request("tools/call", { name: "save" }))?.error).toEqual({ code: RPC_HOST_REFUSED, message: "This bot asks before it changes anything." });
     h.answerRpc(async () => { throw new Error("Offline"); });
     expect((await h.request("resources/read", { uri: "ui://x" }))?.error).toEqual({ code: RPC_HOST_REFUSED, message: "Offline" });
     expect((await h.request("tools/call", { arguments: {} }))?.error?.code).toBe(RPC_INVALID_PARAMS);

@@ -47,8 +47,6 @@ export interface AppRpcRefusal {
   error: JsonRpcError;
   /** 401: the person must sign in to this server again. */
   signIn?: { server: string };
-  /** 409: the call needs the person's Allow. */
-  confirm?: { tool: string; title?: string };
   /** 410: the server is gone, off, or its apps are switched off. */
   blocked?: { reason: AppBlockedReason; text?: string };
 }
@@ -64,9 +62,6 @@ function rpcRefusal(error: unknown): AppRpcRefusal {
   const code = given && typeof given.code === "number" && Number.isInteger(given.code) ? given.code : RPC_HOST_REFUSED;
   const refusal: AppRpcRefusal = { status: error.status, error: { code, message: error.message || "The app's server refused this." } };
   if (isRecord(body.signIn) && typeof body.signIn.server === "string") refusal.signIn = { server: body.signIn.server };
-  if (isRecord(body.confirm) && typeof body.confirm.tool === "string") {
-    refusal.confirm = { tool: body.confirm.tool, ...(typeof body.confirm.title === "string" && body.confirm.title ? { title: body.confirm.title } : {}) };
-  }
   if (isRecord(body.blocked) && typeof body.blocked.reason === "string") {
     refusal.blocked = { reason: body.blocked.reason as AppBlockedReason, ...(typeof body.blocked.text === "string" ? { text: body.blocked.text } : {}) };
   } else if (error.status === 410) {
@@ -81,13 +76,11 @@ export async function callAppRpc(args: {
   messageId: string;
   method: AppRpcMethod;
   params: Record<string, unknown>;
-  /** The person pressed Allow in the host-drawn bar. */
-  confirmed?: boolean;
 }): Promise<AppRpcOutcome> {
   try {
     const result = await api<unknown>(appActionPath(args.botId, args.messageId, "rpc"), {
       method: "POST",
-      body: JSON.stringify({ threadId: args.threadId, method: args.method, params: args.params, ...(args.confirmed ? { confirmed: true } : {}) }),
+      body: JSON.stringify({ threadId: args.threadId, method: args.method, params: args.params }),
     });
     return { ok: true, result };
   } catch (error) {

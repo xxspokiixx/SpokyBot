@@ -144,8 +144,6 @@ export interface AppDocument {
   can: { serverTools: boolean; serverResources: boolean; message: boolean; openLinks: boolean; modelContext: boolean };
   /** Why serverTools/serverResources are off: drawn as a strip under the frame. */
   blocked?: { reason: "signed-out" | "server-removed" | "server-disabled" | "apps-off" | "too-large"; text: string };
-  /** "confirm": non-read-only model-visible tools need the Allow bar. */
-  approval: "full" | "confirm";
 }
 ```
 
@@ -303,7 +301,7 @@ Clients close after 5 idle minutes, and at most 6 are open at once (least recent
 
 ### App → server calls
 
-Every server-proxied bridge method goes through one route: `POST /api/bots/:botId/apps/:messageId/rpc`, with body `{ threadId, method, params, confirmed? }`. `method` is one of `tools/call`, `tools/list`, `resources/read` or `resources/list`. The route (`server/routes/chat-apps.ts` → `server/chat-apps-mcp.ts`) answers with the JSON-RPC `result`, or with `{ error: {code, message}, signIn?, confirm? }`. It checks, in order:
+Every server-proxied bridge method goes through one route: `POST /api/bots/:botId/apps/:messageId/rpc`, with body `{ threadId, method, params }`. `method` is one of `tools/call`, `tools/list`, `resources/read` or `resources/list`. The route (`server/routes/chat-apps.ts` → `server/chat-apps-mcp.ts`) answers with the JSON-RPC `result`, or with `{ error: {code, message}, signIn?, blocked? }`. It checks, in order:
 
 1. The row is an `app` row of this bot and thread, with `source: "mcp"`. Otherwise 404.
 2. The server is still configured, enabled, mounted for this bot and `apps` is on. Otherwise 410 with `blocked.reason`.
@@ -311,11 +309,11 @@ Every server-proxied bridge method goes through one route: `POST /api/bots/:botI
    - The tool exists in the server's current catalog, and its visibility includes `"app"` (default `["model","app"]`). Otherwise `-32602`.
    - Tool selection: a tool whose visibility includes `"model"` needs `allowsTool(scope, {kind:"mcp", server, name})`. An app-only tool needs only `canUseMcpServer`. The Access settings list hides app-only tools.
    - Arguments must be ≤ 64 KB and pass `lenientToolValidator(inputSchema)`.
-   - Approval, using `approvalModeFor({...bot, threadId})`:
+   - Approval follows the bot's own level (`approvalModeFor({...bot, threadId})`), and OpenMausBot draws no card of its own:
      - `readOnlyHint: true` → run.
      - App-only, without `destructiveHint: true` → run.
      - Mode `full` → run.
-     - Otherwise, without `confirmed: true` → 409 `{confirm: {tool, title}}`. The client draws the Allow bar and resends with `confirmed: true` only after the person presses Allow.
+     - Otherwise (any level where the bot itself would ask first) → 403 `-32000` "This bot asks before it changes anything, so its apps can only look. …", handed to the view as is.
 4. `resources/read` takes any URI the server serves, up to 8 MB. `tools/list` returns the app-visible tools after the bot's selection.
 5. Rate limits per row: 60 rpc calls a minute. Over → 429.
 6. Signed out (401 from the server, or `needs-sign-in`) → 401 `{signIn: {server}}`. The client shows "Sign in to <server> again" and answers the view with `-32000 "Sign-in needed"`.
@@ -477,12 +475,11 @@ Limits per frame, enforced by the bridge (the server limits are a backstop):
 |---|---|---|
 | `ui/message` | yes | 1 per 3 s, 10 per 10 min, text ≤ 4,000 chars |
 | `ui/open-link` | yes | 1 per 2 s; http/https, no userinfo, ≤ 2,048 chars |
-| `tools/call` (non-read-only, model-visible, mode not full) | yes, plus Allow | 10 per 10 s, 120 per 10 min |
-| `tools/call` (other), reads, lists | no | same |
+| `tools/call`, reads, lists | no | 10 per 10 s, 120 per 10 min |
 | `ui/update-model-context` | no | coalesced to 1 per s |
 | any incoming message | — | ≤ 1 MB JSON, else dropped |
 
-The Allow bar is host-drawn under the frame: "<title> wants to <tool title>. [Allow] [Allow for this app] [Deny]". "Allow for this app" lasts until the frame is torn down. Deny or a 2-minute timeout answers `-32000 "The person declined."`.
+There is no Allow bar: a change outside Full access is declined by the server, with no card (the owner's rule that approvals belong to each engine's own permission system).
 
 ### Performance
 
@@ -575,8 +572,8 @@ Server:
     - a removed, disabled or apps-off server (410);
     - a tool outside the app's own server's catalog, or a tool whose visibility lacks `"app"` (`-32602`);
     - a model-visible tool outside the bot's selection (`-32602`);
-    - a model-visible tool without `readOnlyHint: true`, when the mode is not `full` and `confirmed` is not true (409 confirm);
-    - an app-only tool with `destructiveHint: true` under the same conditions (409 confirm).
+    - a model-visible tool without `readOnlyHint: true`, when the mode is not `full` (403 `-32000`, no card);
+    - an app-only tool with `destructiveHint: true` under the same condition (403 `-32000`).
 16. The model never sees an app-only tool: gate, proxy and directory listings drop it, and a model call to it is refused.
 17. `show_html` refuses rooms, input over the limits, and `update_html` on another bot's, another thread's or an MCP row. `recordMcpAppCall` writes no row for a room, an unmounted server, a server outside the bot's scope or an apps-off server.
 18. An observer report is accepted only with the active turn's capability for that thread (the existing options-card checks).
@@ -645,7 +642,7 @@ Owns:
 
 - `src/components/app/AppMessage.tsx` (row and chrome);
 - `AppFrame.tsx` (iframe and bridge);
-- `AppChrome.tsx` (header, info popover, Allow bar, strips);
+- `AppChrome.tsx` (header, info popover, strips);
 - `app-pool.ts` (live budget and IntersectionObserver);
 - `app-host-context.ts` (skin tokens → spec variables);
 - `app-api.ts`;
@@ -679,7 +676,7 @@ Tests:
 - the observer against both fakes (report shape, captured before trimming, oversized drop, no double report through gate + proxy);
 - the `strictInitialize` server still connects (fallback recorded as refused);
 - app-only tools filtered for every engine mount;
-- `mcpRpc` (rules 15 and 18; signed-out 401 with `signIn`; removed server 410; confirm flow; rate limit);
+- `mcpRpc` (rules 15 and 18; signed-out 401 with `signIn`; removed server 410; a change declined outside Full access; rate limit);
 - `claude.ts` mounts a URL app server through the proxy and a non-app URL server natively, unchanged.
 
 ### I1. iOS (mausbot-mobile)
@@ -689,7 +686,7 @@ Owns:
 - `ios/Sources/CompanionCore/ChatApp.swift` (`AppPayload` and `AppDocument` decoding, `fromApp`);
 - `Models.swift` (`.app` kind and fields);
 - `Client.swift` (`appDocument`, `appRPC`, `appContext`, `sendAppMessage`);
-- `ios/App/Cards/ChatAppView.swift` (row, chrome, Allow bar, strips, placeholder and snapshot);
+- `ios/App/Cards/ChatAppView.swift` (row, chrome, strips, placeholder and snapshot);
 - `ios/App/Cards/ChatAppWebView.swift` (configuration, scheme handler, content world and handler, delegates, content rule lists, engagement recognizers);
 - `ios/App/Cards/ChatAppPool.swift`;
 - the `ChatView.swift` dispatch and the "Sent from" line;
@@ -726,13 +723,13 @@ End-to-end, on an isolated instance (`docs/verification/README.md`, never the in
 1. Add the three example servers. Settings → Test marks each as having apps, and the catalog shows `uiExtension: ok`.
 2. A Claude Code bot and a Codex bot each ask for "the server time" (basic) and "run the debug tool with includeMeta". An app row appears after each tool call. The frame renders with the result: the time, and the debug view's "tool-result received" with `structuredContent` and `_meta`.
 3. In the debug view (its button labels):
-   - "Call debug-refresh" → the app-only tool runs through `rpc` without an Allow bar (app-only, not destructive).
+   - "Call debug-refresh" → the app-only tool runs through `rpc` (app-only, not destructive).
    - "Send Text" → a "Sent from Debug Tool" message starts a turn, and the model's prompt shows the app form. "Send Test Image" gets an error (text only in v1).
    - "Update (Text)" → the next typed message carries one context block, and the one after carries none.
    - "Open Link" → the browser opens (stubbed in CI).
    - "Fullscreen" → answered `inline`.
    - "200x100" / "400x300" / "800x600" change the frame's height (clamped), never its width.
-4. A bot in Ask mode with `server/testing/fake-stdio-app-server.ts`, whose view calls a model-visible tool without `readOnlyHint`: the call shows the Allow bar, Deny returns the error to the view, and Allow runs it. The same call in Full access runs without the bar.
+4. A bot in Ask mode with `server/testing/fake-stdio-app-server.ts`, whose view calls a model-visible tool without `readOnlyHint`: the call is declined and the error reaches the view, with no card. The same call in Full access runs.
 5. Scroll a thread with 6 app rows: never more than 3 live frames, torn-down rows keep their height, and the debug view logs `teardown`.
 6. Excalidraw: "draw a flowchart of our deploy" → `create_view` renders the diagram (esm.sh allowed by its CSP), its clipboard permission is denied (the info popover says so), and `save_checkpoint` runs through `rpc`.
 7. A strict server (`fake-http-mcp-server` `strictInitialize`) still connects; its catalog says `refused`.
@@ -768,7 +765,7 @@ Security: the Electron test (S3) and the two phone web-view tests (I1, A1) run e
 S1 and S2 (2026-10-14). Small deviations from the text above, so later tasks build on what exists:
 
 - **Wire.** `AppPayload` also carries `blocked?: AppBlockedReason` (the spec's "row is still written with `blocked`"), and its `doc` is `""` when nothing was stored. `AppBlockedReason` adds `"unavailable"` (the UI resource could not be read: offline, wrong mime) for S4. `AppDocument` has no `source`: a document with `tool` is an MCP app, one without is bot HTML (`isMcpDocument` in `bridge.ts`).
-- **Bridge adapter.** `callRpc(method, params, { engaged })` takes a third argument: the engagement when the View asked, so the platform shows the Allow bar only to a person who is interacting and otherwise answers `-32000`. `createAppBridge` also takes `source()` (the frame's window, for rule 9), `hostVersion`, `limits.maxHeight`, `log` and `timers`. It returns `{ handleMessage, contextChanged, teardown, dispose, initialized }`. A document with no `toolResult` is sent `{content: []}`.
+- **Bridge adapter.** `callRpc(method, params)`. `createAppBridge` also takes `source()` (the frame's window, for rule 9), `hostVersion`, `limits.maxHeight`, `log` and `timers`. It returns `{ handleMessage, contextChanged, teardown, dispose, initialized }`. A document with no `toolResult` is sent `{content: []}`.
 - **Phone host page.** Page → native adds `{ v: 1, type: "torn-down" }` after `teardown()` (Android cannot await the call). Android's native → page messages are JSON `{ v: 1, call, args }` over `postWebMessage`, heard on the injected `appHost` object, which the page leaves in place; the page's api is also `window.mausbotAppHost`. `load` takes `limits.height`, the row's starting height. The page has no CSP of its own (a srcdoc frame inherits its parent's policy).
 - **Send path.** The prompt is composed in four places in `server/index.ts`, so `acceptDirectSend`, `startOrQueueDirectMessage` and `startTurn` take one `app: { context?, fromApp? }` option: the context block goes in front of the composed prompt on start, steer and queue, and `fromApp` is stored on the user line on every path (the steer queue carries it). The route builds the block with `appContextBlock` and marks it delivered after acceptance; a retry of an accepted `sendId` carries none. `withAppContext(store, text, threadId)` returns `{ text, deliver }`. Guarded sends carry no app context.
 - **index.ts.** `resolveReplyTarget` moved to `server/replies.ts` (`replyTargetIn`, which now admits `app` rows) to keep the file at its ratcheted length. The internal card route passes `apps: chatApps` to `createAgentCard` and awaits it, so S4's `mcp_app` branch may be async.
@@ -791,7 +788,6 @@ S3, the desktop renderer and Electron (2026-10-14):
 - **Permissions, as measured.** Camera, microphone, geolocation and display capture are refused by Chromium's Permissions Policy before they reach the session handler, because the frame is cross-origin and has no `allow` attribute. A notification request reaches the handler from `about:srcdoc`, and `appPermissionAllowed` refuses it. `navigator.clipboard.writeText` rejects with NotAllowedError. `sendBeacon` returns true, because it only queues, while the CSP blocks the request; the empty sink is the proof.
 - **Host context.** `styles.variables` carries the current skin's resolved values, not `light-dark()` pairs, because a frame cannot read the page's custom properties; a skin change sends them again. Border variables are a tint of the ink over the card (`color-mix(in srgb, ink 20%, composer)`), not the skin's hairline: in Midnight the hairline is a few steps from the card colour and disappeared.
 - **Refusals the row draws:**
-  - A 409 `confirm` while the person is not engaged answers the View `-32000` and draws no Allow bar.
   - A 401 draws the strip "Sign in to <server> again"; its button opens Settings → MCP servers (`togglePlugins`, surface `mcp`). The View gets `-32000 "Sign-in needed"`.
   - A 410 draws the strip from the body's `blocked: {reason, text}`, else `server-removed`. **S4: put `blocked` in the 410 body.**
   - No answer at all draws "Reconnect to use this app" with Try again.
@@ -813,7 +809,7 @@ S4 (2026-10-14). Deviations from the text above:
 - **Catalog.** One entry per server name, valid for the configuration it was learned from (`hash`: a URL server's type and address, a command server's command, arguments and environment; headers are left out so a refreshed sign-in token is the same server). It keeps only app-relevant tools (a UI or a visibility). It learns from Settings → Test, the background probe, the app connections' own tools/list and every reported call, not from the engine's tools/list through a gate or proxy (that would need a second report kind). `mcp-probe.ts` still reads one page of tools.
 - **Probes.** A probe of a command server starts it on this computer, so the background probe never starts one that no turn would: a command server is probed by Settings → Test, or in the background when a 1:1 turn whose bot may use it (its tool selection allows the server) finds no fresh entry; that turn starts the server anyway, and the next turn is observed. A URL server starts nothing locally, so it is also probed when it is saved, switched on or has its apps switched on, and 20 s after startup when its entry is missing or older than 7 days. Probes a turn or startup asks for run at most every ten minutes per server. (Probing every command server on save made `openai-tools.e2e.test.ts` fail: it requires a server a bot cannot use, tools off or an empty selection, never to start.) There is no hook on sign-in in `mcp-oauth.ts`: the next turn's probe covers it. Background probes wait 45 s, since a command started with `npx` may first fetch its package; Settings → Test keeps 8 s for a command, and on a loaded machine the basic example server needed several Tests while the background probe passed. With the apps switch off, Test advertises nothing and records nothing.
 - **Settings.** The listing carries `apps: boolean` (true unless switched off); `PATCH /api/mcp/servers/:name` takes exactly one of `{ enabled }` or `{ apps }`. Stored, the switch is only `apps: false`; an edit that does not mention it keeps it. Removing or editing a server forgets its catalog entry and closes its connections.
-- **rpc answers.** Status codes: 403 with `-32602` for a policy refusal (no such tool, not visible to apps, outside the selection), 400 with `-32602` for malformed or invalid arguments, 409 `{ error: {code: -32000}, confirm: {tool, title} }`, 410 `{ error, blocked: {reason, text} }`, 401 `{ error: {code: -32000, message: "Sign-in needed"}, signIn: {server} }`, 413 for a resource over 8 MB, 502 with the server's own code and redacted words for its JSON-RPC error, 502 `-32603` when it cannot be reached. The 60-a-minute rate is checked after the 410 and sign-in checks and before the server is contacted, so a flood never reaches it. A 401 from the server does not mark it as needing sign-in (only Settings → Test's OAuth discovery does).
+- **rpc answers.** Status codes: 403 with `-32602` for a policy refusal (no such tool, not visible to apps, outside the selection), 400 with `-32602` for malformed or invalid arguments, 403 `-32000` for a change declined outside Full access, 410 `{ error, blocked: {reason, text} }`, 401 `{ error: {code: -32000, message: "Sign-in needed"}, signIn: {server} }`, 413 for a resource over 8 MB, 502 with the server's own code and redacted words for its JSON-RPC error, 502 `-32603` when it cannot be reached. The 60-a-minute rate is checked after the 410 and sign-in checks and before the server is contacted, so a flood never reaches it. A 401 from the server does not mark it as needing sign-in (only Settings → Test's OAuth discovery does).
 - **recordMcpAppCall** answers the observer (which ignores it) with 409 for a room or apps off, 404 for an unmounted or out-of-scope server, 400 for a malformed report; no row in each case. `border` is `prefersBorder !== false`. Row text and title pass `redactSecretsInText`; the stored result does not.
 - **createAgentCard** is overloaded: `tool: "mcp_app"` answers with a promise, every other tool synchronously. `ChatApps` gained `recordMcpAppCall`, set by `createChatAppsMcp` beside `mcpAccess`.
 - **Connections.** Pooled per (name, whole spec including headers), so a new sign-in token opens a new client; the UI resource cache is per (name, configuration hash, uri). Command servers the pool started are sent SIGTERM when the server process exits.

@@ -85,16 +85,14 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
     expect(doc).toMatchObject({
       tool: { name: "show_board" }, toolInput: { cards: 4 },
       toolResult: { content: [{ type: "text", text: "Board with 4 cards" }], structuredContent: { cards: 4 }, _meta: { "fake-app/at": "2026-10-14T00:00:00Z" } },
-      can: { serverTools: true, serverResources: true }, approval: expect.stringMatching(/^(full|confirm)$/),
+      can: { serverTools: true, serverResources: true },
     });
 
     const rpc = (body: Record<string, unknown>, expected = 200) => api("POST", `/api/bots/${bot.id}/apps/${row.id}/rpc`, { threadId: bot.threadId, ...body }, expected);
     expect(await rpc({ method: "tools/call", params: { name: "save_board", arguments: { state: "s1" } } })).toMatchObject({ content: [{ type: "text", text: "Saved" }] });
     expect(logged().filter((frame) => frame.method === "tools/call").map((frame) => frame.params)).toContainEqual({ name: "save_board", arguments: { state: "s1" } });
-    if (doc.approval === "confirm") {
-      expect(await rpc({ method: "tools/call", params: { name: "paint_board", arguments: { color: "red" } } }, 409)).toMatchObject({ confirm: { tool: "paint_board", title: "Paint board" } });
-    }
-    expect(await rpc({ method: "tools/call", params: { name: "paint_board", arguments: { color: "red" } }, confirmed: true })).toMatchObject({ content: [{ type: "text", text: "Painted red" }] });
+    // A new bot starts at Full access: its app's change runs with no card.
+    expect(await rpc({ method: "tools/call", params: { name: "paint_board", arguments: { color: "red" } } })).toMatchObject({ content: [{ type: "text", text: "Painted red" }] });
     expect(await rpc({ method: "tools/call", params: { name: "peek_board", arguments: {} } }, 403)).toEqual({ error: { code: -32602, message: "That tool is not available to apps." } });
     expect((await rpc({ method: "resources/read", params: { uri: BOARD_URI } })).contents[0].uri).toBe(BOARD_URI);
 

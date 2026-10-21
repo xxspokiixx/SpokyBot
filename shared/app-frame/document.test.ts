@@ -55,8 +55,8 @@ describe("buildSrcdoc", () => {
 
 describe("documents", () => {
   it("a bot page carries exactly the bot policy, its network set and no server calls", () => {
-    const doc = botHtmlDocument({ messageId: "m1", rev: 2, html: "<!DOCTYPE html><html><body>hi</body></html>", approval: "confirm" });
-    expect(doc).toMatchObject({ v: 1, messageId: "m1", rev: 2, csp: BOT_HTML_CSP, approval: "confirm" });
+    const doc = botHtmlDocument({ messageId: "m1", rev: 2, html: "<!DOCTYPE html><html><body>hi</body></html>" });
+    expect(doc).toMatchObject({ v: 1, messageId: "m1", rev: 2, csp: BOT_HTML_CSP });
     expect(doc.srcdoc.startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`)).toBe(true);
     expect(doc.can).toEqual({ serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true });
     expect(doc.tool).toBeUndefined();
@@ -67,7 +67,7 @@ describe("documents", () => {
     const doc = mcpAppDocument({
       messageId: "m2", rev: 0, html: "<html><body>app</body></html>", network,
       tool: { name: "create_view" }, toolInput: { a: 1 }, toolResult: { content: [{ type: "text", text: "ok" }] },
-      can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true }, approval: "full",
+      can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true },
     });
     expect(doc.csp).toBe(mcpAppCsp(network));
     expect(doc.srcdoc).toBe(`${CSP_META_PREFIX}${mcpAppCsp(network)}"><html><body>app</body></html>`);

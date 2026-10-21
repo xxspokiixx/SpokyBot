@@ -10,7 +10,7 @@ import { startAppHostPage, type AppHostFromNative, type AppHostToNative } from "
 const DOC: AppDocument = {
   v: 1, messageId: "m1", rev: 0, srcdoc: "<!DOCTYPE html><p>page</p>", csp: BOT_HTML_CSP,
   network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
-  can: { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true }, approval: "confirm",
+  can: { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true },
 };
 
 const pages: Window[] = [];

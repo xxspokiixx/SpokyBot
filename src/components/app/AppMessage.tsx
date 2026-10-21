@@ -7,11 +7,10 @@ import { appBlockedText } from "../../../shared/app";
 import { APP_FRAME_LIMITS } from "../../../shared/app-frame/bridge";
 import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-api";
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
-import { AppAllowBar, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, type AllowDecision } from "./AppChrome";
+import { AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 
 const WIDTH = "max-w-[760px]";
-const ALLOW_TIMEOUT_MS = APP_FRAME_LIMITS.allowTimeoutMs;
 const DOC_REUSE_MS = 60_000;
 
 const heights = new Map<string, number>();
@@ -62,12 +61,6 @@ export function AppMessage({ botId, botName, threadId, message, pool }: {
   return <AppRow botId={botId} botName={botName} threadId={threadId} message={message} payload={payload} pool={pool} />;
 }
 
-interface AllowAsk {
-  id: number;
-  tool: string;
-  decide(decision: AllowDecision): void;
-}
-
 type Loaded =
   | { key: string; doc: AppDocument; failure?: undefined }
   | { key: string; doc?: undefined; failure: AppFetchFailure };
@@ -92,8 +85,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [fetching, setFetching] = useState(false);
   const [problem, setProblem] = useState<AppFrameProblem | null>(null);
-  const [asks, setAsks] = useState<AllowAsk[]>([]);
-  const askSeq = useRef(0);
   const frame = useRef<AppFrameHandle | null>(null);
   const row = useRef<HTMLDivElement | null>(null);
   const mounted = useRef(true);
@@ -148,29 +139,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
     if (mounted.current) setHeight(next);
   }, [message.id, rev]);
 
-  const asksNow = useRef<AllowAsk[]>([]);
-  const askAllow = useCallback((tool: string) => new Promise<AllowDecision>((resolve) => {
-    const id = ++askSeq.current;
-    let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const decide = (decision: AllowDecision) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      asksNow.current = asksNow.current.filter((ask) => ask.id !== id);
-      if (mounted.current) setAsks(asksNow.current);
-      resolve(decision);
-    };
-    timer = setTimeout(() => decide("deny"), ALLOW_TIMEOUT_MS);
-    asksNow.current = [...asksNow.current, { id, tool, decide }];
-    setAsks(asksNow.current);
-  }), []);
-
   const current = slot.live ? loaded?.doc : undefined;
-  // A frame or row that goes away denies its open questions; decide() replaces the list, so this walks a stable one.
-  const denyAll = useCallback(() => { for (const ask of asksNow.current) ask.decide("deny"); }, []);
-  useEffect(() => { if (!current) denyAll(); }, [current, denyAll]);
-  useEffect(() => denyAll, [denyAll]);
 
   const reloadNow = () => {
     setProblem(null);
@@ -211,7 +180,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
 
   const noPage = !docKey || Boolean(loaded?.failure && !loaded.failure.offline);
   const state = collapsed ? "collapsed" : current ? "live" : noPage ? "unavailable" : slot.live ? "loading" : "idle";
-  const ask = asks[0];
   const infoId = `${uid}-info`;
 
   const body = collapsed ? null : noPage ? (
@@ -228,7 +196,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
           height={height}
           handle={frame}
           onHeight={onHeight}
-          askAllow={askAllow}
           onProblem={setProblem}
           onTeardownRequested={onTeardownRequested}
         />
@@ -266,7 +233,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
           </div>
         )}
         {body}
-        {ask && current && <AppAllowBar title={payload.title} tool={ask.tool} onDecide={(decision) => ask.decide(decision)} bordered={bordered} />}
         {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
       </div>
     </div>

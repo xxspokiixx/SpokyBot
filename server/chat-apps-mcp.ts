@@ -26,6 +26,8 @@ const REMOTE_ERROR_CHARS = 1_000;
 /** A command server started through `npx` may first have to fetch its package. */
 const BACKGROUND_PROBE_MS = 45_000;
 const AUTOMATIC_PROBE_EVERY_MS = 10 * 60_000;
+/** An app's change outside Full access: declined, with no card of our own. */
+export const APP_WRITE_DECLINED = "This bot asks before it changes anything, so its apps can only look. Ask the bot to make the change, or set it to Full access.";
 
 type Json = Record<string, unknown>;
 function isRecord(value: unknown): value is Json {
@@ -295,14 +297,13 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     let problems: string[] | undefined;
     try { problems = validate && !validate(callArgs) ? schemaProblems(validate.errors) : undefined; } catch { problems = undefined; }
     if (problems?.length) return rpcError(400, -32602, `Invalid arguments: ${problems.join("; ")}`);
+    // A change follows the bot's approval level: it runs at Full access, and at any other level, where the bot
+    // itself would ask first, it is declined. OpenMausBot draws no Allow card of its own.
     const annotations = isRecord(tool.annotations) ? tool.annotations : {};
     const runs = annotations.readOnlyHint === true
       || (!visibility.includes("model") && annotations.destructiveHint !== true)
       || approvalOf(bot.id, request.threadId) === "full";
-    if (!runs && !request.confirmed) {
-      const title = oneLine(String((typeof tool.title === "string" && tool.title) || (typeof annotations.title === "string" && annotations.title) || tool.name)).slice(0, 120);
-      return rpcError(409, -32000, `The person has to allow ${title}.`, { confirm: { tool: tool.name, title } });
-    }
+    if (!runs) return rpcError(403, -32000, APP_WRITE_DECLINED);
     const result = await connections.request(name, server, "tools/call", { name: tool.name, arguments: callArgs }, AbortSignal.timeout(RPC_CALL_MS), extension);
     return { status: 200, body: isRecord(result) ? result : { content: [] } };
   }

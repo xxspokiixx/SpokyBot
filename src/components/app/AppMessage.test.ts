@@ -10,7 +10,6 @@ import type { AppDocument, AppPayload } from "../../../shared/app";
 import { APP_SAMPLES, MCP_APP_SAMPLES } from "../../../shared/app-samples";
 import { botHtmlDocument, mcpAppDocument } from "../../../shared/app-frame/document";
 import { createAppPool, type AppPool } from "./app-pool";
-import { AppAllowBar } from "./AppChrome";
 import { AppMessage, forgetAppRows } from "./AppMessage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -31,11 +30,11 @@ const mcpPayload = (more: Partial<AppPayload> = {}): AppPayload => ({
 });
 const row = (app: AppPayload | undefined, id = "a1"): Message => ({ id, role: "bot", kind: "app", at: 1, text: "[App] Coffee counter\nCups of coffee today", app });
 
-const htmlDoc = (rev = 0, html = counter.html): AppDocument => botHtmlDocument({ messageId: "a1", rev, html, approval: "confirm" });
+const htmlDoc = (rev = 0, html = counter.html): AppDocument => botHtmlDocument({ messageId: "a1", rev, html });
 const mcpDoc = (more: Partial<Parameters<typeof mcpAppDocument>[0]> = {}): AppDocument => mcpAppDocument({
   messageId: "a1", rev: 0, html: excalidraw.html, network: { connect: ["https://esm.sh"], resources: ["https://esm.sh"] },
   tool: excalidraw.tool, toolInput: excalidraw.toolInput, toolResult: excalidraw.toolResult,
-  can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true }, approval: "confirm", ...more,
+  can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true }, ...more,
 });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -256,17 +255,9 @@ describe("a bot's page", () => {
 });
 
 describe("an MCP app", () => {
-  it("asks the person before a write, and sends it only after Allow", async () => {
-    let rpc = 0;
-    fetchMock.mockImplementation(async (path, init) => {
-      if (path.endsWith("/app")) return json(200, mcpDoc());
-      if (path.endsWith("/rpc")) {
-        rpc += 1;
-        const body = JSON.parse(String(init!.body));
-        return body.confirmed ? json(200, { content: [{ type: "text", text: "exported" }] }) : json(409, { error: { code: -32000, message: "Needs the person's Allow" }, confirm: { tool: "export_to_excalidraw", title: "export the drawing" } });
-      }
-      return json(200, {});
-    });
+  it("hands a write the bot's level declines straight back to the View, with no card of its own", async () => {
+    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, mcpDoc())
+      : json(403, { error: { code: -32000, message: "This bot asks before it changes anything, so its apps can only look." } }));
     await mount(row(mcpPayload()));
     await handshake();
     // the tool's input and result reach the View right after it initialized, once
@@ -275,38 +266,11 @@ describe("an MCP app", () => {
     await engage();
     await fromView({ jsonrpc: "2.0", id: "t1", method: "tools/call", params: { name: "export_to_excalidraw", arguments: {} } });
     await settle();
-    expect(find("[data-app-allow]")!.textContent).toContain("Create view wants to export the drawing.");
-    expect(toView.find((message) => message.id === "t1")).toBeUndefined();
-    await act(async () => button("Allow")!.click());
-    await settle();
-    expect(rpc).toBe(2);
-    expect(posts("/rpc").map((body) => body.confirmed)).toEqual([undefined, true]);
-    expect(toView.find((message) => message.id === "t1")).toEqual({ jsonrpc: "2.0", id: "t1", result: { content: [{ type: "text", text: "exported" }] } });
-    expect(find("[data-app-allow]")).toBeNull();
-  });
-
-  it("answers Deny with the person's refusal", async () => {
-    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, mcpDoc())
-      : json(409, { error: { code: -32000, message: "Needs Allow" }, confirm: { tool: "save" } }));
-    await mount(row(mcpPayload()));
-    await handshake();
-    await engage();
-    await fromView({ jsonrpc: "2.0", id: "t2", method: "tools/call", params: { name: "save", arguments: {} } });
-    await settle();
-    await act(async () => button("Deny")!.click());
-    await settle();
-    expect(toView.find((message) => message.id === "t2")).toEqual({ jsonrpc: "2.0", id: "t2", error: { code: -32000, message: "The person declined." } });
-  });
-
-  it("refuses a write without the Allow bar when the person is not using the app", async () => {
-    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, mcpDoc())
-      : json(409, { error: { code: -32000, message: "Needs Allow" }, confirm: { tool: "save" } }));
-    await mount(row(mcpPayload()));
-    await handshake();
-    await fromView({ jsonrpc: "2.0", id: "t3", method: "tools/call", params: { name: "save", arguments: {} } });
-    await settle();
-    expect(find("[data-app-allow]")).toBeNull();
-    expect(toView.find((message) => message.id === "t3")).toMatchObject({ error: { code: -32000 } });
+    expect(posts("/rpc")).toHaveLength(1);
+    expect(posts("/rpc")[0]).not.toHaveProperty("confirmed");
+    expect(toView.find((message) => message.id === "t1")).toMatchObject({ error: { code: -32000 } });
+    expect(button("Allow")).toBeFalsy();
+    expect(find("[data-app-strip]")).toBeNull();
   });
 
   it("says sign in again when its server signed the person out", async () => {
@@ -336,14 +300,5 @@ describe("an MCP app", () => {
     fetchMock.mockImplementation(async () => json(200, mcpDoc()));
     await mount(row(mcpPayload({ border: false })));
     expect(find("[data-app] > div")!.className).not.toContain("rounded-3xl");
-  });
-});
-
-describe("the Allow bar", () => {
-  it("names the app and the tool, and asks plainly when they share a name", () => {
-    const bar = (title: string, tool: string) => renderToStaticMarkup(createElement(AppAllowBar, { title, tool, onDecide() {}, bordered: true }));
-    expect(bar("Show board", "Paint board")).toContain("Show board wants to Paint board.");
-    expect(bar("Get Time", "get time")).toContain("Run get time?");
-    expect(bar("Get Time", "get time")).not.toContain("wants to");
   });
 });

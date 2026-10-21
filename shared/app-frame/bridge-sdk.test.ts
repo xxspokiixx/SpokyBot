@@ -16,7 +16,6 @@ const DOC: AppDocument = {
   toolInput: { includeMeta: true },
   toolResult: { content: [{ type: "text", text: "done" }], structuredContent: { ok: true }, _meta: { trace: "t1" } },
   can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true },
-  approval: "confirm",
 };
 
 describe("the SDK's App against the bridge", () => {

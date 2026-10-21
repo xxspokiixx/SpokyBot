@@ -36,7 +36,7 @@ export function buildSrcdoc(input: { html: string; csp: string; botHelper?: bool
 
 export const BOT_HTML_CAN: AppCan = { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true };
 
-export function botHtmlDocument(input: { messageId: string; rev: number; html: string; approval: "full" | "confirm" }): AppDocument {
+export function botHtmlDocument(input: { messageId: string; rev: number; html: string }): AppDocument {
   return {
     v: 1,
     messageId: input.messageId,
@@ -45,7 +45,6 @@ export function botHtmlDocument(input: { messageId: string; rev: number; html: s
     csp: BOT_HTML_CSP,
     network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
     can: { ...BOT_HTML_CAN },
-    approval: input.approval,
   };
 }
 
@@ -59,7 +58,6 @@ export function mcpAppDocument(input: {
   toolResult?: AppToolResult;
   can: AppCan;
   blocked?: AppDocument["blocked"];
-  approval: "full" | "confirm";
 }): AppDocument {
   const network = { connect: [...input.network.connect], resources: [...input.network.resources] };
   const csp = mcpAppCsp(network);
@@ -75,6 +73,5 @@ export function mcpAppDocument(input: {
     ...(input.toolResult ? { toolResult: input.toolResult } : {}),
     can: { ...input.can },
     ...(input.blocked ? { blocked: input.blocked } : {}),
-    approval: input.approval,
   };
 }

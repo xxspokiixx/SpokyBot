@@ -93,7 +93,7 @@ export function buildAppFixtures(): AppFixtures {
     const mcpAccess = () => ({ can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true } });
     for (const message of messages) {
       if (message.kind !== "app" || !message.app || typeof message.app !== "object") continue;
-      const doc = appDocument({ store, docs, threadId: THREAD, messageId: message.id, approval: "confirm", mcpAccess });
+      const doc = appDocument({ store, docs, threadId: THREAD, messageId: message.id, mcpAccess });
       if (doc) documents[message.id] = doc;
       rows[message.id] = {
         source: message.app.source, title: message.app.title, rev: message.app.rev, border: message.app.border,

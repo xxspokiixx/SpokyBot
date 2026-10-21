@@ -24,10 +24,10 @@
 //     { v: 1, type: "torn-down" }      teardown finished (for Android, which
 //                                      cannot await the call)
 //
-// `params` per op: rpc {method, params, engaged}; message {text};
+// `params` per op: rpc {method, params}; message {text};
 // open-link {url}; context {content?, structuredContent?}. Native answers
 // every call with appHost.reply; a refusal is { error: { code, message } }
-// (-32000 for "Offline", "Sign-in needed", "The person declined.").
+// (-32000 for "Offline", "Sign-in needed").
 //
 // The script holds no secret and needs none: the native side checks that
 // every message came from the main frame of this page's origin, and the app
@@ -171,7 +171,7 @@ export function startAppHostPage(win: Window, given?: AppHostTransport): AppHost
         source: () => element.contentWindow,
         adapter: {
           post: (message) => element.contentWindow?.postMessage(message, "*"),
-          callRpc: (method: AppRpcMethod, params, context) => call("rpc", { method, params, engaged: context.engaged }),
+          callRpc: (method: AppRpcMethod, params) => call("rpc", { method, params }),
           sendMessage: async (text) => { await call("message", { text }); },
           openLink: async (url) => { await call("open-link", { url }); },
           setContext: async (update: AppContextUpdate) => { await call("context", { ...update }); },

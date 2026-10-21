@@ -9,7 +9,7 @@ import { APP_HELPER_SOURCE } from "./helper.ts";
 const DOC: AppDocument = {
   v: 1, messageId: "m1", rev: 0, srcdoc: "", csp: BOT_HTML_CSP,
   network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
-  can: { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true }, approval: "confirm",
+  can: { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true },
 };
 
 type Listener = (event: { source: unknown; data: unknown }) => void;

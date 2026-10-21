@@ -144,8 +144,6 @@ export interface AppDocument {
   can: AppCan;
   /** Why serverTools/serverResources are off: drawn as a strip under the frame. */
   blocked?: { reason: AppBlockedReason; text: string };
-  /** "confirm": non-read-only model-visible tools need the Allow bar. */
-  approval: "full" | "confirm";
 }
 
 /** `html` is wrapped when it was a fragment, and not yet scrubbed of secrets. */

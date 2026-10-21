@@ -1,4 +1,3 @@
-import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { APP_LIMITS, type AppPayload } from "../../shared/app.ts";
 import { appRow, createChatApps, rowRate, type ChatApps } from "../chat-apps.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -17,18 +16,16 @@ export interface McpRpcRequest {
   row: Message & { app: AppPayload };
   method: (typeof APP_RPC_METHODS)[number];
   params: Record<string, unknown>;
-  /** The person pressed Allow in the host-drawn bar. */
-  confirmed: boolean;
 }
 
-/** The JSON-RPC `result`, or {error: {code, message}, signIn?, confirm?}. */
+/** The JSON-RPC `result`, or {error: {code, message}, signIn?, blocked?}. */
 export interface McpRpcAnswer {
   status: number;
   body: Record<string, unknown>;
 }
 
 export interface ChatAppRouteDeps {
-  store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "patchMessage" | "projectBotForTask" | "taskByThread">;
+  store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "patchMessage" | "taskByThread">;
   apps: ChatApps;
   /** On a Cloud home, a guest changes only conversations it started. */
   threadRefusal?(auth: RequestAuth, threadId: string): string | null;
@@ -46,12 +43,6 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
   const { store, apps } = deps;
   const contextRate = rowRate(120, 60_000);
 
-  const approvalOf = (threadId: string): "full" | "confirm" => {
-    const bot = store.botByThread(threadId);
-    const task = bot ? store.projectBotForTask(bot.id, threadId) : null;
-    return task && approvalModeFor({ ...task, threadId }) === "full" ? "full" : "confirm";
-  };
-
   return async ({ req, res, path, method, auth, json, readBody }) => {
     let m = DOCUMENT.exec(path);
     if (m && method === "GET") {
@@ -59,7 +50,7 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       // An unknown thread answers before the store materialises it.
       if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return json(res, 404, { error: "no such conversation" });
       if (!appRow(store, threadId, m[2]!)) return json(res, 404, { error: "no app on that message" });
-      const doc = apps.appDocument(threadId, m[2]!, approvalOf(threadId));
+      const doc = apps.appDocument(threadId, m[2]!);
       if (!doc) return json(res, 404, { error: "This app's page is not stored on this computer." });
       // `can` and `blocked` change with sign-in and settings: never cached.
       res.setHeader("cache-control", "private, no-store");
@@ -98,7 +89,6 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       auth, bot, threadId, row,
       method: body.method as McpRpcRequest["method"],
       params: isRecord(body.params) ? body.params : {},
-      confirmed: body.confirmed === true,
     });
     return json(res, answer.status, answer.body);
   };

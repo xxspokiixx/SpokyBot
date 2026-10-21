@@ -6,7 +6,6 @@ import { RPC_HOST_REFUSED, type JsonRpcError } from "../../../shared/app-frame/b
 import { callAppRpc, newAppSendId, postAppContext, sendAppMessage } from "./app-api";
 import { mountAppFrame } from "./app-frame-host";
 import { appHostContext, appMaxHeight, appThemeContext } from "./app-host-context";
-import type { AllowDecision } from "./AppChrome";
 
 export interface AppFrameHandle {
   teardown(): Promise<void>;
@@ -25,7 +24,6 @@ export interface AppFrameProps {
   height: number;
   handle: MutableRefObject<AppFrameHandle | null>;
   onHeight(height: number): void;
-  askAllow(tool: string): Promise<AllowDecision>;
   onProblem(problem: AppFrameProblem | null): void;
   /** ui/notifications/request-teardown */
   onTeardownRequested(): void;
@@ -45,8 +43,6 @@ export function AppFrame(props: AppFrameProps) {
     const container = box.current;
     if (!container) return;
     const messageId = doc.messageId;
-    /** "Allow for this app": until this frame is torn down. */
-    let allowAll = false;
     let maxHeight = appMaxHeight();
     const host = mountAppFrame({
       container,
@@ -57,28 +53,16 @@ export function AppFrame(props: AppFrameProps) {
       hostVersion: appVersion(),
       ...(import.meta.env?.DEV ? { log: (params: unknown) => console.info("[app]", params) } : {}),
       adapter: {
-        async callRpc(method, params, { engaged }) {
-          let confirmed = allowAll;
-          for (;;) {
-            const outcome = await callAppRpc({ botId, threadId, messageId, method, params, confirmed });
-            if (outcome.ok) return outcome.result;
-            if (outcome.confirm && !confirmed) {
-              // A write waits on the person only while they are using the app.
-              if (!engaged) throw refusal("This needs the person to be using the app.");
-              const decision = await latest.current.askAllow(outcome.confirm.title ?? outcome.confirm.tool);
-              if (decision === "deny") throw refusal("The person declined.");
-              if (decision === "always") allowAll = true;
-              confirmed = true;
-              continue;
-            }
-            if (outcome.signIn) {
-              latest.current.onProblem({ kind: "sign-in", server: outcome.signIn.server });
-              throw refusal("Sign-in needed");
-            }
-            if (outcome.blocked) latest.current.onProblem({ kind: "blocked", ...outcome.blocked });
-            else if (outcome.status === 0) latest.current.onProblem({ kind: "offline" });
-            throw outcome.error;
+        async callRpc(method, params) {
+          const outcome = await callAppRpc({ botId, threadId, messageId, method, params });
+          if (outcome.ok) return outcome.result;
+          if (outcome.signIn) {
+            latest.current.onProblem({ kind: "sign-in", server: outcome.signIn.server });
+            throw refusal("Sign-in needed");
           }
+          if (outcome.blocked) latest.current.onProblem({ kind: "blocked", ...outcome.blocked });
+          else if (outcome.status === 0) latest.current.onProblem({ kind: "offline" });
+          throw outcome.error;
         },
         async sendMessage(text) {
           // A bot setting just changed is saved before the message starts a turn.

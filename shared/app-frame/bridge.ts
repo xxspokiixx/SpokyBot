@@ -36,8 +36,6 @@ export const APP_FRAME_LIMITS = {
   engagedTouchMs: 10_000,
   contextCoalesceMs: 1_000,
   logsPerMinute: 50,
-  /** The Allow bar answers "declined" after this long. */
-  allowTimeoutMs: 120_000,
   /** [window ms, max calls] pairs, all of which must have room. */
   rates: {
     message: [[3_000, 1], [600_000, 10]] as ReadonlyArray<readonly [number, number]>,
@@ -70,9 +68,8 @@ export interface AppContextUpdate {
 
 export interface AppBridgeAdapter {
   post(message: JsonRpcMessage): void;
-  /** Resolves with the JSON-RPC `result`; rejects with { code, message }. A call that needs the Allow bar
-   * is refused when the person was not `engaged` at the moment the View asked. */
-  callRpc(method: AppRpcMethod, params: Record<string, unknown>, context: { engaged: boolean }): Promise<unknown>;
+  /** Resolves with the JSON-RPC `result`; rejects with { code, message }. */
+  callRpc(method: AppRpcMethod, params: Record<string, unknown>): Promise<unknown>;
   sendMessage(text: string): Promise<void>;
   openLink(url: string): Promise<void> | void;
   setContext(update: AppContextUpdate): Promise<void> | void;
@@ -279,7 +276,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
     if (method === "resources/read" && typeof params.uri !== "string") return fail(id, RPC_INVALID_PARAMS, "resources/read needs {uri}.");
     if (!rates.rpc.take()) return fail(id, RPC_HOST_REFUSED, "Too many calls from this app. Wait a moment.");
     try {
-      const result = await adapter.callRpc(method, params, { engaged: adapter.engaged() });
+      const result = await adapter.callRpc(method, params);
       respond(id, result ?? {});
     } catch (error) {
       const failure = rpcErrorFrom(error);

@@ -6,7 +6,7 @@ import { APP_SAMPLES } from "../../../shared/app-samples";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
 import { APP_FRAME_SANDBOX, createAppIframe, mountAppFrame, trackAppEngagement, type AppFrameAdapter } from "./app-frame-host";
 
-const doc = botHtmlDocument({ messageId: "m1", rev: 0, html: APP_SAMPLES.counter!.html, approval: "confirm" });
+const doc = botHtmlDocument({ messageId: "m1", rev: 0, html: APP_SAMPLES.counter!.html });
 
 function adapter(): AppFrameAdapter & { [key: string]: ReturnType<typeof vi.fn> } {
   return {

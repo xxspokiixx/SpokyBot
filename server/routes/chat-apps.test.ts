@@ -75,8 +75,7 @@ describe("GET /api/threads/:threadId/messages/:messageId/app", () => {
     expect(answer.cache).toBe("private, no-store");
     expect(answer.body).toMatchObject({ v: 1, messageId: id, rev: 0, csp: BOT_HTML_CSP });
     expect(String(answer.body.srcdoc).startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`)).toBe(true);
-    // A new bot starts with Full access.
-    expect(answer.body.approval).toBe("full");
+    expect(answer.body).not.toHaveProperty("approval");
   });
 
   it("answers 404 for an unknown thread, another thread's row, a row that is not an app, and a missing document", async () => {
@@ -149,19 +148,20 @@ describe("POST /api/bots/:botId/apps/:messageId/rpc", () => {
     const mcpRpc = vi.fn(async (request: McpRpcRequest) => ({ status: 200, body: { content: [{ type: "text", text: `ran ${String(request.params.name)}` }] } }));
     const { bot, other, post, mcpRow } = await fixture({ mcpRpc });
     const id = mcpRow();
-    expect(await post(`/api/bots/${bot.id}/apps/${id}/rpc`, { threadId: bot.threadId, method: "tools/call", params: { name: "get-time", arguments: {} }, confirmed: true }))
+    expect(await post(`/api/bots/${bot.id}/apps/${id}/rpc`, { threadId: bot.threadId, method: "tools/call", params: { name: "get-time", arguments: {} } }))
       .toEqual({ status: 200, body: { content: [{ type: "text", text: "ran get-time" }] } });
     expect(mcpRpc).toHaveBeenCalledTimes(1);
     const request = mcpRpc.mock.calls[0]![0];
-    expect(request).toMatchObject({ threadId: bot.threadId, method: "tools/call", params: { name: "get-time", arguments: {} }, confirmed: true, bot: { id: bot.id } });
+    expect(request).toMatchObject({ threadId: bot.threadId, method: "tools/call", params: { name: "get-time", arguments: {} }, bot: { id: bot.id } });
     expect(request.row).toMatchObject({ id, kind: "app", app: { source: "mcp" } });
     // Malformed, or another bot's or thread's row: never reaches it.
     expect(await post(`/api/bots/${bot.id}/apps/${id}/rpc`, { threadId: bot.threadId, method: "prompts/list" })).toMatchObject({ status: 400 });
     expect(await post(`/api/bots/${bot.id}/apps/${id}/rpc`, { threadId: bot.threadId, method: "tools/call", params: "x" })).toMatchObject({ status: 400 });
     expect(await post(`/api/bots/${other.id}/apps/${id}/rpc`, { threadId: other.threadId, method: "tools/list" })).toMatchObject({ status: 404 });
     expect(await post(`/api/bots/${other.id}/apps/${id}/rpc`, { threadId: bot.threadId, method: "tools/list" })).toMatchObject({ status: 404 });
-    expect(await post(`/api/bots/${bot.id}/apps/${id}/rpc`, { threadId: bot.threadId, method: "tools/list", confirmed: "yes" })).toMatchObject({ status: 200 });
-    expect(mcpRpc.mock.calls.at(-1)![0].confirmed).toBe(false);
+    // An older client's `confirmed` is not passed on: nothing the page or the client says lifts the approval level.
+    expect(await post(`/api/bots/${bot.id}/apps/${id}/rpc`, { threadId: bot.threadId, method: "tools/list", confirmed: true })).toMatchObject({ status: 200 });
+    expect(mcpRpc.mock.calls.at(-1)![0]).not.toHaveProperty("confirmed");
     expect(mcpRpc).toHaveBeenCalledTimes(2);
   });
 

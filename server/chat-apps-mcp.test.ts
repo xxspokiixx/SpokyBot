@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { APP_LIMITS, APP_MIME, type AppPayload } from "../shared/app.ts";
 import { createChatApps, type ChatApps } from "./chat-apps.ts";
-import { createChatAppsMcp, type ChatAppsMcp, type ChatAppsMcpStore } from "./chat-apps-mcp.ts";
+import { APP_WRITE_DECLINED, createChatAppsMcp, type ChatAppsMcp, type ChatAppsMcpStore } from "./chat-apps-mcp.ts";
 import { createAgentCard } from "./chat-widgets.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
@@ -78,8 +78,8 @@ function setup(options: { servers?: Record<string, Record<string, unknown>>; sco
   const record = (input: Record<string, unknown> = REPORT, threadId = THREAD, authored?: (id: string) => void) =>
     mcp.recordMcpAppCall({ bot, threadId, input, ...(authored ? { authored } : {}) });
   const row = (id: string, threadId = THREAD) => rows(threadId).find((message) => message.id === id) as Message & { app: AppPayload };
-  const rpc = (messageId: string, method: McpRpcRequest["method"], params: Record<string, unknown> = {}, confirmed = false) =>
-    mcp.rpc({ auth: { kind: "loopback" } as never, bot, threadId: THREAD, row: row(messageId), method, params, confirmed });
+  const rpc = (messageId: string, method: McpRpcRequest["method"], params: Record<string, unknown> = {}) =>
+    mcp.rpc({ auth: { kind: "loopback" } as never, bot, threadId: THREAD, row: row(messageId), method, params });
   return { store, apps, mcp, bot, servers, rows, row, record, rpc, lines };
 }
 
@@ -96,7 +96,7 @@ describe("recordMcpAppCall", () => {
       network: { connect: ["https://api.fake-app.example"], resources: ["https://cdn.fake-app.example"], refused: ["https://bad.example/path"] },
       mcp: { server: "board", serverTitle: "Fake App", tool: "show_board", resourceUri: BOARD_URI },
     });
-    const doc = apps.appDocument(THREAD, "m1", "confirm")!;
+    const doc = apps.appDocument(THREAD, "m1")!;
     expect(doc.srcdoc).toContain("<h1>Fake board</h1>");
     expect(doc.csp).toContain("connect-src https://api.fake-app.example");
     expect(doc.csp).not.toContain("bad.example");
@@ -105,8 +105,8 @@ describe("recordMcpAppCall", () => {
       toolInput: { cards: 3 },
       toolResult: REPORT.result,
       can: { serverTools: true, serverResources: true },
-      approval: "confirm",
     });
+    expect(doc).not.toHaveProperty("approval");
     expect(doc).not.toHaveProperty("blocked");
     expect(mcp.catalog.get("board", board())).toMatchObject({ apps: true, tools: { show_board: { resourceUri: BOARD_URI, readOnly: true } } });
   }, 30_000);
@@ -142,7 +142,7 @@ describe("recordMcpAppCall", () => {
     const { record, row, apps } = setup({ servers: { board: { ...board({ FAKE_APP_MIME: "text/html" }), enabled: true } } });
     expect(await record()).toEqual({ ok: true, messageId: "m1" });
     expect(row("m1")).toMatchObject({ text: "Fake App · Show board\nBoard with 3 cards", app: { doc: "", blocked: "unavailable", mcp: { tool: "show_board" } } });
-    expect(apps.appDocument(THREAD, "m1", "confirm")).toBeNull();
+    expect(apps.appDocument(THREAD, "m1")).toBeNull();
     const big = setup({ servers: { board: { ...board({ FAKE_APP_HTML_BYTES: String(APP_LIMITS.mcpHtmlBytes + 10) }), enabled: true } } });
     await big.record();
     expect(big.row("m1").app.blocked).toBe("too-large");
@@ -161,7 +161,7 @@ describe("access", () => {
     expect(access().blocked?.reason).toBe("server-disabled");
     delete live.servers.board;
     expect(access().blocked?.reason).toBe("server-removed");
-    expect(live.apps.appDocument(THREAD, "m1", "confirm")).toMatchObject({ can: { serverTools: false }, blocked: { reason: "server-removed" } });
+    expect(live.apps.appDocument(THREAD, "m1")).toMatchObject({ can: { serverTools: false }, blocked: { reason: "server-removed" } });
 
     const signedOut = setup({ servers: { draw: { type: "http", url: "https://draw.example/mcp", enabled: true } }, needsSignIn: ["draw"] });
     const message = signedOut.store.appendMessage(THREAD, { role: "bot", kind: "app", text: "x",
@@ -171,7 +171,7 @@ describe("access", () => {
 });
 
 describe("rpc", () => {
-  it("runs read-only and app-only tools at once, and asks the person for the rest outside Full access (rule 15)", async () => {
+  it("runs read-only and app-only tools at any level, and declines the rest outside Full access with no card (rule 15)", async () => {
     const { record, rpc, lines } = setup();
     await record();
     expect(await rpc("m1", "tools/call", { name: "show_board", arguments: { cards: 5 } })).toEqual({
@@ -179,21 +179,19 @@ describe("rpc", () => {
     });
     // the app's own plumbing: app-only, not destructive
     expect(await rpc("m1", "tools/call", { name: "save_board", arguments: { state: "s" } })).toMatchObject({ status: 200, body: { content: [{ type: "text", text: "Saved" }] } });
-    // app-only but destructive, and model-visible without readOnlyHint: the Allow bar
+    // app-only but destructive, and model-visible without readOnlyHint: the bot asks first, so the app may not
     expect(await rpc("m1", "tools/call", { name: "wipe_board", arguments: {} })).toEqual({
-      status: 409, body: { error: { code: -32000, message: "The person has to allow Wipe board." }, confirm: { tool: "wipe_board", title: "Wipe board" } },
+      status: 403, body: { error: { code: -32000, message: APP_WRITE_DECLINED } },
     });
-    expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "red" } })).toMatchObject({ status: 409, body: { confirm: { tool: "paint_board", title: "Paint board" } } });
-    expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "red" } }, true)).toMatchObject({ status: 200, body: { content: [{ type: "text", text: "Painted red" }] } });
-    expect(await rpc("m1", "tools/call", { name: "wipe_board", arguments: {} }, true)).toMatchObject({ status: 200 });
+    expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "red" } })).toEqual({
+      status: 403, body: { error: { code: -32000, message: APP_WRITE_DECLINED } },
+    });
     // every call is logged, never its arguments
     expect(lines.filter((line) => line.startsWith("rpc "))).toEqual([
       "rpc bot=bot-scout server=board method=tools/call tool=show_board → 200",
       "rpc bot=bot-scout server=board method=tools/call tool=save_board → 200",
-      "rpc bot=bot-scout server=board method=tools/call tool=wipe_board → 409",
-      "rpc bot=bot-scout server=board method=tools/call tool=paint_board → 409",
-      "rpc bot=bot-scout server=board method=tools/call tool=paint_board → 200",
-      "rpc bot=bot-scout server=board method=tools/call tool=wipe_board → 200",
+      "rpc bot=bot-scout server=board method=tools/call tool=wipe_board → 403",
+      "rpc bot=bot-scout server=board method=tools/call tool=paint_board → 403",
     ]);
   }, 30_000);
 
@@ -201,6 +199,7 @@ describe("rpc", () => {
     const { record, rpc } = setup({ approval: "full" });
     await record();
     expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "blue" } })).toMatchObject({ status: 200, body: { content: [{ type: "text", text: "Painted blue" }] } });
+    expect(await rpc("m1", "tools/call", { name: "wipe_board", arguments: {} })).toMatchObject({ status: 200 });
   }, 30_000);
 
   it("refuses a tool the server lacks, one its view may not call, one outside the selection, and bad arguments", async () => {
@@ -230,7 +229,7 @@ describe("rpc", () => {
     delete servers.board;
     expect((await rpc("m1", "tools/list")).body).toMatchObject({ blocked: { reason: "server-removed" } });
     const page = store.appendMessage(THREAD, { role: "bot", kind: "app", text: "x", app: { v: 1, source: "html", title: "p", doc: "", rev: 0, bytes: 0, border: true, network: { connect: [], resources: [] } } });
-    expect((await mcp.rpc({ auth: {} as never, bot, threadId: THREAD, row: row(page.id), method: "tools/list", params: {}, confirmed: false })).status).toBe(404);
+    expect((await mcp.rpc({ auth: {} as never, bot, threadId: THREAD, row: row(page.id), method: "tools/list", params: {} })).status).toBe(404);
   }, 30_000);
 
   it("answers 401 with the server to sign in to, when sign-in is due or the server refuses the credentials", async () => {
