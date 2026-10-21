@@ -533,6 +533,7 @@
   "lending.internetUnsupported": "Cloud'unuz güncelleniyor. Güncelleme bitince botlarınız bu bilgisayarın internet bağlantısını kullanabilecek.",
   "lending.stopHelp": "Bunu kapatmak, paylaşımı derhal durdurur ve çalışan her şeyi iptal eder. Bir uygulamanın başlatmış olduğu bir eylem yine de tamamlanabilir.",
   "lending.failed": "Paylaşılanlar değiştirilemedi. Tekrar deneyin.",
+  "lending.drivesHelp": "Harici disk, USB bellek veya bilgisayardaki ikinci bir disk gibi bir sürücünün tamamını paylaşmak için klasörlerini tek tek seçmek yerine sürücünün kendisini seçin. Ana klasörünüz de seçilebilir: her zaman salt okunurdur ve içinde anahtarların, parolaların ve tarayıcı verilerinin tutulduğu yerler gizli kalır. Sistem diski paylaşılamaz ve Düzenleyebilir'i işaretlemediğiniz sürece bir sürücü salt okunurdur.",
   "lending.refused.notFolder": "Dosya değil, klasör seçin.",
   "lending.refused.tooMany": "En fazla 20 klasör ödünç verin.",
   "lending.status.lent": "Paylaşıldı. Bu bilgisayar uyanık olduğu sürece Cloud botları onu kullanabilir.",

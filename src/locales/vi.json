@@ -533,6 +533,7 @@
   "lending.internetUnsupported": "My Cloud đang cập nhật. Bot của bạn sẽ dùng được kết nối internet của máy tính này khi cập nhật xong.",
   "lending.stopHelp": "Tắt tính năng này sẽ dừng việc chia sẻ ngay lập tức và hủy mọi tác vụ đang chạy. Hành động mà một ứng dụng đã bắt đầu có thể vẫn sẽ hoàn tất.",
   "lending.failed": "Không thể thay đổi nội dung được chia sẻ. Hãy thử lại.",
+  "lending.drivesHelp": "Để chia sẻ cả một ổ đĩa, chẳng hạn ổ cứng gắn ngoài, ổ USB hoặc ổ đĩa thứ hai trong máy tính, hãy chọn chính ổ đĩa đó thay vì chọn từng thư mục của nó. Bạn cũng có thể chọn thư mục cá nhân của mình: thư mục này luôn ở chế độ chỉ đọc, và những nơi trong đó lưu khóa, mật khẩu và dữ liệu trình duyệt vẫn được giữ riêng tư. Không thể chia sẻ ổ đĩa hệ thống, và một ổ đĩa chỉ đọc trừ khi bạn đánh dấu Có thể chỉnh sửa.",
   "lending.refused.notFolder": "Hãy chọn một thư mục, không phải một tệp.",
   "lending.refused.tooMany": "Chỉ cho mượn tối đa 20 thư mục.",
   "lending.status.lent": "Đã chia sẻ. Bot trên Cloud có thể dùng máy tính này khi máy không ở chế độ ngủ.",

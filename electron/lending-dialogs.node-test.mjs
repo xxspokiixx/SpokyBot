@@ -43,6 +43,8 @@ test("the whole home folder is lent only after its own warning, and is named in 
     const folder = await createLendingDialogs({ dialog, window: () => win, validate: named, isHome }).chooseFolder("Choose a folder or drive to share");
     assert.equal(calls[1][0], "message");
     assert.equal(calls[1][2].message, "Share your whole home folder?");
+    // The truth, not a scare: secrets inside it stay private (proven through the lending path in shared-computer-access).
+    assert.match(calls[1][2].detail, /readable by the bots you allow\. .*keys, passwords and browser data, like \.ssh .*always stay private\./);
     assert.deepEqual([calls[1][2].defaultId, calls[1][2].cancelId], [1, 1]);
     assert.equal(folder === null, !lent);
     if (lent) assert.deepEqual({ path: folder.path, home: folder.home, write: folder.write }, { path: "/Users/me", home: true, write: false });

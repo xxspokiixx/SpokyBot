@@ -29,8 +29,10 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
       if (picked.canceled || !picked.filePaths[0]) return null;
       const folder = { id: randomUUID(), path: picked.filePaths[0], write: false };
       if (await isHome(folder.path)) {
+        // What stays private is `personalSecretPaths` and this app's own data (computer-sharing.mjs `protectedRoots`),
+        // refused inside any lent folder, the home folder included.
         const { response } = await dialog.showMessageBox(window(), { type: "warning", message: "Share your whole home folder?",
-          detail: "Everything inside it becomes available to the bots you allow, including documents, downloads and any keys or logins kept in hidden folders such as .ssh. It is shared read only. Choosing specific folders is safer.",
+          detail: "Everything in your home folder becomes readable by the bots you allow. The places that hold keys, passwords and browser data, like .ssh and your browsers' profiles, always stay private.",
           buttons: ["Share home folder", "Cancel"], defaultId: 1, cancelId: 1 });
         if (response !== 0) return null;
         folder.home = true;
