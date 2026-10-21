@@ -139,6 +139,13 @@ const heldElsewhere = (held: boolean) => {
 const releases = () => fixture.beacons.filter((beacon) => beacon.url === "/api/bots/scout/computer/control" && beacon.body.action === "release");
 
 beforeEach(() => {
+  // The panel remembers each conversation's tab (computer-panel-view.ts), so one test's tab must not open the next test on it.
+  const saved = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => saved.get(key) ?? null,
+    setItem: (key: string, value: string) => void saved.set(key, value),
+    removeItem: (key: string) => void saved.delete(key),
+  });
   fixture.held = false;
   fixture.owned = true;
   fixture.controls = [];
