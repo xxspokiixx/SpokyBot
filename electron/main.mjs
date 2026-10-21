@@ -33,6 +33,7 @@ import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
+import { createLendingDialogs } from "./lending-dialogs.mjs";
 let startupScreen = null;
 let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, openLogsFolder, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
@@ -2886,11 +2887,10 @@ ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_even
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
 }));
+const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders });
 ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
   await requireSharedComputers();
-  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder to share", properties: ["openDirectory"] });
-  if (picked.canceled || !picked.filePaths[0]) return null;
-  return (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0];
+  return lendingDialogs.chooseFolder("Choose a folder to share");
 }));
 ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", async (_event, id) => {
   await requireSharedComputers();
@@ -2905,18 +2905,10 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
   await requireSharedComputers();
   const env = savedWorkspace(id);
   const info = await sharingController().identity(env);
-  const folders = await validateSharedFolders(input?.folders);
-  const detail = [
-    `Server: ${env.origin}`,
-    ...folders.map(folder => `${folder.write ? "Read and write" : "Read only"}: ${folder.path}`),
-    input?.terminal === true ? "Terminal: UNRESTRICTED commands as your user. Can access files outside the folders above, including credentials." : "Terminal: off",
-    input?.computer === true ? "Computer control: can view your screen and operate logged-in apps. Can access information outside the folders above." : "Computer control: off",
-    "Shared content is sent to this server and may reach its model provider. Bots on this server can use these permissions until you revoke them. Closing the desktop stops access.",
-  ].join("\n\n");
-  const confirmation = await dialog.showMessageBox(mainWindow, { type: "warning", message: `Allow computer access for ${env.name}?`, detail, buttons: ["Allow access", "Cancel"], defaultId: 1, cancelId: 1 });
-  if (confirmation.response !== 0) return null;
+  const grant = { folders: await validateSharedFolders(input?.folders), terminal: input?.terminal === true, computer: input?.computer === true };
+  if (!(await lendingDialogs.confirmServerAccess(env, grant))) return null;
   savedWorkspace(id);
-  return sharingController().save(env, { folders, terminal: input?.terminal === true, computer: input?.computer === true }, info);
+  return sharingController().save(env, grant, info);
 }));
 
 // Decided from the verified Cloud sign-in alone: the renderer names no server, account or origin.
@@ -2927,17 +2919,9 @@ async function lendingSnapshot() {
 }
 const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
-  chooseFolder: async () => { const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder My Cloud can use", properties: ["openDirectory"] }); return picked.canceled || !picked.filePaths[0] ? null : (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0]; },
+  chooseFolder: () => lendingDialogs.chooseFolder("Choose a folder My Cloud can use"),
   defaults: () => usualFolders(usualFolderPaths(name => app.getPath(name), os.homedir()), validateSharedFolders), validate: validateSharedFolders,
-  confirmScreen: async () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return false;
-    const { response } = await dialog.showMessageBox(mainWindow, {
-      type: "warning", message: "Let your bots on My Cloud use your apps and screen?",
-      detail: "In your own conversations and routines, they can see your screen, click and type in your apps as you, while this computer is awake with OpenMausBot open. That reaches anything those apps can reach. You can turn it off at any time on My Cloud's page or in Settings → MausBot Cloud.",
-      buttons: ["Lend apps and screen", "Cancel"], defaultId: 1, cancelId: 1,
-    });
-    return response === 0;
-  } });
+  confirmScreen: lendingDialogs.confirmScreen });
 const cloudSync = installCloudFiles({
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
   fetch: (...args) => session.defaultSession.fetch(...args),
