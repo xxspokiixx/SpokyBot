@@ -31,7 +31,7 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false }: { cloudHome?: boolean } = {}) {
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, memory }: { cloudHome?: boolean; memory?: { useBrowsers: () => void } } = {}) {
   const cfg = {
     features: { browser: true },
     ...(engine ? { browserEngine: { engine } } : {}),
@@ -44,16 +44,17 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
   const minted: unknown[] = [];
   const host = createBrowserHost({
     cfg,
-    store: () => ({ bots, bot: (id: string) => bots.find((bot) => bot.id === id) }) as unknown as Pick<Store, "bots" | "bot">,
+    store: () => ({ bots, bot: (id: string) => bots.find((bot) => bot.id === id), botByThread: () => bots[0] }) as unknown as Pick<Store, "bots" | "bot" | "botByThread">,
     turnResources: { free: () => true },
     activeInternalGenerationByThread: new Map([[turn.threadId, turn.generation]]),
     mintInternalCapability: (capability) => { minted.push(capability); return "capability-token"; },
     DESKTOP_MANAGED: !cloudHome,
     CLOUD_HOME: cloudHome ? { machineId: "m-1" } : null,
     PORT: 4100,
+    memory,
   });
   hosts.push(host);
-  return { cfg, host, minted };
+  return { cfg, host, minted, bots };
 }
 
 describe("the bots' browser host with browserEngine.engine set to chrome", () => {
@@ -103,6 +104,41 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     host.browserEngineSwitched();
     expect(host.usedBrowserSessions.has(browser!.session)).toBe(false);
     expect(host.browserSystemPrompt(undefined)).toBe(BUILT_IN_BROWSER_SYSTEM_PROMPT);
+  });
+});
+
+describe("what the memory guard sees of a bot's browser", () => {
+  it("is handed to the memory guard when the host starts", () => {
+    const memory = { useBrowsers: vi.fn() };
+    const { host } = setup(undefined, { cloudHome: true, memory });
+    expect(memory.useBrowsers).toHaveBeenCalledExactlyOnceWith(host.engineBrowsers);
+  });
+
+  it("counts a browser a bot's turn may start, but not one it can't use or the person's own Chrome", () => {
+    const { host, bots } = setup(undefined, { cloudHome: true });
+    const bot = bots[0] as { browser: boolean; browserProfile?: string };
+    expect(host.engineBrowsers.starts("thread-1")).toBe(true);
+    bot.browser = false;
+    expect(host.engineBrowsers.starts("thread-1")).toBe(false);
+    const desktop = setup(undefined);
+    (desktop.bots[0] as { browserProfile?: string }).browserProfile = "mine";
+    expect(desktop.host.engineBrowsers.starts("thread-1")).toBe(false);
+  });
+
+  it("counts a temporary browser before its first call without making its session", () => {
+    const { host, bots } = setup(undefined, { cloudHome: true });
+    (bots[0] as { browserProfile?: string }).browserProfile = "guest";
+    expect(host.engineBrowsers.starts("thread-1")).toBe(true);
+    expect(host.temporaryBrowserSessions.size).toBe(0);
+  });
+
+  it("closes nothing for a stopped turn whose bot's browser is not running", async () => {
+    const { host } = setup(undefined, { cloudHome: true });
+    await host.browserIntegration("scout", undefined, turn);
+    vi.mocked(closeBrowserSession).mockClear();
+    host.engineBrowsers.stopped("thread-1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(closeBrowserSession).not.toHaveBeenCalled();
   });
 });
 

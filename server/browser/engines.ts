@@ -236,6 +236,12 @@ export class RuntimeRouter {
     return this.#old.closeIfIdle(session, idleMs, spec ? { command: spec.command, args: spec.args ?? [], env: spec.env } : undefined);
   }
 
+  /** Closes a session's browser now unless a call, an agent or a person is using it. */
+  closeUnused(session: string, spec: Spec & { args?: readonly string[] }): Promise<boolean> {
+    if (chromeTarget(session, spec)) return this.#chrome.service.closeUnused(session);
+    return this.#old.closeIfIdle(session, 1, { command: spec.command, args: spec.args ?? [], env: spec.env });
+  }
+
   async close(session: string): Promise<void> {
     await Promise.all([this.#chrome.service.close(session), this.#old.close(session)]);
   }
