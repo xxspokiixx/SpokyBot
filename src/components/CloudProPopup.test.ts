@@ -35,7 +35,7 @@ import { Spotlight } from "./onboarding/Spotlight";
 
 const DAY = 86_400_000, NOW = Date.UTC(2026, 9, 16);
 const plans = [
-  { tier: "personal", label: "Personal", amount: 2900, trialDays: 7 },
+  { tier: "starter", label: "Starter", amount: 1500, trialDays: 7 },
   { tier: "pro", label: "Pro", amount: 4900, trialDays: 7 },
   { tier: "max", label: "Max", amount: 9900, trialDays: 7 },
 ];
@@ -93,11 +93,11 @@ describe("what the popup offers, by plan", () => {
   it("no plan: the in-app checkout, with the trial, prices, credit and money-back from the live offer", () => {
     const signedOut = cloudProPopupView({ status: "signed-out" }, TRIAL_OFFER) as CloudProPopupView;
     expect(signedOut).toMatchObject({ primary: { via: "add-cloud", label: "Start free trial" }, seePlans: true, plan: "none", signedIn: false, email: null,
-      badge: "Free for 7 days", price: "Then from $29/month + tax. Cancel any time.", moneyBack: "14-day money-back on every plan.", current: null });
+      badge: "Free for 7 days", price: "Then from $15/month + tax. Cancel any time.", moneyBack: "14-day money-back on every plan.", current: null });
     expect(signedOut.points).toContain("$5 of Claude credit to start");
     const costlier = { ...PLAIN_OFFER, plans: PLAIN_OFFER.plans.map(plan => ({ ...plan, amount: plan.amount + 1000 })) };
     expect(cloudProPopupView(free, costlier)).toMatchObject({ primary: { via: "add-cloud", label: "Upgrade to Cloud Pro" },
-      plan: "none", signedIn: true, email: "person@example.test", badge: null, price: "MausBot Cloud plans from $39/month + tax.", moneyBack: null });
+      plan: "none", signedIn: true, email: "person@example.test", badge: null, price: "MausBot Cloud plans from $25/month + tax.", moneyBack: null });
     expect((cloudProPopupView(free, costlier) as CloudProPopupView).points).toContain("Cloud desktops and voice included");
   });
 
@@ -172,7 +172,7 @@ describe("the popup as a dialog", () => {
     const dialog = container.querySelector('[role="dialog"]')!;
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent).toBe("MausBot Cloud Pro");
-    expect(document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent).toContain("Then from $29/month + tax.");
+    expect(document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent).toContain("Then from $15/month + tax.");
     expect(document.activeElement!.id).toBe("cloud-pro-popup-title");
     const order: Array<string | null> = [];
     for (let i = 0; i < 5; i++) { expect(press("Tab").defaultPrevented).toBe(true); order.push(focused()); }

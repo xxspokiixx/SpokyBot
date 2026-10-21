@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudAccountState, CloudCheckoutResult } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudOffer, CloudTrial } from "../../electron/cloud-home.mjs";
+import { parseCloudOffer } from "../../electron/cloud-home.mjs";
 import { setLocale } from "@/lib/i18n";
 
 // useState by call order; useEffect as React runs it: again only when its dependencies change, after the last one's cleanup.
@@ -25,7 +26,7 @@ const DAY = 86_400_000, NOW = new Date(2026, 9, 8, 12).getTime();
 const allowances = (cpus: number, maxDiskGb: number, computers: number, computerHours: number, voiceCharacters: number) =>
   ({ cpus, cpuKind: "shared" as const, memoryMb: cpus * 1024, swapMb: cpus === 2 ? 3072 : 4096, diskGb: 10, maxDiskGb, computers, computerHours, voiceCharacters, snapshotDays: 14 });
 const PLANS = [
-  { tier: "personal", label: "Personal", amount: 2900, allowances: allowances(2, 20, 15, 100, 30_000), trialDays: 7 },
+  { tier: "starter", label: "Starter", amount: 1500, allowances: allowances(2, 20, 15, 100, 30_000), trialDays: 7 },
   { tier: "pro", label: "Pro", amount: 4900, allowances: allowances(4, 100, 15, 300, 60_000), trialDays: 7 },
   { tier: "max", label: "Max", amount: 9900, allowances: allowances(8, 100, 15, 800, 180_000), trialDays: 7 },
 ];
@@ -75,7 +76,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     const { html, tree, handlers } = panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null });
     inOrder(text(html), ["MausBot Cloud", "Your bots, always on.", "Runs your bots 24/7 in the cloud, even when this computer is off.",
       "Works while you're away", "Private to you", "Reach it from anywhere", "A real browser and desktop", "Bring everything over",
-      "Choose your plan", "Personal", "$29", "per month", "An always-on cloud for your personal workflows.", "100 cloud desktop hours a month", "up to 15 at once",
+      "Choose your plan", "Starter", "$15", "per month", "Your bots keep working with your laptop closed, at the lowest price.", "100 cloud desktop hours a month", "up to 15 at once",
       "Pro", "Most popular", "$49", "Your bots keep working 24/7, even when your laptop is closed.", "300 cloud desktop hours a month", "up to 15 at once",
       "Max", "$99", "The biggest cloud machine, for bots that use computers all day.", "800 cloud desktop hours a month", "up to 15 at once",
       // The chosen plan's card, in the website's words: benefits backed by the Admin's numbers, then what it adds over the plan before it.
@@ -83,7 +84,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
       "Cloud desktops you can watch or take over: as many as your bots need, 300 hours a month", "Fair use: up to 15 at once",
       "Voice replies: about an hour of speech a month", "Gmail, GitHub, Notion and hundreds more apps: sign in once",
       "Your bots on your phone, anywhere, with alerts when one finishes or needs you", "Your own cloud machine for unlimited bots: 4 shared CPUs and 4 GB of memory, plus 4 GB of swap",
-      "Storage that grows as it fills, up to 100 GB, with daily backups kept 14 days", "Everything in Personal, plus 3× the cloud desktop hours, a machine twice the size and 2× the voice.",
+      "Storage that grows as it fills, up to 100 GB, with daily backups kept 14 days", "Everything in Starter, plus 3× the cloud desktop hours, a machine twice the size and 2× the voice.",
       "Due today", "$0.00", "Card needed, nothing charged for 7 days. Then $49/month + tax. Cancel in the app any time.",
       "Today", "Trial starts, with $5 of Claude credit", "Oct 13", "Reminder email", "Oct 15", "$49/month begins",
       "Start free trial", "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "14-day money-back", "Already have a plan? Sign in"]);
@@ -91,20 +92,40 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     expect(html).toContain('role="radio" aria-checked="true" tabindex="0" data-plan="pro"');
     expect(html).toContain('role="radio" aria-checked="false" tabindex="-1" data-plan="max"');
     expect(html.match(/Most popular/g)).toHaveLength(1);
-    for (const gone of ["Compare plans", "launch", "$89", "Recommended", "AI credit", "this Mac", "a day", "computers at once", "14 days of snapshots"]) expect(text(html)).not.toContain(gone);
+    for (const gone of ["Compare plans", "launch", "$89", "Recommended", "AI credit", "this Mac", "a day", "computers at once", "14 days of snapshots", "Personal", "$29", "Sleeps"]) {
+      expect(text(html)).not.toContain(gone);
+    }
     expect(html.match(/What Pro gives you/g), "only the chosen plan's card opens").toHaveLength(1);
     button(tree, "Start free trial")!.props.onClick(); expect(handlers.start).toHaveBeenCalledOnce();
     tree.find(node => node.props["data-plan"] === "max")!.props.onClick(); expect(handlers.choose).toHaveBeenCalledWith("max");
     button(tree, "Already have a plan? Sign in")!.props.onClick(); expect(handlers.signIn).toHaveBeenCalledOnce();
-    const personal = text(panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null }, { chosen: "personal" }).html);
-    expect(personal).toContain("Then $29/month + tax.");
+    const starter = text(panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: null }, { chosen: "starter" }).html);
+    expect(starter).toContain("Then $15/month + tax.");
     // The first plan listed builds on none, and its card states its own numbers.
-    expect(personal).toContain("What Personal gives you");
-    expect(personal).toContain("Your own cloud machine for unlimited bots: 2 shared CPUs and 2 GB of memory, plus 3 GB of swap");
-    expect(personal).not.toContain("Everything in");
+    inOrder(starter, ["What Starter gives you", "Always on: automations run around the clock, even with your laptop off",
+      "Your own cloud machine for unlimited bots: 2 shared CPUs and 2 GB of memory, plus 3 GB of swap", "Storage that grows as it fills, up to 20 GB, with daily backups kept 14 days"]);
+    expect(starter).not.toContain("Everything in");
     const maxFirst = panel({ kind: "offer", offer: { ...TRIAL, recommended: "max" }, signedOut: false, notice: null }).html;
     expect(maxFirst).toContain('aria-checked="true" tabindex="0" data-plan="max"');
     expect(maxFirst.indexOf("Most popular"), "the Admin's recommended plan, not Pro by itself").toBeGreaterThan(maxFirst.indexOf("data-plan=\"max\""));
+  });
+
+  it("Choose from an Admin that still sells Personal: no Personal card, Pro preselected and Most popular, and Pro builds on Starter", () => {
+    const wire = ({ tier, label, amount, allowances }: (typeof PLANS)[number]) => ({ tier, label, price: { currency: "USD", amount, interval: "month" }, allowances });
+    const personal = { ...PLANS[0]!, tier: "personal", label: "Personal", amount: 2900 };
+    for (const recommended of ["pro", "personal"]) {
+      const older = parseCloudOffer({ plans: [wire(PLANS[0]!), wire(personal), wire(PLANS[1]!), wire(PLANS[2]!)], recommended, trialDays: 7, creditUsd: 5, refundDays: 14 })!;
+      for (const chosen of [null, "personal"]) {
+        const { html } = panel({ kind: "offer", offer: older, signedOut: true, notice: null }, { chosen, offerShown: older });
+        const plain = text(html), why = `recommended ${recommended}, chosen ${chosen}`;
+        for (const gone of ["Personal", "$29", 'data-plan="personal"']) expect(html, why).not.toContain(gone);
+        expect(html, why).toContain('role="radio" aria-checked="true" tabindex="0" data-plan="pro"');
+        expect(html.match(/aria-checked="true"/g), why).toHaveLength(1);
+        expect(html.match(/Most popular/g), why).toHaveLength(1);
+        inOrder(plain, ["Starter", "$15", "Pro", "Most popular", "$49", "Max", "$99", "What Pro gives you",
+          "Everything in Starter, plus 3× the cloud desktop hours, a machine twice the size and 2× the voice.", "Then $49/month + tax."]);
+      }
+    }
   });
 
   it("Choose without a trial: due today at the price, no card line or timeline, Continue · price; no Sign in once signed in", () => {
@@ -393,9 +414,9 @@ describe("the sheet", () => {
     expect(bridge.copyCheckoutLink).toHaveBeenCalledOnce();
     expect(await press("Change plan")).toContain("Choose your plan");
     expect(tree().find(node => node.props["data-plan"] === "pro")!.props["aria-checked"]).toBe(true);
-    tree().find(node => node.props["data-plan"] === "personal")!.props.onClick();
+    tree().find(node => node.props["data-plan"] === "starter")!.props.onClick();
     await press("Start free trial");
-    expect(bridge.checkout).toHaveBeenLastCalledWith("personal", "app_menu");
+    expect(bridge.checkout).toHaveBeenLastCalledWith("starter", "app_menu");
   });
 
   it("the countdown stops when the window loses focus: nothing switches while the person is elsewhere", async () => {
@@ -563,9 +584,9 @@ describe("the sheet", () => {
   });
 
   it("the plan picker moves with the arrow keys", async () => {
-    const tiers = ["personal", "pro", "max"];
-    expect([planFromKey(tiers, "pro", "ArrowDown"), planFromKey(tiers, "max", "ArrowRight"), planFromKey(tiers, "pro", "ArrowUp"), planFromKey(tiers, "personal", "ArrowLeft"),
-      planFromKey(tiers, "max", "Home"), planFromKey(tiers, "personal", "End"), planFromKey(tiers, "pro", "Enter")]).toEqual(["max", "personal", "personal", "max", "personal", "max", null]);
+    const tiers = ["starter", "pro", "max"];
+    expect([planFromKey(tiers, "pro", "ArrowDown"), planFromKey(tiers, "max", "ArrowRight"), planFromKey(tiers, "pro", "ArrowUp"), planFromKey(tiers, "starter", "ArrowLeft"),
+      planFromKey(tiers, "max", "Home"), planFromKey(tiers, "starter", "End"), planFromKey(tiers, "pro", "Enter")]).toEqual(["max", "starter", "starter", "max", "starter", "max", null]);
     await settle();
     const focus = vi.fn(), prevent = vi.fn();
     tree().find(node => node.props["data-plan"] === "pro")!.props.onKeyDown({ key: "ArrowDown", preventDefault: prevent,

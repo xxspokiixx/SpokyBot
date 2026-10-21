@@ -14,8 +14,7 @@ const NOW = Date.now(), DAY = 86_400_000;
 const allowances = (cpus: number, swapGb: number, maxDiskGb: number, computers: number, computerHours: number, voiceCharacters: number, snapshotDays: number) =>
   ({ cpus, cpuKind: "shared" as const, memoryMb: cpus * 1024, ...(swapGb ? { swapMb: swapGb * 1024 } : {}), diskGb: 10, maxDiskGb, computers, computerHours, voiceCharacters, snapshotDays });
 const OFFER: CloudOffer = { recommended: "pro", creditUsd: 5, reminderDays: 1, refundDays: 14, plans: [
-  { tier: "starter", label: "Starter", amount: 1500, trialDays: 3, allowances: { ...allowances(2, 0, 10, 15, 30, 10_000, 7), sleeps: true } },
-  { tier: "personal", label: "Personal", amount: 2900, trialDays: 3, allowances: allowances(2, 3, 20, 15, 100, 30_000, 14) },
+  { tier: "starter", label: "Starter", amount: 1500, trialDays: 3, allowances: allowances(2, 3, 20, 15, 100, 30_000, 14) },
   { tier: "pro", label: "Pro", amount: 4900, trialDays: 3, allowances: allowances(4, 4, 100, 15, 300, 60_000, 14) },
   { tier: "max", label: "Max", amount: 9900, trialDays: 3, allowances: allowances(8, 4, 100, 15, 800, 180_000, 14) },
 ] };

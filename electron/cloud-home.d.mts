@@ -24,6 +24,8 @@ export interface CloudMachine {
 /** A payment received but not yet linked to this account: nobody pays twice. */
 export interface CloudPurchase { state: "confirming" | "held"; tier?: string; paidAt?: number }
 export type CloudTrialState = "active" | "ending" | "processing" | "late" | "ended";
+/** The plans this app knows by name. */
+export type CloudPlanTier = "starter" | "personal" | "pro" | "max";
 /** The free trial on the account's Cloud, as the Admin says: display only, never an entitlement. */
 export interface CloudTrial {
   state: CloudTrialState;
@@ -44,8 +46,12 @@ export interface CloudTrial {
    * billing portal (`portal`: turn renewal back on, update the card) or a new
    * subscription (`checkout`, once it has ended). */
   keep: "none" | "portal" | "checkout";
-  /** While it runs on a plan above Personal: Personal's price before tax, in US cents. */
+  /** While it runs on a plan above Personal and Personal is the way down: Personal's price before tax, in US cents. An
+   * older Admin's only word for the way down; `switchTo` wins over it. */
   personalAmount?: number;
+  /** The plan this trial can switch to from its Plan page, and its price before tax in US cents, only while a switch is
+   * the way down. */
+  switchTo?: { tier: CloudPlanTier; amount: number };
 }
 /** The trial's AI credit, in US dollars. */
 export interface CloudCredit { grantedUsd: number; remainingUsd: number; state: "active" | "used_up" }
