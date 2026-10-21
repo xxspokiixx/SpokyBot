@@ -268,7 +268,9 @@ export function createHomeWindow(deps) {
 
   async function connect(place, token, open) {
     const origin = place.origin;
-    if (shows(origin) && !screen && !open) {
+    // Only a window this opened as home is left as it is: one that shows My Cloud as a saved server (opened from the
+    // switcher before the move) is opened again as home, and goes home with it if My Cloud ends.
+    if (shows(origin) && away && !screen && !open) {
       shown = place;
       if (place.kind === "team" && !renewal) renewLater(place, TEAM_RENEW_MS);
       return;

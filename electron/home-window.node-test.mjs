@@ -163,6 +163,18 @@ test("launching with My Cloud awake: a quick look, then My Cloud's page on the w
   assert.deepEqual([w.went.length, w.fetched], [1, []], "a window already on My Cloud is only brought forward");
 });
 
+test("a window that showed My Cloud as a saved server before the move is opened again as home, and goes home when My Cloud ends", async () => {
+  // Seen in the real app on Oct 22: with moves off, the person opened My Cloud from the switcher; after the move the
+  // window kept "Hosted: My Cloud", the switcher and "This computer", and when My Cloud ended it stayed on the ended Cloud.
+  const w = world({ url: `${CLOUD}/` });
+  await w.home.show({ place: "cloud" });
+  assert.equal(w.went.length, 1, `opened as home, not left as the saved server it was: ${JSON.stringify(w.went)}`);
+  w.state = connected({ hold: { until: 9 } });
+  w.journal = { ...done(), phase: "home-again" };
+  await w.home.show();
+  assert.equal(w.local.at(-1), true, "My Cloud ended: the window leaves it for this computer");
+});
+
 test("launching with My Cloud asleep says Waking My Cloud… and wakes it through the Admin, never by a look, then shows the page", async () => {
   const w = world({ power: { state: "asleep", since: 1, sleeps: true } });
   await w.home.show();
