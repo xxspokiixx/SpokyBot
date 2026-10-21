@@ -98,7 +98,7 @@ describe("what the popup offers, by plan", () => {
     const costlier = { ...PLAIN_OFFER, plans: PLAIN_OFFER.plans.map(plan => ({ ...plan, amount: plan.amount + 1000 })) };
     expect(cloudProPopupView(free, costlier)).toMatchObject({ primary: { via: "add-cloud", label: "Upgrade to Cloud Pro" },
       plan: "none", signedIn: true, email: "person@example.test", badge: null, price: "MausBot Cloud plans from $39/month + tax.", moneyBack: null });
-    expect((cloudProPopupView(free, costlier) as CloudProPopupView).points).toContain("Cloud computers and voice included");
+    expect((cloudProPopupView(free, costlier) as CloudProPopupView).points).toContain("Cloud desktops and voice included");
   });
 
   it("a plan: Manage plan in Settings → MausBot Cloud for every plan, no Compare plans, never a checkout, a price or the browser", () => {
@@ -111,7 +111,7 @@ describe("what the popup offers, by plan", () => {
       [onPlan("ultra"), "other", "Manage plan", "Cloud active · verified by MausBot Cloud"],
       [{ ...free, purchase: { state: "confirming" } }, "none", "Manage plan", "MausBot Cloud · payment received"],
       [{ ...free, entitlement: { plan: "pro", tier: "pro", status: "inactive", expiresAt: null, version: 3 } }, "none", "Manage plan", "Pro · not active right now"],
-      [{ status: "reauth-required", message: "expired", lastPlan: { tier: "pro", active: true } }, "unknown", "Manage plan", "Sign in again to use My Cloud on this computer. Your plan is not affected."],
+      [{ status: "reauth-required", message: "expired", lastPlan: { tier: "pro", active: true } }, "unknown", "Manage plan", "Sign in again to use the Cloud on this computer. Your plan is not affected."],
       [{ status: "signed-out", message: "restore-removed" }, "none", "Manage plan", null],
     ];
     for (const [account, plan, label, current] of cases) {
@@ -129,7 +129,7 @@ describe("what the popup offers, by plan", () => {
       [{ status: "paid", tier: "ultra" }, "other", true, "Cloud active · verified by MausBot Cloud"],
       [{ status: "attention", tier: "max" }, "none", true, "Max · not active right now"],
       [{ status: "attention" }, "none", true, "MausBot Cloud · not active right now"],
-      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use My Cloud on this computer. Your plan is not affected."],
+      [{ status: "signin", tier: "pro" }, "unknown", false, "Sign in again to use the Cloud on this computer. Your plan is not affected."],
     ];
     for (const [snapshot, plan, signedIn, current] of cases) {
       expect(cloudProCloudPageView(snapshot), plan).toMatchObject({ primary: { via: "settings-on-this-computer", label: "Manage plan" }, seePlans: false, plan, signedIn,
@@ -142,7 +142,7 @@ describe("what the popup offers, by plan", () => {
 
   it("a saved server's page: no plan, price or Compare plans, one way on, through This computer", () => {
     expect(cloudProElsewhereView()).toEqual({ primary: { via: "this-computer", label: "Continue on this computer" }, seePlans: false, plan: "unknown", signedIn: false,
-      email: null, badge: null, points: ["Routines run on time, day and night", "Reach your bots from your phone, even with this computer off", "Cloud computers and voice included"],
+      email: null, badge: null, points: ["Routines run on time, day and night", "Reach your bots from your phone, even with this computer off", "Cloud desktops and voice included"],
       price: null, moneyBack: null, current: null });
   });
 });

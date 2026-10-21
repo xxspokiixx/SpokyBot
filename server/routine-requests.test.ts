@@ -1695,7 +1695,7 @@ describe("cross-bot routine targeting", () => {
     });
     const card = store.messagesFor("thread-a")[0]?.card;
     expect(card?.title).toContain("for @Ops");
-    expect(card?.subtitle).toContain("engine and permissions");
+    expect(card?.subtitle).toContain("AI and permissions");
     expect(card?.routineRequest?.operation).toMatchObject({ action: "create", forBot: forOps.forBot });
 
     const result = service.resolve({

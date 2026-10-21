@@ -25,7 +25,7 @@ describe("liveActivityLabel", () => {
 
   it("maps common native and MCP tool names when narration is unavailable", () => {
     expect(liveActivityLabel(activity("Bash: pnpm test"))).toBe("Running a command");
-    expect(liveActivityLabel(activity("mcp__computer__click"))).toBe("Using the computer");
+    expect(liveActivityLabel(activity("mcp__computer__click"))).toBe("Using the screen");
     expect(liveActivityLabel(activity("web_search"))).toBe("Searching the web");
     expect(liveActivityLabel(activity("delegate_bot"))).toBe("Handing off a task");
     expect(liveActivityLabel(activity("ask_bot"))).toBe("Asking a teammate");
@@ -46,7 +46,7 @@ describe("liveActivityLabel", () => {
 describe("activityStepLabel", () => {
   it("names a step the way the working line does: the server's narration first", () => {
     expect(activityStepLabel({ name: "Edit", spoken: "editing a file" })).toBe("Editing a file");
-    expect(activityStepLabel({ name: "mcp__computer__click" })).toBe("Using the computer");
+    expect(activityStepLabel({ name: "mcp__computer__click" })).toBe("Using the screen");
   });
 
   it("never shows a step's arguments", () => {

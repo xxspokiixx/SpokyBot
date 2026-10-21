@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { TurnNotStartedError, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput } from "./contracts.ts";
 import {
-  EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopText, memoryWaitText, processGroupBytes, readHostMemory, withEngineMemory,
+  BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopText, memoryWaitText, processGroupBytes, readHostMemory, withEngineMemory,
   type HostMemory,
 } from "./engine-memory.ts";
 import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
@@ -255,6 +255,84 @@ describe("running short", () => {
     const c = (h.memory.turnStarted("c"), h.spawn("c"));
     c.exit("SIGKILL");
     expect(h.memory.stopText("c")).toBeNull();
+  });
+});
+
+describe("bots' browsers", () => {
+  /** Threads whose bot may browse and whose browser is not running yet, and the threads whose browser was told to close. */
+  function browsers(h: ReturnType<typeof host>, starting: Iterable<string>) {
+    const pending = new Set(starting), closed: string[] = [];
+    h.memory.useBrowsers({ starts: (threadId) => pending.has(threadId), stopped: (threadId) => closed.push(threadId) });
+    return { pending, closed };
+  }
+
+  it("counts the browser a turn may start, so a burst of browsing turns waits before the home runs out", async () => {
+    const h = host();
+    browsers(h, ["a", "b", "c"]);
+    // 3.4 GB free less the 410 MB kept back: two engines with a browser each fit, not four engines.
+    for (const thread of ["a", "b"]) {
+      expect(await h.memory.admit(thread, new AbortController().signal, () => {})).toBe(true);
+      h.memory.turnStarted(thread);
+      h.spawn(thread);
+    }
+    const notices: string[] = [];
+    const stop = new AbortController();
+    const third = h.memory.admit("c", stop.signal, (text) => notices.push(text));
+    await settle();
+    expect(notices).toEqual([memoryWaitText(2)]);
+    stop.abort();
+    expect(await third).toBe(false);
+  });
+
+  it("stops holding a browser's share once it has run a while, where what it takes shows in free memory", async () => {
+    const h = host();
+    const { pending } = browsers(h, ["a", "b", "c"]);
+    for (const thread of ["a", "b"]) {
+      await h.memory.admit(thread, new AbortController().signal, () => {});
+      h.memory.turnStarted(thread);
+      h.spawn(thread);
+    }
+    let admitted = false;
+    const third = h.memory.admit("c", new AbortController().signal, () => {}).then((ok) => { admitted = ok; });
+    await settle();
+    // Both browsers started on a light page: 100 MB each, not the 400 MB held for each.
+    pending.delete("a"); pending.delete("b");
+    h.state.available -= 200 * MB;
+    await settle();
+    // Just started, a browser may still grow: its share stays held.
+    expect(admitted).toBe(false);
+    h.advance(30_000);
+    await third;
+    expect(admitted).toBe(true);
+    expect(BROWSER_BYTES).toBe(400 * MB);
+  });
+
+  it("closes the browser of a turn stopped for memory, and leaves an idle engine's alone", async () => {
+    const h = host();
+    const { closed } = browsers(h, []);
+    for (const thread of ["a", "b", "c"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
+    h.memory.turnStarted("d"); h.spawn("d");
+    h.memory.turnEnded("d");
+    h.state.available = 100 * MB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGTERM -1003"]);
+    expect(closed).toEqual([]);
+    h.advance(20_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGTERM -1003", "SIGKILL -1002"]);
+    expect(closed).toEqual(["c"]);
+  });
+
+  it("closes the browser of a turn the kernel's OOM killer stopped", () => {
+    const h = host();
+    const { closed } = browsers(h, []);
+    h.memory.turnStarted("a"); const a = h.spawn("a");
+    h.memory.turnStarted("b"); h.spawn("b");
+    h.oomKill();
+    a.exit("SIGKILL");
+    expect(closed).toEqual(["a"]);
   });
 });
 

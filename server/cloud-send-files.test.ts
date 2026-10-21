@@ -79,7 +79,7 @@ describe("My Cloud takes a file", () => {
     writeFileSync(join(data, "outside.md"), "secret");
     symlinkSync(join(data, "outside.md"), join(data, "workspaces", "b1", "linked.md"));
     const read = async (path: string, offset: number, length: number) => {
-      let status = 0, bytes = Buffer.alloc(0);
+      let status = 0, bytes: Buffer = Buffer.alloc(0);
       const url = new URL(`http://127.0.0.1/api/cloud-send/files?${new URLSearchParams({ path, offset: String(offset), length: String(length) })}`);
       await moveFilesRoute(deps(), { path: "/api/cloud-send/files", method: "GET", url, auth: {} as never, req: {} as never,
         res: { setHeader() {}, writeHead: (code: number) => { status = code; }, end: (body: Buffer) => { bytes = body; } } as never,

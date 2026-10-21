@@ -244,7 +244,7 @@ describe("the bot panel in Simple mode", () => {
     expect(hero.props.bot).toBe(bot);
     expect(hero.props.patch).toBe(patch);
     const tabs = [...rendered.html.matchAll(/data-panel-tab="(\w+)"[^>]*>([^<]+)<\/button>/g)].map((match) => [match[1], match[2]]);
-    expect(tabs).toEqual([["details", "Details"], ["library", "Library"], ["computer", "Computer"], ["settings", "Settings"]]);
+    expect(tabs).toEqual([["details", "Details"], ["library", "Library"], ["computer", "Screen"], ["settings", "Settings"]]);
     expect(shown(rendered)).toEqual({ tab: "details", page: undefined });
     expect(ofType(rendered, DetailsTab)!.props.bot).toBe(bot);
     expect(rendered.html).toContain('id="bot-settings-title"');
@@ -689,7 +689,7 @@ describe("the browser logins", () => {
     expect(ofType(logins(makeBot({ browserProfile: "team" })), SignedInSites)!.props.sharedBy).toEqual(["Scout", "Nova"]);
     const temporary = logins(makeBot({ browserProfile: "guest" }));
     expect(ofType(temporary, SignedInSites)).toBeUndefined();
-    expect(temporary.html).toContain("Temporary sessions keep logins only while this server is running");
+    expect(temporary.html).toContain("Temporary sessions keep logins only while the app is running");
     const off = logins(makeBot(), vi.fn(), false);
     expect(ofType(off, SignedInSites)).toBeUndefined();
     expect(off.html).toContain("Scout&#x27;s browser is off.");
@@ -706,14 +706,14 @@ describe("the Computer tab", () => {
   const places = (rendered: { nodes: Node[] }) => rendered.nodes.filter((node) => node.props["data-place-choice"] !== undefined);
   const placeOf = (rendered: { nodes: Node[] }, value: string) => find(rendered, "data-place-choice", value);
 
-  it("offers Auto, this computer and a Cloud computer, with the rarer places under More places", () => {
+  it("offers Auto, this computer and a Cloud desktop, with the rarer places under More places", () => {
     const rendered = computer(makeBot());
     expect(rendered.html).toContain("Where Scout works");
     expect(rendered.html).toContain("More places");
     expect(rendered.html).toMatch(/data-place-choice="auto" aria-pressed="true"[^>]*>Auto</);
-    expect(rendered.html).toMatch(/data-place-choice="cloud" aria-pressed="false"[^>]*>Cloud computer</);
+    expect(rendered.html).toMatch(/data-place-choice="cloud" aria-pressed="false"[^>]*>Cloud desktop</);
     expect(places(rendered).map((node) => [node.props["data-place-choice"], node.props.children])).toEqual([
-      ["vm", "Local VM"], ["browser", "Browser only"], ["off", "Off"],
+      ["vm", "Private desktop"], ["browser", "Browser only"], ["off", "Off"],
     ]);
     expect(rendered.html).toContain("Picks the right place for each task");
   });
