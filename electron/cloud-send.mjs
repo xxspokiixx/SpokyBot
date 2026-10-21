@@ -407,7 +407,11 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (move) {
         try { result.conversationSettings = await kinds.moveSettings(ctx); }
         catch (error) { result.failed.push({ key: "conversation-settings", kind: "chats", label: "Chats", error: sentence(error?.message) ?? "The chats' settings could not be added." }); }
-        for (const row of rows.filter((entry) => automations.has(entry.kind))) await goRow(row);
+        const last = rows.filter((entry) => automations.has(entry.kind));
+        for (const row of last) await goRow(row);
+        // The pass's closing plan reads My Cloud as it is now: read before the automations went, it would take each one
+        // just carried for one removed there.
+        if (last.length) return parseSendSummary((await session.call("GET", summaryRoute)).body) ?? latest;
       }
       return latest;
     } finally {
