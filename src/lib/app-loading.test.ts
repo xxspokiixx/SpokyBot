@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import { loadingLine } from "./app-loading";
+
+afterEach(() => { vi.unstubAllGlobals(); });
 
 const line = (connected: boolean, hydrated: boolean, { updating = false, developer = false } = {}) => loadingLine({ connected, hydrated, updating, developer });
 
@@ -16,6 +18,15 @@ it("says Updating My Cloud… while the page the window reloaded for its newer v
   expect(line(false, false, { updating: true })).toEqual({ text: "app.loading.updating", busy: true, command: false });
   expect(line(true, false, { updating: true }).text).toBe("app.loading.updating");
   expect(line(true, true, { updating: true }).text, "loaded: the update is over").toBe("app.loading.noBots");
+});
+
+it("learns from the desktop app that the window reloaded My Cloud's page for its newer version", () => {
+  vi.stubGlobal("window", { ogb: { home: { updating: true } } });
+  expect(loadingLine({ connected: false, hydrated: false, developer: false }).text).toBe("app.loading.updating");
+  vi.stubGlobal("window", { ogb: { home: { updating: false } } });
+  expect(loadingLine({ connected: false, hydrated: false, developer: false }).text).toBe("app.loading.connecting");
+  vi.stubGlobal("window", {});
+  expect(loadingLine({ connected: false, hydrated: false, developer: false }).text, "a browser").toBe("app.loading.connecting");
 });
 
 it("names the command that starts a server only in a developer's build, while nothing answers", () => {

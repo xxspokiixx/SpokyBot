@@ -181,6 +181,8 @@ it("while the bots move to My Cloud, an off switch says it turns on by itself on
   expect(await view(off, true)).toContain(AFTER);
   expect(await view(off, false)).not.toContain(AFTER);
   expect(await view(lent, true)).not.toContain(AFTER);
+  const starting = await view({ ...lent, state: { ...lent.state!, connected: false } }, true);
+  expect(starting, "on and starting: it says so").not.toContain(AFTER); expect(starting).toContain("Starting…");
   const at = new Date(2026, 9, 7, 14, 2).getTime();
   const yours = await view({ ...off, state: { ...off.state!, stopped: { reason: "you", at } } }, true);
   expect(yours).not.toContain(AFTER); expect(yours).toContain("you turned it off");
