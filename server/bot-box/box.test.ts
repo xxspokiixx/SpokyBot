@@ -100,7 +100,9 @@ describe("BotBox", () => {
     expect(existsSync(join(dirs[0]!, "box"))).toBe(false);
   });
 
-  it("on: opens the two gates under the data folder, wraps every spawn and counts them", async () => {
+  // On, the box's gates listen on unix sockets, which Windows refuses at a file path; the box runs only on a Linux Cloud
+  // home (detect.ts says "not-linux" anywhere else), and "off" above is what Windows gets.
+  it.skipIf(process.platform === "win32")("on: opens the two gates under the data folder, wraps every spawn and counts them", async () => {
     const box = new BotBox();
     boxes.push(box);
     const dataDir = temp();
@@ -178,7 +180,8 @@ describe("spawnCli goes through the box", () => {
 });
 
 describe("BoxRunner.lend", () => {
-  it("puts a conversation's lent folders (a memory layer) back read-write in its boxes only, until they are taken back", () => {
+  // A plan over the Linux box's POSIX paths, which Windows' path module would join with backslashes.
+  it.skipIf(process.platform === "win32")("puts a conversation's lent folders (a memory layer) back read-write in its boxes only, until they are taken back", () => {
     const dataDir = "/data/.openmausbot";
     const setup = { dataDir, home: "/data", codeRoots: ["/app"], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }] };
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
