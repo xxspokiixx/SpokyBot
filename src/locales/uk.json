@@ -2383,6 +2383,7 @@
   "cloudSend.move.waiting": "Твої боти переїжджають у Cloud… чекаємо, поки {name} закінчить",
   "cloudSend.move.waitingAny": "Твої боти переїжджають у Cloud… чекаємо, поки твої боти закінчать",
   "cloudSend.move.finishing": "Переїзд у Cloud… майже готово",
+  "cloudSend.move.updating": "My Cloud оновлюється. Переїзд почнеться, щойно оновлення завершиться.",
   "cloudSend.move.failing": "Твої боти ще не змогли переїхати в Cloud: {error}",
   "cloudSend.move.failingPlain": "Твої боти ще не змогли переїхати в Cloud.",
   "cloudSend.move.done": "Усе з цього комп’ютера вже тут: {list}.",

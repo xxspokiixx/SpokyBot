@@ -672,6 +672,7 @@
   "cloudSend.move.waiting": "Moving your bots to My Cloud… waiting for {name} to finish",
   "cloudSend.move.waitingAny": "Moving your bots to My Cloud… waiting for your bots to finish",
   "cloudSend.move.finishing": "Moving to My Cloud… almost done",
+  "cloudSend.move.updating": "My Cloud is updating. Your move starts when it's done.",
   "cloudSend.move.failing": "Your bots couldn't move to My Cloud yet: {error}",
   "cloudSend.move.failingPlain": "Your bots couldn't move to My Cloud yet.",
   "cloudSend.move.done": "Everything from this computer is here: {list}.",
