@@ -8,6 +8,7 @@ import { GATE_APPS_ENV, REMOTE_MCP_APPS_ENV, type AppMount } from "./mcp-app-obs
 import { DEFAULT_RESULT_BUDGET, QUERY_TOOL_NAME } from "./mcp-trim.ts";
 import { REMOTE_MCP_CONFIG_ENV, remoteMcpSpec } from "./mcp-http.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { TOOL_SCHEMA_PROFILE_ENV, type ToolSchemaProfileId } from "./tool-schema-profile.ts";
 
 export type { AppMount } from "./mcp-app-observer.ts";
 
@@ -145,13 +146,15 @@ export function gateServer(input: {
   sourceEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   gateRemote?: boolean;
   apps?: AppMount;
+  /** The engine's provider limits each listed tool schema, so the gate fits them to its profile. */
+  schemaProfile?: ToolSchemaProfileId;
 }): { command: string; args: string[]; env: Record<string, string> } | null {
-  const { name, server, budget, apps } = input;
+  const { name, server, budget, apps, schemaProfile } = input;
   const parsed = parseToolScope(input.toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scoped = parsed.scope !== undefined;
   const remote = remoteMcpSpec(server) !== undefined;
-  if (budget <= 0 && !scoped && !apps) return null;
+  if (budget <= 0 && !scoped && !apps && !schemaProfile) return null;
   const directory = input.directory === true && remote;
   const proxyOptions = {
     nodeEnv: input.nodeEnv,
@@ -190,6 +193,7 @@ export function gateServer(input: {
     args: [SPAWNED_PROXIES.mcpGate, ...(input.configEnvName ? ["--config-env", input.configEnvName] : [])],
     env: {
       ...input.nodeEnv,
+      ...(schemaProfile ? { [TOOL_SCHEMA_PROFILE_ENV]: schemaProfile } : {}),
       ...(input.configEnvName ? { [input.configEnvName]: JSON.stringify(env) } : env),
     },
   };

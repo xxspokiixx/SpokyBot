@@ -10,8 +10,10 @@ import { resolveCliSpawn } from "./env-path.ts";
 import { APP_ONLY_REFUSAL, AppObserver, GATE_APPS_ENV, modelVisible, parseAppMount, withUiExtension } from "./mcp-app-observer.ts";
 import { directoryCallTarget, isDirectoryTool } from "./mcp-directory.ts";
 import { QUERY_TOOL, QUERY_TOOL_NAME, ResultStore, answerQuery, describeShape, exampleQuery } from "./mcp-shape.ts";
+import { fitToolList } from "./mcp-tool-schema.ts";
 import { DEFAULT_RESULT_BUDGET, type HeldResult, trimResultText, trimStructured } from "./mcp-trim.ts";
 import { killCliTree } from "./procs.ts";
+import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 
@@ -41,6 +43,7 @@ const BUDGET = Number.isFinite(rawBudget) && rawBudget >= 0 ? rawBudget : DEFAUL
 const SPILL_MAX_AGE_MS = 24 * 60 * 60_000;
 const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
 const DIRECTORY = gateEnv.OMB_GATE_DIRECTORY === "1";
+const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
@@ -360,6 +363,9 @@ createInterface({ input: child.stdout }).on("line", (line) => {
     }
     result.tools = result.tools.filter((tool: Json) => (DIRECTORY && isDirectoryTool(tool.name))
       || allowsTool(scope, { kind: "mcp", server: NAME, name: tool.name as string }));
+  }
+  if (SCHEMA_PROFILE && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
+    result.tools = fitToolList(result.tools, SCHEMA_PROFILE, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
   if (BUDGET > 0 && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools) && result.nextCursor === undefined) {
     result.tools = [...result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME), QUERY_TOOL];
