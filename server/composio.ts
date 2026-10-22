@@ -536,7 +536,7 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
-  beforeSend?: () => void,
+  beforeSend?: () => void, signal?: AbortSignal,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const apiKey = projectApiKey(cfg);
   let url: string;
@@ -573,7 +573,7 @@ export async function relayMcp(
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(10 * 60_000),
+    signal: signal ?? AbortSignal.timeout(10 * 60_000),
   }));
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (declared > 20 * 1024 * 1024) throw new Error("Connected-app response exceeded 20 MB");
