@@ -713,6 +713,20 @@ describe("Chat MCP schema validation", () => {
     expect(() => session.validate("audit_write", { owner: 1, repo: "hello" })).toThrow("input schema");
   });
 
+  it("accepts Google MCP's x-google-enum-descriptions annotation and still enforces the enum", async () => {
+    const toolSchema = {
+      type: "object",
+      properties: {
+        value: { type: "string", enum: ["METRIC", "IMPERIAL"], "x-google-enum-descriptions": ["Metric units.", "Imperial units."] },
+      },
+      required: ["value"],
+    };
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(() => session.validate("audit_write", { value: "METRIC" })).not.toThrow();
+    expect(() => session.validate("audit_write", { value: "KELVIN" })).toThrow("input schema");
+  });
+
   it.each([
     ["email", "user@example.com", "invalid"],
     ["uri", "https://example.com/path", "not a uri"],
@@ -729,6 +743,7 @@ describe("Chat MCP schema validation", () => {
     { type: "object", properties: {value:{$ref:"https://example.invalid/private-schema"}} },
     { type: "object", properties: {value:{type:"string",unrecognizedAssertion: true}} },
     { type: "object", properties: {value:{type:"string","x-mcp-header": 5}} },
+    { type: "object", properties: {value:{type:"string","x-google-enum-descriptions": "not a list"}} },
   ])("refuses schemas it cannot validate instead of silently weakening them %#", async (toolSchema) => {
     const f = fixture("", toolSchema);
     await expectSkipped(f, /schema could not be validated/);
