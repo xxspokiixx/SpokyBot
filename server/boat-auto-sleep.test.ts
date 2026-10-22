@@ -148,9 +148,9 @@ describe("a cloud computer goes to sleep after its idle window", () => {
     stopStatus = 503;
     await powerFor({});
     power.used(botId);
-    await waitFor(() => stops().length === 1);
+    await waitFor(() => stops().length === 1 && logs.length === 1);
     expect(logs[0]).toMatch(/^cloud computer auto-sleep-test: could not go to sleep, retrying in 1 min: boat sleep failed: Cloud computers are not available right now\.$/);
-    await new Promise(resolve => setTimeout(resolve, 1_500));
+    await waitFor(() => stops().length === 2 && logs.length === 2);
     expect(stops()).toHaveLength(2);
     await new Promise(resolve => setTimeout(resolve, 1_000));
     expect(stops()).toHaveLength(2);
