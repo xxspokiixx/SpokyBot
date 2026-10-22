@@ -1014,7 +1014,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           if (!current || !current.state.promptSent) return;
           const u = p.update ?? {};
-          // Either a finished tool_call or its terminal tool_call_update ends a tool item (./tool-items.ts).
           const finished = u.status === "completed" || u.status === "failed";
           const toolEnded = (itemId: string | undefined) => {
             current.state.producedItem = true;
@@ -1057,8 +1056,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             case "tool_call": {
               current.flushAssistantText();
               trackRunningTool(current, u, "pending");
-              // A call can arrive already finished, e.g. failed on a denied permission, and gets no update after it:
-              // end it here too, or every listener would count it as running. Its id never joins the unkeyed queue.
+              // ACP can send a tool_call already marked completed or failed (e.g. on a denied permission) with no
+              // tool_call_update after it.
               const itemId = (typeof u.toolCallId === "string" && u.toolCallId) ? u.toolCallId
                 : finished ? `acp-tool-unkeyed-${++unkeyedToolSeq}` : nextUnkeyedToolId(current);
               emit({
