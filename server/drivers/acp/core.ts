@@ -1185,7 +1185,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env);
-        const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true });
+        const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true, engine: support.driverKind });
         support.applyTurnEnv?.(env, {
           model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
           threadId, mcpServers,
