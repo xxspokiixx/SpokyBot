@@ -128,6 +128,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
   const nodeParents = new Map<string, TraceParent>();
   const nodeTurns = new Map<string, TraceParent>();
   const threadTotals = new Map<string, TraceTokens>();
+  const finished = new Map<string, true>();
 
   const stepId = (turn: Turn) => `${turn.threadId}:${turn.turnId}:step-${turn.steps.length + 1}`;
   const openStep = (turn: Turn, startedAt: number): StepSpan => {
@@ -170,8 +171,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     const current = live.get(event.threadId);
     if (!event.turnId) return current ?? null;
     if (current?.turnId === event.turnId) return current;
-    const settled = ended.get(event.threadId)?.turn;
-    if (settled?.turnId === event.turnId) return null;
+    if (finished.has(`${event.threadId}:${event.turnId}`)) return null;
     return begin(event, event.turnId);
   }
 
@@ -277,6 +277,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     if (!event.ok) turn.reason = turn.lastError ?? (event.stopReason ? errorLine(event.stopReason.replace(/_/g, " ")) : undefined);
     if (event.usage) turn.usage = typeof event.usage.cachedInput === "number" ? { cachedInput: event.usage.cachedInput } : {};
     flush(turn);
+    remember(finished, `${turn.threadId}:${turn.turnId}`, true);
     live.delete(turn.threadId);
     const previous = ended.get(turn.threadId);
     if (previous) clearTimeout(previous.timer);
@@ -288,7 +289,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
   function observe(event: RuntimeEvent): void {
     if (!event.threadId) return;
     if (event.type === "turn.started") {
-      if (event.turnId && live.get(event.threadId)?.turnId !== event.turnId) begin(event, event.turnId);
+      if (event.turnId && live.get(event.threadId)?.turnId !== event.turnId && !finished.has(`${event.threadId}:${event.turnId}`)) begin(event, event.turnId);
       return;
     }
     if (event.type === "session.started" || event.type === "session.exited" || event.type === "session.model-variants") return;

@@ -78,9 +78,15 @@ describe("trace recorder", () => {
     recorder.observe(started("room", "r2", 6_000));
     recorder.observe(completed("room", "r2", 7_000));
     expect(recorder.settle("room")).toMatchObject({ parent: { threadId: "room", turnId: "r1" } });
+    expect(recorder.liveTurns()).toEqual([]);
     recorder.observe(started("writer", "w2", 8_000));
+    recorder.observe(done("writer", "w1", 8_100, "late-item"));
+    recorder.observe(started("writer", "w1", 8_200));
     recorder.observe(completed("writer", "w2", 9_000));
-    expect(recorder.settle("writer")).not.toHaveProperty("parent");
+    const unlinked = recorder.settle("writer");
+    expect(unlinked).toMatchObject({ turnId: "w2", tools: 0 });
+    expect(unlinked).not.toHaveProperty("parent");
+    expect(recorder.settle("writer")).toEqual({});
   });
 
   it("closes a tool still open at the turn's end, keeps one span per engine id, and says why a turn failed", async () => {
