@@ -330,6 +330,12 @@ export function markNotificationLogRead(id: string): void {
   db().prepare("UPDATE notification_log SET read = 1 WHERE id = ?").run(id);
 }
 
+/** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
+export function markThreadNotificationLogRead(threadId: string): string[] {
+  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 RETURNING id").all(threadId) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
+}
+
 export function markAllNotificationLogRead(): void {
   db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0").run();
 }
