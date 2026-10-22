@@ -1637,6 +1637,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "rate_limit_event":
             if (session.turn) session.turn.limit = claudeLimitRefusal(o.rate_limit_info);
             break;
+          case "tool_progress":
+            // Claude Code 2.1.306 sends one every 30 s while a tool runs: proof the turn is alive.
+            emit({ ...base(threadId, currentTurnId()), type: "item.updated", itemType: "tool" });
+            break;
           case "result": {
             // A synthetic task-notification completion is not the submitted user turn's result.
             if (o.origin?.kind === "task-notification") break;
