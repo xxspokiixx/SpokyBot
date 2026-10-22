@@ -64,6 +64,13 @@ const AsyncAuthDriver = createAcpDriver({
   isAuthenticated: async () => true,
 });
 
+const ReasoningReplayDriver = createAcpDriver({
+  ...SELECT_MODEL_SUPPORT,
+  driverKind: "reasoningReplayTest",
+  selectModel: undefined,
+  resendsReasoningReply: true,
+});
+
 const ClassifiedErrorDriver = createAcpDriver({
   ...SELECT_MODEL_SUPPORT,
   driverKind: "classifiedErrorTest",
@@ -529,14 +536,14 @@ describe("ACP turns (fake CLI)", () => {
     expect(await send("turn 2")).toBe("turn 2");
   });
 
-  const reportingThread = async (name: string) => {
+  const reportingThread = async (name: string, driver?: typeof GrokAgentDriver) => {
     const dump = join(scratch, `acp-${name}.json`);
     const updatesFile = join(scratch, `acp-${name}-updates.json`);
     process.env.FAKE_ACP_DUMP = dump;
     process.env.FAKE_ACP_DUMP_PROMPT = "1";
     process.env.FAKE_ACP_UPDATES_FILE = updatesFile;
     writeFileSync(updatesFile, "[]");
-    await create();
+    await create(driver);
     const threadId = `t-acp-${name}-` + randomUUID();
     let lastTurnId = "";
     /** Whole session/update params, for a `_meta` beside the update. */
@@ -696,6 +703,41 @@ describe("ACP turns (fake CLI)", () => {
     expect(lastTurn().filter((event) => event.type === "runtime.error" || event.type === "runtime.notice")).toEqual([]);
     report();
     expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  describe("a reply re-sent with its reasoning under the streamed messageId", () => {
+    const messageId = randomUUID();
+    const chunk = (sessionUpdate: string, text: string) => ({ sessionUpdate, messageId, content: { type: "text", text } });
+    const say = (...texts: string[]) => texts.map((text) => chunk("agent_message_chunk", text));
+    const reasoned = "💭 **Reasoning:**\n```\nSix times seven.\n```\n\nThe answer is 42.";
+    /** Each turn's replies after the fake's own "hello from fake acp". */
+    const replyingThread = async (name: string, driver?: typeof GrokAgentDriver) => {
+      const { report, send, lastTurn } = await reportingThread(name, driver);
+      return async (...updates: object[]) => {
+        report(...updates);
+        await send("turn");
+        return lastTurn().flatMap((event) =>
+          event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []).slice(1);
+      };
+    };
+
+    it("shows once from an engine that re-sends it", async () => {
+      const repliesTo = await replyingThread("reasoning-replay", ReasoningReplayDriver);
+      expect(await repliesTo(chunk("agent_thought_chunk", "Six times seven."), ...say("The answer", " is 42.", reasoned)))
+        .toEqual(["The answer is 42."]);
+      // hermes-agent 0.22.4 sends the re-sent reply after a blank line
+      expect(await repliesTo(...say("The answer", " is 42.", `\n\n${reasoned}`))).toEqual(["The answer is 42."]);
+      expect(await repliesTo(...say("    indented", "> 💭 **Reasoning:**\n> Six times seven.\n\n    indented")))
+        .toEqual(["indented"]);
+      // chunks that only end with the text so far are deltas
+      expect(await repliesTo(...say("a", "ba"))).toEqual(["aba"]);
+      expect(await repliesTo(...say("42.", "Explanation:\n\n42."))).toEqual(["42.Explanation:\n\n42."]);
+    });
+
+    it("is appended for any other engine", async () => {
+      const repliesTo = await replyingThread("reasoning-append");
+      expect(await repliesTo(...say("The answer is 42.", reasoned))).toEqual([`The answer is 42.${reasoned}`]);
+    });
   });
 
   const plan = (...entries: Array<[status: string, content: string]>) => ({
