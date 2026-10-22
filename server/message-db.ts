@@ -670,7 +670,7 @@ export function optionCardsForTools(tools: readonly string[]): Array<{ threadId:
 }
 
 export function appDocRefs(): string[] {
-  const rows = db().prepare("SELECT DISTINCT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app'").all() as Array<{ doc: unknown }>;
+  const rows = db().prepare("SELECT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app' UNION SELECT h.value FROM messages m, json_each(m.json, '$.app.history') h WHERE m.kind = 'app'").all() as Array<{ doc: unknown }>;
   return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 

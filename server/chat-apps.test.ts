@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { APP_LIMITS, type AppPayload } from "../shared/app.ts";
+import { APP_LIMITS, APP_PAGE_VERSIONS, type AppPayload } from "../shared/app.ts";
 import { BOT_HTML_CSP, BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { CSP_META_PREFIX } from "../shared/app-frame/document.ts";
 import { APP_HELPER_SOURCE } from "../shared/app-frame/helper.ts";
 import { AppDocs } from "./app-docs.ts";
 import {
-  appContextBlock, appDocument, AppMessageRate, createAppCard, createChatApps, prepareAppMessage, rowRate, setAppContext, withAppContext,
-  type ChatApps,
+  appContextBlock, appDocument, AppMessageRate, createAppCard, createChatApps, pageVersion, prepareAppMessage, publishablePage, rowRate, setAppContext,
+  withAppContext, type ChatApps,
 } from "./chat-apps.ts";
 import { createAgentCard, type AgentCardStore } from "./chat-widgets.ts";
 import type { Message, StoreChange } from "./store.ts";
@@ -147,6 +147,55 @@ describe("update_html", () => {
     expect(call({ tool: "update_html", app_id: "m4", html: "<p>x</p>" })).toMatchObject({ ok: false, status: 404 });
     expect(call({ tool: "update_html", app_id: "m9", html: "<p>x</p>" })).toMatchObject({ ok: false, status: 404 });
     expect(JSON.stringify(rows(THREAD))).toBe(before);
+  });
+});
+
+describe("versions", () => {
+  it("keeps the documents before the current one, oldest first, up to the limit, and serves each by its rev", () => {
+    const { call, row, store, docs } = setup();
+    call({ tool: "show_html", html: "<p>v1</p>", title: "Steps" });
+    const first = row("m1").app!.doc;
+    for (let n = 2; n <= APP_PAGE_VERSIONS + 2; n += 1) call({ tool: "update_html", app_id: "m1", html: `<p>v${n}</p>` });
+    const app = row("m1").app!;
+    expect(app.rev).toBe(APP_PAGE_VERSIONS + 1);
+    expect(app.history).toHaveLength(APP_PAGE_VERSIONS - 1);
+    expect(app.history).not.toContain(first);
+    expect(appDocument({ store, docs, threadId: THREAD, messageId: "m1" })!.srcdoc).toContain(`<p>v${APP_PAGE_VERSIONS + 2}</p>`);
+    expect(appDocument({ store, docs, threadId: THREAD, messageId: "m1", rev: app.rev - 1 })).toMatchObject({ rev: app.rev - 1 });
+    expect(appDocument({ store, docs, threadId: THREAD, messageId: "m1", rev: app.rev - 1 })!.srcdoc).toContain(`<p>v${APP_PAGE_VERSIONS + 1}</p>`);
+    const oldest = app.rev - (APP_PAGE_VERSIONS - 1);
+    expect(appDocument({ store, docs, threadId: THREAD, messageId: "m1", rev: oldest })!.srcdoc).toContain(`<p>v${oldest + 1}</p>`);
+    expect(appDocument({ store, docs, threadId: THREAD, messageId: "m1", rev: oldest - 1 })).toBeNull();
+    expect(appDocument({ store, docs, threadId: THREAD, messageId: "m1", rev: app.rev + 1 })).toBeNull();
+  });
+
+  it("pageVersion names the current document, a kept one, or nothing", () => {
+    const app: AppPayload = { v: 1, source: "html", title: "t", doc: "d3", rev: 3, history: ["d1", "d2"], bytes: 1, border: true, network: { connect: [], resources: [] } };
+    expect([pageVersion(app), pageVersion(app, 3), pageVersion(app, 2), pageVersion(app, 1), pageVersion(app, 0), pageVersion(app, 1.5), pageVersion(app, -1)])
+      .toEqual([{ doc: "d3", rev: 3 }, { doc: "d3", rev: 3 }, { doc: "d2", rev: 2 }, { doc: "d1", rev: 1 }, null, null, null]);
+  });
+});
+
+describe("publishablePage", () => {
+  it("serves an HTML page with the theme colours and a quiet mausbot", () => {
+    const { call, store, docs } = setup();
+    call({ tool: "show_html", html: PAGE, title: "Sales" });
+    const html = publishablePage({ store, docs, threadId: THREAD, messageId: "m1" });
+    expect(html).toMatchObject({ ok: true, title: "Sales", rev: 0 });
+    if (!html.ok) throw new Error("not publishable");
+    expect(html.html).toMatch(/^<!DOCTYPE html><style>:root\{color-scheme:light dark;/);
+    expect(html.html).toContain("window.mausbot={theme:");
+    expect(html.html).not.toContain("Content-Security-Policy");
+    expect(html.html.endsWith("<h1>Sales</h1><p>Up 12%</p><script>draw()</script></body></html>")).toBe(true);
+  });
+
+  it("refuses another thread's row, an MCP app and a version no longer kept", () => {
+    const { call, store, docs } = setup();
+    call({ tool: "show_html", html: PAGE, title: "Sales" });
+    store.appendMessage(THREAD, { role: "bot", kind: "app", text: "x", app: { v: 1, source: "mcp", title: "Excalidraw", doc: "", rev: 0, bytes: 1, border: true, network: { connect: [], resources: [] }, mcp: { server: "excalidraw", tool: "create_view", resourceUri: "ui://excalidraw/mcp-app.html" } } });
+    expect(publishablePage({ store, docs, threadId: "elsewhere", messageId: "m1" })).toMatchObject({ ok: false, status: 404 });
+    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m2" })).toMatchObject({ ok: false, status: 409 });
+    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m1", rev: 4 })).toMatchObject({ ok: false, status: 404 });
   });
 });
 

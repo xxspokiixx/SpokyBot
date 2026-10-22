@@ -1,7 +1,10 @@
 import { AppWindow } from "lucide-react";
 import type { Message } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { usePreviewState } from "@/lib/preview-pane";
+import type { AppPayload } from "../../shared/app";
 import { AppMessage } from "./app/AppMessage";
+import { PageCard } from "./preview/PageCard";
 import { MessageBoundary } from "./MessageBoundary";
 import { WidgetMessage } from "./widget/WidgetMessage";
 
@@ -12,11 +15,14 @@ export function richRowKind(message: Message): Message["kind"] {
 }
 
 export function RichMessageRow({ botId, botName, threadId, message }: { botId: string; botName: string; threadId?: string; message: Message }) {
+  const { hosts } = usePreviewState();
+  const page = message.kind === "app" && message.app?.source === "html" && hosts > 0 && threadId ? message as Message & { app: AppPayload } : null;
   return (
     <MessageBoundary fallbackText={message.text ?? ""}>
-      {message.kind === "app"
-        ? <AppMessage botId={botId} botName={botName} threadId={threadId} message={message} />
-        : <WidgetMessage botId={botId} threadId={threadId} message={message} />}
+      {page && threadId ? <PageCard botId={botId} botName={botName} threadId={threadId} message={page} />
+        : message.kind === "app"
+          ? <AppMessage botId={botId} botName={botName} threadId={threadId} message={message} />
+          : <WidgetMessage botId={botId} threadId={threadId} message={message} />}
     </MessageBoundary>
   );
 }

@@ -1,9 +1,9 @@
 import {
-  APP_LIMITS, appBlockedText, htmlFallbackText, oneLine, parseShowHtmlInput, parseUpdateHtmlInput,
+  APP_LIMITS, APP_PAGE_VERSIONS, appBlockedText, htmlFallbackText, oneLine, parseShowHtmlInput, parseUpdateHtmlInput,
   type AppCan, type AppDocument, type AppPayload,
 } from "../shared/app.ts";
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
-import { botHtmlDocument, mcpAppDocument } from "../shared/app-frame/document.ts";
+import { botHtmlDocument, mcpAppDocument, publishedBotHtml } from "../shared/app-frame/document.ts";
 import { AppDocs } from "./app-docs.ts";
 import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
 import { appDocRefs } from "./message-db.ts";
@@ -81,13 +81,15 @@ export function createAppCard(args: {
   const page = scrubbed(parsed.value.html, parsed.value.title ?? existing.app.title);
   const stored = docs.put({ source: "html", html: page.html });
   // The page reloads: what the old one told the model about itself no longer holds.
-  const { context: _context, blocked: _blocked, ...kept } = existing.app;
+  const { context: _context, blocked: _blocked, history: earlier, ...kept } = existing.app;
+  const history = [...(earlier ?? []), ...(existing.app.doc ? [existing.app.doc] : [])].slice(-(APP_PAGE_VERSIONS - 1));
   const payload: AppPayload = {
     ...kept,
     title: page.title,
     doc: stored.ok ? stored.doc : "",
     rev: (existing.app.rev ?? 0) + 1,
     bytes: Buffer.byteLength(page.html),
+    ...(history.length ? { history } : {}),
     ...(stored.ok ? {} : { blocked: "too-large" as const }),
   };
   const patched = store.patchMessage(threadId, existing.id, { text: redactSecretsInText(htmlFallbackText(page.title, page.html)), app: payload });
@@ -103,18 +105,31 @@ const MCP_READ_ONLY: McpAppAccess = (row) => ({
   blocked: { reason: "server-removed", text: appBlockedText("server-removed", row.app.mcp?.serverTitle ?? row.app.mcp?.server) },
 });
 
+/** The content id of version `rev` of a row's page: the current one, or one its history keeps; null when gone. */
+export function pageVersion(app: AppPayload, rev?: number): { doc: string; rev: number } | null {
+  const current = app.rev ?? 0;
+  if (rev === undefined || rev === current) return app.doc ? { doc: app.doc, rev: current } : null;
+  const history = app.history ?? [];
+  const index = history.length - (current - rev);
+  return Number.isInteger(rev) && rev >= 0 && rev < current && index >= 0 && history[index] ? { doc: history[index]!, rev } : null;
+}
+
 export function appDocument(args: {
   store: Pick<AgentCardStore, "messagesFor">;
   docs: AppDocs;
   threadId: string;
   messageId: string;
+  /** An earlier version of a bot's page; the current one when omitted. */
+  rev?: number;
   mcpAccess?: McpAppAccess;
 }): AppDocument | null {
   const row = appRow(args.store, args.threadId, args.messageId);
-  if (!row?.app.doc) return null;
-  const stored = args.docs.read(row.app.doc);
+  if (!row) return null;
+  const version = pageVersion(row.app, row.app.source === "html" ? args.rev : undefined);
+  if (!version) return null;
+  const stored = args.docs.read(version.doc);
   if (!stored || stored.source !== row.app.source) return null;
-  const rev = row.app.rev ?? 0;
+  const rev = version.rev;
   if (stored.source === "html") return botHtmlDocument({ messageId: row.id, rev, html: stored.html });
   if (!stored.data?.tool) return null;
   const access = (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
@@ -127,6 +142,20 @@ export function appDocument(args: {
     can: access.can,
     ...(access.blocked ? { blocked: access.blocked } : {}),
   });
+}
+
+export type PublishablePage = { ok: true; title: string; html: string; rev: number } | { ok: false; status: 404 | 409 | 422; error: string };
+
+/** A bot's page as one static HTML file. */
+export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor">; docs: AppDocs; threadId: string; messageId: string; rev?: number }): PublishablePage {
+  const row = appRow(args.store, args.threadId, args.messageId);
+  if (!row) return { ok: false, status: 404, error: "That page is not in this conversation." };
+  if (row.app.source !== "html") return { ok: false, status: 409, error: "That app came from an MCP server; only a page a bot made can be published." };
+  const version = pageVersion(row.app, args.rev);
+  const stored = version ? args.docs.read(version.doc) : null;
+  if (!version || !stored || stored.source !== "html") return { ok: false, status: 404, error: "That version of the page is no longer kept." };
+  const title = oneLine(row.app.title);
+  return { ok: true, title, html: publishedBotHtml(stored.html), rev: version.rev };
 }
 
 export type AppRouteResult = { ok: true } | { ok: false; status: 400 | 404 | 409 | 429; error: string };
@@ -279,7 +308,8 @@ export function rowRate(limit: number, windowMs: number): { take(key: string, no
 export interface ChatApps {
   readonly docs: AppDocs;
   createAppCard(args: { bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void }): AgentCardResult;
-  appDocument(threadId: string, messageId: string): AppDocument | null;
+  appDocument(threadId: string, messageId: string, rev?: number): AppDocument | null;
+  publishablePage(threadId: string, messageId: string, rev?: number): PublishablePage;
   setAppContext(args: { threadId: string; messageId: string; content?: unknown; structuredContent?: unknown }): AppRouteResult;
   withAppContext(text: string, threadId: string): { text: string; deliver(): void };
   mcpAccess?: McpAppAccess;
@@ -320,7 +350,9 @@ export function createChatApps(deps: {
   const apps: ChatApps = {
     docs,
     createAppCard: (args) => createAppCard({ ...args, store: deps.store, docs }),
-    appDocument: (threadId, messageId) => appDocument({ store: deps.store, docs, threadId, messageId, ...(apps.mcpAccess ? { mcpAccess: apps.mcpAccess } : {}) }),
+    appDocument: (threadId, messageId, rev) => appDocument({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}),
+      ...(apps.mcpAccess ? { mcpAccess: apps.mcpAccess } : {}) }),
+    publishablePage: (threadId, messageId, rev) => publishablePage({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}) }),
     setAppContext: (args) => setAppContext(deps.store, args),
     withAppContext: (text, threadId) => withAppContext(deps.store, text, threadId),
     sweep,

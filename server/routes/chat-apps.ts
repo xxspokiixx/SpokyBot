@@ -43,15 +43,17 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
   const { store, apps } = deps;
   const contextRate = rowRate(120, 60_000);
 
-  return async ({ req, res, path, method, auth, json, readBody }) => {
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m = DOCUMENT.exec(path);
     if (m && method === "GET") {
       const threadId = m[1]!;
       // An unknown thread answers before the store materialises it.
       if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return json(res, 404, { error: "no such conversation" });
       if (!appRow(store, threadId, m[2]!)) return json(res, 404, { error: "no app on that message" });
-      const doc = apps.appDocument(threadId, m[2]!);
-      if (!doc) return json(res, 404, { error: "This app's page is not stored on this computer." });
+      const asked = url.searchParams.get("rev");
+      if (asked !== null && !/^\d{1,6}$/.test(asked)) return json(res, 400, { error: "rev must be a version number" });
+      const doc = apps.appDocument(threadId, m[2]!, asked === null ? undefined : Number(asked));
+      if (!doc) return json(res, 404, { error: asked === null ? "This app's page is not stored on this computer." : "That version of the page is no longer kept." });
       // `can` and `blocked` change with sign-in and settings: never cached.
       res.setHeader("cache-control", "private, no-store");
       return json(res, 200, doc);

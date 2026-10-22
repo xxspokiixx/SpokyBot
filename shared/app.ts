@@ -30,6 +30,9 @@ export const APP_LIMITS = {
   rpcPerMinute: 60,
 } as const;
 
+/** Versions of one bot page kept for stepping back, the current one included. */
+export const APP_PAGE_VERSIONS = 10;
+
 export type AppSource = "html" | "mcp";
 
 /** Origins a frame may reach, after the host's filter. `refused`: what a server asked for and the
@@ -71,6 +74,9 @@ export interface AppPayload {
   doc: string;
   /** 0, bumped by update_html. */
   rev: number;
+  /** Content ids of the versions before `doc`, oldest first, at most APP_PAGE_VERSIONS - 1: the last one is
+   * rev - 1. */
+  history?: string[];
   /** UTF-8 bytes of the HTML, for the info popover. */
   bytes: number;
   /** Initial height in px before the frame reports its own (show_html

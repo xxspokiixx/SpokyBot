@@ -1,5 +1,6 @@
 import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
+import type { PublishedPageCard } from "../../../shared/published-page";
 import { RPC_HOST_REFUSED, type AppContextUpdate, type AppRpcMethod, type JsonRpcError } from "../../../shared/app-frame/bridge";
 
 export function appDocumentPath(threadId: string, messageId: string): string {
@@ -30,9 +31,10 @@ function failureOf(error: unknown): AppFetchFailure {
   return { offline: true };
 }
 
-export async function fetchAppDocument(threadId: string, messageId: string, signal?: AbortSignal): Promise<AppDocument> {
+/** `rev`: an earlier version of a bot's page; the current one when omitted. */
+export async function fetchAppDocument(threadId: string, messageId: string, signal?: AbortSignal, rev?: number): Promise<AppDocument> {
   try {
-    const doc = await api<AppDocument>(appDocumentPath(threadId, messageId), { signal });
+    const doc = await api<AppDocument>(`${appDocumentPath(threadId, messageId)}${rev === undefined ? "" : `?rev=${rev}`}`, { signal });
     if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: "The app's page did not arrive whole." });
     return doc;
   } catch (error) {
@@ -107,4 +109,23 @@ export async function sendAppMessage(args: { botId: string; threadId: string; me
   } catch (error) {
     throw error instanceof ApiError ? new Error(error.message) : new Error(OFFLINE_ERROR.message);
   }
+}
+
+export type PagePublishOutcome = { ok: true; card: PublishedPageCard } | { ok: false; error: string; card?: PublishedPageCard };
+
+/** Publishes the version on screen to a public link, the same link every time. */
+export async function publishAppPage(threadId: string, messageId: string, rev: number): Promise<PagePublishOutcome> {
+  try {
+    const body = await api<{ card: PublishedPageCard }>(`${appDocumentPath(threadId, messageId)}/publish`, { method: "POST", body: JSON.stringify({ rev }) });
+    return { ok: true, card: body.card };
+  } catch (error) {
+    if (!(error instanceof ApiError)) return { ok: false, error: OFFLINE_ERROR.message };
+    const card = isRecord(error.body) && isRecord(error.body.card) ? error.body.card as unknown as PublishedPageCard : undefined;
+    return { ok: false, error: error.message, ...(card ? { card } : {}) };
+  }
+}
+
+export async function fetchAppPagePublished(threadId: string, messageId: string, signal?: AbortSignal): Promise<{ pageId: string; url: string } | null> {
+  const body = await api<{ published: { pageId: string; url: string } | null }>(`${appDocumentPath(threadId, messageId)}/publish`, { signal });
+  return body.published && typeof body.published.url === "string" ? body.published : null;
 }

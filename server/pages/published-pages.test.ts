@@ -8,6 +8,8 @@ import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
 import { PageBundleError, readPageBundle } from "./bundle.ts";
 import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
+import { createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
+import { PASS } from "../routes/table.ts";
 
 const SITE = { "index.html": "<!doctype html><h1>Bake sale</h1>", "style.css": "h1{color:red}" };
 let dir: string;
@@ -228,6 +230,57 @@ describe("unpublishing a page", () => {
     f.service.pages.delete(page!);
     expect(await f.pages.publisher.unpublish({ pageId: page })).toMatchObject({ status: 200, text: "That page was already taken down.", card: { state: "unpublished" } });
     expect(f.pages.store.get(page!)).toBeNull();
+  });
+});
+
+describe("publishing a chat page from the preview", () => {
+  function route(f: ReturnType<typeof setup>, page: AppPages["page"] = () => ({ ok: true, title: "Pricing", html: "<!DOCTYPE html><h1>Pricing</h1>", rev: 2 })) {
+    const posted: Array<{ threadId: string; text: string; card: PublishedPageCard }> = [];
+    const handler = createPublishedPageRoutes(f.pages.publisher, {
+      botOf: (threadId) => (threadId === "room-1" ? null : { id: "bot-1" }),
+      page,
+      post: (threadId, text, card) => { posted.push({ threadId, text, card }); return `card-${posted.length}`; },
+    });
+    const call = async (method: string, path: string, body?: unknown) => {
+      let answer: { status: number; body: any } | null = null;
+      const out = await handler({
+        req: {} as never, res: {} as never, url: new URL(`http://x${path}`), path, method, auth: {} as never,
+        json: ((_res: unknown, status: number, value: unknown) => { answer = { status, body: value }; }) as never,
+        readBody: (async () => body) as never,
+      });
+      return out === PASS ? PASS : answer!;
+    };
+    return { call, posted };
+  }
+
+  it("publishes the page's static HTML as index.html, posts the card, and keeps the link on the next publish", async () => {
+    const f = setup();
+    signIn();
+    const { call, posted } = route(f);
+    const path = "/api/threads/thread-1/messages/m7/app/publish";
+    expect(await call("GET", path)).toEqual({ status: 200, body: { published: null } });
+    const first = await call("POST", path, { rev: 2 }) as { status: number; body: any };
+    expect(first).toMatchObject({ status: 200, body: { ok: true, card: { state: "live", title: "Pricing" } } });
+    const [pageId] = [...f.service.pages.keys()];
+    expect(f.service.pages.get(pageId!)!.files.get("index.html")).toBe("<!DOCTYPE html><h1>Pricing</h1>");
+    expect(posted).toEqual([{ threadId: "thread-1", text: `Published “Pricing”: https://${pageId}.mausbot.page/ (1 of 5 pages)`, card: first.body.card }]);
+    expect(await call("GET", path)).toEqual({ status: 200, body: { published: { pageId, url: `https://${pageId}.mausbot.page/` } } });
+    expect(await call("POST", path, {})).toMatchObject({ status: 200, body: { card: { pageId } } });
+    expect(f.service.pages.size).toBe(1);
+  });
+
+  it("follows the plan's limit with the same card, and refuses a room, a bad body and a page that can't be built", async () => {
+    const f = setup({ quota: 0 });
+    signIn();
+    const { call, posted } = route(f);
+    expect(await call("POST", "/api/threads/thread-1/messages/m7/app/publish", {})).toMatchObject({ status: 402, body: { card: { state: "limit", upgrade: true } } });
+    expect(posted.map((each) => each.card.state)).toEqual(["limit"]);
+    expect(await call("POST", "/api/threads/room-1/messages/m7/app/publish", {})).toMatchObject({ status: 404 });
+    expect(await call("POST", "/api/threads/thread-1/messages/m7/app/publish", { rev: "2" })).toMatchObject({ status: 400 });
+    const broken = route(f, () => ({ ok: false, status: 422, error: "jsx: line 2: Unexpected token." }));
+    expect(await broken.call("POST", "/api/threads/thread-1/messages/m7/app/publish", {})).toEqual({ status: 422, body: { error: "jsx: line 2: Unexpected token." } });
+    expect(await call("DELETE", "/api/threads/thread-1/messages/m7/app/publish")).toBe(PASS);
+    expect(await call("POST", "/api/threads/thread-1/messages/m7/app")).toBe(PASS);
   });
 });
 
