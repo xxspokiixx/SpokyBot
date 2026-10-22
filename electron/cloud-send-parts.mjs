@@ -16,15 +16,33 @@ export const BOT_PARTS = Object.freeze({
   team: ["section", "approvePeerComms", "peers"],
   habits: ["notifications", "parkDirectMessages", "helperModel", "cacheKeepWarm", "recordBrowserSteps"],
 });
+/** A bot's parts only a move compares and carries: My Cloud sets them over its own move route, under the same ids. */
+export const MOVE_BOT_PARTS = Object.freeze({
+  archived: ["hidden"],
+  pinned: ["pinned"],
+  chief: ["chiefOfStaff", "managedSections"],
+  fallback: ["fallback"],
+  projects: ["projects"],
+  playbooks: ["playbooks"],
+  package: ["installedPackage"],
+  library: ["assignedSkills"],
+});
 /** Each server stores a picture under its own name, so the picture is compared by its bytes. */
 export const PICTURE_PART = "picture";
 export const SETTINGS = Object.freeze(["profile", "language"]);
-export const KINDS = Object.freeze(["bot", "skill", "login", "1password", "setting"]);
+/** What only a move carries, each by its own id: automations go last, after the chats, and arrive switched off. */
+export const AUTOMATION_KINDS = Object.freeze(["routine", "call", "webhook", "app-event"]);
+export const MOVE_KINDS = Object.freeze([...AUTOMATION_KINDS, "imported-skill", "library-skill"]);
+export const KINDS = Object.freeze(["bot", "skill", "login", "1password", "setting", ...MOVE_KINDS]);
 /** A part a server has no value for. */
 export const EMPTY = "-";
+/** What either page closes the one-time move's own line by (cloud-send:dismiss). */
+export const MOVE_LINE = "one-home";
+/** What My Cloud's page closes the line of a bot moving into a team by. */
+export const TEAM_MOVE_LINE = "team-move";
 /** Logins and 1Password are compared by when they changed, never by their secrets: two sides that both have one were
  * set up on their own, and from then on a change here goes. */
-const CONTENT_COMPARED = new Set(["bot", "skill", "setting"]);
+const CONTENT_COMPARED = new Set(["bot", "skill", "setting", ...MOVE_KINDS]);
 
 export const itemKey = Object.freeze({
   bot: (id) => `bot:${id}`,
@@ -33,10 +51,12 @@ export const itemKey = Object.freeze({
   login: (site, username, exactHost) => `login:${site}|${String(username).toLowerCase()}${exactHost ? `|${exactHost}` : ""}`,
   onePassword: () => "1password",
   setting: (name) => `setting:${name}`,
+  /** A move's kinds: `routine`, `call`, `webhook`, `app-event` by id, `imported-skill` and `library-skill` by name. */
+  moved: (kind, id) => `${kind}:${id}`,
 });
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const KEY = /^(?:bot:[\w-]{1,128}|skill:[\w-]{1,128}:[a-z0-9-]{1,64}|login:[^|\s]{1,253}\|[^\n]{0,512}|1password|setting:[a-z]{1,40})$/u;
+const KEY = /^(?:bot:[\w-]{1,128}|skill:[\w-]{1,128}:[a-z0-9-]{1,64}|login:[^|\s]{1,253}\|[^\n]{0,512}|1password|setting:[a-z]{1,40}|(?:routine|call|webhook|app-event):[\w-]{1,128}|(?:imported|library)-skill:[a-z0-9-]{1,64})$/u;
 const PART = /^[a-z]{1,20}$/u;
 const HASH = /^[\w:.-]{1,80}$/u;
 
@@ -131,9 +151,10 @@ const FAILURE_REASONS = 3;
 export function failedSummary(outcome) {
   const reasons = new Map();
   for (const entry of outcome.result.failed) {
-    const reason = reasons.get(entry.error) ?? { what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, chats: false }, error: entry.error };
+    const reason = reasons.get(entry.error) ?? { what: { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, connections: 0, chats: false }, error: entry.error };
     const what = reason.what;
     if (entry.kind === "bot") what.bots.push(entry.label);
+    else if (entry.kind === "connection") what.connections++;
     else if (entry.kind === "skill") what.skills++;
     else if (entry.kind === "login") what.logins++;
     else if (entry.kind === "setting") what.settings++;

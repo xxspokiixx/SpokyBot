@@ -66,6 +66,14 @@ describe("Connect your phone in the account menu", () => {
     expect(connectPhoneEntry("cloud", access(chatOnly))).toBeNull();
   });
 
+  it("on a Team Cloud: to the team, for every member, whatever their role", () => {
+    const member = { kind: "session" as const, id: "s", label: "Desktop", scopes: ["client"], expiresAt: 1, team: { id: "team-acme-1", name: "Acme", role: "member" } };
+    const entry = connectPhoneEntry("cloud", access(member, false));
+    expect(entry).toMatchObject({ target: "cloud", team: "Acme" });
+    expect(t("sidebar.menu.connectPhone.team", { team: entry!.team! })).toBe("to Acme");
+    expect(phoneDestinations(entry, null)).toEqual([{ ...entry, id: "here" }]);
+  });
+
   it("on another server: to the bots here, only for a session that may make a pairing code", () => {
     expect(subtitle(connectPhoneEntry("server", access(admin)))).toBe("to the bots here");
     expect(subtitle(connectPhoneEntry("server", access(owner)))).toBe("to the bots here");
@@ -185,6 +193,13 @@ describe("the person's Cloud as a destination on this computer", () => {
       expect(cloudPhoneDestination(paid({ machine }))).toBe("not-ready");
     }
     expect(cloudPhoneDestination(paid({ machine: undefined }))).toBe("not-ready");
+  });
+
+  it("a Team or Business plan has no Cloud of its own to pair here: nothing, never 'once it's ready'", () => {
+    const acme = [{ id: "team-acme", name: "Acme", role: "owner" as const, machine: { status: "ready" as const, origin: "https://omb-t-2.fly.dev" } }];
+    for (const tier of ["team", "business"]) {
+      expect(cloudPhoneDestination(paid({ entitlement: { plan: "pro", tier, status: "active", expiresAt: null, version: 1 }, machine: undefined, teams: acme })), tier).toBeNull();
+    }
   });
 
   it("no paid plan, signed out or not known yet: nothing", () => {

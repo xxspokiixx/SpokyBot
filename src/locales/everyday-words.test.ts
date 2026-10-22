@@ -8,7 +8,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "the chat and the composer": [
     "chat.", "composer.", "attach.", "toolStep.", "approval.", "question.", "signIn.", "limits.", "call.", "task.", "room.",
   ],
-  "Today, notifications and alerts": ["today.", "attention.", "notifications.", "error.", "readyBots.", "app.loading."],
+  "notifications and alerts": ["attention.", "notifications.", "error.", "readyBots.", "app.loading."],
   "the sidebar and the switcher": ["sidebar."],
   "the bot panel": [
     "botPanel.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
@@ -19,13 +19,14 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   ],
   "MausBot Cloud: buying it, setting it up, moving to it and sharing with it": [
     "cloudBuy.", "cloudIntro.", "cloudTrial.", "cloudSetup.", "cloudIntent.", "cloudNotice.", "cloudHowTo.", "cloudScene.", "cloudProPopup.",
-    "cloudCredit.", "cloudPower.", "cloudSignIn.", "cloudAdd.", "cloudHome.", "cloudPhone.", "cloudAccount.", "cloudMove.", "pro.", "lending.",
+    "cloudCredit.", "cloudPower.", "cloudSignIn.", "cloudAdd.", "cloudHome.", "cloudPhone.", "cloudAccount.", "pro.", "lending.",
     "files.",
   ],
   "routines and automations": ["routines.", "automations."],
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],
   "Apps": ["apps.", "connectors."],
   "the Settings pages Simple mode shows": ["settings.section.", "settings.group.", "settings.mcpCalls.", "settings.logins."],
+  "the Usage page and its traces": ["trace.", "usage.page."],
 };
 
 const EVERYDAY_KEYS: Record<string, readonly string[]> = {
@@ -81,7 +82,6 @@ const ALLOWED: Record<string, string> = {
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",
   "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
-  "cloudMove.thisServer": "the name a self-hosted destination gets when it has none of its own",
   "lending.viaAccess": "points at the Settings → Servers page by its label",
   "lending.viaAccessTerminal": "points at the Settings → Servers page by its label",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",

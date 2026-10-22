@@ -11,6 +11,7 @@ import { BACKGROUND_HEADERS, CloudAsleepError, asleepAnswer, createCloudPowerGat
 import { linkUrl, runDeviceLink } from "./device-link.mjs";
 import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
 import { existingFolders } from "./cloud-lending-ipc.mjs";
+import { shareableDrive } from "./shared-drives.mjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -58,6 +59,15 @@ async function volumeRoot(canonical) {
   try { return (await fsp.stat(parent, { bigint: true })).dev !== (await fsp.stat(canonical, { bigint: true })).dev; } catch { return true; }
 }
 
+/** Whether `target` is exactly the person's home folder. Only the home folder itself may be lent on request (see
+ * `home` in validateSharedFolders); the folders above it, and the system disk, never can. */
+export async function isHomeFolder(target) {
+  try {
+    const [home] = homeCandidates();
+    return (await identify(await fsp.realpath(target))) === (await identify(await fsp.realpath(home)));
+  } catch { return false; }
+}
+
 export async function validateSharedFolders(folders) {
   if (!Array.isArray(folders) || folders.length > 20) throw Object.assign(new Error("Choose at most 20 shared folders"), { code: "TOO_MANY" });
   const result = [];
@@ -66,9 +76,15 @@ export async function validateSharedFolders(folders) {
     if (!uuid(folder?.id) || typeof folder.path !== "string" || !path.isAbsolute(folder.path) || typeof folder.write !== "boolean") throw Object.assign(new Error("Choose folders using the desktop folder picker"), { code: "NOT_PICKED" });
     const canonical = await fsp.realpath(folder.path);
     if (!(await fsp.stat(canonical)).isDirectory()) throw Object.assign(new Error("Choose a folder, not a file"), { code: "NOT_FOLDER" });
-    if (enclosing.has(await identify(canonical)) || (await volumeRoot(canonical))) throw Object.assign(new Error("Choose specific folders, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
+    // The home folder, everything above it and the system disk are never shared. A separate drive (an external disk, a data
+    // disk on a server, a drive letter) may be shared whole; any other mount point is still refused.
+    // The home folder itself is lent only when the desktop picker asked for it (`home: true`, after its own warning);
+    // anything above it, and the system disk, are refused whatever is asked. The home folder is always read only: a write
+    // there could reach shell start-up files or ~/.ssh, so edits need a specific folder.
+    const home = folder.home === true && await isHomeFolder(canonical);
+    if (!home && (enclosing.has(await identify(canonical)) || ((await volumeRoot(canonical)) && !(await shareableDrive(canonical))))) throw Object.assign(new Error("Choose specific folders or a separate drive, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
     if (result.some(entry => entry.id === folder.id || entry.path === canonical)) continue;
-    result.push({ id: folder.id, path: canonical, name: path.basename(canonical).slice(0, 120), write: folder.write });
+    result.push({ id: folder.id, path: canonical, name: path.basename(canonical).slice(0, 120), write: home ? false : folder.write, ...(home ? { home: true } : {}) });
   }
   return result;
 }
@@ -422,6 +438,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       enabled: lent?.enabled === true,
       folders: lent && Array.isArray(lent.folders) ? lent.folders : [],
       screen: lent?.computer === true,
+      // Only while lent: an off switch never keeps a terminal choice to be turned on again with it.
+      terminal: lent?.enabled === true && lent.terminal === true,
       ...internetState(env, lent),
       busy: Boolean(env && executing?.env === env.id),
       ...(access ? { via: "access", terminal: access.terminal === true, ...(running.has(env.id) ? {} : { problem: "access-off" }) } : {}),
@@ -460,17 +478,18 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     cloudState,
     /** Lending to My Cloud is running, so it calls My Cloud whenever it is awake. */
     lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)),
-    /** Folders, apps and screen, and the internet connection, never a terminal; the Cloud account and its machine must
-     * be verified now. The internet connection alone is a grant too. */
+    /** Folders, apps and screen, the internet connection and, only when the person ticks it in this computer's own
+     * Settings, a terminal (unrestricted commands as this user; off unless `input.terminal === true`); the Cloud account
+     * and its machine must be verified now. The internet connection alone is a grant too. */
     async saveCloud(env, input) {
       if (closed) throw new Error("Lending is unavailable while the app is closing.");
       const current = cloud();
       if (current?.status !== "connected" || !current.accountId || current.origin !== env.origin) throw Object.assign(new Error("Open My Cloud first."), { problem: "connect-first" });
       const folders = await validateSharedFolders(input?.folders);
-      if (!folders.length && input?.screen !== true && input?.internet !== true) throw new Error("Choose at least one folder, apps and screen, or the internet connection.");
+      if (!folders.length && input?.screen !== true && input?.internet !== true && input?.terminal !== true) throw new Error("Choose at least one folder, apps and screen, the internet connection, or the terminal.");
       let info = { sessionId: null, environmentId: null };
       try { info = await cloudIdentity(env); } catch (error) { if (error.problem !== "connect-first") throw error; }
-      const grant = { ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: false, computer: input.screen === true,
+      const grant = { ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: input.terminal === true, computer: input.screen === true,
         internet: input.internet === true, cloud: { accountId: current.accountId, origin: env.origin } };
       disconnect(env, records[env.id]);
       store({ ...records, [env.id]: grant }); run(env, grant); changed();

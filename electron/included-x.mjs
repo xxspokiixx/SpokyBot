@@ -14,15 +14,17 @@
 const paidDevice = (state) =>
   state?.status === "connected" && state.entitlement?.plan === "pro" && state.entitlement.status === "active" && typeof state.deviceId === "string"
     ? state.deviceId : null;
-/** The sign-in and the plan's version: a changed plan asks again after a no. */
-const planKey = (state) => `${paidDevice(state)}@${state?.entitlement?.version ?? ""}`;
 
 /**
  * @param {{ fetchAccess: () => Promise<{ url: string; token: string } | null>,
- *   send: (access: { url: string; token: string } | null, note?: { offered: false }) => void }} options
+ *   send: (access: { url: string; token: string } | null, note?: { offered: false }) => void,
+ *   device?: (state: any) => string | null }} options
  *   `fetchAccess` asks the Admin (null: the plan is not active there, or X research is not offered); `send` posts to the server.
+ *   `device`: the sign-in that gets access, or null for none (default: one on an active paid plan).
  */
-export function createIncludedXSync({ fetchAccess, send }) {
+export function createIncludedXSync({ fetchAccess, send, device = paidDevice }) {
+  /** The sign-in and the plan's version: a changed plan asks again after a no. */
+  const planKey = (state) => `${device(state)}@${state?.entitlement?.version ?? ""}`;
   /** @type {{ deviceId: string; access: { url: string; token: string } } | null} */
   let held = null;
   /** The plan key the Admin last said no to. */
@@ -33,7 +35,7 @@ export function createIncludedXSync({ fetchAccess, send }) {
   let inflight = null;
   const onState = async (state) => {
     latest = state;
-    const deviceId = paidDevice(state);
+    const deviceId = device(state);
     if (!deviceId) {
       // Clears a held token, or the server's note that the Admin said no.
       if (held || refused) { held = null; refused = null; send(null); }
@@ -57,7 +59,7 @@ export function createIncludedXSync({ fetchAccess, send }) {
     })();
     await inflight;
     // A newer paid sign-in arrived while this one was asked about: ask for it now.
-    if (paidDevice(latest) && latest !== state && planKey(latest) !== key) await onState(latest);
+    if (device(latest) && latest !== state && planKey(latest) !== key) await onState(latest);
   };
   return {
     /** Every Cloud account state the desktop publishes. */

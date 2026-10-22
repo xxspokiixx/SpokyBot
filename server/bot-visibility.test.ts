@@ -313,3 +313,39 @@ describe("live frames for a member", () => {
     expect(memberFramePayload(config)).toBe(config);
   });
 });
+
+describe("a Team Cloud's audiences", () => {
+  const ADA_KEY = "p_adaadaadaadaadaadaada1", BEN_KEY = "p_benbenbenbenbenbenben1";
+  const audienceOf = (threadId: string) =>
+    threadId === "t-pub-2" ? `member:${ADA_KEY}` as const : threadId === "t-pub" ? "team" as const : threadId.startsWith("t-room") ? "room:room-pub" as const : undefined;
+  const open = bots.map(({ visibility: _v, ...bot }) => bot);
+  const openGroups = [{ id: "room-pub", threadId: "t-room-pub", memberIds: ["pub"], tasks: [{ threadId: "t-room-pub-2" }] }];
+
+  it("a member sees the team's conversations, the rooms they see and their own; never another member's", () => {
+    const ada = new VisibleSet(open, openGroups, ADA, undefined, { of: audienceOf, person: ADA_KEY });
+    expect(ada.everything).toBe(false);
+    expect(ada.filtersThreads).toBe(true);
+    expect([ada.thread("t-pub"), ada.thread("t-pub-2"), ada.thread("t-room-pub"), ada.thread("t-room-pub-2")]).toEqual([true, true, true, true]);
+    const ben = new VisibleSet(open, openGroups, BOB, undefined, { of: audienceOf, person: BEN_KEY });
+    expect([ben.thread("t-pub"), ben.thread("t-pub-2"), ben.thread("t-room-pub")]).toEqual([true, false, true]);
+    expect(ben.bot("pub")).toBe(true);
+    const nobody = new VisibleSet(open, openGroups, NOBODY, undefined, { of: audienceOf, person: null });
+    expect(nobody.thread("t-pub-2")).toBe(false);
+    // An admin sees everything, audiences or not.
+    const admin = new VisibleSet(open, openGroups, SEES_EVERYTHING, undefined, { of: audienceOf, person: null });
+    expect(admin.everything).toBe(true);
+    expect(admin.thread("t-pub-2")).toBe(true);
+    // Without audiences (a My Cloud, a desktop) nothing changes: an open workspace is everything to a member.
+    expect(new VisibleSet(open, openGroups, BOB).everything).toBe(true);
+  });
+
+  it("a bot sent to a member lists only the conversations that member may see", () => {
+    const ben = new VisibleSet(open, openGroups, BOB, undefined, { of: audienceOf, person: BEN_KEY });
+    const sent = memberBot({ id: "pub", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }], vpsAlias: "x" }, ben);
+    expect(sent).toEqual({ id: "pub", tasks: [{ threadId: "t-pub" }] });
+    const ada = new VisibleSet(open, openGroups, ADA, undefined, { of: audienceOf, person: ADA_KEY });
+    expect(memberBot({ id: "pub", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }] }, ada).tasks).toHaveLength(2);
+    // Off a team the list is untouched.
+    expect(memberBot({ id: "pub", tasks: [{ threadId: "t-pub-2" }] }, new VisibleSet(bots, groups, BOB)).tasks).toEqual([{ threadId: "t-pub-2" }]);
+  });
+});

@@ -37,6 +37,16 @@ export function parseCloudPower(input) {
 }
 const wholeGb = value => Number.isSafeInteger(value) && value >= 1 && value <= 10_000;
 
+const DEVICE_NAME_MAX = 100;
+/** A computer's installation id, as one-home-main.mjs `installationOf` derives it and the Admin keeps it. */
+export const INSTALLATION_ID = /^[A-Za-z0-9_-]{22,64}$/u;
+/** An ended My Cloud's `hold.homecoming`: the one computer its things come home to, by installation, and its name. */
+function parseHomecoming(input) {
+  if (!record(input) || typeof input.installationId !== "string" || !INSTALLATION_ID.test(input.installationId) || typeof input.name !== "string") return null;
+  const name = input.name.trim();
+  return name && name.length <= DEVICE_NAME_MAX && !/\p{Cc}/u.test(name) ? { installationId: input.installationId, name } : null;
+}
+
 /** A malformed summary is no machine, never a partly trusted one; a malformed optional extra is dropped. */
 export function parseCloudSummary(input) {
   if (!record(input)) return null;
@@ -52,7 +62,10 @@ export function parseCloudSummary(input) {
   const unreachable = status === "ready" && record(input.unreachable) && CLOUD_UNREACHABLE_CAUSES.includes(input.unreachable.cause) && moment(input.unreachable.since)
     ? { cause: input.unreachable.cause, since: input.unreachable.since } : null;
   const power = parseCloudPower(input.power);
-  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}) };
+  const homecoming = record(input.hold) ? parseHomecoming(input.hold.homecoming) : null;
+  const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until, ...(homecoming ? { homecoming } : {}) } : null;
+  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
+    ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}) };
 }
 
 const UNREACHABLE_TEXT = Object.freeze({
@@ -78,14 +91,18 @@ export function parseCloudPurchase(input) {
 export const CLOUD_TRIAL_STATES = Object.freeze(["active", "ending", "processing", "late", "ended"]);
 const TRIAL_KEEP = Object.freeze(["none", "portal", "checkout"]);
 const at = value => moment(value) ? value : null;
+const PLAN_TIERS = Object.freeze(["starter", "personal", "pro", "max"]);
 /** Wording only, never an entitlement. Amounts are US cents before tax. */
 export function parseCloudTrial(input) {
   if (!record(input) || !CLOUD_TRIAL_STATES.includes(input.state) || !moment(input.endsAt) || !TRIAL_KEEP.includes(input.keep)) return null;
   const tier = typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : null;
   const cents = value => Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000 ? value : null;
   const amount = cents(input.amount), personal = cents(input.personalAmount);
+  const switchTo = record(input.switchTo) && PLAN_TIERS.includes(input.switchTo.tier) && cents(input.switchTo.amount)
+    ? { tier: input.switchTo.tier, amount: input.switchTo.amount } : null;
   return { state: input.state, ...(tier ? { tier } : {}), endsAt: input.endsAt, amount,
-    chargeAt: at(input.chargeAt), holdUntil: at(input.holdUntil), deleteAt: at(input.deleteAt), keep: input.keep, ...(personal ? { personalAmount: personal } : {}) };
+    chargeAt: at(input.chargeAt), holdUntil: at(input.holdUntil), deleteAt: at(input.deleteAt), keep: input.keep, ...(personal ? { personalAmount: personal } : {}),
+    ...(switchTo ? { switchTo } : {}) };
 }
 
 const dollars = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10_000;
@@ -115,11 +132,13 @@ function offerPlan(input) {
   return { tier: input.tier, ...(label(input.label) ? { label: label(input.label) } : {}), amount: price.amount,
     ...(allowances ? { allowances } : {}), ...(trial ? { trialDays: trial } : {}) };
 }
+/** An Admin older than this app may still list these; their subscribers keep them, but nobody new buys them here. */
+const NOT_SOLD = Object.freeze(["personal"]);
 function offerPlans(input, allDays) {
   const plans = [];
   for (const entry of Array.isArray(input) ? input.slice(0, 10) : []) {
     const plan = offerPlan(entry);
-    if (plan && !plans.some(known => known.tier === plan.tier)) plans.push(plan);
+    if (plan && !NOT_SOLD.includes(plan.tier) && !plans.some(known => known.tier === plan.tier)) plans.push(plan);
   }
   if (allDays && !plans.some(plan => plan.trialDays)) return plans.map(plan => ({ ...plan, trialDays: allDays }));
   return plans;
@@ -162,10 +181,30 @@ export function cloudPlanDisk(state) {
   return { volumeBytes: disk.gb * GB, maxBytes: disk.maxGb * GB, ...(state.entitlement.tier === LARGEST_TIER ? { largest: true } : {}) };
 }
 
+/** My Cloud's address once the Admin says it is ready, and never before: a name looked up while it is set up does not
+ * exist yet, and resolvers keep that "no such name" for minutes (RFC 2308 negative caching). */
+export function readyCloudOrigin(state) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  return machine?.origin && CLOUD_MACHINE_CONNECTABLE.includes(machine.status) ? machine.origin : null;
+}
+
+/** A machine the Admin is setting up: the step it reports, and whether it is slow. */
+export function machineSetup(machine) {
+  if (machine?.status !== "provisioning") return null;
+  return machine.setup ? { step: machine.setup.step, ...(machine.setup.slow ? { slow: true } : {}) } : {};
+}
+
+/** My Cloud is being set up: the Admin says so, or a payment it is still confirming has no machine yet. */
+export function cloudSetupOf(state) {
+  if (state?.status !== "connected") return null;
+  if (state.machine) return machineSetup(state.machine);
+  return state.purchase?.state === "confirming" ? {} : null;
+}
+
 export function rememberedCloudHome(previous, state) {
   const accountId = state?.account?.id ?? null;
   if (!accountId) return null;
-  if (state.status === "connected" && !state.machine) return null;
+  if (state.status === "connected" && (!state.machine || state.machine.status === "provisioning")) return null;
   const origin = state.status === "connected" ? state.machine.origin ?? null : null;
   if (origin) return { accountId, origin };
   return previous?.accountId === accountId ? previous : null;
@@ -210,6 +249,28 @@ export function savedCloudHomeOrigin(state) {
   return (saved.find((entry) => entry?.home === true) ?? saved.find((entry) => entry?.name === CLOUD_HOME_NAME))?.origin ?? null;
 }
 
+/** The Admin's role words on the wire (owner, admin, member), and the three words the app shows for them. */
+export const CLOUD_TEAM_ROLES = environments.TEAM_ROLES;
+export const teamRoleLabel = environments.teamRoleLabel;
+const TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const MAX_TEAMS = 50;
+/** The teams this account is in, from the verified session only: each with its role and its Cloud as `parseCloudSummary`
+ * reads it (null while the team has no machine). A malformed team is left out, never trusted in part; the same team
+ * twice is read once. */
+export function parseCloudTeams(input) {
+  if (!Array.isArray(input)) return [];
+  const teams = [], seen = new Set();
+  for (const team of input.slice(0, MAX_TEAMS)) {
+    if (!record(team) || typeof team.id !== "string" || !TEAM_ID.test(team.id) || seen.has(team.id) || !CLOUD_TEAM_ROLES.includes(team.role)) continue;
+    const name = typeof team.name === "string" ? team.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    if (!name) continue;
+    const machine = team.machine === null || team.machine === undefined ? null : parseCloudSummary(team.machine);
+    seen.add(team.id);
+    teams.push({ id: team.id, name, role: team.role, machine });
+  }
+  return teams;
+}
+
 export function parsePairingGrant(input, origin, now) {
   if (!input || typeof input !== "object" || input.cloudContractVersion !== 1 || input.origin !== origin) return null;
   if (typeof input.code !== "string" || !CODE.test(input.code)) return null;
@@ -226,9 +287,22 @@ export function withCloudHome(state, machine, makeId, look = null) {
   return { ...added, environments: added.environments.map((entry) => entry.origin === machine.origin ? { ...entry, ...(color ? { color } : {}), home: true } : entry) };
 }
 
-/** The one-time code goes in the hash, never a query. */
-export function cloudHomeConnectUrl(target, now, open = null) {
-  const query = open === "phone" ? "?desktop-settings=phone" : "";
-  return target.grant && target.grant.origin === target.origin && target.grant.expiresAt > now
-    ? `${target.origin}/pair${query}#code=${target.grant.code}` : query ? `${target.origin}/${query}` : target.origin;
+/** The one-time code goes in the hash, never a query. `route`: a path of the Cloud's own to land on after signing in. */
+export function cloudHomeConnectUrl(target, now, open = null, route = null) {
+  const params = new URLSearchParams(open === "phone" ? { "desktop-settings": "phone" } : {});
+  const back = typeof route === "string" && /^\/(?!\/)/.test(route) ? route : null;
+  if (target.grant && target.grant.origin === target.origin && target.grant.expiresAt > now) {
+    if (back) params.set("next", back);
+    const query = params.size ? `?${params}` : "";
+    return `${target.origin}/pair${query}#code=${target.grant.code}`;
+  }
+  if (back) return `${target.origin}${back}`;
+  return params.size ? `${target.origin}/?${params}` : target.origin;
+}
+
+/** Only the verified Cloud, open as this window's active server, in the main window's main frame. */
+export function cloudPageSenderAllowed(event, { contents, homeOrigin, activeOrigin }) {
+  if (!contents || !homeOrigin || activeOrigin !== homeOrigin) return false;
+  if (event?.sender !== contents || !event.senderFrame || event.senderFrame !== contents.mainFrame) return false;
+  try { return new URL(event.senderFrame.url).origin === homeOrigin; } catch { return false; }
 }

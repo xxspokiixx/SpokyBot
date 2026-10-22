@@ -62,7 +62,7 @@ Use only mapped, tested commands:
 - [Computer panel focus hand-off](computer-panel-focus.md)
 - [Taking control of a bot's computer](take-control.md)
 - [Native dictation retention and send-to-stop](dictation.md)
-- [The Today page](today.md)
+- [Proactive routines and the brief](proactive-routines.md)
 - [Chat widgets](widgets.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
@@ -110,9 +110,9 @@ creating, switching between and recovering named local environments by hand on
 a packaged desktop install; the control surface cannot drive it, so it is not
 in the map above.
 
-The [Send to My Cloud fixture](cloud-send.md) runs this computer's server and a
-Cloud home with the desktop's own wiring between them, and shows Settings →
-MausBot Cloud and My Cloud's strip in the real renderer.
+The [move to My Cloud fixture](cloud-send.md) runs this computer's server and a
+Cloud home with the desktop's own wiring between them, and runs and checks the
+one-time move as main does.
 
 The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel
@@ -121,6 +121,11 @@ and a synthetic OAuth provider in a disposable workspace.
 The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
+
+The [X card fixture](x-connector.md) checks the Apps page's X card: a plan's
+included calls with the month's use, the person's own treg key (saved, tested,
+removed, used first) and a used-up month, against loopback stand-ins for treg
+and the relay.
 
 The [Connected Apps OAuth fixture](connected-apps-oauth.md) checks blocked-popup
 recovery, safe authorization links and abandoned-account retries through real

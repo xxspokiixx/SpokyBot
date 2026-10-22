@@ -1,5 +1,5 @@
 // What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices it
-// has shown and its usage-analytics switch.
+// has shown, its usage-analytics switch and the app's language.
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
 import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
@@ -8,9 +8,10 @@ export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
 export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10"]);
 const CLOUD_PRO = DESKTOP_NOTICES[0];
-const HANDOFFS = new Map([["cloud-pro", { settings: "cloud-add", pages: ["cloud", "server"] }], ["manage", { settings: "cloud-settings", pages: ["cloud"] }]]);
-const VIA = { cloud: "my_cloud", server: "server" };
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A locale code such as "de" or "pt-br", or "" for following the system. */
+const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;
+const isLanguage = value => typeof value === "string" && value.length <= 24 && LANGUAGE.test(value);
 
 /** Security: a write that fails (a full disk, a kill mid-write) leaves the last whole record, analytics opt-out included.
  * A file another tool saved with a byte-order mark (Notepad on Windows) still reads. */
@@ -37,7 +38,8 @@ function parse(raw) {
     const day = record.shown && typeof record.shown === "object" ? record.shown[id] : undefined;
     return typeof day === "string" && DAY.test(day) ? [[id, day]] : [];
   }));
-  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}) };
+  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}),
+    ...(isLanguage(record.language) ? { language: record.language } : {}) };
 }
 
 /** A record that cannot be written is still kept for this launch. */
@@ -66,6 +68,13 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
     /** null until a choice is saved. */
     analytics: () => current().analytics ?? null,
     setAnalytics(enabled) { save({ ...current(), analytics: enabled === true }); },
+    /** null until a language is picked; "" is a pick too: follow the system. */
+    language: () => current().language ?? null,
+    setLanguage(language) {
+      if (!isLanguage(language)) return false;
+      if (current().language !== language) save({ ...current(), language });
+      return true;
+    },
   };
 }
 
@@ -73,13 +82,11 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
  * `page(event)`: "local" for this computer's page, "cloud" for My Cloud's own page as main verifies it, "server" for
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
- * `thisComputer(landing)`: switches the window to This computer and loads its page at `landing`; false when it cannot,
- * or when that page does not load.
+ * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them.
  */
-export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, thisComputer, localConfig = () => null, now = Date.now }) {
+export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, localConfig = () => null, languageChanged = () => {}, now = Date.now }) {
   let prefs = null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
-  let switching = false;
   const from = (channel, pages, handler) => (event, ...args) => {
     const asking = page(event);
     if (!pages.includes(asking)) throw new Error(`${channel} is only available in this app's window`);
@@ -97,24 +104,6 @@ export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered,
   ipcMain.handle("desktop-notices:state", from("desktop-notices:state", ANY, state));
   ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => store().markSeen(id)));
   ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, (_, id) => store().shown(id)));
-  // Security: a server's page brings the window to This computer only while the popup is unseen, and the switch marks it
-  // seen once that page has loaded. This computer's page opens only what main names for the popup's own click: Continue on this computer opens what that page's own popup would for the plan it knows; only My Cloud's own
-  // page hands over Manage plan.
-  ipcMain.handle("desktop-notices:this-computer", from("desktop-notices:this-computer", ["cloud", "server"], async (asking, intent) => {
-    const handoff = HANDOFFS.get(intent);
-    if (!handoff?.pages.includes(asking)) throw new Error("This page cannot hand that click to This computer");
-    if (switching) return false;
-    switching = true;
-    try {
-      const notices = await state();
-      if (!notices.cloud || notices.seen.includes(CLOUD_PRO)) return false;
-      if (await thisComputer(`?desktop-settings=${handoff.settings}&source=update_popup&via=${VIA[asking]}`) !== true) return false;
-      store().markSeen(CLOUD_PRO);
-      return true;
-    } finally {
-      switching = false;
-    }
-  }));
   // Security: a server's page learns only that this desktop turned analytics off, never that it is on.
   ipcMain.on("desktop-analytics:read", event => {
     try {
@@ -123,4 +112,17 @@ export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered,
     } catch { event.returnValue = null; }
   });
   ipcMain.handle("desktop-analytics:set", from("desktop-analytics:set", ["local"], (_, enabled) => { store().setAnalytics(enabled === true); }));
+  ipcMain.on("desktop-language:read", event => {
+    try { event.returnValue = page(event) ? store().language() : null; } catch { event.returnValue = null; }
+  });
+  const setLanguage = from("desktop-language:set", ANY, (_, language) => {
+    const before = store().language();
+    return store().setLanguage(language) && before !== language;
+  });
+  ipcMain.handle("desktop-language:set", (event, language) => {
+    if (setLanguage(event, language)) {
+      try { languageChanged(language, event.sender); } catch {}
+    }
+    return store().language() === language;
+  });
 }

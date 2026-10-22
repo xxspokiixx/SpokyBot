@@ -259,7 +259,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
   });
 
-  it("in Simple mode New Bot asks the Chief in its chat; Advanced keeps the form, Create team and Templates", () => {
+  it("New Bot opens the form in both modes, Chief of Staff or not; Advanced keeps Create team and Templates", () => {
     fixture.state = { ...fixture.state, bots: [bot("atlas", { chiefOfStaff: true }), bot("bea")] };
     const openMenu = () => {
       const plus = () => render().tree.find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
@@ -268,7 +268,7 @@ describe("Simple-mode sidebar layout", () => {
       return (label: string) => tree.find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
     };
     (openMenu()("New Bot")!.props.onClick as () => void)();
-    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "atlas" }]);
+    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "toggleNewBot", open: true }]);
     fixture.dispatch.mockClear();
     fixture.values = [];
     fixture.advanced = true;
