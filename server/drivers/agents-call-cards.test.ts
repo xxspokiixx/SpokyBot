@@ -155,7 +155,7 @@ describe("the chat-app tools", () => {
       expect(names.slice(names.indexOf("show_widget"), names.indexOf("show_widget") + 4)).toEqual(["show_widget", "update_widget", "show_html", "update_html"]);
     }
     const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
-    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page beside this chat, where the person watches it appear and can point at a part to change: /);
+    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: /);
     expect(tools.get("show_html")!.description).toContain("or `jsx`, one React component file with a default export");
     // Its last sentence points a dashboard at the bundled data-dashboards skill.
     expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Never put secrets in it\. Not available in rooms\. For a data dashboard, follow the data-dashboards skill\.$/);

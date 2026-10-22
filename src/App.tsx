@@ -53,7 +53,6 @@ import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { usePresence } from "@/hooks/use-presence";
 import { ChatNotice } from "@/components/ChatErrorBanner";
-import { PreviewPaneHost } from "@/components/preview/PreviewPane";
 import { loadingLine } from "@/lib/app-loading";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
@@ -345,7 +344,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           )}
         </main>
       )}
-      <PreviewPaneHost bot={state.activeView === "chat" && !firstRun && !noEngines && !(!remoteClient && localVmWorkspaceBotId) ? bot : undefined} />
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
       {state.settingsOpen && bot && (
         remoteClient

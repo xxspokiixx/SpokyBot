@@ -31,8 +31,8 @@ import {
 import { MentionMenu, type MentionChoice } from "./MentionMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
-import { PointedChips } from "./preview/PageCard";
-import { takePointedChips } from "@/lib/preview-pane";
+import { PointedChips } from "./app/PointedChips";
+import { takePointedChips } from "@/lib/pointed-chips";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { PlaceChip } from "./PlaceChip";

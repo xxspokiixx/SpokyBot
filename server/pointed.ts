@@ -20,7 +20,7 @@ const part = z.object({
 const parts = z.array(part).min(1).max(POINT_LIMITS.perMessage);
 
 const BAD = `pointed must list 1 to ${POINT_LIMITS.perMessage} parts of a page in this conversation.`;
-const NOTE = "While writing this message the person pointed at parts of your page in the preview. To change them, call update_html with that page's app_id.";
+const NOTE = "While writing this message the person pointed at parts of your page. To change them, call update_html with that page's app_id.";
 
 export type Pointed = { ok: true; block: string; refs: AppPointedRef[] } | { ok: false; status: 400 | 404; error: string };
 
@@ -42,7 +42,7 @@ export function preparePointed(store: Pick<AgentCardStore, "messagesFor">, threa
       `${index + 1}. <${pick.tag}>${pick.role ? ` role ${pick.role}` : ""}; text: ${pick.text || "(none)"}; selector: ${pick.selector}; html: ${pick.html}`);
     blocks.push([
       `Page app_id "${appId}" (now version ${current}); the person was looking at ${versions}.`,
-      recordsBlock(`the page "${title}" in the preview, describing what the person pointed at`, lines),
+      recordsBlock(`the page "${title}", describing what the person pointed at`, lines),
     ].join("\n"));
   }
   return {

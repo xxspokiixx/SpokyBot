@@ -5,9 +5,10 @@ description: "Build a fast, good-looking page: a data dashboard, or any page mad
 
 # Data dashboards and pages
 
-A page made with `show_html` opens in a preview beside the chat. The person watches it appear, can step back
-through its versions, publish it, and point at a part to change: their next message then says what they
-pointed at (a tag, its text, a CSS selector and a bit of its HTML). Change exactly that with `update_html`.
+A page made with `show_html` shows in the chat as one card. The person watches it appear, steps back through
+its versions, opens it full screen, shares it at a public link, and points at a part to change: their next
+message then says what they pointed at (a tag, its text, a CSS selector and a bit of its HTML). Change exactly
+that with `update_html`; the same card refreshes.
 
 ## Pick the right home
 

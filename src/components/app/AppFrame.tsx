@@ -29,8 +29,10 @@ export interface AppFrameProps {
   onProblem(problem: AppFrameProblem | null): void;
   /** ui/notifications/request-teardown */
   onTeardownRequested(): void;
-  /** Fill the container instead of sizing to the page (the preview pane). */
+  /** Fill the container instead of sizing to the page (a page in full screen). */
   fill?: boolean;
+  /** The tallest the frame grows to its content, under the window's own limit. */
+  maxHeight?: number;
 }
 
 const refusal = (message: string): JsonRpcError => ({ code: RPC_HOST_REFUSED, message });
@@ -47,7 +49,8 @@ export function AppFrame(props: AppFrameProps) {
     const container = box.current;
     if (!container) return;
     const messageId = doc.messageId;
-    let maxHeight = appMaxHeight();
+    const cap = () => Math.min(appMaxHeight(), latest.current.maxHeight ?? Infinity);
+    let maxHeight = cap();
     const host = mountAppFrame({
       container,
       doc,
@@ -89,7 +92,7 @@ export function AppFrame(props: AppFrameProps) {
     const measure = () => {
       timer = undefined;
       const nextWidth = Math.round(container.clientWidth);
-      const nextMax = appMaxHeight();
+      const nextMax = cap();
       if (nextWidth <= 0 || (nextWidth === width && nextMax === maxHeight)) return;
       width = nextWidth;
       maxHeight = nextMax;
