@@ -69,6 +69,9 @@ this server shares with every bot. It exists only on a Team Cloud.
   uses: `PATCH /api/config` for a key, `/api/mcp/servers` to add, test, sign in to and remove a server,
   `/api/connectors/:slug/authorize` and `DELETE /api/connectors/:slug/accounts/:id` for apps. Every check, side effect
   and record is the app's own, and each change is that member's. A User's session is refused there as anywhere.
+- A Team Cloud always keeps its admin activity (`/api/admin-activity`), even with no User signed in: it is shared by
+  definition. The Admin's Team admin → Activity reads it with the same session, beside the team's own record there; Usage
+  reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way.
 - For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
   admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`).
 

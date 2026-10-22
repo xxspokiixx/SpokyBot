@@ -100,10 +100,18 @@ it("an Owner or Admin's paired session (as the Admin holds one) sets a team key 
     const token = (await call("POST", "/api/auth/pair", { body: JSON.stringify({ code: granted.body.code }), headers: { "content-type": "application/json" } })).body.token as string;
     return (method: string, path: string, body?: unknown) => call(method, path, { ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) } });
   };
-  const user = await session("member"), admin = await session("admin");
+  // Only admins so far: a Team Cloud keeps its admin activity anyway (it is shared by definition).
+  const admin = await session("admin");
+  expect((await admin("PATCH", "/api/config", { openai: { key: "sk-team-key-never-shown" } })).status).toBe(200);
+  let activity: Awaited<ReturnType<typeof admin>> | undefined;
+  await expect.poll(async () => {
+    activity = await admin("GET", "/api/admin-activity?what=all");
+    return activity.body.entries.some((entry: { type: string; who: string; action: string }) => entry.type === "admin" && entry.who.includes("admin@acme.test") && entry.action === "config.update");
+  }, { timeout: 5_000, interval: 100 }).toBe(true);
+  expect(JSON.stringify(activity!.body)).not.toContain("never-shown");
+  const user = await session("member");
   expect((await user("PATCH", "/api/config", { openai: { key: "sk-user-never-saved" } })).status).toBe(403);
   expect((await user("DELETE", "/api/mcp/servers/linear")).status).toBe(403);
-  expect((await admin("PATCH", "/api/config", { openai: { key: "sk-team-key-never-shown" } })).status).toBe(200);
   expect((await admin("DELETE", "/api/mcp/servers/linear")).status).toBe(200);
   const summary = (await signed("GET", CLOUD_TEAM_ADMIN_PATH)).body;
   expect([summary.ai.keys.find((key: { id: string }) => key.id === "openai"), summary.mcp]).toEqual([{ id: "openai", configured: true }, []]);

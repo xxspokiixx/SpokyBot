@@ -1384,7 +1384,7 @@ function memberFrameContext(visible: VisibleSet): FrameContext {
 
 function adminActivityRecording(): boolean {
   if (DESKTOP_MANAGED) return false;
-  if (HOSTED_WORKSPACE) return true;
+  if (HOSTED_WORKSPACE || CLOUD_TEAM) return true;
   const chatOnly = (scopes: readonly string[]) => !scopes.includes("admin");
   return sharedSignIn(signInAllowList()) || sessions.list().some((session) => chatOnly(session.scopes)) ||
     sessions.openPairings().some((pairing) => chatOnly(pairing.scopes));
