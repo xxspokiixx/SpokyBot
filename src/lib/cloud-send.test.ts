@@ -43,3 +43,16 @@ describe("the one-time move's line", () => {
     expect(moveLine({ phase: "copy", updating: true }, "local")?.text).toBe("My Cloud wird gerade aktualisiert. Dein Umzug beginnt, sobald das erledigt ist.");
   });
 });
+
+describe("the line on a computer whose bots came home to another one", () => {
+  const since = Date.UTC(2026, 9, 21, 12);
+  it("names that computer and the date of this computer's own copy, with automations off, and closes like the others", () => {
+    expect(moveLine({ phase: "back", elsewhere: { name: "MacBook Air", since } }, "local"))
+      .toEqual({ kind: "done", text: "Your bots came back to MacBook Air. This computer keeps its copy from October 21, 2026, with automations off.", extra: [] });
+    expect(moveLine({ phase: "back", elsewhere: { name: "MacBook Air" } }, "local")?.text, "a copy already deleted is not offered").toBe("Your bots came back to MacBook Air.");
+    expect(moveLine({ phase: "back", elsewhere: { name: "MacBook Air", since } }, "cloud")).toBeNull();
+    setLocale("de");
+    expect(moveLine({ phase: "back", elsewhere: { name: "MacBook Air", since } }, "local")?.text)
+      .toBe("Deine Bots sind zurück auf MacBook Air. Dieser Computer behält seine Kopie vom 21. Oktober 2026, mit ausgeschalteten Automatisierungen.");
+  });
+});

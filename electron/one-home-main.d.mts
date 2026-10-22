@@ -3,6 +3,7 @@ import type { OneHomeCloud, OneHomeView, createOneHome } from "./one-home.mjs";
 import type { installTeamMove } from "./team-move-main.mjs";
 
 export function oneHomeCloud(state: unknown): OneHomeCloud | null;
+export function installationOf(environmentId: string): string;
 
 type SendDeps = Parameters<typeof installCloudSend>[0];
 
@@ -10,11 +11,13 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   /** This computer's server, as its owner. */
   localRequest(route: string, init?: RequestInit & { duplex?: "half" }): Promise<Response>;
   /** The MausBot Cloud sign-in (cloud-account.mjs). */
-  account(): { state(): any; pairHome(): Promise<{ origin: string; code: string; expiresAt?: number }>; exportHome(): Promise<any>;
-    pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt?: number }> } | null;
+  account(): { state(): any; pairHome(): Promise<{ origin: string; code: string; expiresAt?: number }>; exportHome(options?: { installation?: string }): Promise<any>;
+    reportMove?(options: { installation: string }): Promise<boolean>; pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt?: number }> } | null;
   journalFile(): string;
   tempRoot(): string;
   lend?(projects: string[]): Promise<unknown>;
+  /** Once this computer is lent: asks the person, at most once, to lend the rest of it too, without being waited for. */
+  offer?(): unknown;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;
   openLocal?(): void;

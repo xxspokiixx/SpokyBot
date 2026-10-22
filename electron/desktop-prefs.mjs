@@ -1,5 +1,5 @@
 // What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices it
-// has shown and its usage-analytics switch.
+// has shown, its usage-analytics switch and the app's language.
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
 import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
@@ -9,6 +9,9 @@ export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10"]);
 const CLOUD_PRO = DESKTOP_NOTICES[0];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A locale code such as "de" or "pt-br", or "" for following the system. */
+const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;
+const isLanguage = value => typeof value === "string" && value.length <= 24 && LANGUAGE.test(value);
 
 /** Security: a write that fails (a full disk, a kill mid-write) leaves the last whole record, analytics opt-out included.
  * A file another tool saved with a byte-order mark (Notepad on Windows) still reads. */
@@ -35,7 +38,8 @@ function parse(raw) {
     const day = record.shown && typeof record.shown === "object" ? record.shown[id] : undefined;
     return typeof day === "string" && DAY.test(day) ? [[id, day]] : [];
   }));
-  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}) };
+  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}),
+    ...(isLanguage(record.language) ? { language: record.language } : {}) };
 }
 
 /** A record that cannot be written is still kept for this launch. */
@@ -64,6 +68,13 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
     /** null until a choice is saved. */
     analytics: () => current().analytics ?? null,
     setAnalytics(enabled) { save({ ...current(), analytics: enabled === true }); },
+    /** null until a language is picked; "" is a pick too: follow the system. */
+    language: () => current().language ?? null,
+    setLanguage(language) {
+      if (!isLanguage(language)) return false;
+      if (current().language !== language) save({ ...current(), language });
+      return true;
+    },
   };
 }
 
@@ -71,8 +82,9 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
  * `page(event)`: "local" for this computer's page, "cloud" for My Cloud's own page as main verifies it, "server" for
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
+ * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them.
  */
-export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, localConfig = () => null, now = Date.now }) {
+export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, localConfig = () => null, languageChanged = () => {}, now = Date.now }) {
   let prefs = null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
   const from = (channel, pages, handler) => (event, ...args) => {
@@ -100,4 +112,17 @@ export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered,
     } catch { event.returnValue = null; }
   });
   ipcMain.handle("desktop-analytics:set", from("desktop-analytics:set", ["local"], (_, enabled) => { store().setAnalytics(enabled === true); }));
+  ipcMain.on("desktop-language:read", event => {
+    try { event.returnValue = page(event) ? store().language() : null; } catch { event.returnValue = null; }
+  });
+  const setLanguage = from("desktop-language:set", ANY, (_, language) => {
+    const before = store().language();
+    return store().setLanguage(language) && before !== language;
+  });
+  ipcMain.handle("desktop-language:set", (event, language) => {
+    if (setLanguage(event, language)) {
+      try { languageChanged(language, event.sender); } catch {}
+    }
+    return store().language() === language;
+  });
 }

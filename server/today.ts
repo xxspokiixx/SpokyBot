@@ -229,16 +229,21 @@ export function todayReport(sources: TodaySources, viewer: TodayViewer, requeste
   };
 }
 
+/** What only the person can fix right now, across every conversation the viewer may see. */
+export function needsYouNow(sources: TodaySources, viewer: TodayViewer, now = Date.now()): NeedsYouItem[] {
+  const owners = threadOwners(sources);
+  return needsYou(sources, viewer, owners, (threadId): threadId is string => Boolean(threadId && owners.has(threadId) && viewer.thread(threadId)), now);
+}
+
 function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string, Owner>, seen: (threadId: string | undefined) => threadId is string, now: number): NeedsYouItem[] {
   const rows = attentionRows(now - NEEDS_YOU_WINDOW_MS).filter((row) => seen(row.threadId));
   const botOf = (row: AttentionRow) => row.digestBotId ?? row.fromBotId ?? owners.get(row.threadId)?.botId;
   const engineOf = new Map(sources.bots.map((bot) => [bot.id, bot.modelSelection?.instanceId]));
-  const lastTurnByBot = new Map<string, number>(), lastTurnByThread = new Map<string, number>();
+  const lastTurnByBot = new Map<string, number>();
   for (const row of rows) {
     if (row.kind !== "digest") continue;
     const botId = botOf(row);
     if (botId) lastTurnByBot.set(botId, row.at);
-    lastTurnByThread.set(row.threadId, row.at);
   }
 
   const items = new Map<string, NeedsYouItem>();
@@ -258,7 +263,6 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
       const card = parse<QuestionCard>(row.card);
       const botId = botOf(row);
       if (!card || !botId || !isPersistentQuestionCard(card) || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied) continue;
-      if ((lastTurnByThread.get(row.threadId) ?? -Infinity) > row.at) continue;
       const earlier = card.requestId ? askedIn.get(card.requestId) : undefined;
       if (earlier && earlier !== `question:${row.threadId}`) items.delete(earlier);
       if (card.requestId) askedIn.set(card.requestId, `question:${row.threadId}`);
