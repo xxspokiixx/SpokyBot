@@ -4,6 +4,7 @@
 import type { AppCan, AppDocument, AppToolDefinition, AppToolResult } from "../app.ts";
 import { BOT_HTML_CSP, BOT_HTML_NETWORK, mcpAppCsp } from "./csp.ts";
 import { APP_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
+import { APP_POINT_SOURCE } from "./point.ts";
 
 export const CSP_META_PREFIX = "<!DOCTYPE html><meta http-equiv=\"Content-Security-Policy\" content=\"";
 
@@ -30,7 +31,7 @@ export function stripDocumentPreamble(html: string): string {
 
 export function buildSrcdoc(input: { html: string; csp: string; botHelper?: boolean }): string {
   const head = `${CSP_META_PREFIX}${escapeAttribute(input.csp)}">`;
-  const helper = input.botHelper ? `<style>${APP_THEME_STYLE}</style><script>${APP_HELPER_SOURCE}</script>` : "";
+  const helper = input.botHelper ? `<style>${APP_THEME_STYLE}</style><script>${APP_HELPER_SOURCE}</script><script>${APP_POINT_SOURCE}</script>` : "";
   return `${head}${helper}${stripDocumentPreamble(input.html)}`;
 }
 

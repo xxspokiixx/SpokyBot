@@ -2089,6 +2089,8 @@
   "chat.preview.versionOf": "v{n} von {count}",
   "chat.preview.latest": "Zur neuesten",
   "chat.preview.updated": "Aktualisiert",
+  "chat.preview.point": "Zeigen",
+  "chat.preview.pointHint": "Klicke auf den Teil der Seite, der sich ändern soll. Mit Esc hörst du auf.",
   "chat.preview.openTab": "In neuem Tab öffnen",
   "chat.preview.openTabNeedsLink": "Veröffentliche die Seite, um sie im Browser zu öffnen",
   "chat.preview.publish": "Veröffentlichen",
@@ -2099,5 +2101,8 @@
   "chat.preview.cardLine": "Seite von {bot} · v{n}",
   "chat.preview.showing": "Wird gezeigt",
   "chat.preview.open": "Öffnen",
+  "chat.preview.pointedPart": "ein Teil der Seite",
+  "chat.preview.removePoint": "{label} entfernen",
+  "chat.preview.pointedAt": "Gezeigt auf {parts}",
   "chat.activity.publishPage": "Veröffentlicht eine Seite"
 }

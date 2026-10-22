@@ -5821,6 +5821,8 @@
   "chat.preview.versionOf": "v{n} de {count}",
   "chat.preview.latest": "Voltar para a mais recente",
   "chat.preview.updated": "Atualizada",
+  "chat.preview.point": "Apontar",
+  "chat.preview.pointHint": "Clique na parte da página que você quer mudar. Aperte Esc para parar.",
   "chat.preview.openTab": "Abrir em nova aba",
   "chat.preview.openTabNeedsLink": "Publique a página para abrir no seu navegador",
   "chat.preview.publish": "Publicar",
@@ -5831,5 +5833,8 @@
   "chat.preview.cardLine": "Página criada por {bot} · v{n}",
   "chat.preview.showing": "Mostrando",
   "chat.preview.open": "Abrir",
+  "chat.preview.pointedPart": "uma parte da página",
+  "chat.preview.removePoint": "Tirar {label}",
+  "chat.preview.pointedAt": "Apontado: {parts}",
   "chat.activity.publishPage": "Publicando uma página"
 }

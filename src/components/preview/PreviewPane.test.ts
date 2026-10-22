@@ -5,9 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BotEditorStore, type Bot, type Message, type useStore } from "@/state/store";
-import { forgetPreviewState, openPreview } from "@/lib/preview-pane";
+import { addPointedChip, forgetPreviewState, openPreview, takePointedChips, usePointedChips } from "@/lib/preview-pane";
 import type { AppPayload } from "../../../shared/app";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
+import { POINT_LIMITS, POINTED_METHOD } from "../../../shared/app-frame/point";
 import { RichMessageRow } from "../RichMessageRow";
 import { PreviewPaneHost } from "./PreviewPane";
 
@@ -29,11 +30,16 @@ let published: { pageId: string; url: string } | null = null;
 let host: HTMLDivElement;
 let root: Root;
 
+function Chips() {
+  const chips = usePointedChips("t1");
+  return createElement("output", { "data-chips": JSON.stringify(chips.map(({ id: _id, ...chip }) => chip)) });
+}
 const view = (current: Bot) => createElement(BotEditorStore, {
   value: store,
   children: [
     createElement(PreviewPaneHost, { key: "pane", bot: current }),
     ...current.messages.map((message) => createElement(RichMessageRow, { key: message.id, botId: current.id, botName: current.name, threadId: current.threadId, message })),
+    createElement(Chips, { key: "chips" }),
   ],
 });
 const render = async (current: Bot) => {
@@ -46,7 +52,14 @@ const frame = () => host.querySelector<HTMLIFrameElement>("[data-preview-pane] i
 const button = (label: string) => Array.from(host.querySelectorAll<HTMLButtonElement>("button"))
   .find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label)!;
 const click = (label: string) => act(async () => { button(label).click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+const chips = () => JSON.parse(host.querySelector("[data-chips]")!.getAttribute("data-chips")!) as unknown[];
 const fetched = () => fetchMock.mock.calls.map(([path]) => path).filter((path) => path.includes("/app") && !path.endsWith("/publish"));
+const fromFrame = (data: unknown, source: unknown = frame().contentWindow) => act(async () => {
+  window.dispatchEvent(new MessageEvent("message", { data, source: source as MessageEventSource }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+const toFrame = () => vi.spyOn(frame().contentWindow!, "postMessage").mockImplementation(() => {});
+const PICK = { jsonrpc: "2.0", method: POINTED_METHOD, params: { tag: "button", role: "button", text: "Choose Pro", selector: "main > section:nth-of-type(2) > button", html: "<button>Choose Pro</button>" } };
 
 beforeEach(() => {
   published = null;
@@ -113,6 +126,26 @@ describe("the preview pane", () => {
     expect(host.querySelector("[data-preview-version]")?.textContent).toBe("v2");
   });
 
+  it("points: Point tells the page, and the frame's own pick becomes a chip for the version on screen", async () => {
+    await render(bot([page(payload())]));
+    act(() => openPreview({ botId: "pepper", threadId: "t1", messageId: "a1" }));
+    await settle();
+    const posted = toFrame();
+    await fromFrame(PICK);
+    expect(chips()).toEqual([]);
+    await click("Point");
+    expect(posted).toHaveBeenLastCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: true } }, "*");
+    expect(button("Point").getAttribute("aria-pressed")).toBe("true");
+    await fromFrame(PICK, window);
+    await fromFrame(PICK, document.createElement("iframe").contentWindow);
+    expect(chips()).toEqual([]);
+    await fromFrame(PICK);
+    expect(chips()).toEqual([{ appId: "a1", rev: 0, title: "Pricing", tag: "button", role: "button", text: "Choose Pro", selector: "main > section:nth-of-type(2) > button", html: "<button>Choose Pro</button>" }]);
+    expect(button("Point").getAttribute("aria-pressed")).toBe("false");
+    await fromFrame(PICK);
+    expect(chips()).toHaveLength(1);
+  });
+
   it("publishes the version on screen, then shows the link with Copy, and remembers it next time", async () => {
     await render(bot([page(payload())]));
     act(() => openPreview({ botId: "pepper", threadId: "t1", messageId: "a1" }));
@@ -129,5 +162,22 @@ describe("the preview pane", () => {
     await click("Open");
     await settle();
     expect(host.querySelector("[data-preview-published]")?.textContent).toContain("Published");
+  });
+});
+
+describe("pointed chips", () => {
+  const chip = (selector: string) => ({ appId: "a1", rev: 0, title: "Pricing", tag: "div", role: "", text: selector, selector, html: "<div></div>" });
+
+  it("keep one chip per part, the newest few, and go with one send or come back when it fails", () => {
+    for (const selector of ["a", "b", "a"]) addPointedChip("t1", chip(selector));
+    expect(takePointedChips("t2")).toBeNull();
+    const taken = takePointedChips("t1")!;
+    expect(taken.pointed.map((element) => element.selector)).toEqual(["b", "a"]);
+    expect(taken.pointed[0]).not.toHaveProperty("title");
+    expect(takePointedChips("t1")).toBeNull();
+    taken.restore();
+    expect(takePointedChips("t1")!.pointed).toHaveLength(2);
+    for (let n = 0; n < POINT_LIMITS.perMessage + 2; n += 1) addPointedChip("t1", chip(`s${n}`));
+    expect(takePointedChips("t1")!.pointed.map((element) => element.selector)).toEqual(["s2", "s3", "s4", "s5", "s6"]);
   });
 });

@@ -5706,6 +5706,8 @@
   "chat.preview.versionOf": "v{n} / {count}",
   "chat.preview.latest": "最新に戻る",
   "chat.preview.updated": "更新しました",
+  "chat.preview.point": "指し示す",
+  "chat.preview.pointHint": "変えたい部分をクリックしてください。やめるには Esc を押します。",
   "chat.preview.openTab": "新しいタブで開く",
   "chat.preview.openTabNeedsLink": "ブラウザで開くには、ページを公開してください",
   "chat.preview.publish": "公開",
@@ -5716,5 +5718,8 @@
   "chat.preview.cardLine": "{bot} が作ったページ · v{n}",
   "chat.preview.showing": "表示中",
   "chat.preview.open": "開く",
+  "chat.preview.pointedPart": "ページの一部",
+  "chat.preview.removePoint": "{label} を外す",
+  "chat.preview.pointedAt": "指し示した部分: {parts}",
   "chat.activity.publishPage": "ページを公開中"
 }

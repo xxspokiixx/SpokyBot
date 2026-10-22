@@ -6049,6 +6049,8 @@
   "chat.preview.versionOf": "v{n} of {count}",
   "chat.preview.latest": "Back to the latest",
   "chat.preview.updated": "Updated",
+  "chat.preview.point": "Point",
+  "chat.preview.pointHint": "Click the part of the page you want changed. Press Esc to stop.",
   "chat.preview.openTab": "Open in new tab",
   "chat.preview.openTabNeedsLink": "Publish the page to open it in your browser",
   "chat.preview.publish": "Publish",
@@ -6059,5 +6061,8 @@
   "chat.preview.cardLine": "Page made by {bot} · v{n}",
   "chat.preview.showing": "Showing",
   "chat.preview.open": "Open",
+  "chat.preview.pointedPart": "a part of the page",
+  "chat.preview.removePoint": "Remove {label}",
+  "chat.preview.pointedAt": "Pointed at {parts}",
   "chat.activity.publishPage": "Publishing a page"
 }

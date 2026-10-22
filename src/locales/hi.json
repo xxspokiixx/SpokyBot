@@ -2071,6 +2071,8 @@
   "chat.preview.versionOf": "v{n} / {count}",
   "chat.preview.latest": "सबसे नए पर लौटें",
   "chat.preview.updated": "अपडेट हुआ",
+  "chat.preview.point": "दिखाएं",
+  "chat.preview.pointHint": "पेज के जिस हिस्से को बदलना है, उस पर क्लिक करें। रोकने के लिए Esc दबाएं।",
   "chat.preview.openTab": "नए टैब में खोलें",
   "chat.preview.openTabNeedsLink": "ब्राउज़र में खोलने के लिए पेज प्रकाशित करें",
   "chat.preview.publish": "प्रकाशित करें",
@@ -2081,5 +2083,8 @@
   "chat.preview.cardLine": "{bot} का बनाया पेज · v{n}",
   "chat.preview.showing": "दिख रहा है",
   "chat.preview.open": "खोलें",
+  "chat.preview.pointedPart": "पेज का एक हिस्सा",
+  "chat.preview.removePoint": "{label} हटाएं",
+  "chat.preview.pointedAt": "दिखाया: {parts}",
   "chat.activity.publishPage": "पेज पब्लिश कर रहा है"
 }

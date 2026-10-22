@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Globe, Loader2, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Globe, Loader2, Upload, X } from "lucide-react";
 import { visibleMessages, useStore, type Bot, type Message } from "@/state/store";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { closePreview, hostPreview, openPreview, usePreviewState } from "@/lib/preview-pane";
+import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
+import { addPointedChip, closePreview, hostPreview, openPreview, usePreviewState } from "@/lib/preview-pane";
 import type { AppDocument, AppPayload } from "../../../shared/app";
+import { pointMessage, readPointEvent } from "../../../shared/app-frame/point";
 import type { PublishedPageCard } from "../../../shared/published-page";
 import { AppDocumentError, fetchAppDocument, fetchAppPagePublished, publishAppPage, type AppFetchFailure } from "../app/app-api";
 import { AppPlaceholder } from "../app/AppChrome";
@@ -78,6 +80,7 @@ function blobPage(title: string, srcdoc: string): string {
 export function PreviewPane({ bot, message }: { bot: Bot; message: BotPage }) {
   const { dispatch } = useStore();
   const { padClass, dragProps } = useCaptionChrome();
+  const wide = useMediaQuery(SIDEBAR_INLINE, true);
   const app = message.app;
   const threadId = bot.threadId;
   const { first, last } = pageVersions(app);
@@ -85,8 +88,11 @@ export function PreviewPane({ bot, message }: { bot: Bot; message: BotPage }) {
   const rev = viewing === null ? last : Math.min(last, Math.max(first, viewing));
   const [shown, setShown] = useState<Shown | null>(null);
   const [flash, setFlash] = useState(false);
+  const [pointing, setPointing] = useState(false);
   const [publish, setPublish] = useState<PublishState>({ kind: "idle" });
   const frame = useRef<AppFrameHandle | null>(null);
+  const pointingRef = useRef(false);
+  pointingRef.current = pointing;
   const lastRev = useRef(last);
   const live = publish.kind === "live" ? publish : null;
   const { state: copied, copy } = useCopyFeedback(live?.url ?? "");
@@ -126,6 +132,43 @@ export function PreviewPane({ bot, message }: { bot: Bot; message: BotPage }) {
     );
     return () => controller.abort();
   }, [threadId, message.id]);
+
+  const say = useCallback((on: boolean) => {
+    frame.current?.iframe?.contentWindow?.postMessage(pointMessage(on), "*");
+  }, []);
+  const togglePointing = () => {
+    const next = !pointingRef.current;
+    setPointing(next);
+    say(next);
+  };
+  useEffect(() => {
+    setPointing(false);
+  }, [shown?.key]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const heard = readPointEvent({ source: event.source, data: event.data }, frame.current?.iframe?.contentWindow ?? null);
+      // Security: a pick counts only while the person has Point on; a page cannot fill the composer by itself.
+      if (!heard || !pointingRef.current) return;
+      setPointing(false);
+      if (heard.kind === "ended") return;
+      addPointedChip(threadId, { appId: message.id, rev, title: app.title, ...heard.part });
+      if (!wide) closePreview();
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-tour=\"composer\"] textarea")?.focus());
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && pointingRef.current) {
+        setPointing(false);
+        say(false);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [threadId, message.id, rev, app.title, wide, say]);
 
   const doPublish = async () => {
     setPublish({ kind: "busy" });
@@ -187,6 +230,10 @@ export function PreviewPane({ bot, message }: { bot: Bot; message: BotPage }) {
             {flash && <span role="status" data-preview-updated className="ms-1 rounded-full bg-accent/15 px-2 py-px font-medium text-accent-text motion-safe:animate-pulse">{t("chat.preview.updated")}</span>}
           </div>
         </div>
+        <button type="button" aria-pressed={pointing} onClick={togglePointing} disabled={!shown || !("doc" in shown)}
+          className={cn(ASK_CHIP, pointing ? "border-accent bg-accent/15 text-ink" : ASK_CHIP_IDLE)} title={t("chat.preview.pointHint")}>
+          <Crosshair size={14} />{t("chat.preview.point")}
+        </button>
         <button type="button" className={ICON_BUTTON} onClick={openTab} disabled={!live && (desktop || !shown || !("doc" in shown))}
           aria-label={t("chat.preview.openTab")} title={!live && desktop ? t("chat.preview.openTabNeedsLink") : t("chat.preview.openTab")}>
           <ArrowUpRight size={16} />
@@ -218,7 +265,10 @@ export function PreviewPane({ bot, message }: { bot: Bot; message: BotPage }) {
           )}
         </div>
       )}
-      <div className="relative min-h-0 flex-1 overflow-hidden border-t border-hairline/40 bg-app">
+      {pointing && (
+        <div role="status" className="mx-3 mb-2 rounded-xl bg-accent/10 px-3 py-2 text-[13px] text-ink">{t("chat.preview.pointHint")}</div>
+      )}
+      <div className={cn("relative min-h-0 flex-1 overflow-hidden border-t border-hairline/40 bg-app", pointing && "ring-2 ring-inset ring-accent/60")}>
         {body}
       </div>
     </aside>

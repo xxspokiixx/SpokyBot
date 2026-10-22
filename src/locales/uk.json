@@ -2549,6 +2549,8 @@
   "chat.preview.versionOf": "v{n} з {count}",
   "chat.preview.latest": "До найновішої",
   "chat.preview.updated": "Оновлено",
+  "chat.preview.point": "Показати",
+  "chat.preview.pointHint": "Клацніть частину сторінки, яку треба змінити. Натисніть Esc, щоб зупинитися.",
   "chat.preview.openTab": "Відкрити в новій вкладці",
   "chat.preview.openTabNeedsLink": "Опублікуйте сторінку, щоб відкрити її в браузері",
   "chat.preview.publish": "Опублікувати",
@@ -2559,5 +2561,8 @@
   "chat.preview.cardLine": "Сторінка від {bot} · v{n}",
   "chat.preview.showing": "Показано",
   "chat.preview.open": "Відкрити",
+  "chat.preview.pointedPart": "частина сторінки",
+  "chat.preview.removePoint": "Прибрати {label}",
+  "chat.preview.pointedAt": "Показано: {parts}",
   "chat.activity.publishPage": "Публікує сторінку"
 }

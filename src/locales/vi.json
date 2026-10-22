@@ -4592,6 +4592,8 @@
   "chat.preview.versionOf": "v{n} / {count}",
   "chat.preview.latest": "Về bản mới nhất",
   "chat.preview.updated": "Đã cập nhật",
+  "chat.preview.point": "Chỉ vào",
+  "chat.preview.pointHint": "Bấm vào phần của trang mà bạn muốn đổi. Nhấn Esc để dừng.",
   "chat.preview.openTab": "Mở trong thẻ mới",
   "chat.preview.openTabNeedsLink": "Đăng trang để mở nó trong trình duyệt",
   "chat.preview.publish": "Đăng",
@@ -4602,5 +4604,8 @@
   "chat.preview.cardLine": "Trang do {bot} tạo · v{n}",
   "chat.preview.showing": "Đang hiện",
   "chat.preview.open": "Mở",
+  "chat.preview.pointedPart": "một phần của trang",
+  "chat.preview.removePoint": "Bỏ {label}",
+  "chat.preview.pointedAt": "Đã chỉ vào {parts}",
   "chat.activity.publishPage": "Đang xuất bản trang"
 }

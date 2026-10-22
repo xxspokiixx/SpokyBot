@@ -102,6 +102,13 @@ export interface AppFromRef {
   title: string;
 }
 
+/** One part of a bot's page the person pointed at, as its chip on their message reads. `label` is the page's own
+ * words. */
+export interface AppPointedRef {
+  appId: string;
+  label: string;
+}
+
 /** Why an app's server calls are off, or why its document is missing. `unavailable`: the UI resource
  * could not be read when the row was written (offline, wrong mime type). */
 export type AppBlockedReason = "signed-out" | "server-removed" | "server-disabled" | "apps-off" | "too-large" | "unavailable";

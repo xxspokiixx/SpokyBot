@@ -4592,6 +4592,8 @@
   "chat.preview.versionOf": "v{n} / {count}",
   "chat.preview.latest": "En yeniye dön",
   "chat.preview.updated": "Güncellendi",
+  "chat.preview.point": "Göster",
+  "chat.preview.pointHint": "Sayfada değiştirmek istediğiniz yere tıklayın. Durmak için Esc'ye basın.",
   "chat.preview.openTab": "Yeni sekmede aç",
   "chat.preview.openTabNeedsLink": "Tarayıcıda açmak için sayfayı yayınlayın",
   "chat.preview.publish": "Yayınla",
@@ -4602,5 +4604,8 @@
   "chat.preview.cardLine": "{bot} tarafından hazırlanan sayfa · v{n}",
   "chat.preview.showing": "Gösteriliyor",
   "chat.preview.open": "Aç",
+  "chat.preview.pointedPart": "sayfanın bir bölümü",
+  "chat.preview.removePoint": "{label} öğesini kaldır",
+  "chat.preview.pointedAt": "Gösterilen: {parts}",
   "chat.activity.publishPage": "Bir sayfa yayımlıyor"
 }

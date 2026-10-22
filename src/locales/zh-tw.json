@@ -3976,6 +3976,8 @@
   "chat.preview.versionOf": "v{n} / {count}",
   "chat.preview.latest": "回到最新",
   "chat.preview.updated": "已更新",
+  "chat.preview.point": "指出",
+  "chat.preview.pointHint": "點按頁面上想改的部分。按 Esc 停止。",
   "chat.preview.openTab": "在新分頁中開啟",
   "chat.preview.openTabNeedsLink": "發佈頁面後即可在瀏覽器中開啟",
   "chat.preview.publish": "發佈",
@@ -3986,5 +3988,8 @@
   "chat.preview.cardLine": "由 {bot} 製作的頁面 · v{n}",
   "chat.preview.showing": "正在顯示",
   "chat.preview.open": "開啟",
+  "chat.preview.pointedPart": "頁面的一部分",
+  "chat.preview.removePoint": "移除 {label}",
+  "chat.preview.pointedAt": "指出了 {parts}",
   "chat.activity.publishPage": "正在發佈頁面"
 }

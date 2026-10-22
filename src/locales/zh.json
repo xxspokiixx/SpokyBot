@@ -2948,6 +2948,8 @@
   "chat.preview.versionOf": "v{n} / {count}",
   "chat.preview.latest": "回到最新",
   "chat.preview.updated": "已更新",
+  "chat.preview.point": "指出",
+  "chat.preview.pointHint": "点按页面上想改的部分。按 Esc 停止。",
   "chat.preview.openTab": "在新标签页中打开",
   "chat.preview.openTabNeedsLink": "发布页面后即可在浏览器中打开",
   "chat.preview.publish": "发布",
@@ -2958,5 +2960,8 @@
   "chat.preview.cardLine": "由 {bot} 制作的页面 · v{n}",
   "chat.preview.showing": "正在显示",
   "chat.preview.open": "打开",
+  "chat.preview.pointedPart": "页面的一部分",
+  "chat.preview.removePoint": "移除 {label}",
+  "chat.preview.pointedAt": "指出了 {parts}",
   "chat.activity.publishPage": "正在发布页面"
 }

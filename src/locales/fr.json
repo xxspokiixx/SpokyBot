@@ -2071,6 +2071,8 @@
   "chat.preview.versionOf": "v{n} sur {count}",
   "chat.preview.latest": "Revenir à la dernière",
   "chat.preview.updated": "Mise à jour",
+  "chat.preview.point": "Montrer",
+  "chat.preview.pointHint": "Cliquez sur la partie de la page à changer. Appuyez sur Échap pour arrêter.",
   "chat.preview.openTab": "Ouvrir dans un nouvel onglet",
   "chat.preview.openTabNeedsLink": "Publiez la page pour l’ouvrir dans votre navigateur",
   "chat.preview.publish": "Publier",
@@ -2081,5 +2083,8 @@
   "chat.preview.cardLine": "Page créée par {bot} · v{n}",
   "chat.preview.showing": "Affichée",
   "chat.preview.open": "Ouvrir",
+  "chat.preview.pointedPart": "une partie de la page",
+  "chat.preview.removePoint": "Retirer {label}",
+  "chat.preview.pointedAt": "Montré : {parts}",
   "chat.activity.publishPage": "Publie une page"
 }
