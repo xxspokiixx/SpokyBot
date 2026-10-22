@@ -5503,7 +5503,7 @@ const watchdog = new TurnWatchdog({
     if (bot && routineRun?.target !== "bot") {
       reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: cause });
     }
-    settleDirectFollowup(stalledGeneration, { ok: false, text: stalled });
+    settleDirectFollowup(stalledGeneration, { ok: false, text: stalled, stalled: true });
     turnUsage.delete(turn.threadId);
     turnContext.delete(turn.threadId);
     roomStallCompletions.stall(turn.threadId);

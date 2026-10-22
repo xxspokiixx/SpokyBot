@@ -74,6 +74,8 @@ export interface HostTurnResult {
   evidence?: TurnEvidence;
   cap?: { note: string; handoffPath?: string };
   cards?: { question: string; ids: string[] };
+  /** The host's stall watchdog stopped the turn: it failed as `stalled`, not as a provider error. */
+  stalled?: boolean;
 }
 
 export interface HandoffOpener {
