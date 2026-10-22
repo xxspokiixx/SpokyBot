@@ -1,4 +1,7 @@
+import type { RuntimeEvent } from "./contracts.ts";
+
 // A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall.
+// Drivers report a tool only when it starts and when it ends, so a turn with a tool running may stay silent for toolStallMs.
 export interface WatchedTurn {
   threadId: string;
   botId: string;
@@ -6,14 +9,16 @@ export interface WatchedTurn {
   lastEventAt: number;
   waitingOnHuman: boolean;
   waitingOnComputer: boolean;
+  runningTools: Set<string>;
 }
 
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
 
 export interface TurnWatchdogOptions {
   stallMs: number;
+  toolStallMs: number;
   checkMs: number;
-  onStall: (turn: WatchedTurn) => void;
+  onStall: (turn: WatchedTurn, silentMs: number) => void;
   now?: () => number;
 }
 
@@ -45,12 +50,16 @@ export class TurnWatchdog {
 
   watch(threadId: string, botId: string): void {
     const at = this.now();
-    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false, waitingOnComputer: false });
+    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false, waitingOnComputer: false,
+      runningTools: new Set() });
   }
 
-  touch(threadId: string): void {
-    const turn = this.turns.get(threadId);
-    if (turn) turn.lastEventAt = this.now();
+  observe(event: RuntimeEvent): void {
+    const turn = this.turns.get(event.threadId);
+    if (!turn) return;
+    turn.lastEventAt = this.now();
+    if (event.type === "item.started" && event.itemType === "tool" && event.itemId) turn.runningTools.add(event.itemId);
+    else if (event.type === "item.completed" && event.itemType === "tool" && event.itemId) turn.runningTools.delete(event.itemId);
   }
 
   setWaitingOnHuman(threadId: string, waiting: boolean): void {
@@ -84,9 +93,10 @@ export class TurnWatchdog {
     const at = this.now();
     for (const turn of this.turns.values()) {
       if (parked(turn)) continue;
-      if (at - turn.lastEventAt < this.opts.stallMs) continue;
+      const silentMs = turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
+      if (at - turn.lastEventAt < silentMs) continue;
       this.turns.delete(turn.threadId);
-      this.opts.onStall(turn);
+      this.opts.onStall(turn, silentMs);
     }
   }
 }

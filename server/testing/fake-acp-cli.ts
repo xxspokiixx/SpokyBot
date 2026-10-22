@@ -14,7 +14,8 @@
 //     | ask-peer | delegate-peer | chief-delegate | create-peer (coordinate_bots through the injected agents
 //       MCP; FAKE_ACP_REDELEGATE_FILE, FAKE_ACP_TASKID_FILE; a hand-off result wake gets a fixed line)
 //     | echo-gated (echo the whole prompt; hold until FAKE_ACP_GATE_FILE exists) | safe-agent-reads
-//     | stall-after-text | stall-after-tool (then silent forever) | slow-tool (silent for FAKE_ACP_TOOL_MS)
+//     | stall-after-text | stall-after-tool (then silent forever) | slow-tool (silent for FAKE_ACP_TOOL_MS, or until
+//       FAKE_ACP_TOOL_GATE exists when set)
 //     | quiet-then-answer (silent for FAKE_ACP_QUIET_MS; with QWEN_HOME, append FAKE_ACP_QWEN_LOG lines to
 //       Qwen's debug log every FAKE_ACP_LOG_EVERY_MS) | mcp-tools (list each mcpServers entry's tools with
 //       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE) | lend-question (list_shared_computers around a question)
@@ -861,11 +862,21 @@ function handle(msg: any) {
           hangKeepAlive = setInterval(() => {}, 1_000);
           return;
         }
-        setTimeout(() => {
+        const answer = () => {
           finish();
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
           complete();
-        }, Number(process.env.FAKE_ACP_TOOL_MS ?? 600));
+        };
+        const gate = process.env.FAKE_ACP_TOOL_GATE;
+        if (gate) {
+          const held = setInterval(() => {
+            if (!existsSync(gate)) return;
+            clearInterval(held);
+            answer();
+          }, 20);
+          return;
+        }
+        setTimeout(answer, Number(process.env.FAKE_ACP_TOOL_MS ?? 600));
         return;
       }
       if (mode === "unkeyed-tool") {
