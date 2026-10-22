@@ -63,6 +63,7 @@ Use only mapped, tested commands:
 - [Taking control of a bot's computer](take-control.md)
 - [Native dictation retention and send-to-stop](dictation.md)
 - [The Today page](today.md)
+- [Proactive routines and the brief](proactive-routines.md)
 - [Chat widgets](widgets.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)

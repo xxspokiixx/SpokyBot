@@ -129,6 +129,10 @@ describe("the brief", () => {
     expect(s.brief.serverPress(s.chief, s.thread(), card.id, dismiss, guest)).toBe("refused");
     expect(s.brief.serverPress({ id: "someone-else" }, s.thread(), card.id, dismiss, owner)).toBeNull();
     expect(s.brief.serverPress(s.chief, s.thread(), card.id, { type: "draft_reply", payload: { messageId: "m1" } }, owner)).toBeNull();
+    const other = s.rows().findLast((message) => message.serverCard && message.id !== card.id);
+    if (other) expect(s.brief.serverPress(s.chief, s.thread(), other.id, dismiss, owner)).toBeNull();
+    const posted = s.store.appendMessage(s.thread(), { role: "bot", kind: "widget", serverCard: true, text: "x", widget: { ...card.widget!, root: { ...card.widget!.root, title: "Another card" } } });
+    expect(s.brief.serverPress(s.chief, s.thread(), posted.id, dismiss, owner)).toBeNull();
     expect(s.brief.serverPress(s.chief, s.thread(), card.id, dismiss, owner)).toBe("handled");
     await vi.waitFor(() => expect(s.shown()).not.toContain("Q3 numbers"));
     expect(s.brief.dismissedFrom()).toEqual(["ada@x.test"]);

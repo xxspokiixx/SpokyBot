@@ -105,6 +105,8 @@ describe("a routine's checks", () => {
 
   it("a read that fails is trouble, never nothing new; it keeps the cursor and is not retried every tick", async () => {
     const s = setup();
+    await s.checks.check(s.routine({ checks: ["mail"] }), { manual: false });
+    s.advance(15 * 60_000);
     s.mail("a", 5);
     s.failing.gmail = "Connected account is not ACTIVE";
     const result = await s.checks.check(s.routine({ checks: ["mail"] }), { manual: false });
