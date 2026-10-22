@@ -38,7 +38,7 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // The full bridge goes only to the local server's UI; a remote page gets the safe subset, and main enforces the same rule.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "windowControls"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "windowControls"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder"];
 function updaterOffered() {
@@ -54,6 +54,16 @@ function savedAnalyticsChoice() {
   try { const saved = ipcRenderer.sendSync("desktop-analytics:read"); return typeof saved === "boolean" ? saved : null; } catch { return null; }
 }
 let analyticsChoice;
+function savedLanguageChoice() {
+  try { const saved = ipcRenderer.sendSync("desktop-language:read"); return typeof saved === "string" ? saved : null; } catch { return null; }
+}
+let languageChoice;
+const languageListeners = new Set();
+ipcRenderer.on("desktop-language:changed", (_event, language) => {
+  if (typeof language !== "string") return;
+  languageChoice = language;
+  for (const listener of languageListeners) listener(language);
+});
 const onHomePage = !isLocalPage && homePage();
 const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : []), ...(onHomePage ? HOME_PAGE : [])]);
 
@@ -431,6 +441,20 @@ const bridge = {
       return analyticsChoice;
     },
     ...(isLocalPage ? { set: enabled => { analyticsChoice = enabled === true; return ipcRenderer.invoke("desktop-analytics:set", analyticsChoice); } } : {}),
+  },
+  desktopLanguage: {
+    choice: () => {
+      if (languageChoice === undefined) languageChoice = savedLanguageChoice();
+      return languageChoice;
+    },
+    set: language => {
+      languageChoice = String(language);
+      return ipcRenderer.invoke("desktop-language:set", languageChoice);
+    },
+    onChange: listener => {
+      languageListeners.add(listener);
+      return () => { languageListeners.delete(listener); };
+    },
   },
 };
 

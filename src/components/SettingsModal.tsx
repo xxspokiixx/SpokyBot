@@ -700,6 +700,7 @@ export function SettingsModal() {
               <SkinPicker />
             </Card>
             {remoteActive && <AdvancedModeRow />}
+            {remoteActive && <LanguageRow />}
             <FontRow />
             <ChatWidthRow />
             <ColorUserBubblesRow />
