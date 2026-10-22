@@ -626,6 +626,42 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
     }
   });
 
+  it("declares the parameterized picker and turns Fast off for a plain slug, on for a -fast slug", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-fast-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_CURSOR_FAST = "1";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,composer-2.5|Composer 2.5";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-fast",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      for (const [model, fast] of [["composer-2.5", "false"], ["composer-2.5-fast", "true"]]) {
+        const turn = await instance.adapter.sendTurn({ threadId: `t-cursor-${model}`, text: "hi", model });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
+        expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([
+          { method: "session/set_model", params: { sessionId: expect.any(String), modelId: "composer-2.5" } },
+          { method: "session/set_config_option", params: { sessionId: expect.any(String), configId: "fast", value: fast } },
+        ]);
+      }
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_CURSOR_FAST;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+
   it("completes the turn when set_model answers -32602 and says which model runs instead", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
