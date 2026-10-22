@@ -8796,6 +8796,29 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("mounts the data-dashboards skill, with the folder that holds its template, when the person asks for a dashboard", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "Build me a sales dashboard from orders.csv",
+      })).status).toBe(202);
+      const seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump, 15_000);
+      const system = seen.systemPrompt ?? "";
+      const root = /<openmaus-skill id="data-dashboards" version="[^"]+" root="([^"]+)">/.exec(system)?.[1];
+      expect(root).toBeTruthy();
+      expect(existsSync(join(root!, "dashboard.html"))).toBe(true);
+      expect(system).toContain("publish_page");
+      expect(system).not.toContain('<openmaus-skill id="create-verification-skill"');
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("injects the bot's standing instructions (soul) into a real turn, directly after the persona", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker" })).body.bot;
     try {

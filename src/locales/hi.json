@@ -1885,6 +1885,7 @@
   "cloudSend.move.waiting": "आपके बॉट Cloud पर जा रहे हैं… {name} के काम खत्म करने का इंतज़ार है",
   "cloudSend.move.waitingAny": "आपके बॉट Cloud पर जा रहे हैं… आपके बॉट के काम खत्म करने का इंतज़ार है",
   "cloudSend.move.finishing": "Cloud पर जा रहे हैं… लगभग हो गया",
+  "cloudSend.move.updating": "My Cloud अपडेट हो रहा है। यह पूरा होते ही आपके बॉट वहाँ जाने लगेंगे।",
   "cloudSend.move.failing": "आपके बॉट अभी Cloud पर नहीं जा सके: {error}",
   "cloudSend.move.failingPlain": "आपके बॉट अभी Cloud पर नहीं जा सके।",
   "cloudSend.move.done": "इस कंप्यूटर का सब कुछ यहाँ है: {list}।",

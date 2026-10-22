@@ -54,6 +54,7 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
     if (page !== "local") return null;
     return { kind: "done", text: t(move.phase === "home-again" ? "cloudSend.move.homeAgain" : move.lost ? "cloudSend.move.backLost" : "cloudSend.move.back"), extra: [] };
   }
+  if (move.phase === "copy" && move.updating) return { kind: "sending", text: t("cloudSend.move.updating"), extra: [] };
   const failing = "failing" in move ? move.failing : undefined;
   if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: failing.error }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };

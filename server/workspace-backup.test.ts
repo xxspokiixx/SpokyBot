@@ -396,15 +396,16 @@ describe("encrypted full workspace backups", () => {
     }
   });
 
-  it("leaves the bot box runtime directory out of a backup", async () => {
+  it("leaves the bot box's live sockets and filter out, so a Cloud home with the box on can still be backed up and brought home", async () => {
     // Seen in the real app on Oct 22: a Cloud that ended could not bring its chats home, because its export stopped at
     // "Cannot back up special or live runtime file: box/broker.sock" (the T0 credential broker's socket).
     const source = directory();
     mkdirSync(join(source, "box"), { mode: 0o700 });
     writeFileSync(join(source, "box", "seccomp.bpf"), Buffer.from([0x20, 0, 0, 0]), { mode: 0o600 });
+    // The live socket is the Linux box's (a Cloud home): Windows refuses a unix socket at a file path, so there the
+    // folder holds only the filter, and must still be left out.
     const broker = process.platform === "win32" ? null : createNetServer();
     if (broker) await new Promise<void>((resolve) => broker.listen(join(source, "box", "broker.sock"), resolve));
-    else writeFileSync(join(source, "box", "broker.sock"), "runtime socket path fixture");
     try {
       mkdirSync(join(source, "attachments"));
       writeFileSync(join(source, "attachments", "note.txt"), "ordinary user file");

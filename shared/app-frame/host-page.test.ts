@@ -38,7 +38,7 @@ function setup() {
 
 describe("app-host.html", () => {
   it("is what the build script makes, and carries the hash of its body on its first line", async () => {
-    const committed = readFileSync(APP_HOST_HTML, "utf8").replaceAll("\r\n", "\n");
+    const committed = readFileSync(APP_HOST_HTML, "utf8");
     expect(committed, "run: node --experimental-strip-types scripts/build-app-host.ts").toBe(await buildAppHostHtml());
     const hash = appHostHashOf(committed);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);

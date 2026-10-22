@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { arrivedCounts, CHECK_PASSES, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, QUIET_MS, switchOn } from "./one-home.mjs";
+import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, QUIET_MS, switchOn } from "./one-home.mjs";
 import { oneHomeCloud } from "./one-home-main.mjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
@@ -44,7 +44,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
           },
           async check() { w.checked++; return { ok: checks.shift() ?? true }; },
           switches: () => switches,
-          snapshot: () => ({ running: null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }] } } }),
+          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }] } } }),
         },
         local: {
           async freeze() {
@@ -115,6 +115,32 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
   assert.equal(w.lent.length, 1, "a relaunch lends nothing again");
   assert.equal(w.phone.stopped, 1);
   assert.equal(w.server.unfreezes, 0);
+});
+
+test("a Cloud too old to take a move says My Cloud is updating, never that the move fails, and the move starts once it has", async () => {
+  // Seen in the real app on Oct 22: a new app with a Cloud still on the older image, and the line said "Moving your bots to
+  // My Cloud…" for good.
+  const outdated = () => Object.assign(new Error("My Cloud is updating. Your bots move there by themselves when it's done."), { code: "outdated" });
+  const w = world({ moves: [outdated(), outdated(), new Error("My Cloud did not answer.")] });
+  await w.home.kick();
+  assert.deepEqual(w.home.view(), { phase: "copy", updating: true });
+  assert.equal(w.journal.failingSince, undefined, "My Cloud updating is not the move failing");
+  assert.equal(w.journal.retryAt, w.now() + COPY_RETRY_MS[0]);
+  w.advance(FAILING_LINE_MS + COPY_RETRY_MS[0]);
+  await w.tick();
+  assert.deepEqual(w.home.view(), { phase: "copy", updating: true }, "a day of it still says why, with nothing to try again");
+  w.running = { reason: "move" };
+  assert.deepEqual(w.home.view(), { phase: "copy" }, "a pass on its way is the move again");
+  w.running = null;
+  // Updated, My Cloud failed once in an ordinary way: the line is the move's own again.
+  w.advance(COPY_RETRY_MS[1]);
+  await w.tick();
+  assert.deepEqual(w.home.view(), { phase: "copy" });
+  assert.equal(w.journal.failingSince, w.now());
+  w.advance(COPY_RETRY_MS[2]);
+  await w.tick();
+  assert.equal(w.journal.phase, "done");
+  assert.equal(w.journal.updating, undefined);
 });
 
 test("the freeze waits for a quiet moment: nobody typing for 30 s, and no bot still working", async () => {

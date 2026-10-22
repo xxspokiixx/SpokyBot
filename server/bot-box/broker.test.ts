@@ -1,7 +1,7 @@
 import { createServer, request, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BROKER_PROCESS_TTL_MS, BROKER_THREAD_TTL_MS, BROKER_TOKEN_PREFIX, brokerUrl, openCredentialBroker, type CredentialBroker } from "./broker.ts";
@@ -20,11 +20,11 @@ function call(socketPath: string, method: string, path: string, headers: Record<
   });
 }
 
-function localSocketPath(dir: string, name: string): string {
-  return process.platform === "win32" ? `\\\\.\\pipe\\${basename(dir)}-${name}` : join(dir, name);
-}
+// The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): its broker listens on a unix
+// socket, which Windows refuses at a file path (EACCES).
+const linuxBox = describe.skipIf(process.platform === "win32");
 
-describe("the credential broker", () => {
+linuxBox("the credential broker", () => {
   let upstream: Server, broker: CredentialBroker, dir: string, clock = 1_800_000_000_000;
   const seen: Array<{ method: string; url: string; headers: Record<string, string | string[] | undefined>; body: string }> = [];
   afterEach(async () => {
@@ -52,7 +52,7 @@ describe("the credential broker", () => {
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
     dir = mkdtempSync(join(tmpdir(), "omb-broker-"));
-    broker = await openCredentialBroker({ socketPath: localSocketPath(dir, "b.sock"), now: () => clock });
+    broker = await openCredentialBroker({ socketPath: join(dir, "b.sock"), now: () => clock });
     return (upstream.address() as { port: number }).port;
   }
 

@@ -43,10 +43,6 @@ function chain(target: string): Step[] {
 const shipped = () => all.filter(s => s.name !== "build" && s.name !== "edge").flatMap(s => s.steps);
 const npmInstall = (step: Step) => step.op === "RUN" && /\bnpm install\b/.test(step.args);
 const browserRun = () => chain("runtime").find(step => step.op === "RUN" && step.args.includes("agent-browser install"))!;
-const engineInstalls = (steps: Step[], target: "server" | "cloud-home") => {
-  const packages = target === "server" ? "$ENGINES" : "$CLOUD_HOME_ENGINES";
-  return steps.filter(step => npmInstall(step) && step.args.includes(`npm install -g ${packages}`));
-};
 const grokRun = (steps: Step[]) => steps.findIndex(step => step.op === "RUN" && step.args.includes("https://x.ai/cli/install.sh"));
 // The keys step parses Chrome for Testing's JSON with jq, as on GitHub's runners.
 const jq = process.platform === "win32" ? "" : spawnSync("sh", ["-c", "command -v jq"], { encoding: "utf8" }).stdout.trim();
@@ -66,17 +62,15 @@ describe("container images", () => {
   });
 
   it("puts the browser and the engines beneath the per-commit app files, so a code change leaves them as they were", () => {
-    for (const target of ["server", "cloud-home"] as const) {
+    for (const target of ["server", "cloud-home"]) {
       const steps = chain(target);
-      const browser = steps.indexOf(browserRun());
-      const engines = engineInstalls(steps, target).map(step => steps.indexOf(step));
+      const heavy = steps.flatMap((step, i) => (npmInstall(step) ? [i] : []));
       const app = steps.flatMap((step, i) => (step.op === "COPY" && !step.args.includes("--from=edge") ? [i] : []));
-      // agent-browser + Chrome, then the engines, then the app files (and the Cloud home's Caddyfile)
-      expect(browser, target).toBeGreaterThanOrEqual(0);
-      expect(engines, target).toHaveLength(1);
-      const heavy = [browser, ...engines];
+      // agent-browser + Chrome, then (Cloud home only) pnpm in the tools layer, then the engines, then the app files
+      // (and the Cloud home's Caddyfile)
+      expect(heavy, target).toHaveLength(target === "cloud-home" ? 3 : 2);
       const fromBuild = steps.flatMap((step, i) => (step.op === "COPY" && step.args.includes("--from=build") ? [i] : []));
-      expect(fromBuild, target).toHaveLength(3);
+      expect(fromBuild, target).toHaveLength(4);
       expect(Math.max(...heavy), target).toBeLessThan(Math.min(...app));
       // The Data engine's native tree (DuckDB, resvg) changes on a version bump,
       // not per commit, so it is copied before the per-commit app files.
@@ -92,10 +86,8 @@ describe("container images", () => {
     for (const { args } of installs) {
       const cache = /--cache (\S+)/.exec(args)?.[1] ?? /\bHOME=(\S+) npm install\b/.exec(args)?.[1];
       expect(cache, args).toMatch(/^\/tmp\//);
-      const installAt = args.search(/\bnpm install\b/);
-      const removed = [...args.matchAll(/\brm -rf ([^;&|]+)/g)]
-        .filter(match => (match.index ?? -1) > installAt)
-        .flatMap(match => match[1].split(/\s+/));
+      // Every `rm -rf` in the step counts: the Cloud home's tools layer clears apt's lists before its pnpm install.
+      const removed = [...args.matchAll(/\brm -rf ([^;&|]+)/g)].flatMap((match) => match[1]!.trim().split(/\s+/));
       expect(removed, args).toEqual(expect.arrayContaining([cache, "/tmp/node-compile-cache"]));
     }
   });
@@ -104,7 +96,7 @@ describe("container images", () => {
     for (const { args } of shipped()) expect(args).not.toMatch(/\bch(own|mod) -R\b/);
     // modes are fixed where the files are built, in a stage that is not shipped
     const build = all.find(s => s.name === "build")!.steps.find(step => step.op === "RUN" && step.args.startsWith("pnpm build:server"))!;
-    expect(build.args).toMatch(/ && chmod -R go-w dist dist-server$/);
+    expect(build.args).toMatch(/ && chmod -R go-w dist dist-server skills$/);
     // a plain copy to a fresh inode drops the privileged-port capability and the 1001 owner
     expect(all.find(s => s.name === "edge")!.steps).toContainEqual({ op: "RUN", args: "cp /usr/bin/caddy /caddy" });
     const home = chain("cloud-home");
@@ -115,7 +107,7 @@ describe("container images", () => {
     expect(home.findIndex(step => step.args.startsWith("--from=edge "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.op === "RUN" && /\b(cp|mv)\b[^&]*caddy/.test(step.args))).toEqual([]);
     expect(home.filter(step => step.args.includes("--from=build")).map(step => step.args)).toEqual([
-      "/src/dist-native/duckdb/linux-x64 ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist",
+      "/src/dist-native/duckdb/linux-x64 ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist", "/src/skills ./skills",
     ].map(path => `--from=build ${path}`));
     expect(chain("server").filter(step => step.args.includes("--from=build")).every(step => step.args.startsWith("--from=build --chown=maus:maus "))).toBe(true);
   });
@@ -245,7 +237,8 @@ describe("container images", () => {
     expect(browserRun().args).toContain("${CHROME_CACHE_TAG");
     const home = all.find(s => s.name === "cloud-home")!.steps;
     expect(home).toContainEqual({ op: "ARG", args: 'CLOUD_HOME_ENGINES="@anthropic-ai/claude-code @openai/codex"' });
-    const [engines] = engineInstalls(home, "cloud-home");
+    // the engines' install, not the tools layer's pinned pnpm beneath it
+    const engines = home.find(step => npmInstall(step) && step.args.includes("$CLOUD_HOME_ENGINES"));
     expect(engines?.args).toContain("${ENGINES_CACHE_TAG");
     const keys = (workflow.jobs.publish.steps as { id?: string; env?: Record<string, string> }[]).find(step => step.id === "keys")!;
     expect(keys.env!.CLOUD_HOME_ENGINES).toBe("@anthropic-ai/claude-code @openai/codex");
