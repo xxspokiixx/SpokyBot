@@ -4208,7 +4208,8 @@ function runRoomNode(node: HandoffView, group: GroupRecord, bot: BotRecord, sign
     });
     groupQueues.set(node.threadId, tracked.catch(() => {}));
     tracked.then(
-      () => finish({ ok: result.outcome === "settled", text: result.stopReason || result.replyText || result.outcome || "The addressed agent could not run" }),
+      () => finish({ ok: result.outcome === "settled", text: result.stopReason || result.replyText || result.outcome || "The addressed agent could not run",
+        ...(result.outcome === "stalled" ? { stalled: true } : {}) }),
       error => finish({ ok: false, text: error instanceof Error ? error.message : String(error) }),
     );
   });
@@ -11187,8 +11188,10 @@ async function runClaimedGroupMemberTurn(
     // Covers every early return that never produces a provider terminal event.
     unregisterSetupStall();
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
+    // A stall latched during setup can end the turn before it has an outcome: the watchdog stopped it all the same.
     settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled",
-      text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || roomFailure || roomReply || roomOutcome || "The turn did not run" });
+      text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || roomFailure || roomReply || roomOutcome || "The turn did not run",
+      ...(roomOutcome === "stalled" || setupStalled ? { stalled: true } : {}) });
     if (!retainRoomVmLease) releaseRoomVmLease();
     if (!providerDispatched && roomSpeaker && groupSpeakers.get(threadId) === roomSpeaker) {
       groupSpeakers.delete(threadId);

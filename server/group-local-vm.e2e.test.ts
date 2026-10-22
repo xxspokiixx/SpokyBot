@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomePrompt } from "./system-prompt.ts";
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -54,6 +55,9 @@ const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), 
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
 const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
 const check = (c: any) => createControlClient({ url: c.env.OMB_CONTROL_URL, token: c.env.OMB_CONTROL_TOKEN }).state(true);
+// The runtime outcome of the room's latest coordinated turn, once it has one.
+const roomOutcome = (groupId: string) => until(() => readHandoffs(join(fixtureHome, "data")).findLast(node => node.groupId === groupId)?.outcome,
+  Boolean);
 
 beforeAll(async () => {
   fixtureHome = mkdtempSync(join(tmpdir(), "omb-group-vm-"));
@@ -856,6 +860,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
     vmState();
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
+    // The watchdog stopped the turn before dispatch: a stall, not a provider error.
+    expect(await roomOutcome(group.id)).toBe("stalled");
     // Wait out the stall's VM-lease grace so a later turn can take the VM.
     await new Promise(r => setTimeout(r, 6_500));
     await send(group.id);
@@ -1119,6 +1125,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     if (failure === "stall") vmState({ stall: true });
     await idle(bots[0].id);
     expect((await gate(c)).status).toBe(401);
+    if (failure === "stall") expect(await roomOutcome(group.id)).toBe("stalled");
     await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 2 } });
     vmState({ noContainers: true });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
