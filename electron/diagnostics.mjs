@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// Mirrors WORKSPACE_CREDENTIAL_ENV in server/config.ts; a test asserts the two lists never drift apart.
+// Mirrors WORKSPACE_CREDENTIAL_ENV in server/credential-env.ts; a test asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
   "XAI_API_KEY",
   "MISTRAL_API_KEY",
