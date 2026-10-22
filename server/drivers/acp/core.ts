@@ -17,6 +17,7 @@ import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSe
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
 import { runAcpOneShot } from "./background-text.ts";
+import { sanitizeAcpToolMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import {
   classifyQuiet, describeQuiet, lastSeenPhrase, LogTail, quietKey, sampleProcessTree,
@@ -360,7 +361,6 @@ function acpVariantOption(result: any): { configId: string; options: ModelVarian
     ...(typeof option.currentValue === "string" ? { currentValue: option.currentValue } : {}),
   };
 }
-const TOOL_LOG_TEXT_LIMIT = 64_000;
 
 export function offeredModels(result: any, configId: string): string[] {
   const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
@@ -384,39 +384,6 @@ async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
     data: (await readFile(image.path)).toString("base64"),
     mimeType: image.mime,
   })));
-}
-
-function sanitizeToolLogValue(value: unknown, budget: { nodes: number; text: number }, depth = 0): unknown {
-  if (depth > 12 || budget.nodes-- <= 0) return undefined;
-  if (typeof value === "string") {
-    if (/^data:image\//iu.test(value) || budget.text <= 0) return undefined;
-    const limit = Math.min(TOOL_LOG_TEXT_LIMIT, budget.text);
-    const text = value.length <= limit ? value : `[Earlier output truncated]\n\n${value.slice(-limit)}`;
-    budget.text -= text.length;
-    return text;
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => {
-      const sanitized = sanitizeToolLogValue(entry, budget, depth + 1);
-      return sanitized === undefined ? [] : [sanitized];
-    });
-  }
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(Object.entries(record).flatMap(([key, entry]) => {
-    if ((record.type === "image" && (key === "data" || key === "blob")) ||
-      (key === "blob" && typeof record.mimeType === "string" && record.mimeType.startsWith("image/"))) return [];
-    const sanitized = sanitizeToolLogValue(entry, budget, depth + 1);
-    return sanitized === undefined ? [] : [[key, sanitized]];
-  }));
-}
-
-function sanitizeAcpToolMessage(message: any): unknown {
-  const isToolUpdate = message?.method === "session/update"
-    && ["tool_call", "tool_call_update"].includes(message?.params?.update?.sessionUpdate);
-  const isPermission = message?.method === "session/request_permission";
-  if (!isToolUpdate && !isPermission) return message;
-  return sanitizeToolLogValue(message, { nodes: 512, text: TOOL_LOG_TEXT_LIMIT });
 }
 
 function decodeAcpConfig(defaultCli: string) {
