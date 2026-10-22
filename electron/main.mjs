@@ -92,7 +92,7 @@ import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNo
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs"; import { createDesktopIncludedPages } from "./included-pages.mjs";
-import { cloudHomeConnectUrl, cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
+import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin } from "./open-at-login.mjs";
@@ -1765,7 +1765,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
 }
 
 async function switchEnvironment(id) {
-  if (id === environmentsState.activeId || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
+  if ((id === environmentsState.activeId && !homeWindow.asking()) || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
   if (entry?.team) return void await showHome({ place: { team: entry.team.id, name: entry.name } });
   homePlaces.remember(null);
@@ -1774,7 +1774,7 @@ async function switchEnvironment(id) {
     return await switchLocalEnvironmentTo(desktopDataDir(), LOCAL_ID);
   }
   if (entry && entry.origin === homeWindow.cloudOrigin()) return void await showHome({ place: "cloud" });
-  if (entry && cloudAccount && isCloudHomeEntry(entry, { homeOrigin: cloudAccount.homeTarget()?.origin, remembered: rememberedHome })) {
+  if (entry && cloudAccount && isCloudHomeEntry(entry, { homeOrigin: cloudAccount.homeTarget()?.origin ?? cloudAccount.state().machine?.origin, remembered: rememberedHome })) {
     try { await connectCloudHome(); return; } catch (error) {
       slog(`cloud home: could not connect from the Server menu (${error?.message ?? error})`);
       if (!(await cloudHomeSignedIn(entry.origin))) { await openLendingSettings(); return; }
@@ -1944,23 +1944,19 @@ function rememberCloudHome(state) {
   }
 }
 
+/** My Cloud through the home window, which never looks it up before the Admin says it is ready. */
 async function connectCloudHome(open = null) {
   const client = ensureCloudAccount();
-  const target = client.homeTarget();
-  if (!target) throw new Error("My Cloud is not ready to connect yet.");
-  const signedIn = await openSleepingCloud({ power: client.power(), wake: client.wakeHome, waking: client.setWaking, signedIn: timeoutMs => cloudHomeSignedIn(target.origin, timeoutMs) });
-  const grant = signedIn ? null : await client.pairHome();
-  activateCloud(target.origin);
-  navigateMainWindow(cloudHomeConnectUrl({ origin: target.origin, grant }, Date.now(), open));
-  cloudPower.woke(); client.checkoutDone(); return client.state();
+  await homeWindow.openCloud(open);
+  return client.state();
 }
 
-/** My Cloud listed under Servers once, and the server this window shows. */
+/** My Cloud listed under Servers once, and the server this window shows: the purchase that made it is over. */
 function activateCloud(origin) {
   const next = withCloudHome(environmentsState, { status: "ready", origin }, () => randomUUID(), cloudLook.pending());
   const entry = next.environments.find((candidate) => candidate.origin === origin);
   if (!entry) throw new Error("My Cloud could not be added to Servers.");
-  persistEnvironments(withActive(next, entry.id));
+  persistEnvironments(withActive(next, entry.id)); cloudAccount?.checkoutDone();
 }
 /** A team's Cloud listed under Servers as the Admin names it (never a page), and the server this window shows. */
 function activateTeam(place) {
@@ -2194,7 +2190,7 @@ function createWindow({ deferNavigation = false } = {}) {
       origin = new URL(validatedURL).origin;
     } catch {}
     if (origin !== remote.origin) return;
-    if (origin === homeWindow.cloudOrigin()) return void homeWindow.failed(validatedURL);
+    if (homeWindow.failed(validatedURL, errorCode)) return;
     slog(`remote server unreachable (${errorDescription}); back to Local`);
     void dialog.showMessageBox({
       type: "warning",
@@ -2771,6 +2767,7 @@ const homePlaces = createHomePlaces({ store: jsonFile(path.join(app.getPath("use
 const homeWindow = createHomeWindow({ journal: oneHome.journal, frozen: oneHome.marker, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), restored: cloudAccountRestored,
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), ensureWindow: () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: true }); },
   localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, log: slog,
+  hosts: () => session.defaultSession, readyStore: jsonFile(path.join(app.getPath("userData"), "cloud-ready.json")),
   remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
   go: (url, origin, place) => { if (place?.kind === "team") activateTeam(place); else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
