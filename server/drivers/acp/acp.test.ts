@@ -20,6 +20,7 @@ import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
+import { wideSchema } from "../../testing/oversized-tool-schema.ts";
 import * as procs from "../../procs.ts";
 import * as quietStatus from "./quiet-status.ts";
 
@@ -1250,6 +1251,51 @@ describe("ACP turns (fake CLI)", () => {
       delete process.env.FAKE_ACP_MCP_TRANSPORTS;
       await strict.close();
     }
+  });
+
+  it.each([
+    { engine: "Kimi", driver: KimiAgentDriver, outcome: "fitted to Moonshot's per-tool limit" },
+    { engine: "Grok", driver: GrokAgentDriver, outcome: "as the server sent them" },
+  ])("hands $engine a person's stdio MCP tools $outcome", async ({ driver }) => {
+    const script = join(scratch, "wide-mcp.mjs");
+    const tools = [{ name: "small", inputSchema: { type: "object", properties: { q: { type: "string" } } } }, { name: "configure", inputSchema: wideSchema(110) }];
+    writeFileSync(script, `
+      import { createInterface } from "node:readline";
+      createInterface({ input: process.stdin }).on("line", (line) => {
+        const frame = JSON.parse(line);
+        if (frame.id === undefined) return;
+        const result = frame.method === "tools/list" ? { tools: ${JSON.stringify(tools)} } : { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "wide", version: "1" } };
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }) + "\\n");
+      });`);
+    process.env.FAKE_ACP_MCP_SCHEMA_BYTES = "1";
+    try {
+      await create(driver, "mcp-tools");
+      await instance.adapter.sendTurn({ threadId: `t-wide-${driver.driverKind}`, text: "go", integrations: { custom: { wide: { command: process.execPath, args: [script], env: {} } } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const text = (recorder.events.find((event) => event.type === "item.completed" && (event as { itemType?: string }).itemType === "assistant_text") as { text?: string } | undefined)?.text;
+      const sizes = Object.fromEntries(text!.replace(/^wide: /, "").split(",").map((entry) => entry.split("=")).map(([name, bytes]) => [name, Number(bytes)]));
+      const raw = JSON.stringify(tools[1]!.inputSchema).length;
+      expect(raw).toBeGreaterThan(12_000);
+      expect(sizes.small).toBe(JSON.stringify(tools[0]!.inputSchema).length);
+      if (driver === KimiAgentDriver) expect(sizes.configure).toBeLessThanOrEqual(12_000);
+      else expect(sizes.configure).toBe(raw);
+    } finally {
+      delete process.env.FAKE_ACP_MCP_SCHEMA_BYTES;
+    }
+  });
+
+  it("tells the person in plain words when Kimi still refuses a tool's schema", async () => {
+    const failureFile = join(scratch, "schema-refusal.json");
+    process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+    writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error",
+      data: { details: "400 tools.function.parameters is not a valid moonshot flavored json schema, details: <At path 'root': schema exceeds maximum allowed size>" } }));
+    await create(KimiAgentDriver);
+    await instance.adapter.sendTurn({ threadId: "t-schema-refusal", text: "go" });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false });
+    expect(recorder.events.find((event) => event.type === "runtime.error")).toMatchObject({
+      message: "Kimi refused this turn as an invalid request because the input schema of one of this bot's tools is too large, so nothing ran. "
+        + "Turn off the MCP server or app that tool comes from for this bot, or switch the bot to another AI.",
+    });
   });
 
   it("keeps a tool selection's gate in front of the connector", async () => {
