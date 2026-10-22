@@ -217,9 +217,10 @@ describe("versions", () => {
 });
 
 describe("publishablePage", () => {
-  it("serves an HTML page with the theme colours and a quiet mausbot", () => {
+  it("serves an HTML page with the theme colours and a quiet mausbot, and a jsx page as static HTML with its transpiled code", () => {
     const { call, store, docs } = setup();
     call({ tool: "show_html", html: PAGE, title: "Sales" });
+    call({ tool: "show_html", jsx: JSX_PAGE, title: "Pricing" });
     const html = publishablePage({ store, docs, threadId: THREAD, messageId: "m1" });
     expect(html).toMatchObject({ ok: true, title: "Sales", rev: 0 });
     if (!html.ok) throw new Error("not publishable");
@@ -227,6 +228,13 @@ describe("publishablePage", () => {
     expect(html.html).toContain("window.mausbot={theme:");
     expect(html.html).not.toContain("Content-Security-Policy");
     expect(html.html.endsWith("<h1>Sales</h1><p>Up 12%</p><script>draw()</script></body></html>")).toBe(true);
+    const jsx = publishablePage({ store, docs, threadId: THREAD, messageId: "m2" });
+    if (!jsx.ok) throw new Error("not publishable");
+    expect(jsx.html).toContain("window.__mausbotPage=function(require,module,exports){");
+    expect(jsx.html).toContain("_react.useState.call(void 0, \"Pro\")");
+    expect(jsx.html).not.toContain("useState(\"Pro\")");
+    expect(jsx.html).toContain("page: window.__mausbotPage })");
+    expect(jsx.html).not.toContain(", source: ");
   });
 
   it("refuses another thread's row, an MCP app and a version no longer kept", () => {

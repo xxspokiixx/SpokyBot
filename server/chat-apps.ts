@@ -4,6 +4,7 @@ import {
 } from "../shared/app.ts";
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { botHtmlDocument, mcpAppDocument, publishedBotHtml } from "../shared/app-frame/document.ts";
+import { jsxPublishedHtml } from "../shared/app-frame/jsx-page.ts";
 import { AppDocs, type AppDocPut } from "./app-docs.ts";
 import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
@@ -174,7 +175,7 @@ export function appDocument(args: {
 
 export type PublishablePage = { ok: true; title: string; html: string; rev: number } | { ok: false; status: 404 | 409 | 422; error: string };
 
-/** A bot's page as one static HTML file. */
+/** A bot's page as one static HTML file: a jsx page carries the server's transpiled code, so it loads no compiler. */
 export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor">; docs: AppDocs; threadId: string; messageId: string; rev?: number }): PublishablePage {
   const row = appRow(args.store, args.threadId, args.messageId);
   if (!row) return { ok: false, status: 404, error: "That page is not in this conversation." };
@@ -183,8 +184,10 @@ export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor
   const stored = version ? args.docs.read(version.doc) : null;
   if (!version || !stored || stored.source !== "html") return { ok: false, status: 404, error: "That version of the page is no longer kept." };
   const title = oneLine(row.app.title);
-  if (stored.data?.format === "jsx") return { ok: false, status: 422, error: "A React page can't be published yet." };
-  return { ok: true, title, html: publishedBotHtml(stored.html), rev: version.rev };
+  if (stored.data?.format !== "jsx") return { ok: true, title, html: publishedBotHtml(stored.html), rev: version.rev };
+  const compiled = compileJsxPage(stored.html);
+  if (!compiled.ok) return { ok: false, status: 422, error: compiled.error };
+  return { ok: true, title, html: jsxPublishedHtml({ title, compiled: compiled.code }), rev: version.rev };
 }
 
 export type AppRouteResult = { ok: true } | { ok: false; status: 400 | 404 | 409 | 429; error: string };

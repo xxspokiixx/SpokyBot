@@ -2,6 +2,8 @@
 // pinned and come from cdn.jsdelivr.net, which a bot page's CSP already allows, through one import map; nothing is
 // bundled into the app. In a chat frame the shell transpiles the file itself with Sucrase; a published page carries
 // the server's transpiled code instead and loads no compiler.
+import { APP_THEME_STYLE } from "./helper.ts";
+
 /** Exact versions, each at least two weeks old when pinned; `sucrase` matches the server's own dependency. */
 export const JSX_PAGE_LIBRARIES = {
   react: "19.3.0",
@@ -265,4 +267,17 @@ function shell(input: { title: string; head: string; boot: string }): string {
 export function jsxPageHtml(input: { title: string; source: string }): string {
   const env = `{ doc: document, win: window, load: function (name) { return import(name); }, title: ${scriptJson(input.title)}, source: ${scriptJson(input.source)} }`;
   return shell({ title: input.title, head: "", boot: `(${JSX_RUNTIME_SOURCE})(${env});` });
+}
+
+/** Code inside a script element: a `<` that would start `</script` or `<!--` is escaped, which reads the same in JS. */
+export function scriptSafe(code: string): string {
+  return code.replace(/<\/(script)/gi, "<\\/$1").replace(/<!--/g, "<\\!--");
+}
+
+/** A published page: the server's transpiled code in a plain function, the theme colours the chat would give it, and no
+ * compiler and no eval. */
+export function jsxPublishedHtml(input: { title: string; compiled: string }): string {
+  const page = `<script>window.__mausbotPage=function(require,module,exports){${scriptSafe(input.compiled)}\n};</script>`;
+  const env = `{ doc: document, win: window, load: function (name) { return import(name); }, title: ${scriptJson(input.title)}, page: window.__mausbotPage }`;
+  return shell({ title: input.title, head: `<style>${APP_THEME_STYLE}</style>${page}`, boot: `(${JSX_RUNTIME_SOURCE})(${env});` });
 }

@@ -10,7 +10,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { BOT_HTML_CDNS } from "./csp.ts";
 import {
   JSX_PAGE_IMPORTS, JSX_PAGE_LIBRARIES, JSX_PAGE_MODULES, JSX_PAGE_SUCRASE, JSX_PAGE_TAILWIND, JSX_RUNTIME_SOURCE, JSX_TRANSFORM_OPTIONS,
-  jsxPageHtml,
+  jsxPageHtml, jsxPublishedHtml, scriptSafe,
 } from "./jsx-page.ts";
 
 type Problem = { kind: string; message: string; line: number | null; excerpt: string };
@@ -167,4 +167,14 @@ describe("the shell's HTML", () => {
     expect(html.indexOf(JSX_PAGE_TAILWIND)).toBeLessThan(html.indexOf("type=\"module\""));
   });
 
+  it("publishes as static HTML: the transpiled code in a plain function, the theme colours, and no compiler", () => {
+    const compiled = "\"use strict\";exports.default = function () { return \"</script>\"; };";
+    const html = jsxPublishedHtml({ title: "Pricing", compiled });
+    expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
+    expect(html).toContain("window.__mausbotPage=function(require,module,exports){\"use strict\";exports.default = function () { return \"<\\/script>\"; };");
+    expect(html).toContain("--color-text-primary:light-dark(");
+    expect(html).not.toContain("source:");
+    expect(html.match(/<\/script>/g)).toHaveLength(4);
+    expect(scriptSafe("a<!--b</SCRIPT>")).toBe("a<\\!--b<\\/SCRIPT>");
+  });
 });
