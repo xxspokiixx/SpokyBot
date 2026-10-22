@@ -98,6 +98,19 @@ function refused(result: unknown): string | null {
   return answer?.content?.filter((part) => part.type === "text").map((part) => part.text).join(" ") || JSON.stringify(result).slice(0, 300);
 }
 
+/**
+ * Opens a page of the check's own in the bot's just-started browser. Chrome for Testing 155-156 on Windows now and then
+ * cancels a fresh profile's first network navigation (net::ERR_ABORTED, 35 of 150 starts on GitHub's runner), and a
+ * second request goes through: the page has no side effects, so it is opened once more after that one cancel. Answers
+ * what the bot was told when it failed.
+ */
+export async function openOwnPageAsBot(call: BotCall, url: string, log: (line: string) => void): Promise<string | null> {
+  const failed = refused(await call("agent_browser_open", { url }));
+  if (!failed || !failed.includes("net::ERR_ABORTED")) return failed;
+  log(`the bot's browser: Chrome cancelled its first navigation (${failed}); opening ${url} once more`);
+  return refused(await call("agent_browser_open", { url }));
+}
+
 /** The runtime keeps file paths away from the engine, so a screenshot comes back as image content. */
 function savedImage(result: unknown, base: string): string | null {
   const image = (result as { content?: Array<{ type?: string; data?: string; mimeType?: string }> } | null)?.content?.find((part) => part.type === "image" && part.data);
@@ -195,7 +208,7 @@ export async function verifyBrowserIdentity(options: BotBrowserOptions & { publi
   const probe = await startIdentityProbe();
   try {
     return await withBotBrowser(options, async (call, decided, launcher) => {
-      const failed = refused(await call("agent_browser_open", { url: probe.url }));
+      const failed = await openOwnPageAsBot(call, probe.url, log);
       if (failed) throw new Error(`the bot's browser could not open the probe page: ${failed}`);
       const reports = await probe.complete(30_000);
       const major = String(reports.page?.high?.uaFullVersion ?? "").split(".")[0] ?? "";
