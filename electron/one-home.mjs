@@ -44,6 +44,12 @@ export function missingOf(report) {
   return [...counts, ...(chats ? [`${chats} chat paths`] : []), ...(report?.attachments?.length ? [`${report.attachments.length} attachments`] : []), ...(secrets ? [`${secrets} credentials`] : [])].join(", ") || "something";
 }
 
+/** The Admin's "too many requests" (429) anywhere in an error's causes, as an owner session's pairing refuses it. */
+export function rateLimited(error) {
+  for (let at = error, depth = 0; at && depth < 5; at = at.cause, depth++) if (at.status === 429) return true;
+  return false;
+}
+
 /** A journal read back, kept to its known shape; null when there is none. */
 export function parseJournal(value) {
   if (!record(value) || value.v !== 1 || !PHASES.has(value.phase) || !record(value.cloud) || typeof value.cloud.origin !== "string" || typeof value.cloud.account !== "string") return null;
@@ -137,13 +143,15 @@ export function createOneHome(deps) {
     return true;
   }
 
-  /** The move fails here: a frozen server is lifted, and it all goes again later from the copy. */
+  /** The move fails here: a frozen server is lifted, and it all goes again later from the copy. A frozen pass waits an
+   * hour, unless the Admin only said "too many requests" (429), which it lifts within minutes. */
   async function failed(journal, error, frozen) {
     const said = sentence(error?.message) ?? "My Cloud did not answer.";
     log(`one home: ${journal.phase} failed (${said})`);
     const tries = (journal.tries ?? 0) + 1;
+    const hourly = frozen && !rateLimited(error);
     const next = write({ ...journal, phase: "copy", passes: 0, tries, error: said, failingSince: journal.failingSince ?? now(),
-      retryAt: now() + (frozen ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), hourly: frozen || undefined, ...(frozen ? { thaw: true } : {}) });
+      retryAt: now() + (hourly ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), hourly: hourly || undefined, ...(frozen ? { thaw: true } : {}) });
     if (frozen) await thaw(next);
     return null;
   }

@@ -196,6 +196,22 @@ test("a check that still fails after three passes lifts the freeze and tries aga
   assert.ok(failing.passes.length > 25, "Try again goes now, not at the next hourly try");
 });
 
+test("a frozen pass the Admin refused for too many connections lifts the freeze and goes again in minutes, never an hour", async () => {
+  // Seen in the real app on Oct 22: killed in the final pass and relaunched, the move's next owner session got 429 from the
+  // Admin's pairing limit (10 a device in 10 minutes; every pass opens one), and the move waited an hour.
+  const limited = new Error("Cloud request failed.", { cause: new Error("Cloud request failed.", { cause: Object.assign(new Error("Cloud request failed."), { status: 429 }) }) });
+  const w = world({ moves: [undefined, limited] });
+  await w.home.kick();
+  assert.deepEqual(w.passes, ["copy", "final"]);
+  assert.equal(w.journal.phase, "copy");
+  assert.equal(w.server.frozen, false, "the freeze is lifted");
+  assert.equal(w.journal.hourly, undefined);
+  assert.equal(w.journal.retryAt, w.now() + COPY_RETRY_MS[0]);
+  w.advance(COPY_RETRY_MS[0]);
+  await w.tick();
+  assert.equal(w.journal.phase, "done");
+});
+
 test("an app killed at any phase goes on from the journal: nothing is switched on twice, and nothing is lifted after the switch", async () => {
   for (const at of ["copy", "wait", "freeze", "final", "check", "switch"]) {
     const w = world();
