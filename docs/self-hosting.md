@@ -1147,9 +1147,17 @@ The server stops a turn that has sent it nothing for 20 minutes
 when it starts and when it ends, so a turn whose tool is still running may stay
 silent longer: up to `OMB_TOOL_STALL_MS` (default 2 hours) after that tool
 started. That deadline belongs to the tool. Text or other tools in the same
-turn do not extend it; time the turn spends waiting on a person or a computer
-does not count toward it. A tool still running at its deadline stops the turn
-with "a tool ran for N minutes without finishing".
+turn do not extend it. Time the turn spends waiting on a person or a computer
+does not count toward it, but only the part of a wait that fell while that tool
+ran, and waits that overlap count once. A tool still running at its deadline
+stops the turn with "a tool ran for N minutes without finishing".
+
+A wait belongs to the turn, not to one tool, so a hung tool beside another that
+keeps asking a person would never reach that deadline. Every tool therefore
+also has a cap of twice `OMB_TOOL_STALL_MS` (default 4 hours) from its first
+start that counts every wait and that no event extends. The server checks it
+even while the turn waits, and a tool still running at the cap stops the turn
+with "a tool ran too long".
 
 Both take whole milliseconds. `OMB_TURN_STALL_MS` is never below 60000 (one
 minute) and `OMB_TOOL_STALL_MS` never below `OMB_TURN_STALL_MS`. A value that

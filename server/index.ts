@@ -5496,7 +5496,8 @@ const watchdog = new TurnWatchdog({
     const routineRun = activeRoutineRunForThread(turn.threadId);
     void runningTurnInstance(bot, turn.threadId)?.adapter.interruptTurn(turn.threadId).catch(() => {});
     const minutes = Math.round(limit.ms / 60_000);
-    const what = limit.kind === "tool" ? `a tool ran for ${minutes} minutes without finishing` : `no activity for ${minutes} minutes`;
+    const what = limit.kind === "tool-cap" ? `a tool ran too long: ${minutes} minutes since it started, waits included`
+      : limit.kind === "tool" ? `a tool ran for ${minutes} minutes without finishing` : `no activity for ${minutes} minutes`;
     const cause = engineMemory.stallCause(turn.threadId, `${what} — the turn was stopped`);
     const stalled = stoppedTurnText(turn.threadId, liveTurnByThread.get(turn.threadId), cause);
     if (routineRun?.target === "bot") {
