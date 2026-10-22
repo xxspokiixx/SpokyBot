@@ -37,6 +37,8 @@ export function createOneHome(deps: {
     forget?(): Promise<void>;
   };
   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<Answer>; close(): Promise<void> }>;
+  /** My Cloud's session is no longer needed: the move is done, paused, or not this account's. */
+  release?(): Promise<void>;
   lend?(projects: string[]): Promise<unknown>;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;
