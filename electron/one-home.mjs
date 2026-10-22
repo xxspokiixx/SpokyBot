@@ -32,6 +32,8 @@ export const FAILING_LINE_MS = DAY;
 export const KEPT_MS = 30 * DAY;
 const PHASES = new Set(["copy", "wait", "freeze", "final", "check", "switch", "done", "home-again", "back"]);
 const FROZEN = new Set(["freeze", "final", "check"]);
+/** The phases that use My Cloud's owner session, a pass that failed and waits to go again included. */
+const MOVING = new Set(["copy", "wait", "freeze", "final", "check", "switch"]);
 const AUTOMATION = /^(routine|call|webhook|app-event):([\w-]{1,128})$/u;
 
 /** What a check found missing, by kind and count only: "2 chats, 1 memory". */
@@ -82,6 +84,7 @@ export function arrivedCounts(here, there) {
  *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string }>, unfreeze(): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
  *     call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, forget?(): Promise<void> },
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
+ *   release?(): Promise<void>,
  *   lend?(projects: string[]): Promise<unknown>,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
@@ -315,6 +318,7 @@ export function createOneHome(deps) {
     if (journal && cloud && cloud.account !== journal.cloud.account) {
       // Another account's Cloud never moves this computer's copy, nor lifts its freeze once the move is done.
       if (FROZEN.has(journal.phase)) await failed(journal, new Error("Another MausBot Cloud account signed in."), true);
+      await deps.release?.();
       return;
     }
     if (journal?.phase === "back" && journal.switchBack) return void await switchBack(journal);
@@ -368,6 +372,8 @@ export function createOneHome(deps) {
         again = false;
         try { await run(); } catch (error) { log(`one home: ${error?.message ?? error}`); later(MINUTE); }
       } while (again && !closed);
+      const journal = read();
+      if (!journal || journal.paused || !MOVING.has(journal.phase)) await deps.release?.();
     })().finally(() => { running = null; publish(); });
     return running;
   }

@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
+import { createMoveSession } from "./move-session.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
 import { createOneHome } from "./one-home.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
@@ -76,7 +77,10 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   let lastInput = 0;
   const watched = new WeakSet();
   let teamMove = null;
-  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home, teamMove: () => teamMove });
+  // One owner session for the whole move, every pass and check and the switch: each new one is one of the Admin's codes.
+  const moveSession = createMoveSession({ open: (target) => openOwnerSession(target, fetchImpl, { label: MOVE_LABEL, background: false }) });
+  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home, teamMove: () => teamMove,
+    moveSession });
   teamMove = installTeamMove({ ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
@@ -149,7 +153,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
         if (!got.ok) throw Object.assign(new Error("This computer's copy could not be deleted."), { status: got.status });
       },
     },
-    session: () => openOwnerSession(target(), fetchImpl, { label: MOVE_LABEL, background: false }),
+    session: () => moveSession.open(target()),
+    release: () => moveSession.end(),
     lend, phone, openHome, openLocal, restart, version, log,
     again,
     lastInput: typed,
@@ -163,7 +168,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */
     away: () => home.away(),
     view: () => home.view(),
-    close: () => { teamMove.close(); home.close(); },
+    close: () => { teamMove.close(); home.close(); void moveSession.end(); },
     /** A bot moving from My Cloud into a team (team-move-main.mjs). */
     teamMove,
     oneHome: home,
