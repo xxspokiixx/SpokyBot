@@ -2200,6 +2200,7 @@ function hostTurnResult(node: HandoffView | undefined, generation: string, outco
   if (result.cap) return result;
   const cards = resumableCards(node.threadId, node.startedAt ?? node.createdAt, node.groupId ? node.botId : undefined);
   if (!cards.length) return result;
+  if (result.stalled) { stopCards(node.threadId, new Set(cards.map((card) => card.id))); return result; }
   parkedNodesToReconcile.add(node.id);
   return { ...result, cards: { question: `Waiting on the person: ${cards.map((card) => card.waits).join("; ")}`, ids: cards.map((card) => card.id) } };
 }
@@ -2233,11 +2234,10 @@ function releaseCardNode(threadId: string, messageId: string, reason: string): v
 
 /** Call before the Stop cancels the node, while the cards are still its own. */
 function stopParkedCards(threadId: string): void {
-  const ids = new Set<string>();
-  for (const node of coordinator.active()) {
-    if (node.threadId !== threadId || !(node.status === "waiting" || node.status === "queued")) continue;
-    for (const id of node.cards ?? []) ids.add(id);
-  }
+  stopCards(threadId, new Set(coordinator.active().filter((node) => node.threadId === threadId && (node.status === "waiting" || node.status === "queued")).flatMap((node) => node.cards ?? [])));
+}
+
+function stopCards(threadId: string, ids: ReadonlySet<string>): void {
   if (!ids.size) return;
   for (const message of store.messagesFor(threadId)) {
     if (!ids.has(message.id)) continue;
@@ -5453,7 +5453,7 @@ const watchdog = new TurnWatchdog({
     if (bot && routineRun?.target !== "bot") {
       reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: cause });
     }
-    settleDirectFollowup(stalledGeneration, { ok: false, text: stalled });
+    settleDirectFollowup(stalledGeneration, { ok: false, text: stalled, stalled: true });
     turnUsage.delete(turn.threadId);
     turnContext.delete(turn.threadId);
     roomStallCompletions.stall(turn.threadId);
@@ -11145,7 +11145,7 @@ async function runClaimedGroupMemberTurn(
     // Covers every early return that never produces a provider terminal event.
     unregisterSetupStall();
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
-    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled",
+    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled", ...(roomOutcome === "stalled" || setupStalled ? { stalled: true } : {}),
       text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || roomFailure || roomReply || roomOutcome || "The turn did not run" });
     if (!retainRoomVmLease) releaseRoomVmLease();
     if (!providerDispatched && roomSpeaker && groupSpeakers.get(threadId) === roomSpeaker) {

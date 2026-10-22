@@ -152,7 +152,7 @@ export class Runtime {
         ? { kind: "continue", text: result.text, note: result.continue.note, ...(result.continue.handoffPath ? { handoffPath: result.continue.handoffPath } : {}), ...evidence }
         : result.ok
           ? { kind: "completed", text: result.text, ...evidence }
-          : { kind: "failed", outcome: "provider_error", text: result.text, ...evidence };
+          : { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence };
     try {
       this.withBatch(() => this.finishTurn(n, outcome));
     } catch (error) {
