@@ -44,7 +44,7 @@
 //   FAKE_ACP_UPDATES_FILE  JSON array of session/update params ({update, _meta?}) re-read per prompt, sent as-is
 //   FAKE_ACP_MODE_ACK_FILE  while it exists a mode switch answers "empty" (no configOptions) or "error"
 //   FAKE_ACP_HANG_ON  a prompt whose text holds this hangs as in mode hang; others answer
-//   FAKE_ACP_CURSOR_FAST=1  a `fast` select ("true") once initialize declares _meta.parameterizedModelPicker, as Cursor CLI 2026.10.19
+//   FAKE_ACP_CURSOR_FAST=1  a `fast` select ("true") once initialize declares _meta.parameterizedModelPicker, as Cursor CLI 2026.10.19; =stuck acknowledges set_config_option but keeps "true"
 //   FAKE_ACP_SESSION_CLOSE=1  initialize advertises sessionCapabilities.close (OpenCode 1.19); session/close answers {}
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
@@ -589,7 +589,7 @@ function handle(msg: any) {
       const acceptsImages = process.env.FAKE_ACP_IMAGE_CAPABILITY === "1";
       const mcpTransports = (process.env.FAKE_ACP_MCP_TRANSPORTS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
       const closesSessions = process.env.FAKE_ACP_SESSION_CLOSE === "1";
-      if (process.env.FAKE_ACP_CURSOR_FAST === "1" && msg.params?.clientCapabilities?._meta?.parameterizedModelPicker === true) {
+      if (["1", "stuck"].includes(process.env.FAKE_ACP_CURSOR_FAST ?? "") && msg.params?.clientCapabilities?._meta?.parameterizedModelPicker === true) {
         currentFast = "true";
       }
       result(msg.id, {
@@ -751,7 +751,7 @@ function handle(msg: any) {
         break;
       }
       if (configId === "fast" && currentFast && (value === "true" || value === "false")) {
-        currentFast = value;
+        if (process.env.FAKE_ACP_CURSOR_FAST !== "stuck") currentFast = value;
         configCalls.push({ method: msg.method, params: msg.params });
         if (process.env.FAKE_ACP_DUMP) {
           writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));

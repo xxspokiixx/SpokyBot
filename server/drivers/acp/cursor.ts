@@ -397,11 +397,21 @@ async function setCursorFast(
   sessionId: string,
   fast: boolean,
 ): Promise<void> {
+  let reply: { configOptions?: Array<{ id?: unknown; currentValue?: unknown }> } | undefined;
   try {
-    await request("session/set_config_option", { sessionId, configId: "fast", value: String(fast) });
+    reply = (await request("session/set_config_option", { sessionId, configId: "fast", value: String(fast) })) as typeof reply;
   } catch (e) {
     // -32602: the chosen model has no Fast variant, so there is nothing to switch.
     if ((e as { code?: unknown }).code !== -32602) throw e;
+    return;
+  }
+  // Cursor can acknowledge the switch yet keep its default Fast variant, so only the echoed value counts.
+  const confirmed = reply?.configOptions?.find((option) => option?.id === "fast")?.currentValue;
+  if (confirmed !== String(fast)) {
+    throw new Error(
+      `Cursor did not confirm Fast ${fast ? "on" : "off"} (fast is ${confirmed === undefined ? "unreported" : JSON.stringify(confirmed)}), ` +
+        "so the turn was not sent. Check that `cursor-agent` is current.",
+    );
   }
 }
 
