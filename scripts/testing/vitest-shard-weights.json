@@ -39,7 +39,6 @@
   "scripts/testing/team-share-ui.e2e.test.ts": 1,
   "scripts/testing/team-template-ui.e2e.test.ts": 1,
   "scripts/testing/thinking-timer-ui.e2e.test.ts": 1,
-  "scripts/testing/today-ui.e2e.test.ts": 1,
   "scripts/testing/tool-selection-ui.e2e.test.ts": 1,
   "scripts/testing/trust-controls-ui.e2e.test.ts": 1,
   "scripts/testing/usage-details-ui.e2e.test.ts": 1,
