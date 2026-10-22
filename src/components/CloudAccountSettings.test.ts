@@ -11,12 +11,12 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: f.platform } }, ready: true }) }));
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [{ name: "Ember" }] }, dispatch: vi.fn() }) }));
-import { CloudAccountSettings, CloudPlanOnCloud, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
+import { CloudAccountSettings, CloudPlanOnCloud, TeamPeopleCard, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
 import { CloudLending } from "./CloudLending";
 import { LentComputersCard } from "./LentComputers";
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
-function render(props?: { linkRequest?: number; cloudHome?: boolean; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
+function render(props?: { linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
   const html = renderToStaticMarkup(createElement(Capture)); return { html, nodes: nodes(tree) }; }
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const click = (label: string) => { const button = render().nodes.find(node => node.type === "button" && node.props.children === label); expect(button).toBeTruthy(); button!.props.onClick!(); };
@@ -454,6 +454,22 @@ it("on the Cloud itself, opens this Cloud's phone pairing directly; never where 
   expect(view({}).html).not.toContain(PHONE);
   plan.state.mockRejectedValueOnce(new Error("cloud-plan:state is only available in this app's window")); f.values = []; view({ onConnectPhone }); f.effects[0](); await flush();
   expect(view({ onConnectPhone }).nodes.some(node => node.type === "button")).toBe(false);
+});
+
+it("on a Team Cloud, sends people to the Plan page for its people and plan, never to 'the app on your computer'", () => {
+  const plan = { state: vi.fn().mockRejectedValue(new Error("cloud-plan:state is only available in this app's window")), manage: vi.fn() };
+  vi.stubGlobal("window", { ogb: { cloudPlan: plan } });
+  const team = { name: "Acme", cloudPage: "https://cloud.example.com/cloud" };
+  const onTeam = render({ cloudHome: true, teamHome: team }).nodes;
+  expect(onTeam.some(node => node.type === CloudPlanOnCloud)).toBe(false);
+  const card = onTeam.find(node => node.type === TeamPeopleCard) as unknown as ReactElement<{ team: typeof team }>;
+  expect(card.props.team).toBe(team);
+  const html = renderToStaticMarkup(createElement(TeamPeopleCard, { team }));
+  all(html, ["People and plan", "Invite people to Acme, change their roles and manage its plan on your Plan page.", 'href="https://cloud.example.com/cloud"', "Open your Plan page"]);
+  none(html, ["managed in the OpenMausBot app on your computer"]);
+  expect(renderToStaticMarkup(createElement(TeamPeopleCard, { team: { name: "Acme" } }))).not.toContain("href=");
+  // My Cloud's own page is unchanged.
+  expect(render({ cloudHome: true }).nodes.some(node => node.type === CloudPlanOnCloud)).toBe(true);
 });
 
 const ENDS = new Date(2026, 9, 15, 12).getTime(), DAY = 86_400_000;
