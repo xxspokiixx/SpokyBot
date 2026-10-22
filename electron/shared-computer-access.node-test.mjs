@@ -36,9 +36,11 @@ function stubWorkspace() {
   const environmentId = randomUUID();
   const env = { id: "fixture-workspace", name: "Fixture", origin: "https://workspace.test" };
   const json = value => ({ ok: true, status: 200, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
-  const state = { connected: null, work: [] };
-  let deliver;
+  const state = { connected: null, work: [], results: [] };
+  let deliver, settle = () => {};
   state.delivered = new Promise(resolve => { deliver = resolve; });
+  /** Every result, in the order the jobs were answered, once `count` have arrived. */
+  state.answered = count => new Promise(resolve => { settle = () => { if (state.results.length >= count) resolve(state.results); }; settle(); });
   const fetchImpl = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return json({ kind: "session", id: sessionId });
@@ -51,7 +53,7 @@ function stubWorkspace() {
       return json({ job: { id: randomUUID(), operation: { computer_id: state.connected.id, folder_id: state.connected.folders[0]?.id, ...operation } } });
     }
     if (route.endsWith("/lease")) return json({ active: true });
-    if (route.endsWith("/result")) { deliver(body.result); return json({}); }
+    if (route.endsWith("/result")) { deliver(body.result); state.results.push(body.result); settle(); return json({}); }
     if (route.endsWith("/disconnect")) return json({});
     throw new Error(`fixture workspace has no route ${route}`);
   };
@@ -416,6 +418,51 @@ test("filesystem identities keep all 64 bits instead of rounding distinct inode 
     return info;
   });
   assert.equal(payload(await run({ action: "read_file", path: "ordinary.txt" })).content, "allowed");
+});
+
+test("with the whole home folder lent, keys, a browser profile and this app's data are still refused, while ordinary files read", async () => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-lent-home-")));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  let sharing;
+  try {
+    // A temporary home: isHomeFolder (and so the home opt-in) follows HOME, and nothing here touches the real one.
+    process.env.HOME = home; process.env.USERPROFILE = home;
+    const put = async (relative, content) => {
+      const file = path.join(home, ...relative.split("/"));
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content);
+    };
+    const secrets = [".ssh/id_ed25519", "Library/Application Support/Google/Chrome/Default/Cookies", ".openmausbot/config.json"];
+    for (const relative of secrets) await put(relative, `fixture ${relative}`);
+    await put("Documents/plan.txt", "an ordinary file");
+    const stub = stubWorkspace();
+    stub.state.work.push(...secrets.map(relative => ({ action: "read_file", path: relative })),
+      { action: "read_file", path: "Library/Application Support/OpenMausBot/computer-sharing.json" },
+      { action: "read_file", path: "Documents/plan.txt" }, { action: "list_files" });
+    // Wired as main wires it: the grants file under the app's own profile, and this app's data folder in protectedPaths.
+    sharing = createComputerSharing({
+      file: path.join(home, "Library", "Application Support", "OpenMausBot", "computer-sharing.json"), fetch: stub.fetchImpl, home,
+      environments: () => [stub.env], enabled: async () => true, cuaConnection: async () => null, protectedPaths: [path.join(home, ".openmausbot")],
+    });
+    const info = await sharing.identity(stub.env);
+    // Lent as the picker lends it after its warning: the home folder itself, read only even when edits are asked for.
+    await sharing.save(stub.env, { folders: [{ id: randomUUID(), path: home, write: true, home: true }], terminal: false, computer: false }, info);
+    const results = await stub.state.answered(secrets.length + 3);
+    assert.deepEqual(stub.state.connected.folders.map(({ write }) => write), [false]);
+    const refused = results.slice(0, secrets.length + 1);
+    for (const [index, result] of refused.entries()) {
+      assert.equal(result.isError, true, `${[...secrets, "the grants file"][index]} is refused`);
+      assert.match(result.content[0].text, /Desktop credentials/);
+    }
+    assert.equal(results[secrets.length + 1].isError, undefined);
+    assert.equal(payload(results[secrets.length + 1]).content, "an ordinary file");
+    const listed = Object.fromEntries(payload(results[secrets.length + 2]).entries.map(({ name, type }) => [name, type]));
+    assert.deepEqual([listed[".ssh"], listed[".openmausbot"], listed.Documents], ["protected", "protected", "directory"]);
+  } finally {
+    sharing?.close();
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("the harness data directory is protected through a broad share", async t => {

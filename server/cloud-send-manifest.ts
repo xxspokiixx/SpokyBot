@@ -50,6 +50,8 @@ export interface ManifestSources {
   heads(): Map<string, { lastId: string; rows: number }>;
   kinds?: MoveKindsDeps;
   teamMemory?: Pick<TeamMemory, "list">;
+  /** A move of this one bot into a team: what it carries only (its summary is already kept to it). */
+  bot?: string;
 }
 
 function memoryOf(botId: string): CloudSendManifest["memory"] {
@@ -60,14 +62,20 @@ export async function cloudSendManifest(sources: ManifestSources): Promise<Cloud
   const summary = sources.summary();
   const { store } = sources;
   const sent = [...new Set(summary.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id!))];
-  const rooms = store.groups.filter((room) => !room.dm);
+  const only = sources.bot;
+  const rooms = only === undefined ? store.groups.filter((room) => !room.dm) : [];
   const counts = sources.heads();
-  const conversations: ManifestConversation[] = chatHeads(store.bots, rooms).map((head) => ({
+  const conversations: ManifestConversation[] = chatHeads(only === undefined ? store.bots : store.bots.filter((bot) => bot.id === only), rooms).map((head) => ({
     threadId: head.threadId, ...(head.bot ? { bot: head.bot } : { room: head.room }), rows: counts.get(head.threadId)?.rows ?? 0, newest: head.lastId,
     settings: conversationSettings(store, head),
   }));
   const attachments = new Set<string>();
   for (const { threadId } of conversations) for (const row of store.messagesFor(threadId)) for (const name of attachmentNames(row, sources.dataDir)) attachments.add(name);
+  if (only !== undefined) {
+    return { v: 1, appVersion: summary.appVersion, items: summary.items, memory: [], journal: [], learned: [], forgotten: [], teams: [], rooms: [], connections: [],
+      conversations, attachments: [...attachments].sort(), files: await listBotFiles(sources.dataDir, sent),
+      automations: sources.kinds ? automationSwitches(sources.kinds, only) : [], runs: sources.kinds ? routineRunIds(sources.kinds, only) : [] };
+  }
   return {
     v: 1,
     appVersion: summary.appVersion,

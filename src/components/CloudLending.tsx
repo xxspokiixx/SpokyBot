@@ -168,6 +168,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
       <fieldset disabled={working} className="flex flex-col gap-2 disabled:opacity-60">
         <legend className="mb-1 text-[13px] font-medium text-ink">{t("lending.folders")}</legend>
         <p className="text-[12px] text-ink-secondary">{t("lending.foldersHelp")}</p>
+        <p className="text-[12px] text-ink-secondary">{t("lending.drivesHelp")}</p>
         {folders.map(folder => <div key={folder.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-hairline/40 p-2">
           <div className="min-w-0 flex-1"><p className="text-[13px] text-ink">{folder.name}</p><p dir="ltr" className="break-all text-[11px] text-ink-secondary">{folder.path}</p></div>
           <label className="flex items-center gap-2 text-[12px] text-ink-secondary">

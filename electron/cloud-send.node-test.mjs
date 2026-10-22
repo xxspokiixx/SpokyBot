@@ -184,21 +184,29 @@ function preload({ remote = false, activation = false } = {}) {
   return { bridge, invoked };
 }
 
-test("the bridge: either page gets only the move's line; its Try again goes only from the person's click on My Cloud's page", async () => {
+test("the bridge: either page gets only the move's line; its Try again, and moving a bot into a team, go only from the person's click on My Cloud's page", async () => {
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "teamRetry", "openTeam", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
-  assert.deepEqual(Object.keys(local.bridge.cloudSendPage), ["notice", "dismiss", "moveRetry", "onNotice"]);
+  assert.deepEqual(Object.keys(local.bridge.cloudSendPage), keys);
   const page = preload({ remote: true });
   assert.equal(page.bridge.cloudSend, undefined);
   assert.equal(page.bridge.cloudLogins, undefined);
-  assert.deepEqual(JSON.parse(JSON.stringify(Object.keys(page.bridge.cloudSendPage))), ["notice", "dismiss", "moveRetry", "onNotice"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(Object.keys(page.bridge.cloudSendPage))), keys);
   await assert.rejects(page.bridge.cloudSendPage.moveRetry(), /Try again/);
+  await assert.rejects(page.bridge.cloudSendPage.moveToTeam("scout", "team-acme", "Scout"), /Choose Move/);
+  await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
   assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send")), []);
   const clicked = preload({ remote: true, activation: true });
   await clicked.bridge.cloudSendPage.moveRetry();
   await clicked.bridge.cloudSendPage.dismiss({ toString: () => "one-home" });
-  assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send")))), [["cloud-send:move-retry"], ["cloud-send:dismiss", "one-home"]]);
+  await clicked.bridge.cloudSendPage.moveToTeam({ toString: () => "scout" }, "team-acme", "Scout");
+  await clicked.bridge.cloudSendPage.teamRetry();
+  await clicked.bridge.cloudSendPage.teams();
+  await clicked.bridge.cloudSendPage.openTeam("team-acme");
+  assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send")))), [["cloud-send:move-retry"], ["cloud-send:dismiss", "one-home"],
+    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"]]);
 });
 
 test("replacing a skill whose text changed here puts My Cloud's copy back when the new one is refused", async () => {
