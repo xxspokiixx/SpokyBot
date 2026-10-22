@@ -35,7 +35,7 @@ const WHOLE_SENDS = new Set(["button", "my-cloud", "menu", "move", "first", "aut
  * arrived); "sending" while one runs, or while an older desktop that sends by itself has not sent yet; null otherwise
  * (none yet, a whole send failed, or a desktop too old to say, which sends no `whole`), which keeps the choice to copy
  * or start fresh. */
-export function sentHere(notice: CloudSendNotice | null): { state: "sending" | "sent"; last: CloudSendNotice["last"] } | null {
+export function sentHere(notice: CloudSendNotice | null | undefined): { state: "sending" | "sent"; last: CloudSendNotice["last"] } | null {
   if (!notice || notice.whole === undefined) return null;
   const last = notice.last;
   const whole = Boolean(last && WHOLE_SENDS.has(last.reason));
@@ -83,7 +83,7 @@ export function CloudWelcome() {
     const timer = setTimeout(() => setNoticeLate(true), 1500);
     return () => clearTimeout(timer);
   }, [sendBridge]);
-  const asking = Boolean(sendBridge) && notice === null && !noticeLate;
+  const asking = Boolean(sendBridge) && notice === undefined && !noticeLate;
 
   useEffect(() => {
     markWelcomeSeen();

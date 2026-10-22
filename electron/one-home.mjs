@@ -44,6 +44,12 @@ export function missingOf(report) {
   return [...counts, ...(chats ? [`${chats} chat paths`] : []), ...(report?.attachments?.length ? [`${report.attachments.length} attachments`] : []), ...(secrets ? [`${secrets} credentials`] : [])].join(", ") || "something";
 }
 
+/** The Admin's "too many requests" (429) anywhere in an error's causes, as an owner session's pairing refuses it. */
+export function rateLimited(error) {
+  for (let at = error, depth = 0; at && depth < 5; at = at.cause, depth++) if (at.status === 429) return true;
+  return false;
+}
+
 /** A journal read back, kept to its known shape; null when there is none. */
 export function parseJournal(value) {
   if (!record(value) || value.v !== 1 || !PHASES.has(value.phase) || !record(value.cloud) || typeof value.cloud.origin !== "string" || typeof value.cloud.account !== "string") return null;
@@ -119,7 +125,7 @@ export function createOneHome(deps) {
   function view() {
     const journal = read();
     if (!journal || journal.paused || journal.told) return null;
-    if (journal.phase === "done") return { phase: "done", ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [] };
+    if (journal.phase === "done") return { phase: "done", ...(Number.isSafeInteger(journal.doneAt) ? { at: journal.doneAt } : {}), ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [] };
     if (journal.phase === "home-again" || journal.phase === "back") return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}) };
     const running = deps.send.snapshot?.()?.running;
     const chats = journal.phase === "copy" && running?.phase === "chats" && running.progress ? { done: running.progress.done, total: running.progress.total } : null;
@@ -137,13 +143,15 @@ export function createOneHome(deps) {
     return true;
   }
 
-  /** The move fails here: a frozen server is lifted, and it all goes again later from the copy. */
+  /** The move fails here: a frozen server is lifted, and it all goes again later from the copy. A frozen pass waits an
+   * hour, unless the Admin only said "too many requests" (429), which it lifts within minutes. */
   async function failed(journal, error, frozen) {
     const said = sentence(error?.message) ?? "My Cloud did not answer.";
     log(`one home: ${journal.phase} failed (${said})`);
     const tries = (journal.tries ?? 0) + 1;
+    const hourly = frozen && !rateLimited(error);
     const next = write({ ...journal, phase: "copy", passes: 0, tries, error: said, failingSince: journal.failingSince ?? now(),
-      retryAt: now() + (frozen ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), hourly: frozen || undefined, ...(frozen ? { thaw: true } : {}) });
+      retryAt: now() + (hourly ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), hourly: hourly || undefined, ...(frozen ? { thaw: true } : {}) });
     if (frozen) await thaw(next);
     return null;
   }
@@ -302,7 +310,8 @@ export function createOneHome(deps) {
     return null;
   }
 
-  /** After coming home with My Cloud's backup: what was on at My Cloud is switched on here, which a restore leaves off. */
+  /** After coming home with My Cloud's backup: what was on at My Cloud is switched on here, which a restore leaves off, and
+   * each bot that said on My Cloud that its webhook had a new address says it has one here again. */
   async function switchBack(journal) {
     const pending = { ...journal.switchBack };
     for (const [key, on] of Object.entries(pending)) {
@@ -313,6 +322,7 @@ export function createOneHome(deps) {
       }
       delete pending[key];
     }
+    await deps.local.call("POST", "/api/cloud-send/home", { v: 1 }).catch(() => null);
     const { switchBack: _, ...rest } = journal;
     write(rest);
     return null;

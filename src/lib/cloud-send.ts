@@ -41,6 +41,17 @@ export function arrivedList(counts: OneHomeCounts): string[] {
   ];
 }
 
+/** How long after the move is done the corner cards that sell or ask for something still wait. */
+export const MOVE_QUIET_MS = 5 * 60_000;
+
+/** Until when the corner cards that sell or ask for something (Product Hunt, the star, Cloud offers) wait for the
+ * one-time move: for good while it goes or brings things home (Infinity), and MOVE_QUIET_MS after it is done. */
+export function moveQuietUntil(move: OneHomeView | null | undefined): number {
+  if (!move) return 0;
+  if (move.phase === "done") return move.at ? move.at + MOVE_QUIET_MS : 0;
+  return Infinity;
+}
+
 /** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
  * day (with Try again), what arrived (on My Cloud's page, once), or coming home. `page`: which page shows it. */
 export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true } | null {

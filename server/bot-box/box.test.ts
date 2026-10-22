@@ -1,6 +1,6 @@
-import { chmodSync, closeSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
@@ -136,6 +136,37 @@ describe("BotBox", () => {
     expect(box.report().checks).toEqual({ passed: 20, total: 21, failed: ["egress-public-allowed"], at: 1 });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^bot box: on \(bubblewrap, node bridges, credential broker, seccomp (on|unsupported here)\)$/);
+  });
+});
+
+describe("the box a bot's Chrome runs in", () => {
+  const boxes: BotBox[] = [];
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const box of boxes.splice(0)) await box.stop();
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+  const temp = () => { const dir = mkdtempSync(join(tmpdir(), "omb-box-")); dirs.push(dir); return dir; };
+
+  it("has the host's network and the read-only paths asked for, and none of HOME or the data folder", async () => {
+    const box = new BotBox();
+    boxes.push(box);
+    const off = new BotBox();
+    expect(off.browserBox(9, []), "no box off a Cloud home").toBeNull();
+    const dataDir = join(temp(), "home", ".openmausbot"), home = dirname(dataDir);
+    mkdirSync(dataDir, { recursive: true });
+    await box.start({ dataDir, home, port: 8799, denyEnv: new Set(), env: {}, log: () => {}, detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
+    const uploads = join(dataDir, "browser-uploads");
+    const browser = box.browserBox(9, [uploads])!;
+    expect(browser.bwrap).toBe("/usr/bin/bwrap");
+    const bind = (target: string) => browser.options.some((arg, i) => arg === "--bind" && browser.options[i + 2] === target);
+    expect(bind(home), "HOME is not the browser's").toBe(false);
+    expect(browser.options.join(" ")).not.toContain(`--tmpfs ${dataDir}`);
+    expect(browser.options).not.toContain("--unshare-net");
+    expect(browser.options).toEqual(expect.arrayContaining(["--unshare-user", "--unshare-pid", "--die-with-parent"]));
+    expect(browser.options.join(" ")).toContain(`${uploads} ${uploads}`);
+    expect(browser.options.slice(browser.options.indexOf(uploads) - 1)[0]).toMatch(/^--ro-bind/u);
+    if (browser.seccomp) expect(browser.options.join(" ")).toContain("--seccomp 9");
   });
 });
 

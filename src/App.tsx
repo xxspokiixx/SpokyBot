@@ -52,6 +52,7 @@ import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { ChatNotice } from "@/components/ChatErrorBanner";
+import { loadingLine } from "@/lib/app-loading";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -116,6 +117,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const previousViewRef = useRef(state.activeView);
   const calendarOriginRef = useRef<"chat" | "team-map">("chat");
+  const loading = loadingLine({ connected: state.connected, hydrated: state.hydrated === true, developer: import.meta.env.DEV });
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
@@ -328,14 +330,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+        <main data-app-loading={loading.text} className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
           <WindowDragStrip />
           <div className="w-full max-w-md"><ChatNotice notice={state.notice} /></div>
-          <Loader2 size={20} className="animate-spin" />
-          <div className="text-[14px]">
-            {state.connected ? t("app.loading.noBots") : t("app.loading.connecting")}
-          </div>
-          {!state.connected && (
+          {loading.busy && <Loader2 size={20} className="animate-spin" />}
+          <div className="text-[14px]">{t(loading.text)}</div>
+          {loading.command && (
             <div className="text-[12px]">
             {t("app.loading.startServer")} <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
             </div>

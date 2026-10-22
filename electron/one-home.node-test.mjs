@@ -108,7 +108,7 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
   assert.equal(w.phone.stopped, 1);
   assert.deepEqual(w.opened, ["cloud"]);
   assert.equal(w.home.away(), true);
-  assert.deepEqual(w.home.view(), { phase: "done", counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
+  assert.deepEqual(w.home.view(), { phase: "done", at: w.journal.doneAt, counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
   assert.equal(w.home.seen(), null, "the done line shows until it is closed");
 
   await w.relaunch().kick();
@@ -196,6 +196,22 @@ test("a check that still fails after three passes lifts the freeze and tries aga
   assert.ok(failing.passes.length > 25, "Try again goes now, not at the next hourly try");
 });
 
+test("a frozen pass the Admin refused for too many connections lifts the freeze and goes again in minutes, never an hour", async () => {
+  // Seen in the real app on Oct 22: killed in the final pass and relaunched, the move's next owner session got 429 from the
+  // Admin's pairing limit (10 a device in 10 minutes; every pass opens one), and the move waited an hour.
+  const limited = new Error("Cloud request failed.", { cause: new Error("Cloud request failed.", { cause: Object.assign(new Error("Cloud request failed."), { status: 429 }) }) });
+  const w = world({ moves: [undefined, limited] });
+  await w.home.kick();
+  assert.deepEqual(w.passes, ["copy", "final"]);
+  assert.equal(w.journal.phase, "copy");
+  assert.equal(w.server.frozen, false, "the freeze is lifted");
+  assert.equal(w.journal.hourly, undefined);
+  assert.equal(w.journal.retryAt, w.now() + COPY_RETRY_MS[0]);
+  w.advance(COPY_RETRY_MS[0]);
+  await w.tick();
+  assert.equal(w.journal.phase, "done");
+});
+
 test("an app killed at any phase goes on from the journal: nothing is switched on twice, and nothing is lifted after the switch", async () => {
   for (const at of ["copy", "wait", "freeze", "final", "check", "switch"]) {
     const w = world();
@@ -269,7 +285,8 @@ test("when My Cloud ends after the move, this computer is home again at once, th
   assert.equal(w.journal.phase, "back");
   assert.equal(w.restarted, 1, "the app opens again to finish the restore");
   await w.relaunch().kick();
-  assert.deepEqual(w.localCalls.map(([method, route, body]) => [method, route, body]).sort(), [["PATCH", "/api/routines/r1", { enabled: true }], ["PATCH", "/api/routines/r9", { enabled: true }]]);
+  assert.deepEqual(w.localCalls.map(([method, route, body]) => [method, route, body]).sort(), [["PATCH", "/api/routines/r1", { enabled: true }], ["PATCH", "/api/routines/r9", { enabled: true }],
+    ["POST", "/api/cloud-send/home", { v: 1 }]], "and the bots whose webhooks moved say their address is here again");
   assert.equal(w.journal.switchBack, undefined);
   assert.deepEqual(w.home.view(), { phase: "back" });
   w.home.seen();

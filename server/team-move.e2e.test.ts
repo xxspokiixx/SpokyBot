@@ -29,6 +29,10 @@ beforeAll(async () => {
   fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-move-${randomBytes(8).toString("hex")}`, team: { ...ACME, engine: ENGINE } });
   team = fx.team!;
   for (const [who, member] of Object.entries({ olive: OWNER, ben: ADMIN, ada: ADA, cleo: CLEO })) tokens[who] = (await team.pair(member)).token!;
+  for (const bot of await teamBots("olive")) {
+    const renamed = await onTeam("olive")("PATCH", `/api/bots/${bot.id}/profile`, { name: "Fixture starter" });
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+  }
   // Ada's MausBot Cloud sign-in lists Acme, and the Admin pairs her there as herself.
   fx.account.state.teams = [{ ...ACME, role: "member", machine: { origin: team.base, status: "ready", state: "ready" } }];
   fx.account.pairTeam = async (id) => { if (id !== ACME.id) throw Object.assign(new Error("not in that team"), { gone: true }); return team.grant(ADA); };
