@@ -13202,7 +13202,7 @@ ROUTES.push(createBotMessageRoutes({
   turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
   resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
   deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
-  cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, answeredIn: automationReports.answeredIn,
+  cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, answeredIn: automationReports.answeredIn, pressRecords: proactive.brief.pressRecords, serverPress: proactive.brief.serverPress,
   relayedReaction: (threadId, messageId, person, emoji) => void store.setReaction(threadId, messageId, relayedPersonKey(person),
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
