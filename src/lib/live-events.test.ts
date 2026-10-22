@@ -353,6 +353,48 @@ describe("a Cloud home that goes to sleep", () => {
     stop();
   });
 
+  it("wakes after its sleeping frame, so a Cloud that replays what follows a cursor never sends it back to sleep", async () => {
+    // Such a Cloud: a resuming stream gets every frame after its cursor, the sleeping one included.
+    const sent: { kind: string }[] = [];
+    const serve = (source: FakeEventSource) => {
+      const since = new URLSearchParams(source.url.split("?")[1]).get("since");
+      const from = since === null ? null : Number(since.split(":")[1]);
+      source.message({ kind: "hello", cursor: `run00000:${sent.length}`, resumed: from !== null });
+      if (from !== null) sent.slice(from).forEach((frame, index) => source.message(frame, `run00000:${from + index + 1}`));
+    };
+    const send = (sources: FakeEventSource[], frame: { kind: string }) => {
+      sent.push(frame);
+      sources.at(-1)!.message(frame, `run00000:${sent.length}`);
+    };
+    const sleeping = { kind: "power", state: "sleeping" } as { kind: string };
+
+    const test = harness();
+    const onFrame = vi.fn();
+    const stop = openLiveEvents({ onFrame, onSnapshotRequired: async () => true }, test.platform);
+    serve(test.sources[0]);
+    await Promise.resolve();
+    send(test.sources, { kind: "message" });
+    send(test.sources, sleeping);
+    expect(cloudAsleep()).toBe(true);
+    markCloudAwake();
+    serve(test.sources[1]);
+    expect(cloudAsleep()).toBe(false);
+    send(test.sources, { kind: "message", reply: "Here." } as { kind: string });
+    expect(onFrame).toHaveBeenLastCalledWith({ kind: "message", reply: "Here." });
+    stop();
+
+    // A sleeping frame before the snapshot loaded: waking starts over with a new snapshot, never past the one it missed.
+    const loading = harness();
+    const stopLoading = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: () => new Promise<boolean>(() => {}) }, loading.platform);
+    loading.sources[0].message({ kind: "hello", cursor: "run00000:3", resumed: false });
+    loading.sources[0].message({ kind: "message" }, "run00000:4");
+    loading.sources[0].message(sleeping, "run00000:5");
+    expect(cloudAsleep()).toBe(true);
+    markCloudAwake();
+    expect(loading.sources[1].url).toBe("/api/events");
+    stopLoading();
+  });
+
   it("ignores any other power frame", () => {
     const test = harness();
     const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, test.platform);

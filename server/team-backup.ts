@@ -1,5 +1,5 @@
 import { newId, type ModelSelection } from "./contracts.ts";
-import { botMascotBody } from "../shared/mascot-bodies.ts";
+import { botBodyId } from "../shared/bot-body.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { MAX_TEAM_BACKUP_BYTES, parseTeamBackup, type BackupTask, type TeamBackup } from "../shared/team-backup.ts";
 import { helperModelAllowed, type BotVisibility } from "../shared/wire.ts";
@@ -69,7 +69,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       messages: store.messagesFor(task.threadId).map((message) => ({
         id: message.id, role: message.role, text: messageText(message), at: message.at,
         parentId: message.parentId ?? null, replyToId: message.replyToId,
-        from: message.from, peerPost: message.peerPost,
+        from: message.from, peerPost: message.peerPost, ...(message.serverCard ? { serverCard: true as const } : {}),
       })),
     }));
   };
@@ -118,6 +118,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       name: routine.name, prompt: routine.prompt, target: routine.target, botId: routine.botId,
       groupId: routine.groupId, runOn: routine.runOn, schedule: routine.schedule,
       durationMinutes: routine.durationMinutes, timeoutMinutes: routine.timeoutMinutes,
+      ...(routine.checks ? { checks: routine.checks } : {}), ...(routine.access ? { access: routine.access } : {}), ...(routine.deliver ? { deliver: routine.deliver } : {}),
     })),
   });
   if (Buffer.byteLength(JSON.stringify(document)) > MAX_TEAM_BACKUP_BYTES) {
@@ -159,6 +160,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         ? { from: { ...message.from, botId: botIds.get(message.from.botId)! } }
         : message.from ? { text: `${message.from.name}:\n${message.text}` } : {}),
       peerPost: message.peerPost,
+      ...(message.serverCard && message.role === "bot" ? { serverCard: true as const } : {}),
     }));
     store.importTranscript(threadId, messages, task.activeLeafId ? ids.get(task.activeLeafId)! : null);
   };
@@ -168,7 +170,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       const bot = store.createBot({
         name: takeImportName(source.name, takenNames), title: source.title, description: source.description, soul: source.soul,
         color: source.color, mascotExpression: source.mascotExpression,
-        mascotBody: botMascotBody(source.mascotBody),
+        mascotBody: botBodyId(source.mascotBody),
         modelSelection: selection, section: sectionFor(source.section),
         // who may see the imported team is the importing admin's choice
         ...(options.visibility ? { visibility: options.visibility } : {}),

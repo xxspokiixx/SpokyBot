@@ -26,8 +26,13 @@ export interface EnvironmentDescriptor {
     /** Only while the maintainer flag `features.sharedComputers` is on; otherwise absent, like a build without the feature. */
     sharedComputers?: true;
     lendingDetails?: true;
+    /** A Cloud home with lending on: a lent computer may open the device link and lend its internet connection. */
+    deviceLink?: true;
     /** A person's own OMB Cloud home. */
     cloudHome?: true;
+    /** A Cloud home that takes the one-time move from the person's computer: by-row chats, the manifest, the chats and
+     * credentials checks, and lines its owner wrote there stamped as the owner's. */
+    move?: 1;
     /** Who can update the server: the desktop app that runs it, or the operator. */
     selfUpdate: "desktop-managed" | "operator";
     /** Whether /pair offers "sign in with your email" (an allow-list is set). */
@@ -114,10 +119,10 @@ export function serverVersion(root = SERVER_ROOT): string {
   return "unknown";
 }
 
-export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean }): EnvironmentDescriptor {
+export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean; label?: string }): EnvironmentDescriptor {
   return {
     environmentId: input.environmentId,
-    label: process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname(),
+    label: input.label?.trim() || process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname(),
     platform: process.platform,
     version: serverVersion(),
     capabilities: {
@@ -125,7 +130,8 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       // Never advertise a protocol this server would refuse.
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
       ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const } : {}),
-      ...(input.cloudHome === true ? { cloudHome: true as const } : {}),
+      ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
+      ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
       emailSignIn: input.emailSignIn === true,
       jobs: true,

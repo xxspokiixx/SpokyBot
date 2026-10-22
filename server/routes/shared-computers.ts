@@ -1,10 +1,15 @@
 // /api/shared-computers: a desktop lending its computer to this server (on a Cloud home, to My Cloud). A main-process-only
-// secret binds poll and results to that desktop; with the feature off the family 404s like a build without it.
+// secret binds poll, results and the device link to that desktop; with the feature off the family 404s like a build
+// without it.
 import { answerAsleep, type CloudPower } from "../cloud-power.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import type { DeviceLinks } from "../device-links.ts";
+import { requestSource, type RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
 import { responseGone, sharedComputerRegistration, type SharedComputers } from "../shared-computers.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
+import type { Upgrades } from "./upgrades.ts";
+
+const LINK = /^\/api\/shared-computers\/([\w-]+)\/link$/;
 
 export function createSharedComputerRoutes(deps: {
   enabled: () => boolean;
@@ -17,11 +22,28 @@ export function createSharedComputerRoutes(deps: {
   personKey: (session: Pick<SessionRecord, "id" | "email">) => string;
   /** A Cloud home that agreed to sleep sends the desktop away until it wakes (server/cloud-power.ts). */
   power: () => Pick<CloudPower, "sleeping" | "sleepSignal"> | null;
+  /** A Cloud home's device links (a lent computer's internet connection); null elsewhere, where the path 404s. */
+  links: DeviceLinks | null;
+  upgrades: Upgrades;
 }): RouteHandler {
+  deps.upgrades.route((path) => LINK.test(path));
   return async ({ req, res, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> => {
     if (path !== "/api/shared-computers" && !path.startsWith("/api/shared-computers/")) return PASS;
     if (method === "GET" && path === "/api/shared-computers" && deps.enabled()) {
       return json(res, 200, { computers: deps.computers.status(deps.principal(auth)), known: deps.computers.known(deps.principal(auth)) });
+    }
+    const link = LINK.exec(path);
+    if (link && method === "GET" && deps.enabled() && deps.links) {
+      const pending = deps.upgrades.pending(req);
+      if (!pending) return json(res, 426, { error: "WebSocket upgrade required" });
+      if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
+      if (!deps.sessionLive(auth.session.id)) return json(res, 401, { error: "Session ended" });
+      const computer = deps.computers.linkable(link[1]!, auth.session.id, String(req.headers["x-omb-computer-secret"] ?? ""));
+      if (pending.socket.destroyed) return;
+      pending.release();
+      deps.links.accept({ req, socket: pending.socket, head: pending.head }, { ...computer, seenAs: requestSource(req) }, deps.power());
+      res.detachSocket(pending.socket);
+      return;
     }
     if (method !== "POST" || path === "/api/shared-computers" || !deps.enabled()) return PASS;
     if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
@@ -35,7 +57,7 @@ export function createSharedComputerRoutes(deps: {
       if (!parsed.success) return json(res, 400, { error: "Invalid computer registration" });
       const registration = parsed.data;
       if (registration.environmentId !== deps.environmentId) return json(res, 409, { error: "Workspace identity changed. Pair again before sharing this computer." });
-      if (deps.cloudHomeLender && !auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can lend to My Cloud. On this computer, open My Cloud from Settings → MausBot Cloud first." });
+      if (deps.cloudHomeLender && !auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can be shared with the Cloud. On this computer, choose Open the Cloud in Settings → MausBot Cloud first." });
       deps.computers.register(registration, { session: auth.session.id, person: deps.cloudHomeLender ?? deps.personKey(auth.session) }, secret);
       return json(res, 200, { ok: true });
     }

@@ -22,7 +22,7 @@ describe("self-hosted update row", () => {
       subtitle: "Update with: docker compose pull omb && docker compose up -d",
     });
     const npm = check({ install: "npm", available: true, latest: "0.1.93", command: "npm install -g openmausbot@latest", restart: true });
-    expect(serverUpdateRow("available", npm).subtitle).toBe("Update with: npm install -g openmausbot@latest, then restart the server");
+    expect(serverUpdateRow("available", npm).subtitle).toBe("Update with: npm install -g openmausbot@latest, then restart the app");
     // an install it cannot recognise still learns there is a new version
     expect(serverUpdateRow("available", check({ install: "unknown", available: true, latest: "0.1.93" }))).toEqual({
       label: "Version 0.1.93 available — release notes",
@@ -54,9 +54,9 @@ describe("self-hosted update row", () => {
 
   it("explains servers that are updated elsewhere", () => {
     expect(serverUpdateRow("up-to-date", check({ install: "desktop" })).label).toBe(
-      "Updated from the OpenMausBot app on the computer running this server",
+      "Updates come from the OpenMausBot app on the computer these bots run on",
     );
-    expect(serverUpdateRow("up-to-date", check({ install: "managed" })).label).toBe("This server is kept up to date for you");
+    expect(serverUpdateRow("up-to-date", check({ install: "managed" })).label).toBe("Kept up to date for you");
   });
 
   it("reports a failed check plainly", () => {

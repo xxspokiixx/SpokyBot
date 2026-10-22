@@ -6,7 +6,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { localizedRelativeTime } from "@/lib/memory";
 import { api } from "@/state/store";
-import { lendingFailureKey, lendingProblemKey, lentWhat } from "./CloudLending";
+import { lendingFailureKey, lendingProblemKey, lendingTitle, lendsLine, lentWhat } from "./CloudLending";
 import { Card, Switch } from "./SettingsPrimitives";
 
 /** A computer lent to this server, now or before (server/shared-computers.ts KnownLentComputer). */
@@ -19,7 +19,7 @@ export interface KnownLentComputer {
   lent: boolean;
   lastSeenAt: number;
   lastUsedAt: number | null;
-  scopes: { folders: number; terminal: boolean; screen: boolean };
+  scopes: { folders: number; terminal: boolean; screen: boolean; internet?: boolean };
 }
 
 const PLATFORM: Record<string, string> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
@@ -30,11 +30,15 @@ export function lentComputerLines(computer: KnownLentComputer, now = Date.now())
     : computer.online ? t("lending.cloudSide.online")
     : t("lending.cloudSide.offline", { when: localizedRelativeTime(computer.lastSeenAt, activeLocale(), now) });
   const what = [
-    ...(computer.scopes.folders ? [t("lending.cloudSide.folders", { count: String(computer.scopes.folders) })] : []),
+    ...(computer.scopes.internet ? [t("lending.cloudSide.internet")] : []),
+    ...(computer.scopes.folders === 1 ? [t("lending.cloudSide.folderOne")]
+      : computer.scopes.folders ? [t("lending.cloudSide.folders", { count: String(computer.scopes.folders) })] : []),
     ...(computer.scopes.screen ? [t("lending.cloudSide.screen")] : []),
     ...(computer.scopes.terminal ? [t("lending.cloudSide.terminal")] : []),
   ];
+  const away = computer.lent && !computer.online && computer.scopes.internet === true;
   return [state, ...(computer.lent && what.length ? [t("lending.cloudSide.lends", { what: what.join(", ") })] : []),
+    ...(away ? [t("lending.cloudSide.internetAway")] : []),
     computer.lastUsedAt ? t("lending.cloudSide.lastUsed", { when: localizedRelativeTime(computer.lastUsedAt, activeLocale(), now) }) : t("lending.cloudSide.neverUsed")];
 }
 
@@ -44,13 +48,18 @@ export function pageLendingLine(lending: PageLending): string {
   if (lending.status === "busy") return t("lending.status.busy");
   if (lending.status && lending.status !== "lent" && lending.status !== "starting") return t(lendingProblemKey(lending.status) ?? "lending.status.starting");
   if (lending.status === "starting") return t("lending.status.starting");
-  const what = lentWhat(lending.folders, lending.screen);
-  return what ? t("lending.page.lends", { what }) : t("lending.status.lent");
+  const updating = lending.link === "unsupported";
+  const what = lentWhat(lending.folders, lending.screen, lending.internet === true && !updating);
+  if (updating) return what ? `${lendsLine(what)} ${t("lending.internetUnsupported")}` : t("lending.internetUnsupported");
+  return what ? lendsLine(what) : t("lending.status.lent");
 }
 
-/** In the desktop app on My Cloud's own page: "Let My Cloud use this computer" right here, one switch and one line, so
- * nobody has to leave My Cloud. Main confirms turning it on in a native dialog. */
-function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending> } }) {
+type PageLendingBridge = { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending>; screen?(on: boolean): Promise<PageLending> };
+
+/** In the desktop app on My Cloud's own page: "Let my bots use this Mac" right here, one switch, one line and Apps and
+ * screen, so nobody has to leave My Cloud. Turning either on takes a real click; Apps and screen also asks in a dialog of
+ * this app's own. */
+function LendThisComputer({ bridge }: { bridge: PageLendingBridge }) {
   const [lending, setLending] = useState<PageLending | null>(null);
   const [working, setWorking] = useState(false);
   const [failed, setFailed] = useState<LocaleKey | null>(null);
@@ -62,16 +71,24 @@ function LendThisComputer({ bridge }: { bridge: { state(): Promise<PageLending>;
     return () => { alive = false; clearInterval(timer); };
   }, [bridge]);
   if (!lending?.available) return null;
-  const toggle = () => {
+  const perform = (action: () => Promise<PageLending>) => {
     setWorking(true); setFailed(null);
-    void bridge.set(!lending.on).then(setLending).catch((cause: unknown) => setFailed(lendingFailureKey(cause))).finally(() => setWorking(false));
+    void action().then(setLending).catch((cause: unknown) => setFailed(lendingFailureKey(cause))).finally(() => setWorking(false));
   };
+  const toggle = () => perform(() => bridge.set(!lending.on));
+  const lendScreen = bridge.screen;
   return <div data-lend-this-computer={lending.on ? "on" : "off"} className="flex flex-col gap-1.5 rounded-lg bg-raised/60 p-3">
     <div className="flex items-start justify-between gap-3">
-      <p id="lend-this-computer" className="text-[13px] font-medium text-ink">{t("lending.title")}</p>
+      <p id="lend-this-computer" className="text-[13px] font-medium text-ink">{lendingTitle()}</p>
       <Switch checked={lending.on} disabled={working} aria-labelledby="lend-this-computer" onClick={toggle} />
     </div>
     <p role="status" className="text-[12.5px] text-ink-secondary">{pageLendingLine(lending)}</p>
+    {lending.on && lendScreen && <label data-lend-screen={lending.screen ? "on" : "off"} className="mt-1 flex items-start gap-2">
+      <input className="mt-1" type="checkbox" checked={lending.screen} disabled={working || (!lending.screen && !lending.screenAvailable)}
+        onChange={(event) => perform(() => lendScreen(event.target.checked))} />
+      <span className="text-[12.5px] text-ink">{t("lending.screen")}<span className="mt-0.5 block text-[12px] text-ink-secondary">
+        {t(lending.screen || lending.screenAvailable ? "lending.screenHelp" : "lending.screenUnavailable")}</span></span>
+    </label>}
     {failed && <p role="alert" data-lending-failed={failed} className="text-[12.5px] text-danger">{t(failed)}</p>}
   </div>;
 }
@@ -92,7 +109,7 @@ export function LentComputersCard() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
   const lending = window.ogb?.cloudLending;
-  const here = lending?.state && lending.set ? { state: lending.state, set: lending.set } : null;
+  const here = lending?.state && lending.set ? { state: lending.state, set: lending.set, screen: lending.screen } : null;
   return <Card title={t("lending.cloudSide.title")}>
     <div data-lent-computers={known === null ? "loading" : known.length} className="flex flex-col gap-3">
       {here && <LendThisComputer bridge={here} />}

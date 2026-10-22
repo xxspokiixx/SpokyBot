@@ -183,6 +183,6 @@ describe("a usage limit with a backup engine", () => {
     const backup = run();
     expect(recoverRun(backup, "This Claude account has reached its 5-hour limit", { limitResetsAt: START + 2 * HOUR, backupReady: true }, START, [])).toEqual({ queued: true });
     expect(backup.retryAt).toBe(START + 15_000);
-    expect(backup.attention).toMatch(/backup engine/);
+    expect(backup.attention).toMatch(/backup AI/);
   });
 });

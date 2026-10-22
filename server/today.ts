@@ -6,7 +6,7 @@ import type { TurnDigest } from "../shared/digest.ts";
 import { isClientCancellation } from "../shared/client-cancel.ts";
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import type { PlaceRow, PlaceState } from "../shared/place-view.ts";
-import type { RoutineRunStatus, RoutineRunTrigger } from "../shared/routines.ts";
+import type { RoutineRunReport, RoutineRunStatus, RoutineRunTrigger } from "../shared/routines.ts";
 import { classifyToolCall, isReportRoutine, minutesSaved, OUTCOME_CATEGORIES, toolApps, type OutcomeCategory, type OutcomeCounts } from "../shared/today-outcomes.ts";
 import { NEEDS_YOU_WINDOW_MS, TODAY_MAX_LINES, TODAY_MAX_WINDOW_MS, type NeedsYouItem, type TodayLine, type TodayReport, type TodayStarter } from "../shared/today.ts";
 import { trialCreditKind } from "../shared/trial-credit.ts";
@@ -35,6 +35,7 @@ interface RunRecord {
   startedAt?: number;
   finishedAt?: number;
   error?: string;
+  report?: RoutineRunReport;
 }
 
 export interface TodaySources {
@@ -66,7 +67,8 @@ const APP_WORD_CHARS = 5;
 type Owner = { botId?: string; groupId?: string };
 /** A card's fields that tell a question for the person from an approval, a receipt or an offer to switch engines. */
 type QuestionCard = NonNullable<Parameters<typeof isPersistentQuestionCard>[0]> & {
-  title?: string; subtitle?: string; questionRequest?: QuestionRequestCardData; outboundRequest?: unknown; quotaSwitch?: unknown; teamMemoryRequest?: unknown; autoApplied?: boolean;
+  requestId?: string; title?: string; subtitle?: string; questionRequest?: QuestionRequestCardData; outboundRequest?: unknown; quotaSwitch?: unknown;
+  teamMemoryRequest?: unknown; autoApplied?: boolean;
 };
 
 function threadOwners(sources: TodaySources): Map<string, Owner> {
@@ -161,6 +163,8 @@ export function todayReport(sources: TodaySources, viewer: TodayViewer, requeste
     const ok = run.status === "completed";
     if (ok) routines.ok += 1;
     else routines.failed += 1;
+    if (run.report?.state === "quiet") continue;
+    const reported = run.report?.state === "posted" && seen(run.report.threadId) ? run.report.threadId : undefined;
     const outcomes: OutcomeCounts = {};
     for (const event of run.threadId && run.startedAt !== undefined ? byThread.get(run.threadId) ?? [] : []) {
       if (event.at >= run.startedAt! && event.at <= end) for (const category of event.categories) add(outcomes, category);
@@ -170,7 +174,7 @@ export function todayReport(sources: TodaySources, viewer: TodayViewer, requeste
       add(outcomes, "report");
     }
     lines.push({
-      id: run.id, at: end, botId: run.botId, ...(seen(run.threadId) ? { threadId: run.threadId } : {}), routineId: run.routineId,
+      id: run.id, at: end, botId: run.botId, ...(reported ?? seen(run.threadId) ? { threadId: reported ?? run.threadId } : {}), routineId: run.routineId,
       title: plainTitle(run.routineName), ok, ...(!ok && run.error ? { error: plainTitle(run.error) } : {}),
       startedBy: run.triggerSource ?? (run.manual ? "manual" : "schedule"), outcomes,
     });
@@ -225,6 +229,12 @@ export function todayReport(sources: TodaySources, viewer: TodayViewer, requeste
   };
 }
 
+/** What only the person can fix right now, across every conversation the viewer may see. */
+export function needsYouNow(sources: TodaySources, viewer: TodayViewer, now = Date.now()): NeedsYouItem[] {
+  const owners = threadOwners(sources);
+  return needsYou(sources, viewer, owners, (threadId): threadId is string => Boolean(threadId && owners.has(threadId) && viewer.thread(threadId)), now);
+}
+
 function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string, Owner>, seen: (threadId: string | undefined) => threadId is string, now: number): NeedsYouItem[] {
   const rows = attentionRows(now - NEEDS_YOU_WINDOW_MS).filter((row) => seen(row.threadId));
   const botOf = (row: AttentionRow) => row.digestBotId ?? row.fromBotId ?? owners.get(row.threadId)?.botId;
@@ -238,6 +248,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
   }
 
   const items = new Map<string, NeedsYouItem>();
+  const askedIn = new Map<string, string>();
   const connectionApps = new Map<string, string>();
   const keep = (key: string, item: NeedsYouItem) => {
     const previous = items.get(key);
@@ -254,6 +265,9 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
       const botId = botOf(row);
       if (!card || !botId || !isPersistentQuestionCard(card) || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied) continue;
       if ((lastTurnByThread.get(row.threadId) ?? -Infinity) > row.at) continue;
+      const earlier = card.requestId ? askedIn.get(card.requestId) : undefined;
+      if (earlier && earlier !== `question:${row.threadId}`) items.delete(earlier);
+      if (card.requestId) askedIn.set(card.requestId, `question:${row.threadId}`);
       keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, text: questionText(card) });
       continue;
     }

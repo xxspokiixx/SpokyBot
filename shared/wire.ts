@@ -7,7 +7,7 @@ import type { ToolScope } from "./tool-scope.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
-import type { MascotBodyId } from "./mascot-bodies.ts";
+import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
@@ -19,13 +19,15 @@ import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
-import type { RoutineRunCardData } from "./routine-run.ts";
+import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
+import type { AppFromRef, AppPayload } from "./app.ts";
 import type { GroupGoalRunCardData } from "./group-goal-run.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
 import type { NotificationLogEntry } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
+import type { PublishedPageCard } from "./published-page.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -115,6 +117,12 @@ export interface GroupThreadUsage extends TaskUsage {
   lastSpeaker?: { botId: string; name: string };
 }
 
+export interface BotMovedTo {
+  team: { id: string; name: string };
+  state: "moving" | "moved";
+  at: number;
+}
+
 /** One task = one conversation with its own context, thread and provider
  * session. */
 export interface WireTask {
@@ -132,6 +140,8 @@ export interface WireTask {
   routineRunId?: string;
   /** Set when a bot, not a person, opened this thread. */
   openedBy?: TaskOpenedBy;
+  /** On a team's server: one person's conversation, seen by them and the team's admins only. */
+  private?: true;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
   archivedAt?: number;
@@ -271,7 +281,7 @@ export interface WireBot {
   notifications: boolean;
   color: MausColor;
   mascotExpression?: MausExpression | null;
-  mascotBody?: MascotBodyId | null;
+  mascotBody?: BotBodyId | null;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;
@@ -326,6 +336,9 @@ export interface WireBot {
   rewound?: boolean;
   pinned?: boolean;
   hidden?: boolean;
+  /** On My Cloud, a bot its person moved into one of their teams: `moving` while it goes (no turns, its routines off),
+   * `moved` once it lives there (archived here, shown as a line that opens the team). */
+  movedTo?: BotMovedTo;
   /** Optional labeled divider used to organize this bot in the sidebar. */
   section?: string;
   /** the one message pinned to the top of this bot's active thread */
@@ -404,8 +417,9 @@ export type CardAnswerer = (
   | { kind: "loopback" }
   | { kind: "worker" }
 ) & {
-  /** "call": decided by voice on a Live call, not tapped. */
-  via?: "call";
+  /** "call": decided by voice on a Live call; "reaction": by a 👍 or 👎 on the
+   * card. Absent: tapped. */
+  via?: "call" | "reaction";
 };
 
 /** One transcript line, serialized as stored. */
@@ -413,7 +427,7 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
   compaction?: {
@@ -434,12 +448,21 @@ export interface WireMessage {
   /** widget rows (kind "widget"): a bot-authored UI tree. `text` is its
    * readable fallback for clients that do not know the kind. */
   widget?: WidgetPayload;
+  /** widget rows the server built from records (mail, calendar, other
+   * bots' work) rather than the bot: replayed to the bot only as labelled
+   * data, never as its own words, and never edited by a bot. */
+  serverCard?: true;
+  /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */
+  app?: AppPayload;
+  /** user rows sent by an app's ui/message: the app row that sent them. Every client draws "Sent from <title>". */
+  fromApp?: AppFromRef;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;
   /** signin rows: the bot asked the person to sign in to a site themselves. */
   signIn?: SignInRequestCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
+  automation?: AutomationLine;
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
   /** call rows (kind "call"): the finished Live call this row records. */
@@ -526,12 +549,21 @@ export interface WireMessage {
    * Team incidents report or Team escalations notice about that bot's thread
    * in `threadId`, not its words; `notified`: the person was already buzzed. */
   peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean } };
-  /** emoji reactions; by = "user" or a member botId. */
-  reactions?: Array<{ emoji: string; by: string }>;
+  /** One reaction per person (shared/reactions.ts REACTIONS). `by` is "user"
+   * on a workspace one person uses, otherwise that person's opaque key, the
+   * one GET /api/auth/session returns as `reactor`. `name` is attribution
+   * only; `at` is when they chose it. */
+  reactions?: Array<{ emoji: string; by: string; name?: string; at?: number }>;
+  /** user lines a 👍 or 👎 made: the person reacted with this emoji to
+   * `replyToId` instead of typing. Clients show the reaction on that message
+   * and draw no bubble for this line. */
+  reaction?: string;
   /** comm chips: "Messaged @X", linking to the bot-bot channel. */
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
   /** thread chips: "Opened thread #Title on @X". */
   threadRef?: { botId: string; threadId: string; title: string };
+  /** A page the bot published to a public link (publish_page), or why it couldn't. `text` carries the link too. */
+  publishedPage?: PublishedPageCard;
   /** A published Data result, linked to its bot's main viewer. */
   dataResult?: { botId: string; cardId: string; title: string; kind: "table" | "chart" | "text"; sql?: string };
   /** user messages: the Data result the person was viewing when they sent
@@ -545,6 +577,33 @@ export interface WireMessage {
 
 export const movesThreadToTop = (message: Pick<WireMessage, "role" | "kind" | "peerAsk" | "turnId" | "turnTerminal">): boolean =>
   message.role === "user" ? !message.peerAsk : message.kind === "text" && (message.turnTerminal === true || !message.turnId);
+
+export function orderedThreadList<T extends { pinned?: boolean; lastThreadOrderAt?: number; createdAt?: number }>(tasks: readonly T[]): T[] {
+  return tasks
+    .map((task, index) => ({ task, index }))
+    .sort((a, b) => {
+      const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
+      if (pin) return pin;
+      const recency = (b.task.lastThreadOrderAt ?? b.task.createdAt ?? 0) - (a.task.lastThreadOrderAt ?? a.task.createdAt ?? 0);
+      if (recency) return recency;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.task);
+}
+
+/** 0 is the "until new activity" sentinel. The event stream never drops an expired snooze, so check the clock too. */
+export const isSnoozed = (task: Pick<WireTask, "snoozedUntil">, now = Date.now()): boolean =>
+  task.snoozedUntil !== undefined && (task.snoozedUntil === 0 || task.snoozedUntil > now);
+
+type OpenThreadCandidate = Pick<WireTask, "routineRunId" | "archivedAt" | "closedBy" | "openedBy" | "snoozedUntil" | "pinned" | "lastThreadOrderAt" | "createdAt">;
+
+/** The top row of the bot's thread list, so deleting the open thread never pulls a hidden one into view. */
+export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[], now = Date.now()): T | undefined {
+  const own = tasks.filter((task) => !task.routineRunId);
+  const open = own.filter((task) => task.archivedAt === undefined);
+  const listed = open.filter((task) => task.pinned === true || !(task.closedBy || task.openedBy || isSnoozed(task, now)));
+  return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
+}
 
 export interface OptionCardData {
   /** calls: one per outbound call the card covers, in subtitle order. */

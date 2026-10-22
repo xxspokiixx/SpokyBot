@@ -657,6 +657,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });
   });
 
+  it("settles a turn whose model's extra-usage credits ran out as quota, without holding the engine", async () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 11 * 86_400;
+    const credits = { status: "rejected", resetsAt, overageDisabledReason: "out_of_credits", isUsingOverage: false, errorCode: "credits_required" };
+    await create("usage-limit", { FAKE_CLAUDE_RATE_LIMIT: JSON.stringify(credits) });
+    await instance.adapter.sendTurn({ threadId: "t-credits", text: "continue" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const errors = recorder.events.filter((event) => event.type === "runtime.error");
+    expect(errors).toEqual([expect.objectContaining({ message: claudeLimitMessage({ window: null, resetsAt, credits: true }) })]);
+    expect((errors[0] as any).message).toContain("those credits are used up");
+    expect(errors[0]).not.toHaveProperty("limitResetsAt");
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });
+  });
+
   it("names the weekly limit behind an older CLI's update request, and offers no update", async () => {
     const resetsAt = Math.floor(Date.now() / 1000) + 86_400;
     await create("api-error", {
@@ -1562,6 +1575,44 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.mcpConfig.mcpServers.legacy).toEqual({ type: "sse", url: "https://old.example/sse", headers: {} });
     expect(JSON.stringify(seen.mcpConfig)).not.toContain("mcp-remote-proxy");
     expect(JSON.stringify(seen.argv)).not.toContain("tok-docs");
+  });
+
+  // Claude Code advertises no MCP Apps UI extension and keeps tool results to itself, so only OMB's
+  // remote proxy can observe a URL app server.
+  it("mounts a url app server through the proxy and a url server without apps natively, unchanged", async () => {
+    await create();
+    const dump = join(scratch, "app-mcp.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const docs = { type: "http" as const, url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } };
+    const draw = { type: "http" as const, url: "https://mcp.excalidraw.com/mcp", headers: { Authorization: "Bearer tok-draw" } };
+    const board = { command: "board-mcp", args: [], env: {} };
+    const agents = { command: process.execPath, args: ["agents-proxy.js"], env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: "comms-fixture" } };
+    await instance.adapter.sendTurn({
+      threadId: "t-app-mcp", text: "hi",
+      integrations: { agents, custom: { docs, draw, board }, mcpApps: { draw: { extension: true }, board: { extension: true } } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.docs).toEqual(docs);
+    const proxy = seen.mcpConfig.mcpServers.draw;
+    expect(proxy.args[0]).toContain("mcp-remote-proxy");
+    expect(JSON.parse(proxy.env.OMB_REMOTE_MCP_SERVER)).toEqual(draw);
+    expect(JSON.parse(proxy.env.OMB_REMOTE_MCP_APPS)).toEqual({ server: "draw", harnessUrl: "http://127.0.0.1:8799", token: "comms-fixture", extension: true });
+    const gate = seen.mcpConfig.mcpServers.board;
+    expect(gate.args[0]).toContain("mcp-gate");
+    expect(JSON.parse(gate.env.OMB_GATE_APPS)).toMatchObject({ server: "board", extension: true });
+    expect(JSON.stringify(seen.argv)).not.toContain("tok-draw");
+    expect(JSON.stringify(seen.argv)).not.toContain("comms-fixture");
+  });
+
+  it("observes nothing on a turn that cannot report: no agents capability", async () => {
+    await create();
+    const dump = join(scratch, "app-mcp-no-agents.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const draw = { type: "http" as const, url: "https://mcp.excalidraw.com/mcp", headers: {} };
+    await instance.adapter.sendTurn({ threadId: "t-app-mcp-2", text: "hi", integrations: { custom: { draw }, mcpApps: { draw: { extension: true } } } });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.draw).toEqual(draw);
   });
 
   it("keeps a selected url server's whole catalog: Claude Code searches tools itself", async () => {

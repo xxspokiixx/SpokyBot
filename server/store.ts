@@ -34,7 +34,7 @@ import type {
   OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
-import { movesThreadToTop } from "../shared/wire.ts";
+import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts";
@@ -1236,12 +1236,10 @@ export class Store {
     return { group, deleted, missing };
   }
 
-  toggleReaction(threadId: string, messageId: string, emoji: string, by: string): Message | null {
+  setReaction(threadId: string, messageId: string, by: string, reaction: Omit<NonNullable<Message["reactions"]>[number], "by"> | null): Message | null {
     const existing = this.messagesFor(threadId).find((m) => m.id === messageId);
     if (!existing) return null;
-    const reactions = existing.reactions ?? [];
-    const at = reactions.findIndex((r) => r.emoji === emoji && r.by === by);
-    const next = at >= 0 ? reactions.filter((_, i) => i !== at) : [...reactions, { emoji, by }];
+    const next = [...(existing.reactions ?? []).filter((r) => r.by !== by), ...(reaction ? [{ ...reaction, by }] : [])];
     return this.patchMessage(threadId, messageId, { reactions: next.length ? next : undefined });
   }
 
@@ -1400,6 +1398,7 @@ export class Store {
       text,
       parentId: source.parentId ?? null,
       replyToId: source.replyToId,
+      ...(source.reaction && source.text === text ? { reaction: source.reaction } : {}),
       ...(sendId ? { sendId } : {}),
       ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}),
@@ -2429,7 +2428,7 @@ export class Store {
     const doomed = new Set(deleted);
     mdb.deleteThreads(deleted, () => this.commitBotChange(bot, "the thread deletion", () => {
       const kept = bot.tasks!.filter((t) => !doomed.has(t.threadId));
-      const visible = kept.find((task) => !task.routineRunId) ?? this.buildTask(bot);
+      const visible = nextOpenThread(kept) ?? this.buildTask(bot);
       bot.tasks = kept.includes(visible) ? kept : [visible, ...kept];
       if (doomed.has(bot.threadId) || this.taskByThread(botId, bot.threadId)?.routineRunId) this.mirrorActiveTask(bot, visible);
       bot.unread = bot.tasks.some(taskCountsAsBotUnread);
@@ -2446,6 +2445,6 @@ export class Store {
 
   seedIfEmpty() {
     if (!this.needsSeed()) return;
-    this.createBot();
+    this.setChiefOfStaff(this.createBot().id);
   }
 }

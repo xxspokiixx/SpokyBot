@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import { NEAR_LIMIT_PERCENT, type EngineLimit, type EngineLimitsReport, type LimitWindowName } from "../shared/limit-reset.ts";
 import { loadPlanUsage, type PlanAccount, type PlanProviderRow, type PlanUsageReport, type PlanWindow } from "./plan-usage.ts";
+import type { RuntimeEvent } from "../shared/runtime-events.ts";
 
 /** How often a waiting limit-reset automation checks usage again, and how fresh a shown limit must be. */
 export const LIMIT_POLL_MS = 5 * 60_000;
@@ -80,6 +81,7 @@ export class LimitResetClock {
   private readonly now: () => number;
   private usage = new Map<string, EngineLimit>();
   private readonly refusals = new Map<string, number>();
+  private readonly turnEngines = new Map<string, string>();
   private checkedAt = 0;
   private loading: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -120,6 +122,18 @@ export class LimitResetClock {
       if (until !== null) engines.set(engine, { ...(known ?? this.unnamed(engine)), blocked: true, usedPercent: 100, resetsAt: until });
     }
     return { checkedAt: this.checkedAt, engines: [...engines.values()] };
+  }
+
+  /** Every runtime event, with the engine its turn runs on when known: a refusal holds the engine, and a turn that
+   * works on it afterwards ends the hold, since the account plainly has room again (another model, plan or account). */
+  noteRuntimeEvent(engine: string | undefined, event: RuntimeEvent): void {
+    if (event.type === "turn.started" && engine) this.turnEngines.set(event.threadId, engine);
+    else if (event.type === "runtime.error") this.noteRefusal(engine ?? this.turnEngines.get(event.threadId), event.limitResetsAt);
+    else if (event.type === "turn.completed" || event.type === "session.exited") {
+      const ran = this.turnEngines.get(event.threadId) ?? engine;
+      this.turnEngines.delete(event.threadId);
+      if (event.type === "turn.completed" && event.ok && ran && this.refusals.delete(ran)) this.options.onChange?.();
+    }
   }
 
   /** A turn on this engine was refused by its usage limit; `resetsAt` is when the engine said it resets. */

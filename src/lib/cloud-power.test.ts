@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { asleepAnswer, cloudAsleep, markCloudAsleep, markCloudAwake, onCloudPower, resetCloudPowerForTests, sleepingFrame } from "./cloud-power";
 
-afterEach(() => resetCloudPowerForTests());
+afterEach(() => { vi.unstubAllGlobals(); resetCloudPowerForTests(); });
 
 class Target {
   readonly listeners = new Map<string, Set<() => void>>();
@@ -25,6 +25,20 @@ describe("a page of a Cloud home that sleeps", () => {
     expect(target.size).toBe(0);
     markCloudAwake();
     expect(heard).toHaveBeenCalledTimes(2);
+  });
+
+  it("wakes the home by using it: one request it counts as someone using it, once per wake", () => {
+    const fetch = vi.fn(async (_path: string, _init?: RequestInit) => new Response("{}"));
+    vi.stubGlobal("fetch", fetch);
+    const target = new Target();
+    markCloudAsleep(target as unknown as Window);
+    expect(fetch).not.toHaveBeenCalled();
+    target.emit("pointerdown");
+    markCloudAwake();
+    expect(fetch).toHaveBeenCalledOnce();
+    const [path, init] = fetch.mock.calls[0];
+    expect(path).toBe("/api/auth/session");
+    expect(new Headers(init?.headers).get("x-omb-background")).toBeNull();
   });
 
   it("knows the home's asleep answer and its sleeping frame", () => {

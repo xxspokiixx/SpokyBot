@@ -88,7 +88,7 @@ interface Options {
 }
 
 type RequestFrom = { botId: string; name: string; color: string };
-type SetupArgs = { botId: string; threadId: string; plan: unknown; from?: RequestFrom; suggestion?: boolean };
+type SetupArgs = { botId: string; threadId: string; plan: unknown; from?: RequestFrom };
 type DeletionArgs = { botId: string; threadId: string; targetBotId: string; reason: string; from?: RequestFrom };
 /** Server-only invocation lease. Never saved on a request or approval card. */
 type SubmitAuthority = { canCommit?: () => boolean };
@@ -206,7 +206,7 @@ export class TeamSetupRequestService {
     for (const operation of operations) if (operation.botId === chief.id) Object.assign(requesterScope, operation.fields);
     const request: TeamSetupRequest = { version: 1, requestId: newId(), botId: args.botId, threadId: args.threadId,
       reason: redactSecretsInText(parsed.data.reason), createdAt: Date.now(), requesterRevision: teamSetupRevision(chief, requesterScope),
-      newTeams: [...new Set(parsed.data.newTeams)], operations, ...(args.suggestion ? { suggestion: true as const } : {}) };
+      newTeams: [...new Set(parsed.data.newTeams)], operations };
     this.validate(request, false);
     return request;
   }
@@ -232,21 +232,6 @@ export class TeamSetupRequestService {
     return { ...this.propose(args), applied: false, state: "pending" as const };
   }
 
-  /** The Chief's own question to the person ("add this specialist?"), not an approval: it waits on its card at every level. */
-  suggest(args: SetupArgs) {
-    for (const message of this.options.store.messagesFor(args.threadId)) {
-      const card = message.card;
-      if (!card?.teamSetupRequest?.suggestion || card.teamSetupRequest.threadId !== args.threadId) continue;
-      if (card.answered === "deny" || card.teamSetupRequest.result?.state === "denied") {
-        throw new TeamSetupError("The user said not now to a suggested specialist in this conversation. Do not suggest another here unless they ask for one.", 409);
-      }
-      if (!card.answered && !card.dismissed && !card.expired) {
-        throw new TeamSetupError("A suggested specialist is already waiting for the user's answer in this conversation. Wait for it.", 409);
-      }
-    }
-    return { ...this.propose({ ...args, suggestion: true }), applied: false, state: "pending" as const };
-  }
-
   async submitDeletion(args: DeletionArgs & SubmitAuthority) {
     const grant = this.options.autoApply?.(args.botId, args.threadId) ?? null;
     if (grant) return { ...await this.applyImmediately(this.prepareDeletion(args), args.from, args.canCommit), appliedBy: grant };
@@ -258,7 +243,6 @@ export class TeamSetupRequestService {
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
     const lines = [`Why: ${request.reason}`];
-    if (request.suggestion) lines.push(`@${chief.name} is suggesting this. You did not ask for it.`);
     if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared team computers remain. Active work or an unavailable provider can block deletion safely.");
     if (request.newTeams.length) {
       lines.push(`Create teams: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
@@ -277,7 +261,7 @@ export class TeamSetupRequestService {
         if (key === "soul") {
           lines.push(...soulDiffLines(current?.soul ?? "", value as string));
         } else if (key === "modelSelection") {
-          lines.push(`Default engine/model: ${current ? `${modelSelectionText(current.modelSelection)} → ` : ""}${modelSelectionText(value as ModelSelection)}`);
+          lines.push(`Default AI and model: ${current ? `${modelSelectionText(current.modelSelection)} → ` : ""}${modelSelectionText(value as ModelSelection)}`);
           if (current && typeof value === "object" && value !== null &&
               (value as ModelSelection).instanceId !== current.modelSelection.instanceId && this.options.driverCapabilities) {
             lines.push(...harnessCapabilityLines(
@@ -301,11 +285,10 @@ export class TeamSetupRequestService {
     }
     if (!immediate) lines.push("After this decision the Chief continues once with the result.");
     const title = request.deletion ? `Delete @${request.deletion.name}?`
-      : request.suggestion ? `Add @${request.operations[0]?.fields.name} to the team?`
-        : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
+      : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
     const detail = lines.join("\n");
     return {
-      title, subtitle: detail, options: request.deletion ? ["Delete bot", "Cancel"] : request.suggestion ? ["Add bot", "Not now"] : ["Apply setup", "Cancel"], requestId: request.requestId,
+      title, subtitle: detail, options: request.deletion ? ["Delete bot", "Cancel"] : ["Apply setup", "Cancel"], requestId: request.requestId,
       tool: request.deletion ? "delete_bot" : "set_up_team", teamSetupRequest: request,
     };
   }

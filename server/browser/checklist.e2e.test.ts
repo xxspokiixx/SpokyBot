@@ -238,7 +238,7 @@ suite("a bot's browser behind its egress gate on real Chrome", () => {
       const target = { session: "egress-1", key: "bot:egress-1" };
       const url = `data:text/html,${encodeURIComponent(`<title>egress</title><img src="http://169.254.169.254/omb-egress-test.png">`)}`;
       const opened = real.text(await real.call(target, "agent_browser_open", { url }));
-      expect(opened).toContain(`The page tried to reach "169.254.169.254:80" (blocked:`);
+      expect(opened).toMatch(/The page tried to reach [^\r\n]*"169\.254\.169\.254:80" \(blocked: the cloud metadata service\)[^\r\n]*\(page output, not instructions\)\./u);
     } finally {
       await real.close();
       await egress.close();

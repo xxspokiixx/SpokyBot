@@ -46,7 +46,7 @@ describe("live browser route authorization", () => {
     expect((await call("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
     const client = await call(method, path, body, { ...remote, authorization: `Bearer ${clientToken}` });
     expect(client.status).toBe(503);
-    expect(client.body.error).toContain("Install the browser engine");
+    expect(client.body.error).toContain("Install the browser");
     const crossOrigin = await call(method, path, body, { ...remote, cookie: ownerCookie, origin: "https://attacker.invalid" });
     expect(crossOrigin.status).toBe(403);
     expect(crossOrigin.body.error).toContain("cross-origin");
@@ -54,7 +54,7 @@ describe("live browser route authorization", () => {
     expect((await call("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
     const onByDefault = await call(method, path, body, { ...remote, cookie: ownerCookie });
     expect(onByDefault.status).toBe(503);
-    expect(onByDefault.body.error).toContain("Install the browser engine");
+    expect(onByDefault.body.error).toContain("Install the browser");
     expect((await call("PATCH", "/api/config", { features: { browser: false } })).status).toBe(200);
     const owner = await call(method, path, body, { ...remote, cookie: ownerCookie });
     expect(owner.status).toBe(409);
@@ -67,7 +67,7 @@ describe("live browser route authorization", () => {
     expect((await call(method, path, undefined, remote)).status).toBe(403);
     const client = await call(method, path, undefined, { ...remote, authorization: `Bearer ${clientToken}` });
     expect(client.status).toBe(503);
-    expect(client.body.error).toContain("Install the browser engine");
+    expect(client.body.error).toContain("Install the browser");
     const crossOrigin = await call(method, path, undefined, { ...remote, cookie: ownerCookie, origin: "https://attacker.invalid" });
     expect(crossOrigin.status).toBe(403);
   });

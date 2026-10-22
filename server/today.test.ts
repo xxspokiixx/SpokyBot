@@ -125,6 +125,17 @@ describe("today's report", () => {
     expect(moreLines).toBe(0);
   });
 
+  it("opens a run where it reported, and lists no run that found nothing new", () => {
+    const w = seededDay();
+    const brief = w.runs.find((run) => run.id === "run-brief")!;
+    brief.report = { state: "posted", threadId: w.atlas.threadId, messageId: "report-line" };
+    w.runs.find((run) => run.id === "run-digest")!.report = { state: "quiet" };
+    const report = todayReport(w.sources(), ADMIN, MIDNIGHT, NOW);
+    expect(report.lines.find((line) => line.id === "run-brief")).toMatchObject({ threadId: w.atlas.threadId, title: "Morning briefing" });
+    expect(report.lines.some((line) => line.id === "run-digest")).toBe(false);
+    expect(report.routines).toEqual({ ok: 2, failed: 2 });
+  });
+
   it("reads a longer window back to its start, and never further than eight days", () => {
     const w = seededDay();
     const week = todayReport(w.sources(), ADMIN, MIDNIGHT - 6 * 24 * HOUR, NOW);
@@ -172,7 +183,7 @@ describe("needs you", () => {
     w.fail(kai.threadId, at(8, 30), TRIAL_CREDIT_REFUSED.paused);
     w.fail(w.pepper.threadId, at(9, 30), "You've hit your usage limit. Try again at 3pm.");
     w.fail(rex.threadId, at(10), TRIAL_CREDIT_REFUSED.used_up);
-    w.fail(rex.threadId, at(10, 5), "This month's cloud computer hours are used up.", { place: { state: "cc-no-hours", params: { bot: "Rex" }, source: "works-on" } });
+    w.fail(rex.threadId, at(10, 5), "This month's cloud desktop hours are used up.", { place: { state: "cc-no-hours", params: { bot: "Rex" }, source: "works-on" } });
     w.fail(zed.threadId, at(10, 6), "Cloud computers can't start right now.", { place: { state: "cc-unavailable", params: { bot: "Zed" }, source: "works-on" } });
     w.fail(zed.threadId, at(10, 7), "turn interrupted — OpenMausBot restarted");
     w.tool(w.atlas.threadId, at(11), "mcp__composio__GMAIL_SEND_EMAIL", false, { output: "Error: 401 Unauthorized. The connected account's token has expired; reconnect Gmail." });
@@ -223,6 +234,14 @@ describe("needs you", () => {
       ["question", "Which draft should go out?"],
       ["question", "Which list should I send the newsletter to?"],
     ]);
+  });
+
+  it("lists a run's question once, where its copy can be answered, not in the run's own conversation too", () => {
+    const w = blocked();
+    const card = { title: "Which list should I send the newsletter to?", subtitle: "", options: ["Customers", "Everyone"], requestType: "question" as const, requestId: "q1" };
+    w.say(w.zed.threadId, { role: "bot", kind: "options", at: at(12, 0, 1), card, automation: { routineId: "r", runId: "run", name: "Newsletter", trigger: "schedule", executionThreadId: w.zedTask.threadId, scheduledFor: at(12), needsYou: true } });
+    const questions = todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou.filter((item) => item.kind === "question" && item.text === card.title);
+    expect(questions).toEqual([expect.objectContaining({ threadId: w.zed.threadId })]);
   });
 
   it("looks a week back whatever the window, and gives someone who is not an admin only their bots' questions", () => {

@@ -90,10 +90,12 @@ it("sets up schedule and webhook triggers from chat at Ask, with no confirmation
     expect(retry).toMatchObject({ duplicate: true, runId: accepted.runId });
     await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((run: any) => run.id === accepted.runId)?.status, { timeout: 20_000 }).toBe("completed");
 
-    // 4. A schedule run shows on the live card, not as a card per run in the conversation that made it.
+    // 4. Each run reports in the conversation that made it as the bot's own line, never as a card per run.
     const { run } = await api("POST", `/api/routines/${routineId}/run`, undefined, 201);
     await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === run.id)?.status, { timeout: 20_000 }).toBe("completed");
-    expect((await messages()).some((message) => message.kind === "routine.run" && message.routineRun?.runId === run.id)).toBe(false);
+    expect((await messages()).some((message) => message.kind === "routine.run")).toBe(false);
+    await expect.poll(async () => (await messages()).filter((message) => message.automation).map((message) => [message.automation.runId, message.text]), { timeout: 20_000 })
+      .toEqual([[accepted.runId, "Drafted the follow-up."], [run.id, "Drafted the follow-up."]]);
 
     // 5. manage_trigger pauses it, at Ask, with no card.
     const paused = await turn("Pause the morning summary.", [{ tool: "manage_trigger", arguments: { trigger_id: routineId, action: "pause" } }]);

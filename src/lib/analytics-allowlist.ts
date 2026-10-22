@@ -68,7 +68,7 @@ export const APP: readonly string[] = CURATED_CONNECTOR_SLUGS;
 export const BOT_TEMPLATE: readonly string[] = BOT_ROLES.map((role) => role.id);
 export const CLOUD_TIER = ["starter", "personal", "pro", "max"] as const;
 
-export const KEY_VIA = ["settings", "computer_panel", "chat_request"] as const;
+export const KEY_VIA = ["settings", "computer_panel", "chat_request", "apps"] as const;
 export type KeyVia = (typeof KEY_VIA)[number];
 export const KEY_RESULT = ["ok", "rejected", "unverified", "error"] as const;
 export type KeyResult = (typeof KEY_RESULT)[number];

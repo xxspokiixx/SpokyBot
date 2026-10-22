@@ -2,7 +2,7 @@
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
-import { WIDGET_TOOL_DEFINITIONS } from "./agents-widget-tools.ts";
+import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 
 /** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
@@ -361,7 +361,7 @@ const TOOL_DEFINITIONS = [
       required: ["path"],
     },
   },
-  ...WIDGET_TOOL_DEFINITIONS,
+  ...CHAT_CARD_TOOL_DEFINITIONS,
   {
     name: "post_to_room",
     description:
@@ -380,7 +380,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_bot",
     description:
-      "Create a specialist bot in your section. Chief of Staff only. It is created immediately and the person can undo it. instructions become its soul. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps start disabled and the bot runs at the workspace's default access level. Assign work through coordinate_bots. Maximum four new bots per turn.",
+      "Chief of Staff only: add a specialist to your section now; the person can undo it. instructions become its soul. Omit modelSelection for the workspace default, or use exact IDs from list_team_setup. It starts with connected apps off, at the default access level. Assign work with coordinate_bots. At most four per turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -396,7 +396,6 @@ const TOOL_DEFINITIONS = [
           maxLength: 1024,
           description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
         },
-        suggestion: { type: "boolean", description: "True if the user did not ask for this bot." },
       },
       required: ["name", "role", "instructions"],
     },
@@ -404,6 +403,11 @@ const TOOL_DEFINITIONS = [
   {
     name: "list_team_setup",
     description: "Chief of Staff only: list authorized teams, teammate IDs, and exact engine/model choices for team setup. Call before proposing configuration; never invent model IDs. Existing thread models are independent of bot defaults.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    name: "list_team_library",
+    description: "Chief of Staff only: ready-made teams, each with a summary and roles (lead = the team's Chief). Create roles with create_bot.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -942,7 +946,7 @@ const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
 export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "shared_computer"]);
 const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 const CHIEF_ONLY_TOOL_NAMES = new Set([
-  "create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread",
+  "create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread",
 ]);
 const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);

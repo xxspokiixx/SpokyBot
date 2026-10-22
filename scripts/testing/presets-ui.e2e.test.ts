@@ -68,7 +68,7 @@ describe("Preset bots in the real renderer", () => {
     await click("Share as preset…");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("What's in the file");
     let dialog = await snapshot();
-    for (const line of ["Share New bot defaults as a preset", "follow-up", "Never included: model choices, folders, computers, approval levels"]) expect(dialog).toContain(line);
+    for (const line of ["Share New bot defaults as a preset", "follow-up", "Never included: model choices, folders, where bots work, approval levels"]) expect(dialog).toContain(line);
     await ui("screenshot", "--out", evidence("share"));
     await click("Save file");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Saved sky-1.0.0.openmaus.json");

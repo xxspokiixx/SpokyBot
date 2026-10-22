@@ -1,4 +1,4 @@
-import { FolderOpen, Network, Puzzle, Sun, Zap } from "lucide-react";
+import { FolderOpen, Puzzle, UsersRound, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
@@ -11,6 +11,7 @@ import { useSidebarToolsLayout, type SidebarDensity } from "@/lib/sidebar-prefer
 import { useStore } from "@/state/store";
 
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import { UpdateIndicator } from "./UpdateIndicator";
 
 
 function NavRow({
@@ -61,25 +62,6 @@ function NavRow({
   );
 }
 
-/** The Today page, at the top of the sidebar in every mode, like an inbox. */
-export function SidebarTodayNav({ density }: { density: SidebarDensity }) {
-  const { state, dispatch } = useStore();
-  const iconsOnly = density === "icons";
-  const active = state.activeView === "today";
-  return (
-    <div className={iconsOnly ? "flex justify-center px-2 pb-1" : "px-2 pb-2"}>
-      <NavRow
-        id="today"
-        label={t("sidebar.nav.today")}
-        iconsOnly={iconsOnly}
-        active={active}
-        icon={(on) => <Sun size={iconsOnly ? 20 : 18} className={on ? "text-accent" : "text-ink-secondary"} />}
-        onClick={() => dispatch({ type: "showToday" })}
-      />
-    </div>
-  );
-}
-
 export function SidebarAppsButton() {
   const { state, dispatch } = useStore();
   const label = t("sidebar.nav.apps");
@@ -93,12 +75,56 @@ export function SidebarAppsButton() {
       title={label}
       aria-pressed={state.pluginsOpen}
       className={cn(
-        "flex size-[46px] shrink-0 items-center justify-center rounded-xl transition-colors",
+        "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors",
         state.pluginsOpen ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
       )}
     >
       <Puzzle size={18} />
     </button>
+  );
+}
+
+/** An unseen failed run, or an app trigger in trouble. */
+function useAutomationsNeedYou(): boolean {
+  const { state } = useStore();
+  const appTriggers = useAppTriggers();
+  return state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
+}
+
+/** The bar beside the profile. In Simple mode it carries Automations and Team map as icons, so the sidebar itself is only
+ * Today and the chats; Advanced mode lists them as rows under Tools instead. Apps and the update button sit at the end. */
+export function SidebarBottomButtons() {
+  const { state, dispatch } = useStore();
+  const advanced = useAdvancedMode();
+  const automationsNeedYou = useAutomationsNeedYou();
+  const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
+  return (
+    <div data-sidebar-bottom-buttons="" className="flex shrink-0 items-center gap-0.5">
+      {!advanced && <>
+        <NavRow
+          id="automations"
+          label={t("sidebar.nav.automations")}
+          tourId="nav-automations"
+          iconsOnly
+          rail
+          active={state.activeView === "routines"}
+          attention={automationsNeedYou}
+          icon={(active) => <Zap size={18} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showRoutines", view: "list" })}
+        />
+        <NavRow
+          id="team-map"
+          label={t("sidebar.nav.teamMap")}
+          iconsOnly
+          rail
+          active={state.activeView === "team-map"}
+          icon={(active) => <UsersRound size={18} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showTeamMap" })}
+        />
+      </>}
+      <SidebarAppsButton />
+      <UpdateIndicator />
+    </div>
   );
 }
 
@@ -120,8 +146,7 @@ export function SidebarFooterNav({
   const toolbar = advanced && !iconsOnly && toolsLayout === "toolbar";
   const iconSize = iconsOnly && !rail ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
-  const appTriggers = useAppTriggers();
-  const automationsNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
+  const automationsNeedYou = useAutomationsNeedYou();
   const automationsRow = <NavRow
     id="automations"
     label={t("sidebar.nav.automations")}
@@ -142,8 +167,8 @@ export function SidebarFooterNav({
     icon={(active) => <FolderOpen size={iconSize} className={tone(active)} />}
     onClick={() => dispatch({ type: "showFiles" })}
   />;
-  // Simple mode keeps Automations and Files, without the Tools header.
-  if (!advanced && !iconsOnly) return <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{automationsRow}{filesRow}</nav>;
+  // Simple mode's Automations and Team map are icons in the bottom bar (SidebarBottomButtons); only Files stays a row.
+  if (!advanced && !iconsOnly) return filesRow ? <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{filesRow}</nav> : null;
 
   const rows = (
     <>
@@ -158,14 +183,15 @@ export function SidebarFooterNav({
         icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "togglePlugins", open: true })}
       />}
-      {advanced && (
+      {(advanced || iconsOnly) && (
         <NavRow
           id="team-map"
           label={t("sidebar.nav.teamMap")}
           tourId="team-tools"
           iconsOnly={iconsOnly || toolbar}
+          rail={rail}
           active={state.activeView === "team-map"}
-          icon={(active) => <Network size={iconSize} className={tone(active)} />}
+          icon={(active) => <UsersRound size={iconSize} className={tone(active)} />}
           onClick={() => dispatch({ type: "showTeamMap" })}
         />
       )}

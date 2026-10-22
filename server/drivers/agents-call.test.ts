@@ -294,3 +294,17 @@ describe("X research tools", () => {
     expect(result).toEqual({ text: "X research is off for this bot. Turn it on in this bot's settings under Access.", isError: true });
   });
 });
+
+describe("page tools", () => {
+  it("send the tool's arguments to their internal routes and hand back the sentence, or the refusal as an error", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const answers = [{ ok: true, status: 200, body: { ok: true, text: "Published “Bake sale” at https://abcdefghijklmnopqrstuvwxyz.mausbot.page/" } },
+      { ok: false, status: 402, body: { error: "You’ve used your 5 free pages. MausBot Cloud gives you more, and pages without the badge." } }];
+    const client = { api: async () => ({}), apiResponse: async (path: string, init?: RequestInit) => { calls.push({ path, body: JSON.parse(String(init?.body)) }); return answers.shift()!; } };
+    expect(await callTool("publish_page", { path: "site", title: "Bake sale" }, context({ client }))).toEqual({ text: "Published “Bake sale” at https://abcdefghijklmnopqrstuvwxyz.mausbot.page/" });
+    expect(await callTool("unpublish_page", { page_id: "abcdefghijklmnopqrstuvwxyz" }, context({ client })))
+      .toEqual({ text: "You’ve used your 5 free pages. MausBot Cloud gives you more, and pages without the badge.", isError: true });
+    expect(calls).toEqual([{ path: "/api/internal/pages/publish", body: { path: "site", title: "Bake sale" } },
+      { path: "/api/internal/pages/unpublish", body: { page_id: "abcdefghijklmnopqrstuvwxyz" } }]);
+  });
+});

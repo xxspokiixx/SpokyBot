@@ -830,6 +830,56 @@
   --identity-coral: #d1381f;
 }
 
+[data-skin="halloween"] {
+  --code-color-scheme: dark;
+  --color-app: #110d16;
+  --color-panel: #17121e;
+  --color-raised: #262030;
+  --color-raised-hover: #2e2539;
+  --color-composer: #1d1725;
+  --color-composer-ring: #352a40;
+  --color-card: #201a29;
+  --color-menu: #1e1827;
+  --color-inset: #1b1622;
+  --color-control: #262030;
+  --color-hairline: #3b3048;
+
+  --color-ink: #f8efe2;
+  --color-ink-secondary: #c2b3cc;
+  --color-ink-tertiary: #a898b4;
+
+  --color-accent: #ff7f1f;
+  --color-accent-border: #ff8f3a;
+  --color-accent-text: #ffa060;
+  --color-focus: #ff8f3a;
+  --color-accent-ink: #1d0e02;
+  --color-bubble-user: #3d2818;
+  --color-bubble-user-ink: #fff1e2;
+
+  --color-success: #7cc48f;
+  --color-danger: #f0727c;
+  --color-danger-ink: #240a0e;
+  --color-success-ink: #0d1a10;
+  --color-warning: #f2b45a;
+  --color-scrollbar: #3b3048;
+  --color-maus-line: #c2b3cc;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8c67cd;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
@@ -2261,6 +2311,53 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   box-shadow: 1.5px 1.5px 0 var(--color-accent-border);
 }
 
+/* The main pane only, and never the picker miniature. Isolation keeps the
+   bats behind the conversation. */
+@scope ([data-skin="halloween"]:not([data-skin-preview])) to ([data-skin]) {
+  main.bg-app {
+    isolation: isolate;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 90 90'%3E%3Cg fill='none' stroke='%23f8efe2' stroke-opacity='.12' stroke-linecap='round'%3E%3Cpath d='M0 0h72M0 0l62 34M0 0l34 62M0 0v72'/%3E%3Cpath d='M16 0c-2 6-6 9-16 10M32 0c-4 12-12 18-32 20M48 0c-6 18-20 28-48 32M60 0c-6 22-26 40-60 46'/%3E%3C/g%3E%3Cpath d='M32 40v14' stroke='%23f8efe2' stroke-opacity='.12'/%3E%3Ccircle cx='32' cy='57' r='3' fill='%23f8efe2' fill-opacity='.12'/%3E%3C/svg%3E"),
+      radial-gradient(60% 55% at 50% 100%, rgb(255 127 31 / 0.08), transparent 70%);
+    background-repeat: no-repeat;
+    background-position: 0 0, 0 0;
+    background-size: 96px 96px, 100% 100%;
+  }
+  main.bg-app::before,
+  main.bg-app::after {
+    content: "";
+    position: absolute;
+    inset: 64px 0 auto 0;
+    height: 120px;
+    z-index: -1;
+    pointer-events: none;
+    background: no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 32'%3E%3Cpath fill='%23f8efe2' fill-opacity='.15' d='M32 10C34 6 35 5 36 4L37 9C40 8 44 6 48 2C50 8 56 10 64 10C58 14 56 20 56 26C52 22 47 21 43 23C41 21 38 21 36 24C35 26 33 28 32 30C31 28 29 26 28 24C26 21 23 21 21 23C17 21 12 22 8 26C8 20 6 14 0 10C8 10 14 8 16 2C20 6 24 8 27 9L28 4C29 5 30 6 32 10Z'/%3E%3C/svg%3E");
+    background-size: 34px 17px;
+    animation: halloween-bat 52s linear infinite;
+  }
+  main.bg-app::after {
+    top: 104px;
+    background-size: 22px 11px;
+    animation-duration: 67s;
+    animation-delay: -30s;
+  }
+}
+
+@keyframes halloween-bat {
+  0% { background-position: -60px 40px; }
+  25% { background-position: 25% 22px; }
+  50% { background-position: 50% 48px; }
+  75% { background-position: 75% 26px; }
+  100% { background-position: calc(100% + 60px) 40px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-skin="halloween"] main.bg-app::before,
+  [data-skin="halloween"] main.bg-app::after {
+    display: none;
+  }
+}
+
 /* Disabled buttons.
    Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
    the button stays darker than the page and the white label survives. On a
@@ -2388,6 +2485,12 @@ button:disabled.bg-danger {
     --color-danger: color(display-p3 0.8102 0.2412 0.1727);
     --color-warning: color(display-p3 0.5248 0.3557 0.0473);
   }
+  :is([data-skin="halloween"]) {
+    --color-accent: color(display-p3 0.9556 0.5098 0.1754);
+    --color-accent-border: color(display-p3 0.9592 0.5706 0.2597);
+    --color-accent-text: color(display-p3 0.9634 0.6355 0.3925);
+    --color-focus: color(display-p3 0.9592 0.5706 0.2597);
+  }
 }
 
 /* Window drag regions. A header marked by useCaptionChrome().dragProps is
@@ -2487,3 +2590,30 @@ button:disabled.bg-danger {
   15%, 70% { opacity: 1; }
   100% { opacity: 0; transform: translate(20px, -34px) scale(1.1); }
 }
+
+/* Trace waterfall: AI steps lavender, tools pale teal, errors red, each mixed into the skin's card so every skin keeps its contrast. */
+.trace-bar { border: 1px solid transparent; }
+.trace-bar-step {
+  --trace-hue: #8b7cf6;
+  background: color-mix(in srgb, var(--trace-hue) 20%, var(--color-card));
+  border-color: color-mix(in srgb, var(--trace-hue) 42%, var(--color-card));
+}
+.trace-bar-tool {
+  --trace-hue: #2aa79a;
+  background: color-mix(in srgb, var(--trace-hue) 14%, var(--color-card));
+  border-color: color-mix(in srgb, var(--trace-hue) 36%, var(--color-card));
+}
+.trace-bar-group { background: color-mix(in srgb, #2aa79a 9%, var(--color-card)); border-style: dashed; }
+.trace-bar-error {
+  background: color-mix(in srgb, var(--color-danger) 20%, var(--color-card));
+  border-color: color-mix(in srgb, var(--color-danger) 60%, var(--color-card));
+}
+.trace-bar-span {
+  background: color-mix(in srgb, var(--color-ink) 6%, var(--color-card));
+  border-color: color-mix(in srgb, var(--color-ink) 13%, var(--color-card));
+}
+.trace-bar-span-error { border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-card)); }
+.trace-bar-running { mask-image: linear-gradient(to right, #000 70%, rgb(0 0 0 / 0.35)); }
+.trace-step-box { background: color-mix(in srgb, #8b7cf6 14%, var(--color-card)); border-color: color-mix(in srgb, #8b7cf6 30%, var(--color-card)); }
+.trace-step-ink { color: color-mix(in srgb, #7c6cf0 85%, var(--color-ink)); }
+.trace-tool-ink { color: color-mix(in srgb, #1f9a8c 80%, var(--color-ink)); }
