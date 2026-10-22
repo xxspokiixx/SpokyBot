@@ -15,6 +15,12 @@ describe("the one-time move's line", () => {
     expect(moveLine({ phase: "finishing" }, "cloud")).toMatchObject({ kind: "sending", text: "Moving to My Cloud… almost done" });
   });
 
+  it("with My Cloud too old to take a move, says it is updating and the move starts after, on either page", () => {
+    for (const page of ["local", "cloud"] as const) {
+      expect(moveLine({ phase: "copy", updating: true }, page)).toEqual({ kind: "sending", text: "My Cloud is updating. Your move starts when it's done.", extra: [] });
+    }
+  });
+
   it("after a day of failing says why, with Try again", () => {
     expect(moveLine({ phase: "copy", failing: { error: "My Cloud did not answer." } }, "local")).toMatchObject({ kind: "failed", text: "Your bots couldn't move to My Cloud yet: My Cloud did not answer.", retry: true });
     expect(moveLine({ phase: "finishing", failing: { error: null } }, "local")?.text).toBe("Your bots couldn't move to My Cloud yet.");
@@ -34,5 +40,6 @@ describe("the one-time move's line", () => {
   it("is in every language's own words", () => {
     setLocale("de");
     expect(moveLine({ phase: "copy" }, "local")?.text).toBe("Deine Bots ziehen in die Cloud um…");
+    expect(moveLine({ phase: "copy", updating: true }, "local")?.text).toBe("My Cloud wird gerade aktualisiert. Dein Umzug beginnt, sobald das erledigt ist.");
   });
 });

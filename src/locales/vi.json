@@ -4435,6 +4435,7 @@
   "cloudSend.move.waiting": "Đang chuyển bot của bạn lên Cloud… chờ {name} làm xong",
   "cloudSend.move.waitingAny": "Đang chuyển bot của bạn lên Cloud… chờ các bot làm xong",
   "cloudSend.move.finishing": "Đang chuyển lên Cloud… sắp xong",
+  "cloudSend.move.updating": "My Cloud đang cập nhật. Việc chuyển sẽ bắt đầu khi cập nhật xong.",
   "cloudSend.move.failing": "Bot của bạn chưa chuyển lên Cloud được: {error}",
   "cloudSend.move.failingPlain": "Bot của bạn chưa chuyển lên Cloud được.",
   "cloudSend.move.done": "Mọi thứ từ máy tính này đã ở đây: {list}.",

@@ -1903,6 +1903,7 @@
   "cloudSend.move.waiting": "Deine Bots ziehen in die Cloud um… warte, bis {name} fertig ist",
   "cloudSend.move.waitingAny": "Deine Bots ziehen in die Cloud um… warte, bis deine Bots fertig sind",
   "cloudSend.move.finishing": "Umzug in die Cloud… fast fertig",
+  "cloudSend.move.updating": "My Cloud wird gerade aktualisiert. Dein Umzug beginnt, sobald das erledigt ist.",
   "cloudSend.move.failing": "Deine Bots konnten noch nicht in die Cloud umziehen: {error}",
   "cloudSend.move.failingPlain": "Deine Bots konnten noch nicht in die Cloud umziehen.",
   "cloudSend.move.done": "Alles von diesem Computer ist hier: {list}.",

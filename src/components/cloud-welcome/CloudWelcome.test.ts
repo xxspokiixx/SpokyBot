@@ -343,6 +343,34 @@ describe("CloudWelcome", () => {
       expect(state({ ...notice({ last: sentLast({ reason: "logins" }) }), auto: true })).toBe("sending");
     });
 
+    it("started fresh while nothing came over (moves not on yet), Bring your stuff shows as skipped, never done, until things do come over", async () => {
+      // Seen in the real app on Oct 22: with moves off, Continue on a new Cloud ticked Bring your stuff though nothing came.
+      withSend(notice());
+      fixture.state.bots = [fixture.state.bots[0]];
+      render();
+      await vi.waitFor(() => expect(button("Continue")).toBeDefined());
+      click("Continue");
+      await vi.waitFor(() => expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull());
+      expect(rail().hasAttribute("data-finished")).toBe(false);
+      expect(rail().hasAttribute("data-skipped")).toBe(true);
+      expect(rail().textContent).toBe("Bring your stuffYour bots and chats (Skipped)");
+      flushSync(() => pushNotice(notice({ running: true, runningReason: "move" })));
+      await vi.waitFor(() => expect(rail().hasAttribute("data-bringing")).toBe(true));
+      flushSync(() => pushNotice(notice({ last: sentLast() })));
+      await vi.waitFor(() => expect(rail().hasAttribute("data-finished")).toBe(true));
+      expect(rail().hasAttribute("data-skipped")).toBe(false);
+
+      // Opened again later, with nothing come over: still skipped.
+      flushSync(() => root.unmount());
+      root = createRoot(host);
+      resetCloudWelcome();
+      withSend(notice());
+      fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [SHOWN, welcomeStepHint("bring"), CLOUD_SETUP_MOVE_SKIPPED] };
+      render();
+      await vi.waitFor(() => expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull());
+      expect([rail().hasAttribute("data-finished"), rail().hasAttribute("data-skipped")]).toEqual([false, true]);
+    });
+
     it("moves straight on to the AI while they come over, ticking Bring your stuff only once they arrived, never taking focus", async () => {
       withSend(notice({ running: true, runningReason: "move" }));
       render();

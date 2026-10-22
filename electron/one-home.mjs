@@ -123,6 +123,7 @@ export function createOneHome(deps) {
     if (journal.phase === "home-again" || journal.phase === "back") return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}) };
     const running = deps.send.snapshot?.()?.running;
     const chats = journal.phase === "copy" && running?.phase === "chats" && running.progress ? { done: running.progress.done, total: running.progress.total } : null;
+    if (journal.phase === "copy" && journal.updating && !running) return { phase: "copy", updating: true };
     const failing = journal.failingSince && now() - journal.failingSince >= FAILING_LINE_MS ? { error: journal.error ?? null } : null;
     const phase = FROZEN.has(journal.phase) || journal.phase === "switch" ? "finishing" : journal.phase;
     return { phase, ...(chats ? { chats } : {}), ...(phase === "wait" && waitingFor !== null ? { waitingFor } : {}), ...(failing ? { failing } : {}) };
@@ -150,8 +151,17 @@ export function createOneHome(deps) {
   async function copy(journal) {
     waitingFor = null;
     try { await deps.send.move(); }
-    catch (error) { return failed(journal, error, false); }
-    return write({ ...journal, phase: "wait", retryAt: undefined, hourly: undefined });
+    catch (error) { return error?.code === "outdated" ? updating(journal, error) : failed({ ...journal, updating: undefined }, error, false); }
+    return write({ ...journal, phase: "wait", retryAt: undefined, hourly: undefined, updating: undefined });
+  }
+
+  /** My Cloud is too old to take a move: it updates by itself, and the move starts once it has, so this is not the move
+   * failing and there is nothing to try again. */
+  function updating(journal, error) {
+    log(`one home: the move waits for My Cloud to update (${sentence(error?.message) ?? "too old"})`);
+    const tries = (journal.tries ?? 0) + 1;
+    write({ ...journal, phase: "copy", updating: true, tries, retryAt: now() + COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)] });
+    return null;
   }
 
   async function wait(journal) {
