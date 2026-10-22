@@ -247,6 +247,8 @@ export interface EndResult {
   needsInput?: { question: string; cards?: string[] };
   /** The turn stopped short and continues in place. */
   continue?: { note: string; handoffPath?: string };
+  /** The host's stall watchdog stopped the turn. */
+  stalled?: boolean;
 }
 
 export interface Owner {
