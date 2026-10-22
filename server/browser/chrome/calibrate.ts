@@ -11,7 +11,7 @@ import { IDENTITY_PROBE, type Identity, type IdentityProbe } from "../cdp/identi
 import type { CdpPage } from "../cdp/page.ts";
 import type { HostKind } from "./flags.ts";
 import { headedIdentity, isChromeIdentity } from "./identity.ts";
-import { launchChrome } from "./launch.ts";
+import { FIRST_START_MS, launchChrome } from "./launch.ts";
 import { browserRoot } from "./profile.ts";
 
 export interface CalibratedIdentity extends Identity {
@@ -95,7 +95,7 @@ export async function calibrateIdentity(options: CalibrateOptions): Promise<Cali
     host: options.host,
     ...(options.env ? { env: options.env } : {}),
     ...(options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
-    ...(options.handshakeTimeoutMs === undefined ? {} : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+    handshakeTimeoutMs: options.handshakeTimeoutMs ?? FIRST_START_MS,
   }).catch((error: unknown) => {
     page.close();
     rmSync(userDataDir, { recursive: true, force: true });

@@ -7,6 +7,7 @@ import { removeTempDir } from "../../testing/cleanup.ts";
 import { CdpBrowser } from "../cdp/browser.ts";
 import { FakeChrome } from "../testing/fake-chrome.ts";
 import { calibrateIdentity, identityFile, loadOrCalibrateIdentity, openOwnPage, type CalibratedIdentity } from "./calibrate.ts";
+import { FIRST_START_MS } from "./launch.ts";
 
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders) await removeTempDir(folder); });
@@ -98,6 +99,23 @@ describe("reading a Chrome's own identity", () => {
     expect(args).toContain("--remote-debugging-pipe");
     expect(args.filter((arg) => arg.startsWith("--remote-debugging-port"))).toEqual([]);
     expect(diagnosis.map((run) => run.slice(1))).toEqual(process.platform === "linux" ? [["--version"]] : []);
+  });
+
+  it.skipIf(process.platform === "win32")("gives the binary's first start, which a calibration always is, two minutes to answer", async () => {
+    const dir = folder();
+    const chrome = join(dir, "chrome");
+    writeFileSync(chrome, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const outcome = calibrateIdentity({ executablePath: chrome, host: "desktop", env: { PATH: "/usr/bin:/bin" }, tmpRoot: dir })
+        .then(() => "read", (error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(FIRST_START_MS - 1_000);
+      expect(await Promise.race([outcome, Promise.resolve("still waiting")])).toBe("still waiting");
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await outcome).toContain(`within ${FIRST_START_MS} ms`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reads it once per binary, and again after the binary changed in place", async () => {
