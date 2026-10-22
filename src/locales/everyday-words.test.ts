@@ -8,7 +8,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "the chat and the composer": [
     "chat.", "composer.", "attach.", "toolStep.", "approval.", "question.", "signIn.", "limits.", "call.", "task.", "room.",
   ],
-  "Today, notifications and alerts": ["today.", "attention.", "notifications.", "error.", "readyBots.", "app.loading."],
+  "notifications and alerts": ["attention.", "notifications.", "error.", "readyBots.", "app.loading."],
   "the sidebar and the switcher": ["sidebar."],
   "the bot panel": [
     "botPanel.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
