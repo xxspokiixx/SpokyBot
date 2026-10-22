@@ -678,10 +678,30 @@ connection and may turn your bots away.**
 **The default grant at the move.** The move to My Cloud turns lending on by
 itself (`installCloudLending(...).lendByDefault({ projects })`): the internet
 connection, Desktop, Documents and Downloads read only, each moved bot's own
-project folder with editing, and the screen only when it was lent before (and
-this app's computer control is ready). It adds to what is lent already, never
-takes away, and never undoes the person's own Off: lending they turned off
-(`stopped.reason "you"`) stays off, across restarts too.
+project folder with editing, and apps and screen when they were lent before or
+computer control already works here for this computer's own bots (on macOS:
+Accessibility and Screen Recording already granted, read from computer
+control's running state, never by asking macOS). It adds to what is lent
+already, never takes away, and never undoes the person's own Off: lending they
+turned off (`stopped.reason "you"`) stays off, across restarts too.
+
+**Use my Mac** (`electron/use-my-computer.mjs`). When the move leaves this
+computer not fully lent (apps and screen still off because macOS hasn't granted
+them yet), main shows one popup of its own, once: **Let your bots use this
+Mac?** (this PC, this computer), one plain line, **Use my Mac** and **Not now**.
+It waits for a shown window and a few seconds with no typing, so a key meant for
+the page never answers it. **Use my Mac** lends every part at once (undoing even
+the person's own earlier Off); where apps and screen still need macOS, the same
+press starts computer control again, which asks macOS, then opens each
+permission still missing in System Settings, Accessibility then Screen
+Recording, and starts computer control again whenever the person comes back.
+Screen Recording often works only after OpenMausBot restarts: the choice is kept
+(`use-my-computer.json`), and apps and screen go on once computer control works.
+**Not now** is never asked again on its own. A computer that moved before this
+version gets the same popup once, on its first launch after it. When a bot
+needs the computer, it gives the person `[Use my Mac](openmausbot://use-my-computer)`;
+in the desktop app that opens the same popup (on My Cloud's page only from a
+click), and anywhere else it is plain text.
 
 While lending is on, a menu-bar item shows it (**In use** while bots use this
 Mac: running something on it or browsing through it) with **Stop sharing**, and the
