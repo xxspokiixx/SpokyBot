@@ -5058,5 +5058,21 @@
   "chat.page.freeLimit": "Ya usaste tus {limit} páginas gratis. MausBot Cloud te da más, y páginas sin la insignia.",
   "chat.page.planLimit": "Ya usaste las {limit} páginas de tu plan {plan}. Deja de publicar una para hacer sitio.",
   "chat.page.morePages": "Conseguir más páginas",
-  "chat.activity.publishPage": "Publicando una página"
+  "chat.activity.publishPage": "Publicando una página",
+  "apps.x.title": "X (Twitter)",
+  "apps.x.description": "Busca y lee publicaciones en X para tus bots",
+  "apps.x.included": "Incluido en tu plan",
+  "apps.x.usage": "{used} de {max} llamadas a X este mes.",
+  "apps.x.usageTrial": "{used} de {max} llamadas a X en tu prueba gratis.",
+  "apps.x.resets": "Se renuevan el {date}.",
+  "apps.x.usedUp": "Las llamadas a X incluidas de este mes se han agotado. Se renuevan el {date}. Añade tu propia clave de treg para seguir.",
+  "apps.x.usedUpTrial": "Las llamadas a X incluidas en tu prueba gratis se han agotado. Tu cupo completo empieza el {date}. Añade tu propia clave de treg para seguir.",
+  "apps.x.own": "Usando tu clave de treg",
+  "apps.x.ownBilled": "Tus bots buscan y leen X con tu propia clave de treg. Las llamadas se cobran de tu saldo de treg.",
+  "apps.x.ownFirst": "Se usa primero tu propia clave de treg, y las llamadas se cobran de tu saldo de treg. Las llamadas a X incluidas en tu plan esperan hasta que la quites.",
+  "apps.x.addKey": "Añade tu clave de treg",
+  "apps.x.addKeyHelp": "Pega una clave de treg para que tus bots puedan buscar y leer X. Las llamadas se cobran de tu saldo de treg.",
+  "apps.x.connecting": "Conectando las llamadas a X incluidas en tu plan…",
+  "apps.x.useOwnKey": "Usar mi propia clave de treg",
+  "apps.x.remove": "Quitar la clave"
 }
