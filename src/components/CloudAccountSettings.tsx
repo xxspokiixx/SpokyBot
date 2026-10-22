@@ -166,8 +166,18 @@ export function CloudPlanOnCloud({ bridge, onConnectPhone }: { bridge: CloudPlan
 
 /** Security: the public native snapshot carries no credential and cannot activate a plan. */
 /** `onSignIn`: the sheet's email-code sign-in (the browser approval stays for openmausbot://cloud and Sign in again). */
-export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onConnectPhone, onAddCloud, onSignIn }: {
-  linkRequest?: number; cloudHome?: boolean; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void;
+/** On a Team Cloud: its people and plan live on the Cloud page, where the person signs in with their own email. */
+export function TeamPeopleCard({ team }: { team: { name: string; cloudPage?: string } }) {
+  return <Card title={t("cloudAccount.teamPeopleTitle")}>
+    <div data-cloud-plan="team" className="flex flex-col items-start gap-3">
+      <p className="text-[13px] text-ink-secondary">{t("cloudAccount.teamPeopleBody", { team: team.name })}</p>
+      {team.cloudPage && <a className="ui-button" href={team.cloudPage} target="_blank" rel="noreferrer">{t("cloudAccount.teamPeopleOpen")}</a>}
+    </div>
+  </Card>;
+}
+
+export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onConnectPhone, onAddCloud, onSignIn }: {
+  linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void;
 } = {}) {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const { platform } = useDesktopCapabilities().capabilities.host;
@@ -236,7 +246,8 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
   if (!bridge) {
     const plan = window.ogb?.remoteClient?.active || !cloudHome ? undefined : window.ogb?.cloudPlan;
     return <>
-      {plan ? <CloudPlanOnCloud bridge={plan} onConnectPhone={onConnectPhone} /> : <p className="text-[13px] text-ink-secondary">{t("cloudAccount.desktopOnly")}</p>}
+      {cloudHome && teamHome ? <TeamPeopleCard team={teamHome} />
+        : plan ? <CloudPlanOnCloud bridge={plan} onConnectPhone={onConnectPhone} /> : <p className="text-[13px] text-ink-secondary">{t("cloudAccount.desktopOnly")}</p>}
       {cloudHome && <LentComputersCard />}
     </>;
   }

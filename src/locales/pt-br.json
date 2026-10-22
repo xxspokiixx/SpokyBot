@@ -5836,5 +5836,21 @@
   "chat.preview.pointedPart": "uma parte da página",
   "chat.preview.removePoint": "Tirar {label}",
   "chat.preview.pointedAt": "Apontado: {parts}",
-  "chat.activity.publishPage": "Publicando uma página"
+  "chat.activity.publishPage": "Publicando uma página",
+  "apps.x.title": "X (Twitter)",
+  "apps.x.description": "Pesquise e leia posts no X para seus bots",
+  "apps.x.included": "Incluído no seu plano",
+  "apps.x.usage": "{used} de {max} chamadas ao X este mês.",
+  "apps.x.usageTrial": "{used} de {max} chamadas ao X no seu teste grátis.",
+  "apps.x.resets": "Elas renovam em {date}.",
+  "apps.x.usedUp": "As chamadas ao X incluídas deste mês acabaram. Elas renovam em {date}. Adicione sua própria chave do treg para continuar.",
+  "apps.x.usedUpTrial": "As chamadas ao X incluídas no seu teste grátis acabaram. Sua franquia completa começa em {date}. Adicione sua própria chave do treg para continuar.",
+  "apps.x.own": "Usando sua chave do treg",
+  "apps.x.ownBilled": "Seus bots pesquisam e leem o X com sua própria chave do treg. As chamadas são cobradas do seu saldo no treg.",
+  "apps.x.ownFirst": "Sua própria chave do treg é usada primeiro, e as chamadas são cobradas do seu saldo no treg. As chamadas ao X incluídas no seu plano esperam até você removê-la.",
+  "apps.x.addKey": "Adicione sua chave do treg",
+  "apps.x.addKeyHelp": "Cole uma chave do treg para seus bots pesquisarem e lerem o X. As chamadas são cobradas do seu saldo no treg.",
+  "apps.x.connecting": "Conectando as chamadas ao X incluídas no seu plano…",
+  "apps.x.useOwnKey": "Usar minha própria chave do treg",
+  "apps.x.remove": "Remover a chave"
 }
