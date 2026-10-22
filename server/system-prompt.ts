@@ -6,6 +6,7 @@ import { teammateAvailabilityPrompt, type RosterMember } from "./peer-roster.ts"
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { loginLabel, type LoginPlace } from "../shared/logins.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
+import { useMyComputerLink } from "../shared/use-my-computer.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
@@ -129,7 +130,7 @@ export const CLOUD_HOME_PLACE = "the user's My Cloud, their always-on OpenMausBo
 export { syncedFolders } from "./cloud-sync-store.ts";
 
 /** Their computer as they know it: "their PC MILIND-PC" on Windows, "their Mac" only on a Mac, else "their own computer". */
-function theirComputer(lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }>): { theirs: string; device: string } {
+function theirComputer(lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }>): { theirs: string; device: "PC" | "Mac" | "computer" } {
   const latest = lent[0];
   if (!latest) return { theirs: "their own computer", device: "computer" };
   const device = deviceWord(latest.platform);
@@ -142,7 +143,7 @@ export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyAr
   lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }> = []): string {
   const { theirs, device } = theirComputer(lent);
   return ` You run on ${CLOUD_HOME_PLACE}.` + (sharedComputerTools
-    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows. If none is online, say so in one sentence: use its say field when it has one (it names the computer and when it was last online), otherwise say they can turn on Let my bots use this ${device} under Settings → MausBot Cloud in OpenMausBot on that ${device}.${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
+    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows. If none is online, say so in one sentence: use its say field when it has one (it names the computer and when it was last online), otherwise give them ${useMyComputerLink(device)} to press in OpenMausBot on that ${device}: it asks them once and shares that ${device} with you.${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
     : ` You cannot see or use ${theirs}, its screen or its files from here. If they ask for something on it, say so in one sentence.`)
     + " Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
     + syncedFoldersPrompt(synced);
