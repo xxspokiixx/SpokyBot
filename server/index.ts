@@ -2251,6 +2251,7 @@ function hostTurnResult(node: HandoffView | undefined, generation: string, outco
   if (result.cap) return result;
   const cards = resumableCards(node.threadId, node.startedAt ?? node.createdAt, node.groupId ? node.botId : undefined);
   if (!cards.length) return result;
+  if (result.stalled) { stopCards(node.threadId, new Set(cards.map((card) => card.id))); return result; }
   parkedNodesToReconcile.add(node.id);
   return { ...result, cards: { question: `Waiting on the person: ${cards.map((card) => card.waits).join("; ")}`, ids: cards.map((card) => card.id) } };
 }
@@ -2284,11 +2285,10 @@ function releaseCardNode(threadId: string, messageId: string, reason: string): v
 
 /** Call before the Stop cancels the node, while the cards are still its own. */
 function stopParkedCards(threadId: string): void {
-  const ids = new Set<string>();
-  for (const node of coordinator.active()) {
-    if (node.threadId !== threadId || !(node.status === "waiting" || node.status === "queued")) continue;
-    for (const id of node.cards ?? []) ids.add(id);
-  }
+  stopCards(threadId, new Set(coordinator.active().filter((node) => node.threadId === threadId && (node.status === "waiting" || node.status === "queued")).flatMap((node) => node.cards ?? [])));
+}
+
+function stopCards(threadId: string, ids: ReadonlySet<string>): void {
   if (!ids.size) return;
   for (const message of store.messagesFor(threadId)) {
     if (!ids.has(message.id)) continue;
