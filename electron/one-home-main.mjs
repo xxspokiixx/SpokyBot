@@ -11,6 +11,7 @@ import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
 import { createMoveSession } from "./move-session.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
 import { createOneHome } from "./one-home.mjs";
+import { teamPlan } from "./cloud-team-plan.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
 
 const MOVE_LABEL = "Move to My Cloud";
@@ -37,7 +38,7 @@ export function oneHomeCloud(state) {
     ready: connected && machine?.status === "ready" && Boolean(machine.origin),
     moves: connected && machine?.moves === true,
     ended: connected && Boolean(machine?.hold),
-    paid: connected && state.entitlement?.status === "active" && !trialOn,
+    paid: connected && state.entitlement?.status === "active" && !trialOn && !teamPlan(state),
     ...(homecoming ? { homecoming: { installationId: homecoming.installationId, name: homecoming.name } } : {}),
     ...(connected && typeof state.deviceId === "string" && state.deviceId ? { signIn: state.deviceId } : {}),
   };

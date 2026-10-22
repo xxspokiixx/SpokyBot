@@ -57,7 +57,7 @@ Properties are counts, `true` or `false`, or words from fixed lists in the app's
 
 | List | Values |
 | --- | --- |
-| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live` |
+| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg` |
 | Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `meta`, `muse_code` |
 | App | The 24 apps Connected apps lists by default: `slack`, `github`, `gmail`, `googlecalendar`, `googlesheets`, `googledocs`, `googledrive`, `notion`, `linear`, `sentry`, `posthog`, `discord`, `twitter`, `reddit`, `zapier`, `hubspot`, `salesforce`, `jira`, `asana`, `trello`, `dropbox`, `airtable`, `figma`, `stripe`. Every other app is `other`. |
 | Starting role | `assistant`, `inbox`, `research`, `coder`, `community`, `ops` |
@@ -150,8 +150,8 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `team_imported` | You import a team | `members`: count; `source`: `library`, `file`, `github`, `organization`, `scout`; `mode`: `add`, `project`; `format`: `team`, `package`, `backup` |
 | `team_scouted` | The app suggests a team for a project folder | `signals`: count |
 | `bot_created` | You create a bot in the New bot dialog | `source`: `blank`, `template` (a starting role), `preset`; `template`: starting role, only when `source` is `template` |
-| `api_key_saved` | You save a key in Settings → API keys, in the Screen panel, from a bot's request in a chat, or by adding an OpenAI-compatible server | `provider`: key provider; `via`: `settings`, `computer_panel`, `chat_request`; `result`: `ok` (the provider accepted it), `rejected` (the provider refused it), `unverified` (saved, not checked), `error` (not saved) |
-| `api_key_removed` | You clear a key of your own in Settings → API keys or the Screen panel | `provider`: key provider; `via`: `settings`, `computer_panel` |
+| `api_key_saved` | You save a key in Settings → API keys, in the Screen panel, on the X card in Apps, from a bot's request in a chat, or by adding an OpenAI-compatible server | `provider`: key provider; `via`: `settings`, `computer_panel`, `apps`, `chat_request`; `result`: `ok` (the provider accepted it), `rejected` (the provider refused it), `unverified` (saved, not checked), `error` (not saved) |
+| `api_key_removed` | You clear a key of your own in Settings → API keys, the Screen panel or the X card in Apps | `provider`: key provider; `via`: `settings`, `computer_panel`, `apps` |
 | `engine_signed_in` | You finish signing in to an engine inside the app | `engine`: `claude`, `codex`, `grok`; `method`: `code`, `device_code`, `browser` |
 | `connector_connect` | A Connect you started in Connected apps ends | `app`: app; `result`: `connected` (the account it added works), `failed` or `expired` (that account failed or expired), `timed_out` (neither within two minutes) |
 | `app_snapshot` | Once a day, as described above | The properties in the snapshot table |

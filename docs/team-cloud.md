@@ -106,7 +106,7 @@ audience.** `mayRead(input, turn)` is true for the team's things and for the tur
 | Scout's main chat | the team's notes, the team's conversations | the team's notes |
 
 Where it is applied: visibility (`VisibleSet.thread` with each conversation's audience; a member's bot list carries only
-their conversations; search, SSE, attachments and the Today page go through the same check), the memory system prompt
+their conversations; search, SSE and attachments go through the same check), the memory system prompt
 (the turn's layer, plus the team's notes read-only), recall (`buildRecall.memoryIds`: the layer and the team's), recent
 work, `session_search` (memory of the layer and the team's; conversations the turn may read), memory writes
 (`/api/internal/memory`, `/memory/log`, the turn-outcome line, capture), "About the user", and the bot box, which puts the

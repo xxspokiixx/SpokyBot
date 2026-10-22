@@ -19,7 +19,7 @@ import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQue
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import {
   ActivityPanel, BotSettingsDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
-  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TodayPage, TriggersPage,
+  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
@@ -51,6 +51,7 @@ import { botShowsUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
+import { usePresence } from "@/hooks/use-presence";
 import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
 
@@ -105,6 +106,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     dispatch({ type: "togglePlugins", open: true, surface: request.surface });
   }, [dispatch]);
   useExternalChatLinks(state, dispatch);
+  usePresence(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const language = effectiveLanguage(useLanguageChoice(), state.config?.language);
   const [, setLocaleEpoch] = useState(0);
@@ -308,7 +310,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <TeamMapPage />
       ) : state.activeView === "files" ? (
         <FilesView />
-      ) : state.activeView === "today" ? <TodayPage /> : state.activeView === "routines" ? (
+      ) : state.activeView === "routines" ? (
         <TriggersPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
         <LocalVmWorkspace
