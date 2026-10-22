@@ -3945,6 +3945,8 @@
   "automations.status.done": "Done",
   "automations.needsYou": "Needs you: {reason}",
   "automations.lastRan": "last ran {when}",
+  "automations.checkedNothingNew": "checked {when}, nothing new",
+  "automations.readsAndDrafts": "reads and drafts only",
   "automations.next": "next: {when}",
   "automations.notRunYet": "hasn't run yet",
   "automations.runningNow": "running now",

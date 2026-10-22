@@ -1,20 +1,32 @@
 // The proactive main agent, wired from ordinary routines: the checks a routine runs before any AI turn, the
-// read-and-draft fence its runs work inside, and the brief its results become.
+// read-and-draft fence its runs work inside, the brief its results become, and the Chief's default "Keep an eye on my
+// day" routine, created once with no button on a personal install or a personal Cloud and never on a team's.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type { NeedsYouItem } from "../../shared/today.ts";
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
 import { connectorAccessDecision } from "../../shared/connector-scopes.ts";
 import type { Notification } from "../../shared/notification.ts";
+import { writeFileAtomic } from "../atomic.ts";
 import type { AppConfig } from "../config.ts";
 import { createConnectedReads, READ_APPS, type ReadApp } from "../connected-reads.ts";
 import { evaluateConnectorTools } from "../connector-verdict.ts";
 import type { DecisionRow } from "../decision-log.ts";
 import type { ProviderAdapter } from "../contracts.ts";
 import { createReadAndDraft } from "../read-and-draft.ts";
-import type { RoutineChecks, RoutineManager, RoutineRun } from "../routines.ts";
+import type { Routine, RoutineChecks, RoutineManager, RoutineRun } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { createBrief, type BriefDeps } from "./brief.ts";
 import { createRoutineChecks } from "./routine-checks.ts";
 
+export const WATCH_NAME = "Keep an eye on my day";
+export const WATCH_INSTRUCTIONS = [
+  "Keep an eye on my day for me.",
+  "- Email: pick what I must not miss: mail that needs my reply, mail from someone I meet today, and anything with a deadline. Leave out newsletters, receipts and notifications.",
+  "- Meetings: before a meeting with other people, prepare me in a few lines: who they are, why we are meeting, what is still open, and one next step.",
+].join("\n");
+const WATCH_FILE = "watch.json";
 /** The engines whose every tool use outside a run's allowlist reaches OpenMausBot's answerer and is refused there. */
 const FENCED_ENGINES = new Set(["claudeAgent"]);
 const READ_SLUG: Record<ReadApp, string> = { gmail: "GMAIL_FETCH_EMAILS", googlecalendar: "GOOGLECALENDAR_EVENTS_LIST" };
@@ -43,6 +55,8 @@ export interface ProactiveDeps {
   decide(row: Omit<DecisionRow, "at">): void;
   stale(event: RequestOpened): boolean;
   release(threadId: string): void;
+  /** A routine the server made for the owner is the owner's, as one they made here. */
+  owned(routine: Routine): void;
 }
 
 export function createProactive(deps: ProactiveDeps) {
@@ -98,9 +112,34 @@ export function createProactive(deps: ProactiveDeps) {
     mayDraft: checks.mayDraft, drafted: checks.drafted,
   });
 
+  const watchFile = join(deps.dataDir, WATCH_FILE);
+  const watchMade = (): boolean => {
+    try { return Boolean(JSON.parse(readFileSync(watchFile, "utf8")).createdAt); } catch { return false; }
+  };
+  /** The Chief's default routine, once: pausing or deleting it is how it is switched off, so it is never made again. */
+  function ensureWatch(): Routine | null {
+    const manager = deps.routines();
+    const chief = brief.chief();
+    if (deps.team || !manager || !chief || watchMade()) return null;
+    const existing = manager.listRoutines().find((routine) => routine.botId === chief.id && routine.deliver === "brief" && routine.checks?.length);
+    const routine = existing ?? manager.create({
+      name: WATCH_NAME, prompt: WATCH_INSTRUCTIONS, botId: chief.id, enabled: true, timeoutMinutes: 15,
+      schedule: { type: "interval", everyMinutes: 15, anchorAt: Date.now() + 15 * 60_000 },
+      checks: ["calendar", "mail", "runs"], access: "read-and-draft", deliver: "brief",
+    });
+    if (!existing) deps.owned(routine);
+    try {
+      writeFileAtomic(watchFile, `${JSON.stringify({ version: 1, routineId: routine.id, createdAt: Date.now() })}\n`, { mode: 0o600 });
+    } catch (error) {
+      console.warn(`watch: could not save ${watchFile}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return routine;
+  }
+
   let timer: ReturnType<typeof setInterval> | null = null;
   return {
     checks: routineChecks, fence, brief,
+    ensureWatch,
     /** A routine run's turn ended: a briefing run's answer becomes the brief's rows. */
     runSettled: (run: RoutineRun, turnId: string | undefined): void => void brief.consume(run, turnId).catch((error: unknown) => console.warn("brief: a run's answer was not kept", error)),
     start(): void {
