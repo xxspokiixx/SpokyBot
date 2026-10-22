@@ -210,7 +210,7 @@ describe("a person's own Composio project", () => {
     ]);
 
     const file = join(DATA_DIR, "composio-auth-configs.json");
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(readFileSync(file, "utf8")).toContain("ac_xero_team");
     expect(readFileSync(file, "utf8")).not.toContain("ak_pick");
     vi.resetModules();

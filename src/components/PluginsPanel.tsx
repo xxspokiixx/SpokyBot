@@ -29,6 +29,8 @@ import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
 import { HighLevelCard } from "./HighLevelCard";
+import { X_CARD_SEARCH, XCard } from "./XCard";
+import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import { openBotSettings } from "./bot-panel/panel-link";
 
 export interface ToolkitCard {
@@ -128,50 +130,6 @@ export function connectorSetupNotice(state: {
   return { key: "connectors.notConfigured", tone: "warning" };
 }
 
-export function mergeCurrentConnectorStatus(
-  current: Record<string, ConnectorStatus>,
-  incoming: Record<string, ConnectorStatus>,
-  latestGenerations: ReadonlyMap<string, number>,
-  requestGenerations: ReadonlyMap<string, number>,
-) {
-  const next = { ...current };
-  for (const [slug, state] of Object.entries(incoming)) {
-    if ((latestGenerations.get(slug) ?? 0) !== (requestGenerations.get(slug) ?? 0)) continue;
-    next[slug] = state;
-  }
-  return next;
-}
-
-export function mergeCompleteConnectorStatus(
-  current: Record<string, ConnectorStatus>,
-  incoming: Record<string, ConnectorStatus>,
-  latestGenerations: ReadonlyMap<string, number>,
-  requestGenerations: ReadonlyMap<string, number>,
-  authoritative = true,
-) {
-  const next = { ...current };
-  if (!authoritative) return mergeCurrentConnectorStatus(next, incoming, latestGenerations, requestGenerations);
-  for (const [slug, state] of Object.entries(current)) {
-    if (incoming[slug]) continue;
-    if (!state.connected && !state.accounts?.length) continue;
-    if ((latestGenerations.get(slug) ?? 0) !== (requestGenerations.get(slug) ?? 0)) continue;
-    next[slug] = { connected: false, pending: false, status: "not_connected", accounts: [] };
-  }
-  return mergeCurrentConnectorStatus(next, incoming, latestGenerations, requestGenerations);
-}
-
-export function onlyLatestConnectorResponses(
-  incoming: Record<string, ConnectorStatus>,
-  latestRequests: ReadonlyMap<string, number>,
-  requestIds: ReadonlyMap<string, number>,
-) {
-  return Object.fromEntries(
-    Object.entries(incoming).filter(
-      ([slug]) => (latestRequests.get(slug) ?? 0) === (requestIds.get(slug) ?? 0),
-    ),
-  );
-}
-
 export function ServiceIcon({ card, className = "size-11" }: { card: Pick<ToolkitCard, "logo" | "domain" | "label">; className?: string }) {
   const [stage, setStage] = useState(card.logo ? 0 : card.domain ? 1 : 2);
   if (stage === 0 && card.logo) {
@@ -259,6 +217,7 @@ export function PluginsPanel() {
   const [category, setCategory] = useState<string | null>(null);
   // Appended after the older state so tests that seed state by call order keep their indices.
   const [highLevelConnected, setHighLevelConnected] = useState<boolean | null>(null);
+  const [xConnected, setXConnected] = useState<boolean | null>(null);
 
   const polls = useRef(new Map<string, () => void>());
   const statusGenerations = useRef(new Map<string, number>());
@@ -510,20 +469,20 @@ export function PluginsPanel() {
       .finally(() => setBusySlug(null));
   };
 
-  const matching = (cards ?? []).filter(
-    (c) => !search || `${c.label} ${c.slug} ${connectorDescription(c)}`.toLowerCase().includes(search.toLowerCase()),
-  );
+  const matching = (cards ?? []).filter((c) => (!managedConnectorUnavailableReason(mode, c.slug) || hasActiveConnection(status[c.slug]))
+    && (!search || `${c.label} ${c.slug} ${connectorDescription(c)}`.toLowerCase().includes(search.toLowerCase())));
   const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length);
   const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
   const whopMatches = !search || `whop ${t("whop.description")}`.toLowerCase().includes(search.toLowerCase().trim());
   const showWhop = whopMatches && (filter === "all" || (filter === "connected" && whopConnected !== false));
   const highLevelMatches = !search || `highlevel high level growably crm ${t("highlevel.description")}`.toLowerCase().includes(search.toLowerCase().trim());
   const showHighLevel = highLevelMatches && (filter === "all" || (filter === "connected" && highLevelConnected !== false));
+  const showX = (!search || `${X_CARD_SEARCH} ${t("apps.x.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (filter === "all" || (filter === "connected" && xConnected !== false));
   const visible = (filter === "connected" ? matching.filter((card) => isConnected(card.slug)) : matching)
     .map((card, index) => ({ card, index }))
     .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
     .map(({ card }) => card);
-  const connectedCount = Object.values(status).filter(hasActiveConnection).length + Number(whopConnected === true) + Number(highLevelConnected === true);
+  const connectedCount = Object.values(status).filter(hasActiveConnection).length + Number(whopConnected === true) + Number(highLevelConnected === true) + Number(xConnected === true);
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
@@ -544,7 +503,7 @@ export function PluginsPanel() {
   const moreCategories = ranked.more;
   const categoryInMore = category !== null && moreCategories.includes(category);
   const inCategoryView = filter === "all" && category !== null;
-  const nativeCardsShown = !inCategoryView && (showWhop || showHighLevel);
+  const nativeCardsShown = !inCategoryView && (showWhop || showHighLevel || showX);
   const categoryCards = inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible;
   const sectioned = filter === "all" && !search && category === null;
   const sections = sectioned ? catalogSections(visible, isConnected, ranked.inline) : [];
@@ -843,6 +802,7 @@ export function PluginsPanel() {
                 <div className={showWhop && !inCategoryView ? "contents" : "hidden"}>
                   <McpServersPanel whopCard refreshKey={whopRefresh} onWhopConnection={setWhopConnected} />
                 </div>
+                <div data-native-card="x" className={showX && !inCategoryView ? "contents" : "hidden"}><XCard refreshKey={whopRefresh} onConnection={setXConnected} /></div>
                 <div data-native-card="highlevel" className={showHighLevel && !inCategoryView ? "contents" : "hidden"}>
                   <HighLevelCard refreshKey={whopRefresh} onConnection={setHighLevelConnected} />
                 </div>
