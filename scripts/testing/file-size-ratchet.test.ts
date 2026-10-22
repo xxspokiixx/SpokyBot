@@ -15,15 +15,15 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 17022,
+  "server/index.ts": 16949,
   "src/state/store.tsx": 3525,
-  "electron/main.mjs": 3319,
+  "electron/main.mjs": 3291,
   "server/store.ts": 2450,
-  "src/components/Sidebar.tsx": 2318,
+  "src/components/Sidebar.tsx": 2317,
   "server/drivers/claude.ts": 2160,
   "server/drivers/acp/core.ts": 1893,
   "server/drivers/codex.ts": 1872,
-  "server/routines.ts": 1613,
+  "server/routines.ts": 1589,
   "src/components/ComputerPanel.tsx": 1835,
   "src/components/RoutineCalendarPage.tsx": 1750,
   "server/config.ts": 1435,
@@ -33,7 +33,7 @@ const LINES: Record<string, number> = {
   "src/components/LocalComputerSection.tsx": 1475,
   "src/components/CursorAvatar.tsx": 1329,
   "server/skills.ts": 1391,
-  "server/composio.ts": 1345,
+  "server/composio.ts": 1320,
   "server/vps-computer.ts": 1369,
   "scripts/mcp-server.ts": 1487,
   "server/boat.ts": 1258,
@@ -44,7 +44,7 @@ const LINES: Record<string, number> = {
   "src/components/PhoneSetupFlow.tsx": 1283,
   "server/cli.ts": 1080,
   "src/components/ChatMarkdown.tsx": 1039,
-  "src/components/PluginsPanel.tsx": 1113,
+  "src/components/PluginsPanel.tsx": 1073,
   "server/org-library.ts": 1003,
   "src/components/AttachmentPreview.tsx": 1044,
 };

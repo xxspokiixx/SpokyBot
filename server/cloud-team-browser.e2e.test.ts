@@ -88,7 +88,9 @@ it("shows a member's live browser only from her own chat, to her and the admins,
   expect((await team.as(admin, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${adaThread}`)).status).not.toBe(403);
 }, hostTimeout(60_000));
 
-it.skipIf(!stub)("drives each member's private chat, the group chat and the team's chat on browsers of their own, and opens a view on the conversation's", async () => {
+// The agent-browser stand-in is a POSIX shell script, which Windows cannot run as a program, so no command reaches its
+// log there; a Team Cloud is a Linux machine. The other checks in this file still run on Windows.
+it.skipIf(!stub || process.platform === "win32")("drives each member's private chat, the group chat and the team's chat on browsers of their own, and opens a view on the conversation's", async () => {
   const session = (audience: string) => `bot-${bot.id}${audience === "team" ? "" : audienceBrowserSuffix(audience as `member:${string}`)}`;
   const ADA = session(`member:${personKey({ id: "", email: MEMBER_A.email })}`), CLEO = session(`member:${personKey({ id: "", email: MEMBER_C.email })}`);
   const ROOM = session(`room:${roomId}`), TEAM = session("team");
