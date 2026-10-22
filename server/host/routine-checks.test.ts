@@ -84,13 +84,22 @@ describe("a routine's checks", () => {
     expect(result.run!.prompt).toContain("title planning");
     expect(s.checks.items(result.run!.key)?.mail.map((email) => email.id)).toEqual(["b", "a"]);
     expect(await s.checks.check(s.routine(), { manual: false, hold: "running" })).toEqual({ wakeAt: expect.any(Number) });
-    s.checks.commit(result.run!.key, s.checks.items(result.run!.key)!.prep.map((one) => one.key));
+    s.checks.commit(result.run!.key);
     s.advance(15 * MINUTE);
     expect((await s.checks.check(s.routine(), { manual: false })).run).toBeUndefined();
     const saved = JSON.parse(readFileSync(s.file, "utf8")).routines.watch;
     expect(saved.judged).toEqual(["b", "a"]);
     expect(Object.values(saved.meetings as Record<string, { preppedAt?: number }>).map((one) => one.preppedAt)).toEqual([expect.any(Number)]);
     expect(JSON.stringify(saved)).not.toContain("Subject a");
+  });
+
+  it("a meeting its run's answer did not prepare is settled too, never handed out every tick", async () => {
+    const s = setup();
+    s.meeting("review", 150);
+    const first = await s.checks.check(s.routine({ checks: ["calendar"] }), { manual: false });
+    s.checks.commit(first.run!.key);
+    s.advance(15 * MINUTE);
+    expect((await s.checks.check(s.routine({ checks: ["calendar"] }), { manual: false })).run).toBeUndefined();
   });
 
   it("a run that fails gives its items back for the next check", async () => {

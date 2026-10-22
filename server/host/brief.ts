@@ -71,8 +71,8 @@ export interface BriefDeps {
   address(): string | undefined;
   /** The run's answer was unreadable: it fails like any run, and its items go back. */
   failRun(runId: string, why: string): void;
-  /** The run's items are kept: `prepped` are the meetings it prepared. */
-  keep(key: string, prepped: readonly string[]): void;
+  /** The run's answer was read: its items are settled. */
+  keep(key: string): void;
   items(key: string): { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> } | null;
 }
 
@@ -361,7 +361,6 @@ export function createBrief(deps: BriefDeps) {
       return;
     }
     const at = now();
-    const prepped: string[] = [];
     if (!result.quiet) {
       for (const pick of result.important) {
         const email = items.mail.find((one) => one.id === pick.id)!;
@@ -370,12 +369,11 @@ export function createBrief(deps: BriefDeps) {
       }
       for (const prep of result.prep) {
         const meeting = items.prep.find((one) => one.key === prep.id)!;
-        prepped.push(meeting.key);
         if (state.preps.some((one) => one.key === meeting.key && one.at > at - DAY)) continue;
         if (postCard(prepCard({ event: meeting.event, prep: prep.brief, timeZone: timeZone(), now: at }))) state.preps = [...state.preps, { key: meeting.key, at }].slice(-MAX_ROWS);
       }
     }
-    deps.keep(key, prepped);
+    deps.keep(key);
     save();
     if (!result.quiet && result.important.length) await render({ create: true, notify: true });
   }

@@ -97,8 +97,9 @@ export function troubleSentence(trouble: ReadonlyArray<{ app: ReadApp; signedOut
 }
 
 export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
-  /** Keeps a run's items: its answer was read. `prepped` are the meetings it prepared. */
-  commit(key: string, prepped?: readonly string[]): void;
+  /** Keeps a run's items: its answer was read, so every email and meeting it was given is settled, sorted or prepared
+   * or not, and none is handed out again. */
+  commit(key: string): void;
   /** The run with this key may write a draft answering this thread, to this address, once. */
   mayDraft(key: string, threadId: string, to: string | undefined): boolean;
   drafted(key: string, threadId: string): void;
@@ -148,7 +149,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     save();
   }
 
-  function commit(key: string, prepped: readonly string[] = []): void {
+  function commit(key: string): void {
     const owner = ownerOf(key);
     handed.delete(key);
     if (!owner) return;
@@ -161,7 +162,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
       const record = entry.meetings?.[meeting];
       if (!record) continue;
       delete record.prepStartedAt;
-      if (prepped.includes(meeting)) record.preppedAt = now();
+      record.preppedAt = now();
     }
     delete entry.pending![key];
     save();

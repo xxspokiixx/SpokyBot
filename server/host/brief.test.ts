@@ -33,7 +33,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[] } = {}) {
   store.setChiefOfStaff(chief.id);
   const notified: string[] = [];
   const failed: Array<[string, string]> = [];
-  const kept: Array<[string, readonly string[]]> = [];
+  const kept: string[] = [];
   const items = new Map<string, { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> }>();
   const runs: RoutineRun[] = [];
   let busy = false;
@@ -41,7 +41,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[] } = {}) {
     store, dataDir: dir, now: () => now, hosted: options.hosted ?? false, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => busy,
     notify: (_bot, _thread, detail) => notified.push(detail), runs: () => runs, needsYou: () => options.needsYou ?? [], engineName: () => "Claude",
     hostTimeZone: () => "UTC", session: () => null, address: () => "me@x.test",
-    failRun: (id, why) => failed.push([id, why]), keep: (key, prepped) => kept.push([key, prepped]), items: (key) => items.get(key) ?? null,
+    failRun: (id, why) => failed.push([id, why]), keep: (key) => kept.push(key), items: (key) => items.get(key) ?? null,
   });
   let brief = make();
   const thread = () => store.bot(chief.id)!.threadId;
@@ -96,7 +96,7 @@ describe("the brief", () => {
     s.notified.length = 0;
     s.items.set("chk-1", { mail: [ada], prep: [{ key: "uid-1", event: { ...standup, start: s.now() + 60 * MINUTE, end: s.now() + 90 * MINUTE } }] });
     await s.brief.consume(s.watchRun("chk-1", '{"important": [{"id": "m1", "why": "Ada needs the numbers by Friday.", "needsReply": true}], "prep": [{"id": "uid-1", "brief": "Ada runs it."}]}'), "turn-1");
-    expect(s.kept).toEqual([["chk-1", ["uid-1"]]]);
+    expect(s.kept).toEqual(["chk-1"]);
     expect(s.shown()).toContain("Ada: Q3 numbers");
     expect(s.shown()).toContain("Waiting on your reply · Ada needs the numbers by Friday.");
     const actions = widgetActions(s.card()!.widget!.root as WidgetRoot).map((entry) => [entry.label, entry.action.type]);

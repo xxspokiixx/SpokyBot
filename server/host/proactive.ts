@@ -90,7 +90,7 @@ export function createProactive(deps: ProactiveDeps) {
     session: () => (composio.configured(cfg) ? reads.session() : null),
     address: () => checks.address(),
     failRun: (runId, why) => deps.routines()?.rejectResult(runId, why),
-    keep: (key, prepped) => checks.commit(key, prepped),
+    keep: (key) => checks.commit(key),
     items: (key) => checks.items(key),
   });
   const checks = createRoutineChecks({
