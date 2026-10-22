@@ -132,14 +132,14 @@ describe("Claude usage limits", () => {
 
   it("says which limit, when it resets, and what runs until then", () => {
     expect(claudeLimitMessage(claudeLimitRefusal(WEEKLY), WEEKLY_TEXT, BEFORE_RESET, "Asia/Calcutta"))
-      .toBe("This Claude account has reached its weekly limit, which resets Oct 12, 2:30 PM (Asia/Calcutta). Until then, switch this bot to another engine or Claude account.");
+      .toBe("This Claude account has reached its weekly limit, which resets Oct 12, 2:30 PM (Asia/Calcutta). Until then, switch this bot to another AI or Claude account.");
     expect(claudeLimitMessage({ window: "five_hour", resetsAt: 1791795600 }, undefined, BEFORE_RESET, "UTC"))
-      .toBe("This Claude account has reached its 5-hour limit, which resets Oct 12, 9:00 AM (UTC). Until then, switch this bot to another engine or Claude account.");
+      .toBe("This Claude account has reached its 5-hour limit, which resets Oct 12, 9:00 AM (UTC). Until then, switch this bot to another AI or Claude account.");
     expect(claudeLimitMessage({ window: "seven_day_opus", resetsAt: 1791795600 }, undefined, BEFORE_RESET, "UTC"))
       .toBe("This Claude account has reached its weekly Opus limit, which resets Oct 12, 9:00 AM (UTC). Until then, choose another model for this bot.");
     expect(claudeLimitMessage({ window: "seven_day_sonnet", resetsAt: null })).toBe("This Claude account has reached its weekly Sonnet limit. For now, choose another model for this bot.");
     expect(claudeLimitMessage({ window: "overage", resetsAt: null }, "You're out of usage credits. Contact your admin to add more."))
-      .toBe("This Claude account has reached its usage limit (Claude says: \"You're out of usage credits. Contact your admin to add more\"). For now, switch this bot to another engine or Claude account.");
+      .toBe("This Claude account has reached its usage limit (Claude says: \"You're out of usage credits. Contact your admin to add more\"). For now, switch this bot to another AI or Claude account.");
     expect(claudeLimitMessage(claudeLimitRefusal(WEEKLY), WEEKLY_TEXT, 1791795600_000 + 1, "UTC")).toContain(`(Claude says: "${WEEKLY_TEXT}")`);
     expect(claudeLimitMessage(claudeLimitRefusal(WEEKLY), undefined, BEFORE_RESET, "Mars/Olympus")).toContain("which resets 2026-10-12 09:00 UTC.");
   });

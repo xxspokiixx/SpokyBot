@@ -1,9 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { LOGIN_HANDOFF_REQUEST, LOGIN_HANDOFF_RESULT, ONE_PASSWORD_DEAD_HERE, receiveLoginHandoff, totpAddress, type LoginHandoffResult } from "./login-handoff.ts";
+import { loginFingerprints } from "./cloud-send-verify.ts";
+import { LOGIN_HANDOFF_REQUEST, LOGIN_HANDOFF_RESULT, ONE_PASSWORD_DEAD_HERE, receiveLoginHandoff, totpAddress, type ConnectionHandoffAnswer, type LoginHandoffResult } from "./login-handoff.ts";
 import { LoginStore } from "./login-store.ts";
 import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import { parseTotpKey } from "./totp.ts";
@@ -77,5 +78,27 @@ describe("the private login handoff to the desktop's main process", () => {
     ]) expect(ask(malformed)).toBe(true);
     expect(posted).toEqual([]);
     for (const other of [null, "text", [], { type: "openmausbot:phone-secret-save-result" }, { type: LOGIN_HANDOFF_RESULT, requestId: "request-0008" }]) expect(ask(other)).toBe(false);
+  });
+});
+
+describe("the private ask for credential fingerprints, which checks what a move carried", () => {
+  it("answers each login's and every connection's fingerprint under main's nonce, and refuses when the connections could not be read", async () => {
+    const { store, posted } = setup();
+    store.create({ site: "example.com", hosts: ["example.com"], exactHost: false, username: "alice", password: PASSWORD, source: "settings", bots: "all" });
+    const nonce = "z".repeat(43);
+    let connections: (what: unknown) => Promise<ConnectionHandoffAnswer> = async () => ({ ok: true, secrets: { "key:openrouter": "k".repeat(64) } });
+    const post = (reply: LoginHandoffResult) => { posted.push(reply); return true; };
+    receiveLoginHandoff({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0201", what: { kind: "verify-secrets", nonce } }, store, post, undefined, (what) => connections(what));
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({ type: LOGIN_HANDOFF_RESULT, requestId: "request-0201", ok: true, secrets: { ...loginFingerprints(nonce, store), "key:openrouter": "k".repeat(64) } });
+    expect(JSON.stringify(posted)).not.toContain(PASSWORD);
+    connections = async () => { throw new Error("no"); };
+    receiveLoginHandoff({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0202", what: { kind: "verify-secrets", nonce } }, store, post, undefined, (what) => connections(what));
+    await vi.waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]).toEqual({ type: LOGIN_HANDOFF_RESULT, requestId: "request-0202", ok: false, error: "This computer's apps and keys could not be checked." });
+    receiveLoginHandoff({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0203", what: { kind: "verify-secrets", nonce: "short" } }, store, post, undefined,
+      async () => ({ ok: true, secrets: {} }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(posted, "a nonce too short to keep fingerprints apart is not answered").toHaveLength(2);
   });
 });

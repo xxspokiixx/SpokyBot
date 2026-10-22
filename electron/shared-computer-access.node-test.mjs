@@ -36,9 +36,11 @@ function stubWorkspace() {
   const environmentId = randomUUID();
   const env = { id: "fixture-workspace", name: "Fixture", origin: "https://workspace.test" };
   const json = value => ({ ok: true, status: 200, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
-  const state = { connected: null, work: [] };
-  let deliver;
+  const state = { connected: null, work: [], results: [] };
+  let deliver, settle = () => {};
   state.delivered = new Promise(resolve => { deliver = resolve; });
+  /** Every result, in the order the jobs were answered, once `count` have arrived. */
+  state.answered = count => new Promise(resolve => { settle = () => { if (state.results.length >= count) resolve(state.results); }; settle(); });
   const fetchImpl = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return json({ kind: "session", id: sessionId });
@@ -51,7 +53,7 @@ function stubWorkspace() {
       return json({ job: { id: randomUUID(), operation: { computer_id: state.connected.id, folder_id: state.connected.folders[0]?.id, ...operation } } });
     }
     if (route.endsWith("/lease")) return json({ active: true });
-    if (route.endsWith("/result")) { deliver(body.result); return json({}); }
+    if (route.endsWith("/result")) { deliver(body.result); state.results.push(body.result); settle(); return json({}); }
     if (route.endsWith("/disconnect")) return json({});
     throw new Error(`fixture workspace has no route ${route}`);
   };
@@ -115,10 +117,60 @@ test("folder boundary rejects traversal, links, oversized files and unknown fold
     await symlink(dir, path.join(dir, "linked"));
     await assert.rejects(run({ action: "read_file", path: "linked/note.txt" }), /Symbolic links/);
   }
-  await writeFile(path.join(dir, "large.txt"), Buffer.alloc(262145));
-  await assert.rejects(run({ action: "read_file", path: "large.txt" }), /256 KiB/);
+  await writeFile(path.join(dir, "large.txt"), Buffer.alloc(2 * 1024 * 1024 + 1));
+  await assert.rejects(run({ action: "read_file", path: "large.txt", encoding: "base64" }), /2 MiB/);
   await assert.rejects(run({ action: "list_files", folder_id: randomUUID() }), /not been shared/);
   await assert.rejects(validateSharedFolders([{ id: randomUUID(), path: path.parse(dir).root, write: false }]), /specific folders/);
+});
+
+test("a file up to 2 MiB is read whole, as base64 under the server's 4 MB body, while a write stays at 256 KiB", async t => {
+  const { dir, folder, run } = await fixture(t);
+  const bytes = Buffer.alloc(2 * 1024 * 1024, 7);
+  await writeFile(path.join(dir, "photo.bin"), bytes);
+  const read = await run({ action: "read_file", path: "photo.bin", encoding: "base64" });
+  assert.deepEqual(Buffer.from(payload(read).content, "base64"), bytes, "the whole 2 MiB file arrives");
+  const body = JSON.stringify({ jobId: randomUUID(), result: read });
+  assert.ok(Buffer.byteLength(body) < 4_000_000, `the result body is ${Buffer.byteLength(body)} bytes, over the server's 4,000,000`);
+  await writeFile(path.join(dir, "notes.txt"), "a".repeat(300 * 1024));
+  assert.equal(payload(await run({ action: "read_file", path: "notes.txt" })).bytes, 300 * 1024, "a text file over 256 KiB reads too");
+  folder.write = true;
+  await assert.rejects(run({ action: "write_file", path: "big.txt", content: "b".repeat(256 * 1024 + 1) }), /limited to 256 KiB/);
+  await run({ action: "write_file", path: "fits.txt", content: "b".repeat(256 * 1024) });
+  assert.equal((await stat(path.join(dir, "fits.txt"))).size, 256 * 1024);
+});
+
+test("text that escapes past the server's body limit is refused with the way to read it, never sent to fail there", async t => {
+  const { dir, run } = await fixture(t);
+  // Each quote is escaped twice on the way: one byte becomes four.
+  await writeFile(path.join(dir, "quotes.json"), "\"".repeat(1024 * 1024 + 1024));
+  await assert.rejects(run({ action: "read_file", path: "quotes.json" }), /Read it with encoding base64/);
+  const asBase64 = await run({ action: "read_file", path: "quotes.json", encoding: "base64" });
+  assert.equal(payload(asBase64).bytes, 1024 * 1024 + 1024);
+});
+
+test("no folder grant reaches a browser's saved passwords, the Windows credential vault and its keys, startup programs or ~/.cua", async t => {
+  const { personalSecretPaths } = await import("./shared-computer-access.mjs");
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-secrets-home-")));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const secret = (relative) => path.join(home, ...relative.split("/"));
+  const windows = [
+    "AppData/Local/Google/Chrome/User Data", "AppData/Local/Microsoft/Edge/User Data", "AppData/Local/BraveSoftware/Brave-Browser/User Data",
+    "AppData/Roaming/Mozilla", "AppData/Roaming/Microsoft/Credentials", "AppData/Local/Microsoft/Credentials", "AppData/Roaming/Microsoft/Protect",
+    "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup", ".cua",
+  ];
+  const listed = new Set(personalSecretPaths(home));
+  assert.deepEqual(windows.filter((relative) => !listed.has(secret(relative))), [], "every one of them is protected");
+  // Through the real boundary: AppData lent as a folder still hides each one.
+  for (const relative of windows) await mkdir(secret(relative), { recursive: true });
+  await writeFile(path.join(secret("AppData/Roaming/Microsoft/Protect"), "master-key"), "dpapi");
+  await writeFile(path.join(secret(".cua"), "token"), "cua");
+  const appData = { id: randomUUID(), name: "AppData", path: secret("AppData"), write: false };
+  const grant = { enabled: true, folders: [appData], terminal: false, computer: false, protectedPaths: personalSecretPaths(home) };
+  const run = (operation) => executeSharedOperation(grant, { folder_id: appData.id, ...operation }, new AbortController().signal);
+  await assert.rejects(run({ action: "read_file", path: "Roaming/Microsoft/Protect/master-key" }), /Desktop credentials/);
+  await assert.rejects(run({ action: "list_files", path: "Local/Google/Chrome/User Data" }), /Desktop credentials/);
+  const lentHome = { id: randomUUID(), name: "cua", path: secret(".cua"), write: false };
+  await assert.rejects(executeSharedOperation({ ...grant, folders: [lentHome] }, { folder_id: lentHome.id, action: "read_file", path: "token" }, new AbortController().signal), /Desktop credentials/);
 });
 
 test("terminal and computer control are separately off, and revocation fails closed", async t => {
@@ -366,6 +418,51 @@ test("filesystem identities keep all 64 bits instead of rounding distinct inode 
     return info;
   });
   assert.equal(payload(await run({ action: "read_file", path: "ordinary.txt" })).content, "allowed");
+});
+
+test("with the whole home folder lent, keys, a browser profile and this app's data are still refused, while ordinary files read", async () => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-lent-home-")));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  let sharing;
+  try {
+    // A temporary home: isHomeFolder (and so the home opt-in) follows HOME, and nothing here touches the real one.
+    process.env.HOME = home; process.env.USERPROFILE = home;
+    const put = async (relative, content) => {
+      const file = path.join(home, ...relative.split("/"));
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content);
+    };
+    const secrets = [".ssh/id_ed25519", "Library/Application Support/Google/Chrome/Default/Cookies", ".openmausbot/config.json"];
+    for (const relative of secrets) await put(relative, `fixture ${relative}`);
+    await put("Documents/plan.txt", "an ordinary file");
+    const stub = stubWorkspace();
+    stub.state.work.push(...secrets.map(relative => ({ action: "read_file", path: relative })),
+      { action: "read_file", path: "Library/Application Support/OpenMausBot/computer-sharing.json" },
+      { action: "read_file", path: "Documents/plan.txt" }, { action: "list_files" });
+    // Wired as main wires it: the grants file under the app's own profile, and this app's data folder in protectedPaths.
+    sharing = createComputerSharing({
+      file: path.join(home, "Library", "Application Support", "OpenMausBot", "computer-sharing.json"), fetch: stub.fetchImpl, home,
+      environments: () => [stub.env], enabled: async () => true, cuaConnection: async () => null, protectedPaths: [path.join(home, ".openmausbot")],
+    });
+    const info = await sharing.identity(stub.env);
+    // Lent as the picker lends it after its warning: the home folder itself, read only even when edits are asked for.
+    await sharing.save(stub.env, { folders: [{ id: randomUUID(), path: home, write: true, home: true }], terminal: false, computer: false }, info);
+    const results = await stub.state.answered(secrets.length + 3);
+    assert.deepEqual(stub.state.connected.folders.map(({ write }) => write), [false]);
+    const refused = results.slice(0, secrets.length + 1);
+    for (const [index, result] of refused.entries()) {
+      assert.equal(result.isError, true, `${[...secrets, "the grants file"][index]} is refused`);
+      assert.match(result.content[0].text, /Desktop credentials/);
+    }
+    assert.equal(results[secrets.length + 1].isError, undefined);
+    assert.equal(payload(results[secrets.length + 1]).content, "an ordinary file");
+    const listed = Object.fromEntries(payload(results[secrets.length + 2]).entries.map(({ name, type }) => [name, type]));
+    assert.deepEqual([listed[".ssh"], listed[".openmausbot"], listed.Documents], ["protected", "protected", "directory"]);
+  } finally {
+    sharing?.close();
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("the harness data directory is protected through a broad share", async t => {

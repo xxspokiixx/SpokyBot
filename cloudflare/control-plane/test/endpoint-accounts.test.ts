@@ -56,7 +56,7 @@ describe("endpoint account configuration", () => {
     expect(configured.endpointAccounts.slice(1).map(({ apiToken: _token, ...account }) => account)).toEqual([{
       accountId: "bbb5305f06e28a6f2abaac299f3b09dc",
       companionHostSuffix: "mausbot.si",
-      dnsRecordLimit: 200,
+      dnsRecordLimit: 3500,
       minAppVersion: "0.1.104",
       newEndpoints: true,
       tunnelLimit: 1000,
@@ -69,15 +69,15 @@ describe("endpoint account configuration", () => {
   });
 
   it("deploys every account's limits at its real Cloudflare quotas", () => {
-    // openmausbot.com is a Pro zone (3,500 DNS records); mausbot.si a Free
-    // zone added after September 2024 (200). Both accounts allow 1,000 tunnels.
+    // openmausbot.com and mausbot.si are both Pro zones (3,500 DNS records;
+    // mausbot.si was Free, 200, until Oct 21). Both accounts allow 1,000 tunnels.
     const production = JSON.parse(env.TEST_PRODUCTION_ENDPOINT_ACCOUNTS) as unknown[];
     const deployed = readConfig(withAccounts(production)).endpointAccounts;
     expect(deployed.map(({ companionHostSuffix, dnsRecordLimit, tunnelLimit }) => (
       { companionHostSuffix, dnsRecordLimit, tunnelLimit }
     ))).toEqual([
       { companionHostSuffix: "openmausbot.com", dnsRecordLimit: 3500, tunnelLimit: 1000 },
-      { companionHostSuffix: "mausbot.si", dnsRecordLimit: 200, tunnelLimit: 1000 },
+      { companionHostSuffix: "mausbot.si", dnsRecordLimit: 3500, tunnelLimit: 1000 },
     ]);
   });
 

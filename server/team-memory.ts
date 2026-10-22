@@ -148,6 +148,27 @@ export class TeamMemory {
     }
   }
 
+  /** Another server's entries for this team, as they are there: one this team already has, by id or by its key, stays
+   * as it is here. How many were added. */
+  adopt(section: string | null | undefined, entries: readonly unknown[]): number {
+    const held = this.entries(section, true);
+    const ids = new Set(held.map((entry) => entry.id));
+    const keys = new Set(held.filter(active).map((entry) => entry.key));
+    let added = 0;
+    for (const raw of entries) {
+      const parsed = entrySchema.safeParse(raw);
+      if (!parsed.success || !active(parsed.data)) continue;
+      const entry = { ...parsed.data, key: parsed.data.key ?? `${parsed.data.kind}:${parsed.data.name.toLowerCase()}` };
+      if (ids.has(entry.id) || keys.has(entry.key)) continue;
+      held.push(entry);
+      ids.add(entry.id);
+      keys.add(entry.key);
+      added++;
+    }
+    if (added) this.save();
+    return added;
+  }
+
   list(section: string | null | undefined, includeHistory = false): TeamMemoryEntry[] {
     return this.entries(section).filter(entry => includeHistory || active(entry)).map((entry) => ({ ...structuredClone(entry), revision: teamMemoryRevision(entry) }));
   }

@@ -113,9 +113,9 @@ const until = async (check, what, ms = 5000) => {
   assert.fail(`timed out waiting for ${what}`);
 };
 
-test("lends to the person's own Cloud with the maintainer flag off; never a terminal", async t => {
+test("lends to the person's own Cloud with the maintainer flag off; no terminal unless it is asked for", async t => {
   const { folderPath, home, sharing, maintainerChecks, summaries } = await lendingFixture(t);
-  const lent = await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false, terminal: true });
+  const lent = await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
   assert.equal(lent.enabled, true);
   await connected(sharing, 1, home);
   assert.equal(home.connects[0].terminal, false);
@@ -128,6 +128,27 @@ test("lends to the person's own Cloud with the maintainer flag off; never a term
   assert.equal(maintainerChecks(), 0, "a Cloud grant never consults the maintainer flag");
   assert.ok(summaries.some(summary => summary.lending.includes(env.id)));
   assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", false], ["read_file", true]]);
+});
+
+test("the terminal is lent only when asked for with exactly true: the bots can then run commands here, it is listed in Activity, and it does not outlive the switch", async t => {
+  const { folderPath, home, sharing } = await lendingFixture(t);
+  const folders = [{ id: randomUUID(), path: folderPath, write: false }];
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false, terminal: "true" })).terminal, false, "only a real true counts");
+  const lent = await sharing.saveCloud(env, { folders, screen: false, terminal: true });
+  assert.equal(lent.terminal, true);
+  await connected(sharing, 2, home);
+  assert.equal(home.connects.at(-1).terminal, true);
+  home.push({ action: "run_command", command: "echo fixture-terminal" });
+  await until(() => home.results.length === 1, "the command result");
+  assert.notEqual(home.results[0].isError, true);
+  assert.match(home.results[0].content[0].text, /fixture-terminal/);
+  assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", true]]);
+  // The terminal alone is a grant; turning lending off reports no terminal, and a plain save never brings it back.
+  assert.equal((await sharing.saveCloud(env, { folders: [], screen: false, terminal: true })).enabled, true);
+  sharing.revoke(env);
+  assert.equal(sharing.cloudState(env).terminal, false);
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false })).terminal, false);
+  await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), /terminal/);
 });
 
 test("refuses to lend unless the Cloud sign-in is verified for this exact machine, and never to a server that is not a Cloud home", async t => {
@@ -329,7 +350,7 @@ test("quitting the app pauses lending; it never switches it off, even mid-reconn
   assert.equal(after.cloudState(env).enabled, true, "the next launch still lends");
 });
 
-test("the menu-bar indicator exists only while lending, says when the Cloud is using the Mac, and stops lending", () => {
+test("the menu-bar indicator exists only while lending, reads In use while bots use the Mac, and turns lending off", () => {
   const trays = [];
   class Tray {
     constructor() { this.destroyed = false; this.title = ""; this.menu = null; trays.push(this); }
@@ -339,19 +360,19 @@ test("the menu-bar indicator exists only while lending, says when the Cloud is u
   const Menu = { buildFromTemplate: items => items };
   const nativeImage = { createFromPath: () => ({ resize: () => ({}) }) };
   let stops = 0, opens = 0;
-  const indicator = createLendingIndicator({ Tray, Menu, nativeImage, iconPath: "icon.png", onStop: () => stops++, onOpen: () => opens++ });
+  const indicator = createLendingIndicator({ Tray, Menu, nativeImage, iconPath: "icon.png", onStop: () => stops++, onOpen: () => opens++, device: "Mac" });
   indicator.update({ lending: false, busy: false });
   assert.equal(trays.length, 0, "nothing in the menu bar while nothing is lent");
   indicator.update({ lending: true, busy: false });
   assert.equal(trays.length, 1);
   assert.equal(trays[0].title, "");
-  assert.match(trays[0].menu[0].label, /can use this computer/);
+  assert.equal(trays[0].menu[0].label, "Your bots can use this Mac");
   indicator.update({ lending: true, busy: true });
   assert.equal(trays.length, 1);
   assert.equal(trays[0].title, "In use");
-  assert.match(trays[0].menu[0].label, /using this computer now/);
-  trays[0].menu.find(item => item.label === "Stop lending").click();
-  trays[0].menu.find(item => item.label === "Lending settings…").click();
+  assert.equal(trays[0].menu[0].label, "Your bots are using this Mac now");
+  trays[0].menu.find(item => item.label === "Stop sharing").click();
+  trays[0].menu.find(item => item.label === "Sharing settings…").click();
   assert.deepEqual([stops, opens], [1, 1]);
   indicator.update({ lending: false, busy: true });
   assert.equal(trays[0].destroyed, true, "gone as soon as lending ends");

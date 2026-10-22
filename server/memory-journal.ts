@@ -1,10 +1,11 @@
 // Kept outside the workspace on purpose: an audit trail the audited bot can rewrite is not an audit trail.
 // A journal write must never fail the change it records.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import {
   MEMORY_INDEX,
@@ -189,6 +190,24 @@ function isEntry(value: unknown): value is MemoryJournalEntry {
   // SAFETY: shape probe on a parsed JSON line; the fields the panel keys on are checked below
   const row = value as Record<string, unknown>;
   return typeof row.id === "string" && typeof row.at === "number" && typeof row.path === "string" && typeof row.kind === "string";
+}
+
+/** Another server's changes to this bot's memory, by id, in time order among this server's own: they describe that
+ * server's files, so none of them can be reverted here. How many were added. */
+export async function adoptMemoryJournal(botId: string, entries: readonly MemoryJournalEntry[]): Promise<number> {
+  await flushMemoryJournal(botId);
+  const held = readMemoryJournal(botId, MAX_ROWS);
+  const ids = new Set(held.map((entry) => entry.id));
+  const added = entries.filter((entry) => isEntry(entry) && !ids.has(entry.id)).map((entry): MemoryJournalEntry => ({ ...entry, botId, before: null, canRevert: false,
+    revertUnavailableReason: "This change was made on another computer, so it cannot be reverted here." }));
+  if (!added.length) return 0;
+  let kept = "";
+  try { kept = readFileSync(journalFile(botId), "utf8"); } catch {}
+  const rows = [...kept.split("\n").filter(Boolean), ...added.map((entry) => JSON.stringify(entry))];
+  const at = (line: string) => { try { return Number((JSON.parse(line) as { at?: unknown }).at) || 0; } catch { return 0; } };
+  mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
+  writeFileAtomic(journalFile(botId), `${rows.map((line, index) => ({ line, index, at: at(line) })).sort((a, b) => a.at - b.at || a.index - b.index).map((row) => row.line).join("\n")}\n`, { mode: 0o600 });
+  return added.length;
 }
 
 export function readMemoryJournal(botId: string, limit = 50): MemoryJournalEntry[] {

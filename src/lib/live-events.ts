@@ -1,6 +1,7 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
+import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
 
 export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
@@ -110,6 +111,14 @@ function parseLiveFrame(data: string): LiveFrame | null {
   if (candidate.cursor !== undefined && candidate.cursor !== String(candidate.cursor)) return null;
   if (candidate.resumed !== undefined && candidate.resumed !== Boolean(candidate.resumed)) return null;
   return candidate as LiveFrame;
+}
+
+function tapVoiceProbe(frame: ServerFrame): void {
+  if (frame.kind === "runtime") {
+    recordRuntimeEvent(frame.event);
+  } else if (frame.kind === "message" && frame.message?.role === "bot" && frame.message?.kind === "text") {
+    recordBotTextMessage(frame.message, frame.threadId);
+  }
 }
 
 function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlatform | null {
@@ -258,14 +267,6 @@ export function openLiveEvents(
       const frame = parseLiveFrame(event.data);
       if (!frame) return;
 
-      if (sleepingFrame(frame as LiveFrame & { state?: unknown })) {
-        // The home agreed to sleep: close quietly (not a lost connection) and stay closed until the person is back.
-        clearRetry();
-        closeSource();
-        markCloudAsleep();
-        return;
-      }
-
       if (isLivePing(frame)) {
         // An open event only proves a handshake; a ping proves the stream stayed usable.
         retryAttempt = 0;
@@ -315,7 +316,19 @@ export function openLiveEvents(
         }
       }
 
-      if (frame.kind !== "hello") handlers.onFrame(frame);
+      if (sleepingFrame(frame as LiveFrame & { state?: unknown })) {
+        // The home agreed to sleep: close quietly (not a lost connection) and stay closed until the person is back. The
+        // cursor is past this frame by now, so waking never resumes before it: a Cloud that replays it would close us again.
+        clearRetry();
+        closeSource();
+        markCloudAsleep();
+        return;
+      }
+
+      if (frame.kind !== "hello") {
+        tapVoiceProbe(frame as ServerFrame);
+        handlers.onFrame(frame);
+      }
     };
   };
 

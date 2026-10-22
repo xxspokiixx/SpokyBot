@@ -100,7 +100,7 @@ describe("Settings in Simple mode", () => {
     expect(SIMPLE_PAGES.length).toBeLessThanOrEqual(6);
     expect(html).not.toContain("data-settings-group=");
     expect(html).not.toContain("data-settings-section=");
-    for (const hidden of ["usage", "backups", "experimental", "workspaces", "skills"]) expect(html).not.toContain(`value="${hidden}"`);
+    for (const hidden of ["backups", "experimental", "workspaces", "skills"]) expect(html).not.toContain(`value="${hidden}"`);
     const picker = html.match(/<select aria-label="Settings"[\s\S]*?<\/select>/)![0];
     expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "appearance", "ai", "computers", "cloud", "account"]);
   });
@@ -109,7 +109,7 @@ describe("Settings in Simple mode", () => {
     const placed = SIMPLE_PAGES.flatMap((page) => page.sections);
     expect(new Set(placed).size).toBe(placed.length);
     const hidden = SECTIONS.map((entry) => entry.id).filter((id) => !placed.includes(id));
-    expect(hidden).toEqual(["skills", "usage", "backups", "workspaces", "experimental"]);
+    expect(hidden).toEqual(["skills", "backups", "workspaces", "experimental"]);
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
@@ -132,17 +132,17 @@ describe("Settings in Simple mode", () => {
     expect(html).toContain("More providers for OpenCode bots");
   });
 
-  it("stacks Remote access, Servers, Local VM, the built-in browser and Logins on Computers", () => {
+  it("stacks Remote access, Servers, Bot desktops, the built-in browser and Logins on Devices", () => {
     fixture.section = "companion";
     const html = render();
     expect(currentPage(html)).toBe("computers");
     expect(blocks(html)).toEqual(["companion", "desktopWorkspaces", "computer", "browser", "logins"]);
     const headings = [...html.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["Remote access", "Servers", "Local VM", "Built-in browser", "Logins"]);
+    expect(headings).toEqual(["Remote access", "Servers", "Bot desktops", "Built-in browser", "Logins"]);
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
-  it("gives MausBot Cloud its own page, and stacks Organization and Import on Account in the desktop app", () => {
+  it("gives MausBot Cloud its own page, and stacks Organization, Import and Usage on Account in the desktop app", () => {
     fixture.section = "cloudAccount";
     let html = render();
     expect(currentPage(html)).toBe("cloud");
@@ -150,26 +150,29 @@ describe("Settings in Simple mode", () => {
     fixture.section = "organization";
     html = render();
     expect(currentPage(html)).toBe("account");
-    expect(blocks(html)).toEqual(["organization", "import"]);
+    expect(blocks(html)).toEqual(["organization", "import", "usage"]);
     expect(markers(html)).toContain("import");
   });
 
-  it("adds People and Activity to Account for a hosted workspace's admins in a browser", () => {
+  it("adds People and Activity to Account, above Usage, for a hosted workspace's admins in a browser", () => {
     vi.stubGlobal("window", {});
     fixture.ownerOrAdmin = true;
     fixture.section = "people";
     const html = render();
     expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
-    expect(blocks(html)).toEqual(["people", "activity"]);
+    expect(blocks(html)).toEqual(["people", "activity", "usage"]);
   });
 
-  it("drops Account when nothing on it is shown", () => {
+  it("keeps Account for Usage alone when nothing else on it is shown", () => {
     vi.stubGlobal("window", {});
     fixture.config = { ...fixture.config, cloudHome: true };
-    expect(pages(render())).toEqual(["general", "appearance", "ai", "computers"]);
+    fixture.section = "usage";
+    const html = render();
+    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
+    expect(blocks(html)).toEqual(["usage"]);
   });
 
-  it("keeps a paired remote client's reduced set: Appearance, and Computers with Remote access and Servers", () => {
+  it("keeps a paired remote client's reduced set: Appearance, and Devices with Remote access and Servers", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, remoteClient: { active: true } } });
     fixture.section = "desktopWorkspaces";
     const html = render();
@@ -200,7 +203,6 @@ describe("Settings in Simple mode", () => {
   });
 
   it.each<[AppSettingsSection, string]>([
-    ["usage", "usage"],
     ["backups", "backups"],
     ["experimental", "skillAuthoring"],
   ])("opens a hidden page (%s) for as long as it is the open one", (section, content) => {
@@ -228,7 +230,7 @@ describe("Settings in Simple mode", () => {
 describe("the built-in browser switch", () => {
   const browserSwitch = () => fixture.switches.find((props) => props["aria-label"] === "Enable the built-in browser");
 
-  it.each([false, true])("writes features.browser from Computers (advanced: %s)", async (advanced) => {
+  it.each([false, true])("writes features.browser from Devices (advanced: %s)", async (advanced) => {
     fixture.advancedMode = advanced;
     fixture.section = "computer";
     const html = render();
@@ -256,7 +258,7 @@ describe("the built-in browser switch", () => {
     expect(browserSwitch()).toBeUndefined();
   });
 
-  it("is found by searching for the browser under Local VM in Advanced", () => {
+  it("is found by searching for the browser under Bot desktops in Advanced", () => {
     const computer = SECTIONS.find((entry) => entry.id === "computer")!;
     const experimental = SECTIONS.find((entry) => entry.id === "experimental")!;
     expect(computer.keywords).toContain("browser");

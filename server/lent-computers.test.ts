@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +31,7 @@ describe("what a server remembers about computers lent to it", () => {
     now += 60_000;
     lent.connected("cloud-home", { id: again, name: "ASH-PC", folders: 0, terminal: false, screen: true });
     const reread = new LentComputers(path, () => now);
-    expect(reread.list("cloud-home")).toEqual([{ id: again, person: "cloud-home", name: "ASH-PC", platform: "win32", folders: 0, terminal: false, screen: true,
+    expect(reread.list("cloud-home")).toEqual([{ id: again, person: "cloud-home", name: "ASH-PC", platform: "win32", folders: 0, terminal: false, screen: true, internet: false,
       lastSeenAt: now, lastUsedAt: Date.UTC(2026, 9, 7, 14, 2) + 90_000, stoppedAt: null }]);
     expect(reread.list("someone-else")).toEqual([]);
     expect(reread.list(null)).toEqual([]);
@@ -46,10 +46,10 @@ describe("what a server remembers about computers lent to it", () => {
     const record = { id: randomUUID(), person: "cloud-home", name: "ASH-PC", platform: "win32" as const, folders: 1, terminal: false, screen: true, lastSeenAt: at, lastUsedAt: null, stoppedAt: null };
     expect(awayNotice([record], new Set())).toEqual({
       offline: [{ name: "ASH-PC", device: "PC", lastOnline: "2026-10-07 14:02 UTC", lent: true }],
-      say: "Their PC ASH-PC is lent to My Cloud but offline (last online 2026-10-07 14:02 UTC): OpenMausBot on it is closed, or the PC is asleep or off. Ask them to open OpenMausBot on that PC; it reconnects by itself.",
+      say: "Their PC ASH-PC is shared with the Cloud but offline (last online 2026-10-07 14:02 UTC): OpenMausBot on it is closed, or the PC is asleep or off. Ask them to open OpenMausBot on that PC; it reconnects by itself.",
     });
-    expect(awayNotice([{ ...record, stoppedAt: at }], new Set()).say).toBe("Their PC ASH-PC is no longer lent to My Cloud: lending was turned off on it. They can turn on Let My Cloud use this computer under Settings → MausBot Cloud in OpenMausBot on that PC.");
-    expect(awayNotice([{ ...record, platform: "darwin" }], new Set()).say).toMatch(/^Their Mac ASH-PC is lent/u);
+    expect(awayNotice([{ ...record, stoppedAt: at }], new Set()).say).toBe("Their PC ASH-PC is no longer shared with the Cloud: sharing was turned off on it. They can turn on Let my bots use this PC under Settings → MausBot Cloud in OpenMausBot on that PC.");
+    expect(awayNotice([{ ...record, platform: "darwin" }], new Set()).say).toMatch(/^Their Mac ASH-PC is shared with the Cloud/u);
     expect(awayNotice([record], new Set([record.id]))).toEqual({});
     for (const sentence of [awayNotice([record], new Set()).say!, awayNotice([{ ...record, stoppedAt: at }], new Set()).say!]) expect(sentence).not.toMatch(/this Mac|OMB Cloud|OpenMausBot Cloud/u);
   });
@@ -76,9 +76,9 @@ describe("the shared-computer registry with that memory", () => {
     const pc = lend({ platform: "win32" });
     broker.register(pc, { session: "s1", person: "cloud-home" }, secret);
     expect(broker.away("cloud-home")).toEqual({});
-    expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ id: pc.id, name: "ASH-PC", platform: "win32", online: true, lent: true, scopes: { folders: 1, terminal: false, screen: true } })]);
+    expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ id: pc.id, name: "ASH-PC", platform: "win32", online: true, lent: true, scopes: { folders: 1, terminal: false, screen: true, internet: false } })]);
     live = false;
-    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is lent to My Cloud but offline \(last online \d{4}-\d\d-\d\d \d\d:\d\d UTC\)/u);
+    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is shared with the Cloud but offline \(last online \d{4}-\d\d-\d\d \d\d:\d\d UTC\)/u);
     const offline = expect(broker.request({ computer_id: pc.id, action: "computer_tools" }, "cloud-home", () => true))
       .rejects.toThrow("ASH-PC is offline: OpenMausBot on that PC is closed, or the PC is asleep or off. Ask them to open it; it reconnects by itself.");
     await vi.advanceTimersByTimeAsync(15_250);
@@ -90,8 +90,32 @@ describe("the shared-computer registry with that memory", () => {
     live = true;
     broker.disconnect(pc.id, "s1", secret);
     expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ lent: false, online: false })]);
-    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is no longer lent to My Cloud/u);
+    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is no longer shared with the Cloud/u);
     expect(broker.away(null)).toEqual({});
+    broker.close();
+  });
+
+  it("remembers a computer that lends its internet connection, even an old record without it, and says when the bots browse from My Cloud's own connection", () => {
+    const path = file();
+    const at = Date.UTC(2026, 9, 7, 14, 2);
+    // A record from before the internet connection could be lent.
+    writeFileSync(path, JSON.stringify({ version: 1, computers: [{ id: randomUUID(), person: "cloud-home", name: "OLD-PC", platform: "win32", folders: 1, terminal: false, screen: false, lastSeenAt: at, lastUsedAt: null, stoppedAt: null }] }));
+    expect(new LentComputers(path).list("cloud-home")).toHaveLength(1);
+    let live = true;
+    const broker = new SharedComputers(() => live, new LentComputers(path));
+    expect(broker.internetAway("cloud-home"), "no computer lends its connection: nothing to say").toBeNull();
+    const mac = lend({ name: "Ash's MacBook", platform: "darwin", internet: true });
+    expect(sharedComputerRegistration.safeParse(mac).success).toBe(true);
+    broker.register(mac, { session: "s1", person: "cloud-home" }, secret);
+    expect(broker.known("cloud-home")[0]).toEqual(expect.objectContaining({ name: "Ash's MacBook", online: true, scopes: { folders: 1, terminal: false, screen: true, internet: true } }));
+    expect(broker.status("cloud-home")[0]!.scopes.internet).toBe(true);
+    expect(broker.internetAway("cloud-home"), "online: the browsing goes through it").toBeNull();
+    live = false;
+    expect(broker.internetAway("cloud-home")).toEqual({ away: "Mac" });
+    expect(new LentComputers(path).list("cloud-home")[0]).toEqual(expect.objectContaining({ name: "Ash's MacBook", internet: true }));
+    live = true;
+    broker.disconnect(mac.id, "s1", secret);
+    expect(broker.internetAway("cloud-home"), "turned off there: no longer lent, so nothing to say").toBeNull();
     broker.close();
   });
 
@@ -101,7 +125,7 @@ describe("the shared-computer registry with that memory", () => {
     broker.register(pc, { session: "s1", person: "cloud-home" }, secret);
     broker.disconnect(pc.id, "s1", secret, true);
     expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ lent: true, online: false })]);
-    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is lent to My Cloud but offline/u);
+    expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is shared with the Cloud but offline/u);
     broker.register(pc, { session: "s1", person: "cloud-home" }, secret);
     broker.disconnect(pc.id, "s1", secret);
     expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ lent: false })]);

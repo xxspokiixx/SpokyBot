@@ -68,8 +68,8 @@ describe("bot-first sidebar", () => {
     const messages: Bot["messages"] = [{ id: "step", role: "bot", kind: "activity", at: 1, tool: { name: "mcp__omb__computer_batch", ok: true } }];
     const candidate = { ...bot, messages, tasks: [], projects: [] };
     const group: Group = { id: "room", threadId: "room-thread", name: "Team", memberIds: [bot.id], messages, defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
-    const expected = advanced ? "mcp__omb__computer_batch" : "Use the computer";
-    const other = advanced ? "Use the computer" : "mcp__omb__computer_batch";
+    const expected = advanced ? "mcp__omb__computer_batch" : "Use the screen";
+    const other = advanced ? "Use the screen" : "mcp__omb__computer_batch";
     for (const markup of [
       renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))),
       renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() })),
@@ -230,10 +230,12 @@ describe("bot-first sidebar", () => {
     const enabled = render();
     expect(enabled).toContain("New thread");
     expect(enabled).toContain("New folder");
+    expect(enabled).toContain("Delete all threads…");
     fixture.showThreads = false;
     const disabled = render();
     expect(disabled).not.toContain("New thread");
     expect(disabled).not.toContain("New folder");
+    expect(disabled).toContain("Delete all threads…");
     expect(disabled).toContain("Edit Profile");
     expect(disabled).toContain("Move to team");
   });

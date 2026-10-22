@@ -171,6 +171,9 @@ let connectorAccountsGate: DeferredGate | null = null;
 // Project keys served by the stubbed marketplace catalog; empty means composio falls back to its curated list.
 let connectorCatalogToolkits: Array<{ slug: string; name: string }> = [];
 const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
+// The ak_good project's own auth configs (a Xero OAuth app), and the auth_configs each new Session named.
+let connectorAuthConfigs: Array<{ id: string; status: string; is_composio_managed: boolean; toolkit: { slug: string } }> = [];
+const connectorSessionAuthConfigs: Array<Record<string, string> | undefined> = [];
 const connectorRelayCalls: Array<{ transportSessionId: string; body: any }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
@@ -881,6 +884,12 @@ beforeAll(async () => {
         items: req.url.startsWith("/api/v3.1/connected_accounts") ? connectorAccounts : connectorCatalogToolkits,
       }));
     }
+    if (req.url?.startsWith("/api/v3.1/auth_configs") && req.headers["x-api-key"] === "ak_good") {
+      const id = req.url.match(/^\/api\/v3\.1\/auth_configs\/([\w-]+)/)?.[1];
+      const found = id ? connectorAuthConfigs.find((config) => config.id === id) : undefined;
+      res.writeHead(id && !found ? 404 : 200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(id ? found ?? { error: { message: "Auth config not found" } } : { items: connectorAuthConfigs }));
+    }
     if (req.url?.startsWith("/api/v3.1/tool_router/session")) {
       if (req.headers["x-api-key"] !== "ak_good") {
         res.writeHead(401, { "content-type": "application/json" });
@@ -898,6 +907,7 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ redirect_url: "https://connect.composio.dev/fixture-only" }));
       }
+      if (req.method === "POST") connectorSessionAuthConfigs.push(body.auth_configs);
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_config_test",
@@ -3187,7 +3197,7 @@ describe("harness HTTP API", () => {
       roomId = room.id;
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in the virtual machine" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/fixture-plain-model can't use a Local VM\. Choose a model that can, such as Claude or ChatGPT\. Choose another model in Room VM refusal's settings\./);
+        { timeout: 5_000 }).toMatch(/fixture-plain-model can't use a private desktop\. Choose a model that can, such as Claude or ChatGPT\. Choose another model in Room VM refusal's settings\./);
       expect(JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body)).not.toContain("Works on to Auto");
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
@@ -8315,7 +8325,7 @@ describe("harness HTTP API", () => {
     try {
       const created = await api("POST", "/api/mcp/servers", { name: "docs", url: fake.url, headers: { Authorization: secret } });
       expect(created.status).toBe(201);
-      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false }]);
+      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false, apps: true }]);
       expect(JSON.stringify(created.body)).not.toContain(secret);
 
       const tested = await api("POST", "/api/mcp/servers/docs/test");
@@ -8331,7 +8341,7 @@ describe("harness HTTP API", () => {
         enabled: true,
       });
       expect(updated.status).toBe(200);
-      expect(updated.body.servers[0]).toMatchObject({ type: "sse", headerKeys: ["Authorization", "X-Org"], enabled: true });
+      expect(updated.body.servers[0]).toMatchObject({ type: "sse", headerKeys: ["Authorization", "X-Org"], enabled: true, apps: true });
       expect(JSON.stringify(updated.body)).not.toContain(secret);
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
       expect(disk.mcpServers.docs).toEqual({ type: "sse", url: fake.url, headers: { Authorization: secret, "X-Org": "acme" }, enabled: true });
@@ -8362,7 +8372,7 @@ describe("harness HTTP API", () => {
       const first = await api("POST", "/api/mcp/servers/hf/test");
       expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
       expect((await api("GET", "/api/mcp/servers")).body.servers).toEqual([
-        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, auth: "needs-sign-in" },
+        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, apps: true, auth: "needs-sign-in" },
       ]);
 
       const started = await api("POST", "/api/mcp/servers/hf/sign-in");
@@ -8427,7 +8437,7 @@ describe("harness HTTP API", () => {
       const created = await api("POST", "/api/mcp/servers", { name: "corp", url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
       expect(created.status).toBe(201);
       expect(created.body.servers).toEqual([{
-        name: "corp", type: "http", url, headerKeys: [], enabled: false,
+        name: "corp", type: "http", url, headerKeys: [], enabled: false, apps: true,
         oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
       }]);
 
@@ -8796,6 +8806,29 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("mounts the data-dashboards skill, with the folder that holds its template, when the person asks for a dashboard", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "Build me a sales dashboard from orders.csv",
+      })).status).toBe(202);
+      const seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump, 15_000);
+      const system = seen.systemPrompt ?? "";
+      const root = /<openmaus-skill id="data-dashboards" version="[^"]+" root="([^"]+)">/.exec(system)?.[1];
+      expect(root).toBeTruthy();
+      expect(existsSync(join(root!, "dashboard.html"))).toBe(true);
+      expect(system).toContain("publish_page");
+      expect(system).not.toContain('<openmaus-skill id="create-verification-skill"');
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("injects the bot's standing instructions (soul) into a real turn, directly after the persona", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker" })).body.bot;
     try {
@@ -9075,7 +9108,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9085,7 +9118,7 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
@@ -9093,7 +9126,7 @@ describe("harness HTTP API", () => {
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -10408,7 +10441,7 @@ describe("harness HTTP API", () => {
       });
       expect(unavailableCloud.status).toBe(409);
       expect(await unavailableCloud.json()).toMatchObject({
-        error: expect.stringMatching(/^A cloud computer here needs your own Boat key, a paid service\. Add a Boat key in Settings → API keys\./),
+        error: expect.stringMatching(/^A cloud desktop here needs your own Boat key, a paid service\. Add a Boat key in Settings → API keys\./),
       });
 
       const proposed = await fetch(`${BASE}/api/internal/trigger-requests`, {
@@ -10538,12 +10571,13 @@ describe("harness HTTP API", () => {
       await expect.poll(async () => {
         const destination = (await api("GET", `/api/threads/${teammate.threadId}/messages`)).body;
         return destination.messages.filter(
-          (message: { routineRun?: { runId?: string; status?: string } }) =>
-            message.routineRun?.runId === crossRun.body.run.id && message.routineRun?.status === "failed",
+          (message: { automation?: { runId?: string; failed?: true } }) =>
+            message.automation?.runId === crossRun.body.run.id && message.automation?.failed === true,
         );
       }, { timeout: 5_000 }).toHaveLength(1);
       expect((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.some(
-        (message: { routineRun?: { runId?: string } }) => message.routineRun?.runId === crossRun.body.run.id,
+        (message: { automation?: { runId?: string }; routineRun?: { runId?: string } }) =>
+          message.automation?.runId === crossRun.body.run.id || message.routineRun?.runId === crossRun.body.run.id,
       )).toBe(false);
       const crossStateAfterRun = (await api("GET", "/api/bots?messages=0")).body;
       expect(crossStateAfterRun.bots.find((candidate: { id: string }) => candidate.id === teammate.id)
@@ -10557,7 +10591,8 @@ describe("harness HTTP API", () => {
         return runs.find((run: { id: string }) => run.id === movedRun.body.run.id)?.status;
       }, { timeout: 5_000 }).toBe("failed");
       expect((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.some(
-        (message: { routineRun?: { runId?: string } }) => message.routineRun?.runId === movedRun.body.run.id,
+        (message: { automation?: { runId?: string }; routineRun?: { runId?: string } }) =>
+          message.automation?.runId === movedRun.body.run.id || message.routineRun?.runId === movedRun.body.run.id,
       )).toBe(false);
       await api("DELETE", `/api/bots/${teammate.id}`);
 
@@ -10594,12 +10629,12 @@ describe("harness HTTP API", () => {
           .find((candidate: { id: string }) => candidate.id === bot.id);
         expect(current.tasks.find((task: { threadId: string }) => task.threadId === bot.threadId)?.unread).toBe(true);
         expect(current.tasks.find((task: { threadId: string }) => task.threadId === sibling.body.task.threadId)?.unread).toBeFalsy();
-        // Made in this chat, so the run shows on its live trigger card: no card per run, the chat still marked unread.
-        const runCards = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.filter(
-          (message: { kind?: string; routineRun?: { runId?: string } }) =>
-            message.kind === "routine.run" && message.routineRun?.runId === queued.body.run.id,
-        );
-        expect(runCards).toHaveLength(0);
+        // Made in this chat: no card per run, and the failure is one line there.
+        const chatLines = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as Array<{
+          kind?: string; routineRun?: { runId?: string }; automation?: { runId?: string; failed?: true };
+        }>;
+        expect(chatLines.filter((message) => message.kind === "routine.run" && message.routineRun?.runId === queued.body.run.id)).toHaveLength(0);
+        expect(chatLines.filter((message) => message.automation?.runId === queued.body.run.id && message.automation?.failed)).toHaveLength(1);
         const failedRun = (await api("GET", "/api/routines")).body.runs.find((run: { id: string }) => run.id === queued.body.run.id);
         expect(failedRun).toMatchObject({ routineId, routineName: "Weekday brief", status: "failed" });
         expect(failedRun.threadId).not.toBe(bot.threadId);
@@ -11390,6 +11425,38 @@ describe("harness HTTP API", () => {
       expect((await api("GET", `${card(other, "status")}?threadId=${bot.threadId}`)).body.connected).toBe(false);
     } finally {
       connectorAccounts = [];
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("checks a bot's auth_config_id in the person's Composio project before its card shows, and connects with it", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorAuthConfigs = [{ id: "ac_xero_e2e", status: "ENABLED", is_composio_managed: false, toolkit: { slug: "xero" } }];
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const request = async (authConfigId: string) => {
+        const response = await fetch(`${BASE}/api/internal/connectors/request`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "auth-config-fixture", items: [{ slug: "xero", authConfigId }] }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const cards = async () => ((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[])
+        .filter((message) => message.kind === "connector");
+      const missing = await request("ac_missing_e2e");
+      expect(missing).toMatchObject({ status: 400, body: { error: expect.stringMatching(/has no auth config ac_missing_e2e/) } });
+      expect(await cards()).toEqual([]);
+
+      const requested = await request("ac_xero_e2e");
+      expect(requested.status).toBe(200);
+      const authorized = await api("POST", `/api/bots/${bot.id}/connector-cards/${requested.body.messageIds[0]}/authorize`, { threadId: bot.threadId });
+      expect(authorized.status).toBe(200);
+      expect(connectorLinkRequests.at(-1)).toEqual({ toolkit: "xero" });
+      expect(connectorSessionAuthConfigs).toContainEqual({ xero: "ac_xero_e2e" });
+    } finally {
+      connectorAuthConfigs = [];
       await api("DELETE", `/api/bots/${bot.id}`);
     }
   });

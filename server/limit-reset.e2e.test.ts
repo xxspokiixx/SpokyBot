@@ -79,6 +79,11 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
       const { instances } = await api("GET", "/api/instances") as { instances: any[] };
       return instances.find((instance) => instance.instanceId === "codex")?.models.options.some((option: any) => option.id === codex.model);
     }, { timeout: 20_000 }).toBe(true);
+    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn
+    // of its own on Claude, whose prompts these tests count. Stepped down, only the conversations under test run.
+    const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; chiefOfStaff?: boolean }> };
+    const starter = bots.find((bot) => bot.chiefOfStaff)!;
+    await api("PATCH", `/api/bots/${starter.id}`, { chiefOfStaff: false });
     await check({
       api, control, dataDir, evidence,
       limit: (resetsAt) => writeFileSync(limitedFile, JSON.stringify({ status: "rejected", rateLimitType: "five_hour", resetsAt })),

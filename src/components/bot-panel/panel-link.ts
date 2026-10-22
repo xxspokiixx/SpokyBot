@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import type { Action, BotSettingsSection } from "@/state/store";
-import { PAGES, sectionTarget, type PageId, type PanelTarget } from "./page-registry";
+import { isSimplePage, PAGES, sectionTarget, type PageId, type PanelTarget } from "./page-registry";
 
 /**
  * A named open of a bot's settings. The store keeps only the section, which the Simple bot panel maps to one tab or
@@ -45,8 +45,9 @@ export function usePanelLink(): PanelLink | null {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
-/** Where a named open of `section` lands: the link's page when it came with one for that section, else the section's place. */
+/** Where a named open of `section` lands: the link's page when it came with one for that section and Simple mode draws
+ * that page, else the section's place. */
 export function linkTarget(section: BotSettingsSection, link: PanelLink | null): PanelTarget {
   const page = link?.section === section ? link.page : undefined;
-  return page ? { tab: PAGES[page].home, page } : sectionTarget(section);
+  return page && isSimplePage(page) ? { tab: PAGES[page].home, page } : sectionTarget(section);
 }

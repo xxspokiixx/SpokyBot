@@ -171,8 +171,8 @@ describe("header name", () => {
     }));
     const button = (markup: string) => markup.match(/<button[^>]*data-tour="computer"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
     expect(button(working("browser", true))).toContain('data-testid="computer-button-live"');
-    expect(button(working("browser", true))).toContain('aria-label="Bot&#x27;s computer, In use now"');
-    expect(button(working("browser", false))).toContain('aria-label="Bot&#x27;s computer"');
+    expect(button(working("browser", true))).toContain('aria-label="Bot&#x27;s screen, In use now"');
+    expect(button(working("browser", false))).toContain('aria-label="Bot&#x27;s screen"');
     expect(button(working("browser", false))).not.toContain("computer-button-live");
     expect(button(working("local", true))).not.toContain("computer-button-live");
     const pinned = renderToStaticMarkup(createElement(ChatView, {
@@ -203,6 +203,14 @@ describe("glass header", () => {
     expect(name).toBeLessThan(scroller);
     expect(markup.slice(frame, header)).toContain("[--glass-tint:var(--color-app)]");
     expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
+  });
+
+  it("holds every row's positioned parts inside the transcript, so nothing in it can make the window scroll", () => {
+    // An absolutely positioned reply label with no positioned ancestor in the scroller is placed past
+    // the window, which then scrolls by script: an app frame's scrollIntoView lifts the whole app off the top.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const transcript = markup.match(/class="(glass-scroller-content[^"]*)"[^>]*role="log"/)?.[1] ?? "";
+    expect(transcript.split(" ")).toContain("relative");
   });
 });
 

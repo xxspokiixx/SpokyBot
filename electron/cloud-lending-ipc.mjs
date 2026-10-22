@@ -1,6 +1,7 @@
-// "Let My Cloud use this computer": main's IPC for it. This computer's Settings may choose folders and the screen; My
-// Cloud's own page in this app (verified as the person's Cloud) gets the same one switch and what is lent, so nobody has
-// to leave My Cloud to change it. Turned on with nothing chosen, it lends the usual folders, read only.
+// "Let my bots use this Mac" (this PC, this computer): main's IPC for it. This computer's Settings may choose folders,
+// the screen and the internet connection; My Cloud's own page in this app (verified as the person's Cloud) gets the same
+// one switch, Apps and screen, and what is lent, so nobody has to leave My Cloud to change it. Turned on with nothing
+// chosen, it lends the internet connection and the usual folders, read only.
 
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -59,21 +60,6 @@ export async function usualFolders(entries, validate) {
   return found;
 }
 
-/** The native confirmation's words for exactly what goes: what bots may read, what they may also change, and the screen. */
-export function grantSentence({ folders, screen }) {
-  const list = (names) => names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-  const read = folders.filter((folder) => !folder.write).map((folder) => folder.name);
-  const edit = folders.filter((folder) => folder.write).map((folder) => folder.name);
-  const parts = [
-    ...(read.length ? [`read ${list(read)}`] : []),
-    ...(edit.length ? [`read and change files in ${list(edit)}`] : []),
-    ...(screen ? ["see your screen and use your apps as you"] : []),
-  ];
-  const what = parts.length ? list(parts) : "use nothing yet";
-  const safe = !edit.length && !screen ? ", without changing anything" : "";
-  return `Bots on My Cloud can ${what} on this computer${safe}, in your own conversations and while this app is open. Turn it off at any time.`;
-}
-
 /** My Cloud's page learns whether it is on, how it is going, and what is lent by folder name, never a path. */
 export function pageLending(snapshot) {
   const state = snapshot?.state;
@@ -84,7 +70,59 @@ export function pageLending(snapshot) {
     status: on ? state.busy ? "busy" : state.connected ? "lent" : state.problem ?? "starting" : state?.problem ?? null,
     folders: on ? (state.folders ?? []).map((folder) => ({ name: String(folder.name ?? ""), write: folder.write === true })) : [],
     screen: on && state.screen === true,
+    screenAvailable: snapshot?.screenAvailable === true,
+    internet: on && state.internet === true,
+    ...(on && state.link ? { link: state.link } : {}),
   };
+}
+
+/** Which Cloud lending is for, from the verified Cloud sign-in alone (the renderer names no server, account or origin):
+ * `cloud()` is the sign-in's state, and `environment()` the saved server that is My Cloud, kept through a brief
+ * disconnect of the same account. */
+export function createLendingTarget({ account, environments }) {
+  let lastHome = null;
+  const cloud = () => {
+    const current = account();
+    if (!current) return null;
+    const state = current.state();
+    const accountId = state.account?.id ?? null;
+    const origin = state.status === "connected" ? (state.machine?.origin ?? null) : null;
+    if (origin && accountId) lastHome = { accountId, origin };
+    else if (!accountId || lastHome?.accountId !== accountId) lastHome = null;
+    return { status: state.status === "signed-out" && state.message === "restoring" ? "restoring" : state.status, accountId, origin };
+  };
+  return {
+    cloud,
+    environment() {
+      const snapshot = cloud();
+      const origin = snapshot?.origin ?? (lastHome?.accountId === snapshot?.accountId ? lastHome?.origin : null);
+      return origin ? environments().find((entry) => entry.origin === origin) ?? null : null;
+    },
+  };
+}
+
+/** Each folder that exists and passes the folder checks, with editing; any that cannot be lent is left out. */
+async function editableFolders(paths, validate) {
+  const found = [];
+  for (const where of paths) {
+    if (typeof where !== "string" || !path.isAbsolute(where)) continue;
+    try {
+      const [folder] = await validate([{ id: randomUUID(), path: where, write: true }]);
+      if (folder) found.push(folder);
+    } catch {}
+  }
+  return found;
+}
+
+/** The default grant, on top of what was lent before: the usual folders read only, each project folder with editing,
+ * the screen only when it was lent before (and works here), and the internet connection. */
+export function defaultGrant({ kept, usual, projects, screenAvailable }) {
+  const byPath = new Map();
+  for (const folder of [...(kept?.folders ?? []), ...usual, ...projects]) {
+    const known = byPath.get(folder.path);
+    byPath.set(folder.path, known ? { ...known, write: known.write || folder.write } : folder);
+  }
+  return { folders: [...byPath.values()].slice(0, 20), screen: kept?.screen === true && screenAvailable === true, internet: true };
 }
 
 /**
@@ -94,29 +132,31 @@ export function pageLending(snapshot) {
  *   cloudPage: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   snapshot: () => Promise<{ available: boolean, screenAvailable?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
  *   environment: () => unknown,
- *   save: (env: unknown, choice: { folders: unknown, screen: boolean }) => Promise<unknown>,
+ *   save: (env: unknown, choice: { folders: unknown, screen: boolean, internet?: boolean, terminal?: boolean }) => Promise<unknown>,
  *   stop: () => void,
  *   chooseFolder: () => Promise<{ id: string, path: string, name: string, write: boolean } | null>,
  *   defaults: () => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
  *   validate: (folders: unknown[]) => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
- *   confirm: (grant: { folders: Array<{ name: string, write: boolean }>, screen: boolean }) => Promise<boolean>,
- * }} deps `cloudPage` lets only My Cloud's verified page through; `confirm` asks in a native dialog, which no page can
- * draw or answer, and is told the exact grant: each folder with whether bots may edit it, and the screen.
+ *   confirmScreen: () => Promise<boolean>,
+ * }} deps `cloudPage` lets only My Cloud's verified page through; turning lending or Apps and screen on from it still
+ * takes a real click (the preload bridge's rule). Security: Apps and screen lets bots act as the person, and a page
+ * served by the Cloud must never grant that alone, so main also asks in a dialog of its own (`confirmScreen`).
  */
-export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirm }) {
+export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen }) {
   const env = () => {
     const current = environment();
     if (!current) throw new Error("Open My Cloud first.");
     return current;
   };
-  /** What was chosen (an off switch keeps its choice), without folders that are gone since; else the usual folders. With
-   * none of those either, nothing can be lent: said plainly, never a "try again". */
+  /** What was chosen (an off switch keeps its choice), without folders that are gone since; else the internet connection
+   * and the usual folders. The internet connection alone is a choice too. */
   const choice = async (input) => {
     const folders = Array.isArray(input?.folders) && input.folders.length ? await existingFolders(input.folders, validate) : [];
-    if (folders.length || input?.screen === true) return { folders, screen: input?.screen === true };
-    const usual = await defaults();
-    if (!usual.length) throw refused("nothing-to-lend");
-    return { folders: usual, screen: false };
+    // The terminal is chosen only here, from this computer's own Settings (`lending:save` is local-only); it is never
+    // carried over from a saved grant, filled in by default, or set from My Cloud's page.
+    const terminal = input?.terminal === true;
+    if (folders.length || input?.screen === true || input?.internet === true || terminal) return { folders, screen: input?.screen === true, internet: input?.internet === true, ...(terminal ? { terminal: true } : {}) };
+    return { folders: await defaults(), screen: false, internet: true };
   };
   ipcMain.handle("lending:state", localOnly("lending:state", () => snapshot()));
   ipcMain.handle("lending:folder", localOnly("lending:folder", plainly(async () => { env(); return chooseFolder(); })));
@@ -132,10 +172,28 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     const current = await snapshot();
     if (current.state?.enabled) return pageLending(current);
     const kept = current.state ?? {};
-    const next = await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true });
-    const grant = { folders: next.folders.map((folder) => ({ name: String(folder.name ?? ""), write: folder.write === true })), screen: next.screen === true };
-    if (!(await confirm(grant))) return pageLending(current);
-    await save(env(), next);
+    await save(env(), await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true, internet: kept.internet === true }));
     return pageLending(await snapshot());
   })));
+  ipcMain.handle("cloud-lending:screen", cloudPage("cloud-lending:screen", plainly(async (_event, on) => {
+    const current = await snapshot();
+    const kept = current.state;
+    if (!kept?.enabled || (kept.screen === true) === (on === true)) return pageLending(current);
+    if (on === true && (!current.screenAvailable || !(await confirmScreen()))) return pageLending(current);
+    await save(env(), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true }));
+    return pageLending(await snapshot());
+  })));
+  return {
+    /** At the move to My Cloud: lends the default grant (defaultGrant) on top of what is lent. The person's own Off is
+     * never undone: lending they turned off stays off. Answers the page's view, or null when it stayed off. */
+    async lendByDefault({ projects = [] } = {}) {
+      const current = await snapshot();
+      const kept = current.state;
+      if (!current.available || (!kept?.enabled && kept?.stopped?.reason === "you")) return null;
+      const lentBefore = kept?.folders?.length ? await existingFolders(kept.folders, validate) : [];
+      const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true }, usual: await defaults(), projects: await editableFolders(projects, validate), screenAvailable: current.screenAvailable });
+      await save(env(), grant);
+      return pageLending(await snapshot());
+    },
+  };
 }
