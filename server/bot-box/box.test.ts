@@ -148,11 +148,15 @@ describe("the box a bot's Chrome runs in", () => {
   });
   const temp = () => { const dir = mkdtempSync(join(tmpdir(), "omb-box-")); dirs.push(dir); return dir; };
 
-  it("has the host's network and the read-only paths asked for, and none of HOME or the data folder", async () => {
+  it("is no box off a Cloud home, which is what Windows gets", () => {
+    expect(new BotBox().browserBox(9, []), "no box off a Cloud home").toBeNull();
+  });
+
+  // On, the box's gates listen on unix sockets, which Windows refuses at a file path; the box runs only on a Linux Cloud
+  // home (detect.ts says "not-linux" anywhere else).
+  it.skipIf(process.platform === "win32")("has the host's network and the read-only paths asked for, and none of HOME or the data folder", async () => {
     const box = new BotBox();
     boxes.push(box);
-    const off = new BotBox();
-    expect(off.browserBox(9, []), "no box off a Cloud home").toBeNull();
     const dataDir = join(temp(), "home", ".openmausbot"), home = dirname(dataDir);
     mkdirSync(dataDir, { recursive: true });
     await box.start({ dataDir, home, port: 8799, denyEnv: new Set(), env: {}, log: () => {}, detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
