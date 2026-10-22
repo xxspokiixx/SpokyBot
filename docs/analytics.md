@@ -133,6 +133,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | --- | --- | --- |
 | `app_first_open` | The first time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
+| `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser` |
 | `email_submitted` | You shared your email on the first-run screen; your events are tied to that email from then on | none |
 | `$identify` | PostHog's own event, sent with `email_submitted`, and before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud (not while the app has kept no analytics choice of its own and serves that page on a port other than its first), to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, the email you shared or your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
 | `email_skipped` | You skipped the email on the first-run screen | none |
