@@ -1,9 +1,13 @@
 ---
 name: data-dashboards
-description: "Build a fast, good-looking data dashboard as a page: in this chat with show_html, or at a public link with publish_page. Use when the person asks for a dashboard, charts or KPIs on a page, or a data page to share or keep up to date."
+description: "Build a fast, good-looking page: a data dashboard, or any page made with show_html (a landing page, a pricing page, a tool), in this chat or at a public link with publish_page. Use when the person asks for a dashboard, charts or KPIs on a page, a page or mock-up to look at, or a data page to share or keep up to date."
 ---
 
-# Data dashboards
+# Data dashboards and pages
+
+A page made with `show_html` opens in a preview beside the chat. The person watches it appear, can step back
+through its versions, publish it, and point at a part to change: their next message then says what they
+pointed at (a tag, its text, a CSS selector and a bit of its HTML). Change exactly that with `update_html`.
 
 ## Pick the right home
 
@@ -85,3 +89,31 @@ Cut cards rather than adding a fifth chart.
 - Look at it, light and dark, wide and narrow: labels must not collide or clip.
 - First load takes 1 to 3 seconds (DuckDB is about 7 MB, cached afterwards). Never chart more than about 10,000 marks; aggregate in SQL.
 - For a shared page, give the link and say how it stays current (the schedule, if any).
+
+## Make a page
+
+**Pick the format**
+- `jsx` for anything with state, several sections or repeated parts: a landing or pricing page, a form-like
+  tool, a mock-up to iterate on. One file, a default export of the page component.
+- `html` for a quick static page, or when you start from `dashboard.html`.
+
+**Building blocks a `jsx` file can import**, nothing else (pinned, loaded from cdn.jsdelivr.net):
+- `react` (19.3): hooks and all; `react-dom` for portals.
+- `lucide-react` icons: `import { Check, ArrowRight } from "lucide-react"`, sized with `size={16}`.
+- `echarts` (6.1), or `import { Chart, useTheme } from "mausbot"`: `<Chart option={…} height={280} label="…" />`
+  follows the light or dark theme; `useTheme()` returns `"light"` or `"dark"`.
+- `mausbot` also has `send(text)`, `open(url)` and `setContext(text)`, as in the tool's description.
+- Tailwind classes (4.3) need no import. `dark:` follows the chat's theme.
+TypeScript types are fine. A file that doesn't read, or imports anything else, comes back as an error with the
+line: fix it and send the whole file again. Errors while it runs show on the page and reach you with the next message.
+
+**Design**
+- Space on 4, 8, 12, 16, 24, 32 and 48 px (Tailwind 1, 2, 3, 4, 6, 8, 12). One container, `max-w-5xl mx-auto px-4`.
+- Type: one family; sizes 12, 14, 16, 20, 24, 30, 36; headings `font-semibold tracking-tight`, body `leading-relaxed`.
+- Colour: neutral greys (`zinc`) for text and surfaces, one accent for actions and what matters. Give every
+  surface and text colour a `dark:` partner (`bg-white dark:bg-zinc-900`, `text-zinc-900 dark:text-zinc-100`).
+- Cards: `rounded-2xl border border-zinc-200 dark:border-zinc-800`, a soft shadow at most. Buttons at least 36 px tall.
+- It must work at 360 px wide: stack columns (`grid gap-4 sm:grid-cols-3`), nothing scrolls sideways.
+- Real words, not lorem ipsum. Give each section a `data-name` and each repeated item a `key`, so a point at it
+  names it clearly.
+- Keep it under 256 KB: embed data, not libraries.
