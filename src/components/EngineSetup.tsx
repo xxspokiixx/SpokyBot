@@ -448,7 +448,9 @@ function ApiKeyEngineSetup({ instance, className, unframed, configured = false }
           <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t(copy.description)}</p>
         </div>
       </div>
-      {needsSignIn(instance) && (
+      {/* An API-only engine is available only with a saved key, so unauthenticated means rejected.
+          A key engine with its own CLI (DeepSeek Harness) is unauthenticated simply when no key is saved yet. */}
+      {isApiKeyEngine(instance) && needsSignIn(instance) && (
         <p role="alert" className="mt-2 text-[12px] leading-relaxed text-danger">{t("engineSetup.apiKey.rejected")}</p>
       )}
       {!remote && (

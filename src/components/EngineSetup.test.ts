@@ -124,6 +124,8 @@ describe("engines set up with a key in Settings", () => {
     expect(keyless).toContain("DeepSeek Harness needs an API key");
     expect(keyless).toContain("Open API keys");
     expect(keyless).not.toContain("Terminal");
+    // No key is saved, so nothing was rejected.
+    expect(keyless).not.toContain("rejected the saved key");
   });
 });
 
