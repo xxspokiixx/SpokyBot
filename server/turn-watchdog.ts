@@ -31,6 +31,19 @@ export interface StallLimit {
   ms: number;
 }
 
+/** Says which limit stopped a turn, to start a sentence: "no activity for 20 minutes". */
+export function stallDescription(limit: StallLimit): string {
+  const minutes = Math.round(limit.ms / 60_000);
+  return limit.kind === "tool-cap" ? `a tool ran too long: ${minutes} minutes since it started, waits included`
+    : limit.kind === "tool" ? `a tool ran for ${minutes} minutes without finishing` : `no activity for ${minutes} minutes`;
+}
+
+// Number() also reads "Infinity" and "1e309" as numbers, and an endless limit would switch the watchdog off.
+export function stallLimitMs(raw: string | undefined, fallback: number): number {
+  const ms = Number(raw);
+  return Number.isFinite(ms) && ms > 0 ? ms : fallback;
+}
+
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
 const parkedTotal = (turn: WatchedTurn, at: number): number =>
   turn.parkedMs + (turn.parkedSince === null ? 0 : at - turn.parkedSince);

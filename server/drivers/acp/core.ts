@@ -54,7 +54,7 @@ import { appendNative } from "../native.ts";
 import { acpSessionOperationKey, acpShellRequest, answersAlone, permissionLaunchCwd } from "../permission-command.ts";
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
-import { extractMcpImages } from "../../mcp-tool-images.ts";
+import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost, type AcpLink } from "./host.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
@@ -1014,19 +1014,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           if (!current || !current.state.promptSent) return;
           const u = p.update ?? {};
+          // Either a finished tool_call or its terminal tool_call_update ends a tool item (./tool-items.ts).
           const finished = u.status === "completed" || u.status === "failed";
           const toolEnded = (itemId: string | undefined) => {
             current.state.producedItem = true;
-            emit({
-              ...base(threadId, current.turnId),
-              type: "item.completed",
-              itemType: "tool",
-              itemId,
-              ok: u.status !== "failed",
-              output: toolDetailPreview(u.rawOutput ?? u.content),
-            });
-            for (const img of extractMcpImages(u.content ?? u.rawOutput)) {
-              emit({ ...base(threadId, current.turnId), type: "item.completed", itemType: "assistant_image", data: img.data });
+            for (const event of acpToolEndEvents(u, itemId)) {
+              emit({ ...base(threadId, current.turnId), ...event });
             }
           };
           switch (u.sessionUpdate) {

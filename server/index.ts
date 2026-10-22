@@ -328,7 +328,7 @@ import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } f
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractReplayImages, extractTurnImages } from "./turn-images.ts";
 import { callTitleExcerpt, threadTitlePrompt, type ThreadTitleSource } from "./thread-title.ts";
-import { TurnWatchdog } from "./turn-watchdog.ts";
+import { stallDescription, stallLimitMs, TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import {
   ensureWorkspace,
@@ -5461,11 +5461,6 @@ const turnContext = new Map<string, { tokens?: number; window?: number }>();
 
 const TURN_STALL_MS = Math.max(60_000, stallLimitMs(process.env.OMB_TURN_STALL_MS, 20 * 60_000));
 const TOOL_STALL_MS = Math.max(TURN_STALL_MS, stallLimitMs(process.env.OMB_TOOL_STALL_MS, 2 * 60 * 60_000));
-// Number() also reads "Infinity" and "1e309" as numbers, and an endless limit would switch the watchdog off.
-function stallLimitMs(raw: string | undefined, fallback: number): number {
-  const ms = Number(raw);
-  return Number.isFinite(ms) && ms > 0 ? ms : fallback;
-}
 const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAIT_MAX_MS) || 30 * 60_000);
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
@@ -5495,10 +5490,7 @@ const watchdog = new TurnWatchdog({
     const bot = botForThread(turn.botId, turn.threadId);
     const routineRun = activeRoutineRunForThread(turn.threadId);
     void runningTurnInstance(bot, turn.threadId)?.adapter.interruptTurn(turn.threadId).catch(() => {});
-    const minutes = Math.round(limit.ms / 60_000);
-    const what = limit.kind === "tool-cap" ? `a tool ran too long: ${minutes} minutes since it started, waits included`
-      : limit.kind === "tool" ? `a tool ran for ${minutes} minutes without finishing` : `no activity for ${minutes} minutes`;
-    const cause = engineMemory.stallCause(turn.threadId, `${what} — the turn was stopped`);
+    const what = stallDescription(limit), cause = engineMemory.stallCause(turn.threadId, `${what} — the turn was stopped`);
     const stalled = stoppedTurnText(turn.threadId, liveTurnByThread.get(turn.threadId), cause);
     if (routineRun?.target === "bot") {
       routines?.failThread(turn.threadId, engineMemory.stallCause(turn.threadId, `${what.charAt(0).toUpperCase()}${what.slice(1)} — the routine was stopped`), { cause: "stalled" });
