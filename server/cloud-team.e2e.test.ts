@@ -88,7 +88,7 @@ it("pairs three people with the Admin's signed claims, each with their role, and
   expect((await team.pair(OWNER, { secret: "W".repeat(43) })).status).toBe(401);
   // The app says what the server is called, and the server is the team.
   expect((await team.pair(MEMBER_C)).body.environment.label).toBe("Acme");
-  expect((await team.as(ada, "GET", "/api/config")).body.team).toEqual({ id: "team-acme-1", name: "Acme" });
+  expect((await team.as(ada, "GET", "/api/config")).body.team).toEqual({ id: "team-acme-1", name: "Acme", cloudPage: "https://cloud.example.test/cloud" });
   // My Cloud, beside it, is one person's: it refuses a team claim (cloud-home.test.ts) and its owner paired as before.
   expect((await fx.onCloud("GET", "/api/auth/session")).body).toMatchObject({ kind: "session", scopes: ["admin", "client"], cloudHome: true });
   expect((await fx.onCloud("GET", "/api/auth/session")).body.team).toBeUndefined();
