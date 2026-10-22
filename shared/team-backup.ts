@@ -132,6 +132,9 @@ const backupSchema = z.object({
     runOn: z.enum(["maus", "cloud"]), schedule,
     durationMinutes: z.number().finite().positive(),
     timeoutMinutes: z.number().int().min(5).max(240).optional(),
+    checks: z.array(z.enum(["calendar", "mail", "runs"])).max(3).optional(),
+    access: z.literal("read-and-draft").optional(),
+    deliver: z.literal("brief").optional(),
   })).max(2_000),
 });
 
