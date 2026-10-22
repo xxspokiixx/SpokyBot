@@ -13390,8 +13390,7 @@ ROUTES.push(createBrowserSiteRoutes({
 ROUTES.push(createBrowserEvidenceRoutes({ evidence: browserEvidence.attach({ onChange: (listener) => store.onChange(listener), threadExists: (id) => Boolean(threadOwner(id)) }), threadExists: (id) => Boolean(threadOwner(id)) }));
 ROUTES.push(createLoginRoutes(botLogins.routes((id) => Boolean(store.bot(id)))));
 ROUTES.push(createUsageRoutes({
-  dataDir: DATA_DIR,
-  prices: operatorPrices,
+  dataDir: DATA_DIR, prices: operatorPrices,
   budget: () => spendState(cfg, DATA_DIR),
   currency: () => cfg.billing?.currency ?? "USD",
   recorder: usageTrace, messages: (threadId) => store.messagesFor(threadId), liveBot: (threadId) => {
@@ -14032,6 +14031,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (internalCapability.kind !== requiredCapabilityKind) {
         return json(res, 403, { error: "this internal capability cannot access that service" });
       }
+      if (requiredCapabilityKind !== "agents" && requiredCapabilityKind !== "hooks") usageTrace.timeServed(req, res, internalCapability.threadId);
       // The opaque bearer is the authority: refuse disagreeing sender ids, so a Full bot cannot reuse its token to impersonate a peer.
       for (const key of ["self", "fromBotId", "botId"] as const) {
         const claimed = url.searchParams.get(key);

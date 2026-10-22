@@ -1,8 +1,10 @@
 // Records each turn's AI steps and tool calls from the runtime events every engine emits, plus the receipts OMB's own tools
 // send, and hands the turn's timing, parent and outcome to its usage row when the turn is booked.
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
 import { TOOL_NAMESPACE } from "../../shared/tool-surface.ts";
 import type { TraceParent, TraceStatus, TraceTokens, TraceUsageStatus } from "../../shared/usage-trace.ts";
+import { onJsonBody, parsedBodyOf } from "../harness/http.ts";
 import { errorLine, pageTitle, toolDetail } from "./detail.ts";
 import { appendSpans, type SpanRecord, type StepSpan, type ToolSpan } from "./spans.ts";
 
@@ -374,6 +376,22 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     };
   }
 
+  /** Times one MCP request OMB serves itself (browser, computer, data, connected apps): a receipt once its answer is sent. */
+  function timeServed(req: IncomingMessage, res: ServerResponse, threadId: string): void {
+    const startedAt = now();
+    onJsonBody(res, (body) => {
+      const request = parsedBodyOf(req) as { method?: unknown; params?: { name?: unknown; arguments?: unknown } } | undefined;
+      const name = request?.method === "tools/call" ? request.params?.name : undefined;
+      if (typeof name !== "string" || !name) return body;
+      const answer = (body ?? {}) as { error?: unknown; result?: { isError?: unknown; content?: Array<{ text?: unknown }> } };
+      const failed = answer.error !== undefined || answer.result?.isError === true;
+      const detail = toolDetail(name, request?.params?.arguments);
+      const error = failed ? errorLine(typeof answer.error === "string" ? answer.error : answer.result?.content?.find((part) => typeof part.text === "string")?.text) : undefined;
+      receipt(threadId, { name, startedAt, endedAt: now(), ok: !failed, ...(detail ? { detail } : {}), ...(error ? { error } : {}) });
+      return body;
+    });
+  }
+
   /** Turns not yet booked, with every span so far: what a live trace draws. */
   function liveTurns(): LiveTurnView[] {
     const view = (turn: Turn, running: boolean): LiveTurnView => ({
@@ -392,6 +410,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
   return {
     observe,
     receipt,
+    timeServed,
     settle,
     liveTurns,
     /** The next turn to start on `threadId` belongs to coordinator node `node`, or to an explicit parent turn. */

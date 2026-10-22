@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
+import { json, readBody } from "../harness/http.ts";
 import { createTraceRecorder } from "./recorder.ts";
 import { daysBetween, flushSpans, readSpans } from "./spans.ts";
 
@@ -115,6 +117,30 @@ describe("trace recorder", () => {
       .toEqual([["mcp__agents__coordinate_bots", 1_150, 1_900, "omb", "ok"], ["list_room_targets", 3_000, 3_400, "omb", "error"]]);
     expect(spans.filter((span) => span.kind === "step").map((span) => [span.startedAt - T0, span.endedAt! - T0]))
       .toEqual([[0, 1_000], [2_000, 3_000], [3_400, 5_000]]);
+  });
+
+  it("times the browser, computer and app calls OMB answers itself, and reads their failure from the answer", async () => {
+    const recorder = createTraceRecorder({ dataDir: dataDir() });
+    recorder.observe(event("bot", "t1", Date.now() - T0, { type: "turn.started" }));
+    const server = createServer(async (req, res) => {
+      await readBody(req);
+      recorder.timeServed(req, res, "bot");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      json(res, 200, { result: { isError: req.url === "/fail", content: [{ type: "text", text: "Element @e12 is not visible\nmore" }] } });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    const call = (path: string, body: unknown) => fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", body: JSON.stringify(body) });
+    await call("/ok", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "agent_browser_open", arguments: { url: "https://www.figma.com/pricing" } } });
+    await call("/fail", { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "agent_browser_click", arguments: { ref: "@e12" } } });
+    await call("/ok", { jsonrpc: "2.0", id: 3, method: "tools/list" });
+    server.close();
+    const tools = recorder.liveTurns()[0]!.spans.filter((span) => span.kind === "tool");
+    expect(tools.map((tool) => tool.kind === "tool" && [tool.name, tool.status, tool.timedBy, tool.detail, tool.error])).toEqual([
+      ["agent_browser_open", "ok", "omb", "figma.com/pricing", undefined],
+      ["agent_browser_click", "error", "omb", undefined, "Element @e12 is not visible"],
+    ]);
+    expect(tools.every((tool) => tool.endedAt! - tool.startedAt >= 25)).toBe(true);
   });
 
   it("takes each Codex turn's share of the thread's running total", () => {
