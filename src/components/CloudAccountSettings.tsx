@@ -10,6 +10,7 @@ import type { LocaleKey } from "@/locales";
 import { Card } from "./SettingsPrimitives";
 import { StagingMark } from "./cloud-buy/parts";
 import { CloudLending } from "./CloudLending";
+import { CloudSetupSteps } from "./CloudSetupSteps";
 import { useCloudSendNotice } from "./CloudSendStrip";
 import { LentComputersCard } from "./LentComputers";
 import { OpenFilesButton } from "./OpenFilesButton";
@@ -24,22 +25,9 @@ const MACHINE_TEXT = {
   "payment-problem": "cloudHome.paymentProblem",
   failed: "cloudHome.failed",
 } as const;
-const SETUP_STEPS = [
-  ["reserving", "cloudHome.step.reserving"], ["storage", "cloudHome.step.storage"],
-  ["starting", "cloudHome.step.starting"], ["checking", "cloudHome.step.checking"],
-] as const satisfies ReadonlyArray<readonly [string, LocaleKey]>;
 
 const time = (value: number) => new Intl.DateTimeFormat(activeLocale(), { timeStyle: "short" }).format(new Date(value));
 const day = (value: number) => new Intl.DateTimeFormat(activeLocale(), { dateStyle: "medium" }).format(new Date(value));
-
-function setupSteps(machine: CloudMachine) {
-  if (!machine.setup) return null;
-  const at = SETUP_STEPS.findIndex(([step]) => step === machine.setup!.step);
-  return <ol data-cloud-setup={machine.setup.step} className="flex flex-col gap-1 text-[13px]">
-    {SETUP_STEPS.map(([step, key], index) => <li key={step} aria-current={index === at ? "step" : undefined}
-      className={index === at ? "font-medium text-ink" : index < at ? "text-ink-secondary line-through decoration-ink-secondary/40" : "text-ink-secondary"}>{t(key)}</li>)}
-  </ol>;
-}
 
 function trialLines(trial: CloudTrial | undefined, credit: CloudCredit | undefined) {
   if (!trial && !credit) return null;
@@ -68,7 +56,7 @@ function cloudHomeCard({ machine, busy, failed, onConnect, lending, trial = fals
   return <Card title={t("cloudHome.title")}>
     <div data-cloud-home={machine.status} data-cloud-unreachable={unreachable?.cause} data-cloud-waking={waking && connectable ? true : undefined} data-cloud-moving={moving && !unreachable ? true : undefined} className="flex flex-col items-start gap-3">
       <p role="status" className={connectable ? "text-[14px] text-ink" : "text-[13px] text-ink-secondary"}>{text}</p>
-      {machine.status === "provisioning" && setupSteps(machine)}
+      {machine.status === "provisioning" && machine.setup && <CloudSetupSteps step={machine.setup.step} />}
       {connectable && <>
         {!moving && <>
           <button type="button" disabled={busy} className="ui-button" onClick={onConnect}>{t("cloudHome.connect")}</button>
