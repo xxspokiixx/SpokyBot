@@ -185,7 +185,7 @@ export async function withBotBrowser<T>(options: BotBrowserOptions, work: (call:
     await closeBrowserSession(options.engine, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })).catch(() => false);
     await runtime.closeAll();
     await gate.close();
-    rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     rmSync(sockets, { recursive: true, force: true });
   }
 }
