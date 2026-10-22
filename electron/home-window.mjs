@@ -19,6 +19,8 @@ export const RETRY_MS = Object.freeze([2_000, 4_000, 8_000, 15_000, 30_000]);
 /** A new version of My Cloud's page waits for this long without typing before the window reloads it. */
 export const QUIET_MS = 30_000;
 export const VERSION_EVERY_MS = 60_000;
+/** A home page that loads this soon after the window reloaded it for a newer version is that version. */
+export const UPDATING_MS = 30_000;
 /** While the startup screen is up, a wake that takes longer hands over to this computer's screen, which says the same. */
 export const SPLASH_HANDOFF_MS = 6_000;
 export const SPLASH_TEXT = Object.freeze({ opening: "Opening My Cloud…", waking: "Waking My Cloud…" });
@@ -132,7 +134,7 @@ export function createHomeWindow(deps) {
     now = Date.now, timers = DEFAULT_TIMERS, log = () => {} } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   /** The place the window was last sent to (My Cloud, or a team's Cloud), and the one being opened now. */
-  let shown = null, opening = null, renewal = null;
+  let shown = null, opening = null, renewal = null, updatingAt = null;
   /** The window shows a place or this computer's screen, which this computer's page replaces once home is here again. */
   let away = false;
   const state = () => account()?.state() ?? null;
@@ -168,9 +170,15 @@ export function createHomeWindow(deps) {
     return named({ screen: MOVING.has(parseJournal(journal())?.phase ?? "") ? "moving" : "opening" });
   }
   const tell = () => { try { publish(view()); } catch {} };
+  let splashSaid = null;
+  const onSplash = (text) => {
+    if (text === splashSaid) return;
+    splashSaid = text;
+    try { splash()?.status(text); } catch {}
+  };
   function say(next) {
     status = next;
-    if (next) { try { splash()?.status(splashText(next, teamName())); } catch {} }
+    if (next) onSplash(splashText(next, teamName()));
     tell();
   }
   const shows = (origin) => {
@@ -189,9 +197,12 @@ export function createHomeWindow(deps) {
     away = true;
     if (!onScreen()) void Promise.resolve(go(`${localOrigin()}${HOME_SCREEN_PATH}`, null, null)).catch(() => {});
   }
+  /** The place can't be shown now: this computer's screen says why, and the startup screen, while it is up, that the place
+   * is opening. */
   function toScreen(next) {
     screen = next;
     status = null;
+    onSplash(splashText("opening", teamName()));
     goScreen();
   }
 
@@ -268,7 +279,9 @@ export function createHomeWindow(deps) {
 
   async function connect(place, token, open) {
     const origin = place.origin;
-    if (shows(origin) && !screen && !open) {
+    // Only a window this opened as home is left as it is: one that shows My Cloud as a saved server (opened from the
+    // switcher before the move) is opened again as home, and goes home with it if My Cloud ends.
+    if (shows(origin) && away && !screen && !open) {
       shown = place;
       if (place.kind === "team" && !renewal) renewLater(place, TEAM_RENEW_MS);
       return;
@@ -389,10 +402,15 @@ export function createHomeWindow(deps) {
     if (!loaded) { loaded = current; return; }
     if (current !== loaded) newer = true;
     if (!newer || now() - lastInput() < quietMs || !shows(origin)) return;
-    newer = false; loaded = current;
+    newer = false; loaded = current; updatingAt = now();
     window()?.webContents.reload();
   }
   const watcher = timers.every(() => { void watchVersion(); }, versionEveryMs);
+  function homePage(event) {
+    const origin = placeOrigin(), win = window();
+    if (!origin || !win || win.isDestroyed() || event?.sender !== win.webContents || !event.senderFrame || event.senderFrame !== win.webContents.mainFrame) return false;
+    return originOf(event.senderFrame.url) === origin;
+  }
 
   return {
     show,
@@ -451,10 +469,12 @@ export function createHomeWindow(deps) {
       if (origin && originOf(url) === origin) offline(++opens);
     },
     /** `event` came from the shown place's own page in this window (My Cloud's while it is home, or a team's Cloud's). */
-    homePage(event) {
-      const origin = placeOrigin(), win = window();
-      if (!origin || !win || win.isDestroyed() || event?.sender !== win.webContents || !event.senderFrame || event.senderFrame !== win.webContents.mainFrame) return false;
-      return originOf(event.senderFrame.url) === origin;
+    homePage,
+    updating(event) {
+      if (!homePage(event)) return false;
+      const reloaded = updatingAt !== null && now() - updatingAt < UPDATING_MS;
+      updatingAt = null;
+      return reloaded;
     },
     /** `event` came from this computer's screen in this window. */
     screenPage(event) {
@@ -481,4 +501,5 @@ export function installHomeWindowIpc({ ipcMain, homeWindow, cloudPage }) {
   ipcMain.handle("home:sign-in", from("home:sign-in", (event) => screenPage(event) || cloudPage(event) === "cloud", () => homeWindow.signIn()));
   ipcMain.handle("home:repair", from("home:repair", (event) => homeWindow.homePage(event), () => homeWindow.repair()));
   ipcMain.on("home:page", (event) => { try { event.returnValue = homeWindow.homePage(event); } catch { event.returnValue = false; } });
+  ipcMain.on("home:updating", (event) => { try { event.returnValue = homeWindow.updating(event); } catch { event.returnValue = false; } });
 }

@@ -1,12 +1,13 @@
 /** The line either page shows for the one-time move to My Cloud (one-home.mjs). */
 export type OneHomeView =
-  /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, with why. */
-  | { phase: "copy"; chats?: { done: number; total: number }; failing?: { error: string | null } }
+  /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, with why; `updating`: My Cloud is too old
+   * to take a move and updates first. */
+  | { phase: "copy"; chats?: { done: number; total: number }; failing?: { error: string | null }; updating?: true }
   /** `waitingFor`: the bot or room still working here ("" when it has no name). */
   | { phase: "wait"; waitingFor?: string; failing?: { error: string | null } }
   | { phase: "finishing"; failing?: { error: string | null } }
-  /** What arrived, checked on both sides; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
-  | { phase: "done"; counts?: OneHomeCounts; phone: boolean; held: string[] }
+  /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
+  | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[] }
   /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`; or, with
    * `elsewhere`, they came back to that other computer and this one keeps its own copy from `since`, with automations off. */
   | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number } };
@@ -44,6 +45,8 @@ export function createOneHome(deps: {
     forget?(): Promise<void>;
   };
   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<Answer>; close(): Promise<void> }>;
+  /** My Cloud's session is no longer needed: the move is done, paused, or not this account's. */
+  release?(): Promise<void>;
   lend?(projects: string[]): Promise<unknown>;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;

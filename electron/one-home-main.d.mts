@@ -7,7 +7,7 @@ export function installationOf(environmentId: string): string;
 
 type SendDeps = Parameters<typeof installCloudSend>[0];
 
-export function installOneHome(deps: Omit<SendDeps, "local" | "move"> & {
+export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSession"> & {
   /** This computer's server, as its owner. */
   localRequest(route: string, init?: RequestInit & { duplex?: "half" }): Promise<Response>;
   /** The MausBot Cloud sign-in (cloud-account.mjs). */
