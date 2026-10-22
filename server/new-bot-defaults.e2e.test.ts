@@ -35,8 +35,8 @@ it("applies independent creation templates through the real isolated HTTP routes
       expect(JSON.stringify(memory)).toContain("Synthetic default memory");
       expect((await api("GET", `/api/bots/${bot.id}/skills`)).skills).toHaveLength(1);
     }
-    const routines = (await api("GET", "/api/routines")).routines.filter((routine: any) => [first.id, second.id].includes(routine.botId));
-    expect(routines).toHaveLength(2);
+    const routines = (await api("GET", "/api/routines")).routines;
+    expect(routines.filter((routine: any) => [first.id, second.id].includes(routine.botId))).toHaveLength(2);
     expect(routines.every((routine: any) => !routine.enabled)).toBe(true);
     const explicit = (await api("POST", "/api/bots", { title: "", settings: { description: "", computer: null, notifications: true } }, 201)).bot;
     expect(explicit).toMatchObject({ title: "", description: "", notifications: true });

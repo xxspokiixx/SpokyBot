@@ -70,7 +70,7 @@ it("takes cron through the real routine tools, applying the bot's own routine at
     expect(duplicateResponse.result.content[0].text).toContain(routineId);
     expect(duplicateResponse.result.content[0].text).toContain("already exists");
     expect((await messages()).filter(message => message.card?.routineRequest)).toHaveLength(cardCount);
-    expect((await api("GET", "/api/routines")).routines.filter((routine: any) => routine.deliver !== "brief")).toHaveLength(1);
+    expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
 
     const lastDay = { ...schedule, expression: "0 9 L * *" };
     const update = await proposal("manage_trigger", {
@@ -114,7 +114,7 @@ it("takes cron through the real routine tools, applying the bot's own routine at
       await api("PATCH", `/api/routines/${routineId}`, { schedule: invalid }, 400);
     }
     expect(await current()).toEqual(before);
-    expect((await api("GET", "/api/routines")).routines.filter((routine: any) => routine.deliver !== "brief")).toHaveLength(1);
+    expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
     const persisted = JSON.parse(readFileSync(join(fixture.info.dataDir, "routines.json"), "utf8"));
     expect(persisted.routines.find((routine: any) => routine.id === routineId).schedule).toEqual(lastDay);
     evidence.push({ final: await api("GET", "/api/routines"), persisted });

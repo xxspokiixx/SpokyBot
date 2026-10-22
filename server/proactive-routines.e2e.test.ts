@@ -84,13 +84,10 @@ describe("the Chief keeps an eye on the day", () => {
       schedule: { type: "interval", everyMinutes: 15 } });
   });
 
-  it("the first open of the day shows the brief, which says what it does, with no AI turn", async () => {
+  it("the first open of the day, with nothing for the person yet, posts no brief, opens nothing and starts no AI turn", async () => {
     const answer = await api("POST", "/api/presence/active", { source: "desktop", timeZone: "UTC" });
-    expect(answer).toMatchObject({ ok: true, returned: false, open: { botId: chief.id, threadId: chief.threadId } });
-    const card = await brief();
-    expect(card.text).toContain("Your brief");
-    expect(JSON.stringify(card.widget.root)).toContain("Tell me to stop, or what to watch for.");
-    expect(JSON.stringify(card.widget.root)).toContain("Nothing needs you right now.");
+    expect(answer).toEqual({ ok: true, returned: false });
+    expect(await brief()).toBeUndefined();
     expect(existsSync(fixture.fixtureDumpPath)).toBe(false);
   });
 
@@ -103,8 +100,7 @@ describe("the Chief keeps an eye on the day", () => {
     apps.connected = { gmail: true, googlecalendar: true };
   });
 
-  it("new mail and a meeting become one read-and-draft run; the reminder needs no AI; the brief and prep are edited in", async () => {
-    const before = await brief();
+  it("new mail and a meeting become one read-and-draft run; the reminder needs no AI; the brief and prep are posted", async () => {
     inbox(apps, Date.now());
     const run = await settled((await runNow()).id);
     expect(run).toMatchObject({ status: "completed", access: "read-and-draft", deliver: "brief" });
@@ -124,8 +120,9 @@ describe("the Chief keeps an eye on the day", () => {
     const prep = rows.find((message) => message.serverCard && message.widget?.root.title === "Prep: Standup");
     expect(JSON.stringify(prep.widget.root)).toContain("Next step: bring the draft.");
     const card = await brief();
-    expect(card.id).toBe(before.id);
+    expect(rows.filter((message) => message.serverCard && message.widget?.root.title === "Your brief")).toHaveLength(1);
     const shown = JSON.stringify(card.widget.root);
+    expect(shown).toContain("Tell me to stop, or what to watch for.");
     expect(shown).toContain("Ada: Q3 numbers due Friday");
     expect(shown).toContain("Ada needs the Q3 numbers from you by Friday.");
     expect(widgetActions(card.widget.root as WidgetRoot).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Draft a reply to Ada", "Dismiss Ada's email", "Join"]));
@@ -158,6 +155,7 @@ describe("the Chief keeps an eye on the day", () => {
     expect(run).toMatchObject({ status: "failed" });
     expect((await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === watch.id).checkTrouble).toBe("Couldn't read Gmail. Reconnect it in Connected apps.");
     await expect.poll(async () => JSON.stringify((await brief()).widget.root), { timeout: 10_000 }).toContain("Reconnect Gmail in Connected apps.");
+    expect((await messages()).filter((message) => message.serverCard && message.widget?.root.title === "Your brief")).toHaveLength(1);
     delete apps.gmailError;
   });
 

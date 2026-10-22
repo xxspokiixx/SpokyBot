@@ -1,6 +1,6 @@
 // The main agent's brief: one server-built card a day in a fixed chat of the Chief's, edited in place, rendered with no
-// AI from what the checks found and what the watch run sorted. It appears on the first open of the day, refreshes after
-// three hours away, and tells the person once per update. Presence, the brief's home and its rows live in brief.json,
+// AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
+// on the first open of the day and after three hours away, and tells the person once per update. Presence, the brief's home and its rows live in brief.json,
 // ids and times only; the senders and subjects it shows are read back from Gmail by id after a restart.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -57,6 +57,8 @@ export interface BriefDeps {
   now?: () => number;
   /** A hosted team workspace or a Team Cloud: the people there are not one person, so there is no brief. */
   hosted: boolean;
+  /** The Chief's briefing routine is on; with it paused or deleted there is no brief. */
+  watching(): boolean;
   mainThread(botId: string): string | undefined;
   threadBusy(botId: string, threadId: string): boolean;
   notify(bot: BotRecord, threadId: string, detail: string): void;
@@ -253,9 +255,10 @@ export function createBrief(deps: BriefDeps) {
     }
   }
 
-  /** Posts today's brief, or edits it in place. `create`: post one even when nothing needs the person. */
-  async function render(options: { create: boolean; notify: boolean }): Promise<{ botId: string; threadId: string } | null> {
-    if (deps.hosted) return null;
+  /** Posts today's brief, or edits it in place. `create`: post one when it has anything to show, not only what needs the
+   * person. `worth`: the card has something in it, so an arrival may open it. */
+  async function render(options: { create: boolean; notify: boolean }): Promise<{ botId: string; threadId: string; worth: boolean } | null> {
+    if (deps.hosted || !deps.watching()) return null;
     const bot = chief();
     if (!bot) return null;
     if (rendering) {
@@ -270,7 +273,8 @@ export function createBrief(deps: BriefDeps) {
       const threadId = existing?.card.threadId ?? home(bot);
       if (!threadId) return null;
       const needsPerson = built.needs.length > 0 || built.emails.length > 0;
-      if (!existing && !options.create && !needsPerson) return null;
+      const worth = needsPerson || (built.meetings?.length ?? 0) > 0;
+      if (!existing && !(options.create ? worth : needsPerson)) return null;
       if (deps.threadBusy(bot.id, threadId)) {
         dirty = true;
         return null;
@@ -278,7 +282,7 @@ export function createBrief(deps: BriefDeps) {
       dirty = false;
       const card = briefCard(built);
       const json = JSON.stringify(card.card);
-      if (existing && written?.messageId === existing.card.messageId && written.json === json) return { botId: bot.id, threadId };
+      if (existing && written?.messageId === existing.card.messageId && written.json === json) return { botId: bot.id, threadId, worth };
       const shown = existing ? edit(bot, existing.card, card) : post(bot, threadId, card);
       if (!shown) return null;
       written = { messageId: shown, json };
@@ -291,7 +295,7 @@ export function createBrief(deps: BriefDeps) {
       if ((options.notify || !existing) && (fresh.length || !existing) && needsPerson) deps.notify(bot, threadId, card.summary);
       state.notified = [...seen, ...fresh].slice(-200);
       save();
-      return { botId: bot.id, threadId };
+      return { botId: bot.id, threadId, worth };
     } finally {
       rendering = false;
     }
@@ -383,7 +387,8 @@ export function createBrief(deps: BriefDeps) {
     if (!result.quiet && result.important.length) await render({ create: true, notify: true });
   }
 
-  /** The person opened the app: the first open of a day shows today's brief, and a return after 3 hours refreshes it. */
+  /** The person arrived: the first open of a day, or a return after 3 hours away, shows today's brief when it has anything
+   * in it. Any other ping only records the time, so the brief never takes the screen from a chat in use. */
   async function active(source: "desktop" | "phone", zone?: string): Promise<PresenceAnswer> {
     if (deps.hosted) return { returned: false };
     const at = now();
@@ -392,12 +397,12 @@ export function createBrief(deps: BriefDeps) {
     state.lastActiveAt = at;
     const skewed = previous !== undefined && previous > at + CLOCK_SKEW_MS;
     const returned = previous !== undefined && !skewed && at - previous >= AWAY_MS;
-    const newDay = currentCard() === null;
-    if (returned || newDay || persistedAt === undefined || at - persistedAt >= PERSIST_EVERY_MS) save();
+    const firstToday = previous === undefined || (!skewed && localDate(previous, timeZone()) !== today());
+    if (returned || firstToday || persistedAt === undefined || at - persistedAt >= PERSIST_EVERY_MS) save();
     void source;
-    if (!returned && !newDay) return { returned: false };
+    if (!returned && !firstToday) return { returned: false };
     const shown = await render({ create: true, notify: false });
-    return shown ? { returned, open: shown } : { returned };
+    return shown?.worth ? { returned, open: { botId: shown.botId, threadId: shown.threadId } } : { returned };
   }
 
   const briefRow = (threadId: string, messageId: string): boolean => {

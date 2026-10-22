@@ -86,7 +86,7 @@ it("shows the organization's shelf, adds a team once, and keeps its stamps off t
       const listed = (await call("GET", `/api/bots/${bot.id}/skills`)).body.skills as Array<{ enabled: boolean }>;
       expect(listed.every((skill) => skill.enabled)).toBe(true);
     }
-    expect((await call("GET", "/api/routines")).body.routines.filter((routine: any) => bots.some((bot: any) => bot.id === routine.botId)).every((routine: any) => !routine.enabled)).toBe(true);
+    expect((await call("GET", "/api/routines")).body.routines.every((routine: any) => !routine.enabled)).toBe(true);
     const state = JSON.parse(readFileSync(join(fixture.info.dataDir, "org-library", "state.json"), "utf8"));
     expect(state.installs[added.body.installId]).toMatchObject({ packageId: TEAM_ID, status: "installed", section: "Sales desk" });
 

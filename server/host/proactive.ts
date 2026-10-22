@@ -1,6 +1,7 @@
 // The proactive main agent, wired from ordinary routines: the checks a routine runs before any AI turn, the
 // read-and-draft fence its runs work inside, the brief its results become, and the Chief's default "Keep an eye on my
-// day" routine, created once with no button on a personal install or a personal Cloud and never on a team's.
+// day" routine, created once with no button on a personal install or a personal Cloud that can reach connected apps,
+// and never on a team's. The brief is there only while that routine is on.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -82,9 +83,14 @@ export function createProactive(deps: ProactiveDeps) {
     return Boolean(bot && FENCED_ENGINES.has(deps.registry.get(bot.modelSelection.instanceId)?.driverKind ?? ""));
   };
   const runs = (): RoutineRun[] => [...(deps.routines()?.listRuns() ?? [])].reverse();
+  /** The Chief's briefing routine is on: pausing or deleting it switches the brief off. */
+  const watching = (): boolean => {
+    const chief = brief.chief();
+    return Boolean(chief && deps.routines()?.listRoutines().some((routine) => routine.botId === chief.id && routine.deliver === "brief" && routine.enabled));
+  };
 
   const brief = createBrief({
-    store, dataDir: deps.dataDir, hosted: deps.team, mainThread: deps.mainThread, threadBusy: deps.threadBusy, runs,
+    store, dataDir: deps.dataDir, hosted: deps.team, watching, mainThread: deps.mainThread, threadBusy: deps.threadBusy, runs,
     needsYou: deps.needsYou, engineName: deps.engineName, hostTimeZone: deps.hostTimeZone,
     notify: (bot, threadId, detail) => deps.notify(briefNotification(bot, threadId, detail)),
     session: () => (composio.configured(cfg) ? reads.session() : null),
@@ -113,14 +119,19 @@ export function createProactive(deps: ProactiveDeps) {
   });
 
   const watchFile = join(deps.dataDir, WATCH_FILE);
+  let made: boolean | undefined;
   const watchMade = (): boolean => {
-    try { return Boolean(JSON.parse(readFileSync(watchFile, "utf8")).createdAt); } catch { return false; }
+    if (made === undefined) {
+      try { made = Boolean(JSON.parse(readFileSync(watchFile, "utf8")).createdAt); } catch { made = false; }
+    }
+    return made;
   };
-  /** The Chief's default routine, once: pausing or deleting it is how it is switched off, so it is never made again. */
+  /** The Chief's default routine, once, when connected apps are there to read: pausing or deleting it is how it is
+   * switched off, so it is never made again. Asked at start and every minute, since a Cloud's access arrives later. */
   function ensureWatch(): Routine | null {
     const manager = deps.routines();
     const chief = brief.chief();
-    if (deps.team || !manager || !chief || watchMade()) return null;
+    if (deps.team || !composio.configured(cfg) || !manager || !chief || watchMade()) return null;
     const existing = manager.listRoutines().find((routine) => routine.botId === chief.id && routine.deliver === "brief" && routine.checks?.length);
     const routine = existing ?? manager.create({
       name: WATCH_NAME, prompt: WATCH_INSTRUCTIONS, botId: chief.id, enabled: true, timeoutMinutes: 15,
@@ -128,6 +139,7 @@ export function createProactive(deps: ProactiveDeps) {
       checks: ["calendar", "mail", "runs"], access: "read-and-draft", deliver: "brief",
     });
     if (!existing) deps.owned(routine);
+    made = true;
     try {
       writeFileAtomic(watchFile, `${JSON.stringify({ version: 1, routineId: routine.id, createdAt: Date.now() })}\n`, { mode: 0o600 });
     } catch (error) {
@@ -144,7 +156,10 @@ export function createProactive(deps: ProactiveDeps) {
     runSettled: (run: RoutineRun, turnId: string | undefined): void => void brief.consume(run, turnId).catch((error: unknown) => console.warn("brief: a run's answer was not kept", error)),
     start(): void {
       if (timer || deps.team) return;
-      timer = setInterval(() => brief.tick(), 60_000);
+      timer = setInterval(() => {
+        brief.tick();
+        try { ensureWatch(); } catch (error) { console.warn("watch: not made yet", error); }
+      }, 60_000);
       timer.unref?.();
     },
     stop(): void {

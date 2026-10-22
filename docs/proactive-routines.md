@@ -1,7 +1,9 @@
 # Proactive routines
 
 The Chief of Staff keeps an eye on the person's day with one ordinary routine,
-"Keep an eye on my day". It is built from four upgrades every routine can use.
+"Keep an eye on my day". It is made once, with no button, on a personal install
+or Cloud that can reach connected apps, and it is built from four upgrades every
+routine can use.
 There is no second bot and no separate watcher: the routine engine
 (`server/routines.ts`) runs it like any other routine, on the desktop, headless
 and on a Cloud.
@@ -9,9 +11,12 @@ and on a Cloud.
 ## What the person sees
 
 - **The brief.** One card a day in a fixed chat of the Chief's, edited in
-  place, built with no AI. It shows on the first open of the day and refreshes
-  after three hours away. Its first appearance says what it does and that the
-  person can tell the Chief to stop or change it. Sections:
+  place, built with no AI. It exists only once it has something for the person
+  (something that needs them, an important email or a meeting today); an empty
+  brief is never posted. It opens on the first open of the day and after three
+  hours away. Any other moment, it never takes the screen from the chat in use.
+  Its first appearance says what it does and that the person can tell the Chief
+  to stop or change it. Sections:
   1. **Needs you**: emails waiting on a reply, failed or missed routines,
      meetings that clash, an app that can't be read ("Couldn't read Gmail ·
      Reconnect Gmail in Connected apps"), a signed-out AI, a usage limit, a
@@ -25,7 +30,8 @@ and on a Cloud.
 - **The 10-minute reminder**: a card posted by the server, with no AI.
 - One notification per update that adds something that needs the person.
 
-Pausing or deleting the routine in Automations is the off switch. Its row says
+Pausing or deleting the routine in Automations is the off switch: with it off
+there is no brief at all. Its row says
 "reads and drafts only" and "checked … , nothing new".
 
 ## The four routine upgrades
@@ -99,6 +105,10 @@ Pausing or deleting the routine in Automations is the off switch. Its row says
   starts no turn. Recent dismissals go into the next triage as records.
 - A hosted team workspace or Team Cloud gets no watch and no brief. Presence is
   recorded for the owner only.
+- An install that can't reach connected apps gets no watch, and so no brief,
+  until it can. It checks once a minute, since a Cloud's access arrives after
+  start. A scripted test install without the fake connected-apps service
+  behaves as before.
 - Routines carry `checks`, `access` and `deliver` through Cloud moves and team
   backups. The move freeze pauses the watch like any routine, so two homes never
   watch the same inbox.

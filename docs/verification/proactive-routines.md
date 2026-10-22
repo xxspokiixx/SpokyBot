@@ -20,7 +20,9 @@ Expected:
 
 - The Chief has one default routine, "Keep an eye on my day", with checks,
   `read-and-draft` and `deliver: brief`.
-- The first open of the day posts the brief with its intro line and no AI turn.
+- The first open of the day, with nothing for the person yet, posts no brief,
+  opens nothing and starts no AI turn. The first brief, posted by the watch's
+  run, carries the intro line, and every later change edits it in place.
 - With nothing connected, a check reads nothing and starts no turn.
 - New mail and a meeting with other people become **one** run. Its prompt
   holds the mail and the invite in records blocks, and forged markers are

@@ -25,6 +25,7 @@ const standup: CalendarEvent = {
 };
 
 function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[] } = {}) {
+  let watching = true;
   const dir = mkdtempSync(join(tmpdir(), "omb-brief-"));
   dirs.push(dir);
   let now = Date.parse("2026-10-22T08:00:00Z");
@@ -38,7 +39,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[] } = {}) {
   const runs: RoutineRun[] = [];
   let busy = false;
   const make = () => createBrief({
-    store, dataDir: dir, now: () => now, hosted: options.hosted ?? false, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => busy,
+    store, dataDir: dir, now: () => now, hosted: options.hosted ?? false, watching: () => watching, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => busy,
     notify: (_bot, _thread, detail) => notified.push(detail), runs: () => runs, needsYou: () => options.needsYou ?? [], engineName: () => "Claude",
     hostTimeZone: () => "UTC", session: () => null, address: () => "me@x.test",
     failRun: (id, why) => failed.push([id, why]), keep: (key) => kept.push(key), items: (key) => items.get(key) ?? null,
@@ -57,15 +58,34 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[] } = {}) {
   return {
     get brief() { return brief; }, store, chief, notified, failed, kept, items, runs, rows, card, shown, watchRun, thread,
     advance: (ms: number) => { now += ms; }, now: () => now, busy: (value: boolean) => { busy = value; }, restart: () => { brief = make(); },
+    watch: (on: boolean) => { watching = on; },
   };
 }
 
 describe("the brief", () => {
+  it("is not there while it has nothing for the person, so an open never takes the screen for an empty card", async () => {
+    const needsYou: NeedsYouItem[] = [];
+    const s = setup({ needsYou });
+    expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false });
+    expect(s.card()).toBeUndefined();
+    // Something needs the person later that day: a ping while they use the app neither posts the brief nor opens it.
+    needsYou.push({ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] });
+    s.advance(5 * MINUTE);
+    expect(await s.brief.active("desktop")).toEqual({ returned: false });
+    expect(s.card()).toBeUndefined();
+    // A check's news posts it, still without taking the screen.
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false }] });
+    expect(s.shown()).toContain("Couldn't read Gmail");
+    expect(s.shown()).toContain(BRIEF_INTRO);
+    s.advance(5 * MINUTE);
+    expect(await s.brief.active("desktop")).toEqual({ returned: false });
+  });
+
   it("shows on the first open of a day, saying what it does, and once more only after three hours away", async () => {
-    const s = setup();
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
     expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false, open: { botId: s.chief.id, threadId: s.thread() } });
     expect(s.shown()).toContain(BRIEF_INTRO);
-    expect(s.shown()).toContain("Nothing needs you right now.");
+    expect(s.shown()).toContain("Claude is signed out");
     const first = s.card()!;
     s.advance(30 * MINUTE);
     expect(await s.brief.active("desktop")).toEqual({ returned: false });
@@ -80,7 +100,7 @@ describe("the brief", () => {
   });
 
   it("keeps its home chat when the person starts a newer one, and posts a new card the next day", async () => {
-    const s = setup();
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
     await s.brief.active("desktop", "UTC");
     const home = s.thread();
     const first = s.card()!.id;
@@ -139,6 +159,9 @@ describe("the brief", () => {
     expect(s.brief.serverPress(s.chief, s.thread(), card.id, dismiss, owner)).toBe("handled");
     await vi.waitFor(() => expect(s.shown()).not.toContain("Q3 numbers"));
     expect(s.brief.dismissedFrom()).toEqual(["ada@x.test"]);
+    // Nothing is left on it, so coming back does not open it.
+    s.advance(AWAY_MS);
+    expect(await s.brief.active("desktop")).toEqual({ returned: true });
     s.restart();
     expect(s.brief.dismissedFrom()).toEqual(["ada@x.test"]);
   });
@@ -176,6 +199,17 @@ describe("the brief", () => {
     s.busy(false);
     s.brief.tick();
     await vi.waitFor(() => expect(s.shown()).toContain("Couldn't read Gmail"));
+  });
+
+  it("is not there while its routine is paused or deleted: that is its off switch", async () => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    s.watch(false);
+    expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false });
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: true }] });
+    expect(s.card()).toBeUndefined();
+    s.watch(true);
+    s.advance(AWAY_MS);
+    expect(await s.brief.active("desktop")).toMatchObject({ returned: true, open: { threadId: s.thread() } });
   });
 
   it("is never there on a hosted team workspace or a Team Cloud", async () => {
