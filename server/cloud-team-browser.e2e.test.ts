@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { resolveAgentBrowserBinary } from "./browser-engine.ts";
@@ -30,10 +31,31 @@ if (!REAL_BROWSER) console.log("skipping the Team Cloud sign-in check: it needs 
 const stub = REAL_BROWSER ? null : (() => {
   const dir = mkdtempSync(join(tmpdir(), "omb-team-browser-stub-"));
   const engine = join(dir, "agent-browser"), log = join(dir, "commands.log");
-  writeFileSync(engine, ["#!/bin/sh", `printf '%s %s\\n' "$AGENT_BROWSER_SESSION" "$1" >> '${log}'`,
+  const preloader = process.platform === "win32" ? join(dir, "agent-browser-prelude.mjs") : undefined;
+  writeFileSync(engine, preloader ? "fixture marker; intercepted by the test prelude" : ["#!/bin/sh", `printf '%s %s\\n' "$AGENT_BROWSER_SESSION" "$1" >> '${log}'`,
     `if [ "$1" = session ]; then printf '{"success":true,"data":{"sessions":[]}}\\n'; fi`, "exit 0"].join("\n"), { mode: 0o755 });
+  if (preloader) {
+    writeFileSync(preloader, [
+      'import childProcess from "node:child_process";',
+      'import { resolve } from "node:path";',
+      'const original = childProcess.ChildProcess.prototype.spawn;',
+      'const target = process.env.OMB_AGENT_BROWSER_PATH;',
+      'const log = process.env.OMB_AGENT_BROWSER_LOG;',
+      'childProcess.ChildProcess.prototype.spawn = function(options) {',
+      '  if (typeof options.file !== "string" || !target || resolve(options.file) !== resolve(target)) return original.call(this, options);',
+      '  const program = [',
+      '    \'const fs=require("node:fs");\',',
+      '    \'const log=\' + JSON.stringify(log) + \';\',',
+      '    \'const args=process.argv.slice(1);\',',
+      '    \'fs.appendFileSync(log,(process.env.AGENT_BROWSER_SESSION||"")+" "+(args[0]||"")+String.fromCharCode(10));\',',
+      '    \'if(args[0]==="session")process.stdout.write(JSON.stringify({success:true,data:{sessions:[]}})+String.fromCharCode(10));\',',
+      '  ].join("");',
+      '  return original.call(this, { ...options, file: process.execPath, args: [process.execPath, "-e", program, "--", ...options.args.slice(1)] });',
+      '};',
+    ].join("\n"));
+  }
   const lines = () => (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").filter(Boolean);
-  return { dir, engine, lines, sessions: () => lines().map((line) => line.split(" ")[0]!).filter(Boolean) };
+  return { dir, engine, log, preloader, lines, sessions: () => lines().map((line) => line.split(" ")[0]!).filter(Boolean) };
 })();
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
@@ -42,7 +64,23 @@ let bot: { id: string; mainThreadId: string };
 let adaThread = "", cleoThread = "", roomId = "", roomThread = "";
 
 beforeAll(async () => {
-  fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-1", name: "Acme", engine: ENGINE, ...(stub ? { env: { OMB_AGENT_BROWSER_PATH: stub.engine } } : {}) } });
+  fx = await launchCloudSendFixture({
+    onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`,
+    team: {
+      id: "team-acme-1",
+      name: "Acme",
+      engine: ENGINE,
+      ...(stub ? {
+        env: {
+          OMB_AGENT_BROWSER_PATH: stub.engine,
+          ...(stub.preloader ? {
+            OMB_AGENT_BROWSER_LOG: stub.log,
+            NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${pathToFileURL(stub.preloader).href}`].filter(Boolean).join(" "),
+          } : {}),
+        },
+      } : {}),
+    },
+  });
   team = fx.team!;
   owner = (await team.pair(OWNER)).token!;
   admin = (await team.pair(ADMIN)).token!;

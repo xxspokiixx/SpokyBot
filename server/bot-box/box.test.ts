@@ -148,7 +148,7 @@ describe("the box a bot's Chrome runs in", () => {
   });
   const temp = () => { const dir = mkdtempSync(join(tmpdir(), "omb-box-")); dirs.push(dir); return dir; };
 
-  it("has the host's network and the read-only paths asked for, and none of HOME or the data folder", async () => {
+  it.skipIf(process.platform === "win32")("has the host's network and the read-only paths asked for, and none of HOME or the data folder", async () => {
     const box = new BotBox();
     boxes.push(box);
     const off = new BotBox();
