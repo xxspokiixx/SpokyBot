@@ -8,12 +8,14 @@ import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 
 import { removeTempDir, waitForExit } from "../../../testing/cleanup.ts";
+import { loopbackPage, openOwnPage } from "../../chrome/calibrate.ts";
 import { chromeEnv } from "../../chrome/flags.ts";
 import { FIRST_START_MS, launchChrome, type ChromeProcess, type LaunchOptions } from "../../chrome/launch.ts";
 import { sandboxDisabled } from "../../chrome/host-setup.ts";
 import { credentialStoreFlags } from "../../egress/gate.ts";
 import { CdpBrowser, type BrowserOptions } from "../browser.ts";
 import { CdpConnection } from "../connection.ts";
+import { DEFAULT_NAVIGATION_TIMEOUT_MS } from "../page.ts";
 import { pipeTransport, tracingTransport, type SentCommand } from "../transport.ts";
 
 const INSTALLED: Partial<Record<NodeJS.Platform, string[]>> = {
@@ -96,7 +98,15 @@ export interface RunningChrome {
   close(): Promise<void>;
 }
 
-export async function startChrome(label: string, { launch = {}, browser: browserOptions = {} }: { launch?: Partial<LaunchOptions>; browser?: BrowserOptions } = {}): Promise<RunningChrome> {
+export interface StartOptions {
+  launch?: Partial<LaunchOptions>;
+  browser?: BrowserOptions;
+  /** The startup tab first opens a page of the harness's own, then about:blank, as LocalBackend takes a fresh profile's
+   * first navigation before a bot's first page on Windows: Chrome there now and then loses it. */
+  takeFirstNavigation?: boolean;
+}
+
+export async function startChrome(label: string, { launch = {}, browser: browserOptions = {}, takeFirstNavigation = process.platform === "win32" }: StartOptions = {}): Promise<RunningChrome> {
   if (!CHROME) throw new Error("No Chrome to test with.");
   const dir = mkdtempSync(join(testRoot(), "omb-cdp-"));
   const chrome = await launchChrome({
@@ -115,6 +125,7 @@ export async function startChrome(label: string, { launch = {}, browser: browser
     TRACE.push(traced);
   });
   const browser = await CdpBrowser.connect(transport, { downloadDir: join(dir, "downloads"), ...browserOptions });
+  if (takeFirstNavigation) await firstNavigation(browser);
   return {
     chrome,
     browser,
@@ -126,6 +137,17 @@ export async function startChrome(label: string, { launch = {}, browser: browser
       await removeTempDir(dir);
     },
   };
+}
+
+async function firstNavigation(browser: CdpBrowser): Promise<void> {
+  const own = await loopbackPage();
+  try {
+    const tab = await browser.waitForPage();
+    await openOwnPage(tab, own.url, DEFAULT_NAVIGATION_TIMEOUT_MS);
+    await tab.navigate("about:blank");
+  } finally {
+    own.close();
+  }
 }
 
 /**
