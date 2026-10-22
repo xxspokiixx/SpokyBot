@@ -13327,7 +13327,7 @@ ROUTES.push(createTaskRoutes({
   cloudThreadRefusal,
   sharedWorkspaceFullAccessEnabled,
   supportsApprovalMode,
-  threadBusy,
+  threadBusy, broadcast,
   publicBot,
   wireBot,
   wireTask,
