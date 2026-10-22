@@ -338,6 +338,7 @@ const appConfigSchema = z.object({
   cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(),
   groq: z.object({ key: optionalText, url: optionalText }).optional(),
   meta: z.object({ key: optionalText, url: optionalText }).optional(),
+  deepseek: z.object({ key: optionalText }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
   /** Anthropic API key for Claude Code billed per token; `url` is for a proxy or test double. Never a login OAuth token. */
   anthropic: z.object({ key: optionalText, url: optionalText, everyClaudeBot: z.boolean().optional() }).optional(),
@@ -486,6 +487,8 @@ export interface AppConfig extends HelperConfig {
   cerebras?: { key?: string }; treg?: { key?: string };
   groq?: { key?: string; url?: string };
   meta?: { key?: string; url?: string };
+  /** DeepSeek API key for the DeepSeek Harness engine (`dsh`). */
+  deepseek?: { key?: string };
   /** `everyClaudeBot`: the key runs every Claude bot instead of its login; unset means true. */
   anthropic?: { key?: string; url?: string; everyClaudeBot?: boolean };
   openai?: { key?: string };
@@ -788,6 +791,8 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_GROQ_API_KEY !== undefined) cfg.groq.key = process.env.OMB_GROQ_API_KEY;
   cfg.meta = { ...cfg.meta };
   if (process.env.OMB_META_API_KEY !== undefined) cfg.meta.key = process.env.OMB_META_API_KEY;
+  cfg.deepseek = { ...cfg.deepseek };
+  if (process.env.OMB_DEEPSEEK_API_KEY !== undefined) cfg.deepseek.key = process.env.OMB_DEEPSEEK_API_KEY;
   cfg.xai = { ...cfg.xai };
   if (process.env.XAI_API_KEY !== undefined) cfg.xai.key = process.env.XAI_API_KEY;
   // Never ANTHROPIC_API_KEY: an operator's stray variable must not move every Claude bot onto API billing.
@@ -856,6 +861,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.cerebras?.key, "CEREBRAS_API_KEY"], [patch.treg?.key, "OMB_TREG_KEY"],
     [patch.groq?.key, "OMB_GROQ_API_KEY"],
     [patch.meta?.key, "OMB_META_API_KEY"],
+    [patch.deepseek?.key, "OMB_DEEPSEEK_API_KEY"],
     [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
     [patch.openaiCompat?.key, "OPENAI_COMPAT_API_KEY"],
     [patch.openai?.key, "OMB_OPENAI_API_KEY"],
@@ -896,6 +902,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "CEREBRAS_API_KEY",
   "OMB_GROQ_API_KEY",
   "OMB_META_API_KEY",
+  "OMB_DEEPSEEK_API_KEY",
   "OMB_ANTHROPIC_API_KEY",
   "OMB_ANTHROPIC_API_URL",
   "OMB_HOSTED_MODEL_TOKEN",
@@ -957,6 +964,7 @@ export const PROVIDER_CREDENTIAL_ENV = [
   "CEREBRAS_API_KEY",
   "GROQ_API_KEY",
   "META_API_KEY",
+  "DEEPSEEK_API_KEY",
   "CURSOR_API_KEY",
   "CURSOR_AUTH_TOKEN",
 ] as const;
@@ -972,6 +980,7 @@ export const OPENCODE_PROVIDER_ENV = [
   "MOONSHOT_API_KEY",
   "MINIMAX_API_KEY",
   "GROQ_API_KEY",
+  "DEEPSEEK_API_KEY",
 ] as const;
 
 export const OPENCODE_PROVIDER_KEY_LIMIT = 20;
@@ -1047,7 +1056,7 @@ export function saveConfig(
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "groq", "meta", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "groq", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1244,6 +1253,9 @@ export function instanceOwnsRouting(
       return own(entry.environment?.GROQ_API_KEY) || ownUrl("https://api.groq.com/openai/v1", cfg.groq?.url);
     case "meta":
       return own(entry.environment?.META_API_KEY) || ownUrl("https://api.meta.ai/v1", cfg.meta?.url);
+    case "deepseekAgent":
+      // A second DeepSeek Harness account brings its own key; the workspace key fills only an instance without one.
+      return own(entry.environment?.DEEPSEEK_API_KEY);
     case "grok":
       return own(entry.environment?.XAI_API_KEY) || (own(config.apiKeyEnv) && config.apiKeyEnv !== "XAI_API_KEY")
         || ownUrl("https://api.x.ai/v1", cfg.xai?.url);
@@ -1259,6 +1271,7 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   if (driver === "cerebras" && cfg.cerebras?.key) environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
+  if (driver === "deepseekAgent" && cfg.deepseek?.key) environment.set("DEEPSEEK_API_KEY", cfg.deepseek.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
   if (driver === "claudeAgent") for (const [name, value] of Object.entries(anthropicKeyEnv(cfg.anthropic, instanceId === CLAUDE_API_INSTANCE))) environment.set(name, value);
   if (driver === "openai-compat" && instanceId === OPENAI_API_INSTANCE) {
@@ -1316,6 +1329,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cerebras: { driver: "cerebras" },
     groq: { driver: "groq" },
     meta: { driver: "meta" },
+    deepseek: { driver: "deepseekAgent" },
     museCode: { driver: "museCode" },
     ...API_KEY_FLEET,
     qwen: { driver: "qwenAgent" },
@@ -1337,6 +1351,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cerebras: { driver: "cerebras" },
     groq: { driver: "groq" },
     meta: { driver: "meta" },
+    deepseek: { driver: "deepseekAgent" },
     museCode: { driver: "museCode" },
     ...API_KEY_FLEET,
     ...CUSTOM_ONLY,

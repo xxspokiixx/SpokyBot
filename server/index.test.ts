@@ -11917,6 +11917,17 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("stores a DeepSeek key write-only and reports it configured", async () => {
+    const put = await api("PUT", "/api/config", { deepseek: { key: "ds-secret" } });
+    expect(put.status).toBe(200);
+    expect(put.body.deepseek).toEqual({ configured: true });
+    expect(JSON.stringify(put.body)).not.toContain("ds-secret");
+
+    const after = await api("GET", "/api/config");
+    expect(after.body.deepseek).toEqual({ configured: true });
+    expect(JSON.stringify(after.body)).not.toContain("ds-secret");
+  });
+
   it("stores OpenCode Go credentials as a configured-only status", async () => {
     const put = await api("PUT", "/api/config", { opencodeGo: { apiKey: "opencode-secret" } });
     expect(put.status).toBe(200);
