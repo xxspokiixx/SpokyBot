@@ -23,11 +23,14 @@
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { existsSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
+import { resolveCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
@@ -103,6 +106,152 @@ function offeredWireValues(sessionConfig: unknown, configId: string): { values: 
   return { values, current: typeof option?.currentValue === "string" ? option.currentValue : null };
 }
 
+/** The `model` config option of a session/new answer, as a picker catalog.
+ * Groups carry dsh's provider display name, kept as the option's provider
+ * badge so a gateway's copy of a model stays distinguishable. */
+export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog {
+  const options = (sessionResult as { configOptions?: unknown[] } | undefined)?.configOptions;
+  const option = (Array.isArray(options) ? options : []).find((entry: any) => entry?.id === "model") as
+    { currentValue?: unknown; options?: unknown } | undefined;
+  const out: ModelCatalog["options"] = [];
+  const collect = (entries: unknown, provider: string | undefined) => {
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      if (Array.isArray(entry?.options)) {
+        const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim()
+          : typeof entry.group === "string" ? entry.group : provider;
+        collect(entry.options, name);
+        continue;
+      }
+      if (typeof entry?.value !== "string") continue;
+      const id = deepseekPickerId(entry.value);
+      if (!id || out.some((row) => row.id === id)) continue;
+      const label = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : id;
+      out.push({ id, label, ...(provider ? { provider } : {}) });
+    }
+  };
+  collect(option?.options, undefined);
+  if (!out.length) throw new Error("dsh advertised no models");
+  const current = typeof option?.currentValue === "string" ? deepseekPickerId(option.currentValue) : null;
+  return {
+    default: current && out.some((row) => row.id === current) ? current : out[0]!.id,
+    options: out,
+  };
+}
+
+export const DEEPSEEK_MODELS_TIMEOUT_ENV = "OPENMAUS_DEEPSEEK_MODELS_TIMEOUT_MS";
+/** A warm `dsh --profile acp` answers session/new in ~2 s; the first boot
+ * after an install also creates the profile, so leave real headroom. */
+export const DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS = 60_000;
+
+function catalogTimeoutMs(env: Record<string, string | undefined>): number {
+  const raw = env[DEEPSEEK_MODELS_TIMEOUT_ENV];
+  if (raw === undefined) return DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647 ? parsed : DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS;
+}
+
+/** Ask the installed dsh what it offers: initialize, session/new in `cwd`,
+ * read the catalog, session/close. Rejects on any failure so the core keeps
+ * the last usable catalog; never resolves to an empty or guessed list. */
+export function fetchDeepSeekCatalog(
+  cli: string,
+  env: Record<string, string | undefined>,
+  cwd: string,
+): Promise<ModelCatalog> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      const resolved = resolveCli(cli, ["--profile", "acp"], env);
+      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
+    } catch (error) {
+      return reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (outcome: { catalog: ModelCatalog } | { error: Error }) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try {
+        child.stdin?.end();
+      } catch {}
+      try {
+        if (child.kill()) {
+          const hardKill = setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {}
+          }, 1_000);
+          hardKill.unref?.();
+        }
+      } catch {}
+      if ("catalog" in outcome) resolve(outcome.catalog);
+      else reject(outcome.error);
+    };
+    timer = setTimeout(() => finish({ error: new Error(`dsh timed out after ${catalogTimeoutMs(env)} ms without answering session/new`) }), catalogTimeoutMs(env));
+    child.once("error", (error) => finish({ error }));
+    // A child that already exited makes stdin emit EPIPE, and an unhandled stream 'error' crashes the server.
+    child.stdin?.on("error", (error) => finish({ error }));
+    child.once("close", (code, signal) => finish({ error: new Error(`dsh exited (${signal ?? code}) before answering session/new`) }));
+
+    let buf = "";
+    let nextId = 0;
+    const send = (method: string, params: unknown): number => {
+      nextId += 1;
+      try {
+        child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id: nextId, method, params })}\n`, (error) => {
+          if (error) finish({ error });
+        });
+      } catch (error) {
+        finish({ error: error instanceof Error ? error : new Error(String(error)) });
+      }
+      return nextId;
+    };
+    let initId = 0;
+    let sessionReqId = 0;
+    let closeId = 0;
+    let catalog: ModelCatalog | null = null;
+    child.stdout?.on("data", (chunk) => {
+      buf += String(chunk);
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        let msg: any;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (msg?.id === initId) {
+          if (!msg.result) return finish({ error: new Error(`dsh rejected initialize: ${JSON.stringify(msg.error ?? msg)}`) });
+          sessionReqId = send("session/new", { cwd, mcpServers: [] });
+        } else if (sessionReqId && msg?.id === sessionReqId) {
+          const sessionId = typeof msg.result?.sessionId === "string" ? msg.result.sessionId : null;
+          try {
+            catalog = parseDeepSeekCatalog(msg.result);
+          } catch (error) {
+            // Best effort: the close is sent, but an unusable answer does not wait on it.
+            if (sessionId) send("session/close", { sessionId });
+            return finish({ error: error instanceof Error ? error : new Error(String(error)) });
+          }
+          if (!sessionId) return finish({ catalog });
+          // Leave no half-open session behind in dsh's persisted list.
+          closeId = send("session/close", { sessionId });
+        } else if (closeId && msg?.id === closeId) {
+          finish({ catalog: catalog! });
+        }
+      }
+    });
+    initId = send("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
+      clientInfo: { name: "openmausbot", version: "catalog" },
+    });
+  });
+}
+
 export const deepseekSupport: AcpSupport = {
   driverKind: "deepseekAgent",
   displayName: "DeepSeek Harness",
@@ -127,6 +276,8 @@ export const deepseekSupport: AcpSupport = {
   selectModel: { configId: "model" },
   modelVariants: true,
   resumeMethod: "resume",
+  // Refresh only: a fresh profile boot can take long, and startup must not wait on it.
+  resolveModels: (env, config) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir()),
   resolveModelsOnCreate: false,
 
   // initialize advertises no auth methods; the key rides in the child env or
