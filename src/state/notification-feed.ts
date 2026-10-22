@@ -9,6 +9,15 @@ export type NotificationFeedAction =
   | { type: "notificationsRead"; ids: string[] }
   | { type: "notificationsMarkAllRead" };
 
+const FEED_ACTIONS: ReadonlySet<string> = new Set<NotificationFeedAction["type"]>([
+  "notificationsHydrated", "notificationReceived", "notificationRead", "notificationsRead", "notificationsMarkAllRead",
+]);
+
+/** The feed's own actions, which the app's reducer hands straight to reduceNotificationFeed. */
+export function isNotificationFeedAction(action: { type: string }): action is NotificationFeedAction {
+  return FEED_ACTIONS.has(action.type);
+}
+
 /** Newest first. Hydration takes the server's copy of each entry it returns and keeps live entries it has not seen yet. */
 export function reduceNotificationFeed(feed: NotificationLogEntry[], action: NotificationFeedAction): NotificationLogEntry[] {
   switch (action.type) {
