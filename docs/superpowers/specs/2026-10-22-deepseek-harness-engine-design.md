@@ -92,12 +92,13 @@ with the normal approval cards, model picker and reasoning-effort control.
   labels; `currentValue` becomes the default. Any failure throws so the core
   keeps the last usable catalog. Timeout 60 s (`OPENMAUS_DEEPSEEK_MODELS_TIMEOUT_MS`).
   `resolveModelsOnCreate: false`.
-- `effortLevels: ["none", "low", "high", "max"]`; `none` ↔ `off`.
-- `configureSession`: set `model` when `turn.model` differs from the current
-  wire value; set `reasoning_effort` when `turn.effort` is given. Both go
-  through `session/set_config_option` and are confirmed from the returned
-  `configOptions`; a mismatch or RPC error throws a message that names the
-  engine and the setting.
+- Model and reasoning effort ride the core's existing OpenCode-shaped path
+  (builder's call, replacing the `effortLevels` + `configureSession` draft
+  above once `core.ts` on main was read): `selectModel: { configId: "model" }`
+  sets and confirms the model through `session/set_config_option`, and
+  `modelVariants: true` discovers dsh's `reasoning_effort` option (category
+  `thought_level`: off/low/high/max) as the per-session "Reasoning" picker the
+  UI already renders for OpenCode. No driver code for effort.
 - `resumeMethod: "resume"`.
 - `pickAuthMethod: () => null`, `authFailure: "continue"` (ambient key).
 - `isAuthenticated(env)`: `env.DEEPSEEK_API_KEY` set, or
@@ -107,7 +108,10 @@ with the normal approval cards, model picker and reasoning-effort control.
 - `loginNote`: "DeepSeek Harness has no DeepSeek API key — paste one under
   Settings → Connections → Model providers, or set DEEPSEEK_API_KEY."
 - `install`: `npm install -g @deepseek-ai/dsh` on all three platforms,
-  `needsNode: true`, `docsUrl: https://github.com/deepseek-ai/deepseek-harness`.
+  `needsNode: true`, `docsUrl: https://github.com/deepseek-ai/deepseek-harness`,
+  `settings: "connections"` so a keyless but installed dsh shows the
+  "needs an API key → Open API keys" card instead of a terminal sign-in; the
+  setup panel still offers the npm install while the CLI itself is missing.
 - `buildPromptText`: persona then text, like Droid and Hermes.
 
 ### Registry and fleet
