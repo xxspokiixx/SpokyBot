@@ -238,7 +238,10 @@ describe("a menu opening below its trigger", () => {
     const sub = document.querySelector<HTMLElement>("[data-sidebar-popover-submenu]")!;
     expect(sub).not.toBeNull();
     expect(sub.style.visibility).not.toBe("hidden");
-    await act(async () => sub.querySelector<HTMLElement>('[role="menuitem"]')!.click());
+    // The submenu sits outside the menu's own box, so pressing on it must not count as a press outside the menu.
+    const pick = sub.querySelector<HTMLElement>('[role="menuitem"]')!;
+    await act(async () => { pick.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+    await act(async () => pick.click());
     expect(picked).toEqual(["Trip plan"]);
     await act(async () => root.unmount());
     host.remove();
