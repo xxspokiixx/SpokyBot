@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { TraceGroup, TraceStep, TraceTool, TraceTurn } from "../../shared/usage-trace.ts";
 import { monthKey, type UsageRow } from "../usage-ledger.ts";
 import { groupRuns, linkTurns, summarizeRoot, traceTurn } from "./build.ts";
+import { ledgerRows } from "./ledger.ts";
 import { createTraceService } from "./service.ts";
 import { appendSpans, flushSpans, type SpanRecord } from "./spans.ts";
 
@@ -101,6 +102,24 @@ describe("trace tree", () => {
 describe("trace service", () => {
   const dirs: string[] = [];
   afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
+  it("reads only the ledger lines added since the last read, once, however many requests overlap", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-trace-ledger-"));
+    dirs.push(dataDir);
+    mkdirSync(join(dataDir, "usage"), { recursive: true });
+    const ledger = join(dataDir, "usage", `${monthKey(new Date(T0))}.jsonl`);
+    const add = (n: number) => { for (let index = 0; index < n; index += 1) appendFileSync(ledger, JSON.stringify(timed(`t-${Math.random()}`, "bot", "x", 0, 10)) + "\n"); };
+    const range: [string, number, number] = [dataDir, T0 - 60_000, T0 + 60_000];
+    add(3);
+    expect(await ledgerRows(...range)).toHaveLength(3);
+    add(2);
+    appendFileSync(ledger, '{"half a line');
+    const [first, second] = await Promise.all([ledgerRows(...range), ledgerRows(...range)]);
+    expect([first.length, second.length]).toEqual([5, 5]);
+    appendFileSync(ledger, '", "x": 1}\n');
+    add(1);
+    expect(await ledgerRows(...range)).toHaveLength(6);
+  });
 
   it("builds a 500-span trace from disk in well under 100 ms and pages the runs list", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "omb-trace-service-"));

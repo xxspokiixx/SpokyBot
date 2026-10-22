@@ -90,6 +90,7 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
 
 const MAX_TOOL_NAME = 128;
 const MAX_TOOL_MS = 24 * 60 * 60_000;
+const MAX_SKEW_MS = 24 * 60 * 60_000;
 
 /** A receipt from the agents tools for one call this turn's capability made: OMB's own timing of the tools it serves. */
 export function createToolTimingRoute(recorder: Pick<TraceRecorder, "receipt">, threadId: string): RouteHandler {
@@ -99,8 +100,9 @@ export function createToolTimingRoute(recorder: Pick<TraceRecorder, "receipt">, 
     try { body = await readBody(req, 8_192); } catch { return json(res, 400, { error: "expected a small JSON body" }); }
     const value = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
     const { name, startedAt, endedAt, ok } = value;
+    const near = (time: unknown): time is number => typeof time === "number" && Number.isFinite(time) && Math.abs(time - Date.now()) <= MAX_SKEW_MS;
     if (typeof name !== "string" || !name || name.length > MAX_TOOL_NAME || typeof ok !== "boolean" ||
-        typeof startedAt !== "number" || typeof endedAt !== "number" || !(endedAt >= startedAt) || endedAt - startedAt > MAX_TOOL_MS) {
+        !near(startedAt) || !near(endedAt) || !(endedAt >= startedAt) || endedAt - startedAt > MAX_TOOL_MS) {
       return json(res, 400, { error: "name, startedAt, endedAt and ok are required" });
     }
     const text = (field: unknown, max: number) => typeof field === "string" && field.trim() ? redactSecretsInText(field.slice(0, max)) : undefined;

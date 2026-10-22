@@ -149,8 +149,32 @@ describe("trace recorder", () => {
     expect(tools.every((tool) => tool.endedAt! - tool.startedAt >= 25)).toBe(true);
   });
 
+  it("closes a turn its engine abandoned, forgets a stale expected start, and ignores a receipt from outside the turn", async () => {
+    let clock = T0;
+    const dir = dataDir();
+    const recorder = createTraceRecorder({ dataDir: dir, now: () => clock });
+    recorder.observe(started("bot", "t1", 0));
+    recorder.observe(tool("bot", "t1", 500, "a", "Bash"));
+    recorder.observe(started("bot", "t2", 2_000));
+    recorder.observe(completed("bot", "t1", 3_000));
+    expect(recorder.liveTurns().map((turn) => turn.turnId)).toEqual(["t2"]);
+    recorder.receipt("bot", { name: "list_bots", startedAt: T0 - 60_000, endedAt: T0 - 59_000, ok: true });
+    recorder.receipt("bot", { name: "list_bots", startedAt: T0 + 2_100, endedAt: T0 + 1e12, ok: true });
+    expect(recorder.liveTurns()[0]!.spans.filter((span) => span.kind === "tool")).toEqual([]);
+    clock = T0 + 31 * 60_000;
+    expect(recorder.liveTurns()).toEqual([]);
+    recorder.expect("writer", { parent: { threadId: "chief", turnId: "c1" } });
+    clock += 61_000;
+    recorder.observe(event("writer", "w1", clock - T0, { type: "turn.started" }));
+    recorder.observe(event("writer", "w1", clock - T0 + 10, { type: "turn.completed", ok: true }));
+    expect(recorder.settle("writer")).not.toHaveProperty("parent");
+    await flushSpans(dir);
+    const t1 = (await readSpans(dir, daysBetween(T0, T0), new Set(["bot:t1"]))).get("bot:t1")!;
+    expect(t1.find((span) => span.kind === "tool")).toMatchObject({ status: "ended", endedAt: T0 + 500 });
+  });
+
   it("takes each Codex turn's share of the thread's running total", () => {
-    const recorder = createTraceRecorder({ dataDir: dataDir() });
+    const recorder = createTraceRecorder({ dataDir: dataDir(), now: () => T0 + 3_000 });
     recorder.observe(started("codex", "t1", 0, "codex"));
     recorder.observe(usage("codex", "t1", 500, { input: 1_000, output: 100, cachedInput: 200, reasoning: 30 }, "codex"));
     recorder.observe(completed("codex", "t1", 1_000));

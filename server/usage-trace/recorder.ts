@@ -61,6 +61,7 @@ interface Turn {
   status?: TraceStatus;
   reason?: string;
   lastError?: string;
+  lastEventAt: number;
   steps: StepSpan[];
   openStep: StepSpan | null;
   stepByCall: Map<string, StepSpan>;
@@ -77,6 +78,11 @@ interface Turn {
 }
 
 type Expectation = { node: string; resumed?: boolean } | { parent: TraceParent };
+
+/** A turn not seen to finish by then is closed as stopped: its engine went away without saying so. */
+const STALE_MS = 30 * 60_000;
+/** An expected start that never came (a refused dispatch, a held room member) must not adopt a later turn. */
+const EXPECT_TTL_MS = 60_000;
 
 /** Claude reports each model call; Codex a thread's running total; the OpenAI-style chat engines a turn's running total. */
 const PER_CALL = new Set(["claude"]);
@@ -124,7 +130,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
   const now = options.now ?? Date.now;
   const live = new Map<string, Turn>();
   const ended = new Map<string, { turn: Turn; timer: ReturnType<typeof setTimeout> }>();
-  const expected = new Map<string, Expectation>();
+  const expected = new Map<string, { expectation: Expectation; at: number }>();
   const nodeParents = new Map<string, TraceParent>();
   const nodeTurns = new Map<string, TraceParent>();
   const threadTotals = new Map<string, TraceTokens>();
@@ -144,9 +150,10 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
   };
 
   function parentFor(threadId: string, turnId: string): TraceParent | undefined {
-    const expectation = expected.get(threadId);
+    const entry = expected.get(threadId);
     expected.delete(threadId);
-    if (!expectation) return undefined;
+    if (!entry || now() - entry.at > EXPECT_TTL_MS) return undefined;
+    const { expectation } = entry;
     if ("parent" in expectation) return expectation.parent;
     if (expectation.resumed) return nodeTurns.get(expectation.node);
     if (!nodeTurns.has(expectation.node)) remember(nodeTurns, expectation.node, { threadId, turnId });
@@ -158,8 +165,10 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     const turn: Turn = {
       threadId: event.threadId, turnId, provider: event.provider, startedAt,
       steps: [], openStep: null, stepByCall: new Map(), tools: new Map(), byItem: new Map(), openTools: new Set(), receipts: [],
-      sawTokens: false, flushed: false,
+      sawTokens: false, flushed: false, lastEventAt: startedAt,
     };
+    const replaced = live.get(event.threadId);
+    if (replaced) close(replaced, replaced.lastEventAt, "interrupted");
     const parent = parentFor(event.threadId, turnId);
     if (parent && !(parent.threadId === turn.threadId && parent.turnId === turnId)) turn.parent = parent;
     openStep(turn, startedAt);
@@ -261,8 +270,9 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     appendSpans(options.dataDir, spans.map(({ itemId: _itemId, ...span }: SpanRecord & { itemId?: string }) => span as SpanRecord), now);
   }
 
-  function complete(turn: Turn, event: Extract<RuntimeEvent, { type: "turn.completed" }>): void {
-    const endedAt = Math.max(turn.startedAt, at(event));
+  /** Ends a turn's open step and tools, writes its spans and keeps it from reopening. */
+  function close(turn: Turn, end: number, status: TraceStatus): number {
+    const endedAt = Math.max(turn.startedAt, end);
     closeStep(turn, endedAt);
     for (const itemId of turn.openTools) {
       const tool = turn.byItem.get(itemId);
@@ -273,12 +283,17 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     }
     turn.openTools.clear();
     turn.endedAt = endedAt;
-    turn.status = event.ok ? "ok" : STOPPED.test(`${event.stopReason ?? ""} ${turn.lastError ?? ""}`) ? "interrupted" : "error";
-    if (!event.ok) turn.reason = turn.lastError ?? (event.stopReason ? errorLine(event.stopReason.replace(/_/g, " ")) : undefined);
-    if (event.usage) turn.usage = typeof event.usage.cachedInput === "number" ? { cachedInput: event.usage.cachedInput } : {};
+    turn.status = status;
     flush(turn);
     remember(finished, `${turn.threadId}:${turn.turnId}`, true);
-    live.delete(turn.threadId);
+    if (live.get(turn.threadId) === turn) live.delete(turn.threadId);
+    return endedAt;
+  }
+
+  function complete(turn: Turn, event: Extract<RuntimeEvent, { type: "turn.completed" }>): void {
+    if (!event.ok) turn.reason = turn.lastError ?? (event.stopReason ? errorLine(event.stopReason.replace(/_/g, " ")) : undefined);
+    if (event.usage) turn.usage = typeof event.usage.cachedInput === "number" ? { cachedInput: event.usage.cachedInput } : {};
+    close(turn, at(event), event.ok ? "ok" : STOPPED.test(`${event.stopReason ?? ""} ${turn.lastError ?? ""}`) ? "interrupted" : "error");
     const previous = ended.get(turn.threadId);
     if (previous) clearTimeout(previous.timer);
     const timer = setTimeout(() => { if (ended.get(turn.threadId)?.turn === turn) ended.delete(turn.threadId); }, ENDED_GRACE_MS);
@@ -295,6 +310,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     if (event.type === "session.started" || event.type === "session.exited" || event.type === "session.model-variants") return;
     const turn = turnFor(event);
     if (!turn) return;
+    turn.lastEventAt = at(event);
     switch (event.type) {
       case "item.started":
         if (event.itemType === "tool") toolStarted(turn, event);
@@ -318,6 +334,8 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
   function receipt(threadId: string, served: ToolReceipt): void {
     const turn = live.get(threadId) ?? ended.get(threadId)?.turn;
     if (!turn || !Number.isFinite(served.startedAt) || !Number.isFinite(served.endedAt) || served.endedAt < served.startedAt) return;
+    if (served.startedAt < turn.startedAt - RECEIPT_SLACK_MS || served.endedAt > now() + RECEIPT_SLACK_MS) return;
+    if (!turn.endedAt) turn.lastEventAt = Math.max(turn.lastEventAt, served.endedAt);
     const near = (tool: Tool) => tool.startedAt <= served.endedAt + RECEIPT_SLACK_MS && (tool.endedAt ?? Infinity) >= served.startedAt - RECEIPT_SLACK_MS;
     const matches = [...turn.tools.values()].filter((tool) => tool.timedBy === "engine" && bare(tool.name) === served.name && near(tool));
     const tool = matches.sort((a, b) => Math.abs(a.startedAt - served.startedAt) - Math.abs(b.startedAt - served.startedAt))[0];
@@ -395,6 +413,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
 
   /** Turns not yet booked, with every span so far: what a live trace draws. */
   function liveTurns(): LiveTurnView[] {
+    for (const turn of live.values()) if (now() - turn.lastEventAt > STALE_MS) close(turn, turn.lastEventAt, "interrupted");
     const view = (turn: Turn, running: boolean): LiveTurnView => ({
       threadId: turn.threadId, turnId: turn.turnId, provider: turn.provider, startedAt: turn.startedAt,
       ...(turn.endedAt !== undefined ? { endedAt: turn.endedAt } : {}),
@@ -416,7 +435,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
     liveTurns,
     /** The next turn to start on `threadId` belongs to coordinator node `node`, or to an explicit parent turn. */
     expect(threadId: string, expectation: Expectation): void {
-      expected.set(threadId, expectation);
+      expected.set(threadId, { expectation, at: now() });
     },
     /** Coordinator node `node` was handed off by node `parentNode`, from the turn `parent`. */
     link(node: string, parentNode: string | undefined, parent: TraceParent): void {

@@ -13,6 +13,7 @@ interface CachedMonth {
 
 const MAX_CACHED_MONTHS = 24;
 const cache = new Map<string, CachedMonth>();
+const loading = new Map<string, Promise<UsageRow[]>>();
 
 async function readFrom(file: string, start: number, into: UsageRow[]): Promise<number> {
   const stream = createReadStream(file, { encoding: "utf8", start });
@@ -38,7 +39,16 @@ async function readFrom(file: string, start: number, into: UsageRow[]): Promise<
   return Math.min(consumed, start + stream.bytesRead);
 }
 
-async function monthRows(file: string): Promise<UsageRow[]> {
+/** One read per file at a time: two overlapping reads would both append the same new lines to the cached rows. */
+function monthRows(file: string): Promise<UsageRow[]> {
+  const pending = loading.get(file);
+  if (pending) return pending;
+  const read = loadMonth(file).finally(() => loading.delete(file));
+  loading.set(file, read);
+  return read;
+}
+
+async function loadMonth(file: string): Promise<UsageRow[]> {
   let size: number;
   try {
     size = (await stat(file)).size;
