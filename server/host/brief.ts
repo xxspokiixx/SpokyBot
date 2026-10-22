@@ -124,6 +124,8 @@ export function createBrief(deps: BriefDeps) {
   const headers = new Map<string, EmailHeader & { why?: string }>();
   let dirty = false;
   let rendering = false;
+  /** The card last written, so a check that changed nothing leaves it (and a press on it) alone. */
+  let written: { messageId: string; json: string } | undefined;
 
   const timeZone = (): string | undefined => validZone(state.timeZone) ?? deps.hostTimeZone();
   const today = (): string => localDate(now(), timeZone());
@@ -275,8 +277,11 @@ export function createBrief(deps: BriefDeps) {
       }
       dirty = false;
       const card = briefCard(built);
+      const json = JSON.stringify(card.card);
+      if (existing && written?.messageId === existing.card.messageId && written.json === json) return { botId: bot.id, threadId };
       const shown = existing ? edit(bot, existing.card, card) : post(bot, threadId, card);
       if (!shown) return null;
+      written = { messageId: shown, json };
       if (!existing) {
         state.card = { day: today(), botId: bot.id, threadId, messageId: shown, postedAt: now() };
         state.introducedOn ??= state.card.day;

@@ -72,8 +72,11 @@ describe("the brief", () => {
     s.advance(AWAY_MS);
     expect(await s.brief.active("desktop")).toMatchObject({ returned: true, open: { threadId: s.thread() } });
     expect(s.card()!.id).toBe(first.id);
-    expect(s.card()!.widget!.rev).toBe(1);
+    expect(s.card()!.widget!.rev ?? 0).toBe(0);
     expect(s.shown()).toContain(BRIEF_INTRO);
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false }] });
+    expect(s.card()!.id).toBe(first.id);
+    expect(s.card()!.widget!.rev).toBe(1);
   });
 
   it("keeps its home chat when the person starts a newer one, and posts a new card the next day", async () => {
