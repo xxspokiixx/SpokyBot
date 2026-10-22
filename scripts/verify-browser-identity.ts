@@ -3,7 +3,7 @@
 // --public, reads the four public bot-test pages. Read-only: it never signs in or submits a form.
 // Usage: node --experimental-strip-types scripts/verify-browser-identity.ts [--chrome PATH] [--engine PATH] [--public] [--out DIR]
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -15,6 +15,7 @@ import { ChromeLauncher } from "../server/browser/chrome/launcher.ts";
 import { openGate } from "../server/browser/egress/gate.ts";
 import { refusalFor } from "../server/browser/egress/policy.ts";
 import { DATA_DIR } from "../server/config.ts";
+import { removeTempDir } from "../server/testing/cleanup.ts";
 import { expectedUserAgent, startIdentityProbe, type ProbeReports, type ReportedIdentity } from "./testing/browser-identity-probe.ts";
 
 export const PUBLIC_PAGES = [
@@ -198,8 +199,8 @@ export async function withBotBrowser<T>(options: BotBrowserOptions, work: (call:
     await closeBrowserSession(options.engine, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })).catch(() => false);
     await runtime.closeAll();
     await gate.close();
-    rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    rmSync(sockets, { recursive: true, force: true });
+    await removeTempDir(scratch);
+    await removeTempDir(sockets);
   }
 }
 
