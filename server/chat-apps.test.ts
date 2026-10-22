@@ -150,6 +150,46 @@ describe("update_html", () => {
   });
 });
 
+const JSX_PAGE = `import { useState } from "react";
+export default function Pricing() {
+  const [plan, setPlan] = useState("Pro");
+  return <main className="p-6"><h1>Pricing</h1><button onClick={() => setPlan("Team")}>{plan}</button></main>;
+}`;
+
+describe("a jsx page", () => {
+  it("is stored as the file itself, marked jsx, with a plain fallback, and served inside the page shell", () => {
+    const { call, row, docs, store } = setup();
+    expect(call({ tool: "show_html", jsx: JSX_PAGE, title: "Pricing" })).toEqual({ ok: true, messageId: "m1" });
+    const message = row("m1");
+    expect(message.text).toBe("[App] Pricing");
+    expect(message.app).toMatchObject({ source: "html", format: "jsx", rev: 0, bytes: Buffer.byteLength(JSX_PAGE) });
+    expect(docs.read(message.app!.doc)).toMatchObject({ html: JSX_PAGE, data: { format: "jsx" } });
+    const doc = appDocument({ store, docs, threadId: THREAD, messageId: "m1" })!;
+    expect(doc.srcdoc.startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`)).toBe(true);
+    expect(doc.srcdoc).toContain(APP_HELPER_SOURCE);
+    expect(doc.srcdoc).toContain("<script type=\"importmap\">");
+    expect(doc.srcdoc).toContain(JSON.stringify(JSX_PAGE).replace(/</g, "\\u003c"));
+  });
+
+  it("is refused at once, with the line, when it cannot be transpiled or imports what a page can't load", () => {
+    const { call, rows } = setup();
+    expect(call({ tool: "show_html", jsx: "export default function Page() {\n  const x = ;\n}", title: "Broken" }))
+      .toEqual({ ok: false, status: 400, error: "jsx: line 2: Unexpected token. Fix it and send the whole file again." });
+    expect(call({ tool: "show_html", jsx: "import axios from \"axios\";\nexport default () => <p>{String(axios)}</p>;", title: "Fetch" }))
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/^jsx: imports axios; a page can import only react, /) });
+    expect(rows(THREAD)).toEqual([]);
+  });
+
+  it("can replace an HTML page, and an HTML page can replace it", () => {
+    const { call, row } = setup();
+    call({ tool: "show_html", html: PAGE, title: "Sales" });
+    call({ tool: "update_html", app_id: "m1", jsx: JSX_PAGE });
+    expect(row("m1").app).toMatchObject({ format: "jsx", rev: 1 });
+    call({ tool: "update_html", app_id: "m1", html: PAGE });
+    expect(row("m1").app).not.toHaveProperty("format");
+  });
+});
+
 describe("versions", () => {
   it("keeps the documents before the current one, oldest first, up to the limit, and serves each by its rev", () => {
     const { call, row, store, docs } = setup();

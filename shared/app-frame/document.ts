@@ -4,6 +4,7 @@
 import type { AppCan, AppDocument, AppToolDefinition, AppToolResult } from "../app.ts";
 import { BOT_HTML_CSP, BOT_HTML_NETWORK, mcpAppCsp } from "./csp.ts";
 import { APP_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
+import { jsxPageHtml } from "./jsx-page.ts";
 import { APP_POINT_SOURCE } from "./point.ts";
 
 export const CSP_META_PREFIX = "<!DOCTYPE html><meta http-equiv=\"Content-Security-Policy\" content=\"";
@@ -47,12 +48,14 @@ export function publishedBotHtml(html: string): string {
 
 export const BOT_HTML_CAN: AppCan = { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true };
 
-export function botHtmlDocument(input: { messageId: string; rev: number; html: string }): AppDocument {
+/** `format: "jsx"`: `html` is a React component file, served inside the page shell. */
+export function botHtmlDocument(input: { messageId: string; rev: number; html: string; format?: "jsx"; title?: string }): AppDocument {
+  const html = input.format === "jsx" ? jsxPageHtml({ title: input.title ?? "Page", source: input.html }) : input.html;
   return {
     v: 1,
     messageId: input.messageId,
     rev: input.rev,
-    srcdoc: buildSrcdoc({ html: input.html, csp: BOT_HTML_CSP, botHelper: true }),
+    srcdoc: buildSrcdoc({ html, csp: BOT_HTML_CSP, botHelper: true }),
     csp: BOT_HTML_CSP,
     network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
     can: { ...BOT_HTML_CAN },

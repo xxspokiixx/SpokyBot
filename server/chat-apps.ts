@@ -4,8 +4,9 @@ import {
 } from "../shared/app.ts";
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { botHtmlDocument, mcpAppDocument, publishedBotHtml } from "../shared/app-frame/document.ts";
-import { AppDocs } from "./app-docs.ts";
+import { AppDocs, type AppDocPut } from "./app-docs.ts";
 import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
+import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
@@ -38,6 +39,25 @@ function scrubbed(html: string, title: string): { html: string; title: string; m
   return { html: cleanHtml, title: cleanTitle, masked: cleanHtml !== html || cleanTitle !== title };
 }
 
+type PageText = { html: string; format?: "jsx" };
+
+/** The page's text, scrubbed; a jsx page is transpiled first, so one that cannot run is refused with where. */
+function pageText(value: { html?: string; jsx?: string }, title: string): { ok: true; page: PageText; title: string; masked: boolean } | { ok: false; error: string } {
+  if (value.jsx !== undefined) {
+    const compiled = compileJsxPage(value.jsx);
+    if (!compiled.ok) return compiled;
+  }
+  const page = scrubbed(value.jsx ?? value.html ?? "", title);
+  return { ok: true, page: { html: page.html, ...(value.jsx !== undefined ? { format: "jsx" as const } : {}) }, title: page.title, masked: page.masked };
+}
+
+function storePage(docs: AppDocs, page: PageText): AppDocPut {
+  return docs.put({ source: "html", html: page.html, ...(page.format ? { data: { format: page.format } } : {}) });
+}
+
+const pageFallback = (title: string, page: PageText, given?: string) =>
+  redactSecretsInText(htmlFallbackText(title, page.format === "jsx" ? "" : page.html, given));
+
 /** The route has already checked that the conversation is the calling bot's own. */
 export function createAppCard(args: {
   store: AgentCardStore;
@@ -56,12 +76,15 @@ export function createAppCard(args: {
   if (input.tool === "show_html") {
     const parsed = parseShowHtmlInput(input);
     if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
-    const page = scrubbed(parsed.value.html, parsed.value.title);
-    const fallback = redactSecretsInText(htmlFallbackText(page.title, page.html, parsed.value.fallbackText));
-    const stored = docs.put({ source: "html", html: page.html });
+    const made = pageText(parsed.value, parsed.value.title);
+    if (!made.ok) return { ok: false, status: 400, error: made.error };
+    const { page } = made;
+    const fallback = pageFallback(made.title, page, parsed.value.fallbackText);
+    const stored = storePage(docs, page);
     const payload: AppPayload = {
-      v: 1, source: "html", title: page.title,
+      v: 1, source: "html", title: made.title,
       doc: stored.ok ? stored.doc : "", rev: 0, bytes: Buffer.byteLength(page.html),
+      ...(page.format ? { format: page.format } : {}),
       ...(parsed.value.height !== undefined ? { height: parsed.value.height } : {}),
       border: true,
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
@@ -70,7 +93,7 @@ export function createAppCard(args: {
     // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
     const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: fallback, app: payload });
     args.authored?.(message.id);
-    return { ok: true, messageId: message.id, ...(page.masked ? { masked: true as const } : {}) };
+    return { ok: true, messageId: message.id, ...(made.masked ? { masked: true as const } : {}) };
   }
 
   const parsed = parseUpdateHtmlInput(input);
@@ -78,24 +101,27 @@ export function createAppCard(args: {
   const existing = appRow(store, threadId, parsed.value.appId);
   if (!existing || (existing.from && existing.from.botId !== bot.id)) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   if (existing.app.source !== "html") return { ok: false, status: 409, error: NOT_A_PAGE };
-  const page = scrubbed(parsed.value.html, parsed.value.title ?? existing.app.title);
-  const stored = docs.put({ source: "html", html: page.html });
+  const made = pageText(parsed.value, parsed.value.title ?? existing.app.title);
+  if (!made.ok) return { ok: false, status: 400, error: made.error };
+  const { page } = made;
+  const stored = storePage(docs, page);
   // The page reloads: what the old one told the model about itself no longer holds.
-  const { context: _context, blocked: _blocked, history: earlier, ...kept } = existing.app;
+  const { context: _context, blocked: _blocked, format: _format, history: earlier, ...kept } = existing.app;
   const history = [...(earlier ?? []), ...(existing.app.doc ? [existing.app.doc] : [])].slice(-(APP_PAGE_VERSIONS - 1));
   const payload: AppPayload = {
     ...kept,
-    title: page.title,
+    title: made.title,
     doc: stored.ok ? stored.doc : "",
     rev: (existing.app.rev ?? 0) + 1,
     bytes: Buffer.byteLength(page.html),
     ...(history.length ? { history } : {}),
+    ...(page.format ? { format: page.format } : {}),
     ...(stored.ok ? {} : { blocked: "too-large" as const }),
   };
-  const patched = store.patchMessage(threadId, existing.id, { text: redactSecretsInText(htmlFallbackText(page.title, page.html)), app: payload });
+  const patched = store.patchMessage(threadId, existing.id, { text: pageFallback(made.title, page), app: payload });
   if (!patched) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   args.authored?.(patched.id);
-  return { ok: true, messageId: patched.id, ...(page.masked ? { masked: true as const } : {}) };
+  return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}) };
 }
 
 export type McpAppAccess = (row: Message & { app: AppPayload }, threadId: string) => { can: AppCan; blocked?: AppDocument["blocked"] };
@@ -130,7 +156,9 @@ export function appDocument(args: {
   const stored = args.docs.read(version.doc);
   if (!stored || stored.source !== row.app.source) return null;
   const rev = version.rev;
-  if (stored.source === "html") return botHtmlDocument({ messageId: row.id, rev, html: stored.html });
+  if (stored.source === "html") {
+    return botHtmlDocument({ messageId: row.id, rev, html: stored.html, title: row.app.title, ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}) });
+  }
   if (!stored.data?.tool) return null;
   const access = (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
   return mcpAppDocument({
@@ -155,6 +183,7 @@ export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor
   const stored = version ? args.docs.read(version.doc) : null;
   if (!version || !stored || stored.source !== "html") return { ok: false, status: 404, error: "That version of the page is no longer kept." };
   const title = oneLine(row.app.title);
+  if (stored.data?.format === "jsx") return { ok: false, status: 422, error: "A React page can't be published yet." };
   return { ok: true, title, html: publishedBotHtml(stored.html), rev: version.rev };
 }
 

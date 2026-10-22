@@ -15,6 +15,8 @@ const KINDS = { html: ".html", data: ".json", doc: ".json" } as const;
 type Kind = keyof typeof KINDS;
 
 export interface AppDocData {
+  /** The stored text is a React component file (show_html `jsx`), not HTML. */
+  format?: "jsx";
   tool?: AppToolDefinition;
   toolInput?: Record<string, unknown>;
   toolResult?: AppToolResult;
