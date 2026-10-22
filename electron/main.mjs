@@ -3114,6 +3114,9 @@ app.whenReady().then(async () => {
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
   registerDesktopPrefs({ ipcMain, ...jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")), localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
+    languageChanged: (language, sender) => {
+      for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
+    },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
