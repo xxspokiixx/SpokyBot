@@ -319,7 +319,6 @@
   "approval.action.allowOnce": "允許一次",
   "approval.held.native": "這項操作需要你向服務供應商核准。",
   "approval.held.sandbox": "這會放寬 AI 本身的安全限制，因此只有「完整存取權」才能自動核准。",
-  "approval.held.outbound": "這會代表你傳送內容，因此一律會先詢問。",
   "approval.held.undeliveredFull": "「完整存取權」無法送出這項核准。",
   "approval.held.undelivered": "「替我核准」無法回應這一項。",
   "settings.title": "設定",
