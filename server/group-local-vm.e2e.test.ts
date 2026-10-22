@@ -870,6 +870,20 @@ describe("Group Local VM ownership on the real isolated server", () => {
     await idle(bots[0].id);
     await stop(group.id); await idle(bots[0].id);
   });
+  it("records a stall during VM readiness as stalled, though setup ends before the turn has an outcome", async () => {
+    const { bots, group } = await room();
+    // Park setup in Local VM readiness, before dispatch: the stall revokes the turn's generation, so readiness returns
+    // to a setup that is no longer current and ends it without any room outcome.
+    vmState({ blocked: true }); rmSync(stateFile + ".entered", { force: true });
+    await send(group.id);
+    await until(() => existsSync(stateFile + ".entered"), Boolean);
+    vmState({ blocked: true, stall: true });
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
+    vmState();
+    await idle(bots[0].id);
+    expect(existsSync(dumpFile)).toBe(false);
+    expect(await roomOutcome(group.id)).toBe("stalled");
+  });
   it("revokes the previous member and rejects cross-bot control after a shared desktop handoff", async () => {
     const { bots, group } = await room();
     await send(group.id);

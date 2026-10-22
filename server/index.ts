@@ -4208,8 +4208,7 @@ function runRoomNode(node: HandoffView, group: GroupRecord, bot: BotRecord, sign
     });
     groupQueues.set(node.threadId, tracked.catch(() => {}));
     tracked.then(
-      () => finish({ ok: result.outcome === "settled", text: result.stopReason || result.replyText || result.outcome || "The addressed agent could not run",
-        ...(result.outcome === "stalled" ? { stalled: true } : {}) }),
+      () => finish({ ok: result.outcome === "settled", text: result.stopReason || result.replyText || result.outcome || "The addressed agent could not run" }),
       error => finish({ ok: false, text: error instanceof Error ? error.message : String(error) }),
     );
   });
