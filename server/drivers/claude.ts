@@ -31,6 +31,7 @@ import type {
   TextGenerationOptions,
 } from "../contracts.ts";
 import { appMountFor, customServerGate, gateServer } from "../mcp-gate-config.ts";
+import { QUERY_TOOL_NAME } from "../mcp-shape.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -1185,10 +1186,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           botOwned.add(name);
         }
       }
+      const queryable = new Map<string, unknown>();
       for (const name of turn.toolScope === undefined ? botOwned : Object.keys(mcpServers)) {
         if (!canUseMcpServer(turn.toolScope, name)) { delete mcpServers[name]; continue; }
-        const gated = gateServer({ name, server: mcpServers[name], threadId, nodeEnv: NODE_ENV_FLAG, toolScope: turn.toolScope, ...customServerGate(name, botOwned.has(name), turn.integrations?.customResultBudgets, turnEnvironment), apps: appMountFor(name, turn) });
+        const gate = customServerGate(name, botOwned.has(name), turn.integrations?.customResultBudgets, turnEnvironment);
+        const gated = gateServer({ name, server: mcpServers[name], threadId, nodeEnv: NODE_ENV_FLAG, toolScope: turn.toolScope, ...gate, apps: appMountFor(name, turn) });
         if (gated) mcpServers[name] = { ...gated, ...((mcpServers[name] as { alwaysLoad?: unknown })?.alwaysLoad === true ? { alwaysLoad: true } : {}) };
+        if (gated && gate.budget > 0 && botOwned.has(name)) queryable.set(name, mcpServers[name]);
       }
       allowed.splice(0, allowed.length, ...allowed.filter((name) => Object.hasOwn(mcpServers, name.slice("mcp__".length))));
       // Full access keeps ask_user: native bypass skips permission prompts, not questions.
@@ -1200,6 +1204,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const permissionEnv = { ...NODE_ENV_FLAG, ...(turn.toolScope !== undefined ? { OMB_PERMISSION_TOOL_SCOPE: JSON.stringify(turn.toolScope) } : {}) };
       mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: permissionEnv, alwaysLoad: true };
       allowed.push("mcp__ogb");
+      // A trimming gate adds its own read-only query over held results (mcp-shape.ts). It reads nothing
+      // the server has not already returned, so it never asks, while the server's own tools still do.
+      // Only for a mount that is still that gate: a project server a harness mount shadowed has no such tool.
+      for (const [name, spec] of queryable) if (mcpServers[name] === spec) allowed.push(`mcp__${name}__${QUERY_TOOL_NAME}`);
       // A guest pre-allows only harness tools; anything else (the browser can open file:) asks.
       if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
       // The MCP config carries credentials and argv is readable via `ps`: a 0600 file, removed at settle.
