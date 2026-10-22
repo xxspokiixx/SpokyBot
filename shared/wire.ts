@@ -54,9 +54,10 @@ export type CloudBackend = "box" | "vps";
 /** A place a bot can act. `cloud` covers both cloud backends. */
 export type Surface = "cloud" | "vm" | "local" | "browser";
 
+/** Every colour a bot may have. A client that does not know one draws its default. */
 export const MAUS_COLOR_NAMES = [
   "green", "blue", "red", "orange", "purple", "cyan", "pink",
-  "yellow", "teal", "coral",
+  "yellow", "teal", "coral", "silver",
 ] as const;
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
 

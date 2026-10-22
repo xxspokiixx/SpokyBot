@@ -13,6 +13,11 @@ describe("Halloween dress-up", () => {
     expect(wornBody(undefined, "purple", true)).toBe("ghost");
   });
 
+  it("leaves a silver bot in its own body while dressed", () => {
+    expect(wornBody("cursor", "silver", true)).toBe("cursor");
+    expect(wornBody(undefined, "silver", true)).toBeUndefined();
+  });
+
   it("keeps a Halloween body the bot already chose", () => {
     expect(wornBody("vampire", "orange", true)).toBe("vampire");
   });
