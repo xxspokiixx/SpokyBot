@@ -103,7 +103,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     const request = takeConnectRequest(window.location.href);
     if (!request) return;
     window.history.replaceState(null, "", request.rest);
-    dispatch({ type: "togglePlugins", open: true, surface: request.surface });
+    dispatch("section" in request ? { type: "toggleAppSettings", open: true, section: request.section } : { type: "togglePlugins", open: true, surface: request.surface });
   }, [dispatch]);
   useExternalChatLinks(state, dispatch);
   usePresence(state, dispatch);
