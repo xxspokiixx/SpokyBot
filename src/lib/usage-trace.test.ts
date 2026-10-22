@@ -9,6 +9,7 @@ vi.mock("@/state/store", async (original) => {
   return { ...actual, useStore: () => ({ state: actual.initialState, dispatch: vi.fn() }), api: vi.fn(() => new Promise(() => {})) };
 });
 const { TraceWaterfall } = await import("../components/usage/TraceWaterfall");
+const { usageGroupLabel } = await import("../components/UsageSection");
 
 const T0 = Date.UTC(2026, 9, 22, 9, 0, 0);
 const turn = (id: string, botName: string, start: number, end: number | undefined, children: TraceTurn["children"], extra: Partial<TraceTurn> = {}): TraceTurn => ({
@@ -60,6 +61,14 @@ describe("trace helpers", () => {
 
   it("marks the slowest step or tool and the most expensive span", () => {
     expect(traceBadges([chief], T0 + 51_000)).toEqual({ slowest: "w-s1", costliest: "c-s1" });
+  });
+
+  it("names the groupings that are not a person in plain words", () => {
+    expect(usageGroupLabel("user", { key: "owner", label: "This computer" })).toBe("This computer");
+    expect(usageGroupLabel("user", { key: "bot", label: "Bot to bot" })).toBe("Bot to bot");
+    expect(usageGroupLabel("user", { key: "routine:r1", label: "Routine: Morning digest" })).toBe("Routine: Morning digest");
+    expect(usageGroupLabel("user", { key: "user:ada@example.test", label: "ada@example.test" })).toBe("ada@example.test");
+    expect(usageGroupLabel("routine", { key: "manual", label: "Not from a routine" })).toBe("Not from a routine");
   });
 
   it("picks calendar periods in UTC days", () => {

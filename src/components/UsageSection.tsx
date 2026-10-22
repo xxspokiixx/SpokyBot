@@ -3,8 +3,8 @@ import { ArrowLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { activeLocale, documentLanguage, t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";
-import { formatTokens, formatUsd, hasFiniteCost, headlineTokens } from "@/lib/usage";
-import { fetchTraces, formatDuration, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
+import { formatTokens, hasFiniteCost, headlineTokens } from "@/lib/usage";
+import { fetchTraces, formatCost, formatDuration, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
 import { api, useStore } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import type { TraceList, TraceRootSummary } from "../../shared/usage-trace";
@@ -13,7 +13,7 @@ import { PlanUsage } from "./PlanUsage";
 import { Select } from "./Select";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 import { TraceView } from "./usage/TraceView";
-import { LiveBadge, StatStrip, totalsStats } from "./usage/TraceWaterfall";
+import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
 const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "day", "engine", "routine"];
@@ -89,13 +89,13 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
           <li key={group.key} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 text-[13px]" title={t("usage.page.turns", { count: String(group.turns) })}>
             <span className="flex min-w-0 items-center gap-2 text-ink">
               {bot && <BotAvatar bot={bot} state="idle" size={18} animated={false} />}
-              <span className="truncate">{usageGroupLabel(groupBy, group)}</span>
+              <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
             <span className="h-2 overflow-hidden rounded-full bg-raised">
               <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (value(group) / max) * 100)}%` }} />
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
-              {priced ? hasFiniteCost(group.costUsd) ? formatUsd(group.costUsd) : "—" : formatTokens(headlineTokens(group))}
+              {priced ? formatCost(group.costUsd) : formatTokens(headlineTokens(group))}
             </span>
           </li>
         );
@@ -148,12 +148,12 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
   return (
     <li>
       <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-raised/50" data-testid="usage-run">
-        <span className="flex -space-x-1.5">
-          {root.bots.slice(0, 4).map((entry) => {
+        <span className="flex w-[38px] shrink-0 -space-x-1.5 sm:w-[74px]">
+          {root.bots.slice(0, 4).map((entry, index) => {
             const bot = state.bots.find((item) => item.id === entry.id);
             return bot
-              ? <span key={entry.id} className="rounded-full ring-2 ring-card"><BotAvatar bot={bot} state="idle" size={22} animated={false} /></span>
-              : <span key={entry.id} className="flex size-[22px] items-center justify-center rounded-full bg-raised text-[10px] font-semibold text-ink-secondary ring-2 ring-card">{entry.name.slice(0, 1).toUpperCase()}</span>;
+              ? <span key={entry.id} className={cn("rounded-full ring-2 ring-card", index > 1 && "hidden sm:block")}><BotAvatar bot={bot} state="idle" size={22} animated={false} /></span>
+              : <span key={entry.id} className={cn("flex size-[22px] items-center justify-center rounded-full bg-raised text-[10px] font-semibold text-ink-secondary ring-2 ring-card", index > 1 && "hidden sm:flex")}>{entry.name.slice(0, 1).toUpperCase()}</span>;
           })}
         </span>
         <span className="min-w-0">
@@ -165,7 +165,7 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
           {root.errors > 0 && <span className="rounded-md bg-danger/12 px-1.5 py-0.5 text-[11.5px] font-medium text-danger">{t("trace.groupErrors", { count: String(root.errors) })}</span>}
           {root.timed ? <span className="hidden min-w-[3.5rem] text-right sm:inline">{formatDuration(root.durationMs)}</span>
             : <span className="hidden rounded bg-raised px-1.5 text-[11px] sm:inline">{t("trace.notTimed")}</span>}
-          <span className="min-w-[3.5rem] text-right text-ink">{hasFiniteCost(root.costUsd) ? formatUsd(root.costUsd) : "—"}</span>
+          <span className="min-w-[3.5rem] text-right text-ink">{formatCost(root.costUsd)}</span>
           <ChevronRight size={14} className="text-ink-tertiary" />
         </span>
       </button>
@@ -211,11 +211,8 @@ export function UsageSection() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="usage-page">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[17px] font-semibold text-ink">{t("usage.title")}</h2>
-          <p className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">{t("usage.page.subtitle")}</p>
-        </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+        <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink-secondary">{t("usage.page.subtitle")}</p>
         <div className="flex items-center gap-2">
           <Select size="sm" value={period} onChange={(event) => { setPeriod(event.target.value as UsagePeriod); setOpen(null); }} aria-label={t("usage.history.period")}>
             {USAGE_PERIODS.map((option) => <option key={option} value={option}>{t(PERIOD_LABEL_KEYS[option])}</option>)}

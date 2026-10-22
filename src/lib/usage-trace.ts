@@ -1,6 +1,7 @@
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { toolStepLabel } from "@/lib/tool-step-label";
+import { formatUsd, hasFiniteCost } from "@/lib/usage";
 import type {
   TraceDetail, TraceGroup, TraceList, TraceNode, TraceStep, TraceTokens, TraceTool, TraceTurn,
 } from "../../shared/usage-trace.ts";
@@ -19,6 +20,12 @@ export function usagePeriodRange(period: UsagePeriod, now = new Date()): { from:
   if (period === "month") return { from: day(new Date(Date.UTC(year, month, 1))), to: day(now) };
   if (period === "lastMonth") return { from: day(new Date(Date.UTC(year, month - 1, 1))), to: day(new Date(Date.UTC(year, month, 0))) };
   return { from: day(new Date(now.getTime() - 29 * DAY_MS)), to: day(now) };
+}
+
+/** A cost as the trace prints it: a sliver of a cent reads "<$0.001", never "$0.000". */
+export function formatCost(usd: number | null | undefined): string {
+  if (!hasFiniteCost(usd)) return "—";
+  return usd > 0 && usd < 0.001 ? "<$0.001" : formatUsd(usd);
 }
 
 export function usageExportHref(range: { from: string; to: string }): string {

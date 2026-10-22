@@ -1,10 +1,10 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { formatTokens, formatUsd, hasFiniteCost } from "@/lib/usage";
+import { formatTokens, hasFiniteCost } from "@/lib/usage";
 import {
-  formatDuration, formatTick, groupLabel, timeAxis, toolLabel, traceBadges, traceRows, type TraceRow,
+  formatCost, formatDuration, formatTick, groupLabel, timeAxis, toolLabel, traceBadges, traceRows, type TraceRow,
 } from "@/lib/usage-trace";
 import { useStore, type InstanceInfo } from "@/state/store";
 import type { TraceDetail, TraceNode, TraceRootSummary, TraceTotals } from "../../../shared/usage-trace";
@@ -47,7 +47,7 @@ export function totalsStats(totals: TraceTotals & { usageStatus?: TraceRootSumma
   const partial = totals.usageStatus === "partial" || totals.usageStatus === "unavailable";
   return [
     { label: timeLabel, value: formatDuration(totals.durationMs) || "—" },
-    { label: t("trace.stat.cost"), value: hasFiniteCost(totals.costUsd) ? formatUsd(totals.costUsd) : "—" },
+    { label: t("trace.stat.cost"), value: formatCost(totals.costUsd) },
     {
       label: t("trace.stat.tokens"), value: totals.tokens ? `${formatTokens(totals.tokens)}${partial ? "*" : ""}` : partial ? t("trace.partial") : "0",
       hint: t("trace.tokensHover", { input: formatTokens(totals.input), cached: formatTokens(totals.cachedInput), output: formatTokens(totals.output) }) +
@@ -135,8 +135,19 @@ function Badge({ kind }: { kind: "slowest" | "costliest" }) {
   );
 }
 
-function RowBar({ row, origin, axisMax, badges, now }: {
-  row: TraceRow; origin: number; axisMax: number; badges: { slowest?: string; costliest?: string }; now: number;
+/** Where a bar's label fits: after the bar, before it, or over its end. */
+export function labelPlace(startPct: number, endPct: number, labelPx: number, trackPx: number): "after" | "before" | "inside" {
+  const room = (pct: number) => (pct / 100) * trackPx;
+  if (trackPx - room(endPct) >= labelPx + 12) return "after";
+  if (room(startPct) >= labelPx + 12) return "before";
+  return "inside";
+}
+
+const BADGE_PX = 112;
+const CHAR_PX = 7.2;
+
+function RowBar({ row, origin, axisMax, badges, now, trackPx }: {
+  row: TraceRow; origin: number; axisMax: number; badges: { slowest?: string; costliest?: string }; now: number; trackPx: number;
 }) {
   const node = row.node;
   const point = (node.kind === "turn" && !node.timed) || (node.kind === "tool" && node.endedAt === undefined && !node.running);
@@ -145,16 +156,18 @@ function RowBar({ row, origin, axisMax, badges, now }: {
   const width = endPct - startPct;
   const label = [
     point ? null : formatDuration(row.durationMs),
-    hasFiniteCost(row.costUsd) ? formatUsd(row.costUsd) : null,
+    hasFiniteCost(row.costUsd) ? formatCost(row.costUsd) : null,
   ].filter(Boolean).join(" · ");
-  const right = endPct < 68 || startPct < 30;
-  const labelStyle: CSSProperties = right ? { left: `calc(${endPct}% + 8px)` } : { right: `calc(${100 - startPct}% + 8px)` };
+  const badgeCount = (badges.slowest === node.id ? 1 : 0) + (badges.costliest === node.id ? 1 : 0);
+  const place = labelPlace(startPct, endPct, label.length * CHAR_PX + badgeCount * BADGE_PX, trackPx);
+  const labelStyle: CSSProperties = place === "after" ? { left: `calc(${endPct}% + 8px)` }
+    : place === "before" ? { right: `calc(${100 - startPct}% + 8px)` } : { right: `calc(${100 - endPct}% + 8px)` };
   return (
     <>
       {point
         ? <span className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] bg-ink-tertiary" style={{ left: `${startPct}%` }} />
         : <span className={cn("absolute top-1/2 h-[18px] -translate-y-1/2 rounded-md", barClass(row))} style={{ left: `${startPct}%`, width: `max(${width}%, 3px)` }} />}
-      <span className="absolute top-1/2 flex -translate-y-1/2 items-center whitespace-nowrap text-[12.5px] tabular-nums text-ink-secondary" style={labelStyle}>
+      <span className={cn("absolute top-1/2 flex -translate-y-1/2 items-center whitespace-nowrap text-[12.5px] tabular-nums", place === "inside" ? "text-ink" : "text-ink-secondary")} style={labelStyle}>
         {label}
         {badges.slowest === node.id && <Badge kind="slowest" />}
         {badges.costliest === node.id && <Badge kind="costliest" />}
@@ -174,6 +187,15 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
   const origin = root.startedAt;
   const span = Math.max((live ? now : root.endedAt) - origin, 1);
   const axis = timeAxis(span);
+  const track = useRef<HTMLDivElement>(null);
+  const [trackPx, setTrackPx] = useState(600);
+  useEffect(() => {
+    const node = track.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => { if (entry) setTrackPx(entry.contentRect.width); });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const nowPct = live ? ((now - origin) / axis.max) * 100 : null;
   const grid: CSSProperties = {
     backgroundImage: "linear-gradient(to right, color-mix(in srgb, var(--color-hairline) 55%, transparent) 1px, transparent 1px)",
@@ -199,7 +221,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
       <div role="tree" aria-label={t("trace.spans")} className="border-t border-hairline/40">
         <div className="grid grid-cols-1 border-b border-hairline/40 sm:grid-cols-[minmax(220px,38%)_1fr]">
           <div className="hidden px-5 py-2.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary sm:block">{t("trace.span")}</div>
-          <div className="relative mx-4 h-9 sm:ml-0 sm:mr-6 sm:border-l sm:border-hairline/40">
+          <div ref={track} className="relative mx-4 h-9 sm:ml-0 sm:mr-6 sm:border-l sm:border-hairline/40">
             {axis.ticks.map((tick, index) => (
               <span
                 key={tick}
@@ -238,7 +260,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
                   {rowFailed(row.node) && row.node.kind === "turn" && <X size={13} className="shrink-0 text-danger" aria-label={t("trace.failed")} />}
                 </div>
                 <div className="relative mx-4 h-7 sm:ml-0 sm:mr-6 sm:h-9 sm:border-l sm:border-hairline/40" style={grid}>
-                  <RowBar row={row} origin={origin} axisMax={axis.max} badges={badges} now={now} />
+                  <RowBar row={row} origin={origin} axisMax={axis.max} badges={badges} now={now} trackPx={trackPx} />
                   {nowPct !== null && <span className="absolute inset-y-0 w-px bg-accent/70" style={{ left: `${nowPct}%` }} />}
                 </div>
               </div>

@@ -45,7 +45,7 @@ export function ToolIcon({ icon, app, catalog, error = false }: { icon: TraceToo
     const card = catalog.get(app);
     return (
       <span className={BOX}>
-        <ServiceIcon card={{ logo: card?.logo ?? null, domain: card?.domain ?? null, label: card?.label ?? app }} className="size-4 rounded-[4px]" />
+        <ServiceIcon key={`${card?.logo}:${card?.domain}`} card={{ logo: card?.logo ?? null, domain: card?.domain ?? null, label: card?.label ?? app }} className="size-4 rounded-[4px]" />
       </span>
     );
   }
