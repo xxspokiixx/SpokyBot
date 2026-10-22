@@ -19,6 +19,7 @@ import { DroidAgentDriver } from "./droid.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { TurnWatchdog, type StallLimit } from "../../turn-watchdog.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import * as procs from "../../procs.ts";
 import * as quietStatus from "./quiet-status.ts";
@@ -305,6 +306,31 @@ describe("ACP turns (fake CLI)", () => {
     expect(typeof started?.itemId).toBe("string");
     expect(started?.itemId).toBeTruthy();
     expect(completed?.itemId).toBe(started?.itemId);
+  });
+
+  it("ends a tool call that arrives already finished, so nothing counts it as running", async () => {
+    await create(GrokAgentDriver, "finished-tools");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-finished-tools", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const started = recorder.events.flatMap((e) => e.type === "item.started" && e.itemType === "tool" ? [e.itemId] : []);
+    const completed = new Map(recorder.events.flatMap((e) =>
+      e.type === "item.completed" && e.itemType === "tool" ? [[e.itemId, e] as const] : []));
+    expect(started).toHaveLength(4);
+    expect(new Set(started).size).toBe(4);
+    expect([...completed.keys()].sort()).toEqual([...started].sort());
+    expect(completed.get("tc-done")).toMatchObject({ ok: true, output: expect.stringContaining("ok") });
+    expect(completed.get("tc-denied")).toMatchObject({ ok: false, output: expect.stringContaining("Permission denied") });
+    expect(completed.get(started[0])).toMatchObject({ ok: true, output: expect.stringContaining("built") });
+    expect(completed.get(started[3])).toMatchObject({ ok: true, output: expect.stringContaining("unkeyed") });
+    // The stall watchdog sees no tool left running, so the turn's own silence limit applies.
+    let now = 0;
+    const limits: StallLimit[] = [];
+    const dog = new TurnWatchdog({ stallMs: 10, toolStallMs: 1_000, checkMs: 60_000, now: () => now, onStall: (_turn, limit) => limits.push(limit) });
+    dog.watch("t-finished-tools", "bot");
+    for (const event of recorder.events) dog.observe(event);
+    now = 10;
+    dog.sweep();
+    expect(limits).toEqual([{ kind: "silence", ms: 10 }]);
   });
 
   it("normalizes a full turn into the canonical event sequence", async () => {

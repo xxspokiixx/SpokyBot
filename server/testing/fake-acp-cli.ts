@@ -6,7 +6,8 @@
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt | hang
-//     | hang-initialize | unkeyed-tool | no-auth | auth-required | permission | question
+//     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed)
+//     | no-auth | auth-required | permission | question
 //     | ask-question (a mid-prompt vendor question: FAKE_ACP_ASK_METHOD, default cursor/ask_question, params
 //       FAKE_ACP_ASK_PARAMS; the client's reply is written to FAKE_ACP_ASK_ANSWER. FAKE_ACP_ASK_TIMING=with-result
 //       settles the turn with the card open; after-result asks between turns)
@@ -884,6 +885,19 @@ function handle(msg: any) {
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", title: "run", rawInput: { command: "echo done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
+        complete();
+        return;
+      }
+      if (mode === "finished-tools") {
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { update: u } });
+        // An unkeyed call left running, so an unkeyed finished one must not take its place in the queue.
+        update({ sessionUpdate: "tool_call", title: "build", rawInput: { command: "make" } });
+        update({ sessionUpdate: "tool_call", toolCallId: "tc-done", status: "completed", title: "read", rawOutput: { output: "ok" } });
+        update({ sessionUpdate: "tool_call", toolCallId: "tc-denied", status: "failed", title: "rm -rf build",
+          content: [{ type: "content", content: { type: "text", text: "Permission denied" } }] });
+        update({ sessionUpdate: "tool_call", status: "completed", title: "echo", rawOutput: { output: "unkeyed" } });
+        update({ sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "built" } });
+        update({ sessionUpdate: "agent_message_chunk", content: { text: "done" } });
         complete();
         return;
       }

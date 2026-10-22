@@ -7,7 +7,7 @@ import type { RuntimeEvent } from "./contracts.ts";
 import { EngineMemory } from "./engine-memory.ts";
 import type { Message } from "./store.ts";
 import { TurnStops, stoppedTurnOutcome } from "./turn-outcome.ts";
-import { TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts";
+import { TurnWatchdog, type StallLimit, type WatchedTurn } from "./turn-watchdog.ts";
 
 const STALL = 10_000;
 const TOOL_STALL = 50_000;
@@ -19,15 +19,15 @@ const toolEnded = (itemId: string): RuntimeEvent => ({ ...base, type: "item.comp
 function rig() {
   let now = 0;
   const stalls: WatchedTurn[] = [];
-  const silences: number[] = [];
+  const limits: StallLimit[] = [];
   const dog = new TurnWatchdog({
     stallMs: STALL,
     toolStallMs: TOOL_STALL,
     checkMs: 60_000,
-    onStall: (turn, silentMs) => { stalls.push(turn); silences.push(silentMs); },
+    onStall: (turn, limit) => { stalls.push(turn); limits.push(limit); },
     now: () => now,
   });
-  return { dog, stalls, silences, tick: (ms: number) => (now += ms) };
+  return { dog, stalls, limits, tick: (ms: number) => (now += ms) };
 }
 
 describe("TurnWatchdog", () => {
@@ -132,7 +132,7 @@ describe("TurnWatchdog", () => {
   });
 
   it("lets a turn stay silent while its tool runs, up to the tool limit", () => {
-    const { dog, stalls, silences, tick } = rig();
+    const { dog, stalls, limits, tick } = rig();
     dog.watch("t1", "bot1");
     dog.observe(toolStarted("tool-1"));
     tick(TOOL_STALL - 1);
@@ -141,11 +141,11 @@ describe("TurnWatchdog", () => {
     tick(2);
     dog.sweep();
     expect(stalls).toEqual([expect.objectContaining({ threadId: "t1" })]);
-    expect(silences).toEqual([TOOL_STALL]);
+    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
   });
 
   it("goes back to the turn limit once every running tool has ended", () => {
-    const { dog, stalls, silences, tick } = rig();
+    const { dog, stalls, limits, tick } = rig();
     dog.watch("t1", "bot1");
     dog.observe(toolStarted("tool-1"));
     dog.observe(toolStarted("tool-2"));
@@ -159,11 +159,11 @@ describe("TurnWatchdog", () => {
     expect(stalls).toHaveLength(0);
     tick(2);
     dog.sweep();
-    expect(silences).toEqual([STALL]);
+    expect(limits).toEqual([{ kind: "silence", ms: STALL }]);
   });
 
   it("never carries a running tool into a turn that did not start it", () => {
-    const { dog, stalls, silences, tick } = rig();
+    const { dog, stalls, limits, tick } = rig();
     dog.observe(toolStarted("early"));
     dog.watch("t1", "bot1");
     dog.observe(toolStarted("tool-1"));
@@ -171,13 +171,60 @@ describe("TurnWatchdog", () => {
     tick(STALL);
     dog.sweep();
     expect(stalls).toHaveLength(1);
-    expect(silences).toEqual([STALL]);
+    expect(limits).toEqual([{ kind: "silence", ms: STALL }]);
+  });
+
+  it("stops a hung tool at its own deadline while a parallel tool and text keep the turn busy", () => {
+    const { dog, limits, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.observe(toolStarted("hung"));
+    for (let i = 0; i < 10; i++) {
+      dog.observe(toolStarted(`busy-${i}`));
+      tick(TOOL_STALL / 10 - 1);
+      dog.observe(text);
+      dog.observe(toolEnded(`busy-${i}`));
+      dog.sweep();
+    }
+    expect(limits).toEqual([]);
+    tick(10);
+    dog.observe(text);
+    dog.sweep();
+    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
+  });
+
+  it("keeps a tool's first deadline when its start is reported again", () => {
+    const { dog, limits, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.observe(toolStarted("tool-1"));
+    tick(TOOL_STALL - 1);
+    dog.observe(toolStarted("tool-1"));
+    tick(1);
+    dog.sweep();
+    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
+  });
+
+  it("does not count a tool's time waiting on a person toward its deadline", () => {
+    const { dog, limits, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.observe(toolStarted("ask"));
+    tick(TOOL_STALL / 2);
+    dog.setWaitingOnHuman("t1", true);
+    tick(TOOL_STALL * 10);
+    dog.sweep();
+    dog.setWaitingOnHuman("t1", false);
+    tick(TOOL_STALL / 2 - 1);
+    dog.observe(text);
+    dog.sweep();
+    expect(limits).toEqual([]);
+    tick(1);
+    dog.sweep();
+    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
   });
 });
 
 // The harness's stall handler (index.ts), run without starting a server.
 describe("the stall handler", () => {
-  function load(engineMemory = new EngineMemory({ enabled: false })) {
+  function load(engineMemory = new EngineMemory({ enabled: false }), env: Record<string, string> = {}) {
     const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
     const from = source.indexOf("\nconst TURN_STALL_MS"), to = source.indexOf("\nwatchdog.start();");
     if (from < 0 || to <= from) throw new Error("Stall handler section moved");
@@ -189,7 +236,7 @@ describe("the stall handler", () => {
     ];
     const settled: Array<{ generation?: string; text: string }> = [], delegations: string[] = [];
     const context = vm.createContext({
-      process: { env: {} },
+      process: { env },
       RoomTurnStallRegistry: class { stall() {} },
       TurnStops, stoppedTurnOutcome, reportsToRequester: () => true,
       TurnWatchdog: class { options: unknown; constructor(options: { onStall: (turn: WatchedTurn) => void }) { this.options = options; } },
@@ -211,16 +258,25 @@ describe("the stall handler", () => {
 
   it("tells a stalled turn's requester why it stopped and what it did", () => {
     const { context, settled, delegations } = load();
-    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, 20 * 60_000);
+    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, { kind: "silence", ms: 20 * 60_000 });
     const told = 'No activity for 20 minutes — the turn was stopped. Before it stopped it made 1 tool call: Bash ×1.\nIts last message, quoted: "Exporting the second half now."';
     expect(settled).toEqual([{ generation: "gen-1", text: told }]);
     expect(delegations).toEqual([]);
   });
 
-  it("names the silence that stopped the turn, the longer one while a tool ran", () => {
+  it("says when a tool ran past its own deadline", () => {
     const { context, settled } = load();
-    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, 120 * 60_000);
-    expect(settled[0]!.text).toMatch(/^No activity for 120 minutes — the turn was stopped\. Before it stopped/);
+    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, { kind: "tool", ms: 120 * 60_000 });
+    expect(settled[0]!.text).toMatch(/^A tool ran for 120 minutes without finishing — the turn was stopped\. Before it stopped/);
+  });
+
+  it("never lets the environment switch the watchdog off", () => {
+    for (const endless of ["Infinity", "1e309", "-Infinity"]) {
+      const { context } = load(undefined, { OMB_TURN_STALL_MS: endless, OMB_TOOL_STALL_MS: endless });
+      expect(context.watchdog.options).toMatchObject({ stallMs: 20 * 60_000, toolStallMs: 2 * 60 * 60_000 });
+    }
+    const { context } = load(undefined, { OMB_TURN_STALL_MS: "3900000", OMB_TOOL_STALL_MS: "1e309" });
+    expect(context.watchdog.options).toMatchObject({ stallMs: 3_900_000, toolStallMs: 2 * 60 * 60_000 });
   });
 
   it("says when the Cloud ran out of memory while the stalled turn ran", () => {
@@ -229,7 +285,7 @@ describe("the stall handler", () => {
     memory.turnStarted("t1");
     memory.tick();
     const { context, settled } = load(memory);
-    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, 20 * 60_000);
+    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, { kind: "silence", ms: 20 * 60_000 });
     expect(settled[0]!.text).toMatch(/^No activity for 20 minutes — the turn was stopped\. This Cloud ran out of memory while 1 task ran at once \(not a problem with the AI provider\)\. Before it stopped/);
   });
 
