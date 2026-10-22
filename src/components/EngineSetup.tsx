@@ -400,8 +400,10 @@ export function hasSavedApiKey(instance: InstanceInfo): boolean {
 }
 
 function apiKeySetup(instance: InstanceInfo): boolean {
-  return (isApiKeyEngine(instance) || instance.install?.settings === "connections") && !instance.snapshot.authenticationUnavailableReason
-    && (instance.snapshot.state !== "available" || instance.snapshot.authenticated === false);
+  if (!(isApiKeyEngine(instance) || instance.install?.settings === "connections") || instance.snapshot.authenticationUnavailableReason) return false;
+  // A key engine with its own CLI (DeepSeek Harness) is installed first, then given the key.
+  if (instance.snapshot.state !== "available") return !installCommandFor(instance.install);
+  return instance.snapshot.authenticated === false;
 }
 
 function GrokKeyInstead({ className, unframed }: { className?: string; unframed: boolean }) {

@@ -268,6 +268,8 @@ export const deepseekSupport: AcpSupport = {
     },
     docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
     needsNode: true,
+    // Keyless is "paste a key in Settings", not a terminal sign-in.
+    settings: "connections",
   },
 
   spawnArgs: () => ["--profile", "acp"],

@@ -107,6 +107,8 @@ describe("DeepSeek ACP support", () => {
     expect(deepseekSupport.install?.command?.darwin).toBe("npm install -g @deepseek-ai/dsh");
     expect(deepseekSupport.install?.command?.win32).toBe("npm install -g @deepseek-ai/dsh");
     expect(deepseekSupport.install?.needsNode).toBe(true);
+    // Keyless means "paste a key in Settings", never "sign in in Terminal".
+    expect(deepseekSupport.install?.settings).toBe("connections");
   });
 
   it("is authenticated exactly when a DeepSeek key is reachable", () => {
