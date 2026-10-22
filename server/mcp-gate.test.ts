@@ -8,6 +8,8 @@ import { once } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
+import { createPageSchema } from "./testing/oversized-tool-schema.ts";
+import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GATE = join(HERE, "mcp-gate.ts");
@@ -53,6 +55,17 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   send(msg.id, { scope: process.env.OMB_GATE_TOOL_SCOPE ?? null, upstreamOnly: process.env.UPSTREAM_ONLY });
+});
+`;
+
+/** Answers tools/list with its script as the catalog. */
+const LISTING_UPSTREAM = `
+const { createInterface } = require("node:readline");
+const { readFileSync } = require("node:fs");
+const catalog = JSON.parse(readFileSync(process.env.SCRIPT, "utf8"));
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const msg = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: msg.method === "tools/list" ? catalog : {} }) + "\\n");
 });
 `;
 
@@ -354,6 +367,23 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     expect((await callWith("call_tool", { name: "read", arguments: {} }, 2)).error).toMatchObject({ code: -32602 });
     expect((await callWith("describe_tool", { name: "read" }, 3)).error).toMatchObject({ code: -32602 });
     expect(ran()).toEqual([]);
+  });
+
+  it("fits each listed schema to the engine's provider profile, and lists tools as they came without one", async () => {
+    const catalog = { tools: [{ name: "small", inputSchema: { type: "object", properties: { q: { type: "string" } } } },
+      { name: "create_page", description: "Create a page.", inputSchema: createPageSchema() }] };
+    start(catalog, { OMB_GATE_BUDGET: "0", [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" }, LISTING_UPSTREAM);
+    send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const [small, page] = JSON.parse(await nextLine()).result.tools;
+    expect(small).toEqual(catalog.tools[0]);
+    expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
+    expect(page.description).toMatch(/^Create a page\.\n\n\(OpenMausBot shortened this tool's parameters to fit Kimi's size limit/);
+    gate!.kill();
+    await once(gate!, "close");
+
+    start(catalog, { OMB_GATE_BUDGET: "0" }, LISTING_UPSTREAM);
+    send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect(JSON.parse(await nextLine()).result).toEqual(catalog);
   });
 
   it("strips policy from the upstream environment without losing its own configuration", async () => {

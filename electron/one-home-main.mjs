@@ -69,6 +69,7 @@ async function answer(response) {
  *   journalFile(): string,
  *   tempRoot(): string,
  *   lend?(projects: string[]): Promise<unknown>,
+ *   offer?(): unknown,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
@@ -83,7 +84,7 @@ async function answer(response) {
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
  * `teamJournal`, team-moves.json beside this one by default). The rest are installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, openTeam, teamJournal, ...sendDeps }) {
+export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, offer, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, openTeam, teamJournal, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -175,7 +176,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     },
     session: () => moveSession.open(target()),
     release: () => moveSession.end(),
-    lend, phone, openHome, openLocal, restart, version, log,
+    lend, offer, phone, openHome, openLocal, restart, version, log,
     again,
     installation,
     async reportMove() {
