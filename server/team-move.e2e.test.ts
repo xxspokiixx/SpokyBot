@@ -33,6 +33,7 @@ beforeAll(async () => {
   fx.account.state.teams = [{ ...ACME, role: "member", machine: { origin: team.base, status: "ready", state: "ready" } }];
   fx.account.pairTeam = async (id) => { if (id !== ACME.id) throw Object.assign(new Error("not in that team"), { gone: true }); return team.grant(ADA); };
   expect((await fx.onCloud("PATCH", "/api/config", { profile: { name: "Ada", aboutMe: ABOUT } })).status).toBe(200);
+  await nameSeededChiefs();
 }, hostTimeout(180_000));
 const watchers: Array<() => void> = [];
 afterAll(async () => { for (const stop of watchers) stop(); await fx?.close(); }, hostTimeout(60_000));
@@ -88,6 +89,13 @@ function watchRoutine(id: string) {
   })();
   watchers.push(() => { stop = true; });
   return { seen, stop: async () => { stop = true; await done; } };
+}
+
+/** Each home seeds its Chief under a random bot name, Scout and Quill among them; these bots must be the only ones so named. */
+async function nameSeededChiefs() {
+  for (const [side, name] of [[fx.onCloud, "Ada's Chief"], [onTeam("olive"), "Acme's Chief"]] as const) {
+    for (const bot of (await side("GET", "/api/bots")).body.bots as Bot[]) expect((await side("PATCH", `/api/bots/${bot.id}`, { name })).status).toBe(200);
+  }
 }
 
 const move = async (bot: Bot) => { await fx.teamMove.start({ bot: { id: bot.id, name: bot.name }, team: { ...ACME, origin: team.base } }); };
