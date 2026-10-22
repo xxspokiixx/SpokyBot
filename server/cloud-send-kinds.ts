@@ -199,14 +199,15 @@ function parseKey(key: string | null): { kind: Kind; id: string } | null {
   return (kind === "imported-skill" || kind === "library-skill") && !isSkillName(match[2]!) ? null : { kind, id: match[2]! };
 }
 
-/** One item's whole record on this server, for a move to carry; null when it is not here. */
-export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { record: unknown; runs?: RoutineRun[] } | null {
+/** One item's whole record on this server, for a move to carry; null when it is not here. A routine's `changedAt` says
+ * when it last changed here, for a move to keep the side that changed it last. */
+export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { record: unknown; runs?: RoutineRun[]; changedAt?: number } | null {
   if (kind === "bot") { const bot = deps.store.bot(id); return bot ? { record: pick(bot, MOVE_BOT_FIELDS) } : null; }
   if (kind === "routine") {
     const routines = deps.routines();
     const routine = routines?.listRoutines().find((candidate) => candidate.id === id);
     // Its switch goes along for the switch that turns on there what was on here; My Cloud takes it switched off.
-    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS), enabled: routine.enabled }, runs: finishedRuns(routines!, id) } : null;
+    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS), enabled: routine.enabled }, runs: finishedRuns(routines!, id), changedAt: routine.updatedAt } : null;
   }
   if (kind === "call") { const call = deps.calls()?.list().find((candidate) => candidate.id === id); return call ? { record: call } : null; }
   if (kind === "webhook") { const webhook = deps.webhooks()?.list().find((candidate) => candidate.id === id); return webhook ? { record: webhook } : null; }
