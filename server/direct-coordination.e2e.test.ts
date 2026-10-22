@@ -94,17 +94,19 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
 }), 60_000);
 
 it("marks a failed one-way send so restart recovery cannot duplicate its notice", () => fixture(async f => {
+  // The failed send reports an incident to Clive, the lead's Chief; answering it must not send the task again.
   f.plan[f.chief.id] = { steps: [{ arguments: {
     bot_ids: [f.lead.id], message: "Try the task", thread: "new", reply: "none",
-  } }], reply: "Sent" };
+  } }], reply: "Sent", byPrompt: [{ promptIncludes: "[Incident report from OpenMausBot", plan: { reply: "Noted the failed send" } }] };
   f.plan[f.lead.id] = { fail: true };
   await f.start();
   expect((await f.wait()).status).toBe("settled");
   const failureNotice = async () => {
     const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
-    const task = lead?.tasks.find((item: any) => item.title === "Try the task");
-    if (!task) return null;
-    const messages = await f.messages(task.threadId);
+    const tasks = lead?.tasks.filter((item: any) => item.title === "Try the task") ?? [];
+    expect(tasks.length).toBeLessThanOrEqual(1);
+    if (!tasks[0]) return null;
+    const messages = await f.messages(tasks[0].threadId);
     return messages.find((message: any) => message.tool?.name?.startsWith("Send failed")) ?? null;
   };
   await expect.poll(failureNotice, { timeout: 15_000 }).toBeTruthy();
