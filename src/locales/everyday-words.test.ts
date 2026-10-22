@@ -26,6 +26,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],
   "Apps": ["apps.", "connectors."],
   "the Settings pages Simple mode shows": ["settings.section.", "settings.group.", "settings.mcpCalls.", "settings.logins."],
+  "the Usage page and its traces": ["trace.", "usage.page."],
 };
 
 const EVERYDAY_KEYS: Record<string, readonly string[]> = {
