@@ -2663,6 +2663,13 @@ ipcMain.handle("cloud-account:checkout", localWorkspaceOnly("cloud-account:check
 // The machine and its code come from the verified session in main, never from the renderer.
 ipcMain.handle("cloud-account:connectHome", localWorkspaceOnly("cloud-account:connectHome", () => connectCloudHome()));
 ipcMain.handle("cloud-account:connectHomeForPhone", localWorkspaceOnly("cloud-account:connectHomeForPhone", () => connectCloudHome("phone")));
+// The page names a team only; the team and its Cloud come from the verified session, opened as the switcher opens it.
+ipcMain.handle("cloud-account:openTeam", localWorkspaceOnly("cloud-account:openTeam", async (_event, teamId) => {
+  const current = ensureCloudAccount().state();
+  const team = current.status === "connected" ? current.teams?.find(entry => entry.id === teamId) ?? null : null;
+  if (!team) throw new Error("You're not in that team.");
+  await showHome({ place: { team: team.id, name: team.name } });
+}));
 ipcMain.handle("organization:settings-opened", localWorkspaceOnly("organization:settings-opened", () => organizationEntry.settingsOpened()));
 ipcMain.handle("organization:state", localWorkspaceOnly("organization:state", () => ensureManagedDesktop().state()));
 ipcMain.handle("organization:begin", localWorkspaceOnly("organization:begin", (_event, input) => ensureManagedDesktop().begin(input)));

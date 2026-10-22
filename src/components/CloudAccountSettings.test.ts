@@ -525,3 +525,22 @@ it("Sign in is the sheet's email code when Settings hands it over; the staging A
   const staging = render().html;
   expect(staging).toContain("data-cloud-staging"); expect(staging).toContain(">Staging<");
 });
+it("a Team plan has no Cloud of its own: the team's Cloud under its name, Open {team}, its own setup meanwhile, and no phone card for a Cloud that never comes", async () => {
+  type Machine = NonNullable<CloudAccountState["teams"]>[number]["machine"];
+  const onTeam = (machine: Machine): CloudAccountState => ({ ...free, entitlement: { plan: "pro", tier: "team", status: "active", expiresAt: 1_900_000_000_000, version: 2 },
+    teams: [{ id: "team-acme", name: "Acme", role: "owner", machine }] });
+  bridge.openTeam = vi.fn().mockResolvedValue(undefined);
+  await ready(onTeam({ status: "ready", origin: "https://omb-t-2.fly.dev" }));
+  let html = render().html;
+  all(html, ['data-cloud-team="true"', "Acme is ready. It keeps your team&#x27;s bots running 24/7", "Open Acme"]);
+  none(html, ["Setting up", "Reserving your machine", "Open the Cloud", PHONE, "is not ready yet"]);
+  click("Open Acme"); await flush();
+  expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme"); expect(bridge.connectHome).not.toHaveBeenCalled();
+  push(onTeam({ status: "provisioning", setup: { step: "storage" } }));
+  html = render().html;
+  all(html, ["Setting up your team&#x27;s Cloud", 'data-cloud-setup="storage"', "Reserving your machine"]); none(html, ["Open Acme", PHONE]);
+  push({ ...onTeam(null), teams: undefined });
+  all(render().html, ["Your team&#x27;s Cloud", "Setting up your team&#x27;s Cloud"]);
+  push({ ...onTeam({ status: "ready", origin: "https://omb-t-2.fly.dev" }), entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: 1_900_000_000_000, version: 3 } });
+  all(render().html, ["Setting up the Cloud", 'data-cloud-phone="steps"']);
+});

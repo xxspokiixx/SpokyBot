@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CloudAccountBridge, CloudAccountState, CloudPlanBridge, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudMachine, CloudTrial } from "../../electron/cloud-home.mjs";
+import { planTeam, teamPlan } from "../../electron/cloud-team-plan.mjs";
 import { cloudFilesBridge } from "@/lib/cloud-files";
 import { moveLine } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
@@ -54,27 +55,30 @@ function trialLines(trial: CloudTrial | undefined, credit: CloudCredit | undefin
 /**
  * Security: status and address come only from the verified native snapshot; the pairing code never reaches this page.
  * `moving`: the one-time move's own line while the bots go to My Cloud, which then opens by itself: nothing to open or
- * switch back to meanwhile.
+ * switch back to meanwhile. `team`: a Team or Business plan's Cloud, the team's, under the team's name; it has no Files,
+ * lending or move of its own here.
  */
-function cloudHomeCard({ machine, busy, failed, onConnect, lending, trial = false, waking = false, moving = null }: { machine: CloudMachine; busy: boolean; failed: boolean; onConnect: () => void; lending?: CloudAccountBridge["lending"]; trial?: boolean; waking?: boolean; moving?: string | null }) {
+function cloudHomeCard({ machine, busy, failed, onConnect, lending, trial = false, waking = false, moving = null, team = null }: { machine: CloudMachine; busy: boolean; failed: boolean; onConnect: () => void; lending?: CloudAccountBridge["lending"]; trial?: boolean; waking?: boolean; moving?: string | null; team?: { name: string | null } | null }) {
   const unreachable = machine.status === "ready" ? machine.unreachable : undefined;
   const connectable = machine.status === "ready" && !unreachable;
   const text = unreachable ? t(unreachable.cause === "host" ? "cloudHome.unreachableHost" : "cloudHome.unreachable")
     : moving ?? (waking && connectable ? t("cloudHome.waking")
+    : team?.name && machine.status === "ready" ? t("cloudHome.team.ready", { name: team.name })
     : machine.status === "ready" && machine.power?.sleeps ? t("cloudHome.readySleeps")
     : trial && (machine.status === "stopped" || machine.status === "payment-problem") ? t("cloudHome.stoppedTrial")
     : machine.status === "failed" && machine.retryAt ? t("cloudHome.failedRetry", { time: time(machine.retryAt) })
-    : machine.status === "provisioning" && machine.setup?.slow ? t("cloudHome.slow") : t(MACHINE_TEXT[machine.status]));
-  return <Card title={t("cloudHome.title")}>
-    <div data-cloud-home={machine.status} data-cloud-unreachable={unreachable?.cause} data-cloud-waking={waking && connectable ? true : undefined} data-cloud-moving={moving && !unreachable ? true : undefined} className="flex flex-col items-start gap-3">
+    : machine.status === "provisioning" && machine.setup?.slow ? t("cloudHome.slow")
+    : team && machine.status === "provisioning" ? t("cloudHome.team.provisioning") : t(MACHINE_TEXT[machine.status]));
+  return <Card title={team ? team.name ?? t("cloudHome.team.title") : t("cloudHome.title")}>
+    <div data-cloud-home={machine.status} data-cloud-team={team ? true : undefined} data-cloud-unreachable={unreachable?.cause} data-cloud-waking={waking && connectable ? true : undefined} data-cloud-moving={moving && !unreachable ? true : undefined} className="flex flex-col items-start gap-3">
       <p role="status" className={connectable ? "text-[14px] text-ink" : "text-[13px] text-ink-secondary"}>{text}</p>
       {machine.status === "provisioning" && setupSteps(machine)}
       {connectable && <>
         {!moving && <>
-          <button type="button" disabled={busy} className="ui-button" onClick={onConnect}>{t("cloudHome.connect")}</button>
+          <button type="button" disabled={busy} className="ui-button" onClick={onConnect}>{team?.name ? t("cloudBuy.setup.open", { name: team.name }) : t("cloudHome.connect")}</button>
           <p className="text-[12px] text-ink-secondary">{t("cloudHome.connectHelp")}</p>
         </>}
-        {cloudFilesBridge() && <OpenFilesButton label={t("cloudHome.filesLink")} className="text-[13px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" />}
+        {!team && cloudFilesBridge() && <OpenFilesButton label={t("cloudHome.filesLink")} className="text-[13px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" />}
       </>}
       {failed && !unreachable && <p role="alert" className="text-[13px] text-danger">{t("cloudHome.connectFailed")}</p>}
       {lending && <CloudLending bridge={lending} moving={Boolean(moving)} />}
@@ -212,6 +216,14 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
       try { return await bridge.connectHome(); } catch { setHomeFailed(true); return bridge.state(); }
     });
   };
+  const openTeam = (teamId: string) => {
+    if (!bridge?.openTeam) return;
+    setHomeFailed(false);
+    void perform(async () => {
+      try { await bridge.openTeam!(teamId); } catch { setHomeFailed(true); }
+      return bridge.state();
+    });
+  };
   const openOnPhone = () => {
     if (!bridge) return;
     setPhoneFailed(false);
@@ -244,7 +256,9 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
   const signed = account && ["connected", "unavailable", "reauth-required"].includes(account.status);
   const message = accountMessage(account, view, platform);
   const line = cloudPlanLine(view);
-  const machine: CloudMachine | undefined = account?.status === "connected" ? account.machine ?? (view.kind === "paid" ? { status: "provisioning" } : undefined) : undefined;
+  const onTeamPlan = teamPlan(account), team = planTeam(account);
+  const setUp: CloudMachine | undefined = view.kind === "paid" ? { status: "provisioning" } : undefined;
+  const machine: CloudMachine | undefined = onTeamPlan ? team?.machine ?? setUp : account?.status === "connected" ? account.machine ?? setUp : undefined;
   const enrollment = account?.status === "connecting" ? account.enrollment : undefined;
   const moneyBack = moneyBackLine(offer);
   const addCloudButton = onAddCloud && buyOfferAllowed(view) && <div className="flex flex-col items-start gap-1">
@@ -298,7 +312,9 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
       {error && <p role="alert" className="mt-3 text-[13px] text-danger">{t("cloudAccount.actionFailed")}</p>}
       {!account && <button type="button" disabled={busy} className="ui-button mt-3" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}
     </Card>
-    {machine && cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: connectHome, lending: bridge.lending, trial: Boolean(account?.trial), waking: account?.waking === true, moving })}
-    {signed && view.kind === "paid" && cloudPhoneCard({ ready: machine?.status === "ready", busy, failed: phoneFailed, onUse: openOnPhone })}
+    {machine && (onTeamPlan
+      ? cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: () => { if (team) openTeam(team.id); }, team: { name: team?.name ?? null } })
+      : cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: connectHome, lending: bridge.lending, trial: Boolean(account?.trial), waking: account?.waking === true, moving }))}
+    {signed && view.kind === "paid" && !onTeamPlan && cloudPhoneCard({ ready: machine?.status === "ready", busy, failed: phoneFailed, onUse: openOnPhone })}
   </>;
 }
