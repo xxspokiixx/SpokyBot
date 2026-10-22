@@ -217,7 +217,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect(await unanswered(ask.threadId)).toHaveLength(0);
     expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Applied in Ask");
     expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(true);
-    expect((await api("GET", "/api/routines")).routines).toHaveLength(2);
+    expect((await api("GET", "/api/routines")).routines.filter((routine: any) => routine.deliver !== "brief")).toHaveLength(2);
     expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review" && item.enabled)).toBe(true);
     const receipts = (await messages(ask.threadId)).filter(message => message.card?.autoApplied);
     expect(receipts.map(message => Boolean(message.card.profileRequest || message.card.routineRequest || message.card.skillRequest || message.card.teamSetupRequest)))
@@ -228,7 +228,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     }
     expect((await messages(ask.threadId)).filter(message => message.card?.autoApplied).every(message => message.card.undone)).toBe(true);
     expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Monthly reporting Chief");
-    expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
+    expect((await api("GET", "/api/routines")).routines.filter((routine: any) => routine.deliver !== "brief")).toHaveLength(1);
     expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review")).toBe(false);
     expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(false);
 

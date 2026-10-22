@@ -107,7 +107,7 @@ it("My Cloud ends after two computers moved to it: everything comes home to the 
   expect(read(studio.journalFile)).toMatchObject({ phase: "back", elsewhere: { name: "MacBook Air", since: imacCopy } });
   expect(studio.oneHome.view()).toEqual({ phase: "back", elsewhere: { name: "MacBook Air", since: imacCopy } });
   expect((await imac("GET", "/api/move/freeze")).body.frozen).toBe(false);
-  expect((await routines(imac)).routines.map((routine) => [routine.name, routine.enabled])).toEqual([["iMac at every start", false]]);
+  expect((await routines(imac)).routines.map((routine) => [routine.name, routine.enabled]).sort()).toEqual([["Keep an eye on my day", false], ["iMac at every start", false]]);
   expect(((await imac("GET", "/api/webhooks")).body.webhooks as Array<{ enabled: boolean }>).map((entry) => entry.enabled)).toEqual([false]);
   const imacHooks = `http://127.0.0.1:${Number(new URL(studio.base).port) + 1}`;
   expect((await fetch(`${imacHooks}/hooks/${hook.webhook.endpointId}/${hook.credential.secret}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).ok,
@@ -132,7 +132,7 @@ it("My Cloud ends after two computers moved to it: everything comes home to the 
   const home = { scout: (await rows(air, scout.threadId)).map((row) => row.id), pip: (await rows(air, pip.threadId)).map((row) => row.id) };
   expect(home.scout).toEqual(expect.arrayContaining(cloudRows.scout));
   expect(home.pip, "the iMac's bot, with its chats from My Cloud, comes home to the Air").toEqual(expect.arrayContaining(cloudRows.pip));
-  expect((await routines(air)).routines.map((routine) => [routine.name, routine.enabled]).sort()).toEqual([["Air at every start", true], ["iMac at every start", true]]);
+  expect((await routines(air)).routines.map((routine) => [routine.name, routine.enabled]).sort()).toEqual([["Air at every start", true], ["Keep an eye on my day", true], ["iMac at every start", true]]);
   expect(asked.air).toBeGreaterThanOrEqual(1);
   // Its automations run: opened again, both routines that run at every start do, there.
   await fx.relaunch({ kill: false });
