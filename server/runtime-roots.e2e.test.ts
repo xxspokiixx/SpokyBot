@@ -735,10 +735,11 @@ type StallFixture = {
   messages(threadId: string): Promise<Array<{ id: string; kind: string; tool?: { name: string }; secret?: CardState; connector?: CardState; signIn?: CardState }>>;
   turns(botId: string): Array<{ planKey?: string }>;
   open(name: string): void;
-  settle(ms: number): Promise<unknown>;
+  script(botId: string, ...entries: unknown[]): void;
+  say(botId: string, threadId: string, text: string): Promise<unknown>;
+  said(threadId: string, text: string): Promise<number>;
 };
 
-/** None of these cards pauses the stall watchdog, so the turn that posted one can still go silent. */
 const stallOverCards = async (f: StallFixture, job: string, ids: string[]) => {
   const marker = join(f.dataDir, "stall-turns");
   writeFileSync(marker, "now");
@@ -751,12 +752,14 @@ const stallOverCards = async (f: StallFixture, job: string, ids: string[]) => {
   expect(cards.map((message) => (message.secret ?? message.connector ?? message.signIn)?.stopped)).toEqual(ids.map(() => true));
 };
 
-const stalledAfterAnswer = async (f: StallFixture) => {
+const answerStartsNothing = async (f: StallFixture, job: string) => {
   f.open("c0");
-  await f.settle(1_500);
-  expect(f.roots()).toHaveLength(1);
-  expect(f.roots()[0]).toMatchObject({ status: "failed", outcome: "stalled", executions: 1 });
-  expect(f.turns(f.clive.id).map((record) => record.planKey)).toEqual([]);
+  f.script(f.clive.id, { key: "C-AFTER", match: ["AFTER-ANSWER"], reply: "AFTER-ANSWER-DONE: hello back." });
+  await f.say(f.clive.id, job, "AFTER-ANSWER: hello after the card was answered.");
+  await expect.poll(() => f.roots().map((row) => row.status), { timeout: 30_000 }).toEqual(["failed", "completed"]);
+  expect(f.roots().map((row) => [row.outcome, row.executions])).toEqual([["stalled", 1], ["done", 1]]);
+  expect(await f.said(job, "AFTER-ANSWER-DONE")).toBe(1);
+  expect(f.turns(f.clive.id).map((record) => record.planKey)).toEqual(["C-AFTER"]);
 };
 
 it("T12 a turn the watchdog stops after it posted a credential card fails as stalled and stops the card", () => scenario(async (f) => {
@@ -771,7 +774,7 @@ it("T12 a turn the watchdog stops after it posted a credential card fails as sta
   const provided = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${card.id}/provided`, { threadId: job });
   expect(provided.status, JSON.stringify(provided.body)).toBe(200);
   expect(provided.body).toEqual({ provided: true, resumed: false });
-  await stalledAfterAnswer(f);
+  await answerStartsNothing(f, job);
 }, { fake: STALL_CLOCK }), hostTimeout(60_000));
 
 it("T12 a turn the watchdog stops after it posted connector cards fails as stalled and stops the cards", async () => {
@@ -791,7 +794,7 @@ it("T12 a turn the watchdog stops after it posted connector cards fails as stall
       composio.connect("slack");
       expect((await f.api("GET", `/api/bots/${f.clive.id}/connector-cards/${gmail}/status?threadId=${job}`)).body).toMatchObject({ connected: true });
       expect((await f.api("GET", `/api/bots/${f.clive.id}/connector-cards/${slack}/status?threadId=${job}`)).body).toMatchObject({ connected: true });
-      await stalledAfterAnswer(f);
+      await answerStartsNothing(f, job);
       const cards = (await f.messages(job)).filter((message: { kind: string }) => message.kind === "connector").map((message: { connector: CardState }) => message.connector);
       expect(cards.map((connector: CardState) => [connector.status, connector.stopped, connector.resumed])).toEqual([["connected", true, undefined], ["connected", true, undefined]]);
     }, { env: composio.env, fake: STALL_CLOCK });
@@ -812,5 +815,5 @@ it("T12 a turn the watchdog stops after it posted a sign-in card fails as stalle
   const done = await f.api("POST", `/api/bots/${f.clive.id}/sign-in-cards/${card.id}/done`, { threadId: job });
   expect(done.status, JSON.stringify(done.body)).toBe(200);
   expect(done.body).toEqual({ done: true, resumed: false });
-  await stalledAfterAnswer(f);
+  await answerStartsNothing(f, job);
 }, { fake: STALL_CLOCK }), hostTimeout(60_000));
