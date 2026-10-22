@@ -405,3 +405,22 @@ test("a bot's fields only a move carries go over My Cloud's move route, absent o
   await createCloudSend(sending.deps).send({ reason: "button" });
   assert.deepEqual(fields, []);
 });
+
+test("while the chats go, the move's progress counts chats only: the automations after them never add to it", async () => {
+  // Seen in the real app on Oct 22: the line read "5 of 5 chats" for a moment, and what went after the chats counted on.
+  const routine = (id) => ({ key: `routine:${id}`, kind: "routine", label: id, id, bot: "ember", parts: { def: id } });
+  const conversations = ["a", "b"].map((threadId) => ({ bot: "ember", threadId, last: 1, lastId: `${threadId}-1`, busy: false }));
+  const here = [bot("ember", { soul: "s" }), routine("r1"), routine("r2")];
+  const move = sides({ here, there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } }, conversations,
+    onCall: (method, route, body, cloud) => {
+      if (method === "PUT" && route === "/api/cloud-send/kind") { cloud.set(body.key, here.find((item) => item.key === body.key)); return reply(200, { v: 1, ok: true }); }
+      return null;
+    } });
+  const seen = [];
+  move.deps.onChange = (snapshot) => { if (snapshot.running?.phase === "chats") seen.push(snapshot.running.progress ?? null); };
+  await createCloudSend(move.deps).send({ reason: "move" });
+  const counted = seen.filter(Boolean);
+  assert.ok(counted.length > 0, "the chats are counted as they go");
+  assert.ok(counted.every((progress) => progress.total === 2 && progress.done <= 2), `every count is of the 2 chats: ${JSON.stringify(counted)}`);
+  assert.deepEqual(counted.at(-1), { done: 2, total: 2 });
+});

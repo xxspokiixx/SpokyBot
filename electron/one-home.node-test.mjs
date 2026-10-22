@@ -108,7 +108,7 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
   assert.equal(w.phone.stopped, 1);
   assert.deepEqual(w.opened, ["cloud"]);
   assert.equal(w.home.away(), true);
-  assert.deepEqual(w.home.view(), { phase: "done", counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
+  assert.deepEqual(w.home.view(), { phase: "done", at: w.journal.doneAt, counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
   assert.equal(w.home.seen(), null, "the done line shows until it is closed");
 
   await w.relaunch().kick();
@@ -285,7 +285,8 @@ test("when My Cloud ends after the move, this computer is home again at once, th
   assert.equal(w.journal.phase, "back");
   assert.equal(w.restarted, 1, "the app opens again to finish the restore");
   await w.relaunch().kick();
-  assert.deepEqual(w.localCalls.map(([method, route, body]) => [method, route, body]).sort(), [["PATCH", "/api/routines/r1", { enabled: true }], ["PATCH", "/api/routines/r9", { enabled: true }]]);
+  assert.deepEqual(w.localCalls.map(([method, route, body]) => [method, route, body]).sort(), [["PATCH", "/api/routines/r1", { enabled: true }], ["PATCH", "/api/routines/r9", { enabled: true }],
+    ["POST", "/api/cloud-send/home", { v: 1 }]], "and the bots whose webhooks moved say their address is here again");
   assert.equal(w.journal.switchBack, undefined);
   assert.deepEqual(w.home.view(), { phase: "back" });
   w.home.seen();

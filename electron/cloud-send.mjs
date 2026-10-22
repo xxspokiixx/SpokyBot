@@ -399,7 +399,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
         try { await sendRow(ctx, row); }
         catch (error) { result.failed.push({ key: row.key, kind: row.kind, label: row.label, error: sentence(error?.message) ?? "It could not be sent.", ...(error?.final === true ? { final: true } : {}) }); }
         await recordItem(ctx, row.key).catch(() => {});
-        if (progress) progress = { done: progress.done + 1, total };
+        if (progress && !job.chats) progress = { done: progress.done + 1, total };
         publish();
       };
       for (const row of rows.filter((entry) => !automations.has(entry.kind)).sort((a, b) => order[a.kind] - order[b.kind])) await goRow(row);

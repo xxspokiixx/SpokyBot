@@ -6,8 +6,8 @@ export type OneHomeView =
   /** `waitingFor`: the bot or room still working here ("" when it has no name). */
   | { phase: "wait"; waitingFor?: string; failing?: { error: string | null } }
   | { phase: "finishing"; failing?: { error: string | null } }
-  /** What arrived, checked on both sides; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
-  | { phase: "done"; counts?: OneHomeCounts; phone: boolean; held: string[] }
+  /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
+  | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[] }
   /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`. */
   | { phase: "home-again" | "back"; lost?: true };
 export interface OneHomeCounts { bots: number; skills: number; logins: number; onePassword: boolean; chats: number; routines: number }

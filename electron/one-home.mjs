@@ -125,7 +125,7 @@ export function createOneHome(deps) {
   function view() {
     const journal = read();
     if (!journal || journal.paused || journal.told) return null;
-    if (journal.phase === "done") return { phase: "done", ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [] };
+    if (journal.phase === "done") return { phase: "done", ...(Number.isSafeInteger(journal.doneAt) ? { at: journal.doneAt } : {}), ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [] };
     if (journal.phase === "home-again" || journal.phase === "back") return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}) };
     const running = deps.send.snapshot?.()?.running;
     const chats = journal.phase === "copy" && running?.phase === "chats" && running.progress ? { done: running.progress.done, total: running.progress.total } : null;
@@ -310,7 +310,8 @@ export function createOneHome(deps) {
     return null;
   }
 
-  /** After coming home with My Cloud's backup: what was on at My Cloud is switched on here, which a restore leaves off. */
+  /** After coming home with My Cloud's backup: what was on at My Cloud is switched on here, which a restore leaves off, and
+   * each bot that said on My Cloud that its webhook had a new address says it has one here again. */
   async function switchBack(journal) {
     const pending = { ...journal.switchBack };
     for (const [key, on] of Object.entries(pending)) {
@@ -321,6 +322,7 @@ export function createOneHome(deps) {
       }
       delete pending[key];
     }
+    await deps.local.call("POST", "/api/cloud-send/home", { v: 1 }).catch(() => null);
     const { switchBack: _, ...rest } = journal;
     write(rest);
     return null;
