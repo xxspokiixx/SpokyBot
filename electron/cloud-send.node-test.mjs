@@ -499,6 +499,37 @@ test("a room's chats go with the room, whatever bots My Cloud has, and never as 
   assert.deepEqual({ room: sent.room, roomInfo: sent.roomInfo, bot: sent.bot, task: sent.task.title }, { room: "r-launch", roomInfo: room, bot: undefined, task: "Plan" });
 });
 
+test("a room nobody wrote in yet goes once as its thread with no rows, so My Cloud makes it; one with no bot never goes", async () => {
+  let answer = "waiting";
+  const { sides, posted } = chatSides({ threads: { "t-a": 1 }, answer: (entry) => entry.threadId === "t-quiet" ? answer : "accepted" });
+  const local = sides.deps.local;
+  const room = { name: "Quiet", memberIds: ["ember"], bulletin: "" };
+  const asked = [];
+  sides.deps.local = async (route) => {
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: [{ bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }],
+      rooms: [{ room: "r-quiet", threadId: "t-quiet", members: ["ember"] }, { room: "r-lonely", threadId: "t-lonely", members: [] }] }), { status: 200 });
+    if (route.startsWith("/api/cloud-send/chats/rows?thread=t-quiet&")) {
+      asked.push(route);
+      return new Response(JSON.stringify({ room: "r-quiet", roomInfo: room, task: { threadId: "t-quiet", title: "Untitled", createdAt: 1 }, rows: [], leaf: null, last: 0, lastId: null,
+        more: false, restarted: false, attachments: [] }), { status: 200 });
+    }
+    return local(route);
+  };
+  const store = stored();
+  const send = createCloudSend({ ...sides.deps, store });
+  await send.send();
+  assert.deepEqual(posted.flat().filter((entry) => entry.threadId !== "t-a"), [{ threadId: "t-quiet", rows: [], sent: false }], "the room with a bot goes; the other never does");
+  assert.equal(store.value.clouds[CLOUD].chats["t-quiet"], undefined, "My Cloud did not make it yet: it goes again");
+  answer = "accepted";
+  await send.send();
+  assert.deepEqual(posted.at(-1), [{ threadId: "t-quiet", rows: [], sent: false }]);
+  assert.deepEqual(store.value.clouds[CLOUD].chats["t-quiet"], { after: 0, id: "" });
+  const before = posted.length;
+  await send.send();
+  assert.equal(posted.length, before, "made there once: never sent again");
+  assert.equal(asked.length, 2);
+});
+
 test("nothing answering on the way to My Cloud is told from a refusal", () => {
   assert.equal(unanswered(new TypeError("fetch failed")), true);
   assert.equal(unanswered(Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" })), true);
