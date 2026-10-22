@@ -724,6 +724,8 @@ describe("ACP turns (fake CLI)", () => {
       const repliesTo = await replyingThread("reasoning-replay", ReasoningReplayDriver);
       expect(await repliesTo(chunk("agent_thought_chunk", "Six times seven."), ...say("The answer", " is 42.", reasoned)))
         .toEqual(["The answer is 42."]);
+      // hermes-agent 0.22.4 sends the re-sent reply after a blank line
+      expect(await repliesTo(...say("The answer", " is 42.", `\n\n${reasoned}`))).toEqual(["The answer is 42."]);
       expect(await repliesTo(...say("    indented", "> 💭 **Reasoning:**\n> Six times seven.\n\n    indented")))
         .toEqual(["indented"]);
       // chunks that only end with the text so far are deltas

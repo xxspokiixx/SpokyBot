@@ -219,7 +219,7 @@ export interface AcpSupport {
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
   restartOnMcpChange?: boolean;
-  /** hermes-agent 0.22.2 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
+  /** hermes-agent 0.22.4 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
    * then the reply; that chunk is dropped instead of appended. */
   resendsReasoningReply?: boolean;
   /** Threads with the same spawn contract run their sessions in one process (OpenCode 1.19: about 100 MB a session
@@ -322,7 +322,7 @@ function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknown; stat
 
 function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
   const reply = streamed.trim();
-  const replay = chunk.trimEnd();
+  const replay = chunk.trim();
   return reply !== "" && /^(?:> |-# )?💭/.test(replay) && replay.endsWith(reply)
     && /\n\n[ \t]*$/.test(replay.slice(0, -reply.length));
 }
