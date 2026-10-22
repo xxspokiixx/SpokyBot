@@ -958,8 +958,8 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
     const leads = f.nodes().filter((node: any) => node.botId === f.lead.id);
     expect(leads).toHaveLength(1);
     const child = leads[0];
-    expect(child).toMatchObject({ status: "failed", outcome: "stalled", executions: 2 });
-    expect(child.result).toMatch(/^Stopped after 64 steps without a final answer\./);
+    expect(child).toMatchObject({ status: "failed", outcome: "stalled", executions: 2,
+      result: expect.stringMatching(/^Stopped after 64 steps without a final answer\./) });
     expect(child.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 64 steps without a final answer\./);
     expect(child.result).not.toContain("assign what is left");
     expect(f.eventsOf(child.id).filter((kind: string) => kind === "continued")).toHaveLength(1);
