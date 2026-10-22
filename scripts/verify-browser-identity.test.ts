@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { expectedUserAgent } from "./testing/browser-identity-probe.ts";
-import { completeHints, headerLanguages } from "./verify-browser-identity.ts";
+import { completeHints, headerLanguages, openIdentityProbe, type BotCall } from "./verify-browser-identity.ts";
 
 const MAC = {
   architecture: "arm", bitness: "64", brands: [{ brand: "Chromium", version: "153" }], formFactors: ["Desktop"],
@@ -28,5 +28,45 @@ describe("the identity checks", () => {
     expect(headerLanguages("en-US,en;q=0.9")).toBe("en-US,en");
     expect(headerLanguages("pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")).toBe("pt-BR,pt,en-US,en");
     expect(headerLanguages(undefined)).toBe("");
+  });
+});
+
+describe("opening the owned identity probe", () => {
+  const url = "http://127.0.0.1:43127/probe";
+  const opened = { content: [{ type: "text", text: "Opened probe" }] };
+  const aborted = { isError: true, content: [{ type: "text", text: "Navigation failed: net::ERR_ABORTED" }] };
+
+  it("keeps a successful open to one navigation", async () => {
+    const call = vi.fn<BotCall>().mockResolvedValue(opened);
+    await openIdentityProbe(call, url);
+    expect(call).toHaveBeenCalledExactlyOnceWith("agent_browser_open", { url });
+  });
+
+  it("retries an aborted navigation of the owned probe once", async () => {
+    const call = vi.fn<BotCall>().mockResolvedValueOnce(aborted).mockResolvedValue(opened);
+    await openIdentityProbe(call, url);
+    expect(call.mock.calls).toEqual([
+      ["agent_browser_open", { url }],
+      ["agent_browser_open", { url }],
+    ]);
+  });
+
+  it("fails when the second navigation is aborted too", async () => {
+    const call = vi.fn<BotCall>().mockResolvedValue(aborted);
+    await expect(openIdentityProbe(call, url)).rejects.toThrow("Navigation failed: net::ERR_ABORTED");
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves other navigation failures without retrying", async () => {
+    const call = vi.fn<BotCall>().mockResolvedValue({ isError: true,
+      content: [{ type: "text", text: "Navigation failed: net::ERR_CONNECTION_REFUSED" }] });
+    await expect(openIdentityProbe(call, url)).rejects.toThrow("Navigation failed: net::ERR_CONNECTION_REFUSED");
+    expect(call).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a lost engine response without retrying", async () => {
+    const call = vi.fn<BotCall>().mockRejectedValue(new Error("engine disconnected"));
+    await expect(openIdentityProbe(call, url)).rejects.toThrow("engine disconnected");
+    expect(call).toHaveBeenCalledOnce();
   });
 });

@@ -190,13 +190,19 @@ export async function withBotBrowser<T>(options: BotBrowserOptions, work: (call:
   }
 }
 
+export async function openIdentityProbe(call: BotCall, url: string): Promise<void> {
+  let failed = refused(await call("agent_browser_open", { url }));
+  // A fresh Chrome for Testing profile can abort its first navigation; only this owned probe is safe to reopen.
+  if (failed === "Navigation failed: net::ERR_ABORTED") failed = refused(await call("agent_browser_open", { url }));
+  if (failed) throw new Error(`the bot's browser could not open the probe page: ${failed}`);
+}
+
 export async function verifyBrowserIdentity(options: BotBrowserOptions & { publicPages?: boolean }): Promise<{ readout: IdentityReadout; public: PublicVerdict[] }> {
   const log = options.log ?? (() => {});
   const probe = await startIdentityProbe();
   try {
     return await withBotBrowser(options, async (call, decided, launcher) => {
-      const failed = refused(await call("agent_browser_open", { url: probe.url }));
-      if (failed) throw new Error(`the bot's browser could not open the probe page: ${failed}`);
+      await openIdentityProbe(call, probe.url);
       const reports = await probe.complete(30_000);
       const major = String(reports.page?.high?.uaFullVersion ?? "").split(".")[0] ?? "";
       const expected = expectedUserAgent(major);
