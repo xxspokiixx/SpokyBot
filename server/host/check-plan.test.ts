@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CalendarEvent, EmailHeader } from "../connected-reads.ts";
 import {
-  answered, clashes, EMAIL_MAX_AGE_MS, emailSince, fingerprint, mergeMeetings, nextMeetingDue, planMail, planMeetings, PREP_LEAD_MS, REMINDER_LEAD_MS, TRIAGE_BATCH,
+  answered, clashes, EMAIL_MAX_AGE_MS, emailSince, FIRST_MAIL_LOOK_BACK_MS, fingerprint, mergeMeetings, nextMeetingDue, planMail, planMeetings, PREP_LEAD_MS, REMINDER_LEAD_MS, TRIAGE_BATCH,
 } from "./check-plan.ts";
 
 const MINUTE = 60_000;
@@ -63,10 +63,10 @@ describe("mail", () => {
     expect(plan.quiet.map((one) => one.id)).toEqual(["old"]);
   });
 
-  it("starts from the cursor but never more than a day back", () => {
-    expect(emailSince({ now, checkMs: 15 * MINUTE })).toBe(now - 15 * MINUTE);
-    expect(emailSince({ now, emailCursor: now - MINUTE, checkMs: 15 * MINUTE })).toBe(now - MINUTE);
-    expect(emailSince({ now, emailCursor: 0, checkMs: 15 * MINUTE })).toBe(now - EMAIL_MAX_AGE_MS);
+  it("starts from the cursor but never more than a day back, and a first check reads the last 12 hours", () => {
+    expect(emailSince({ now })).toBe(now - FIRST_MAIL_LOOK_BACK_MS);
+    expect(emailSince({ now, emailCursor: now - MINUTE })).toBe(now - MINUTE);
+    expect(emailSince({ now, emailCursor: 0 })).toBe(now - EMAIL_MAX_AGE_MS);
   });
 
   it("knows when the person already replied", () => {

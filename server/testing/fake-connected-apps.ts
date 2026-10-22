@@ -61,10 +61,10 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
     let raw = "";
     for await (const chunk of req) raw += chunk;
     res.setHeader("content-type", "application/json");
-    if (req.method === "GET" && req.url === "/broker/v1/connectors/connected") {
+    if (req.method === "GET" && req.url === "/v1/connectors/connected") {
       return res.end(JSON.stringify({ services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) => [slug, { connected }])) }));
     }
-    if (req.method === "POST" && req.url === "/broker/v1/mcp") {
+    if (req.method === "POST" && req.url === "/v1/mcp") {
       const body = (raw ? JSON.parse(raw) : {}) as Frame;
       if (body.method === "initialize") {
         res.setHeader("mcp-session-id", "fake-session");
@@ -99,7 +99,7 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
   return Object.assign(fake, {
-    url: `http://127.0.0.1:${port}/broker`,
+    url: `http://127.0.0.1:${port}`,
     token: "c".repeat(64),
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   });

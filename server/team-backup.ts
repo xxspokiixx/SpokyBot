@@ -69,7 +69,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       messages: store.messagesFor(task.threadId).map((message) => ({
         id: message.id, role: message.role, text: messageText(message), at: message.at,
         parentId: message.parentId ?? null, replyToId: message.replyToId,
-        from: message.from, peerPost: message.peerPost,
+        from: message.from, peerPost: message.peerPost, ...(message.serverCard ? { serverCard: true as const } : {}),
       })),
     }));
   };
@@ -160,6 +160,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         ? { from: { ...message.from, botId: botIds.get(message.from.botId)! } }
         : message.from ? { text: `${message.from.name}:\n${message.text}` } : {}),
       peerPost: message.peerPost,
+      ...(message.serverCard && message.role === "bot" ? { serverCard: true as const } : {}),
     }));
     store.importTranscript(threadId, messages, task.activeLeafId ? ids.get(task.activeLeafId)! : null);
   };

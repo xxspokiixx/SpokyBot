@@ -20,6 +20,8 @@ const message = z.object({
   replyToId: key.optional(),
   from: z.object({ botId: key, name, color: z.string().max(40) }).optional(),
   peerPost: z.object({ unattended: z.boolean().optional() }).optional(),
+  /** A card the server built from records: it replays to a bot as records, never as the bot's own words. */
+  serverCard: z.literal(true).optional(),
 });
 const task = z.object({
   key,

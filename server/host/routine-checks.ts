@@ -106,6 +106,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   items(key: string): { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> } | null;
   pendingKeys(): string[];
   forget(routineId: string): void;
+  /** The person's own Gmail address, once a check has read it. */
+  address(): string | undefined;
 } {
   const file = join(deps.dataDir, CHECKS_FILE);
   const now = deps.now ?? Date.now;
@@ -189,8 +191,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
       const run = deps.runs().find((candidate) => candidate.checkKey === key);
       if ((run && !ACTIVE.has(run.status)) || (!run && at - pending.at > PENDING_MS)) release(key);
     }
-    // Mail is watched from one interval before the first check, so mail a failed read or run gave back is read again.
-    if (checks.includes("mail")) entry.mailCursor ??= at - CHECK_MS;
+    // The first check fixes where mail is watched from, so mail a failed read or run gave back is read again.
+    if (checks.includes("mail")) entry.mailCursor ??= emailSince({ now: at });
     const brief = routine.deliver === "brief";
     const aiAllowed = !context.hold && (routine.access !== "read-and-draft" || deps.fenced(routine.botId));
     const report: CheckReport = { routine, at };
@@ -244,7 +246,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
 
     if (checks.includes("mail") && readable("gmail")) {
       try {
-        const since = emailSince({ now: at, emailCursor: entry.mailCursor, checkMs: CHECK_MS });
+        const since = emailSince({ now: at, emailCursor: entry.mailCursor });
         const { emails, more } = await session.emails(since, MAIL_READ_LIMIT);
         succeeded(entry, "gmail");
         const judged = new Set([...(entry.judged ?? []), ...held]);
@@ -321,6 +323,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
       save();
     },
     items: (key) => handed.get(key) ?? null,
+    address: () => Object.values(state.routines).find((entry) => entry.address)?.address,
     pendingKeys: () => Object.values(state.routines).flatMap((entry) => Object.keys(entry.pending ?? {})),
     forget(routineId) {
       if (!state.routines[routineId]) return;

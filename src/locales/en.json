@@ -1129,6 +1129,7 @@
   "notifications.status.failed": "Failed",
   "notifications.status.deferred": "Deferred",
   "notifications.status.spend": "Spend",
+  "notifications.status.brief": "Brief",
   "settings.roomTurns.title": "Group turns",
   "settings.roomTurns.subtitle": "Set the usual maximum for a bot turn in a group. A conversation can choose its own.",
   "settings.roomTurns.label": "Maximum turn length",

@@ -15,6 +15,8 @@ export const TRIAGE_BATCH = 20;
 export const PICKS_PER_TRIAGE = 5;
 export const EMAIL_MAX_AGE_MS = 24 * HOUR;
 export const KEEP_MEETINGS_MS = 7 * 24 * HOUR;
+/** How far back a routine's first mail check reads: the morning's mail, not only the last few minutes. */
+export const FIRST_MAIL_LOOK_BACK_MS = 12 * HOUR;
 
 /** What the checks remember about one meeting: ids and times only. */
 export interface MeetingRecord {
@@ -93,9 +95,9 @@ export function keepNewest<T>(list: readonly T[], max: number): T[] {
   return list.length > max ? list.slice(list.length - max) : [...list];
 }
 
-/** Where the next mail check starts: the cursor, but never more than a day back; the first check looks one interval back. */
-export function emailSince(input: { now: number; emailCursor?: number; checkMs: number }): number {
-  if (input.emailCursor === undefined) return input.now - input.checkMs;
+/** Where the next mail check starts: the cursor, but never more than a day back; the first check reads the last 12 hours. */
+export function emailSince(input: { now: number; emailCursor?: number }): number {
+  if (input.emailCursor === undefined) return input.now - FIRST_MAIL_LOOK_BACK_MS;
   return Math.max(input.emailCursor, input.now - EMAIL_MAX_AGE_MS);
 }
 

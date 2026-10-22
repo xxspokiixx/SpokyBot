@@ -1292,6 +1292,12 @@ export class RoutineManager {
     return cloneRun(run);
   }
 
+  /** A completed run whose answer its consumer could not use: it fails like any run, so its items go back. */
+  rejectResult(id: string, why: string): void {
+    const run = this.runs.find((candidate) => candidate.id === id && candidate.status === "completed");
+    if (run) this.failRun(run, why);
+  }
+
   failThread(threadId: string, message: string, facts: RoutineFailureFacts = {}) {
     const run = this.runs.find((r) => r.threadId === threadId && ["running", "waiting"].includes(r.status));
     if (run) this.settleFailure(run, message, facts);
