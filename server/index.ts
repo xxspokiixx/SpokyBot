@@ -11187,10 +11187,8 @@ async function runClaimedGroupMemberTurn(
     // Covers every early return that never produces a provider terminal event.
     unregisterSetupStall();
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
-    // A stall latched during setup can end the turn before it has an outcome: the watchdog stopped it all the same.
-    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled",
-      text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || roomFailure || roomReply || roomOutcome || "The turn did not run",
-      ...(roomOutcome === "stalled" || setupStalled ? { stalled: true } : {}) });
+    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled", ...(roomOutcome === "stalled" || setupStalled ? { stalled: true } : {}),
+      text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || roomFailure || roomReply || roomOutcome || "The turn did not run" });
     if (!retainRoomVmLease) releaseRoomVmLease();
     if (!providerDispatched && roomSpeaker && groupSpeakers.get(threadId) === roomSpeaker) {
       groupSpeakers.delete(threadId);
