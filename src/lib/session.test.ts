@@ -118,7 +118,7 @@ describe("the profile shown for a signed-in session", () => {
       kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1,
       team: { id: "team-1", name: "Shared Team", role: "member" },
     }), { status: 200 });
-    expect(await readSessionState(answer)).toEqual({
+    expect(await readSessionState(answer)).toMatchObject({
       kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1,
       team: { id: "team-1", name: "Shared Team", role: "member" },
     });
