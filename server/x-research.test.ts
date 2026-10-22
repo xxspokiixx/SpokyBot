@@ -471,6 +471,7 @@ describe("the plan's included X calls this month", () => {
   it("keeps a used-up month and a trial's end, and never counts past the allowance", async () => {
     const trial = { calls: 9, max: 3, usedUp: true, resetsAt: usage.resetsAt, trialEndsAt: "2026-10-25T09:00:00.000Z" };
     expect(await readIncludedXUsage(plan, { fetcher: fakeFetch({ body: trial }).fetcher })).toEqual({ ...trial, calls: 3 });
+    expect(await readIncludedXUsage(plan, { fetcher: fakeFetch({ body: { ...usage, calls: 5_000 } }).fetcher })).toEqual({ ...usage, calls: 5_000, usedUp: true });
   });
 
   it("says nothing for an own key, a refusal, an older relay without /usage, a malformed answer or no answer", async () => {

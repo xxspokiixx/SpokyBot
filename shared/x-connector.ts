@@ -25,12 +25,12 @@ export interface XConnectorStatus {
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const isoTime = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value));
 
-/** The relay's answer as XIncludedUsage, or null for anything else. */
+/** The relay's answer as XIncludedUsage, or null for anything else. Every call used reads as used up. */
 export function parseXIncludedUsage(value: unknown): XIncludedUsage | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const { calls, max, usedUp, resetsAt, trialEndsAt } = value as Record<string, unknown>;
   if (!count(calls) || !count(max) || !isoTime(resetsAt) || (trialEndsAt !== undefined && !isoTime(trialEndsAt))) return null;
-  return { calls: Math.min(calls, max), max, ...(usedUp === true ? { usedUp: true as const } : {}), resetsAt, ...(trialEndsAt !== undefined ? { trialEndsAt } : {}) };
+  return { calls: Math.min(calls, max), max, ...(usedUp === true || calls >= max ? { usedUp: true as const } : {}), resetsAt, ...(trialEndsAt !== undefined ? { trialEndsAt } : {}) };
 }
 
 export function isXConnectorStatus(value: unknown): value is XConnectorStatus {
