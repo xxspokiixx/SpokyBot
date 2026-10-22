@@ -2445,6 +2445,6 @@ export class Store {
 
   seedIfEmpty() {
     if (!this.needsSeed()) return;
-    this.setChiefOfStaff(this.createBot().id);
+    this.setChiefOfStaff(this.createBot({ name: "MausBot", color: "silver" }).id);
   }
 }
