@@ -27,6 +27,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
@@ -68,24 +69,53 @@ export function dshHome(env: Record<string, string | undefined>): string {
   return env.DSH_HOME || harnessHome("dsh", env);
 }
 
-const CREDENTIAL_LINE = /^\s*DEEPSEEK_API_KEY\s*:\s*\S/m;
-const DOTENV_LINE = /^\s*(?:export\s+)?DEEPSEEK_API_KEY\s*=\s*\S/m;
+const nonEmpty = (value: unknown): boolean => typeof value === "string" && value.trim() !== "";
 
-function fileMatches(path: string, pattern: RegExp): boolean {
+/** dsh 0.2.1 writes `version: 1` with the key under `refs:`; it also migrates
+ * the pre-release flat layout (the key at the top level), so both count. An
+ * empty or quoted-empty value is "no key": dsh treats it as a boot error. */
+function storedCredentialPresent(path: string): boolean {
+  let doc: unknown;
   try {
-    return pattern.test(readFileSync(path, "utf8"));
+    doc = parseYaml(readFileSync(path, "utf8"));
   } catch {
     return false;
   }
+  if (!doc || typeof doc !== "object") return false;
+  const root = doc as Record<string, unknown>;
+  const refs = root.refs && typeof root.refs === "object" ? root.refs as Record<string, unknown> : {};
+  return nonEmpty(refs.DEEPSEEK_API_KEY) || nonEmpty(root.DEEPSEEK_API_KEY);
+}
+
+const DOTENV_LINE = /^[ \t]*(?:export[ \t]+)?DEEPSEEK_API_KEY[ \t]*=(.*)$/;
+
+/** One dotenv assignment with a non-empty value, quotes and a trailing comment stripped. */
+function dotenvValuePresent(path: string): boolean {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return false;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const match = DOTENV_LINE.exec(line);
+    if (!match) continue;
+    let value = match[1]!.trim();
+    const quoted = /^(["'])(.*)\1(?:[ \t]+#.*)?$/.exec(value);
+    if (quoted) value = quoted[2]!;
+    else value = value.replace(/[ \t]+#.*$/, "").trim();
+    if (value !== "") return true;
+  }
+  return false;
 }
 
 /** A DeepSeek key dsh will find: the launch env, its stored credential file,
- * or its home .env (the same precedence dsh documents, read-only here). */
+ * or its home .env (the layers dsh documents, read-only here). The stored
+ * file outranks the env inside dsh; for "is there a key at all" any layer counts. */
 export function hasDeepSeekKey(env: Record<string, string | undefined>): boolean {
-  if (env.DEEPSEEK_API_KEY?.trim()) return true;
+  if (nonEmpty(env.DEEPSEEK_API_KEY)) return true;
   const home = dshHome(env);
-  return fileMatches(join(home, ".credentials.yaml"), CREDENTIAL_LINE)
-    || fileMatches(join(home, ".env"), DOTENV_LINE);
+  return storedCredentialPresent(join(home, ".credentials.yaml")) || dotenvValuePresent(join(home, ".env"));
 }
 
 /** Every `value` string under a select option, descending into groups. */

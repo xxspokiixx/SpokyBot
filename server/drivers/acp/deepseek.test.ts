@@ -1,13 +1,17 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { recordEvents } from "../../testing/events.ts";
 import {
   DEEPSEEK_MODELS,
   DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS,
   DEEPSEEK_MODELS_TIMEOUT_ENV,
+  DeepSeekAgentDriver,
   deepseekPickerId,
   deepseekSupport,
   deepseekWireValue,
@@ -81,6 +85,44 @@ describe("DeepSeek key detection", () => {
   it("accepts the harness-home .env fallback", () => {
     const h = home();
     writeFileSync(join(h, ".env"), "export DEEPSEEK_API_KEY=sk-env\n");
+    expect(hasDeepSeekKey({ DSH_HOME: h })).toBe(true);
+  });
+
+  it("reads a stored key from dsh's version-1 refs layout", () => {
+    const h = home();
+    writeFileSync(join(h, ".credentials.yaml"), "version: 1\nrefs:\n  DEEPSEEK_API_KEY: sk-stored\nrecords: {}\n");
+    expect(hasDeepSeekKey({ DSH_HOME: h })).toBe(true);
+  });
+
+  it.each([
+    'DEEPSEEK_API_KEY: ""',
+    "DEEPSEEK_API_KEY: ''",
+    "DEEPSEEK_API_KEY:\nOTHER_KEY: x\n",
+    "version: 1\nrefs:\n  DEEPSEEK_API_KEY: \"\"\n  OTHER_KEY: x\n",
+    "version: 1\nrefs:\n  OTHER_KEY: x\nrecords: {}\n",
+    "refs:\n  DEEPSEEK_API_KEY:\n  OTHER_KEY: x\n",
+    "not: [valid",
+  ])("treats an empty, quoted-empty or absent stored credential as missing: %j", (text) => {
+    const h = home();
+    writeFileSync(join(h, ".credentials.yaml"), text);
+    expect(hasDeepSeekKey({ DSH_HOME: h })).toBe(false);
+  });
+
+  it.each([
+    "DEEPSEEK_API_KEY=\nOPENAI_API_KEY=sk-other\n",
+    'DEEPSEEK_API_KEY=""\n',
+    "DEEPSEEK_API_KEY=''\n",
+    "# DEEPSEEK_API_KEY=sk-old\n",
+    "DEEPSEEK_API_KEY_BACKUP=sk-x\n",
+  ])("treats a blank or commented .env value as missing: %j", (text) => {
+    const h = home();
+    writeFileSync(join(h, ".env"), text);
+    expect(hasDeepSeekKey({ DSH_HOME: h })).toBe(false);
+  });
+
+  it("reads a quoted .env value", () => {
+    const h = home();
+    writeFileSync(join(h, ".env"), 'DEEPSEEK_API_KEY="sk-quoted" # comment\n');
     expect(hasDeepSeekKey({ DSH_HOME: h })).toBe(true);
   });
 
@@ -274,5 +316,66 @@ process.stdin.on("data", (chunk) => {
   it("is what Refresh runs, against the instance's own cli", async () => {
     const { cli, env } = fakeCli({});
     await expect(deepseekSupport.resolveModels!(env, { cli, fullAuto: false }, "deepseek")).resolves.toEqual(PARSED);
+  });
+});
+
+describe("DeepSeek Harness after a provider was added in dsh since its process started", () => {
+  const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
+  const base = '["deepseek-official","deepseek-v4-flash"]';
+  const addedPicker = "deepseek-official/deepseek-v4-pro";
+  const added = '["deepseek-official","deepseek-v4-pro"]';
+  const fixtures: Array<{ scratch: string; instance: ProviderInstance; recorder: ReturnType<typeof recordEvents> }> = [];
+  afterEach(async () => {
+    for (const entry of fixtures.splice(0)) {
+      entry.recorder.stop();
+      await entry.instance.dispose();
+      await removeTempDir(entry.scratch);
+    }
+  });
+  const open = async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-deepseek-stale-"));
+    const modelsFile = join(scratch, "models");
+    writeFileSync(modelsFile, `${base}\n`);
+    const instance = await DeepSeekAgentDriver.create({
+      instanceId: "deepseek-stale", displayName: "DeepSeek Harness", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
+      environment: {
+        HOME: scratch, USERPROFILE: scratch, DSH_HOME: join(scratch, "dsh"), DEEPSEEK_API_KEY: "sk-fixture",
+        FAKE_ACP_MODELS_FILE: modelsFile, FAKE_ACP_LAUNCH_COUNT_FILE: join(scratch, "launches"),
+        FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
+      },
+    });
+    const recorder = recordEvents(instance.adapter);
+    fixtures.push({ scratch, instance, recorder });
+    const run = async (model: string) => {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-stale", text: "hello", model });
+      const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return { done, events: recorder.events.filter((event) => event.turnId === turnId) };
+    };
+    const launches = () => Number(readFileSync(join(scratch, "launches"), "utf8"));
+    const prompts = () => readFileSync(join(scratch, "rpc.jsonl"), "utf8").trim().split("\n")
+      .filter((line) => (JSON.parse(line) as { method: string }).method === "session/prompt").length;
+    return { run, launches, prompts, modelsFile };
+  };
+
+  it("sends the wire pair for the picker id and reports it on session.started", async () => {
+    const f = await open();
+    const { done, events } = await f.run("deepseek-official/deepseek-v4-flash");
+    expect(done).toMatchObject({ ok: true });
+    expect(events.find((event) => event.type === "session.started")).toMatchObject({ model: base });
+  });
+
+  it("never swaps a catalog model for another one: fails the stale process and retries on a fresh one", async () => {
+    const f = await open();
+    expect((await f.run("deepseek-official/deepseek-v4-flash")).done).toMatchObject({ ok: true });
+    writeFileSync(f.modelsFile, `${base}\n${added}\n`);
+    const stale = await f.run(addedPicker);
+    expect(stale.done).toMatchObject({ ok: false });
+    expect(stale.events.some((event) => event.type === "runtime.notice")).toBe(false);
+    expect(stale.events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("deepseek-v4-pro") });
+    expect(f.prompts()).toBe(1);
+    const retry = await f.run(addedPicker);
+    expect(retry.done).toMatchObject({ ok: true });
+    expect(f.launches()).toBe(2);
   });
 });
