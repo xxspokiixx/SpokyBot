@@ -772,7 +772,7 @@ export function SettingsModal() {
             <RemoteComputerSection />
             {!remoteActive && <CustomDomainSettings />}
             {/* Security: the server decides who may pair (an owner or admin session), not this gate. */}
-            <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} />
+            <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} />
             {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? phoneFocus : 0} />}
           </>
         );
