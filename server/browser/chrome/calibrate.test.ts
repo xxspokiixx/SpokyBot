@@ -28,6 +28,14 @@ const READ: CalibratedIdentity = {
   calibratedAt: "2026-10-16T00:00:00.000Z",
 };
 
+/** A Chrome whose pages commit but never finish loading. */
+class NeverLoads extends FakeChrome {
+  override event(method: string, params: Record<string, unknown>, sessionId?: string): void {
+    if (method === "Page.loadEventFired" || (method === "Page.lifecycleEvent" && params.name === "load")) return;
+    super.event(method, params, sessionId);
+  }
+}
+
 async function firstTab(chrome: FakeChrome) {
   const browser = await CdpBrowser.connect(chrome, { identity: null, headless: true, permissions: false });
   return browser.waitForPage();
@@ -43,6 +51,26 @@ describe("opening a page of our own", () => {
     await openOwnPage(tab, url, 5_000);
     expect(tab.url()).toBe(url);
     expect(navigations(chrome)).toBe(2);
+  });
+
+  it("opens it again when Chrome never answers the first navigation", async () => {
+    const chrome = new FakeChrome();
+    let lost = 1;
+    chrome.hang = (method) => method === "Page.navigate" && lost-- > 0;
+    const tab = await firstTab(chrome);
+    await openOwnPage(tab, url, 200);
+    expect(tab.url()).toBe(url);
+    expect(navigations(chrome)).toBe(2);
+  });
+
+  it("gives up when the second navigation goes unanswered too, and never repeats a page that was slow to load", async () => {
+    const silent = new FakeChrome();
+    silent.hang = (method) => method === "Page.navigate";
+    await expect(openOwnPage(await firstTab(silent), url, 200)).rejects.toThrow(/Page.navigate got no answer/);
+    expect(navigations(silent)).toBe(2);
+    const slow = new NeverLoads();
+    await expect(openOwnPage(await firstTab(slow), url, 200)).rejects.toMatchObject({ code: "timeout", detail: undefined });
+    expect(navigations(slow)).toBe(1);
   });
 
   it("gives up when the second navigation is cancelled too, and never repeats another failure", async () => {
