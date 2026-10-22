@@ -49,15 +49,15 @@ Expected:
 quiet ticks, one batched run, overlap, catch-up, wake times, backoff, the daily
 cap, busy bots, and Run now. The others:
 
-- `server/host/routine-checks.test.ts`, `check-plan.test.ts` and
-  `check-prompts.test.ts`: the checks, planner and prompts;
-- `server/host/brief.test.ts` and `proactive.test.ts`: the brief and the default
-  routine;
-- `server/connected-reads.test.ts` and `records-block.test.ts`: the readers and
-  the sanitiser;
+- `server/host/routine-checks.test.ts`, `server/host/check-plan.test.ts` and
+  `server/host/check-prompts.test.ts`: the checks, planner and prompts;
+- `server/host/brief.test.ts` and `server/host/proactive.test.ts`: the brief and
+  the default routine;
+- `server/connected-reads.test.ts` and `server/records-block.test.ts`: the
+  readers and the sanitiser;
 - `server/read-and-draft.test.ts`: the fence;
-- `server/routes/bot-messages.test.ts` and `presence.test.ts`: the press fences
-  and presence;
+- `server/routes/bot-messages.test.ts` and `server/routes/presence.test.ts`: the
+  press fences and presence;
 - `src/lib/automations.test.ts`: the Automations row.
 
 ## Looking at it in the real renderer
