@@ -160,7 +160,7 @@ await openSettings();
 await click("Replay welcome tour");
 await textVisible("Your name");
 await holdConfigWrite();
-await click("Skip tour");
+await click("Skip setup");
 await poll(() => evaluate("document.querySelectorAll('.welcome-card').length"), 0, "slow completion cannot trap welcome");
 await evaluate("window.releaseWrite(); true");
 console.log("PASS welcome replay can close while persistence is pending");

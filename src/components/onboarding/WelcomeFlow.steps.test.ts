@@ -174,7 +174,7 @@ describe("a reload in the middle of the welcome", () => {
     await show({ onDone });
     await type(NAME, "Ada");
     await type(EMAIL, "ada@example.com");
-    await press("Skip tour");
+    await press("Skip setup");
     expect(onDone).toHaveBeenCalledOnce();
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(putBodies()).toContainEqual({ profile: { name: "Ada", email: "ada@example.com" } });
@@ -203,7 +203,7 @@ describe("a reload in the middle of the welcome", () => {
     await press("Continue");
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(text()).toContain("Couldn't save your details");
-    await press("Skip tour");
+    await press("Skip setup");
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(putBodies().filter((body) => "profile" in body)).toEqual([{ profile: { name: "Ada" } }, { profile: { name: "Ada" } }]);
   });
@@ -243,7 +243,7 @@ describe("a reload in the middle of the welcome", () => {
 describe("on a phone-width screen", () => {
   it("keeps Skip in the title's own row after the greeting, so a long title wraps beside it instead of under it", async () => {
     await show({ initialBeat: "engines" });
-    const skip = button("Skip tour")!;
+    const skip = button("Skip setup")!;
     const title = host.querySelector("h1")!;
     expect(skip.className).not.toContain("absolute");
     expect(skip.parentElement).toBe(title.parentElement);

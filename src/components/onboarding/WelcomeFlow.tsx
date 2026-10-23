@@ -269,7 +269,7 @@ export function WelcomeFlow({
   const { current, total } = flowProgress(beats, beat);
   const skip = (className: string) => (
     <QuietButton onClick={() => void finish("skipped")} className={className}>
-      {t("onboarding.skipTour")}
+      {t("onboarding.skipSetup")}
     </QuietButton>
   );
 

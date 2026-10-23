@@ -2495,6 +2495,7 @@
   "onboarding.perms.enable": "Enable",
   "onboarding.skip": "Skip for now",
   "onboarding.skipTour": "Skip tour",
+  "onboarding.skipSetup": "Skip setup",
   "onboarding.reel.next": "Next",
   "settings.welcome.appTour": "Replay app tour",
   "onboarding.tour.progress": "Step {current} of {total}",
