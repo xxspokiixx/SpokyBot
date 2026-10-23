@@ -130,7 +130,7 @@ export interface SecretRequestCardData {
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "sender"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "sender"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -744,7 +744,7 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
-      dataContext?: import("../../shared/data-context").DataContext;
+      dataContext?: import("../../shared/data-context").DataContext; pointed?: import("../../shared/app-frame/point").PointedElement[];
       onError?: () => void;
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
@@ -2559,7 +2559,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}) }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}) }),
               }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {

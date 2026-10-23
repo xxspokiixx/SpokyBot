@@ -7614,7 +7614,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"] }) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId),
     threadBusy: threadBusy(botId, threadId),
@@ -7679,7 +7679,7 @@ async function acceptDirectSend(
     callId?: string;
     dataContext?: DataContext;
     personPresent: boolean;
-    app?: { context?: string; fromApp?: Message["fromApp"] };
+    app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
@@ -7993,7 +7993,7 @@ async function startTurn(
     callId?: string;
     relayed?: boolean;
     dataContext?: DataContext;
-    app?: { context?: string; fromApp?: Message["fromApp"] };
+    app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
     onDispatchError?: (message: string) => void;
     compactOnly?: boolean;
     automaticRecoveryAttempted?: boolean;
@@ -8129,7 +8129,7 @@ async function startTurn(
           replyToId: opts?.replyTo?.id,
           reaction: opts?.replyTo?.reactedWith,
           sendId: opts?.sendId,
-          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}), ...(opts?.app?.fromApp ? { fromApp: opts.app.fromApp } : {}),
+          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}), ...(opts?.app?.fromApp ? { fromApp: opts.app.fromApp } : {}), ...(opts?.app?.pointed ? { pointed: opts.app.pointed } : {}),
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
           ...spokenLineFields(opts?.via, opts?.callId),
@@ -13001,7 +13001,7 @@ const { react } = createReactions({
   store, reply: (input) => personReplies.deliver({ ...input, about: "message" }),
   answerCard: (input) => respondToCard({ ...input, via: "reaction" }), withdraw: personReplies.withdraw,
 });
-const publishedPages = createPublishedPages({ dataDir: DATA_DIR, cloudHome: CLOUD_HOME, patch: (threadId, messageId, text, publishedPage) => void store.patchMessage(threadId, messageId, { text, publishedPage }) }); ROUTES.push(createReactionRoutes({ react, reactorFor, cloudGuestSendRefusal }), publishedPages.routes);
+const publishedPages = createPublishedPages({ dataDir: DATA_DIR, cloudHome: CLOUD_HOME, patch: (threadId, messageId, text, publishedPage) => void store.patchMessage(threadId, messageId, { text, publishedPage }), apps: { chat: chatApps, store } }); ROUTES.push(createReactionRoutes({ react, reactorFor, cloudGuestSendRefusal }), publishedPages.routes);
 // `let` slots are read per request.
 ROUTES.push(createThreadRoutes({
   store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
@@ -13504,7 +13504,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
       return json(res, 200, { session: issued.session, environment });
     }
-    if (cloudSigned && await cloudSigned({ req, res, url, path, method })) return;
+    if ((cloudSigned && await cloudSigned({ req, res, url, path, method })) || chatApps.serveFile(req, res, path, method)) return;
     if (method === "POST" && path === "/api/auth/pair") {
       // JSON only: a cross-site HTML form cannot send this content type without a preflight, so no unused code is planted as a session.
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
@@ -13878,7 +13878,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
-      if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS) return; if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }), post: (text, publishedPage) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return source ? store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id : null; } }) !== PASS) return;
+      if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS) return; if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }), post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (!source.group && bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
       };
@@ -13952,7 +13952,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         requireActiveInternalCapability();
         const result = await createAgentCard({
           store,
-          bot: internalSender, apps: chatApps,
+          bot: internalSender, apps: chatApps, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }),
           threadId: internalCapability.threadId,
           input: body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });
