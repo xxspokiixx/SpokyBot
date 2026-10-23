@@ -160,7 +160,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   const confirmations = new Map();
   async function upgradeFailure(error, signedIn, browser = true) {
     if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
-    if (!browser && !error?.status) return { outcome: "unconfirmed" };
+    if (!browser && (!error?.status || error.opaque || error.status === 504)) return { outcome: "unconfirmed" };
     if (!error?.opaque && UPGRADE_REFUSALS.includes(error?.code)) return { outcome: "refused", code: error.code };
     if (browser && grant === signedIn && !error?.opaque && ([404, 405, 501].includes(error?.status) || (error?.status === 503 && error.code === "temporarily_unavailable"))) {
       await openBrowser(`${origin}/cloud`);

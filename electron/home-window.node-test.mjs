@@ -785,12 +785,12 @@ test("the usage meter's Upgrade: only from the person's click, only to a plan th
   for (const origin of [LOCAL, CLOUD]) {
     const page = preload(origin);
     await assert.rejects(page.bridge.cloudPlan.upgrade("max", "app_usage"), /Choose Upgrade/, "the change needs the confirm's own click on every page");
+    await assert.rejects(page.bridge.cloudPlan.upgradePreview("max", "app_usage"), /Choose Upgrade/, "so does the price");
     const clicked = preload(origin, { activation: true });
     await clicked.bridge.cloudPlan.upgradePreview("max", "app_usage");
     await clicked.bridge.cloudPlan.upgrade("max", "app_usage");
     assert.deepEqual(clicked.invoked, [["cloud-plan:upgrade-preview", "max", "app_usage"], ["cloud-plan:upgrade", "max", "app_usage"]]);
   }
-  await assert.rejects(preload(CLOUD).bridge.cloudPlan.upgradePreview("max", "app_usage"), /Choose Upgrade/);
   const ipc = pageIpc();
   const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };
   ipc.account.usage = { tier: "pro", resetsAt: 1, meters: [], upgrades: [{ tier: "max", amount: 9900 }] };

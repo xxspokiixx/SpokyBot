@@ -834,6 +834,16 @@ test("usage meter: the session's usage reaches the state and the Cloud page's sn
   await f.client.upgradePreview("max", "app_settings");
   f.upgrade = { status: 402, body: { cloudContractVersion: 1, error: "payment_failed", errorDescription: "Your payment didn't go through." } };
   assert.deepEqual(await f.client.upgrade("max", "app_settings"), { outcome: "refused", code: "payment_failed" });
+  // A gateway's own error page, or one that timed out, says nothing about the change: the session will.
+  for (const answer of [{ status: 502, body: "<!doctype html>Bad gateway" }, { status: 504, body: { error: "timeout" } }]) {
+    await f.client.upgradePreview("max", "app_settings");
+    f.upgrade = answer;
+    assert.deepEqual(await f.client.upgrade("max", "app_settings"), { outcome: "unconfirmed" });
+  }
+  // The Admin's own word that nothing changed is just that.
+  await f.client.upgradePreview("max", "app_settings");
+  f.upgrade = { status: 502, body: { cloudContractVersion: 1, error: "provider_error", errorDescription: "Nothing was changed." } };
+  assert.deepEqual(await f.client.upgrade("max", "app_settings"), { outcome: "failed" });
   // An Admin that can't change plans from the app (off, or older): the Cloud page opens instead.
   for (const answer of [{ status: 503, body: { cloudContractVersion: 1, error: "temporarily_unavailable", errorDescription: "Off." } }, { status: 404, body: { error: "not_found" } }]) {
     f.upgradePreview = answer;
