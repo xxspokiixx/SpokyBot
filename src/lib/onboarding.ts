@@ -139,16 +139,16 @@ export function welcomeOnScreen(): boolean {
   return welcomeShown > 0;
 }
 
+/** The next step offered after `current`. A step that left the list (an AI connected meanwhile) still moves on to the
+ * next one offered, in BEAT_ORDER, instead of ending the welcome early. */
 export function nextBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const index = beats.indexOf(current);
-  if (index < 0 || index + 1 >= beats.length) return null;
-  return beats[index + 1]!;
+  const at = BEAT_ORDER.indexOf(current);
+  return beats.find((beat) => BEAT_ORDER.indexOf(beat) > at) ?? null;
 }
 
 export function previousBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const index = beats.indexOf(current);
-  if (index <= 0) return null;
-  return beats[index - 1]!;
+  const at = BEAT_ORDER.indexOf(current);
+  return beats.filter((beat) => BEAT_ORDER.indexOf(beat) < at).at(-1) ?? null;
 }
 
 export function beatWidth(beat: BeatId): number {

@@ -238,6 +238,14 @@ describe("beat machine", () => {
     expect(nextBeat(beats, "cloud")).toBeNull();
   });
 
+  it("moves on from a step that left the list to the next one still offered, so it never ends the welcome early", () => {
+    expect(nextBeat(["hello", "permissions", "cloud"], "engines")).toBe("permissions");
+    expect(nextBeat(["hello", "cloud"], "import")).toBe("cloud");
+    expect(previousBeat(["hello", "permissions"], "engines")).toBe("hello");
+    expect(nextBeat(["hello"], "engines"), "nothing after it: the welcome is done").toBeNull();
+    expect(previousBeat(["engines", "permissions"], "hello")).toBeNull();
+  });
+
   it("gives the engines beat the widest card", () => {
     expect(beatWidth("engines")).toBeGreaterThan(beatWidth("hello"));
     expect(beatWidth("cloud")).toBeGreaterThan(beatWidth("hello"));

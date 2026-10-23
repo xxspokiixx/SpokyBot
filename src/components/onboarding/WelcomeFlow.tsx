@@ -108,7 +108,12 @@ export function WelcomeFlow({
   const aiStepShown = useRef(initialBeat === "engines");
   const aiReady = !aiStepShown.current && state.instances.some(engineReady);
   const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, hosted, setupImport: detection !== null, cloud: offer !== null, aiReady });
-  const [beat, setBeat] = useState<BeatId>(() => resumeBeat(beats, initialBeat));
+  const [beat, setBeat] = useState<BeatId>(() => {
+    const first = resumeBeat(beats, initialBeat);
+    // Opened on Connect an AI (a reload resuming there or after it): it stays, though a working AI turns up meanwhile.
+    if (first === "engines") aiStepShown.current = true;
+    return first;
+  });
   // A saved step offered only once something loads (the import look, the Cloud offer) is opened when it arrives.
   const resumeTo = useRef(initialBeat && !beats.includes(initialBeat) ? initialBeat : null);
   const [moving, setMoving] = useState(false);

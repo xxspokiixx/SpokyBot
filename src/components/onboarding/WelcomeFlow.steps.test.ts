@@ -39,6 +39,8 @@ const type = async (selector: string, value: string) => {
   });
 };
 const NAME = 'input[type="text"]', EMAIL = 'input[type="email"]';
+const DRAFT = { name: "", email: "" };
+const READY_AI = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true }, models: { default: "m", options: [] } };
 const draft = () => JSON.parse(localStorage.getItem(WELCOME_DRAFT_KEY) ?? "null");
 const putBodies = () => f.api.mock.calls.filter(([, init]) => init?.method === "PUT").map(([, init]) => JSON.parse(init.body));
 
@@ -119,6 +121,21 @@ describe("a reload in the middle of the welcome", () => {
     expect(text()).toContain("Step 2 of 3");
     await press("Back");
     expect((host.querySelector(NAME) as HTMLInputElement).value).toBe("Ada");
+  });
+
+  it("keeps Connect an AI when a working AI shows up after a reload, and Continue goes on to the next step", async () => {
+    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ ...DRAFT, beat: "import" }));
+    const onDone = vi.fn();
+    await show({ onDone });
+    expect(text()).toContain("Connect an AI");
+    expect(text()).toContain("Step 2 of 3");
+    f.state = { ...f.state, instances: [READY_AI] };
+    await show({ onDone });
+    expect(text(), "the step on screen stays in the count").toContain("Step 2 of 3");
+    expect(button("Back")).toBeDefined();
+    await press("Continue");
+    expect(onDone, "the microphone step is still to come").not.toHaveBeenCalled();
+    expect(text()).toContain("Step 3 of 3");
   });
 
   it("opens on a step that joins late (the import step) once it is offered, or the step before it until then", async () => {
