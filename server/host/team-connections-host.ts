@@ -231,6 +231,8 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       return shared;
     },
 
+    /** A person who left the team (host/team-member-left.ts): every connection, key and sign-in of theirs goes. */
+    forgetPerson: (person: string) => people.forgetPerson(person),
     /** For the Admin's signed read: what is `person`, and who has connected each (addresses, never a secret). */
     async adminExtras(): Promise<{ scopes: { apps: string[]; mcp: string[] }; people: { apps: Record<string, string[]>; mcp: Record<string, string[]> } } | Record<string, never>> {
       if (!team) return {};

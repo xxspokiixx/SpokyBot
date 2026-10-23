@@ -18,13 +18,16 @@ export interface CloudSignedHostDeps {
   box: () => BoxReport;
   /** A Team Cloud's shared connections and AI for its admins; used only when the home is a Team Cloud. */
   teamAdmin?: { summary(): Promise<TeamAdminSummary> };
+  /** A Team Cloud's member left (the Admin's signed request): delete what was theirs alone. */
+  memberLeft?: (email: string) => Promise<Record<string, unknown>>;
 }
 
 export function createCloudSignedHost(deps: CloudSignedHostDeps): { cloudHealth: CloudHealth | null; cloudSigned: ReturnType<typeof createCloudSignedRoutes> | null } {
   const cloudHealth = deps.cloudHome ? createCloudHealth({ ...deps.health, box: deps.box }) : null;
   const cloudSigned = deps.cloudHome && cloudHealth
     ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, team: deps.cloudHome.team, health: cloudHealth, power: deps.power, box: deps.box,
-      ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}) })
+      ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}),
+      ...(deps.cloudHome.team && deps.memberLeft ? { memberLeft: deps.memberLeft } : {}) })
     : null;
   return { cloudHealth, cloudSigned };
 }

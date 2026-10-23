@@ -1543,6 +1543,19 @@ describe("Store", () => {
     expect(reloaded.bots[0]?.chiefOfStaff).toBe(true);
   });
 
+  it("seedIfEmpty names the new install's Chief MausBot in silver, and no bot after it takes silver in turn", () => {
+    const store = new Store(selection);
+    store.seedIfEmpty();
+    const chief = store.bots[0]!;
+    expect(chief).toMatchObject({ name: "MausBot", color: "silver", chiefOfStaff: true });
+    expect(store.messagesFor(chief.threadId).map((message) => message.text)).toEqual(["Hi, I'm MausBot. What would you like me to do?"]);
+    const later = Array.from({ length: 25 }, () => store.createBot());
+    expect(later.map((bot) => bot.color)).not.toContain("silver");
+    expect(later[0]?.color).toBe("blue");
+    expect(later.map((bot) => bot.name)).not.toContain("MausBot");
+    expect(new Store(selection).bot(chief.id)).toMatchObject({ name: "MausBot", color: "silver" });
+  });
+
   it("seedIfEmpty leaves an existing workspace without a Chief as it is", () => {
     const store = new Store(selection);
     const existing = store.createBot();

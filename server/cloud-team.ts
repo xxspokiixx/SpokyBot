@@ -41,6 +41,11 @@ export function teamSessionExpiresAt(createdAt: number, proposed: number): numbe
 const MEMBER_EMAIL = /^[!-;=?A-~]{1,64}@[!-;=?A-~]{1,189}$/;
 export type MemberClaimRefusal = "member_required" | "invalid_member" | "team_mismatch";
 
+/** A member's address as a claim carries it (printable ASCII), lowercased; null for anything else. */
+export function teamMemberEmail(value: unknown): string | null {
+  return typeof value === "string" && value.length <= 254 && MEMBER_EMAIL.test(value) ? value.trim().toLowerCase() : null;
+}
+
 export function parseMemberClaim(body: Record<string, unknown>, team: CloudTeam): { ok: true; member: TeamMember } | { ok: false; error: MemberClaimRefusal } {
   const claimedTeam = body.team;
   if (claimedTeam !== undefined) {

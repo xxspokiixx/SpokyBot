@@ -15,7 +15,7 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
 import { cancelledChatFollowup } from "../message-db.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
-import { promptWithReply } from "../replies.ts";
+import { promptWithReply, type PersonName } from "../replies.ts";
 import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts";
 import type { RoomContextTracker } from "../room-context.ts";
 import { parseConversationTurnTimeout } from "../room-turn-timeout.ts";
@@ -38,7 +38,9 @@ export interface ChannelRouteDeps {
   store: Pick<Store,
     | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
     | "createGroupTask" | "appendMessage">;
-  cfg: Pick<AppConfig, "profile" | "budgets">;
+  cfg: Pick<AppConfig, "budgets">;
+  /** What people's lines are called in this conversation (replies.ts PersonName). */
+  userName(threadId: string): PersonName;
   /** The desktop app owns this server, so a loopback caller is its owner. */
   desktopManaged: boolean;
   routines(): Pick<RoutineManager, "disableForGroup"> | null;
@@ -442,7 +444,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         });
       }
       const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
-      const speakerName = cfg.profile?.name?.trim() || "User";
+      const speakerName = deps.userName(targetThreadId);
       let foldedPrompt: string;
       try {
         foldedPrompt = headGroup

@@ -492,7 +492,7 @@ describe("EventBus status-line progress", () => {
     expect(logged).toEqual(["item.started"]);
   });
 
-  it("sends a frame only when what it shows changes, a few a second at most, and the newest one last", () => {
+  it("sends a frame only when what it shows changes, a few a second at most, and the newest one last", async () => {
     const bus = new EventBus();
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
@@ -508,9 +508,10 @@ describe("EventBus status-line progress", () => {
     expect(frames.at(-1)!.bytes).toBe(149_900);
     const kb = frames.map((frame) => Math.floor((frame.bytes ?? 0) / 1024));
     expect(new Set(kb).size, "no two frames read the same").toBe(kb.length);
+    await bus.flush();
   });
 
-  it("drops a waiting report once the thread says anything newer, and forgets it when the turn ends", () => {
+  it("drops a waiting report once the thread says anything newer, and forgets it when the turn ends", async () => {
     const bus = new EventBus();
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
@@ -525,14 +526,17 @@ describe("EventBus status-line progress", () => {
     bus.publish(testEvent({ type: "turn.completed", ok: true, turnId: "turn-1" } as Partial<RuntimeEvent>));
     vi.advanceTimersByTime(1000);
     expect(shown(seen)).toEqual(["progress:2048", "item.started", "progress:8192", "turn.completed"]);
+    // The log writes before the next test clears its folder.
+    await bus.flush();
   });
 
-  it("keeps threads apart", () => {
+  it("keeps threads apart", async () => {
     const bus = new EventBus();
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
     bus.publish(progress(1024, { threadId: "a" }));
     bus.publish(progress(1024, { threadId: "b" }));
     expect(seen.map((event) => event.threadId)).toEqual(["a", "b"]);
+    await bus.flush();
   });
 });
