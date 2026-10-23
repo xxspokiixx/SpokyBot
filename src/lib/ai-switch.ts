@@ -49,6 +49,14 @@ export function cancelAiSwitch(match?: { threadId: string; turnId: string }): vo
   if (held || waiting) notify();
 }
 
+/** The row's turn is no longer the one running: its picker goes back to waiting for whatever runs. A pick already
+ * made keeps going. */
+export function releaseAiSwitchIntent(match: { threadId: string; turnId: string }): void {
+  if (!intent || intent.threadId !== match.threadId || intent.turnId !== match.turnId) return;
+  intent = null;
+  notify();
+}
+
 const sameAi = (a: SetModel["selection"], b: SetModel["selection"]) => a.instanceId === b.instanceId && a.model === b.model;
 
 function beginSwitch(held: Held, action: SetModel, showError: (message: string) => void): void {
@@ -98,6 +106,8 @@ export function useAiSwitch(input: {
           && !sameAi(action.selection, bot.modelSelection);
         if (switching && busy) beginSwitch(mine, action, (message) => dispatch({ type: "error", message }));
         else dispatch(action);
+        // The turn ended before the pick: an ordinary switch, and the picker is ordinary again.
+        if (switching && !busy) releaseAiSwitchIntent(mine);
       },
     };
   }, [mine, bot, dispatch]);

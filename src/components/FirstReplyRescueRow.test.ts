@@ -33,10 +33,11 @@ let host: HTMLDivElement;
 let root: Root;
 let dispatch: ReturnType<typeof vi.fn>;
 const opened = { header: vi.fn(), panel: vi.fn() };
+let headerBot: Bot | null = null;
 
 /** The pickers this chat could draw; Switch AI must reach exactly one of them. */
 function Pickers() {
-  useAiSwitch({ bot: bot(true), threadId: "thread-1", contained: false, dispatch: vi.fn(), setOpen: opened.header });
+  headerBot = useAiSwitch({ bot: bot(true), threadId: "thread-1", contained: false, dispatch: vi.fn(), setOpen: opened.header }).bot;
   useAiSwitch({ bot: bot(true), threadId: "thread-1", contained: true, dispatch: vi.fn(), setOpen: opened.panel });
   return null;
 }
@@ -112,6 +113,15 @@ describe("first-reply rescue row", () => {
     expect(dispatch).not.toHaveBeenCalled();
     expect(opened.header).toHaveBeenCalledWith(true);
     expect(opened.panel).not.toHaveBeenCalled();
+  });
+
+  it("hands the picker back to the running turn once the row's own turn is over", () => {
+    setAdvancedMode(true);
+    render(row());
+    act(() => button("Switch AI")!.click());
+    expect(headerBot!.busy).toBe(false);
+    render(row({ ...rescue, over: true }));
+    expect(headerBot!.busy).toBe(true);
   });
 
   it.each([

@@ -1,6 +1,7 @@
 import { Info } from "lucide-react";
 import { openBotSettings } from "@/components/bot-panel/panel-link";
-import { requestAiSwitch, useAiSwitchFinish } from "@/lib/ai-switch";
+import { useEffect } from "react";
+import { releaseAiSwitchIntent, requestAiSwitch, useAiSwitchFinish } from "@/lib/ai-switch";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useLiveTurn } from "@/lib/stop-turn";
@@ -23,6 +24,9 @@ export function FirstReplyRescueRow({ rescue, text, at }: { rescue: FirstReplyRe
   const startedAt = rescue.groupId ? group?.turnStartedAt : task?.turnStartedAt;
   // The row's own turn: the one this client saw start, or (it saw none, as after a reload) one running since before the row.
   const live = !rescue.settled && !rescue.over && busy && (seen !== undefined ? seen === rescue.turnId : startedAt == null || startedAt <= at);
+  useEffect(() => {
+    if (!live) releaseAiSwitchIntent({ threadId: rescue.threadId, turnId: rescue.turnId });
+  }, [live, rescue.threadId, rescue.turnId]);
   useAiSwitchFinish({ botId: rescue.botId, threadId: rescue.threadId, turnId: rescue.turnId, busy, messages: bot?.messages ?? [], dispatch });
   if (rescue.settled) return null;
   const ai = state.instances.find((instance) => instance.instanceId === rescue.instanceId)?.displayName || rescue.ai;
