@@ -177,8 +177,10 @@ describe("MCP servers each person connects", () => {
     const { host, dataDir } = setup();
     adaConnected(host, dataDir);
     const folder = join(dataDir, "people-connections");
-    expect(statSync(folder).mode & 0o777).toBe(0o700);
-    expect(statSync(join(folder, "mcp-keys.json")).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(folder).mode & 0o777).toBe(0o700);
+      expect(statSync(join(folder, "mcp-keys.json")).mode & 0o777).toBe(0o600);
+    }
     for (const file of ["people-connections/mcp-keys.json", "people-connections/apps.json", `people-connections/mcp-oauth/${ADA}.json`]) expect(excludedWorkspaceAuthPath(file), file).toBe(true);
     expect(excludedWorkspaceAuthPath("team-connection-scopes.json"), "the scopes hold no secret").toBe(false);
     host.forgetServer("mail");

@@ -159,7 +159,7 @@ it("lets Ada connect her own Gmail and mail key, and nobody reads them back", as
     expect(JSON.stringify(answer)).not.toContain("ada.private@gmail.example");
   }
   // On the volume: a folder of its own, 0700, that no backup carries.
-  expect(statSync(join(team.home, ".openmausbot", "people-connections")).mode & 0o777).toBe(0o700);
+  if (process.platform !== "win32") expect(statSync(join(team.home, ".openmausbot", "people-connections")).mode & 0o777).toBe(0o700);
 }, hostTimeout(60_000));
 
 it("gives Ada's own Gmail and mail to her private chat, for her own request, and runs as her", async () => {
