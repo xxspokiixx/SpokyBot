@@ -6314,6 +6314,6 @@
   "usageMeter.err.failed": "We couldn't change your plan. Nothing was charged. Try again in a minute.",
   "chat.setupOffer.button": "Set me up",
   "composer.setupRequest.placeholder": "Tell {name} what you'd like help with",
-  "composer.setupRequest.chip": "Setting up {name}",
+  "composer.setupRequest.waiting": "{name} is ready to be set up",
   "composer.setupRequest.cancel": "Stop setting up {name}"
 }

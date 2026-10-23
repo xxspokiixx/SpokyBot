@@ -31,7 +31,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function draw(bot: Bot) {
   const state: AppState = {
     ...initialState, connected: true, selectedId: bot.id, bots: [bot],
-    instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available" } } as InstanceInfo],
+    instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available" }, capabilities: { agentsMcp: true } } as InstanceInfo],
   };
   const value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));

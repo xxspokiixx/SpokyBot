@@ -29,6 +29,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   }) };
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/cloud-guest", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/cloud-guest")>(), useReactor: () => "user" }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("./CallView", () => ({ CallButton: (props: Record<string, unknown>) => {
@@ -162,7 +163,7 @@ describe("the composer after Set me up", () => {
   it("asks for the job and shows a chip to stop it while the conversation waits, and neither once it does not", () => {
     render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1, setupRequest: { at: 2 } }] } });
     expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Tell Atlas what you'd like help with");
-    expect(container.querySelector("[data-setup-request]")?.textContent).toContain("Setting up Atlas");
+    expect(container.querySelector("[data-setup-request]")?.textContent).toContain("Atlas is ready to be set up");
     expect(container.querySelector(`[aria-label="Stop setting up Atlas"]`)).not.toBeNull();
     render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1 }] } });
     expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Atlas");
