@@ -356,7 +356,6 @@ export class Runtime {
       const settled = awaited(children).filter(isTerminal);
       const ids = new Set(children.map(c => c.id));
       const inbox = this.store.inbox({ threadId: n.assignee.destination.threadId }, true).filter(i => ids.has(i.assignmentId));
-      // A question goes out with the turn that delivers its inbox item, and again only in the rerun of that turn after a restart cut it.
       const fresh = new Set(inbox.filter(i => i.kind === "needs_input").map(i => i.assignmentId));
       const again = new Set(n.restart === "rerun" ? n.carrying : undefined);
       const asked = awaited(children).filter(c => asking(c) && (fresh.has(c.id) || again.has(c.id)));
@@ -478,7 +477,6 @@ export class Runtime {
     }
     n.result = clip(result.text, RESULT_MAX);
     const kids = awaited(this.store.children(n.id));
-    // A child that settled while this turn ran is a result the turn never saw: the node resumes once more for it.
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
     const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {

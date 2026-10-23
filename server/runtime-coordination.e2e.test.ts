@@ -194,7 +194,6 @@ it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, c
   await expect.poll(async () => (await f.chips(job, "needs your input")).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
   expect((await f.chips(job, "needs your input")).some((message: any) => chipText(message).includes("which repository?"))).toBe(true);
   await expect.poll(async () => await f.said(job, "C-ASKED: Mira needs the repository.") === 1 && f.roots()[0]?.status === "waiting", { timeout: 30_000 }).toBe(true);
-  // `resumed`: the turn was sent the settled-results text; the question turn is not.
   const chiefTurns = () => (f.turns(f.clive.id) as Array<{ planKey?: string; resumed?: boolean }>).map((record) => [record.planKey, record.resumed]);
   expect(chiefTurns()).toEqual([["C0", false], ["C-ASKED", false]]);
 
