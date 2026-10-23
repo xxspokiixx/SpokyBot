@@ -231,6 +231,50 @@ describe("testing an AI with one tiny message before a new bot's default trusts 
     expect(chief().modelSelection.instanceId).toBe("claude");
   });
 
+  it("moves the first bot off an AI whose latest test missed, to the default that answered, as the welcome says", async () => {
+    answers.claude = silent;
+    await boot();
+    expect(chief().modelSelection).toEqual(on("claude"));
+    // The welcome checks the next AI while Claude waits for its retry; that AI answers, and new bots get it.
+    await tested.check({ ...engineFor("grok"), snapshot: async () => instances[0]!.snapshot });
+    await settled();
+    expect(pick).toEqual(on("grok"));
+    expect(chief().modelSelection, "the first bot goes where the welcome said").toEqual({ ...on("grok"), effort: "high" });
+    // Claude answers its retry: the first bot, still following, moves back up.
+    answers.claude = async () => "OK";
+    await wait(2 * MINUTE);
+    expect(pick).toEqual(on("claude"));
+    expect(chief().modelSelection.instanceId).toBe("claude");
+  });
+
+  it("moves the first bot off an AI that can't run once one that can has answered", async () => {
+    instances = [ready("claude", "claudeAgent", { authenticated: false })];
+    await boot();
+    expect(chief().modelSelection.instanceId, "nothing could run: the first bot got what was there").toBe("claude");
+    answers.codex = async () => "OK";
+    instances = [ready("claude", "claudeAgent", { authenticated: false }), ready("codex", "codex")];
+    refresh();
+    await settled();
+    expect(pick).toEqual(on("codex"));
+    expect(chief().modelSelection.instanceId).toBe("codex");
+  });
+
+  it("keeps trying an AI that missed three times, once an hour", async () => {
+    answers.claude = silent;
+    await boot();
+    await wait(2 * MINUTE);
+    await wait(10 * MINUTE);
+    expect(sent("claude")).toBe(3);
+    await wait(59 * MINUTE);
+    expect(sent("claude"), "not before the hour").toBe(3);
+    await wait(MINUTE);
+    expect(sent("claude")).toBe(4);
+    answers.claude = async () => "OK";
+    await wait(60 * MINUTE);
+    expect(sent("claude")).toBe(5);
+    expect(pick).toEqual(on("claude"));
+  });
+
   it("keeps a passing result across a restart for a day, so a start sends no test message", async () => {
     await boot();
     expect(sent("claude")).toBe(1);

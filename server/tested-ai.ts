@@ -17,7 +17,7 @@ import { dirname } from "node:path";
 import { aiSignInKey, rankAis, type AiTestState } from "../shared/ai-ranking.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import type { ModelSelection, ProviderSnapshot } from "./contracts.ts";
-import { readyToRun, type DefaultSelectionContext, type SelectableInstance } from "./default-model-selection.ts";
+import { readyToRun, signedOut, type DefaultSelectionContext, type SelectableInstance } from "./default-model-selection.ts";
 import { checkEngine, type CheckableEngine, type EngineCheck } from "./engine-check.ts";
 import type { Store } from "./store.ts";
 
@@ -49,8 +49,10 @@ export interface TestedAiDeps {
 /** A status read that drops the account now and then looks like a new sign-in each time: a new sign-in is tested in the
  * background at most this often per AI, so it never sends a stream of test messages. A check asked for is not held back. */
 const BACKGROUND_SPACING_MS = 5 * 60_000;
-/** After the first miss, then after the second. */
+/** After the first miss, then after the second; then once an hour, so a used-up limit or an outage doesn't hold an AI back
+ * for a day. */
 const RETRY_AFTER_MS = [2 * 60_000, 10 * 60_000] as const;
+const SLOW_RETRY_MS = 60 * 60_000;
 /** Two misses in a row: the AI didn't answer. */
 const MISSES_TO_FAIL = 2;
 const RESULT_TTL_MS = 24 * 60 * 60_000;
@@ -163,9 +165,9 @@ export function createTestedAi(deps: TestedAiDeps) {
     const previous = saved.results[instanceId]?.key === key ? saved.results[instanceId] : undefined;
     if (check.ok === false) {
       const misses = (previous?.state === "failed" ? previous.misses : 0) + 1;
-      const delay = RETRY_AFTER_MS[misses - 1];
-      saved.results[instanceId] = { key, state: "failed", misses, at: now(), error: check.error, ...(delay === undefined ? {} : { retryAt: now() + delay }) };
-      if (delay !== undefined && background) arm(instanceId, now() + delay);
+      const delay = RETRY_AFTER_MS[misses - 1] ?? SLOW_RETRY_MS;
+      saved.results[instanceId] = { key, state: "failed", misses, at: now(), error: check.error, retryAt: now() + delay };
+      if (background) arm(instanceId, now() + delay);
     } else {
       retries.get(instanceId)?.cancel();
       saved.results[instanceId] = { key, state: check.ok ? "passed" : "untestable", misses: 0, at: now() };
@@ -179,7 +181,8 @@ export function createTestedAi(deps: TestedAiDeps) {
     save();
   };
 
-  /** Only after a test result: to the default when that AI answered, away from one that didn't answer or up to a better one. */
+  /** Only after a test result: to the default when that AI answered, away from one whose latest test missed or that is signed
+   * out or turned off, or up to a better one. */
   const follow = () => {
     const follower = saved.follower;
     const target = lastSelection;
@@ -191,7 +194,9 @@ export function createTestedAi(deps: TestedAiDeps) {
     const to = lastInstances.find((instance) => instance.instanceId === target.instanceId);
     const from = lastInstances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
     if (!to || state(to) !== "passed" || !from) return;
-    if (answered(from) !== false && rankAis([from, to])[0] !== to) return;
+    // Only a plain "signed out" or "turned off" counts as can't run: a status read that timed out says neither, and moves nothing.
+    const leave = resultOf(from)?.state === "failed" || signedOut(from) || from.enabled === false;
+    if (!leave && rankAis([from, to])[0] !== to) return;
     const tasks = store.tasks(bot.id);
     if (tasks.some((task) => task.modelSelection !== undefined)
       || tasks.some((task) => store.messagesFor(task.threadId).some((message) => message.role === "user"))) return clearFollower();
