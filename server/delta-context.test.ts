@@ -425,6 +425,7 @@ describe("isContextMessage", () => {
     // A voice-only reply: its words sit on the audio attachment, and the provider still reads them.
     expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(true);
     expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg" }] })).toBe(false);
+    expect(isContextMessage({ kind: "text", text: "", webhookPost: true, attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(false);
     expect(isContextMessage({ kind: "compaction" })).toBe(true);
     expect(isContextMessage({ kind: "text", roomRequest: { id: "r1", phase: "result" } })).toBe(true);
     expect(isContextMessage({ kind: "activity", text: "Bash" })).toBe(false);
