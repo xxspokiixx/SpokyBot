@@ -161,6 +161,26 @@ describe("install from Settings on the server", () => {
     expect(markup).toContain("npm install -g kimi-fixture");
   });
 
+  it("offers the vendor's own build on a machine without Node.js, and drops the Node.js line", () => {
+    const opencode = (server?: NonNullable<InstanceInfo["install"]>["server"]): InstanceInfo => ({
+      ...instance({ state: "unavailable", reason: "`opencode` CLI not found" }),
+      instanceId: "opencode",
+      driverKind: "opencodeGo",
+      displayName: "OpenCode",
+      install: {
+        command: { linux: "npm install -g opencode-ai", darwin: "npm install -g opencode-ai", win32: "npm install -g opencode-ai" },
+        needsNode: true,
+        ...(server ? { server } : {}),
+      },
+    });
+    const standalone = render(opencode({ standalone: { version: "1.19.4", downloadBytes: 79_667_571 } }));
+    expect(standalone).toContain("Install OpenCode here");
+    expect(standalone).not.toContain("Requires Node.js");
+    const neither = render(opencode());
+    expect(neither).not.toContain("Install OpenCode here");
+    expect(neither).toContain("Requires Node.js");
+  });
+
   it("never offers an install when only sign-in is missing", () => {
     const markup = render(npmEngine({ state: "available", authenticated: false, version: "1.0.0" }));
     expect(markup).not.toContain("Install Kimi here");
