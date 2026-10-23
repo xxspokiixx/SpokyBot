@@ -10,9 +10,10 @@ const BOT = { id: "bot-1", name: "Maus", modelSelection: { instanceId: "opencode
 
 const event = (fields: Record<string, unknown>): RuntimeEvent =>
   ({ eventId: `e-${Math.random()}`, provider: "opencodeGo", threadId: THREAD, createdAt: "", ...fields }) as unknown as RuntimeEvent;
-const started = (turnId = "turn-1", threadId = THREAD) => event({ type: "turn.started", turnId, threadId });
+let currentTurn = "turn-1";
+const started = (turnId = "turn-1", threadId = THREAD) => { currentTurn = turnId; return event({ type: "turn.started", turnId, threadId }); };
 
-function harness(options: { quiet?: boolean; speaker?: { botId: string; name: string; color: string } } = {}) {
+function harness(options: { quiet?: boolean; speaker?: { botId: string; name: string; color: string }; live?: () => boolean } = {}) {
   const rows = new Map<string, Message[]>();
   const append = vi.fn((threadId: string, message: Omit<Message, "id" | "at">) => {
     const row = { ...message, id: `m-${(rows.get(threadId)?.length ?? 0) + 1}`, at: Date.now() } as Message;
@@ -39,6 +40,8 @@ function harness(options: { quiet?: boolean; speaker?: { botId: string; name: st
     runningEngine: () => "opencodeGo",
     engineName: (instanceId) => (instanceId === "opencodeGo" ? "OpenCode" : instanceId),
     quiet: () => options.quiet === true,
+    live: (_threadId, _turnId) => options.live?.() ?? true,
+    requests: { get: () => ({ messageId: `request-of-${currentTurn}`, turnId: currentTurn }) },
   });
   return { rescue, rows: (threadId = THREAD) => rows.get(threadId) ?? [], append, patch };
 }
@@ -68,7 +71,8 @@ describe("first-reply rescue", () => {
         // The plain line every older client (the phones) prints as it is.
         name: "notice: Maus hasn't heard back from OpenCode yet.",
         ok: true,
-        rescue: { botId: "bot-1", threadId: THREAD, instanceId: "opencodeGo", ai: "OpenCode" },
+        // The row names its own turn and the message that turn answers, so its buttons can never reach another one.
+        rescue: { botId: "bot-1", threadId: THREAD, turnId: "turn-1", requestMessageId: "request-of-turn-1", instanceId: "opencodeGo", ai: "OpenCode" },
       },
     });
     expect(rows()[0]!.tool!.rescue!.settled).toBeUndefined();
@@ -83,6 +87,7 @@ describe("first-reply rescue", () => {
     ["progress", { type: "item.updated", itemType: "reasoning", tokens: 12 }],
     ["a reply", { type: "item.completed", itemType: "assistant_text", text: "Hi" }],
     ["a question", { type: "request.opened", requestType: "question", tool: "ask", summary: "Which?" }],
+    ["live progress", { type: "turn.progress", activity: "write", file: "index.html", bytes: 34_000 }],
   ])("stays out of a turn whose AI sent %s before 20 s", (_label, output) => {
     const { rescue, rows } = harness();
     rescue.onEvent(started());
@@ -106,6 +111,48 @@ describe("first-reply rescue", () => {
     });
     rescue.onEvent(event({ type: "item.completed", turnId: "turn-1", itemType: "assistant_text", text: "Hello" }));
     expect(rows()).toHaveLength(1);
+  });
+
+  it("settles once the engine reports live progress, so it never sits beside \"Writing index.html · 34 KB\"", () => {
+    const { rescue, rows } = harness();
+    rescue.onEvent(started());
+    vi.advanceTimersByTime(20_000);
+    rescue.onEvent(event({ type: "turn.progress", turnId: "turn-1", activity: "write", file: "index.html", bytes: 34_000 }));
+    expect(rows()[0]!.tool!.rescue).toMatchObject({ settled: true });
+  });
+
+  it.each([
+    ["ends", { type: "turn.completed", turnId: "turn-1", ok: true, stopReason: "cancelled" }],
+    ["fails", { type: "runtime.error", turnId: "turn-1", message: "OpenCode is signed out." }],
+    ["gives way to the next turn", { type: "turn.started", turnId: "turn-2" }],
+  ])("marks the notice over when its turn %s without an answer", (_label, end) => {
+    const { rescue, rows } = harness();
+    rescue.onEvent(started("turn-1"));
+    vi.advanceTimersByTime(20_000);
+    rescue.onEvent(event(end));
+    expect(rows()[0]!.tool).toMatchObject({
+      name: "notice: Maus hasn't heard back from OpenCode yet.",
+      rescue: { turnId: "turn-1", over: true },
+    });
+    expect(rows()[0]!.tool!.rescue!.settled).toBeUndefined();
+  });
+
+  it("posts nothing for a turn that is no longer running, even when its end never arrived", () => {
+    const { rescue, rows } = harness({ live: () => false });
+    rescue.onEvent(started());
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(rows()).toEqual([]);
+  });
+
+  it("survives a notice it could not write, and watches the next turn", () => {
+    const { rescue, rows, append } = harness();
+    append.mockImplementationOnce(() => { throw new Error("disk full"); });
+    rescue.onEvent(started("turn-1"));
+    expect(() => vi.advanceTimersByTime(20_000)).not.toThrow();
+    expect(rows()).toEqual([]);
+    rescue.onEvent(started("turn-2"));
+    vi.advanceTimersByTime(20_000);
+    expect(rows().map((row) => row.turnId)).toEqual(["turn-2"]);
   });
 
   it("never posts a second notice in the same turn, and watches the next turn afresh", () => {

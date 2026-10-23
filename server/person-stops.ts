@@ -7,8 +7,10 @@ import type { Message } from "./store.ts";
 export class PersonStops {
   readonly #byThread = new Map<string, string | undefined>();
 
-  /** The person pressed Stop on the thread's live turn; `turnId` is undefined while that turn is still being dispatched. */
-  stop(threadId: string, turnId: string | undefined): void {
+  /** The person pressed Stop on the thread's live turn; `turnId` is undefined while that turn is still being
+   * dispatched. A Stop that found nothing running or dispatching is no stop of anything. */
+  stop(threadId: string, turnId: string | undefined, dispatching: boolean): void {
+    if (turnId === undefined && !dispatching) return;
     this.#byThread.set(threadId, turnId);
   }
 
@@ -18,9 +20,12 @@ export class PersonStops {
     return stopped === undefined || turnId === undefined || stopped === turnId;
   }
 
-  /** At a turn's start and end: a stop never outlives the turn it was pressed on. */
-  forget(threadId: string): void {
-    this.#byThread.delete(threadId);
+  /** At a turn's start and end: a stop never outlives the turn it was pressed on. Another turn's start or end
+   * leaves it be; a Stop pressed during a dispatch goes at the next start or end. */
+  forget(threadId: string, turnId: string | undefined): void {
+    if (!this.#byThread.has(threadId)) return;
+    const stopped = this.#byThread.get(threadId);
+    if (stopped === undefined || stopped === turnId) this.#byThread.delete(threadId);
   }
 }
 

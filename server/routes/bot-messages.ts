@@ -674,7 +674,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       }
       const stopPerson = async (threadId: string) => {
         handoffs.stoppedByPerson(threadId);
-        personStops.stop(threadId, liveTurn(threadId));
+        personStops.stop(threadId, liveTurn(threadId), Boolean(directTurnDispatchClaims.get(threadId)));
         await interruptDirectThread(bot.id, threadId);
       };
       if (typeof expectedThreadId === "string" && store.taskByThread(bot.id, expectedThreadId)) {

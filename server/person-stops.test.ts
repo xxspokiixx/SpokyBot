@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { PERSON_STOPPED_TURN_NAME, STOPPED_TURN_NAME } from "../shared/client-cancel.ts";
+import { LiveTurns } from "./live-turns.ts";
 import { PersonStops, stopReachesLiveTurn, stoppedTurnRow } from "./person-stops.ts";
 import type { Message } from "./store.ts";
 
@@ -9,18 +10,57 @@ const row = (fields: Partial<Message>): Message => ({ id: `m-${Math.random()}`, 
 describe("PersonStops", () => {
   it("knows the turn the person stopped, and only that one", () => {
     const stops = new PersonStops();
-    stops.stop("t1", "turn-1");
+    stops.stop("t1", "turn-1", false);
     expect(stops.stopped("t1", "turn-1")).toBe(true);
     expect(stops.stopped("t1", "turn-2")).toBe(false);
     expect(stops.stopped("t2", "turn-1")).toBe(false);
-    stops.forget("t1");
+    stops.forget("t1", "turn-1");
     expect(stops.stopped("t1", "turn-1")).toBe(false);
   });
 
   it("takes a Stop pressed while the turn was still being dispatched for whatever that turn turns out to be", () => {
     const stops = new PersonStops();
-    stops.stop("t1", undefined);
+    stops.stop("t1", undefined, true);
     expect(stops.stopped("t1", "turn-1")).toBe(true);
+    stops.forget("t1", "turn-9");
+    expect(stops.stopped("t1", "turn-1")).toBe(false);
+  });
+
+  it("records nothing for a Stop that found nothing running", () => {
+    const stops = new PersonStops();
+    stops.stop("t1", undefined, false);
+    expect(stops.stopped("t1", "turn-1")).toBe(false);
+  });
+
+  it("forgets only its own turn, never on another turn's start or end", () => {
+    const stops = new PersonStops();
+    stops.stop("t1", "turn-1", false);
+    stops.forget("t1", "turn-2");
+    expect(stops.stopped("t1", "turn-1")).toBe(true);
+  });
+});
+
+describe("LiveTurns", () => {
+  const frame = (type: string, turnId: string, threadId = "t1") => ({ type, turnId, threadId }) as never;
+
+  it("names the running turn from its start to its end", () => {
+    const live = new LiveTurns(() => true);
+    live.onEvent(frame("turn.started", "turn-1"));
+    // Any other event naming a turn leaves it alone: only a start and an end move it.
+    live.onEvent(frame("content.delta", "turn-0"));
+    expect(live.running("t1")).toBe("turn-1");
+    live.onEvent(frame("turn.completed", "turn-0"));
+    expect(live.running("t1")).toBe("turn-1");
+    live.onEvent(frame("turn.completed", "turn-1"));
+    expect(live.running("t1")).toBeUndefined();
+  });
+
+  it("names nothing once the thread is idle, even when the end never arrived", () => {
+    let busy = true;
+    const live = new LiveTurns(() => busy);
+    live.onEvent(frame("turn.started", "turn-1"));
+    busy = false;
+    expect(live.running("t1")).toBeUndefined();
   });
 });
 

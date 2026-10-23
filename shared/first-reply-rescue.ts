@@ -7,6 +7,10 @@ export interface FirstReplyRescue {
   /** The bot whose turn is waiting: its AI is what "Switch AI" changes. */
   botId: string;
   threadId: string;
+  /** The turn this row is about: its buttons never reach another one. */
+  turnId: string;
+  /** The person's message that turn answers, to send again on another AI. */
+  requestMessageId?: string;
   /** The AI the turn waits on, as its instance id and the name a person knows it by. */
   instanceId: string;
   ai: string;
@@ -14,6 +18,8 @@ export interface FirstReplyRescue {
   groupId?: string;
   /** The AI has started answering: the row no longer asks anything of the person. */
   settled?: true;
+  /** Its turn ended (or gave way to the next) without an answer: the row is history, with no live buttons. */
+  over?: true;
 }
 
 /** The waiting row's words, for clients that print the tool name. */

@@ -37,11 +37,12 @@ it("posts one rescue notice into a silent first reply, readable as plain text, a
       if (!row) throw new Error("waiting for the rescue notice");
       return row;
     }, { timeout: 20_000, interval: 200 });
-    expect(notice).toMatchObject({ role: "bot", kind: "activity" });
+    expect(notice).toMatchObject({ role: "bot", kind: "activity", turnId: expect.any(String) });
+    const asked = (await messages(threadId)).find((message) => message.role === "user" && message.text === "Hello?");
     expect(notice.tool).toEqual({
       name: `notice: Maus hasn't heard back from ${ai} yet.`,
       ok: true,
-      rescue: { botId: bot.id, threadId, instanceId, ai },
+      rescue: { botId: bot.id, threadId, turnId: notice.turnId, requestMessageId: asked.id, instanceId, ai },
     });
     // A client that only prints tool names (the phones) gets the whole sentence in the live frame.
     expect(stream.frames.some((frame) => frame.kind === "message" && frame.message?.tool?.name === notice.tool.name)).toBe(true);
@@ -53,7 +54,7 @@ it("posts one rescue notice into a silent first reply, readable as plain text, a
     expect(after.find((message) => message.id === notice.id).tool).toEqual({
       name: `notice: ${ai} answered after a slow start.`,
       ok: true,
-      rescue: { botId: bot.id, threadId, instanceId, ai, settled: true },
+      rescue: { botId: bot.id, threadId, turnId: notice.turnId, requestMessageId: asked.id, instanceId, ai, settled: true },
     });
     expect(after.some((message) => message.kind === "text" && message.text === "released")).toBe(true);
   } finally {

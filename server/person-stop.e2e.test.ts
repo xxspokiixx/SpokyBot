@@ -10,7 +10,7 @@ import { failedTurnCause } from "../shared/failed-turn.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
-it("ends a stopped turn with one quiet stop, and a second Stop on it leaves the queued message running", async () => {
+it("ends a stopped turn with one quiet stop, keeps what it said, and a second Stop on it leaves the queued message running", async () => {
   const fixture = await launchVerificationServer();
   const { dataDir, url, logPath } = fixture.info;
   const held = join(dataDir, "first-prompt-held");
@@ -39,6 +39,11 @@ it("ends a stopped turn with one quiet stop, and a second Stop on it leaves the 
         FACTORY_API_KEY: "fixture-only", FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: gate, FAKE_ACP_STARTED_FILE: secondStarted,
         FAKE_ACP_HANG_ON: "Hold this one", FAKE_ACP_HANG_ONCE_FILE: held, FAKE_ACP_CANCEL_STOP_REASON: "end_turn",
       },
+    };
+    // Says half an answer, then goes silent until stopped.
+    config.instances["droid-partial"] = {
+      ...config.instances.droid,
+      environment: { FACTORY_API_KEY: "fixture-only", FAKE_ACP_MODE: "stall-after-text", FAKE_ACP_CANCEL_STOP_REASON: "end_turn" },
     };
     writeFileSync(configPath, JSON.stringify(config));
     const log = openSync(logPath, "a", 0o600);
@@ -77,6 +82,19 @@ it("ends a stopped turn with one quiet stop, and a second Stop on it leaves the 
     expect(stops).toEqual([expect.objectContaining({ turnId: first, tool: { name: PERSON_STOPPED_TURN_NAME, ok: true } })]);
     expect(rows.filter((message) => message.tool && failedTurnCause(message.tool.name) !== null)).toEqual([]);
     expect(rows.find((message) => message.role === "user" && message.text === "Second message")?.requestCancelled).toBeUndefined();
+
+    // A Stop after half an answer: the chat keeps the words, and so does the turn's digest.
+    const partial = (await api("POST", "/api/bots", { name: "Halfway", modelSelection: { instanceId: "droid-partial", model: droid.models.default } }, 201)).bot;
+    await api("POST", `/api/bots/${partial.id}/messages`, { threadId: partial.threadId, text: "Start, then stall." }, 202);
+    const halfway = (await stream.until((frame) => frame.kind === "runtime" && frame.event?.type === "content.delta"
+      && frame.event.threadId === partial.threadId)).event.turnId;
+    await api("POST", `/api/bots/${partial.id}/interrupt`, { threadId: partial.threadId, turnId: halfway });
+    const digest = await expect.poll(async () => (await messages(partial.threadId)).find((message) => message.kind === "digest"), { timeout: 20_000 }).toBeTruthy()
+      .then(async () => (await messages(partial.threadId)).find((message) => message.kind === "digest"));
+    expect(JSON.stringify(digest.digest)).toContain("half an answer, then silence");
+    const after = await messages(partial.threadId);
+    expect(after.filter((message) => message.tool?.name === PERSON_STOPPED_TURN_NAME)).toHaveLength(1);
+    expect(after.some((message) => message.kind === "text" && message.text === "half an answer, then silence")).toBe(true);
   } finally {
     stream?.close();
     if (server) await waitForExit(server, { signal: "SIGTERM" });
