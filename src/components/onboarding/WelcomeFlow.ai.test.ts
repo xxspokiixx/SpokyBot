@@ -5,8 +5,15 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import type { Bot, InstanceInfo } from "@/state/store";
 
-const f = vi.hoisted(() => ({ state: {} as { instances: InstanceInfo[]; config: object; cloudAdd: null; bots: Bot[] }, dispatch: vi.fn() }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: async () => ({ instances: f.state.instances }) }));
+const f = vi.hoisted(() => ({
+  state: {} as { instances: InstanceInfo[]; config: object; cloudAdd: null; bots: Bot[] }, dispatch: vi.fn(),
+  checks: [] as string[], check: { ok: true } as object,
+}));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: async (path: string) => {
+  if (!path.endsWith("/check")) return { instances: f.state.instances };
+  f.checks.push(path);
+  return f.check;
+} }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn(), setEmailGateDone: vi.fn() }));
 vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 vi.mock("@/components/DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } } }) }));
@@ -17,10 +24,14 @@ vi.mock("@/components/EngineSetup", async () => {
 const { WelcomeFlow } = await import("./WelcomeFlow");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const claude = (ready: boolean): InstanceInfo => ({
+const claude = (ready: boolean, aiTest?: InstanceInfo["aiTest"]): InstanceInfo => ({
   instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", install: { docsUrl: "https://example.test" },
-  snapshot: { state: ready ? "available" : "unavailable", authenticated: ready }, models: { default: "m", options: [] },
+  snapshot: { state: ready ? "available" : "unavailable", authenticated: ready }, models: { default: "m", options: [] }, ...(aiTest ? { aiTest } : {}),
 });
+const freeOpenCode: InstanceInfo = {
+  instanceId: "opencodeGo", driverKind: "opencodeGo", displayName: "OpenCode", install: { docsUrl: "https://example.test" },
+  snapshot: { state: "available", authenticated: true, freeFallback: true }, models: { default: "opencode/big-pickle", options: [] }, aiTest: "passed",
+};
 const chief: Bot = {
   id: "chief", threadId: "t", name: "Pip", title: "", description: "", notifications: true, color: "green", unread: false,
   modelSelection: { instanceId: "claude", model: "m" }, messages: [], chiefOfStaff: true,
@@ -36,6 +47,8 @@ const press = async (label: string) => {
 
 beforeEach(() => {
   setLocale("en");
+  f.checks = [];
+  f.check = { ok: true };
   f.state = { instances: [claude(false)], config: {}, cloudAdd: null, bots: [chief] };
   host = document.createElement("div");
   document.body.append(host);
@@ -49,6 +62,8 @@ afterEach(async () => {
 it("asks for no AI when one already works, and goes from hello to the next step", async () => {
   f.state.instances = [claude(true)];
   await show();
+  // One tiny test message first: the step is left out once Claude answered it.
+  expect(f.checks).toEqual(["/api/instances/claude/check"]);
   expect(text()).toContain("Step 1 of 3");
   await press("Maybe later");
   expect(text()).not.toContain("Connect an AI");
@@ -63,8 +78,32 @@ it("asks to connect an AI when none works, and keeps the step once it is shown, 
   expect(host.querySelector('[data-engine-setup="claude"]')).not.toBeNull();
   f.state = { ...f.state, instances: [claude(true)] };
   await show();
-  expect(text()).toContain("Claude is connected. Your bots can start now.");
+  expect(text()).toContain("Connected · Claude");
   expect(text()).toContain("Step 2 of 4");
+});
+
+it("still asks for the person's own AI when only OpenCode's free model works, and says it is there as a backup", async () => {
+  f.state.instances = [freeOpenCode, claude(false)];
+  await show();
+  expect(text()).toContain("Step 1 of 4");
+  await press("Maybe later");
+  expect(text()).toContain("Connect an AI");
+  expect(text()).toContain("OpenCode's free model is ready as a backup");
+  expect(host.querySelector('[data-engine-setup="claude"]')).not.toBeNull();
+  expect(host.querySelector("[data-ai-connected]")).toBeNull();
+  expect(f.checks).toEqual([]);
+});
+
+it("leaves the step out for a real AI that answered its test, and keeps it for one that didn't", async () => {
+  f.state.instances = [freeOpenCode, claude(true, "passed")];
+  await show();
+  expect(text()).toContain("Step 1 of 3");
+  expect(f.checks).toEqual([]);
+  f.state.instances = [freeOpenCode, claude(true, "failed")];
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  await show();
+  expect(text()).toContain("Step 1 of 4");
 });
 
 it("introduces the Chief as the person's assistant on the last step", async () => {

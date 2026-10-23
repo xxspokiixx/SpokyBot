@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aiChoices,
+  aiWorks,
   beatWidth,
   beatsFor,
   cloudBeatPossible,
@@ -22,6 +23,7 @@ import {
   previousBeat,
   showWelcome,
   welcomeOnScreen,
+  welcomeAi,
   welcomeDue,
   welcomeViewer,
   WELCOME_VERSION,
@@ -173,6 +175,39 @@ describe("connecting an AI in the welcome", () => {
     expect(aiChoices([kimi, grok, antigravity]).recommended).toBe(antigravity);
     expect(aiChoices([kimi, grok])).toEqual({ recommended: grok, others: [kimi] });
     expect(aiChoices([kimi, row("droid", "droidAgent")]).recommended).toBe(kimi);
+  });
+});
+
+describe("the AI the welcome stands on", () => {
+  type Ai = { id: string; driverKind: string; ready: boolean; aiTest?: "testing" | "passed" | "failed" | "untestable"; snapshot?: { freeFallback?: boolean } };
+  const ai = (id: string, driverKind: string, extra: Partial<Ai> = {}): Ai => ({ id, driverKind, ready: true, ...extra });
+  const stand = (instances: Ai[]) => {
+    const found = welcomeAi(instances, (instance) => instance.ready, (instance) => instance.aiTest);
+    return found && { id: found.instance.id, state: found.state };
+  };
+
+  it("is none while only OpenCode's free backup works, so the welcome still asks for the person's own AI", () => {
+    const backup = ai("opencodeGo", "opencodeGo", { snapshot: { freeFallback: true }, aiTest: "passed" });
+    expect(stand([backup, ai("claude", "claudeAgent", { ready: false })])).toBeNull();
+    expect(stand([])).toBeNull();
+  });
+
+  it("is the best ready AI, waiting on its test, and works once it answered", () => {
+    expect(stand([ai("grok", "grokAgent"), ai("claude", "claudeAgent")])).toEqual({ id: "claude", state: "testing" });
+    expect(stand([ai("grok", "grokAgent"), ai("claude", "claudeAgent", { aiTest: "testing" })])).toEqual({ id: "claude", state: "testing" });
+    expect(stand([ai("grok", "grokAgent"), ai("claude", "claudeAgent", { aiTest: "passed" })])).toEqual({ id: "claude", state: "passed" });
+    // An AI with nothing to test it with is trusted, as before.
+    expect(stand([ai("muse", "museCode", { aiTest: "untestable" })])).toEqual({ id: "muse", state: "untestable" });
+    // Only those two let the welcome leave out its Connect an AI step.
+    expect(["passed", "untestable", "testing", "failed"].map((state) => aiWorks({ state: state as Ai["aiTest"] & string }))).toEqual([true, true, false, false]);
+    expect(aiWorks(null)).toBe(false);
+  });
+
+  it("walks past an AI that didn't answer to the next, and says so when none is left", () => {
+    expect(stand([ai("grok", "grokAgent", { aiTest: "passed" }), ai("claude", "claudeAgent", { aiTest: "failed" })])).toEqual({ id: "grok", state: "passed" });
+    expect(stand([ai("grok", "grokAgent"), ai("claude", "claudeAgent", { aiTest: "failed" })])).toEqual({ id: "grok", state: "testing" });
+    expect(stand([ai("claude", "claudeAgent", { aiTest: "failed" }), ai("opencodeGo", "opencodeGo", { snapshot: { freeFallback: true } })]))
+      .toEqual({ id: "claude", state: "failed" });
   });
 });
 
