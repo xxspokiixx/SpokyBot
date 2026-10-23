@@ -705,7 +705,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     ctx.cloudNames ??= ctx.session.call("GET", "/api/bots?messages=0")
       .then((listed) => (Array.isArray(listed.body?.bots) ? listed.body.bots : []).filter(record), () => []);
     const same = (name) => typeof name === "string" && name.trim().toLocaleLowerCase() === bot.name.trim().toLocaleLowerCase();
-    const taken = (await ctx.cloudNames).some((theirs) => theirs.id !== bot.id && same(theirs.name));
+    const taken = (await ctx.cloudNames).some((theirs) => theirs.id !== bot.id && same(theirs.name) && !(bot.defaultBot && theirs.defaultBot));
     return taken ? `${bot.name} (${ctx.computer})`.slice(0, 80) : bot.name;
   }
 

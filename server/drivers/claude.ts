@@ -41,7 +41,7 @@ import { claudeApiErrorMessage, claudeEngineReset, claudeLimitRefusal, claudeUsa
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
 import { engineIdleMs, sessionIdlePolicy } from "./session-idle.ts";
 import { promptHalves, withVolatileNote } from "./prompt-split.ts";
-import { parseVersionTriple, versionAtLeast } from "./acp/core.ts";
+import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
 import {
   applyClaudeInject,
   decodeInjectId,
@@ -53,8 +53,8 @@ import { appendNative } from "./native.ts";
 import { runKeepWarmPing, type KeepWarmContract } from "./claude-keepwarm.ts";
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts";
-import { SPAWNED_PROXIES } from "../proxy-paths.ts";
-import { extractMcpImages } from "../mcp-tool-images.ts";
+import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts";
 import {
   ASK_USER_QUESTION_TOOL,
   ASK_USER_TOOL,
@@ -1105,9 +1105,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // Pre-allowed: a headless acceptEdits run silently denies anything unlisted.
       const mcpServers: Record<string, unknown> = {};
       const allowed: string[] = [];
-      if (turn.integrations?.composio) {
-        mcpServers.composio = { ...turn.integrations.composio };
-        allowed.push("mcp__composio");
+      for (const [name, bridge] of [["composio", turn.integrations?.composio], [OWN_APPS_SERVER, turn.integrations?.composioOwn]] as const) {
+        if (bridge) { mcpServers[name] = { ...bridge }; allowed.push(`mcp__${name}`); }
       }
       if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
@@ -1533,9 +1532,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "stream_event": {
             // Subagent narration is dropped: parallel Tasks would interleave prose into one bubble.
             if (o.parent_tool_use_id) break;
-            const ev = o.event ?? {};
+            const ev = o.event ?? {}, d = ev.delta ?? {}, draft = claudeToolDraft(session, ev);
+            if (draft) emit({ ...base(threadId, currentTurnId()), ...draft });
             if (ev.type !== "content_block_delta") { const call = claudeCallUsage(session, ev); if (call) emit({ ...base(threadId, currentTurnId()), ...call }); break; }
-            const d = ev.delta ?? {};
             if (d.type === "text_delta" && typeof d.text === "string" && d.text) {
               if (session.turn) session.turn.sawStreamDelta = true;
               emit({ ...base(threadId, currentTurnId()), type: "content.delta", streamKind: "assistant_text", delta: d.text });

@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { expectedUserAgent } from "./testing/browser-identity-probe.ts";
-import { completeHints, headerLanguages, openIdentityProbe, type BotCall } from "./verify-browser-identity.ts";
+import { completeHints, headerLanguages, openOwnPageAsBot, type BotCall } from "./verify-browser-identity.ts";
 
 const MAC = {
   architecture: "arm", bitness: "64", brands: [{ brand: "Chromium", version: "153" }], formFactors: ["Desktop"],
@@ -31,42 +31,32 @@ describe("the identity checks", () => {
   });
 });
 
-describe("opening the owned identity probe", () => {
-  const url = "http://127.0.0.1:43127/probe";
-  const opened = { content: [{ type: "text", text: "Opened probe" }] };
-  const aborted = { isError: true, content: [{ type: "text", text: "Navigation failed: net::ERR_ABORTED" }] };
+describe("opening the check's own page as the bot", () => {
+  const url = "http://127.0.0.1:9/probe";
+  const said = (text: string) => ({ isError: true, content: [{ type: "text", text }] });
+  const engine = (...answers: unknown[]) => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const call: BotCall = async (name, args) => { calls.push({ name, args }); return answers.shift() ?? { content: [{ type: "text", text: "Opened." }] }; };
+    return { call, calls };
+  };
 
-  it("keeps a successful open to one navigation", async () => {
-    const call = vi.fn<BotCall>().mockResolvedValue(opened);
-    await openIdentityProbe(call, url);
-    expect(call).toHaveBeenCalledExactlyOnceWith("agent_browser_open", { url });
+  it("opens it once more after Chrome cancels the first navigation, and says so", async () => {
+    const { call, calls } = engine(said("Navigation failed: net::ERR_ABORTED"));
+    const lines: string[] = [];
+    expect(await openOwnPageAsBot(call, url, (line) => lines.push(line))).toBeNull();
+    expect(calls).toEqual([{ name: "agent_browser_open", args: { url } }, { name: "agent_browser_open", args: { url } }]);
+    expect(lines).toEqual([`the bot's browser: Chrome cancelled its first navigation (Navigation failed: net::ERR_ABORTED); opening ${url} once more`]);
   });
 
-  it("retries an aborted navigation of the owned probe once", async () => {
-    const call = vi.fn<BotCall>().mockResolvedValueOnce(aborted).mockResolvedValue(opened);
-    await openIdentityProbe(call, url);
-    expect(call.mock.calls).toEqual([
-      ["agent_browser_open", { url }],
-      ["agent_browser_open", { url }],
-    ]);
-  });
-
-  it("fails when the second navigation is aborted too", async () => {
-    const call = vi.fn<BotCall>().mockResolvedValue(aborted);
-    await expect(openIdentityProbe(call, url)).rejects.toThrow("Navigation failed: net::ERR_ABORTED");
-    expect(call).toHaveBeenCalledTimes(2);
-  });
-
-  it("preserves other navigation failures without retrying", async () => {
-    const call = vi.fn<BotCall>().mockResolvedValue({ isError: true,
-      content: [{ type: "text", text: "Navigation failed: net::ERR_CONNECTION_REFUSED" }] });
-    await expect(openIdentityProbe(call, url)).rejects.toThrow("Navigation failed: net::ERR_CONNECTION_REFUSED");
-    expect(call).toHaveBeenCalledOnce();
-  });
-
-  it("preserves a lost engine response without retrying", async () => {
-    const call = vi.fn<BotCall>().mockRejectedValue(new Error("engine disconnected"));
-    await expect(openIdentityProbe(call, url)).rejects.toThrow("engine disconnected");
-    expect(call).toHaveBeenCalledOnce();
+  it("opens it only once otherwise, and answers the bot's error when the second open fails too", async () => {
+    const opened = engine();
+    expect(await openOwnPageAsBot(opened.call, url, () => {})).toBeNull();
+    expect(opened.calls).toHaveLength(1);
+    const refused = engine(said("Navigation failed: net::ERR_CONNECTION_REFUSED"));
+    expect(await openOwnPageAsBot(refused.call, url, () => {})).toBe("Navigation failed: net::ERR_CONNECTION_REFUSED");
+    expect(refused.calls).toHaveLength(1);
+    const twice = engine(said("Navigation failed: net::ERR_ABORTED"), said("Navigation failed: net::ERR_ABORTED"));
+    expect(await openOwnPageAsBot(twice.call, url, () => {})).toBe("Navigation failed: net::ERR_ABORTED");
+    expect(twice.calls).toHaveLength(2);
   });
 });

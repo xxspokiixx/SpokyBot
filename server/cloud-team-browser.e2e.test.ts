@@ -8,7 +8,6 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { resolveAgentBrowserBinary } from "./browser-engine.ts";
@@ -31,31 +30,10 @@ if (!REAL_BROWSER) console.log("skipping the Team Cloud sign-in check: it needs 
 const stub = REAL_BROWSER ? null : (() => {
   const dir = mkdtempSync(join(tmpdir(), "omb-team-browser-stub-"));
   const engine = join(dir, "agent-browser"), log = join(dir, "commands.log");
-  const preloader = process.platform === "win32" ? join(dir, "agent-browser-prelude.mjs") : undefined;
-  writeFileSync(engine, preloader ? "fixture marker; intercepted by the test prelude" : ["#!/bin/sh", `printf '%s %s\\n' "$AGENT_BROWSER_SESSION" "$1" >> '${log}'`,
+  writeFileSync(engine, ["#!/bin/sh", `printf '%s %s\\n' "$AGENT_BROWSER_SESSION" "$1" >> '${log}'`,
     `if [ "$1" = session ]; then printf '{"success":true,"data":{"sessions":[]}}\\n'; fi`, "exit 0"].join("\n"), { mode: 0o755 });
-  if (preloader) {
-    writeFileSync(preloader, [
-      'import childProcess from "node:child_process";',
-      'import { resolve } from "node:path";',
-      'const original = childProcess.ChildProcess.prototype.spawn;',
-      'const target = process.env.OMB_AGENT_BROWSER_PATH;',
-      'const log = process.env.OMB_AGENT_BROWSER_LOG;',
-      'childProcess.ChildProcess.prototype.spawn = function(options) {',
-      '  if (typeof options.file !== "string" || !target || resolve(options.file) !== resolve(target)) return original.call(this, options);',
-      '  const program = [',
-      '    \'const fs=require("node:fs");\',',
-      '    \'const log=\' + JSON.stringify(log) + \';\',',
-      '    \'const args=process.argv.slice(1);\',',
-      '    \'fs.appendFileSync(log,(process.env.AGENT_BROWSER_SESSION||"")+" "+(args[0]||"")+String.fromCharCode(10));\',',
-      '    \'if(args[0]==="session")process.stdout.write(JSON.stringify({success:true,data:{sessions:[]}})+String.fromCharCode(10));\',',
-      '  ].join("");',
-      '  return original.call(this, { ...options, file: process.execPath, args: [process.execPath, "-e", program, "--", ...options.args.slice(1)] });',
-      '};',
-    ].join("\n"));
-  }
   const lines = () => (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").filter(Boolean);
-  return { dir, engine, log, preloader, lines, sessions: () => lines().map((line) => line.split(" ")[0]!).filter(Boolean) };
+  return { dir, engine, lines, sessions: () => lines().map((line) => line.split(" ")[0]!).filter(Boolean) };
 })();
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
@@ -64,23 +42,7 @@ let bot: { id: string; mainThreadId: string };
 let adaThread = "", cleoThread = "", roomId = "", roomThread = "";
 
 beforeAll(async () => {
-  fx = await launchCloudSendFixture({
-    onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`,
-    team: {
-      id: "team-acme-1",
-      name: "Acme",
-      engine: ENGINE,
-      ...(stub ? {
-        env: {
-          OMB_AGENT_BROWSER_PATH: stub.engine,
-          ...(stub.preloader ? {
-            OMB_AGENT_BROWSER_LOG: stub.log,
-            NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${pathToFileURL(stub.preloader).href}`].filter(Boolean).join(" "),
-          } : {}),
-        },
-      } : {}),
-    },
-  });
+  fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-1", name: "Acme", engine: ENGINE, ...(stub ? { env: { OMB_AGENT_BROWSER_PATH: stub.engine } } : {}) } });
   team = fx.team!;
   owner = (await team.pair(OWNER)).token!;
   admin = (await team.pair(ADMIN)).token!;
@@ -114,19 +76,24 @@ async function liveView(token: string, threadId?: string): Promise<{ status: num
   return { status: response.status, error: ((await response.json().catch(() => ({}))) as { error?: string }).error };
 }
 
-it("shows a member's live browser only from her own chat, to her and the admins, never to another member", async () => {
+it("shows a member's live browser only from her own chat, to her alone: never to another member or an admin", async () => {
   expect(await liveView(cleo, adaThread), "Cleo opening the browser of Ada's private chat").toEqual({ status: 404, error: "no such conversation" });
   expect(await liveView(ada, cleoThread), "Ada opening the browser of Cleo's private chat").toEqual({ status: 404, error: "no such conversation" });
+  expect(await liveView(admin, adaThread), "Ben (Admin) opening the browser of Ada's private chat").toEqual({ status: 404, error: "no such conversation" });
+  expect(await liveView(owner, adaThread), "the Owner opening the browser of Ada's private chat").toEqual({ status: 404, error: "no such conversation" });
   expect(await liveView(ada, "not-a-conversation")).toEqual({ status: 404, error: "no such conversation" });
-  for (const [who, token, threadId] of [["Ada, her own chat", ada, adaThread], ["Ben (Admin), Ada's chat", admin, adaThread], ["Cleo, the group chat", cleo, roomThread], ["Ada, no chat named", ada, undefined]] as const) {
+  for (const [who, token, threadId] of [["Ada, her own chat", ada, adaThread], ["Ben (Admin), the group chat", admin, roomThread], ["Cleo, the group chat", cleo, roomThread], ["Ada, no chat named", ada, undefined]] as const) {
     expect((await liveView(token, threadId)).error, who).not.toBe("no such conversation");
   }
-  // Signed-in sites are an admin's: Ada's own browser by her chat, never by a member.
+  // Signed-in sites are an admin's, of the team's browser and the group chats', never of a member's own.
   expect((await team.as(ada, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${adaThread}`)).status).toBe(403);
-  expect((await team.as(admin, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${adaThread}`)).status).not.toBe(403);
+  expect((await team.as(admin, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${adaThread}`)).status).toBe(404);
+  expect((await team.as(admin, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${roomThread}`)).status).not.toBe(404);
 }, hostTimeout(60_000));
 
-it.skipIf(!stub)("drives each member's private chat, the group chat and the team's chat on browsers of their own, and opens a view on the conversation's", async () => {
+// The agent-browser stand-in is a POSIX shell script, which Windows cannot run as a program, so no command reaches its
+// log there; a Team Cloud is a Linux machine. The other checks in this file still run on Windows.
+it.skipIf(!stub || process.platform === "win32")("drives each member's private chat, the group chat and the team's chat on browsers of their own, and opens a view on the conversation's", async () => {
   const session = (audience: string) => `bot-${bot.id}${audience === "team" ? "" : audienceBrowserSuffix(audience as `member:${string}`)}`;
   const ADA = session(`member:${personKey({ id: "", email: MEMBER_A.email })}`), CLEO = session(`member:${personKey({ id: "", email: MEMBER_C.email })}`);
   const ROOM = session(`room:${roomId}`), TEAM = session("team");
@@ -140,9 +107,9 @@ it.skipIf(!stub)("drives each member's private chat, the group chat and the team
   expect(new Set(stub!.sessions().filter((name) => name.startsWith("bot-"))), "one browser per audience, the team's being the bot's own").toEqual(new Set([ADA, CLEO, ROOM, TEAM]));
   // A view opens the browser of the conversation it is opened from, for whoever may read it.
   const before = stub!.sessions().length;
-  for (const [token, threadId] of [[admin, cleoThread], [ada, undefined]] as const) await liveView(token, threadId);
+  for (const [token, threadId] of [[admin, cleoThread], [cleo, cleoThread], [ada, undefined]] as const) await liveView(token, threadId);
   const viewed = stub!.sessions().slice(before).filter((name) => name.startsWith("bot-"));
-  expect([...new Set(viewed)], "Ben's view of Cleo's chat reached Cleo's browser; Ada's own view, hers").toEqual([CLEO, ADA]);
+  expect([...new Set(viewed)], "Ben's view of Cleo's chat reached nothing; Cleo's reached her browser; Ada's own view, hers").toEqual([CLEO, ADA]);
   // A tool call from Ada's turn goes through the harness to her own browser, the one her turn was given.
   const mark = stub!.lines().length;
   const called = await browserTurn(ada, adaThread, "Which tabs are open?", [{ server: "browser", name: "agent_browser_tab_list", input: {} }]);
@@ -183,7 +150,7 @@ it("pairs a member's phone with a code she made: her address and role, her chats
   expect(bens.status).toBe(200);
   const benPhone = (await (await fetch(`${team.base}/api/auth/pair`, { method: "POST", headers: { ...fx.edge, "content-type": "application/json" }, body: JSON.stringify({ code: bens.body.code }) })).json() as { token: string }).token;
   expect((await team.as(benPhone, "GET", "/api/auth/session")).body).toMatchObject({ scopes: ["admin", "client"], email: ADMIN.email, team: { role: "admin" } });
-  expect((await messages(benPhone, cleoThread)).status, "an admin's phone reads private chats, as the admin does").toBe(200);
+  expect((await messages(benPhone, cleoThread)).status, "an admin's phone never reads a member's private chat, as the admin never does").toBe(404);
   // My Cloud is one person's: no member code there.
   expect((await fx.onCloud("POST", "/api/team/phone-pairing", {})).status).not.toBe(200);
 }, hostTimeout(60_000));

@@ -10,7 +10,7 @@
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
-import { parseJournal } from "./one-home.mjs";
+import { awayIn, parseJournal } from "./one-home.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
@@ -60,7 +60,7 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
  * @returns {{ kind: "computer" } | { kind: "cloud", origin: string } | { kind: "signin", other?: true }}
  */
 export function homeOf({ journal = null, frozenCloud = null, state = null }) {
-  const moved = journal ? (["switch", "done"].includes(journal.phase) ? journal.cloud : null)
+  const moved = journal ? (awayIn(journal) ? journal.cloud : null)
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
@@ -198,7 +198,7 @@ export function createHomeWindow(deps) {
       const marker = await frozen().catch(() => null);
       if (marker?.frozen) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
     }
-    if (frozenCloud || (kept && ["switch", "done"].includes(kept.phase))) await restored();
+    if (frozenCloud || awayIn(kept)) await restored();
     home = homeOf({ journal: kept, frozenCloud, state: state() });
     return home;
   }

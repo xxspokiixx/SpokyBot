@@ -38,7 +38,7 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // The full bridge goes only to the local server's UI; a remote page gets the safe subset, and main enforces the same rule.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "windowControls"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder"];
 function updaterOffered() {
@@ -368,6 +368,10 @@ const bridge = {
     teamRetry: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
     openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
+    // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
+    keepHere: () => ipcRenderer.invoke("one-home:keep"),
+    setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("one-home:keep-set", on === true) : Promise.reject(new Error("Turn the switch to keep this computer's bots here.")),
     onNotice: cb => {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);
@@ -433,6 +437,13 @@ const bridge = {
       ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
     repair: () => ipcRenderer.invoke("home:repair"),
     updating: onHomePage && reloadedForUpdate(),
+  },
+  updatesConsent: {
+    state: () => ipcRenderer.invoke("updates-consent:state"),
+    choose: choice => ipcRenderer.invoke("updates-consent:choose", {
+      status: String(choice?.status),
+      ...(typeof choice?.email === "string" ? { email: choice.email } : {}),
+    }),
   },
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),

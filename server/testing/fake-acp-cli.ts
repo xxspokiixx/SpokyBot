@@ -45,6 +45,7 @@
 //   FAKE_ACP_UPDATES_FILE  JSON array of session/update params ({update, _meta?}) re-read per prompt, sent as-is
 //   FAKE_ACP_MODE_ACK_FILE  while it exists a mode switch answers "empty" (no configOptions) or "error"
 //   FAKE_ACP_HANG_ON  a prompt whose text holds this hangs as in mode hang; others answer
+//   FAKE_ACP_CURSOR_FAST=1  a `fast` select ("true") once initialize declares _meta.parameterizedModelPicker, as Cursor CLI 2026.10.19; =stuck acknowledges set_config_option but keeps "true"
 //   FAKE_ACP_SESSION_CLOSE=1  initialize advertises sessionCapabilities.close (OpenCode 1.19); session/close answers {}
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
@@ -64,9 +65,11 @@ const mode = process.env.FAKE_ACP_MODE ?? "happy";
   orphanWatch.unref();
 }
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-const models = (process.env.FAKE_ACP_MODELS_FILE && existsSync(process.env.FAKE_ACP_MODELS_FILE)
+const modelsText = process.env.FAKE_ACP_MODELS_FILE && existsSync(process.env.FAKE_ACP_MODELS_FILE)
   ? readFileSync(process.env.FAKE_ACP_MODELS_FILE, "utf8")
-  : process.env.FAKE_ACP_MODELS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+  : process.env.FAKE_ACP_MODELS ?? "";
+// One id per line when the list holds a newline (DeepSeek's wire values are JSON pairs with commas); else comma-separated.
+const models = modelsText.split(modelsText.includes("\n") ? "\n" : ",").map((id) => id.trim()).filter(Boolean);
 const defaultModelEnv = process.env.AGY_ACP_DEFAULT_MODEL;
 if (models.length && defaultModelEnv && !models.includes(defaultModelEnv)) models.push(defaultModelEnv);
 let currentModel: string | null = models.length && defaultModelEnv ? defaultModelEnv : models[0] ?? null;
@@ -78,6 +81,7 @@ const variantValues = (entries: any[]): string[] => entries.flatMap((entry) => (
 ));
 const modes = (process.env.FAKE_ACP_MODES ?? "").split(",").filter(Boolean);
 let currentMode: string | null = modes[0] ?? null;
+let currentFast: string | null = null;
 const taskIdFile = process.env.FAKE_ACP_TASKID_FILE ?? "";
 const peerIdOf = (list: string): string => /id: ([\w-]+)/.exec(list)?.[1] ?? "";
 function handoffCall(message: string, options: { consult?: boolean; reason?: string } = {}): { name: string; args: (list: string) => object } {
@@ -140,6 +144,13 @@ const configOptions = () => {
       type: "select",
       currentValue: currentMode,
       options: modes.map((value) => ({ value, name: value })),
+    }] : []),
+    ...(currentFast ? [{
+      id: "fast",
+      name: "Fast",
+      type: "select",
+      currentValue: currentFast,
+      options: [{ value: "true", name: "On" }, { value: "false", name: "Off" }],
     }] : []),
   ];
   return options.length ? options : null;
@@ -582,6 +593,9 @@ function handle(msg: any) {
       const acceptsImages = process.env.FAKE_ACP_IMAGE_CAPABILITY === "1";
       const mcpTransports = (process.env.FAKE_ACP_MCP_TRANSPORTS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
       const closesSessions = process.env.FAKE_ACP_SESSION_CLOSE === "1";
+      if (["1", "stuck"].includes(process.env.FAKE_ACP_CURSOR_FAST ?? "") && msg.params?.clientCapabilities?._meta?.parameterizedModelPicker === true) {
+        currentFast = "true";
+      }
       result(msg.id, {
         protocolVersion: 1,
         authMethods,
@@ -740,6 +754,15 @@ function handle(msg: any) {
         resultAndConfigUpdates(msg.id, process.env.FAKE_ACP_EMPTY_VARIANT_ACK ? {} : { configOptions: configOptions() }, "effort", msg.params.sessionId);
         break;
       }
+      if (configId === "fast" && currentFast && (value === "true" || value === "false")) {
+        if (process.env.FAKE_ACP_CURSOR_FAST !== "stuck") currentFast = value;
+        configCalls.push({ method: msg.method, params: msg.params });
+        if (process.env.FAKE_ACP_DUMP) {
+          writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+        }
+        result(msg.id, { configOptions: configOptions() });
+        break;
+      }
       if (configId === "mode" && modes.includes(value)) {
         const ackFile = process.env.FAKE_ACP_MODE_ACK_FILE;
         const ack = ackFile && existsSync(ackFile) ? readFileSync(ackFile, "utf8").trim() : "";
@@ -854,7 +877,7 @@ function handle(msg: any) {
         const tool = (update: Record<string, unknown>) =>
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { toolCallId: "tc-slow", ...update } } });
         // ACP's default status is pending: this tool_call carries none.
-        tool({ sessionUpdate: "tool_call", title: "sleep", rawInput: { command: "sleep 45 && echo done" } });
+        tool({ sessionUpdate: "tool_call", title: "sleep", kind: "execute", rawInput: { command: "sleep 45 && echo done" } });
         tool({ sessionUpdate: "tool_call_update", status: "in_progress" });
         const finish = () => tool({ sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } });
         if (mode === "stall-after-tool") {
