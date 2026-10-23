@@ -448,10 +448,12 @@ describe("the Cloud Pro popup after the update", () => {
     f.state.config.onboarding = { ...EMPTY_ONBOARDING };
     expect(await launch()).toBe("");
     f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-10-16", version: 1, hintsSeen: [] };
+    f.state.welcomeOpen = true;
     expect(await launch()).toBe("");
-    f.state.config.onboarding.hintsSeen = withTourFinished(undefined); f.state.welcomeOpen = true;
-    expect(await launch()).toBe("");
-    f.state.welcomeOpen = false;
+    f.state.welcomeOpen = false; f.state.tourOpen = true;
+    expect(await launch(), "the app tour, started from Settings").toBe("");
+    // The welcome is the whole onboarding: an app tour never taken does not hold the popup back.
+    f.state.tourOpen = false;
     const html = await launch();
     expect(html).toContain(POPUP); expect(html).not.toContain(INTRO);
     expect(popupEvents("shown")).toHaveLength(1);
