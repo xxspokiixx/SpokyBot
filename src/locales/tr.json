@@ -3796,6 +3796,7 @@
   "teamPhone.title": "Telefonunuzda açın",
   "teamPhone.subtitle": "Bu kodu telefonunuzdaki OpenMausBot uygulamasıyla tarayın. Telefonunuz {team} alanını sizin adınıza, burada gördüğünüz sohbetlerle açar.",
   "teamPhone.stays": "{team} bu uygulamada açık olduğu sürece telefonunuzun oturumu açık kalır.",
+  "teamPhone.remove": "Kaldır",
   "remote.serverPairing.creating": "Oluşturuluyor…",
   "remote.serverPairing.expires": "{minutes} dk içinde sona eriyor",
   "remote.serverPairing.expired": "Bu kodun süresi doldu. Yeni bir tane oluşturun.",
