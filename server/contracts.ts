@@ -367,7 +367,7 @@ export interface StandaloneAsset {
   /** The executable's `/`-separated path inside the archive; a raw download is saved under this name. */
   executable: string;
   /** SHA-256 of the executable itself, checked after unpacking, before reusing a copy and at every start. */
-  executableSha256?: string;
+  executableSha256: string;
   /** About how big the download is; a download over twice this is stopped. */
   approxBytes: number;
 }
@@ -386,6 +386,9 @@ export interface StandaloneRelease {
   /** Environment for the app's own copy only, such as turning off the vendor's self-updater. */
   runEnv?: Readonly<Record<string, string>>;
   assets: Partial<Record<StandalonePlatform, StandaloneAsset>>;
+  /** Program SHA-256s of earlier pinned versions, per platform: a copy of one of those stays usable after the pin moves
+   * on, until it is updated. Nothing in the data folder can add to this list. */
+  previousPrograms?: Partial<Record<StandalonePlatform, readonly string[]>>;
 }
 
 export interface ProviderAuthenticationStart {

@@ -503,7 +503,7 @@ process.exit(0);
       engine: "fake-engine",
       version: "2.0.0",
       hosts: ["downloads.example.test"],
-      assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), archive: "raw", executable: "fakebin", approxBytes: 70_000_000 } },
+      assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), executableSha256: "b".repeat(64), archive: "raw", executable: "fakebin", approxBytes: 70_000_000 } },
     };
   }
 

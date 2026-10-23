@@ -22,6 +22,8 @@ export const OPENCODE_STANDALONE: StandaloneRelease = {
   macTeamId: "5NZ4Q7NXJ4",
   // The app installs its own copy's updates; OpenCode's self-updater would replace that copy behind its back.
   runEnv: { OPENCODE_DISABLE_AUTOUPDATE: "1" },
+  // Program hashes of earlier pins whose installed copies stay usable after this pin moves on; none yet.
+  previousPrograms: {},
   assets: {
     "darwin-arm64": { url: `${RELEASE}/opencode-darwin-arm64.zip`, archive: "zip", executable: "opencode", approxBytes: 64_291_659, sha256: "c400a2f8c8ab7e99478a7f4dd1a466b57bf33888e520d85c55780a5464c4b689", executableSha256: "417af53923f3d529759ab85ce3e8dd09116f742efcd332de591d2da6ebae696b" },
     "darwin-x64": { url: `${RELEASE}/opencode-darwin-x64-baseline.zip`, archive: "zip", executable: "opencode", approxBytes: 69_113_303, sha256: "7ad6170131ed5b8dab9ebd82f5ad5581d0051f8d50754f88460515ad61e1f37e", executableSha256: "362c45dcd36a16215dce88c6b5232fe230f542c25960f01ba4e4a35588f42de9" },

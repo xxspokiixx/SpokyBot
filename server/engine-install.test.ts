@@ -197,7 +197,7 @@ describe("which installer Settings offers", () => {
     engine: "fake-engine",
     version: "2.0.0",
     hosts: ["downloads.example.test"],
-    assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), archive: "raw", executable: "fake-engine", approxBytes: 70_000_000 } },
+    assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), executableSha256: "b".repeat(64), archive: "raw", executable: "fake-engine", approxBytes: 70_000_000 } },
   });
 
   it("offers the vendor's own build first, and names the npm package only when npm is here", () => {
@@ -238,7 +238,10 @@ describe.skipIf(process.platform === "win32")("app-installed engines on PATH at 
     writeFileSync(join(engine, "current.json"), JSON.stringify({ version: "2.0.0", executable: "fake-engine", sha256: "a".repeat(64), executableSha256: programSha }));
     mkdirSync(enginesBinDir(base), { recursive: true });
     resetPathCacheForTests();
-    const release: StandaloneRelease = { name: "Fake Engine", engine: "fake-engine", version: "2.0.0", hosts: [], assets: {} };
+    const release: StandaloneRelease = {
+      name: "Fake Engine", engine: "fake-engine", version: "2.0.0", hosts: [],
+      assets: { [standalonePlatformKey()]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), executableSha256: programSha, archive: "raw", executable: "fake-engine", approxBytes: 1 } },
+    };
     registerEnginesBinDir(base, [release]);
     const path = augmentedPath().split(delimiter);
     expect(path[0]).toBe(enginesBinDir(base));

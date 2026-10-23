@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import {
-  chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -45,7 +45,7 @@ describe("which build this machine gets", () => {
   });
 
   it("offers only a build made for this exact platform, never a glibc build to a musl machine", () => {
-    const asset: StandaloneAsset = { url: "https://downloads.example.test/a", sha256: "0".repeat(64), archive: "raw", executable: "x", approxBytes: 1 };
+    const asset: StandaloneAsset = { url: "https://downloads.example.test/a", sha256: "0".repeat(64), executableSha256: "1".repeat(64), archive: "raw", executable: "x", approxBytes: 1 };
     const release = fixtureRelease({ "linux-x64": asset });
     expect(standaloneAssetFor(release, "linux-x64")).toBe(asset);
     expect(standaloneAssetFor(release, "linux-x64-musl")).toBeNull();
@@ -230,6 +230,20 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     // The version check ran once, with the app copy's run settings.
     expect(readFileSync(log, "utf8")).toBe("--version app-copy nokey\n");
     expect(leftovers()).toEqual([VERSION, "bin", "current.json"]);
+  });
+
+  it("clears anything else out of bin/ when it installs, so only the program is on PATH", async () => {
+    mkdirSync(binDir(), { recursive: true });
+    writeFileSync(join(binDir(), "codex"), "#!/bin/sh\necho planted\n", { mode: 0o755 });
+    await install(await served("raw"));
+    expect(readdirSync(binDir())).toEqual(["fake-engine"]);
+  });
+
+  it("refuses a release that does not pin the program's own hash", async () => {
+    const release = await served("raw");
+    const { executableSha256: _pin, ...asset } = standaloneAssetFor(release)!;
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: asset as StandaloneAsset }))).rejects.toThrow(/invalid/);
+    expect(downloads()).toBe(0);
   });
 
   it("refuses a download that fails its SHA-256 check and leaves nothing behind", async () => {
@@ -485,10 +499,11 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     });
 
     it("never deletes a version this server started with, since its processes may still be running", async () => {
-      makeCurrent("1.0.0", seedVersion("1.0.0", 1));
+      const older = seedVersion("1.0.0", 1);
+      makeCurrent("1.0.0", older);
       seedVersion("1.1.0", 2);
-      registerStandaloneBinDirs(base, [fixtureRelease({})]);
-      const release = await served("raw");
+      const release = { ...(await served("raw")), previousPrograms: { [standalonePlatformKey()]: [sha256(older)] } };
+      registerStandaloneBinDirs(base, [release]);
       await install(release);
       expect(leftovers()).toEqual(["1.0.0", "1.1.0", VERSION, "bin", "current.json"]);
       // After a restart nothing runs 1.0.0 any more.
@@ -497,13 +512,20 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
       expect(leftovers()).toEqual(["1.1.0", VERSION, "bin", "current.json"]);
     });
 
-    it("keeps a copy from an earlier pin on PATH at start-up while its program is unchanged", () => {
-      makeCurrent("1.0.0", seedVersion("1.0.0", 1));
-      registerStandaloneBinDirs(base, [fixtureRelease({})]);
+    it("keeps a copy from an earlier pin on PATH only while the code lists its program", async () => {
+      const older = seedVersion("1.0.0", 1);
+      makeCurrent("1.0.0", older);
+      const release = await served("raw");
+      // Its own record vouches for itself, which is not enough.
+      registerStandaloneBinDirs(base, [release]);
+      expect(pathDirs()).not.toContain(binDir());
+      const listed = { ...release, previousPrograms: { [standalonePlatformKey()]: [sha256(older)] } };
+      resetPathCacheForTests();
+      registerStandaloneBinDirs(base, [listed]);
       expect(pathDirs().at(-1)).toBe(binDir());
       writeFileSync(binPath(), "#!/bin/sh\necho changed\n");
       resetPathCacheForTests();
-      registerStandaloneBinDirs(base, [fixtureRelease({})]);
+      registerStandaloneBinDirs(base, [listed]);
       expect(pathDirs()).not.toContain(binDir());
     });
   });
@@ -536,6 +558,45 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
       boot([release]);
       expect(pathDirs()).not.toContain(join(planted, "bin"));
       expect(findCliCandidates("git")).not.toContain(join(planted, "bin", "git"));
+    });
+
+    it.each([["unlisted", false], ["listed", true]])("ignores a planted record that names another program, even with its hash %s", async (_label, listed) => {
+      const release = await served("raw");
+      const program = "#!/bin/sh\necho planted codex\n";
+      mkdirSync(join(engineDir(), "0.0.1"), { recursive: true });
+      mkdirSync(binDir(), { recursive: true });
+      writeFileSync(join(engineDir(), "0.0.1", "codex"), program, { mode: 0o755 });
+      linkSync(join(engineDir(), "0.0.1", "codex"), join(binDir(), "codex"));
+      writeFileSync(join(engineDir(), "0.0.1", ".standalone-install.json"), JSON.stringify({ engine: ENGINE, version: "0.0.1", sha256: "a".repeat(64), executable: "codex", executableSha256: sha256(program), installedAt: 1 }));
+      writeFileSync(join(engineDir(), "current.json"), JSON.stringify({ version: "0.0.1", executable: "codex", sha256: "a".repeat(64), executableSha256: sha256(program) }));
+      boot([listed ? { ...release, previousPrograms: { [standalonePlatformKey()]: [sha256(program)] } } : release]);
+      expect(pathDirs()).not.toContain(binDir());
+      expect(findCliCandidates("codex")).not.toContain(join(binDir(), "codex"));
+    });
+
+    it("ignores a record whose program sits elsewhere in its folder than the pin says, even with the same name", async () => {
+      const release = await served("raw");
+      const program = "#!/bin/sh\necho elsewhere\n";
+      mkdirSync(join(engineDir(), "0.0.1", "other"), { recursive: true });
+      mkdirSync(binDir(), { recursive: true });
+      writeFileSync(join(engineDir(), "0.0.1", "other", "fake-engine"), program, { mode: 0o755 });
+      linkSync(join(engineDir(), "0.0.1", "other", "fake-engine"), binPath());
+      writeFileSync(join(engineDir(), "0.0.1", ".standalone-install.json"), JSON.stringify({ engine: ENGINE, version: "0.0.1", sha256: "a".repeat(64), executable: "other/fake-engine", executableSha256: sha256(program), installedAt: 1 }));
+      writeFileSync(join(engineDir(), "current.json"), JSON.stringify({ version: "0.0.1", executable: "other/fake-engine", sha256: "a".repeat(64), executableSha256: sha256(program) }));
+      boot([{ ...release, previousPrograms: { [standalonePlatformKey()]: [sha256(program)] } }]);
+      expect(pathDirs()).not.toContain(binDir());
+    });
+
+    it.each(["current.json", "bin"])("never puts a leftover back under the reserved name %s", async (reserved) => {
+      const release = await served("raw");
+      await install(release);
+      rmSync(join(engineDir(), reserved), { recursive: true, force: true });
+      const aside = join(engineDir(), ".old-planted");
+      mkdirSync(aside);
+      writeFileSync(join(aside, ".standalone-install.json"), JSON.stringify({ engine: ENGINE, version: reserved, sha256: "a".repeat(64), executable: "fake-engine", executableSha256: "b".repeat(64), installedAt: 1 }));
+      boot([release]);
+      expect(existsSync(aside)).toBe(false);
+      expect(existsSync(join(engineDir(), reserved))).toBe(false);
     });
 
     it.each([

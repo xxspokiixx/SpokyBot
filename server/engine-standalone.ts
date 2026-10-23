@@ -42,6 +42,11 @@ const POINTER_TEMP = /^current\.json\..+\.tmp$/u;
 const ENGINE_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 // No slash, and it cannot be "." or "..": the first character is a letter or digit.
 const VERSION_NAME = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
+
+/** A version gets its own folder, so it can never be one of the names the engine folder already uses. */
+function usableVersionName(name: string): boolean {
+  return VERSION_NAME.test(name) && name !== BIN && name !== CURRENT;
+}
 const SHA256 = /^[0-9a-f]{64}$/u;
 const TEAM_ID = /^[A-Z0-9]{10}$/u;
 
@@ -177,7 +182,7 @@ function readJsonFile(path: string): unknown {
 function readRecord(versionDir: string): InstallRecord | null {
   const record = readJsonFile(join(versionDir, RECORD)) as Partial<InstallRecord> | null;
   if (
-    !record || typeof record.engine !== "string" || typeof record.version !== "string" || !VERSION_NAME.test(record.version)
+    !record || typeof record.engine !== "string" || typeof record.version !== "string" || !usableVersionName(record.version)
     || typeof record.sha256 !== "string" || typeof record.executable !== "string" || !safeArchivePath(record.executable)
     || typeof record.executableSha256 !== "string" || !SHA256.test(record.executableSha256)
   ) return null;
@@ -204,12 +209,6 @@ function hashFileSync(path: string): string {
   return hash.digest("hex");
 }
 
-/** The program's hash the code pins for this version, else the one recorded when it was installed (an earlier pin). */
-function expectedProgramHash(release: StandaloneRelease, version: string, record: InstallRecord): string {
-  const pinned = version === release.version ? standaloneAssetFor(release)?.executableSha256 : undefined;
-  return pinned ?? record.executableSha256;
-}
-
 /** An interrupted swap left the old folder aside with nothing in its place: it goes back. Anything else is removed. */
 function sweepLeftovers(engineDir: string): void {
   let names: string[];
@@ -223,7 +222,7 @@ function sweepLeftovers(engineDir: string): void {
     try {
       if (name.startsWith(OLD_PREFIX)) {
         const version = readRecord(path)?.version;
-        if (version && version !== BIN && !existsSync(join(engineDir, version))) {
+        if (version && !existsSync(join(engineDir, version))) {
           renameSync(path, join(engineDir, version));
           continue;
         }
@@ -242,19 +241,25 @@ function sweepLeftovers(engineDir: string): void {
   } catch {}
 }
 
-/** The current version when its record, pointer and bin/ program all agree and the program hashes to the expected value. */
+/** The current version when its record, pointer and bin/ program agree with the code: the program the pin names, hashing
+ * to the pinned value, or for an earlier version to one the code lists. The data folder never vouches for itself. */
 function verifiedCurrent(engineDir: string, release: StandaloneRelease): StandaloneInstalled | null {
+  const key = standalonePlatformKey();
+  const asset = standaloneAssetFor(release, key);
+  if (!asset) return null;
   const pointer = readJsonFile(join(engineDir, CURRENT)) as Partial<CurrentPointer> | null;
-  if (!pointer || typeof pointer.version !== "string" || !VERSION_NAME.test(pointer.version) || pointer.version === BIN) return null;
+  if (!pointer || typeof pointer.version !== "string" || !usableVersionName(pointer.version)) return null;
   const record = readRecord(join(engineDir, pointer.version));
   if (
     !record || record.engine !== release.engine || record.version !== pointer.version || record.sha256 !== pointer.sha256
-    || record.executable !== pointer.executable || record.executableSha256 !== pointer.executableSha256
+    || record.executable !== asset.executable || pointer.executable !== asset.executable
+    || record.executableSha256 !== pointer.executableSha256
   ) return null;
-  const expected = expectedProgramHash(release, pointer.version, record);
-  if (record.executableSha256 !== expected) return null;
+  const earlier = (release.previousPrograms as Record<string, readonly string[] | undefined> | undefined)?.[key] ?? [];
+  const expected = pointer.version === release.version ? asset.executableSha256 : earlier.includes(record.executableSha256) ? record.executableSha256 : null;
+  if (!expected || record.executableSha256 !== expected) return null;
   const binDir = join(engineDir, BIN);
-  const name = programName(record.executable);
+  const name = programName(asset.executable);
   if (!realDirectory(binDir)) return null;
   // Nothing but the program goes on PATH; a rename Windows could not finish (.old-) is never a command anyone types.
   if (readdirSync(binDir).some((entry) => entry !== name && !entry.startsWith(OLD_PREFIX))) return null;
@@ -300,8 +305,8 @@ export function standaloneRunEnv(release: StandaloneRelease | undefined, cli: st
 
 function checkRelease(release: StandaloneRelease, asset: StandaloneAsset): void {
   if (
-    !ENGINE_NAME.test(release.engine) || !VERSION_NAME.test(release.version) || release.version === BIN || !SHA256.test(asset.sha256)
-    || (asset.executableSha256 !== undefined && !SHA256.test(asset.executableSha256))
+    !ENGINE_NAME.test(release.engine) || !usableVersionName(release.version) || !SHA256.test(asset.sha256)
+    || typeof asset.executableSha256 !== "string" || !SHA256.test(asset.executableSha256)
     || !safeArchivePath(asset.executable) || !Number.isSafeInteger(asset.approxBytes) || asset.approxBytes <= 0
     || (release.macTeamId !== undefined && !TEAM_ID.test(release.macTeamId))
   ) throw new StandaloneInstallError(`${release.name}'s install details are invalid. Nothing was downloaded.`);
@@ -517,7 +522,7 @@ async function verifiedVersion(
 ): Promise<{ executable: string; sha256: string } | null> {
   const record = readRecord(versionDir);
   if (!record || record.engine !== release.engine || record.version !== release.version || record.sha256 !== asset.sha256 || record.executable !== asset.executable) return null;
-  const expected = asset.executableSha256 ?? record.executableSha256;
+  const expected = asset.executableSha256;
   if (record.executableSha256 !== expected) return null;
   const executable = executableIn(versionDir, asset.executable);
   if (!(await lstat(executable).catch(() => null))?.isFile()) return null;
@@ -576,6 +581,11 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
     // Renaming one hard link onto another of the same file leaves both names in place.
     await rm(fresh, { force: true }).catch(() => {});
   }
+  // Only the program goes on PATH: anything else here, planted or left over, goes. A program Windows still holds open
+  // under an .old- name stays for a later sweep.
+  for (const entry of await readdir(binDir)) {
+    if (entry !== name) await rm(join(binDir, entry), { recursive: true, force: true }).catch(() => {});
+  }
   const pointer: CurrentPointer = { version: release.version, executable: asset.executable, sha256: asset.sha256, executableSha256: programSha256 };
   writeFileAtomic(join(engineDir, CURRENT), `${JSON.stringify(pointer)}\n`, { mode: 0o600 });
   activeVersions.add(versionDir);
@@ -589,7 +599,7 @@ async function prune(engineDir: string, currentDir: string): Promise<void> {
   const versions: Array<{ dir: string; installedAt: number }> = [];
   for (const entry of await readdir(engineDir, { withFileTypes: true })) {
     const dir = join(engineDir, entry.name);
-    if (!entry.isDirectory() || entry.name === BIN || !VERSION_NAME.test(entry.name) || dir === currentDir) continue;
+    if (!entry.isDirectory() || !usableVersionName(entry.name) || dir === currentDir) continue;
     const installedAt = readRecord(dir)?.installedAt;
     const modified = (await stat(dir).catch(() => null))?.mtimeMs ?? 0;
     versions.push({ dir, installedAt: typeof installedAt === "number" ? installedAt : modified });
@@ -654,7 +664,7 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
     }
     if (process.platform !== "win32") await chmod(stagedProgram, 0o755);
     const programSha256 = await hashFile(stagedProgram);
-    if (asset.executableSha256 !== undefined && programSha256 !== asset.executableSha256) {
+    if (programSha256 !== asset.executableSha256) {
       throw new StandaloneInstallError(`The ${release.name} download failed its safety check, so nothing was installed. Try again later.`);
     }
     if (signedHere(key, release) && !(await macSignerOk(stagedProgram, release, codesign))) {
