@@ -1327,6 +1327,7 @@
   "chat.turnStopped": "Durduruldu",
   "chat.error.signedOut": "{name} henüz oturum açmadı. Aşağıdan oturum açın, ardından mesajınızı tekrar gönderin.",
   "chat.error.details": "Ayrıntılar",
+  "chat.error.requestTooLarge": "Bu mesaj {model} için çok büyük. Yeni bir sohbet başlatın veya daha fazlasını kabul eden bir model seçin.",
   "chat.error.dismiss": "Kapat",
   "error.plain.unreachable": "OpenMausBot'a ulaşılamadı. Çalıştığından emin olun, ardından tekrar deneyin.",
   "error.plain.rateLimited": "Şu anda çok fazla istek var. Biraz bekleyin, ardından tekrar deneyin.",

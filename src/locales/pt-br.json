@@ -1598,6 +1598,7 @@
   "chat.turnStopped": "Parado",
   "chat.error.signedOut": "{name} ainda não está conectado. Entre abaixo e envie sua mensagem de novo.",
   "chat.error.details": "Detalhes",
+  "chat.error.requestTooLarge": "Esta mensagem é grande demais para {model}. Comece uma nova conversa ou escolha um modelo que aceite mais.",
   "chat.error.dismiss": "Dispensar",
   "error.plain.unreachable": "Não foi possível acessar o OpenMausBot. Verifique se ele está em execução e tente novamente.",
   "error.plain.rateLimited": "Muitas solicitações agora. Aguarde um momento e tente novamente.",

@@ -539,6 +539,7 @@
   "chat.retry": "Réessayer",
   "chat.error.signedOut": "{name} n’est pas encore connecté. Connectez-vous ci-dessous, puis renvoyez votre message.",
   "chat.error.details": "Détails",
+  "chat.error.requestTooLarge": "Ce message est trop volumineux pour {model}. Commencez une nouvelle conversation ou choisissez un modèle qui en accepte davantage.",
   "chat.send": "Envoyer",
   "chat.editMessage": "Modifier le message",
   "chat.reply": "Répondre",

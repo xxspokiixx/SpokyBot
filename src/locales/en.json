@@ -1707,6 +1707,7 @@
   "chat.turnStopped": "Stopped",
   "chat.error.signedOut": "{name} isn't signed in yet. Sign in below, then send your message again.",
   "chat.error.details": "Details",
+  "chat.error.requestTooLarge": "This message is too large for {model}. Start a new chat or pick a model that accepts more.",
   "chat.error.dismiss": "Dismiss",
   "error.plain.unreachable": "Couldn't reach OpenMausBot. Check that it's running, then try again.",
   "error.plain.rateLimited": "Too many requests right now. Wait a moment, then try again.",

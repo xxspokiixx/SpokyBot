@@ -1536,6 +1536,7 @@
   "chat.turnStopped": "Detenido",
   "chat.error.signedOut": "{name} todavía no tiene la sesión iniciada. Inicia sesión abajo y luego vuelve a enviar tu mensaje.",
   "chat.error.details": "Detalles",
+  "chat.error.requestTooLarge": "Este mensaje es demasiado grande para {model}. Empieza un chat nuevo o elige un modelo que admita más.",
   "chat.error.dismiss": "Descartar",
   "error.plain.unreachable": "No se pudo conectar con OpenMausBot. Comprueba que esté en ejecución e inténtalo de nuevo.",
   "error.plain.rateLimited": "Hay demasiadas solicitudes ahora mismo. Espera un momento e inténtalo de nuevo.",
