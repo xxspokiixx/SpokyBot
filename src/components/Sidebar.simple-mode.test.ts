@@ -237,7 +237,7 @@ describe("bot-first sidebar", () => {
     expect(disabled).not.toContain("New folder");
     expect(disabled).toContain("Delete all threads…");
     expect(disabled).toContain("Edit Profile");
-    expect(disabled).toContain("Move to team");
+    expect(disabled).toContain("Move to department");
   });
 
   it("Edit profile opens the panel without naming a section", () => {
