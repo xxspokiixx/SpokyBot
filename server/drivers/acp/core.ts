@@ -662,6 +662,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let notices = 0;
         let probing = false;
         let state: QuietState | null = null;
+        const promptStartedAt = Date.now();
         const tick = async () => {
           if (probing || current.state.settled || session.current !== current) return;
           const now = Date.now();
@@ -671,7 +672,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (signal?.kind === "context") context = { tokens: signal.tokens, threshold: signal.threshold };
             else if (signal) logged = { signal, at: now };
           }
-          const quietMs = now - session.acp.lastInboundAt;
+          const quietMs = now - Math.max(promptStartedAt, session.acp.lastInboundAt);
           if (quietMs < noticeAfterMs || current.asks.size || current.runningTools.size) {
             if (quietMs < noticeAfterMs) logged = null;
             previous = null;
