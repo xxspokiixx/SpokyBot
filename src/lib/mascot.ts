@@ -71,14 +71,14 @@ export const MAUS_COLOR_LABEL = {
   chrome: "mascotColor.chrome",
 } as const satisfies Record<MausColor, LocaleKey>;
 
-/** Chrome's body under its metal finish (ChromeFinish.tsx), and wherever a finish is not drawn. */
-export const CHROME_GRADIENT: [string, string, string] = ["#E4EAF1", "#A8B4C2", "#717E8E"];
+/** Chrome's body where its metal finish is not drawn. */
+export const CHROME_GRADIENT: [string, string, string] = [CHROME_STEEL.tones[0], CHROME_STEEL.tones[1], CHROME_STEEL.tones[2]];
 
-/** What a colour's swatch paints: chrome wears the same steel and top rim as its mascot. */
+/** What a colour's swatch paints: chrome wears the same brushed steel as its mascot. */
 export function colorSwatch(color: MausColor): string {
   if (color !== "chrome") return MAUS_COLORS[color];
-  const steel = CHROME_STEEL.stops.map(([offset, tone]) => `${tone} ${offset * 100}%`).join(", ");
-  return `linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0) 22%), linear-gradient(180deg, ${steel})`;
+  const [light, mid, edge] = CHROME_STEEL.tones;
+  return `repeating-linear-gradient(0deg, rgba(255,255,255,0.14) 0 1px, rgba(0,0,0,0.06) 1px 2px), radial-gradient(circle at ${CHROME_STEEL.light.x * 100}% ${CHROME_STEEL.light.y * 100}%, ${light} 0%, ${mid} 50%, ${edge} 100%)`;
 }
 
 export const MAUS_MOTIONS = [

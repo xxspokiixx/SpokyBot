@@ -191,7 +191,7 @@ function GradientAvatarComponent(
         size={size}
         silhouette={silhouette}
         gradient={gradient ?? gradientFor(color)}
-        overBody={metal ? (uid) => metalLayers(uid, silhouette, metal) : undefined}
+        overBody={metal ? (uid) => metalLayers(uid, silhouette, metal, size) : undefined}
         eyeColor={metal?.eyes}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
