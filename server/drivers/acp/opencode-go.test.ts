@@ -16,6 +16,7 @@ import {
   describeOpenCodeAccountError,
   discoverOpenCodeModels,
   openCodeOwnedDirectories,
+  OpenCodeDriver,
   openCodeProviderKeysAllowed,
   openMausOwnsWorkingFolder,
   parseOpenCodeModelsOutput,
@@ -24,6 +25,8 @@ import {
   setOpenCodeProviderKeyPolicy,
 } from "./opencode-go.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
+import { serverInstallFor } from "../../engine-install.ts";
+import { standaloneAssetFor, standaloneEngineDir } from "../../engine-standalone.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
@@ -1104,5 +1107,59 @@ describe("OpenCode model choice without a saved model", () => {
       method: "session/set_config_option",
       params: { sessionId: "fake-acp-session", configId: "model", value: "opencode/longcat-2.5-preview-free" },
     }]);
+  });
+});
+
+describe("OpenCode without Node.js", () => {
+  const release = OpenCodeDriver.install?.standalone;
+
+  it.each([
+    ["darwin-arm64", "opencode"], ["darwin-x64", "opencode"], ["linux-x64", "opencode"], ["linux-arm64", "opencode"],
+    ["linux-x64-musl", "opencode"], ["linux-arm64-musl", "opencode"], ["win32-x64", "opencode.exe"], ["win32-arm64", "opencode.exe"],
+  ])("has a pinned %s build on OpenCode's own release, from a host the installer accepts", (platform, executable) => {
+    const asset = standaloneAssetFor(release, platform);
+    expect(asset?.executable).toBe(executable);
+    const url = new URL(asset!.url);
+    expect(url.protocol).toBe("https:");
+    expect(release!.hosts).toContain(url.hostname);
+    expect(url.pathname).toBe(`/anomalyco/opencode/releases/download/v${release!.version}/${url.pathname.split("/").at(-1)}`);
+    expect(asset!.sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("offers Settings' Install button with no npm on this machine", () => {
+    expect(serverInstallFor(OpenCodeDriver.install, false)).toMatchObject({ standalone: { version: release!.version } });
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    ["the app's own copy with OpenCode's self-updater off", true],
+    ["a copy the person installed with its updater left alone", false],
+  ])("runs %s", async (_label, appCopy) => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-autoupdate-"));
+    const dump = join(scratch, "env.json");
+    let cli = FAKE_CLI;
+    if (appCopy) {
+      const version = join(standaloneEngineDir("opencode"), release!.version);
+      mkdirSync(version, { recursive: true });
+      cli = join(version, "opencode");
+      writeFileSync(cli, `#!/bin/sh\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    }
+    const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
+    const instance = await driver.create({
+      instanceId: `opencode-autoupdate-${appCopy}`, displayName: "OpenCode", enabled: true,
+      config: { cli, fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_DUMP: dump },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-autoupdate", botId: "bot-7", text: "hi", model: "opencode/big-pickle", approvalMode: "full" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const env = (JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> }).env;
+      expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBe(appCopy ? "1" : undefined);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      await removeTempDir(standaloneEngineDir("opencode"));
+      await removeTempDir(scratch);
+    }
   });
 });
