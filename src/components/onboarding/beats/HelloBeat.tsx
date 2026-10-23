@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { track } from "@/lib/analytics";
 import { brand } from "@/lib/brand";
 import { t } from "@/lib/i18n";
@@ -17,6 +17,7 @@ export function HelloBeat({
 }: BeatProps & { hosted?: boolean; fields: WelcomeFields; onFields: (fields: WelcomeFields) => void }) {
   const { state, dispatch } = useStore();
   const pending = useRef(false);
+  const noteId = useId();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   const email = checkEmail(fields.email);
@@ -77,7 +78,7 @@ export function HelloBeat({
         type="email"
         aria-label={t("phone.signIn.email")}
         aria-invalid={email === "invalid"}
-        aria-describedby="welcome-email-note"
+        aria-describedby={noteId}
         value={fields.email}
         onChange={(e) => onFields({ ...fields, email: e.target.value })}
         onKeyDown={(e) => e.key === "Enter" && void saveProfile()}
@@ -85,7 +86,7 @@ export function HelloBeat({
         className={`animate-rise mt-3 ${inputClass}`}
         style={staggerIndex(2)}
       />
-      <p id="welcome-email-note" aria-live="polite" className="animate-rise mt-1.5 w-full text-[12px] leading-snug" style={staggerIndex(2)}>
+      <p id={noteId} aria-live="polite" className="animate-rise mt-1.5 w-full text-[12px] leading-snug" style={staggerIndex(2)}>
         {email === "invalid" ? (
           <span className="text-danger">{t("onboarding.email.invalid")}</span>
         ) : (
