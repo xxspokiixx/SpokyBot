@@ -26,7 +26,7 @@ import {
 } from "./opencode-go.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
-import { OPENCODE_PROVIDER_ENV } from "../../config.ts";
+import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { TASK_WORKSPACES_DIR, workspaceDir } from "../../workspace.ts";
 import type { ModelCatalog, ProviderInstance, SendTurnInput } from "../../contracts.ts";
@@ -1164,5 +1164,33 @@ describe("OpenCode ready only through its free models", () => {
     const snapshot = await snapshotWith(catalog("opencode/big-pickle", "openrouter/vendor/model-v2"));
     expect(snapshot.authenticated).toBe(true);
     expect(snapshot).not.toHaveProperty("freeFallback");
+  });
+});
+
+describe("OpenCode one-off calls (connection checks, memory upkeep)", () => {
+  it("file their session under OpenMaus's own OpenCode project, never the global one the person's other folders share", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-oneshot-"));
+    const requests = join(scratch, "requests.jsonl");
+    const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
+    const instance = await driver.create({
+      instanceId: "opencode-oneshot",
+      displayName: "OpenCode",
+      environment: { XDG_DATA_HOME: join(scratch, "data"), OPENCODE_API_KEY: "", FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: requests },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      await instance.generateMemoryText!("This is a connection check. Reply with the single word OK.").catch(() => "");
+      const folders = readFileSync(requests, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { method: string; cwd: string });
+      const opened = folders.find((request) => request.method === "session/new")!;
+      const project = realpathSync(join(DATA_DIR, "providers", "opencode", "discovery"));
+      expect(relative(project, opened.cwd).startsWith("..")).toBe(false);
+      expect(existsSync(join(project, ".git"))).toBe(true);
+      // The one-off's own folder inside it is gone again.
+      expect(existsSync(opened.cwd)).toBe(false);
+    } finally {
+      await instance.dispose();
+      await removeTempDir(scratch);
+    }
   });
 });

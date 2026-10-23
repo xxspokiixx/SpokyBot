@@ -198,8 +198,8 @@ export interface AcpSupport {
   /** The approval mode is applied per turn by configureSession, which must throw unless the runtime
    * confirms it; an approval change never respawns the process. */
   sessionScopedApproval?: boolean;
-  /** False when this engine cannot run memory upkeep's one-shot text call cleanly. */
-  backgroundText?: false;
+  /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
+  backgroundText?: false; oneShotFolder?(): Promise<string>;
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -1689,7 +1689,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (support.requireAuthenticationBeforeSpawn && !(await support.isAuthenticated(env, turnConfig, instanceId))) {
           throw new Error(support.loginNote);
         }
-        const cwd = mkdtempSync(join(tmpdir(), "omb-acp-memory-"));
+        const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
         try {
           const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
           support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });

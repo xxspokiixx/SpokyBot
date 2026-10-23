@@ -756,6 +756,9 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
     needsNode: true,
   },
   spawnArgs: () => ["acp"],
+  // A folder outside git files its session under OpenCode's global project, which every non-git folder of the person's
+  // shares: a connection check or memory upkeep would show up in their history there.
+  oneShotFolder: discoveryDirectory,
   shareProcess: true,
   credentialEnv: ["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV],
   selectModel: { configId: "model" },
