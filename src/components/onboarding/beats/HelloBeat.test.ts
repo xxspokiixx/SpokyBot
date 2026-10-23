@@ -58,7 +58,7 @@ describe("the greeting beat", () => {
     await show({ name: "", email: "" });
     expect(host.querySelector('input[type="email"]')?.getAttribute("placeholder")).toBe("you@example.com");
     expect(host.textContent).toContain("let you know when big things ship");
-    expect(host.textContent).toContain("We only use your email to tell you about OpenMausBot updates.");
+    expect(host.textContent).toContain("Optional. We'll send you OpenMausBot updates, and link your usage stats to this email.");
     expect(host.textContent).not.toContain("shared OpenMausBot");
   });
 
@@ -73,7 +73,7 @@ describe("the greeting beat", () => {
   it("holds Continue while the email is not valid, and says why once the field is left, not while typing", async () => {
     await show({ name: "Ada", email: "a" });
     expect(host.textContent, "nothing is flagged on the first character").not.toContain("Check the email address.");
-    expect(host.textContent).toContain("We only use your email");
+    expect(host.textContent).toContain("link your usage stats to this email");
     expect(blocked()).toBe(true);
     const email = host.querySelector<HTMLInputElement>('input[type="email"]')!;
     await act(async () => { email.focus(); email.blur(); });

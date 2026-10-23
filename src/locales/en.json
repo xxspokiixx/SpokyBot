@@ -2432,7 +2432,7 @@
   "onboarding.tour.error": "Couldn't save your progress. Try again, or skip the tour.",
   "onboarding.maybeLater": "Maybe later",
   "onboarding.email.invalid": "Check the email address.",
-  "onboarding.email.why": "We only use your email to tell you about {app} updates.",
+  "onboarding.email.why": "Optional. We'll send you {app} updates, and link your usage stats to this email.",
   "onboarding.saving": "Saving…",
   "onboarding.engines.title": "Connect an AI",
   "onboarding.engines.intro": "Your bots need an AI to think with. Sign in with an account you already have.",
