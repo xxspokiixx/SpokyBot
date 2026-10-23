@@ -147,6 +147,28 @@ describe("header name", () => {
     expect(pill).toContain("Rename Pepper");
   });
 
+  it("shows the bot's role beside the pill in both modes, taking only the room the name leaves", () => {
+    for (const advanced of [true, false]) {
+      fixture.advanced = advanced;
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: " Research " } }));
+      const identity = markup.slice(markup.indexOf("data-chathead-identity"), markup.indexOf("data-chathead-controls"));
+      const role = identity.match(/<span data-chathead-role="true" class="([^"]*)"><span title="Research" class="([^"]*)">Research<\/span><\/span>/);
+      expect(role, `advanced ${advanced}`).toBeTruthy();
+      expect(role![1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "max-w-fit", "grow", "basis-0"]));
+      expect(role![2].split(" ")).toEqual(expect.arrayContaining(["truncate", "text-[13px]", "text-ink-secondary"]));
+      expect(identity.indexOf("data-chathead-role")).toBeGreaterThan(identity.indexOf(advanced ? "Rename Pepper" : "</button>"));
+      expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("data-chathead-role");
+    }
+    fixture.advanced = true;
+  });
+
+  it("leaves a Chief's role out of the header when it only repeats the Chief of Staff badge", () => {
+    const header = (title: string) => renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, chiefOfStaff: true, title } }));
+    expect(header("chief of staff ")).not.toContain("data-chathead-role");
+    expect(header("Operations lead")).toContain('<span title="Operations lead"');
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: "Chief of Staff" } }))).toContain("data-chathead-role");
+  });
+
   it("draws no working dots in the header pill, keeping one width, while a status still tells a screen reader", () => {
     for (const advanced of [true, false]) {
       fixture.advanced = advanced;
