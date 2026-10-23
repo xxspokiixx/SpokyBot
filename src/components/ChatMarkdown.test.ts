@@ -26,7 +26,7 @@ import {
 } from "./ChatMarkdown";
 import { getSnippetFileName, parseFenceInfo } from "@/lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "@/lib/markdown-image";
-import { StoreProvider } from "@/state/store";
+import { BotEditorStore, initialState, StoreProvider } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
@@ -579,6 +579,54 @@ describe("a bot's Use my Mac link", () => {
     expect(markup).not.toContain("<button");
     expect(markup).not.toContain('href="openmausbot://');
     expect(chatUrlTransform("openmausbot://use-my-computer")).toBe("openmausbot://use-my-computer");
+  });
+});
+
+describe("a bot's link to a page it published", () => {
+  const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+  const text = `Here is your dashboard: [Sales dashboard](${PAGE})`;
+  async function clickPage(store?: Parameters<typeof BotEditorStore>[0]["value"]) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      const markdown = createElement(ChatMarkdown, { text });
+      await act(async () => root.render(store ? createElement(BotEditorStore, { value: store, children: markdown }) : markdown));
+      const link = host.querySelector<HTMLAnchorElement>(`a[href="${PAGE}"]`)!;
+      expect(link.textContent).toBe("Sales dashboard");
+      const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+      await act(async () => { link.dispatchEvent(click); });
+      return click;
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  }
+
+  it("in the desktop app, opens like the card's Open: in the bot's browser panel, never as a message", async () => {
+    const openExternal = vi.fn(async () => {});
+    window.ogb = { platform: "darwin", openExternal } as unknown as typeof window.ogb;
+    const dispatch = vi.fn();
+    try {
+      const state = { ...initialState, selectedId: "pepper", bots: [{ id: "pepper" }], config: { features: { browser: true }, browserEngine: { kind: "engine" } } };
+      const click = await clickPage({ state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} } as never);
+      expect(click.defaultPrevented).toBe(true);
+      expect(dispatch.mock.calls).toEqual([[{ type: "toggleComputer", open: true }]]);
+      expect(openExternal).not.toHaveBeenCalled();
+    } finally {
+      delete window.ogb;
+    }
+  });
+
+  it("elsewhere, opens it outside the chat, as any web link", async () => {
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    try {
+      const click = await clickPage();
+      expect(click.defaultPrevented).toBe(true);
+      expect(opened).toHaveBeenCalledWith(PAGE, "_blank", "noopener,noreferrer");
+    } finally {
+      opened.mockRestore();
+    }
   });
 });
 

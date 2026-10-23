@@ -64,10 +64,11 @@ export function preloadConnectedApps(force = false): Promise<ConnectorInventory>
   }
   if (connectorStatusRequest) return connectorStatusRequest;
   connectorStatusRequest = api("/api/connectors/connected")
-    .then((response) => {
+    .then((response: { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean }) => {
       const services: Record<string, ConnectorStatus> = response.services ?? {};
-      if (response.credentialStore === "unavailable") {
-        return { services: readCachedInventory()?.services ?? {}, authoritative: false };
+      if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {
+        cachedConnectorStatusAuthoritative = false;
+        return { services: readCachedInventory()?.services ?? services, authoritative: false };
       }
       cachedConnectorStatus = services;
       cachedConnectorStatusAt = Date.now();
