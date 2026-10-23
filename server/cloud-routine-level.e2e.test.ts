@@ -323,11 +323,12 @@ it("in a conversation a guest left behind, a Chief's new specialist waits for th
   expect((await api("PATCH", `/api/bots/${chief.id}`, { token: owner, body: { chiefOfStaff: true } })).status).toBe(200);
   const conversation = (await api("POST", `/api/bots/${chief.id}/tasks`, { token: owner, body: { title: "From before" } })).body.task.threadId as string;
   await restart(() => markLeftBehind(dataDir, { threadIds: [conversation] }));
-  const call = await ownerAsks({ id: chief.id, threadId: conversation }, "Add a bot named Scout that researches every new lead.");
-  expect(await call("create_bot", { name: "Scout", role: "Lead researcher", instructions: "Research every new lead." })).toContain("@Scout has not been created yet");
+  // Not a name the home's seeded Chief can be given, which would make this one a duplicate.
+  const call = await ownerAsks({ id: chief.id, threadId: conversation }, "Add a bot named Leadhound that researches every new lead.");
+  expect(await call("create_bot", { name: "Leadhound", role: "Lead researcher", instructions: "Research every new lead." })).toContain("@Leadhound has not been created yet");
   const messages = async () => (await api("GET", `/api/threads/${conversation}/messages`, { token: owner })).body.messages as any[];
-  const card = async () => (await messages()).find((message) => message.card?.teamSetupRequest?.operations?.[0]?.fields?.name === "Scout")?.card;
-  const scout = async () => ((await api("GET", "/api/bots", { token: owner })).body.bots as any[]).some((bot) => bot.name === "Scout");
+  const card = async () => (await messages()).find((message) => message.card?.teamSetupRequest?.operations?.[0]?.fields?.name === "Leadhound")?.card;
+  const scout = async () => ((await api("GET", "/api/bots", { token: owner })).body.bots as any[]).some((bot) => bot.name === "Leadhound");
   const requestId = (await card())?.requestId as string;
   expect(requestId, "the owner sees one card").toBeTruthy();
   expect(await scout(), "nothing is added before the owner answers").toBe(false);
