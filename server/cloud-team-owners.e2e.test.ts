@@ -15,10 +15,11 @@ const OLIVE = { email: "olive@acme.test", role: "owner" as const };
 const ADA = { email: "ada@acme.test", role: "admin" as const };
 const BOB = { email: "bob@acme.test", role: "member" as const };
 // Every turn waits for the release file: present, it answers at once; removed, the turn holds while a card is asked.
-const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";
-process.env.FAKE_CLAUDE_TEXT_DUMP = process.env.HOME + "/text-dump.json";
+// The files live in the fixture folder, not the engine's HOME: on a team each audience's engine gets a home of its own.
+const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";
+process.env.FAKE_CLAUDE_TEXT_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/text-dump.json";
 process.env.FAKE_CLAUDE_MODE = "hang";
-process.env.FAKE_CLAUDE_RELEASE = process.env.HOME + "/release";`;
+process.env.FAKE_CLAUDE_RELEASE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/release";`;
 
 type Bot = { id: string; name: string; threadId: string; createdBy?: string; reportsTo?: string; chiefOfStaff?: boolean; busy?: boolean };
 type Frame = { kind: string; notification?: { kind: string; botId: string; threadId: string; body: string } };
