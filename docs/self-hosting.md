@@ -899,17 +899,20 @@ models comes last.
 The server picks at once at start, then sends the person's own engines one
 tiny test message each in the background ("Reply with the single word OK",
 90 seconds at most), best first, stopping at the first that answers. One
-miss changes nothing: that engine is tried again two minutes later. Two
-misses in a row move the default to the best engine that answered, and the
-engine is tried once more ten minutes later. An organization's models and
-the trial credit are never tested this way. Results are kept for a day per
+miss alone doesn't move the default: that engine is tried again two minutes
+later. Two misses in a row move the default to the best engine that
+answered; the engine is tried again ten minutes later, then once an hour.
+An engine that already answered (for example one the welcome checked) can
+take the default after a single miss. An organization's models and the
+trial credit are never tested this way. Results are kept for a day per
 engine and sign-in in `<data dir>/providers/ai-checks.json`, so a restart
 doesn't send them again.
 
 The first bot the app made follows the default until someone writes to it
 or picks a model for it or one of its conversations: it moves only after a
-test result, only to an engine that answered, and only away from one that
-didn't or up to a better one. No other bot ever moves. To stop the
+test result, only to an engine that answered, and only away from one whose
+latest test missed or that is signed out or turned off, or up to a better
+one. A status read that timed out moves nothing. No other bot ever moves. To stop the
 background test messages, start the server with `OMB_AI_CHECKS=0`.
 
 ### The decision log
