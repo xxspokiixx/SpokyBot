@@ -628,6 +628,7 @@
   "chat.chiefOfStaff": "Stabschef",
   "chat.openProfile": "Agentenprofil öffnen",
   "chat.openProfileAria": "Profil von {name} öffnen",
+  "chat.showConversations": "Unterhaltungen mit {name} anzeigen",
   "chat.find": "In der Unterhaltung suchen",
   "chat.findShortcut": "In der Unterhaltung suchen (⌘F)",
   "chat.stop": "Stopp",
@@ -2142,5 +2143,11 @@
   "keys.treg.working": "treg funktioniert ✓",
   "keys.treg.balance": "Guthaben: {balance}.",
   "keys.test": "Testen",
-  "apps.connected": "Verbunden"
+  "apps.connected": "Verbunden",
+  "botPanel.conversations.title": "Unterhaltungen",
+  "botPanel.conversations.search": "Unterhaltungen durchsuchen",
+  "botPanel.conversations.searchPlaceholder": "Unterhaltungen mit {name} durchsuchen",
+  "botPanel.conversations.new": "Neue Unterhaltung",
+  "botPanel.conversations.showMore": "{count} weitere anzeigen",
+  "botPanel.conversations.showFewer": "Weniger anzeigen"
 }

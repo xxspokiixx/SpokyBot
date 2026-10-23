@@ -686,6 +686,7 @@
   "chat.chiefOfStaff": "Керівник штабу",
   "chat.openProfile": "Відкрити профіль агента",
   "chat.openProfileAria": "Відкрити профіль {name}",
+  "chat.showConversations": "Показати розмови з {name}",
   "chat.find": "Знайти в розмові",
   "chat.findShortcut": "Знайти в розмові (⌘F)",
   "chat.stop": "Стоп",
@@ -2601,5 +2602,11 @@
   "keys.treg.link": "Отримайте ключ на treg.to",
   "keys.treg.working": "treg працює ✓",
   "keys.treg.balance": "Баланс: {balance}.",
-  "apps.connected": "Підключено"
+  "apps.connected": "Підключено",
+  "botPanel.conversations.title": "Розмови",
+  "botPanel.conversations.search": "Пошук у розмовах",
+  "botPanel.conversations.searchPlaceholder": "Пошук у розмовах з {name}",
+  "botPanel.conversations.new": "Нова розмова",
+  "botPanel.conversations.showMore": "Показати ще {count}",
+  "botPanel.conversations.showFewer": "Показати менше"
 }

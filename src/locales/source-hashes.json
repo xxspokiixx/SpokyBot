@@ -631,6 +631,7 @@
       "chat.chiefOfStaff": "245b630a86a9f2753c86a86f1a9cdeaed80b74704dfa2fc3193d6e312c294a38",
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -2145,7 +2146,13 @@
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
       "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
       "keys.test": "532eaabd9574880dbf76b9b8cc00832c20a6ec113d682299550d7a6e0f345e25",
-      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2"
+      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -3749,6 +3756,7 @@
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.backToMainThread": "6e2edefe43990c5eb1f121883cc074425ff7b0272f9b35b385b0d2e45f742eb2",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -7310,7 +7318,13 @@
       "apps.x.addKeyHelp": "99a49f92381f2317b0db14d61472f1f42d7c566aebc381e4f26a11374c05768f",
       "apps.x.connecting": "1b476f0ce6cfd94fe70cd0bf60153ac20e1aabead4440f298996ef5cb37442a3",
       "apps.x.useOwnKey": "fae2e81aa7c6529e8d92d8722122d6d3088e51100344c1a8a1fcd16d3b2cab10",
-      "apps.x.remove": "81c45fd9b904308ae8d00aa14e8d8be085604cad40871ef27075a0da0a8022ae"
+      "apps.x.remove": "81c45fd9b904308ae8d00aa14e8d8be085604cad40871ef27075a0da0a8022ae",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -7861,6 +7875,7 @@
       "chat.chiefOfStaff": "245b630a86a9f2753c86a86f1a9cdeaed80b74704dfa2fc3193d6e312c294a38",
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -9438,7 +9453,13 @@
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
       "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
       "keys.test": "532eaabd9574880dbf76b9b8cc00832c20a6ec113d682299550d7a6e0f345e25",
-      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2"
+      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -9989,6 +10010,7 @@
       "chat.chiefOfStaff": "245b630a86a9f2753c86a86f1a9cdeaed80b74704dfa2fc3193d6e312c294a38",
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -11566,7 +11588,13 @@
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
       "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
       "keys.test": "532eaabd9574880dbf76b9b8cc00832c20a6ec113d682299550d7a6e0f345e25",
-      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2"
+      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -13228,6 +13256,7 @@
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.backToMainThread": "6e2edefe43990c5eb1f121883cc074425ff7b0272f9b35b385b0d2e45f742eb2",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -14664,6 +14693,12 @@
       "botSettings.simple.loginsOff": "4f19d0cf7f357b63e083ea82b3fb048577a95024a96ec8f6e7ccc7dcbf5dbd18",
       "botPanel.addLabel": "43db67d6db0d41cd4779146e9515171d0143b623f9083939d4a86ad33b72ede2",
       "botPanel.rename": "3064d79a295cefe4b384b8fe5cb29fd6b06d7eb1ad94b8895f4148039d06b330",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a",
       "botPanel.avatar.edit": "286d83d111875b33d3a9c34b9c1d4e4d224c3f1b88e7bf379534dbb16c7efc1a",
       "botPanel.avatar.tabBot": "41e35ba1a1fd8b4cdc7f899b3b8f9442a7542f445170e8782e219732cc25c10f",
       "botPanel.avatar.tabGenerate": "49e49bb4401e67bd54ffe1e9ab6c2af87ddad0cdc8ca1c84ba1b4e94234438ba",
@@ -18993,6 +19028,7 @@
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.backToMainThread": "6e2edefe43990c5eb1f121883cc074425ff7b0272f9b35b385b0d2e45f742eb2",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -23198,7 +23234,13 @@
       "apps.x.addKeyHelp": "99a49f92381f2317b0db14d61472f1f42d7c566aebc381e4f26a11374c05768f",
       "apps.x.connecting": "1b476f0ce6cfd94fe70cd0bf60153ac20e1aabead4440f298996ef5cb37442a3",
       "apps.x.useOwnKey": "fae2e81aa7c6529e8d92d8722122d6d3088e51100344c1a8a1fcd16d3b2cab10",
-      "apps.x.remove": "81c45fd9b904308ae8d00aa14e8d8be085604cad40871ef27075a0da0a8022ae"
+      "apps.x.remove": "81c45fd9b904308ae8d00aa14e8d8be085604cad40871ef27075a0da0a8022ae",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -24036,6 +24078,7 @@
       "chat.chiefOfStaff": "245b630a86a9f2753c86a86f1a9cdeaed80b74704dfa2fc3193d6e312c294a38",
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -26205,7 +26248,13 @@
       "keys.treg.link": "66da229610b067b01554d1ba879c241afa97f250b9a24c09d35136743ede92db",
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
       "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
-      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2"
+      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27370,6 +27419,7 @@
       "chat.chiefOfStaff": "245b630a86a9f2753c86a86f1a9cdeaed80b74704dfa2fc3193d6e312c294a38",
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -30236,7 +30286,13 @@
       "keys.treg.placeholder": "441e353d0a61e8b6ab6b25463647f59a2d1832f22ad9fefe2829eca3bc9f631b",
       "keys.treg.link": "66da229610b067b01554d1ba879c241afa97f250b9a24c09d35136743ede92db",
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
-      "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f"
+      "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -30926,6 +30982,7 @@
       "chat.chiefOfStaff": "245b630a86a9f2753c86a86f1a9cdeaed80b74704dfa2fc3193d6e312c294a38",
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -32841,7 +32898,13 @@
       "keys.treg.link": "66da229610b067b01554d1ba879c241afa97f250b9a24c09d35136743ede92db",
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
       "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
-      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2"
+      "apps.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -34236,6 +34299,7 @@
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.backToMainThread": "6e2edefe43990c5eb1f121883cc074425ff7b0272f9b35b385b0d2e45f742eb2",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -37488,7 +37552,13 @@
       "keys.treg.placeholder": "441e353d0a61e8b6ab6b25463647f59a2d1832f22ad9fefe2829eca3bc9f631b",
       "keys.treg.link": "66da229610b067b01554d1ba879c241afa97f250b9a24c09d35136743ede92db",
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
-      "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f"
+      "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -38883,6 +38953,7 @@
       "chat.openProfile": "30981d8dc8fe1ec79e86941594e52290df892e4533d8845e6a8563a1b1d3d2a0",
       "chat.backToMainThread": "6e2edefe43990c5eb1f121883cc074425ff7b0272f9b35b385b0d2e45f742eb2",
       "chat.openProfileAria": "eafd73166fd6d063c71c5fe3e6ec807a0ea84cd7b0f34b6bf52997b979123a7b",
+      "chat.showConversations": "6640531128b7941c5956242863bab46b27f7890ac7f0ca93e33348e0ccf1486e",
       "chat.find": "30d2305aebbeb06f39c61d06b290399864f229d405c5be01592ca8c09c0f9b73",
       "chat.findShortcut": "2eb1799c769597301f4c6c4b57256ea729213629fd3eaa028a4963d547a82a09",
       "chat.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
@@ -42135,7 +42206,13 @@
       "keys.treg.placeholder": "441e353d0a61e8b6ab6b25463647f59a2d1832f22ad9fefe2829eca3bc9f631b",
       "keys.treg.link": "66da229610b067b01554d1ba879c241afa97f250b9a24c09d35136743ede92db",
       "keys.treg.working": "19587d754911f5150bf52afa460753ca1247098d2e4c14829466bf1e3a1674d0",
-      "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f"
+      "keys.treg.balance": "6deace7ee73276a5883fe5540d63ebf98a2111926e50ca0f3c36dea51131e73f",
+      "botPanel.conversations.title": "1d432f58690c2b4a9737b0a97f04b70bb4f0d9950d5177619039afe139f3b31e",
+      "botPanel.conversations.search": "8abdf3b226e731792791a4d5c005817e5ad85a513467c80abc6f914ee3173d99",
+      "botPanel.conversations.searchPlaceholder": "2d0a3fb44dbbabb93d86586425c4d81d8ff1c094ee1a5ffa26ed9a4f31e8dcca",
+      "botPanel.conversations.new": "396c946f0c795aa63e5ecd43128af985f9c2682892a01706500807111424c000",
+      "botPanel.conversations.showMore": "e372f20a52883cff2eb03f97aba6383ccd70805457f928bba33da9129c405739",
+      "botPanel.conversations.showFewer": "255beb6510e7827d37ec1cd22d080f910888ae00f29374dd9545c8b3d1fce43a"
     }
   }
 }

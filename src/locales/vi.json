@@ -1391,6 +1391,7 @@
   "chat.openProfile": "Mở hồ sơ trợ lý",
   "chat.backToMainThread": "Quay lại cuộc trò chuyện của bạn",
   "chat.openProfileAria": "Mở hồ sơ của {name}",
+  "chat.showConversations": "Xem các cuộc trò chuyện với {name}",
   "chat.find": "Tìm trong cuộc trò chuyện",
   "chat.findShortcut": "Tìm trong cuộc trò chuyện (⌘F)",
   "chat.stop": "Dừng",
@@ -4643,5 +4644,11 @@
   "keys.treg.placeholder": "Dán khóa treg của bạn",
   "keys.treg.link": "Lấy khóa tại treg.to",
   "keys.treg.working": "treg đang hoạt động ✓",
-  "keys.treg.balance": "Số dư: {balance}."
+  "keys.treg.balance": "Số dư: {balance}.",
+  "botPanel.conversations.title": "Cuộc trò chuyện",
+  "botPanel.conversations.search": "Tìm cuộc trò chuyện",
+  "botPanel.conversations.searchPlaceholder": "Tìm trong các cuộc trò chuyện với {name}",
+  "botPanel.conversations.new": "Cuộc trò chuyện mới",
+  "botPanel.conversations.showMore": "Hiện thêm {count}",
+  "botPanel.conversations.showFewer": "Thu gọn"
 }

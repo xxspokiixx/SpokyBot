@@ -547,6 +547,7 @@
   "chat.chiefOfStaff": "चीफ़ ऑफ़ स्टाफ़",
   "chat.openProfile": "एजेंट की प्रोफ़ाइल खोलें",
   "chat.openProfileAria": "{name} की प्रोफ़ाइल खोलें",
+  "chat.showConversations": "{name} के साथ सभी बातचीत देखें",
   "chat.find": "बातचीत में खोजें",
   "chat.findShortcut": "बातचीत में खोजें (⌘F)",
   "chat.stop": "रोकें",
@@ -2124,5 +2125,11 @@
   "keys.treg.working": "treg काम कर रहा है ✓",
   "keys.treg.balance": "बैलेंस: {balance}.",
   "keys.test": "टेस्ट करें",
-  "apps.connected": "कनेक्टेड"
+  "apps.connected": "कनेक्टेड",
+  "botPanel.conversations.title": "बातचीत",
+  "botPanel.conversations.search": "बातचीत खोजें",
+  "botPanel.conversations.searchPlaceholder": "{name} के साथ बातचीत खोजें",
+  "botPanel.conversations.new": "नई बातचीत",
+  "botPanel.conversations.showMore": "{count} और दिखाएँ",
+  "botPanel.conversations.showFewer": "कम दिखाएँ"
 }
