@@ -720,31 +720,47 @@ function allServiceStates(
   return Object.fromEntries(services);
 }
 
-export async function connectedServices(cfg: AppConfig): Promise<Record<string, ConnectorServiceState>> {
+export interface ConnectedServicesInventory {
+  services: Record<string, ConnectorServiceState>;
+  complete: boolean;
+}
+
+export async function connectedServicesInventory(cfg: AppConfig): Promise<ConnectedServicesInventory> {
   const apiKey = projectApiKey(cfg);
   if (!apiKey) {
     const response = await brokerRequest("/v1/connectors/connected");
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     const body = connectorServicesResponseSchema.parse(await response.json());
     const services = canonicalServiceRecord(body.services ?? {});
-    return Object.fromEntries(
-      Object.entries(services).map(([slug, state]) => [slug, {
-        connected: state.connected,
-        pending: state.pending ?? false,
-        status: state.status ?? (state.connected ? "ACTIVE" : "not_connected"),
-        accounts: state.accounts ?? [],
-      }]),
-    );
+    return {
+      services: Object.fromEntries(
+        Object.entries(services).map(([slug, state]) => [slug, {
+          connected: state.connected,
+          pending: state.pending ?? false,
+          status: state.status ?? (state.connected ? "ACTIVE" : "not_connected"),
+          accounts: state.accounts ?? [],
+        }]),
+      ),
+      complete: true,
+    };
   }
   const session = await ensureProjectSession(cfg);
   const userId = session.config?.user_id ?? cfg.composio?.userId;
   if (!userId) throw new Error("Composio Session returned no user ID");
-  const [toolkits, accounts] = await Promise.all([
+  const [toolkits, accountResult] = await Promise.all([
     listSessionToolkits(apiKey, session.session_id),
     // Scoped project keys can grant Session reads without the raw connected-account list.
-    listConnectedAccounts(apiKey, userId, []).catch(() => []),
+    listConnectedAccounts(apiKey, userId, []).then((accounts) => ({ accounts, complete: true as const }))
+      .catch(() => ({ accounts: [] as ConnectedAccountResponse[], complete: false as const })),
   ]);
-  return allServiceStates(summarizeAccounts(accounts, []), toolkits);
+  return {
+    services: allServiceStates(summarizeAccounts(accountResult.accounts, []), toolkits),
+    complete: accountResult.complete,
+  };
+}
+
+export async function connectedServices(cfg: AppConfig): Promise<Record<string, ConnectorServiceState>> {
+  return (await connectedServicesInventory(cfg)).services;
 }
 
 /** Rejects a connectorTools patch naming an unconnected service or a tool without its service prefix. Checks that need the
