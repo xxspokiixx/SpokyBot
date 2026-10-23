@@ -890,16 +890,27 @@ setting in `config.json` yet.
 
 ### Which engine a new bot uses
 
-A saved default model (Settings, or `openmausbot setup`) always wins. Without
-one, new bots get the first engine that can run, in this order: a Claude
-account, a ChatGPT plan, Gemini, Grok, then the rest in the order of
-`instances`; OpenCode running only Zen's free no-login models comes last.
-The server picks at once at start, then sends that engine one tiny test
-message in the background ("Reply with the single word OK", 90 seconds at
-most). If it doesn't answer, the next engine is tested, and the default moves
-to the best engine that answered; the first bot follows while nobody has
-written to it. A result lasts until that engine's sign-in changes. To stop
-the background test messages, start the server with `OMB_AI_CHECKS=0`.
+A saved default model (Settings, `openmausbot setup`, or the New Bot
+defaults) always wins. Without one, new bots get the first engine that can
+run, in this order: a Claude account, a ChatGPT plan, Gemini, Grok, then the
+rest in the order of `instances`; OpenCode running only Zen's free no-login
+models comes last.
+
+The server picks at once at start, then sends the person's own engines one
+tiny test message each in the background ("Reply with the single word OK",
+90 seconds at most), best first, stopping at the first that answers. One
+miss changes nothing: that engine is tried again two minutes later. Two
+misses in a row move the default to the best engine that answered, and the
+engine is tried once more ten minutes later. An organization's models and
+the trial credit are never tested this way. Results are kept for a day per
+engine and sign-in in `<data dir>/providers/ai-checks.json`, so a restart
+doesn't send them again.
+
+The first bot the app made follows the default until someone writes to it
+or picks a model for it or one of its conversations: it moves only after a
+test result, only to an engine that answered, and only away from one that
+didn't or up to a better one. No other bot ever moves. To stop the
+background test messages, start the server with `OMB_AI_CHECKS=0`.
 
 ### The decision log
 
