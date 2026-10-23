@@ -140,10 +140,18 @@ describe("the profile shown for a signed-in session", () => {
     expect(profileForSession(owner, null)).toBeUndefined();
   });
 
-  it("leaves the profile unchanged for anonymous, unreachable, loopback, and email-less sessions", () => {
+  it("does not show the configured owner when the session cannot be verified", () => {
     const sessions: SessionState[] = [
       { kind: "unauthenticated", error: "pair" },
       { kind: "unreachable", error: "offline" },
+    ];
+    for (const session of sessions) {
+      expect(profileForSession(owner, session)).toBeUndefined();
+    }
+  });
+
+  it("leaves the profile unchanged for loopback and email-less sessions", () => {
+    const sessions: SessionState[] = [
       { kind: "loopback" },
       { kind: "session", id: "s", label: "Ada's iPad", scopes: ["client"], expiresAt: 1 },
       { kind: "session", id: "s", label: "Ada's iPad", email: "  ", scopes: ["client"], expiresAt: 1 },

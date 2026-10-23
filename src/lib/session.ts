@@ -19,7 +19,7 @@ type SessionProfile = { name?: string; email?: string; avatarUrl?: string };
 
 export function profileForSession(profile: SessionProfile | undefined, sessionState: SessionState | null): SessionProfile | undefined {
   if (!sessionState) return undefined;
-  if (sessionState.kind !== "session") return profile;
+  if (sessionState.kind !== "session") return sessionState.kind === "loopback" ? profile : undefined;
   const email = sessionState.email;
   if (!email?.trim()) return profile;
   return profile?.email?.trim().toLowerCase() === email.trim().toLowerCase() ? profile : { email };
