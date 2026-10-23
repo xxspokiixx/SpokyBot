@@ -82,12 +82,37 @@ describe("who gets the welcome flow", () => {
     expect(tree?.props).toMatchObject({ hosted: false, initialBeat: undefined, replay: false });
   });
 
-  it("introduces the Chief of Staff when there is one, wherever it sits in the list", () => {
+  it("lands in the chat with the Chief of Staff when there is one, wherever it sits in the list, else the first bot", () => {
     vi.stubGlobal("window", LOCAL_PAGE);
+    const finish = () => (gate(LOCAL_VIEWER).tree!.props.onDone as () => void)();
     store.state = { ...store.state, bots: [{ id: "old", hidden: true, chiefOfStaff: true }, { id: "helper" }, { id: "chief", chiefOfStaff: true }] };
-    expect(gate(LOCAL_VIEWER).tree?.props.bot).toMatchObject({ id: "chief" });
+    finish();
+    expect(store.dispatch).toHaveBeenCalledWith({ type: "select", id: "chief" });
+    fixture.values = [];
+    store.dispatch.mockReset();
     store.state = { ...store.state, bots: [{ id: "old", hidden: true }, { id: "helper" }] };
-    expect(gate(LOCAL_VIEWER).tree?.props.bot).toMatchObject({ id: "helper" });
+    finish();
+    expect(store.dispatch).toHaveBeenCalledWith({ type: "select", id: "helper" });
+    fixture.values = [];
+    store.dispatch.mockReset();
+    store.state = { ...store.state, bots: [] };
+    finish();
+    expect(store.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "select" }));
+  });
+
+  it("never starts the app tour when the welcome is finished or skipped, nor after a reload", () => {
+    vi.stubGlobal("window", LOCAL_PAGE);
+    store.state = { ...store.state, bots: [{ id: "first" }] };
+    (gate(LOCAL_VIEWER).tree!.props.onDone as () => void)();
+    expect(store.dispatch).toHaveBeenCalledWith({ type: "toggleWelcome", open: false });
+    // Reloaded: the welcome is saved as done, and nothing opens in its place.
+    fixture.values = [];
+    store.state = { ...store.state, config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-10-23T00:00:00.000Z", version: WELCOME_VERSION } } };
+    expect(gate(LOCAL_VIEWER).tree).toBeNull();
+    // A replay from Settings closes the same way.
+    store.state = { ...store.state, welcomeOpen: true };
+    (gate(LOCAL_VIEWER).tree!.props.onDone as () => void)();
+    expect(store.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "toggleTour" }));
   });
 
   it("opens the hosted beat set for a hosted workspace's admin", () => {

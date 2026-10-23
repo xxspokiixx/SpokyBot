@@ -65,7 +65,6 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
   const replay = state.welcomeOpen && !due;
   return (
     <WelcomeFlow
-      bot={bot}
       replay={replay}
       hosted={viewer.hosted}
       initialBeat={resumeAt}
@@ -77,7 +76,8 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
         setDismissed(true);
         setResumeAt(undefined);
         dispatch({ type: "toggleWelcome", open: false });
-        if (!replay) dispatch({ type: "toggleTour", open: true });
+        // The first run ends in the chat with the first bot; the app tour starts only from Settings.
+        if (!replay && bot) dispatch({ type: "select", id: bot.id });
       }}
     />
   );
