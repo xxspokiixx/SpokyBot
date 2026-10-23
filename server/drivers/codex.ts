@@ -35,7 +35,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexLocalProviderArgs } from "./local-inject.ts";
-import { codexBackgroundModel, runCodexOneShot } from "./codex-background-text.ts";
+import { codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
@@ -600,6 +600,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       } catch { return null; }
       return [`codex-login:${home}`, stored];
     };
+    const smallModelsUsable = () => !plan && loginMark() === null;
     const loginRefused = () => { const mark = loginMark(); if (mark) noteKeyRejected(...mark); };
     const loginAccepted = (mark = loginMark()) => { if (mark) noteKeyAccepted(...mark); };
     const loginRejected = () => { const mark = loginMark(); return mark !== null && keyRejected(...mark); };
@@ -1737,22 +1738,18 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
       providerArgs = managedCodexArgs(config.managed);
     }
-    const id = codexBackgroundModel(models);
-    if (!id) throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex.");
-    const selection = planAuth || config.managed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
-    if (!planAuth && !config.managed) providerArgs = codexLocalProviderArgs(env, id);
-    return runCodexOneShot({
-      spawn: spawnCli,
-      kill: killCliTree,
-      cli: config.cli,
-      env,
-      prompt,
-      model: selection.model ?? id,
-      modelProvider: selection.modelProvider,
-      providerArgs,
-      options,
-      describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
-    });
+    const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback);
+    if (!route) throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex.");
+    return runCodexBackgroundRoute(route, (id) => {
+      const selection = planAuth || config.managed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
+      return runCodexOneShot({
+        spawn: spawnCli, kill: killCliTree, cli: config.cli, env, prompt, options,
+        model: selection.model ?? id,
+        modelProvider: selection.modelProvider,
+        providerArgs: planAuth || config.managed ? providerArgs : codexLocalProviderArgs(env, id),
+        describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
+      });
+    }, options);
   };
 
   return {
@@ -1763,7 +1760,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     get models() {
       return models;
     },
-    quickModelsUsable: () => !plan && loginMark() === null,
+    quickModelsUsable: smallModelsUsable,
     refreshModels,
     ...(startupModelRefresh ? { startupModelRefresh } : {}),
     generateMemoryText,

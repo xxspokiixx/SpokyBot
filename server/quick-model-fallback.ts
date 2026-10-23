@@ -1,7 +1,7 @@
 // A short message moved to the engine's quick model runs again on the bot's own model when the provider refuses the
 // quick model (OpenAI answers 400 invalid_request_error for gpt-5.4-mini on a ChatGPT-account Codex). The retry keeps
 // the first turn's id and the refusal never reaches the bus, so the conversation sees one turn with one reply. The
-// refused model is kept per engine instance and never picked for a quick turn there again.
+// refused model is kept per engine instance and never picked for a quick turn or background text there again.
 import { readFileSync } from "node:fs";
 
 import type { EffortLevel } from "../shared/wire.ts";
@@ -161,7 +161,7 @@ export class QuickModelFallback {
     });
   }
 
-  private remember(instanceId: string, model: string): void {
+  remember(instanceId: string, model: string): void {
     const models = this.refusedModels.get(instanceId) ?? new Set<string>();
     if (models.has(model)) return;
     models.add(model);
