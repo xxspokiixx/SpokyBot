@@ -17,8 +17,22 @@ export function replyExcerpt(text: string, limit = MAX_REPLY_EXCERPT): string {
   if (clean.length <= limit) return clean;
   return `${clean.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
-export function replySpeaker(message: Message, userName = "User"): string {
-  return message.role === "user" ? userName : (message.from?.name ?? "Assistant");
+/** What people's lines are called in a bot's prompt: one name where one person uses the server, or a name per line from
+ * its speaker on a Team Cloud, where no one person is the user. */
+export type PersonName = string | ((line: Pick<Message, "sender">) => string);
+
+/** The one name, or this line's speaker. */
+export function personOf(name: PersonName, line: Pick<Message, "sender">): string {
+  return typeof name === "string" ? name : name(line);
+}
+
+/** The line's recorded sender before the one name, or this line's speaker. */
+export function speakerOf(name: PersonName, line: Pick<Message, "sender">): string {
+  return typeof name === "string" ? line.sender?.name ?? name : name(line);
+}
+
+export function replySpeaker(message: Message, userName: PersonName = "User"): string {
+  return message.role === "user" ? personOf(userName, message) : (message.from?.name ?? "Assistant");
 }
 
 /** A widget press (`widgetPress`), an app's ui/message (`appMessage`) and a 👍 or 👎 (`reactedWith`) are known only
@@ -134,7 +148,7 @@ const REACTION_MEANS = {
 } as const;
 
 /** The quote is conversation data: it cannot grant tools or override the current system prompt. */
-export function promptWithReply(text: string, target: ReplyTarget | undefined, userName = "User"): string {
+export function promptWithReply(text: string, target: ReplyTarget | undefined, userName: PersonName = "User"): string {
   if (!target?.text) return text;
   const answer = reactionAnswer(target.reactedWith);
   if (answer) {
@@ -167,7 +181,7 @@ export function promptWithReply(text: string, target: ReplyTarget | undefined, u
   ].join("\n");
 }
 
-export function transcriptText(stored: Message, messagesById: ReadonlyMap<string, Message>, userName = "User"): string {
+export function transcriptText(stored: Message, messagesById: ReadonlyMap<string, Message>, userName: PersonName = "User"): string {
   // A voice note's words live on its attachment; the provider reads them after the text, as it always has.
   const message = { ...stored, text: contextText(stored) };
   if (message.serverCard) return cardRecords(message.text);
