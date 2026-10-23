@@ -16,9 +16,11 @@ import {
   flowProgress,
   nextBeat,
   previousBeat,
+  resumeBeat,
   showWelcome,
   type BeatId,
 } from "@/lib/onboarding";
+import { clearWelcomeDraft, readWelcomeDraft, saveWelcomeDraft, type WelcomeFields } from "@/lib/welcome-draft";
 import { api, useStore } from "@/state/store";
 import { CloudBeat, useCloudBeatOffer } from "./beats/CloudBeat";
 import type { SetupDetection, SetupImportResult } from "../../../shared/setup-import";
@@ -27,6 +29,7 @@ import { HelloBeat } from "./beats/HelloBeat";
 import { ImportBeat } from "./beats/ImportBeat";
 import { PermissionsBeat } from "./beats/PermissionsBeat";
 import { QuietButton } from "./beats/shared";
+import { saveWelcomeProfile } from "./save-profile";
 import { withViewTransition } from "./view-transition";
 import { ProgressDots } from "./ProgressDots";
 
@@ -58,10 +61,16 @@ type Motion = Exclude<MausMotion, "none">;
 /** Found later than these, the import step would land behind the person, so it is left out. */
 const BEFORE_IMPORT: readonly BeatId[] = ["hello", "engines"];
 
+/** After a step changes, Next, Continue and Back wait this long (and for the card's morph), so a double click moves one step. */
+export const STEP_HOLD_MS = 450;
+/** ...but never longer than this, should a transition never report that it finished. */
+const STEP_HOLD_CAP_MS = 3_000;
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export function WelcomeFlow({
   onDone,
   replay = false,
-  initialBeat,
+  initialBeat: requestedBeat,
   embedded = false,
   dictation,
   entrance = "arrive",
@@ -84,6 +93,12 @@ export function WelcomeFlow({
   setupImport?: { client: SetupImportClient; detection?: SetupDetection } | null;
 }) {
   const { state, dispatch } = useStore();
+  // A first run keeps its step and typed fields in this browser as it goes, so a reload resumes it; a replay starts over.
+  const keepsDraft = !replay && !embedded;
+  const [resumed] = useState(() => (keepsDraft ? readWelcomeDraft() : null));
+  const initialBeat = requestedBeat ?? resumed?.beat;
+  const [fields, setFields] = useState<WelcomeFields>(() =>
+    resumed ? { name: resumed.name, email: resumed.email } : { name: state.config?.profile?.name ?? "", email: state.config?.profile?.email ?? "" });
   const { capabilities } = useDesktopCapabilities();
   const offer = useCloudBeatOffer(hosted, cloudOffer);
   const importClient = setupImport === undefined ? (localSetupImport(hosted) ? setupImportApi : null) : setupImport?.client ?? null;
@@ -93,12 +108,18 @@ export function WelcomeFlow({
   const aiStepShown = useRef(initialBeat === "engines");
   const aiReady = !aiStepShown.current && state.instances.some(engineReady);
   const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, hosted, setupImport: detection !== null, cloud: offer !== null, aiReady });
-  const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
+  const [beat, setBeat] = useState<BeatId>(() => resumeBeat(beats, initialBeat));
+  // A saved step offered only once something loads (the import look, the Cloud offer) is opened when it arrives.
+  const resumeTo = useRef(initialBeat && !beats.includes(initialBeat) ? initialBeat : null);
+  const [moving, setMoving] = useState(false);
+  const movingNow = useRef(false);
   const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
   const [motion, setMotion] = useState<{ kind: Motion; key: number }>({ kind: "blink", key: 0 });
   const cardRef = useRef<HTMLDivElement>(null);
   const finishing = useRef(false);
   const beatNow = useRef(beat);
+  const live = useRef({ beats, fields });
+  live.current = { beats, fields };
 
   const bump = useCallback((kind: Motion) => setMotion((m) => ({ kind, key: m.key + 1 })), []);
 
@@ -114,6 +135,20 @@ export function WelcomeFlow({
     track("onboarding_step", { step: beat, replay });
   }, [beat, replay]);
 
+  useEffect(() => {
+    if (keepsDraft && !finishing.current) saveWelcomeDraft({ beat, ...fields });
+  }, [keepsDraft, beat, fields]);
+
+  const offered = beats.join(" ");
+  useEffect(() => {
+    const target = resumeTo.current;
+    if (!target || !live.current.beats.includes(target)) return;
+    resumeTo.current = null;
+    beatNow.current = target;
+    setBeat(target);
+    setMascot(MASCOT_FOR_BEAT[target]);
+  }, [offered]);
+
   // A Cloud sheet opened over the welcome never switches the window away from it (CloudAddDialog).
   useEffect(() => (embedded ? undefined : showWelcome()), [embedded]);
   // Looked for once, from the first beat; nothing found in time leaves the step out.
@@ -127,14 +162,25 @@ export function WelcomeFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Only from the step on screen, and never while a step is still arriving: a second click lands on the new step's button.
   const go = useCallback(
-    (target: BeatId) => {
+    (from: BeatId, target: BeatId) => {
+      if (movingNow.current || beatNow.current !== from) return;
+      movingNow.current = true;
+      setMoving(true);
+      resumeTo.current = null;
+      beatNow.current = target;
       if (target === "engines") aiStepShown.current = true;
-      withViewTransition(() => {
+      const transition = withViewTransition(() => {
         setBeat(target);
         setMascot(MASCOT_FOR_BEAT[target]);
       });
       bump("switch");
+      const arrived = Promise.all([transition?.finished.catch(() => {}), delay(STEP_HOLD_MS)]);
+      void Promise.race([arrived, delay(STEP_HOLD_CAP_MS)]).then(() => {
+        movingNow.current = false;
+        setMoving(false);
+      });
     },
     [bump],
   );
@@ -145,6 +191,9 @@ export function WelcomeFlow({
       finishing.current = true;
       track("onboarding_completed", { reason, at: beat, replay });
       setEmailGateDone("submitted");
+      if (keepsDraft) clearWelcomeDraft();
+      // What the greeting typed is kept however the welcome ends (Maybe later, Skip, Escape).
+      void saveWelcomeProfile(live.current.fields, state.config?.profile, dispatch, false).catch(() => {});
       onDone();
       try {
         const config = await api("/api/config", { method: "PUT", body: JSON.stringify(completionPatch()), signal: AbortSignal.timeout(10_000) });
@@ -152,15 +201,20 @@ export function WelcomeFlow({
       } catch {
       }
     },
-    [beat, dispatch, onDone, replay],
+    [beat, dispatch, onDone, replay, keepsDraft, state.config?.profile],
   );
 
-  const next = nextBeat(beats, beat);
   const previous = previousBeat(beats, beat);
-  const advance = useCallback(() => {
-    if (next) go(next);
-    else void finish("completed");
-  }, [next, go, finish]);
+  const advanceFrom = useCallback(
+    (from: BeatId) => {
+      if (movingNow.current || beatNow.current !== from) return;
+      const target = nextBeat(live.current.beats, from);
+      if (target) go(from, target);
+      else void finish("completed");
+    },
+    [go, finish],
+  );
+  const advance = useCallback(() => advanceFrom(beat), [advanceFrom, beat]);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
@@ -188,13 +242,13 @@ export function WelcomeFlow({
 
   useEffect(() => {
     const card = cardRef.current;
-    if (!card || card.contains(document.activeElement)) return;
+    if (moving || !card || card.contains(document.activeElement)) return;
     const target =
       card.querySelector<HTMLElement>("[autofocus], input, textarea, select") ??
       card.querySelector<HTMLElement>("[data-primary]") ??
       card;
     target.focus({ preventScroll: true });
-  }, [beat]);
+  }, [beat, moving]);
 
   const hello = beat === "hello";
   const title = beatTitle(beat);
@@ -245,8 +299,8 @@ export function WelcomeFlow({
           )}
         </div>
 
-        <div key={beat} className={cn("flex flex-col", beat === "engines" ? "min-h-0" : "shrink-0")}>
-          {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} />}
+        <div key={beat} inert={moving} aria-busy={moving} className={cn("flex flex-col", beat === "engines" ? "min-h-0" : "shrink-0")}>
+          {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} fields={fields} onFields={setFields} />}
           {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
           {beat === "import" && detection && importClient && (
             <ImportBeat
@@ -264,7 +318,7 @@ export function WelcomeFlow({
 
         <div className="mt-6 flex shrink-0 items-center justify-between">
           {previous ? (
-            <QuietButton onClick={() => go(previous)} disabled={importBusy} className="disabled:opacity-50">{t("onboarding.back")}</QuietButton>
+            <QuietButton onClick={() => go(beat, previous)} disabled={importBusy || moving} className="disabled:opacity-50">{t("onboarding.back")}</QuietButton>
           ) : (
             <span />
           )}

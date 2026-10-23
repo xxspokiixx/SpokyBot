@@ -34,7 +34,7 @@ it("the welcome offers MausBot Cloud as its last step, and Not now finishes it, 
 it("without an offer the welcome has no Cloud beat at all", async () => {
   await act(async () => { root.render(flow({ cloudOffer: null })); });
   expect(host.textContent).not.toContain("Keep your bots working while you sleep");
-  expect(host.textContent).toContain("1 of 2");
+  expect(host.textContent, "asked for the Cloud step, it opens on the step before it").toContain("2 of 2");
 });
 
 it("marks itself on screen while it is shown (so a Cloud sheet over it never switches the window), not as an embedded preview", async () => {
