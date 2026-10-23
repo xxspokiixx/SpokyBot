@@ -21,9 +21,11 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   person's chat; what a group chat decides never reaches your private chat. "About you" is yours alone: `GET`/`PUT /api/me`
   (the app's Profile on a team), read into your own conversations only.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
-  Team Cloud and serve every member's turn through the broker. A person's own connections have no way in: a share code,
-  a moved MCP sign-in or a HighLevel connection is refused with *"Personal connections never enter Acme. Ask an admin to
-  connect it for Acme."* A login from a sign-in card is saved by an Admin only, for the whole team.
+  Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
+  person's own* (below): then every member connects their own, and only their own private chats use it. A person's
+  connections from elsewhere have no way in: a share code, a moved MCP sign-in or a HighLevel connection is refused with
+  *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
+  an Admin only, for the whole team.
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
@@ -77,6 +79,42 @@ this server shares with every bot. It exists only on a Team Cloud.
   reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way.
 - For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
   admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`).
+
+## Connections: the team's or each person's
+
+Every app (a Composio toolkit) and MCP server has a scope. `team`, the default and what every connection made before this
+is, is one connection an Admin makes and every turn uses. `person` is one connection per member, made by that member on
+their team page in MausBot Cloud (the Admin's Cloud page calls the routes below as them).
+
+- **Who gets a member's own connection.** Only a turn in that member's private chat (`member:<person>`) that their own
+  message started (the request proven for that turn, as lent computers use). Never a group chat, the bot's main chat,
+  another member's chat, an Admin writing in theirs, a routine, a webhook, or work handed on from another conversation.
+- **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
+  registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
+  `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
+  while the team's own installation still holds one), a member's bridge refuses a team app and anything outside their
+  own turn. A connection card for a `person` app is never shown: the bot gets one plain line to say, *"Connect your
+  Gmail here: <their team page>"*, or that it works only in each person's private chat.
+- **MCP servers.** Only a server reached by its address can be `person`. A `person` server's team credential is never
+  attached to any turn; a member's own turn gets the server with their own key (in the header the Admin's key used, else
+  `Authorization: Bearer`) or their own sign-in. Both are pinned to the server's address: re-pointed, they aren't sent.
+  Removing the server forgets every member's key and sign-in for it.
+- **Storage.** `team-connection-scopes.json` (no secret, carried by backups) and `people-connections/` (0700; each
+  member's installation token, keys and sign-ins, 0600), which no backup carries and no bot box binds. Nothing a route
+  answers carries a key, a token or more of an address than its host.
+
+| Route | Who | |
+|---|---|---|
+| `PUT /api/team/connection-scopes { kind: "app" \| "mcp", id, scope: "team" \| "person" }` | admin | `{ scopes: { apps, mcp } }`; recorded in admin activity |
+| `GET /api/team/my-connections` | the member | `{ team, link, email, apps: [{ slug, name, connected, accounts }], mcp: [{ name, host, connected, how, offers }] }` |
+| `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab) |
+| `DELETE /api/team/my-connections/apps/:slug` | the member | |
+| `POST /api/team/my-connections/mcp/:name/sign-in` | the member | `{ auth }`; it comes back to this server's `/mcp-oauth/callback` |
+| `PUT /api/team/my-connections/mcp/:name/key { value }` | the member | write-only |
+| `DELETE /api/team/my-connections/mcp/:name` | the member | |
+
+The signed read (`GET /api/cloud/team/admin`) adds `scopes: { apps, mcp }` and `people: { apps: { <slug>: [address] },
+mcp: { <name>: [address] } }`: who has connected each, never with what.
 
 ## The pairing claim (contract v1)
 
@@ -169,3 +207,8 @@ every browser keeps its old name and Chrome its old launcher, and nothing here c
 - **Per-member engine state.** A Team Cloud's engines use the team's key through the broker, so the engine's config dir
   (`~/.claude`, `~/.codex`) holds no member's login; it is the team's, by design.
 - **A roster read from the Admin.** Removal takes effect within the hour (above), not at once.
+- **A removed member's own connections.** They stay on the Team Cloud, unused (nobody can start a turn as them), until
+  the server they were for is removed. Nothing drops them when the Admin removes the person yet.
+- **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
+  service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
+  config can't be connected by each person.

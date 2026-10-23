@@ -140,6 +140,17 @@ describe("scopes", () => {
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
+  it("lets a Team Cloud member reach only their own connections; who connects what stays an admin's", () => {
+    for (const [method, path] of [
+      ["GET", "/api/team/my-connections"], ["POST", "/api/team/my-connections/apps/gmail/connect"], ["DELETE", "/api/team/my-connections/apps/gmail"],
+      ["POST", "/api/team/my-connections/mcp/mail/sign-in"], ["PUT", "/api/team/my-connections/mcp/mail/key"], ["DELETE", "/api/team/my-connections/mcp/mail"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
+    for (const [method, path] of [
+      ["PUT", "/api/team/connection-scopes"], ["GET", "/api/team/my-connections/mcp/mail/key"], ["POST", "/api/team/my-connections/apps/gmail"],
+      ["POST", "/api/connectors/gmail/authorize"], ["POST", "/api/mcp/servers/mail/sign-in"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
   it("lets a desktop's own lending connector reach its device link only while lending is on, like its poll", () => {
     for (const path of ["/api/shared-computers/c1/poll", "/api/shared-computers/c1/link"]) {
       const method = path.endsWith("link") ? "GET" : "POST";
