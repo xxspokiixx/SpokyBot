@@ -2,11 +2,14 @@
 import type { AppConfig } from "../config.ts";
 import { OPENROUTER_MODEL_ID_MAX, WORKERS_AI_ACCOUNT_ID } from "../decider/config.ts";
 import type { Decider } from "../decider/index.ts";
+import type { Extractor } from "../extractor/index.ts";
 import { createOpenRouterModelCatalog, type OpenRouterModelCatalog } from "../decider/openrouter-models.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface DeciderRouteDeps {
   decider: Pick<Decider, "testKey">;
+  /** Tested beside a saved key, when something can extract. */
+  extractor?: Pick<Extractor, "testKey">;
   models?: Pick<OpenRouterModelCatalog, "load">;
   config(): AppConfig;
 }
@@ -43,7 +46,12 @@ export function createDeciderRoutes(deps: DeciderRouteDeps): RouteHandler {
       ...(api ? { api } : {}),
       ...(accountId ? { accountId } : {}),
     });
-    if (result.ok) return json(res, 200, { ok: true, latencyMs: result.latencyMs });
-    return json(res, 200, { ok: false, reason: result.reason, ...(result.status ? { status: result.status } : {}) });
+    // The saved keys also read: say whether extraction works too. A draft key is checked for decisions only.
+    const read = !draft && !provider && deps.extractor ? await deps.extractor.testKey() : null;
+    const extraction = read && !(read.ok === false && read.reason === "no_key")
+      ? { extraction: read.ok ? { ok: true } : { ok: false, reason: read.reason, ...(read.status ? { status: read.status } : {}) } }
+      : {};
+    if (result.ok) return json(res, 200, { ok: true, latencyMs: result.latencyMs, ...extraction });
+    return json(res, 200, { ok: false, reason: result.reason, ...(result.status ? { status: result.status } : {}), ...extraction });
   };
 }
