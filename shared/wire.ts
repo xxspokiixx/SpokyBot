@@ -192,8 +192,9 @@ export interface WireTask {
   /** the folder this task's turns run in, pinned on its first turn. */
   cwd?: string | null;
   /** Set me up was pressed here (server/setup-request.ts): the person's next line in this conversation runs as a
-   * setup request. Server-owned; a client only shows it. */
-  setupRequest?: { at: number };
+   * setup request. Server-owned; a client only shows it. `by`: who pressed, where several people share the place (their
+   * reactor key); only their next line takes it, and only they see its chip. */
+  setupRequest?: { at: number; by?: string };
 }
 
 /** One thread's keep-warm window as a client shows it. Times are epoch ms. */

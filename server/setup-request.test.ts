@@ -18,11 +18,12 @@ function setup() {
   const threadId = bot.threadId;
   const say = (text: string, thread = threadId, extra: Partial<Message> = {}) =>
     store.appendMessage(thread, { role: "user", kind: "text", text, ...extra });
-  const take = (line: Message, options: { person?: boolean; mounted?: boolean; editedFrom?: string; thread?: string } = {}) =>
+  const turn = (line: Message, options: { person?: boolean; mounted?: boolean; editedFrom?: string; thread?: string } = {}) =>
     takeSetupRequest(store, { botId: bot.id, threadId: options.thread ?? threadId, line, person: options.person ?? true,
       mounted: options.mounted ?? true, ...(options.editedFrom ? { editedFrom: options.editedFrom } : {}) });
+  const take = (...args: Parameters<typeof turn>) => turn(...args) !== null;
   const waiting = (thread = threadId) => store.taskByThread(bot.id, thread)?.setupRequest;
-  return { store, bot, threadId, say, take, waiting };
+  return { store, bot, threadId, say, turn, take, waiting };
 }
 
 beforeEach(() => {
@@ -46,11 +47,16 @@ describe("the Set me up offer", () => {
     expect(openSetupOffer(s.store, s.bot.id, s.threadId)).toBeNull();
   });
 
-  it("stays when a routine or another bot writes first", () => {
-    const s = setup();
-    s.take(s.say("Run the daily check"), { person: false });
-    s.take(s.say("A teammate asked you to review this", s.threadId, { peerAsk: { botId: "b2", name: "Kit" } }));
-    expect(openSetupOffer(s.store, s.bot.id, s.threadId)).not.toBeNull();
+  it("is closed once anything is written there, even by a routine or another bot", () => {
+    const routine = setup();
+    routine.take(routine.say("Run the daily check"), { person: false });
+    expect(openSetupOffer(routine.store, routine.bot.id, routine.threadId)).toBeNull();
+    const peer = setup();
+    peer.take(peer.say("A teammate asked you to review this", peer.threadId, { peerAsk: { botId: "b2", name: "Kit" } }));
+    expect(openSetupOffer(peer.store, peer.bot.id, peer.threadId)).toBeNull();
+    expect(askForSetup(peer.store, peer.bot.id, peer.threadId, "en")).toEqual({
+      ok: false, status: 409, error: "This chat has already started. Type /setup and what you'd like this bot to do.",
+    });
   });
 });
 
@@ -66,6 +72,12 @@ describe("pressing Set me up", () => {
     expect(s.waiting()).toEqual({ at: messages[1]!.at });
   });
 
+  it("records who pressed it where several people share the place", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a");
+    expect(s.waiting()).toEqual({ at: expect.any(Number), by: "member-a" });
+  });
+
   it("is kept across a restart, and a second press adds nothing", () => {
     const s = setup();
     askForSetup(s.store, s.bot.id, s.threadId, "en");
@@ -79,7 +91,9 @@ describe("pressing Set me up", () => {
   it("is refused once the bot has a role or the person has written, and for a conversation it does not own", () => {
     const s = setup();
     s.store.patchBot(s.bot.id, { soul: "Only water the garden." });
-    expect(askForSetup(s.store, s.bot.id, s.threadId, "en")).toMatchObject({ ok: false, status: 409 });
+    expect(askForSetup(s.store, s.bot.id, s.threadId, "en")).toEqual({
+      ok: false, status: 409, error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do.",
+    });
     const fresh = setup();
     fresh.take(fresh.say("hello"));
     expect(askForSetup(fresh.store, fresh.bot.id, fresh.threadId, "en")).toMatchObject({ ok: false, status: 409 });
@@ -99,7 +113,10 @@ describe("the line after the press", () => {
     const s = setup();
     askForSetup(s.store, s.bot.id, s.threadId, "en");
     const line = s.say("sort my inbox every morning");
-    expect(s.take(line)).toBe(true);
+    const marked = s.turn(line);
+    // The caller keeps this copy for a retry on the backup AI: it must carry the mark, not be the copy it passed in.
+    expect(marked).toMatchObject({ id: line.id, text: "sort my inbox every morning", setupRequest: true });
+    expect(line.setupRequest).toBeUndefined();
     expect(s.store.messagesFor(s.threadId).find((message) => message.id === line.id)).toMatchObject({
       text: "sort my inbox every morning", setupRequest: true,
     });
@@ -122,10 +139,42 @@ describe("the line after the press", () => {
   it("clears on cancel, and the next line runs as typed", () => {
     const s = setup();
     askForSetup(s.store, s.bot.id, s.threadId, "en");
-    expect(cancelSetupRequest(s.store, s.bot.id, s.threadId)).toBe(true);
+    expect(cancelSetupRequest(s.store, s.bot.id, s.threadId)).toBe("cleared");
     expect(s.waiting()).toBeUndefined();
     expect(s.take(s.say("sort my inbox"))).toBe(false);
-    expect(cancelSetupRequest(s.store, s.bot.id, "not-a-thread")).toBe(false);
+    expect(cancelSetupRequest(s.store, s.bot.id, "not-a-thread")).toBe("unknown");
+  });
+
+  it("where several people share the place, is only the presser's: anyone else's line passes through, and only they can cancel", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a");
+    const other = s.say("what's the weather?", s.threadId, { sender: { name: "Bea", id: "member-b" } });
+    expect(s.take(other)).toBe(false);
+    expect(s.store.messagesFor(s.threadId).find((message) => message.id === other.id)?.setupRequest).toBeUndefined();
+    expect(s.waiting()).toMatchObject({ by: "member-a" });
+    expect(s.take(s.say("no sender"))).toBe(false);
+    expect(cancelSetupRequest(s.store, s.bot.id, s.threadId, "member-b")).toBe("refused");
+    expect(cancelSetupRequest(s.store, s.bot.id, s.threadId)).toBe("refused");
+    expect(s.take(s.say("sort my inbox", s.threadId, { sender: { name: "Ann", id: "member-a" } }))).toBe(true);
+    const again = setup();
+    askForSetup(again.store, again.bot.id, again.threadId, "en", "member-a");
+    expect(cancelSetupRequest(again.store, again.bot.id, again.threadId, "member-a")).toBe("cleared");
+  });
+
+  it("with one person, is anyone's next line: a press here and a message from the phone", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en");
+    expect(s.take(s.say("sort my inbox", s.threadId, { sender: { name: "Omkar's iPhone", id: "phone-session" } }))).toBe(true);
+  });
+
+  it("clears without setting up when the bot was given instructions after the press", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en");
+    s.store.patchBot(s.bot.id, { description: "Files bugs." });
+    const line = s.say("sort my inbox");
+    expect(s.take(line)).toBe(false);
+    expect(s.waiting()).toBeUndefined();
+    expect(s.store.messagesFor(s.threadId).find((message) => message.id === line.id)?.setupRequest).toBeUndefined();
   });
 
   it("clears and runs as typed for a slash command, or on a model that cannot set itself up", () => {
@@ -155,6 +204,16 @@ describe("the line after the press", () => {
     s.take(plain);
     const editedPlain = s.store.branchMessage(s.threadId, plain.id, "thank you")!;
     expect(s.take(editedPlain, { person: false, editedFrom: plain.id })).toBe(false);
+  });
+
+  it("is not a setup request once edited into a slash command", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en");
+    const line = s.say("sort my inbox");
+    s.take(line);
+    const edited = s.store.branchMessage(s.threadId, line.id, "/learn how I like reports")!;
+    expect(s.take(edited, { person: false, editedFrom: line.id })).toBe(false);
+    expect(s.store.messagesFor(s.threadId).find((message) => message.id === edited.id)?.setupRequest).toBeUndefined();
   });
 });
 
