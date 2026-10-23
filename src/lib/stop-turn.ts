@@ -35,6 +35,10 @@ export function sendStop(api: Api, action: StopAction, showError: (error: unknow
   api(`/api/bots/${action.botId}/interrupt`, {
     method: "POST",
     body: action.threadId ? JSON.stringify({ threadId: action.threadId, ...(turnId ? { turnId } : {}) }) : undefined,
+  }).then((result) => {
+    // That turn was over: this client missed its end. Name none next time, so the next press reaches what runs.
+    const over = (result as { outcome?: unknown } | null)?.outcome === "already-stopped";
+    if (over && action.threadId && liveTurns.get(action.threadId) === turnId) liveTurns.delete(action.threadId);
   }).catch((error) => {
     // Refused: the next press is a new Stop, not a repeat.
     if (lastStops.get(key) === now) lastStops.delete(key);

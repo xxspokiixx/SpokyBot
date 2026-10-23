@@ -59,6 +59,19 @@ describe("Stop", () => {
     expect(bodies(api).map(([, body]) => body)).toEqual([{ threadId: "thread-1", turnId: "turn-1" }, { threadId: "thread-1", turnId: "turn-2" }]);
   });
 
+  it("forgets a turn the server says is already over, so a missed frame never blocks the next Stop", async () => {
+    const api = vi.fn().mockResolvedValueOnce({ ok: true, outcome: "already-stopped" }).mockResolvedValue({ ok: true });
+    const action = { type: "interrupt", botId: "bot-1", threadId: "thread-1" } as const;
+    // This client never saw turn-1 end or turn-2 start (a dropped connection).
+    runtimeFrameAction(frame("turn.started", "turn-1"));
+    sendStop(api, action, vi.fn());
+    await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    vi.advanceTimersByTime(STOP_REPEAT_MS);
+    sendStop(api, action, vi.fn());
+    expect(bodies(api).map(([, body]) => body)).toEqual([{ threadId: "thread-1", turnId: "turn-1" }, { threadId: "thread-1" }]);
+  });
+
   it("keeps each thread's Stop to itself", () => {
     const api = vi.fn().mockResolvedValue({ ok: true });
     sendStop(api, { type: "interrupt", botId: "bot-1", threadId: "thread-1" }, vi.fn());
