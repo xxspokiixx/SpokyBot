@@ -2197,6 +2197,8 @@ function hostTurnResult(node: HandoffView | undefined, generation: string, outco
   computerParks.delete(generation);
   if (!node) return outcome;
   const result: DirectTurnOutcome = { ...outcome, evidence: { ...outcome.evidence, ...turnEvidence(turnRows(node)) } };
+  const cards = resumableCards(node.threadId, node.startedAt ?? node.createdAt, node.groupId ? node.botId : undefined);
+  if (result.stalled) stopCards(node.threadId, new Set(cards.map((card) => card.id)));
   if (node.goalRunId) return result;
   if (seat) {
     parkedSeats.set(node.id, seat);
@@ -2204,10 +2206,7 @@ function hostTurnResult(node: HandoffView | undefined, generation: string, outco
     const { okToolCalls: _unknown, ...evidence } = result.evidence ?? {};
     return { ...result, evidence, cap: { note: COMPUTER_FREE_NOTE } };
   }
-  if (result.cap) return result;
-  const cards = resumableCards(node.threadId, node.startedAt ?? node.createdAt, node.groupId ? node.botId : undefined);
-  if (!cards.length) return result;
-  if (result.stalled) { stopCards(node.threadId, new Set(cards.map((card) => card.id))); return result; }
+  if (result.cap || result.stalled || !cards.length) return result;
   parkedNodesToReconcile.add(node.id);
   return { ...result, cards: { question: `Waiting on the person: ${cards.map((card) => card.waits).join("; ")}`, ids: cards.map((card) => card.id) } };
 }
@@ -2251,6 +2250,7 @@ function stopCards(threadId: string, ids: ReadonlySet<string>): void {
     if (message.secret) store.patchMessage(threadId, message.id, { secret: { ...message.secret, stopped: true } });
     else if (message.connector) store.patchMessage(threadId, message.id, { connector: { ...message.connector, stopped: true } });
     else if (message.signIn) store.patchMessage(threadId, message.id, { signIn: { ...message.signIn, stopped: true } });
+    else if (message.card?.teamSetupRequest && !message.card.answered && !message.card.dismissed && !message.card.expired) store.patchMessage(threadId, message.id, { card: { ...message.card, answered: "unavailable", dismissed: true } });
   }
 }
 
