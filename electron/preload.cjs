@@ -368,6 +368,10 @@ const bridge = {
     teamRetry: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
     openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
+    // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
+    keepHere: () => ipcRenderer.invoke("one-home:keep"),
+    setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("one-home:keep-set", on === true) : Promise.reject(new Error("Turn the switch to keep this computer's bots here.")),
     onNotice: cb => {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);

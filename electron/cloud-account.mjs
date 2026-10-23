@@ -535,6 +535,15 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       try { await request("moved", { method: "POST", body: { installation }, token: current.token }); return true; }
       catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
     },
+    /** Tells the Admin that this computer, as `installation`, keeps its bots on itself again (POST
+     * /api/cloud/desktop/kept): it no longer counts as moved, so an ended Cloud's things never come home to it. False when
+     * the Admin can't take it yet. */
+    async reportKept({ installation }) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("kept", { method: "POST", body: { installation }, token: current.token }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
+    },
     /** This sign-in's own X research relay access while its plan is paid:
      * `{ url, token }` for the local server (electron/included-x.mjs), or null
      * when there is no sign-in, the Admin says the plan is not active (402) or

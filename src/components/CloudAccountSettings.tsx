@@ -10,6 +10,7 @@ import { useCloudOffer } from "@/lib/use-cloud-offer";
 import type { LocaleKey } from "@/locales";
 import { Card } from "./SettingsPrimitives";
 import { StagingMark } from "./cloud-buy/parts";
+import { CloudKeepHere } from "./CloudKeepHere";
 import { CloudLending } from "./CloudLending";
 import { CloudSetupSteps } from "./CloudSetupSteps";
 import { useCloudSendNotice } from "./CloudSendStrip";
@@ -248,6 +249,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
     return <>
       {cloudHome && teamHome ? <TeamPeopleCard team={teamHome} />
         : plan ? <CloudPlanOnCloud bridge={plan} onConnectPhone={onConnectPhone} /> : <p className="text-[13px] text-ink-secondary">{t("cloudAccount.desktopOnly")}</p>}
+      {plan && !teamHome && <CloudKeepHere bridge={window.ogb?.cloudSendPage} />}
       {cloudHome && <LentComputersCard />}
     </>;
   }
@@ -315,5 +317,6 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
       ? cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: () => { if (team) openTeam(team.id); }, team: { name: team?.name ?? null } })
       : cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: connectHome, lending: bridge.lending, trial: Boolean(account?.trial), waking: account?.waking === true, moving }))}
     {signed && view.kind === "paid" && !onTeamPlan && cloudPhoneCard({ ready: machine?.status === "ready", busy, failed: phoneFailed, onUse: openOnPhone })}
+    <CloudKeepHere bridge={window.ogb?.cloudSendPage} />
   </>;
 }
