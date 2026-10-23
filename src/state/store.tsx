@@ -182,6 +182,7 @@ export interface Group extends Pick<WireGroup, "memberContext" | "queue"> {
   memberIds: string[];
   defaultResponder: GroupDefaultResponder;
   bulletin: string;
+  description?: string;
   unread: boolean;
   lastReadMessageId?: string;
   createdAt: number;
@@ -779,7 +780,7 @@ export type Action =
   | {
       type: "patchGroup";
       groupId: string;
-      patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "defaultResponder" | "pinnedMessageId" | "section">>;
+      patch: Partial<Pick<Group, "name" | "bulletin" | "description" | "memberIds" | "defaultResponder" | "pinnedMessageId" | "section">>;
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "newGroupTask"; groupId: string }

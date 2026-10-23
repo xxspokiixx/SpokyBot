@@ -3978,6 +3978,13 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
     }
     patch.bulletin = body.bulletin;
   }
+  if (body.description !== undefined) {
+    if (typeof body.description !== "string") throw Object.assign(new Error("description must be a string"), { status: 400 });
+    const trimmed = body.description.trim();
+    if (!trimmed) patch.description = undefined;
+    else if (trimmed.length > 120) throw Object.assign(new Error("description must be at most 120 characters"), { status: 400 });
+    else patch.description = trimmed;
+  }
   if (body.unread !== undefined) {
     if (typeof body.unread !== "boolean") throw Object.assign(new Error("unread must be true or false"), { status: 400 });
     patch.unread = body.unread;

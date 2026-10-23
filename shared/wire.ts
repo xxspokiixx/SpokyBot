@@ -863,6 +863,9 @@ export interface WireGroup {
   defaultResponder: GroupDefaultResponder;
   /** The room's shared instructions. */
   bulletin: string;
+  /** Short one-line description shown under the room name; distinct from
+   * the bulletin (long-form instructions) and any member bot's title. */
+  description?: string;
   unread: boolean;
   /** The newest message on screen the last time the person read this
    * conversation. The New divider goes after it. */

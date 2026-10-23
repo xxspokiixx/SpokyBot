@@ -1792,6 +1792,31 @@ describe("harness HTTP API", () => {
     expect(after.body.groups).toHaveLength(before.body.groups.length);
   });
 
+  it("sets and clears a room description through PATCH", async () => {
+    const [first, second] = await Promise.all([api("POST", "/api/bots"), api("POST", "/api/bots")]).then(
+      (created) => created.map((response) => response.body.bot),
+    );
+    const room = (await api("POST", "/api/groups", { name: "Kitchen", memberIds: [first.id, second.id] })).body.group;
+    try {
+      const set = await api("PATCH", `/api/groups/${room.id}`, { description: "  The Family Hub Kitchen  " });
+      expect(set.status).toBe(200);
+      expect(set.body.group.description).toBe("The Family Hub Kitchen");
+
+      const state = (await api("GET", "/api/bots")).body;
+      expect(state.groups.find((group: { id: string }) => group.id === room.id).description).toBe("The Family Hub Kitchen");
+
+      const rejected = await api("PATCH", `/api/groups/${room.id}`, { description: "x".repeat(121) });
+      expect(rejected.status).toBe(400);
+
+      const cleared = await api("PATCH", `/api/groups/${room.id}`, { description: "   " });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.group.description).toBeUndefined();
+    } finally {
+      await api("DELETE", `/api/groups/${room.id}`);
+      for (const bot of [first, second]) await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("adds and removes room members through PATCH", async () => {
     const [first, second, third] = await Promise.all([
       api("POST", "/api/bots"),
