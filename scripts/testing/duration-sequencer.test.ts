@@ -107,6 +107,8 @@ describe("vitest shard balance", () => {
 
   it("logs its split, and annotates a CI run whose weights match no files", async () => {
     vi.stubEnv("GITHUB_ACTIONS", "true");
+    // The Windows and macOS CI shards run this file with OMB_VITEST_E2E=host.
+    vi.stubEnv("OMB_VITEST_E2E", "");
     const lines: string[] = [];
     await new DurationSequencer(context(2, 4, (line) => lines.push(line))).shard(specs(FILES));
     expect(lines).toEqual([expect.stringMatching(new RegExp(`^duration-sequencer: shard 2/4 runs \\d+ of ${FILES.length} files, ~\\d+s recorded; ${Object.keys(WEIGHTS).length} of ${Object.keys(WEIGHTS).length} weighted files found$`))]);

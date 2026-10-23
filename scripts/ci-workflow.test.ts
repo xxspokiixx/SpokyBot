@@ -86,6 +86,8 @@ describe("CI concurrency", () => {
       expect(shards.map((entry) => entry.shard)).toEqual(Array.from({ length: shards[0]!.shards }, (_, i) => i + 1));
       expect(new Set(shards.map((entry) => entry.e2e))).toEqual(new Set([os === "ubuntu-latest" ? "all" : "host"]));
     }
+    const units = (workflow.jobs.vitest.steps as { name?: string; "timeout-minutes"?: number }[]).find((step) => step.name === "Broker and Electron unit tests")!;
+    expect(units["timeout-minutes"]).toBe(5);
     // Browser jobs keep one job per platform.
     expect(workflow.jobs["browser-identity"].strategy.matrix.os).toBe("${{ fromJSON(needs.static.outputs.vitest_os) }}");
   });
