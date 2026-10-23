@@ -877,7 +877,7 @@ function handle(msg: any) {
         const tool = (update: Record<string, unknown>) =>
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { toolCallId: "tc-slow", ...update } } });
         // ACP's default status is pending: this tool_call carries none.
-        tool({ sessionUpdate: "tool_call", title: "sleep", rawInput: { command: "sleep 45 && echo done" } });
+        tool({ sessionUpdate: "tool_call", title: "sleep", kind: "execute", rawInput: { command: "sleep 45 && echo done" } });
         tool({ sessionUpdate: "tool_call_update", status: "in_progress" });
         const finish = () => tool({ sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } });
         if (mode === "stall-after-tool") {

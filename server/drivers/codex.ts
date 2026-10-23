@@ -58,7 +58,7 @@ import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-app
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
-import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts";
+import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts"; import { codexPatchProgress } from "./tool-progress.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -1252,10 +1252,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "item/reasoning/textDelta":
           case "item/reasoning/summaryTextDelta": {
-            const delta = typeof p.delta === "string" ? p.delta : "";
-            if (delta) emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+            if (typeof p.delta === "string" && p.delta) emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta: p.delta });
             break;
           }
+          case "item/fileChange/patchUpdated": { const draft = codexPatchProgress(p); if (draft) emit({ ...base(threadId, turnId), ...draft }); break; }
           case "item/started": {
             const item = p.item ?? {};
             const runs = item.type === "mcpToolCall" && item.tool === CALL_TOOL && typeof item.server === "string" && directoryMounts.has(item.server)

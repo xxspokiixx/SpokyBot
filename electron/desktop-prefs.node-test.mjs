@@ -262,7 +262,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /for \(const port of DESKTOP_PORTS\)/, "main tries the ports this module names, in order");
   assert.deepEqual([...DESKTOP_PORTS], [8799, 18799, 28799]);
-  const start = main.indexOf("  registerDesktopPrefs({"), end = main.indexOf("\n", main.indexOf("page:", start));
+  const start = main.indexOf("  updatesConsent = registerDesktopPrefs({"), end = main.indexOf("\n", main.indexOf("page:", start));
   assert.ok(start >= 0 && end > start, "main.mjs registers the desktop prefs");
   let options = null;
   const localFrame = { url: `${LOCAL}/` }, serverFrame = { url: `${VPS}/` };
@@ -273,7 +273,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const windows = [window("team"), window("home"), window("closed")];
   let switched = async id => { calls.push(["switch", id]); }, loads = true;
   const context = vm.createContext({
-    registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {},
+    registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
     path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
     navigateMainWindow: async url => { calls.push(["navigate", url]); return loads; },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,

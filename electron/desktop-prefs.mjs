@@ -1,8 +1,10 @@
 // What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices it
-// has shown, its usage-analytics switch and the app's language.
+// has shown, its usage-analytics switch, the app's language and its answer to the product-updates email question.
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
 import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
+import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent } from "./updates-consent.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
@@ -12,6 +14,7 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** A locale code such as "de" or "pt-br", or "" for following the system. */
 const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;
 const isLanguage = value => typeof value === "string" && value.length <= 24 && LANGUAGE.test(value);
+const INSTALL_ID = /^[A-Za-z0-9_-]{22,64}$/;
 
 /** Security: a write that fails (a full disk, a kill mid-write) leaves the last whole record, analytics opt-out included.
  * A file another tool saved with a byte-order mark (Notepad on Windows) still reads. */
@@ -38,8 +41,11 @@ function parse(raw) {
     const day = record.shown && typeof record.shown === "object" ? record.shown[id] : undefined;
     return typeof day === "string" && DAY.test(day) ? [[id, day]] : [];
   }));
+  const updatesConsent = parseUpdatesConsent(record.updatesConsent);
   return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}),
-    ...(isLanguage(record.language) ? { language: record.language } : {}) };
+    ...(isLanguage(record.language) ? { language: record.language } : {}),
+    ...(typeof record.installId === "string" && INSTALL_ID.test(record.installId) ? { installId: record.installId } : {}),
+    ...(updatesConsent ? { updatesConsent } : {}) };
 }
 
 /** A record that cannot be written is still kept for this launch. */
@@ -75,16 +81,33 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
       if (current().language !== language) save({ ...current(), language });
       return true;
     },
+    /** Random, made on first use: the only name the Admin's no-account consent endpoint counts this computer by. */
+    installId() {
+      const saved = current();
+      if (saved.installId) return saved.installId;
+      const installId = randomBytes(24).toString("base64url");
+      save({ ...saved, installId });
+      return installId;
+    },
+    updatesConsent: () => current().updatesConsent ?? null,
+    setUpdatesConsent(value) {
+      const updatesConsent = parseUpdatesConsent(value);
+      if (!updatesConsent) return false;
+      save({ ...current(), updatesConsent });
+      return true;
+    },
   };
 }
 
 /**
+ * `cloudAccount()`: the MausBot Cloud sign-in client, for the product-updates question (updates-consent.mjs), which is
+ * asked where Cloud offers are (`cloudOffered`); without it nothing is asked and null is returned.
  * `page(event)`: "local" for this computer's page, "cloud" for My Cloud's own page as main verifies it, "server" for
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
  * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them.
  */
-export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, localConfig = () => null, languageChanged = () => {}, now = Date.now }) {
+export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, now = Date.now }) {
   let prefs = null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
   const from = (channel, pages, handler) => (event, ...args) => {
@@ -125,4 +148,10 @@ export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered,
     }
     return store().language() === language;
   });
+  if (!cloudAccount) return null;
+  const consent = createUpdatesConsent({ prefs: { installId: () => store().installId(), updatesConsent: () => store().updatesConsent(), setUpdatesConsent: value => store().setUpdatesConsent(value) },
+    account: cloudAccount, available: cloudOffered, now });
+  registerUpdatesConsent({ ipcMain, page, consent });
+  void cloudOffered().then(offered => offered && consent.sync()).catch(() => {});
+  return consent;
 }

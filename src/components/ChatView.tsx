@@ -53,7 +53,7 @@ import { normalizeState, stateForBot } from "@/lib/mascot";
 import { peerLine, peerRequest, type PeerLine } from "@/lib/peer-message";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { lastNonReceipt } from "@/lib/receipts";
-import { liveActivityPhrases } from "@/lib/live-activity";
+import { turnNowPhrases } from "@/lib/live-activity"; import { useTurnLive } from "@/state/turn-status";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
@@ -1012,13 +1012,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   }, [lastTypedMessage]);
 
   const lastMessage = lastNonReceipt(messages);
-  const toolInFlight = lastMessage?.kind === "activity" && lastMessage.tool?.ok === undefined;
-  const activity = liveActivityPhrases(lastMessage);
-  const waiting = Boolean(
-    bot.busy &&
-      bot.activity !== "waiting-on-you" &&
-      showWorkingDots(bot.busy, lastMessage),
-  );
+  const live = useTurnLive(bot.threadId), activity = turnNowPhrases(live.status, lastMessage);
+  const toolInFlight = (lastMessage?.kind === "activity" && lastMessage.tool?.ok === undefined) || Boolean(live.status && live.status.activity !== "thinking" && live.status.activity !== "reply");
+  // The mascot and its status line stay for the whole turn; only its end hides them, never a timer.
+  const waiting = Boolean(bot.busy && bot.activity !== "waiting-on-you" && showWorkingDots(bot.busy, lastMessage, undefined, live.ended));
   const wasWaiting = useRef(false);
   const [popping, setPopping] = useState<string | null>(null);
   const poppingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1032,11 +1029,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     setPopping(null);
   }, [bot.id]);
   useEffect(() => {
-    if (waiting) wasWaiting.current = true;
+    wasWaiting.current = waiting;
   }, [waiting]);
   useLayoutEffect(() => {
     if (lastMessage?.role !== "bot" || lastMessage.kind !== "text" || !wasWaiting.current) return;
-    wasWaiting.current = false;
     const messageId = lastMessage.id;
     if (poppingTimer.current) clearTimeout(poppingTimer.current);
     setPopping(messageId);
@@ -1299,8 +1295,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               />
             }
             visible={presenceVisible}
-            phrases={activity.phrases}
-            phase={activity.phase}
+            phrases={activity?.phrases}
+            phase={activity?.phase}
+            size={activity?.size}
             seed={`${bot.id}:${bot.threadId ?? ""}:${busySince ?? ""}`}
             answering={popping !== null}
             since={busySince}
