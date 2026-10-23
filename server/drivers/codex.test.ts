@@ -2546,36 +2546,28 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     }
   });
 
-  it("times out an ask with empty answers and a timeout-sourced resolve", async () => {
-    // A completed turn starts the driver's child-reap loop, whose 25ms poll would freeze on the fake clock.
-    process.env.FAKE_CODEX_ASK_HOLD = "1";
+  it("keeps a question open for days and still delivers the person's answer", async () => {
     await create({ mode: "multi-question" });
-    const dump = join(scratch, "question-timeout.json");
+    const dump = join(scratch, "question-no-timeout.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let opened: RuntimeEvent;
     try {
-      await instance.adapter.sendTurn({ threadId: "t-question-timeout", text: "ask me" });
-      const opened = await recorder.until((e) => e.type === "request.opened");
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-
-      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
+      await instance.adapter.sendTurn({ threadId: "t-question-no-timeout", text: "ask me" });
+      opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+      expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
     } finally {
       vi.useRealTimers();
     }
 
-    // The held fake records the answers once real time lets the child parse the reply.
-    let decision: unknown = null;
-    for (let i = 0; i < 80 && (decision === null || decision === undefined); i++) {
-      try {
-        decision = JSON.parse(readFileSync(dump, "utf8")).decision;
-      } catch {}
-      if (decision === null || decision === undefined) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    }
-    expect(decision).toEqual({ answers: {} });
+    await instance.adapter.respondToRequest("t-question-no-timeout", opened.requestId!, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Ship today?\nA: Yes",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
   });
 
   it("answers Codex 0.149 MCP elicitation with the MCP result shape", async () => {
