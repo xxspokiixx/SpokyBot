@@ -201,6 +201,48 @@ test("explicit terminal grant executes a harmless command and cancellation stops
   await assert.rejects(pending, /revoked|turn ended/);
 });
 
+/** A command that starts a process which outlives it, outside its process tree, holding its output; and that process's pid. */
+async function backgroundHolder(dir, then) {
+  const script = path.join(dir, "holder.mjs");
+  const pidFile = path.join(dir, "holder.pid");
+  await writeFile(script, `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";
+const held = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { detached: true, stdio: "inherit" });
+writeFileSync(${JSON.stringify(pidFile)}, String(held.pid)); held.unref();`);
+  const command = process.platform === "win32"
+    ? `& "${process.execPath}" "${script}"; ${then.win32}`
+    : `"${process.execPath}" "${script}" && ${then.posix}`;
+  const holderPid = async () => Number((await readFile(pidFile, "utf8").catch(() => "")).trim()) || null;
+  return { command, holderPid, release: async () => { const pid = await holderPid(); if (pid) try { process.kill(pid); } catch {} } };
+}
+
+test("a command's result comes back when it ends, though a process it left running still holds its output", { timeout: 20_000 }, async t => {
+  const { dir } = await fixture(t);
+  const holder = await backgroundHolder(dir, { win32: "Write-Output fixture-done", posix: "echo fixture-done" });
+  t.after(holder.release);
+  const started = Date.now();
+  const result = payload(await sharedCommand(holder.command, dir, new AbortController().signal));
+  assert.equal(result.exitCode, 0);
+  assert.match(result.output, /fixture-done/);
+  assert.ok(Date.now() - started < 15_000, `took ${Date.now() - started} ms`);
+  assert.ok(await holder.holderPid(), "the background process started");
+});
+
+test("a stopped command ends promptly, though a process it left running still holds its output", { timeout: 20_000 }, async t => {
+  const { dir } = await fixture(t);
+  const holder = await backgroundHolder(dir, { win32: "Start-Sleep -Seconds 20", posix: "sleep 20" });
+  t.after(holder.release);
+  const stop = new AbortController();
+  const pending = sharedCommand(holder.command, dir, stop.signal);
+  pending.catch(() => {});
+  const startedBy = Date.now() + 15_000;
+  while (!(await holder.holderPid()) && Date.now() < startedBy) await delay(50);
+  assert.ok(await holder.holderPid(), "the background process started");
+  const stopped = Date.now();
+  stop.abort();
+  await assert.rejects(pending, /revoked|turn ended/);
+  assert.ok(Date.now() - stopped < 8_000, `took ${Date.now() - stopped} ms after the stop`);
+});
+
 test("Windows terminal preserves command syntax, pipeline output and exit status", { skip: process.platform !== "win32" }, async t => {
   const { dir } = await fixture(t);
   const run = async command => payload(await sharedCommand(command, dir, new AbortController().signal));
