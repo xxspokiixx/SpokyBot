@@ -220,7 +220,7 @@ type BotRecord = {
     await expect.poll(snapshot).toContain("A department can have only one Chief of Staff");
     expect((await savedBot(cleo.id)).section).toBe("Research");
     expect((await savedBot(dana.id)).section).toBe("Delivery");
-    await click("Close team dialog");
+    await click("Close department dialog");
     await expect.poll(focused).toBe("Manage Engineering department");
     await evaluate("document.querySelectorAll('[data-team-key] details').forEach(details => { details.open = false; }); true");
 
