@@ -6,7 +6,7 @@
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt | hang
-//     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed)
+//     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
 //     | no-auth | auth-required | permission | question
 //     | ask-question (a mid-prompt vendor question: FAKE_ACP_ASK_METHOD, default cursor/ask_question, params
 //       FAKE_ACP_ASK_PARAMS; the client's reply is written to FAKE_ACP_ASK_ANSWER. FAKE_ACP_ASK_TIMING=with-result
@@ -901,6 +901,9 @@ function handle(msg: any) {
         update({ sessionUpdate: "tool_call", status: "failed", title: "screenshot",
           content: [{ type: "image", data: ONE_PIXEL_PNG, mimeType: "image/png" }] });
         update({ sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "built" } });
+        // ACP v1 lets an update name a tool call that already finished.
+        update({ sessionUpdate: "tool_call_update", toolCallId: "tc-done", status: "completed",
+          content: [{ type: "image", data: ONE_PIXEL_PNG, mimeType: "image/png" }] });
         update({ sessionUpdate: "agent_message_chunk", content: { text: "done" } });
         complete();
         return;

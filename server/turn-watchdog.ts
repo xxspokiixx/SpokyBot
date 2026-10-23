@@ -94,7 +94,6 @@ export class TurnWatchdog {
     const at = this.now();
     turn.lastEventAt = at;
     if ((event.type !== "item.started" && event.type !== "item.completed") || event.itemType !== "tool" || !event.itemId) return;
-    // A repeated start keeps the first one's deadline.
     if (event.type === "item.completed") turn.runningTools.delete(event.itemId);
     else if (!turn.runningTools.has(event.itemId)) turn.runningTools.set(event.itemId, { startedAt: at, parkedBefore: parkedTotal(turn, at) });
   }

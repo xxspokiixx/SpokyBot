@@ -346,6 +346,16 @@ describe("ACP turns (fake CLI)", () => {
     expect(limits).toEqual([{ kind: "silence", ms: 10 }]);
   });
 
+  it("completes a finished tool call once, though a later terminal update names it again", async () => {
+    await create(GrokAgentDriver, "finished-tools");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-finished-twice", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const ends = recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "tool" && e.itemId === "tc-done");
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).toMatchObject({ ok: true, output: expect.stringContaining("ok") });
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_image")).toHaveLength(1);
+  });
+
   it("normalizes a full turn into the canonical event sequence", async () => {
     await create();
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "grok-4.5" });
