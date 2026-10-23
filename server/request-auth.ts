@@ -307,6 +307,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+\/title$/ },
   { methods: ["PATCH"], path: /^\/api\/bots\/[\w-]+\/profile$/ },
   { methods: ["PATCH"], path: /^\/api\/bots\/[\w-]+$/ }, // display fields only: see clientBotPatchViolation
+  { methods: ["PUT"], path: /^\/api\/bots\/order$/ }, // the fleet's display order; the handler accepts only bots the caller sees
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/respond$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/respond$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/undo$/ }, // whoever may answer the card: see the handler
@@ -363,6 +364,11 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET", "PUT"], path: /^\/api\/me$/ },
   // a Team Cloud's member moving a bot of their own in: it answers with a sign-in for that one bot
   { methods: ["POST"], path: /^\/api\/team-move-in$/ },
+  // a Team Cloud member's own connections: only the session's own person, never a value back
+  { methods: ["GET"], path: /^\/api\/team\/my-connections$/ },
+  { methods: ["POST"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}\/connect|mcp\/[a-z][a-z0-9_-]{0,31}\/sign-in)$/ },
+  { methods: ["PUT"], path: /^\/api\/team\/my-connections\/mcp\/[a-z][a-z0-9_-]{0,31}\/key$/ },
+  { methods: ["DELETE"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}|mcp\/[a-z][a-z0-9_-]{0,31})$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {

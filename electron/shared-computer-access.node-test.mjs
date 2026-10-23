@@ -195,10 +195,18 @@ test("explicit terminal grant executes a harmless command and cancellation stops
   const { dir } = await fixture(t);
   const result = payload(await sharedCommand("echo fixture-terminal", dir, new AbortController().signal));
   assert.equal(result.exitCode, 0); assert.match(result.output, /fixture-terminal/);
+  // Stopped once it runs: on Windows a stop while PowerShell is still creating its inner shell can miss that shell,
+  // which taskkill /T cannot see yet, and it would keep this folder busy for its 20 seconds.
+  const started = path.join(dir, "started");
   const stop = new AbortController();
-  const command = process.platform === "win32" ? "Start-Sleep -Seconds 20" : "sleep 20";
+  const command = process.platform === "win32"
+    ? `[IO.File]::WriteAllText('${started.replaceAll("'", "''")}', 'x'); Start-Sleep -Seconds 20`
+    : `echo x > '${started}'; sleep 20`;
   const pending = sharedCommand(command, dir, stop.signal);
-  setTimeout(() => stop.abort(), 80);
+  pending.catch(() => {});
+  const startedBy = Date.now() + 15_000;
+  while (!(await readFile(started, "utf8").catch(() => "")) && Date.now() < startedBy) await delay(50);
+  stop.abort();
   await assert.rejects(pending, /revoked|turn ended/);
 });
 

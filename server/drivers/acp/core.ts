@@ -639,6 +639,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let notices = 0;
         let probing = false;
         let state: QuietState | null = null;
+        const promptStartedAt = Date.now();
         const tick = async () => {
           if (probing || current.state.settled || session.current !== current) return;
           const now = Date.now();
@@ -648,7 +649,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (signal?.kind === "context") context = { tokens: signal.tokens, threshold: signal.threshold };
             else if (signal) logged = { signal, at: now };
           }
-          const quietMs = now - session.acp.lastInboundAt;
+          const quietMs = now - Math.max(promptStartedAt, session.acp.lastInboundAt);
           if (quietMs < noticeAfterMs || current.asks.size || current.runningTools.size) {
             if (quietMs < noticeAfterMs) logged = null;
             previous = null;
@@ -1487,9 +1488,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 const wanted = cliTurn.model;
                 const offered = offeredModels(session.sessionConfigResult, configId);
                 if (support.sessionModelEnv && !session.launchModel && offered.length) accountModels = new Set(offered);
-                // A pooled process missing a catalog model predates the catalog: fail and respawn, never run another.
+                // A pooled process missing a catalog model predates the catalog: fail and respawn, never run another (the catalog holds picker ids; `wanted` may be the resolved wire id, so check both).
                 staleProcess = Boolean(support.fallbackModel && wanted && !launchedThisTurn && offered.length
-                  && !offered.includes(wanted) && models.options.some((option) => option.id === wanted));
+                  && !offered.includes(wanted) && models.options.some((option) => option.id === wanted || option.id === turn.model));
                 if (support.fallbackModel && offered.length && !skipSubscriptionAuthForLocalInject(turn.model)
                     && !staleProcess && (!wanted || !offered.includes(wanted))) {
                   const fallback = support.fallbackModel(session.sessionConfigResult, models.default);

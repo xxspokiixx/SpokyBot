@@ -9,7 +9,7 @@ import type { LocaleKey } from "@/locales";
 import { SECTION_PROVIDER, type KeyResult, type KeyVia } from "@/lib/analytics-allowlist";
 import { keyRemoved, keySaved, keySaveFailure, keyTestResult, savedKeyResult } from "@/lib/product-events";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg" | "deepseek";
 export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg";
 
 const SECTIONS: Record<
@@ -43,6 +43,7 @@ const SECTIONS: Record<
   cerebras: { body: (v) => ({ cerebras: { key: v } }), flag: (c) => c.cerebras?.configured ?? false },
   groq: { body: (v) => ({ groq: { key: v } }), flag: (c) => c.groq?.configured ?? false },
   meta: { body: (v) => ({ meta: { key: v } }), flag: (c) => c.meta?.configured ?? false },
+  deepseek: { body: (v) => ({ deepseek: { key: v } }), flag: (c) => c.deepseek?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
   treg: { body: (v) => ({ treg: { key: v } }), flag: (c) => c.treg?.configured ?? false },
 };
@@ -174,6 +175,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.meta.desc",
     href: "https://dev.meta.ai/docs/authentication",
     linkLabelKey: "keys.meta.link",
+    optional: true,
+  },
+  deepseek: {
+    labelKey: "keys.deepseek.label",
+    placeholder: "sk-…",
+    descriptionKey: "keys.deepseek.desc",
+    href: "https://platform.deepseek.com/api_keys",
+    linkLabelKey: "keys.deepseek.link",
     optional: true,
   },
   xai: {

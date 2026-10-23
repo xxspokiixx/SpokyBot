@@ -84,7 +84,7 @@ import { CallRecordRow } from "./CallRecordRow";
 import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMessageAttachments } from "./AttachmentGallery";
 import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
-import { RenameTitle } from "./RenameTitle";
+import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole } from "./BotRole";
 import { BotActivityPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
 import { ChatHeaderMenu } from "./ChatMoreMenu"; import { TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine";
@@ -1215,7 +1215,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               <ChevronRight size={14} aria-hidden="true" className="-ml-2.5 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
             </button>
           )}
-          <span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{privateChat && <TeamPrivateHeader />}{sharedChat && team && <TeamSharedHeader team={team} />}
+          <ChatHeadRole bot={bot} /><span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{privateChat && <TeamPrivateHeader />}{sharedChat && team && <TeamSharedHeader team={team} />}
           {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
           {awayFromMainThread(profile, showThreads) && (
             <button

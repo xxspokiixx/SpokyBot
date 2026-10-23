@@ -30,6 +30,7 @@ import {
   Search,
   Share2,
   SlidersHorizontal,
+  TextQuote,
   Trash2,
   Users,
   X,
@@ -40,7 +41,7 @@ import { liveActivityLabel } from "@/lib/live-activity";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar } from "./Avatar";
-import { BotModelBadge, BotModelMark } from "./BotModelBadge";
+import { BotModelBadge, BotModelMark } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
@@ -238,7 +239,7 @@ export function GroupListItem({
           {(expanded || (quiet && !groupStatus)) && group.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>
         {!expanded && (!quiet || groupStatus) && <div className="flex items-center justify-between gap-2">
-          <span className={cn("truncate text-ink-secondary", simpleRow ? "text-[13px] leading-[18px]" : "text-[11px]")}>{groupPreview(group, state.bots, state.instances, advanced)}</span>
+          <span className={cn("truncate text-ink-secondary", simpleRow ? "text-[13px] leading-[18px]" : "text-[11px]")}>{group.description || groupPreview(group, state.bots, state.instances, advanced)}</span>
           {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>}
       </div>
@@ -326,12 +327,16 @@ function RoomContextMenu({
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const group = shown ? state.groups.find((g) => g.id === shown.groupId) : undefined;
   const [renaming, setRenaming] = useState(false);
+  const [describing, setDescribing] = useState(false);
   const [draft, setDraft] = useState(group?.name ?? "");
+  const [descriptionDraft, setDescriptionDraft] = useState(group?.description ?? "");
 
   useEffect(() => {
     if (!menu) return;
     setDraft(state.groups.find((g) => g.id === menu.groupId)?.name ?? "");
+    setDescriptionDraft(state.groups.find((g) => g.id === menu.groupId)?.description ?? "");
     setRenaming(false);
+    setDescribing(false);
   }, [menu]);
   useEffect(() => {
     if (!menu) return;
@@ -356,6 +361,13 @@ function RoomContextMenu({
     if (name) dispatch({ type: "patchGroup", groupId: group.id, patch: { name } });
     onClose();
   };
+  const saveDescription = () => {
+    const trimmed = descriptionDraft.trim();
+    if (trimmed !== (group.description ?? "")) {
+      dispatch({ type: "patchGroup", groupId: group.id, patch: { description: trimmed } });
+    }
+    onClose();
+  };
   const top = Math.min(shown.y, window.innerHeight - 204);
   const left = Math.min(shown.x, window.innerWidth - 240);
   return createPortal(
@@ -365,7 +377,48 @@ function RoomContextMenu({
       style={{ top, left }}
       className={cn("fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
-      {!remoteClient && (renaming ? (
+      {!remoteClient && describing ? (
+        <div className="flex items-center gap-1 px-2 py-1">
+          <input
+            autoFocus
+            value={descriptionDraft}
+            maxLength={120}
+            placeholder={t("sidebar.room.descriptionPlaceholder")}
+            aria-label={t("sidebar.room.descriptionAria", { name: group.name })}
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setDescriptionDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                saveDescription();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                onClose();
+              }
+            }}
+            className="min-w-0 flex-1 rounded-lg bg-raised px-2 py-1.5 text-[14px] text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <button
+            type="button"
+            onClick={saveDescription}
+            aria-label={t("sidebar.room.saveDescription")}
+            title={t("common.save")}
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            <Check size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("common.cancel")}
+            title={t("common.cancel")}
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      ) : !remoteClient && (renaming ? (
         <div className="flex items-center gap-1 px-2 py-1">
           <input
             autoFocus
@@ -417,6 +470,18 @@ function RoomContextMenu({
           {isBotChat ? t("sidebar.room.renameChat") : t("sidebar.room.renameChannel")}
         </button>
       ))}
+      {!remoteClient && !renaming && !isBotChat && (
+        <button
+          onClick={() => {
+            setDescriptionDraft(group.description ?? "");
+            setDescribing(true);
+          }}
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+        >
+          <TextQuote size={16} className="text-ink-secondary" />
+          {t("sidebar.room.setDescription")}
+        </button>
+      )}
       {!remoteClient && !isBotChat && (
         <button
           onClick={() => {
@@ -1237,12 +1302,12 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
                 <title>{t("sidebar.bot.chiefOfStaff")}</title>
               </Crown>
             )}
-            {title && !renaming && <span className="sr-only">{`, ${title}`}</span>}
             {onLiveCall && !iconOnly && !renaming && (
               <Phone className="size-3 shrink-0 text-success" role="img" aria-label={t("call.live.badge")} data-testid="live-call-badge">
                 <title>{t("call.live.badge")}</title>
               </Phone>
             )}
+            {title && !renaming && <SidebarBotRole role={title} />}
           </span>
           {selected && last && !renaming && !expanded && (
             <span className="shrink-0 text-[12px] tabular-nums text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0">

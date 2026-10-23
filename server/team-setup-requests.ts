@@ -13,7 +13,7 @@ import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupRe
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
-const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Section", cwd: "Working folder" };
+const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
 const fieldsSchema = z.object({
@@ -243,11 +243,11 @@ export class TeamSetupRequestService {
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
     const lines = [`Why: ${request.reason}`];
-    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared team computers remain. Active work or an unavailable provider can block deletion safely.");
+    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared department computers remain. Active work or an unavailable provider can block deletion safely.");
     if (request.newTeams.length) {
-      lines.push(`Create teams: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
+      lines.push(`Create departments: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
       if (!request.operations.some(op => op.botId === chief.id && op.fields.chiefOfStaff === false)) {
-        lines.push(`Authorize @${chief.name} to coordinate and propose setup changes in these new teams.`);
+        lines.push(`Authorize @${chief.name} to coordinate and propose setup changes in these new departments.`);
       }
     }
     for (const operation of request.operations) {
@@ -255,7 +255,7 @@ export class TeamSetupRequestService {
       lines.push(`\n${operation.action === "create" ? "Create" : "Update"} @${operation.fields.name ?? current?.name} (${operation.action === "create" ? "new bot" : operation.botId})`);
       for (const [key, value] of Object.entries(operation.fields)) {
         if (key === "chiefOfStaff") {
-          lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this team." : " Additional managed-team access is removed."}`);
+          lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this department." : " Access to additional departments is removed."}`);
           continue;
         }
         if (key === "soul") {
