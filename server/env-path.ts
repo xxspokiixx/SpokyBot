@@ -99,6 +99,7 @@ export function resetPathCache(): void {
 
 export function augmentedPath(): string {
   if (cached === null) {
+    const fallback = fallbackDirs.filter((d) => existsSync(d));
     cached = mergePaths([
       ...registeredDirs.filter((d) => existsSync(d)),
       ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
@@ -106,8 +107,7 @@ export function augmentedPath(): string {
       // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
       ...(loginShellPath ? loginShellPath.split(delimiter) : []),
       ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
-      ...fallbackDirs.filter((d) => existsSync(d)),
-    ]);
+    ].filter((d) => !fallback.includes(d)).concat(fallback));
   }
   if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
     probed = true;

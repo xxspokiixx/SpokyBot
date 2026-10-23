@@ -572,6 +572,26 @@ describe("registerFallbackPathDir", () => {
     resetPathCacheForTests();
   });
 
+  posixIt("keeps an app-installed directory last even when the inherited PATH already lists it first", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-fallback-path-"));
+    originalPath = process.env.PATH;
+    try {
+      const own = join(dir, "own-bin");
+      const fallback = join(dir, "app-bin");
+      mkdirSync(own);
+      mkdirSync(fallback);
+      process.env.PATH = [fallback, own].join(delimiter);
+      resetPathCacheForTests();
+      registerFallbackPathDir(fallback);
+      const path = augmentedPath().split(delimiter);
+      expect(path.at(-1)).toBe(fallback);
+      expect(path.filter((entry) => entry === fallback)).toHaveLength(1);
+      expect(path.indexOf(own)).toBeLessThan(path.indexOf(fallback));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   posixIt("puts an app-installed directory after PATH and the vendors' own folders, so a person's copy wins", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-fallback-path-"));
     originalPath = process.env.PATH;
