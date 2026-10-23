@@ -373,3 +373,47 @@ describe("the stall handler", () => {
     expect(context.stoppedTurnText("t1", "turn-1", undefined, "interrupted")).toMatch(/^Turn interrupted — the Company connection changed\. Before it stopped/);
   });
 });
+
+// The harness's Stop during provider setup (index.ts), run against a real watchdog without starting a server.
+describe("a Stop that wins against a provider dispatch", () => {
+  function load(watchdog: TurnWatchdog) {
+    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    const section = (from: string, to: string) => {
+      const start = source.indexOf(from), end = source.indexOf(to, start);
+      if (start < 0 || end <= start) throw new Error(`${from.trim()} moved`);
+      return source.slice(start, end);
+    };
+    const code = ts.transpileModule(section("\nfunction markCancelledProviderHandshake", "\nfunction clearCancelledProviderHandshake") +
+      section("\nfunction cancelDirectTurnDispatch", "\nconst {") + "\nglobalThis.cancelDirectTurnDispatch = cancelDirectTurnDispatch;",
+    { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+    const quarantined: string[] = [];
+    const context = vm.createContext({
+      watchdog,
+      pendingCancelledProviderHandshakes: { mark: (threadId: string) => quarantined.push(threadId) },
+      store: { bot: () => undefined },
+      directTurnDispatchClaims: new Map([["t1", { id: "gen-1", botId: "bot1", threadId: "t1", phase: "dispatching" }]]),
+      compactionControllers: new Map(), directTurnGenerationByThread: new Map([["t1", "gen-1"]]), clearTurnDigestState() {},
+    });
+    vm.runInContext(code, context, { filename: "index.ts (dispatch cancel fixture)" });
+    return { cancel: (threadId: string) => context.cancelDirectTurnDispatch("bot1", threadId), quarantined };
+  }
+
+  it("gives the stopped turn the silence limit, since its quarantined tool can never report its end", () => {
+    const r = rig();
+    const { cancel, quarantined } = load(r.dog);
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(toolStarted("tool-1"));
+    r.tick(STALL * 2);
+    cancel("t1");
+    expect(quarantined).toEqual(["t1"]);
+    r.tick(STALL - 1);
+    r.dog.sweep();
+    expect(r.stalls).toHaveLength(0);
+    r.tick(2);
+    r.dog.sweep();
+    expect(r.limits).toEqual([{ kind: "silence", ms: STALL }]);
+    // The stall handler cancels the dispatch after the sweep dropped the turn: that must not watch it again.
+    r.dog.eventsDiscarded("t1");
+    expect(r.dog.watching("t1")).toBe(false);
+  });
+});

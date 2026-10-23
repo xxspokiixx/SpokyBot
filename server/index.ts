@@ -2528,6 +2528,7 @@ function purgeTurnAttachmentsForThread(threadId: string): void {
 
 function markCancelledProviderHandshake(threadId: string, ownerId: string): void {
   pendingCancelledProviderHandshakes.mark(threadId, ownerId);
+  watchdog.eventsDiscarded(threadId);
 }
 
 function clearCancelledProviderHandshake(threadId: string, ownerId: string): void {

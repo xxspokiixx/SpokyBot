@@ -125,6 +125,12 @@ export class TurnWatchdog {
     this.turns.delete(threadId);
   }
 
+  /** A Stop that discards the turn's later events leaves no way for a tool or a wait to report its end: watch the teardown as a fresh silent turn. */
+  eventsDiscarded(threadId: string): void {
+    const turn = this.turns.get(threadId);
+    if (turn) this.watch(threadId, turn.botId);
+  }
+
   watching(threadId: string): boolean {
     return this.turns.has(threadId);
   }
