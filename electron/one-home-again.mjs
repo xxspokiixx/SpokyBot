@@ -1,7 +1,8 @@
 // Coming home when My Cloud ends. While the Admin still holds it, the Admin starts it for its owner's export only (it
 // boots frozen: server/move-freeze.ts); this computer takes My Cloud's own backup, and restores it with its own upload
 // and restore, which keep this computer's credentials and make a safety copy first. A restore leaves automations off, so
-// what was on at My Cloud is read first, for one-home.mjs to switch on here after.
+// what was on at My Cloud is read first, for one-home.mjs to switch on here after. The same, from a My Cloud that goes on
+// (`exportGrant` then gives an owner's code for it), brings this computer's bots home when the person keeps them here.
 import { randomBytes } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
@@ -52,18 +53,26 @@ export function createHomeAgain({ exportGrant, open, local, tempRoot }) {
     }
   }
 
+  /** My Cloud's backup, taken and staged here unless it already is; `switches`: what was on there when it was taken. */
+  async function stage() {
+    if (!staged) {
+      const asked = await exportGrant();
+      if ("starting" in asked) return { later: STARTING_MS };
+      if ("notHeld" in asked) return { later: NOT_HELD_MS };
+      if ("deleted" in asked) return { deleted: true };
+      staged = await take(asked.grant);
+    }
+    return { staged: true, switches: { ...staged.switches } };
+  }
+
   return {
+    stage,
     /** `restored`: this computer's restore of My Cloud's backup, ready once the app opens again; `switches`: what was on
      * there. `later`: My Cloud is still starting or not held yet, or this computer's bots are busy. `deleted`: there is
      * nothing left to bring. */
     async bring() {
-      if (!staged) {
-        const asked = await exportGrant();
-        if ("starting" in asked) return { later: STARTING_MS };
-        if ("notHeld" in asked) return { later: NOT_HELD_MS };
-        if ("deleted" in asked) return { deleted: true };
-        staged = await take(asked.grant);
-      }
+      const ready = await stage();
+      if (!("staged" in ready)) return ready;
       const restored = await local.json("POST", "/api/workspace-backup/restore", { id: staged.id, confirmation: "REPLACE" });
       if (restored.status === 409) return { later: BUSY_MS };
       const { id, switches } = staged;

@@ -63,6 +63,7 @@ import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { useChatErrorClear } from "./chat-error";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 import { trimRoutineRuns } from "./routine-runs";
+import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } from "./queue-receipts";
 
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
@@ -129,7 +130,7 @@ export interface SecretRequestCardData {
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "routedBy" | "quickModel" | "automation" | "publishedPage"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "sender"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -663,70 +664,6 @@ export interface AppState {
   transcriptGeneration: Record<string, number>;
 }
 
-const MAX_CONSUMED_QUEUE_IDS = 64;
-
-function rememberConsumedQueueId(
-  consumed: AppState["consumedQueueIds"],
-  queueId: string,
-): AppState["consumedQueueIds"] {
-  const next = { ...consumed, [queueId]: true as const };
-  const overflow = Object.keys(next).length - MAX_CONSUMED_QUEUE_IDS;
-  if (overflow > 0) {
-    for (const id of Object.keys(next).slice(0, overflow)) delete next[id];
-  }
-  return next;
-}
-
-interface QueueReceiptSnapshot {
-  messages?: Message[];
-}
-
-/** Leaves a tombstone so a slower POST continuation cannot add a drained chip back. */
-function reconcileSnapshotQueues(
-  state: AppState,
-  conversations: QueueReceiptSnapshot[],
-): AppState {
-  const landed: Array<{ queueId: string; at: number }> = [];
-  for (const conversation of conversations) {
-    for (const message of conversation.messages ?? []) {
-      if (message.queueId) landed.push({ queueId: message.queueId, at: message.at });
-    }
-  }
-  if (landed.length === 0) return state;
-
-  const landedIds = new Set(landed.map((entry) => entry.queueId));
-  const pendingQueued: AppState["pendingQueued"] = {};
-  for (const [threadId, entries] of Object.entries(state.pendingQueued)) {
-    const waiting = entries.filter((entry) => !landedIds.has(entry.queueId));
-    if (waiting.length > 0) pendingQueued[threadId] = waiting;
-  }
-
-  let consumedQueueIds: AppState["consumedQueueIds"] = {};
-  landed.sort((left, right) => left.at - right.at);
-  for (const entry of landed) {
-    consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
-  }
-  // Live receipts are newer than any loaded history; never evict them for a late POST.
-  for (const queueId of Object.keys(state.consumedQueueIds)) {
-    consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, queueId);
-  }
-  return { ...state, pendingQueued, consumedQueueIds };
-}
-
-function replaceBotQueues(state: AppState, queues: AppState["pendingQueued"]): AppState {
-  const groupThreads = new Set(state.groups.flatMap((group) => [group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]));
-  const liveIds = new Set(Object.values(queues).flatMap((entries) => entries.map((entry) => entry.queueId)));
-  const pendingQueued = { ...queues };
-  let consumedQueueIds = state.consumedQueueIds;
-  for (const [threadId, entries] of Object.entries(state.pendingQueued)) {
-    if (groupThreads.has(threadId)) pendingQueued[threadId] = entries;
-    else for (const entry of entries) {
-      if (!liveIds.has(entry.queueId)) consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
-    }
-  }
-  return { ...state, pendingQueued, consumedQueueIds };
-}
-
 export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
 
 export type Action =
@@ -807,7 +744,7 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
-      dataContext?: import("../../shared/data-context").DataContext;
+      dataContext?: import("../../shared/data-context").DataContext; pointed?: import("../../shared/app-frame/point").PointedElement[];
       onError?: () => void;
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
@@ -2622,7 +2559,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}) }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}) }),
               }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {

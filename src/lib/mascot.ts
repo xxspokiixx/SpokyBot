@@ -2,6 +2,7 @@ import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
 import { botShowsUnread } from "./bot-unread";
 import { lastNonReceipt } from "./receipts";
 import type { MausColor } from "../../shared/wire";
+import type { LocaleKey } from "@/locales";
 
 export { MAUS_COLOR_NAMES, type MausColor } from "../../shared/wire";
 
@@ -58,7 +59,14 @@ export const MAUS_COLORS = {
   yellow: "#D8A729",
   teal: "#01A492",
   coral: "#E5634E",
+  silver: "#A8ADB4",
 } satisfies Record<MausColor, string>;
+
+export const MAUS_COLOR_LABEL = {
+  green: "mascotColor.green", blue: "mascotColor.blue", red: "mascotColor.red", orange: "mascotColor.orange",
+  purple: "mascotColor.purple", cyan: "mascotColor.cyan", pink: "mascotColor.pink", yellow: "mascotColor.yellow",
+  teal: "mascotColor.teal", coral: "mascotColor.coral", silver: "mascotColor.silver",
+} as const satisfies Record<MausColor, LocaleKey>;
 
 export const MAUS_MOTIONS = [
   "arrive",

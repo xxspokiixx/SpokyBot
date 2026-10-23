@@ -70,7 +70,8 @@ export interface TaskRouteDeps {
   rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
 }
 
-export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
+/** `deleteTasks`: the same deletion for the server's own use (a person leaving a Team Cloud, host/team-member-left.ts). */
+export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTasks(botId: string, threadIds: string[]): ReturnType<TaskRouteDeps["store"]["deleteTasks"]> } {
   const {
     store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations,
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
@@ -108,7 +109,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
     }
     return result;
   };
-  return async ({ req, res, url, path, method, auth, json, readBody }) => {
+  return Object.assign(async ({ req, res, url, path, method, auth, json, readBody }: Parameters<RouteHandler>[0]) => {
     let m: RegExpMatchArray | null = null;
 
     // Folders never own settings, transcripts or working directories; the "project" wire names stay.
@@ -416,5 +417,5 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       }
     }
     return PASS;
-  };
+  }, { deleteTasks });
 }

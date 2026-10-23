@@ -182,7 +182,7 @@ it("gives Ada's own Gmail and mail to her private chat, for her own request, and
   expect(bearer(seen, "own_apps")).not.toBe(bearer(seen, "composio"));
 }, hostTimeout(120_000));
 
-it("never lets her Gmail or mail into a group chat, the main chat, Cleo's chat or an admin's turn in her chat", async () => {
+it("never lets her Gmail or mail into a group chat, the main chat, Cleo's chat or an admin's turn", async () => {
   const before = gmailCallsBy(adaUser), teamBefore = gmailCallsBy(teamUser);
   const room = await turn(ada, roomThread, "@Scout check my inbox", { room: roomId, calls: [gmailCall("composio")] });
   expect(room.servers).not.toContain("own_apps");
@@ -202,11 +202,9 @@ it("never lets her Gmail or mail into a group chat, the main chat, Cleo's chat o
   expect(cleos.thread).toContain("no own_apps MCP server was launched for this turn");
   expect(cleos.systemPrompt).toContain(`this person hasn't yet: Gmail and mail. If the task needs one, reply with one plain line and nothing more about it: "Connect your <name> here: ${LINK}".`);
 
-  // Ben, an admin, may read Ada's chat and write in it: his turn there is not hers.
-  const bens = await turn(admin, adaThread, "Forward me her last email.", { calls: [gmailCall("own_apps")] });
-  expect(bens.servers).not.toContain("own_apps");
-  expect(bens.servers).not.toContain("mail");
-  expect(bens.config).not.toContain(ADA_KEY);
+  // Ben, an admin, can neither read Ada's chat nor write in it, so no turn of his ever runs there.
+  expect((await team.as(admin, "POST", `/api/bots/${bot.id}/messages`, { text: "Forward me her last email.", threadId: adaThread })).status).toBe(404);
+  expect((await messages(admin, adaThread)).status).toBe(404);
   expect(gmailCallsBy(adaUser)).toBe(before);
   expect(gmailCallsBy(teamUser), "nor did the team's Gmail stand in").toBe(teamBefore);
 }, hostTimeout(180_000));
