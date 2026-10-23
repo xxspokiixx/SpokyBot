@@ -311,7 +311,12 @@ function probeVersion(executable: string, release: StandaloneRelease): Promise<s
   return new Promise((resolveProbe) => {
     execFile(executable, ["--version"], { env, timeout: PROBE_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" }, (error, stdout, stderr) => {
       const lines = (text: string) => stripVTControlCharacters(text).split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
-      if (error) return resolveProbe((lines(stderr)[0] ?? lines(stdout)[0] ?? error.message).slice(0, 400));
+      if (error) {
+        const { code, killed } = error as { code?: unknown; killed?: boolean };
+        const said = lines(stderr)[0]
+          ?? (killed ? "it did not answer in time" : typeof code === "number" ? `it stopped with exit code ${code}` : lines(stdout)[0] ?? "it could not be run");
+        return resolveProbe(said.slice(0, 400));
+      }
       if (!stdout.includes(release.version)) return resolveProbe(`it reported version ${(lines(stdout)[0] ?? "nothing").slice(0, 80)}, not ${release.version}`);
       resolveProbe(null);
     });
@@ -401,8 +406,8 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
     const record: InstallRecord = { engine: release.engine, version: release.version, sha256: asset.sha256, executable: asset.executable, installedAt: Date.now() };
     await writeFile(join(staging, RECORD), `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
 
-    // A broken or different build under this version's name never passed these checks; it makes way for this one.
-    if (existsSync(versionDir) && !(await completedVersion(versionDir, release, asset))) await removeDir(versionDir);
+    // Whatever holds this version's name now (a partial or different build, or a copy that no longer starts) makes way.
+    if (existsSync(versionDir)) await removeDir(versionDir);
     try {
       renameWithRetry(staging, versionDir);
       placed = true;

@@ -2,7 +2,7 @@
 // installer's own HTTPS, host and redirect checks run unchanged. Nothing here reaches the internet.
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -208,6 +208,27 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     expect(server.hits("assets.example.test/blob/fake")).toBe(1);
     await install(release);
     expect(server.hits("assets.example.test/blob/fake")).toBe(1);
+  });
+
+  it("downloads again when the installed copy of this version no longer starts", async () => {
+    const { data, executable } = await build("raw");
+    const release = fixtureRelease({ [standalonePlatformKey()]: serve(data, "raw", executable) });
+    const installed = await install(release);
+    // A scanner or a person broke the program but left its install record.
+    writeFileSync(installed.executablePath, "#!/bin/sh\nexit 1\n");
+    await expect(install(release)).resolves.toEqual(installed);
+    expect(server.hits("assets.example.test/blob/fake")).toBe(2);
+    expect(readFileSync(installed.executablePath)).toEqual(data);
+  });
+
+  it("refuses a tar.gz holding a link, and keeps none of it", async () => {
+    const source = mkdtempSync(join(scratch, "tar-link-"));
+    writeFileSync(join(source, "fake-engine"), script(), { mode: 0o755 });
+    symlinkSync("/etc/hosts", join(source, "hosts"));
+    const file = join(scratch, "link.tar.gz");
+    await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "hosts"]);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine") }))).rejects.toThrow(/unsafe/);
+    expect(leftovers()).toEqual([]);
   });
 
   it("refuses a macOS build signed by someone other than its maker", async () => {
