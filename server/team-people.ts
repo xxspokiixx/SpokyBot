@@ -1,6 +1,6 @@
-// The members a Team Cloud has seen: each one the Admin paired, with their role, kept in team-people.json. The Admin
-// holds the real roster and this machine never reads it, so a removed member stays listed here; this list only offers
-// who a bot can report to.
+// The members a Team Cloud has seen: each one the Admin paired, with their role, kept in team-people.json, and the ones
+// the Admin said left. The Admin holds the real roster and this machine never reads it; this list only offers who a bot
+// can report to.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -17,6 +17,7 @@ const personSchema = z.object({
   role: z.enum(["owner", "admin", "member"]),
   firstSeenAt: z.number().finite().nonnegative(),
   lastSeenAt: z.number().finite().nonnegative(),
+  leftAt: z.number().finite().nonnegative().optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), people: z.array(personSchema).max(MAX_PEOPLE) });
 
@@ -45,19 +46,32 @@ export function createTeamPeople(dataDir: string, now: () => number = Date.now) 
       const address = ownerEmail(email);
       const at = now();
       const known = people.find((person) => person.email === address);
-      if (known && known.role === role && at - known.lastSeenAt < 60_000) return;
+      if (known && known.role === role && known.leftAt === undefined && at - known.lastSeenAt < 60_000) return;
       people = [
         { email: address, role, firstSeenAt: known?.firstSeenAt ?? at, lastSeenAt: at },
         ...people.filter((person) => person.email !== address),
       ].slice(0, MAX_PEOPLE);
       save();
     },
+    /** The Admin said this member left: no bot reports to them any more, and the picker stops offering them. */
+    left(email: string): void {
+      const address = ownerEmail(email);
+      const at = now();
+      const known = people.find((person) => person.email === address);
+      people = [{ email: address, role: known?.role ?? "member", firstSeenAt: known?.firstSeenAt ?? at, lastSeenAt: known?.lastSeenAt ?? at, leftAt: at },
+        ...people.filter((person) => person.email !== address)].slice(0, MAX_PEOPLE);
+      save();
+    },
+    gone(email: string): boolean {
+      const address = ownerEmail(email);
+      return people.some((person) => person.email === address && person.leftAt !== undefined);
+    },
     has(email: string): boolean {
       const address = ownerEmail(email);
-      return people.some((person) => person.email === address);
+      return people.some((person) => person.email === address && person.leftAt === undefined);
     },
     list(): TeamPerson[] {
-      return [...people].sort((a, b) => a.email.localeCompare(b.email));
+      return people.filter((person) => person.leftAt === undefined).sort((a, b) => a.email.localeCompare(b.email));
     },
   };
 }

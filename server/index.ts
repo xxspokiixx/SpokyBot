@@ -2965,7 +2965,7 @@ const { listBotSkills, readBotSkillFile } = skillsHost; const cloudConnections =
 const highlevelHost = createHighLevelHost({ service: highlevel, dataDir: DATA_DIR, bot: (id) => store.bot(id),
   inRoom: (threadId) => Boolean(store.groupByThread(threadId)), appendMessage: (threadId, message) => { store.appendMessage(threadId, message as Parameters<typeof store.appendMessage>[1]); } });
 let cloudPower: CloudPower | null = null; // The sleep handshake of a plan that sleeps (server/cloud-power.ts), made just before the server listens.
-const { cloudHealth, cloudSigned } = createCloudSignedHost({ cloudHome: CLOUD_HOME, sessions, power: () => cloudPower, box: () => botBox.report(), teamAdmin: teamAdminHost(), memberLeft: (email) => leaveTeam ? leaveTeam(email) : Promise.reject(new Error("not a team")), health: { store, bus, dataDir: DATA_DIR, eventsDir: EVENTS_DIR, version: serverVersion(), image: process.env.OMB_CLOUD_IMAGE,
+const { cloudHealth, cloudSigned } = createCloudSignedHost({ cloudHome: CLOUD_HOME, sessions, power: () => cloudPower, box: () => botBox.report(), teamAdmin: teamAdminHost(), memberLeft: (email) => leaveTeam ? leaveTeam(email).then((result) => { teamOwners.left(email); return result; }) : Promise.reject(new Error("not a team")), health: { store, bus, dataDir: DATA_DIR, eventsDir: EVENTS_DIR, version: serverVersion(), image: process.env.OMB_CLOUD_IMAGE,
   engines: () => registry.instances().map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, snapshot: registry.lastSnapshot(instance.instanceId) })),
   connectors: () => highlevelHost.health(composio.configured(cfg) ? composio.connectedServices(cfg) : null),
   browser: () => ({ available: browserReady(undefined), installing: Boolean(browserEngineInstall), interrupted: browserRuntime.interruptedCount() }) } });
@@ -13015,7 +13015,8 @@ ROUTES.push(createBotCreateRoutes({
   hostedModels, cloudRoutineAuthors,
   routines: () => routines,
   storedAvatarExists, defaultSelection, checkedModelSelection, cloudOwnerSession, wireBot, team: CLOUD_TEAM && teamOwners.people ? { name: CLOUD_TEAM.name, people: teamOwners.people } : null,
-}), createTeamOwnerRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, sees: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId), publicBot }));
+}), createTeamOwnerRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, sees: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId), publicBot,
+  nameOf: (email) => { const name = teamHost.personName(personKey({ id: "", email })); return name === email ? undefined : name; } }));
 ROUTES.push(createBotSettingsRoutes({
   store, cfg, registry, commandAllowlist, commandAllowlistDrivers: COMMAND_ALLOWLIST_DRIVERS,
   cloudHome: Boolean(CLOUD_HOME), cloudOwnerProfileFields: CLOUD_OWNER_PROFILE_FIELDS,

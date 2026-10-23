@@ -24,6 +24,8 @@ export interface AskRoutingDeps {
   audienceOf(threadId: string): Audience;
   bot(botId: string): OwnedBot | undefined;
   personKeyOf(email: string): string;
+  /** A member the Admin said left: their bots' asks go to the Admins until someone else owns them. */
+  gone?(email: string): boolean;
 }
 
 export function createAskRouting(deps: AskRoutingDeps) {
@@ -33,7 +35,7 @@ export function createAskRouting(deps: AskRoutingDeps) {
     if (member) return member;
     const bot = botId ? deps.bot(botId) : undefined;
     const owner = bot ? botOwner(bot) : null;
-    return owner ? deps.personKeyOf(owner) : null;
+    return owner && !deps.gone?.(owner) ? deps.personKeyOf(owner) : null;
   }
 
   /** Whether an ask in this conversation is the viewer's. Off a team every ask is everyone's who sees it. */

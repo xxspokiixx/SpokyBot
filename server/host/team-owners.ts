@@ -41,7 +41,8 @@ export function createTeamOwners(deps: TeamOwnersDeps) {
       if (session.membershipAuthority === "team" && session.email && session.teamRole) people.seen(session.email, session.teamRole);
     });
   }
-  const routing = createAskRouting({ team: Boolean(team), audienceOf: deps.audienceOf, bot: (botId) => deps.store().bot(botId) ?? undefined, personKeyOf: keyOf });
+  const routing = createAskRouting({ team: Boolean(team), audienceOf: deps.audienceOf, bot: (botId) => deps.store().bot(botId) ?? undefined, personKeyOf: keyOf,
+    gone: (email) => people?.gone(email) ?? false });
   /** Whose a session's asks are: its person's, and an Admin's too when nobody owns the bot. */
   const viewer = (auth: RequestAuth): AskViewer => ({
     person: auth.kind === "session" && auth.session.email ? personKey(auth.session) : null,
@@ -80,6 +81,10 @@ export function createTeamOwners(deps: TeamOwnersDeps) {
     } : undefined,
     /** Today's and Needs you's question: is this ask the session's person's? Undefined off a team. */
     asks: team ? (auth: RequestAuth, botId: string | undefined, threadId: string) => routing.asks(viewer(auth), botId, threadId) : undefined,
+    /** The Admin said this member left: what reported to them goes to the Admins. */
+    left(email: string): void {
+      people?.left(email);
+    },
     /** Bots moved in before owners were recorded report to whoever moved them. */
     backfill(moveIns: Record<string, { email?: string }>): void {
       for (const [botId, move] of Object.entries(moveIns)) if (move.email) setCreatedBy(deps.store(), botId, move.email);

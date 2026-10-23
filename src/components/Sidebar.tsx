@@ -27,11 +27,8 @@ import {
   PinOff,
   Plus,
   Search,
-  Share2,
-  SlidersHorizontal,
   TextQuote,
   Trash2,
-  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -123,8 +120,10 @@ import { useCloudOwner } from "./CloudOwner";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { NeedsYouButton, OwnerFace, OwnerPickerHost, departmentOwner, requestOwnerPick } from "./TeamOwner";
-import { mayChangeOwner, ownerOf, useTeamPeople } from "@/state/team-people";
+import { NeedsYouButton, OwnerFace, OwnerPickerHost, departmentOwner, ownerMenuLabel, pickOwnerOf } from "./TeamOwner";
+import { TeamMenuItems } from "./SidebarTeamMenu";
+import { mayChangeOwner, useTeamPeople } from "@/state/team-people";
+export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
@@ -669,11 +668,7 @@ export function BotContextMenu({
       </>}
       {item(<Trash2 size={16} />, t("task.deleteAll"), () => clearThreads.ask(bot.id), { danger: true })}
       {divider("threads")}
-      {team && mayChangeOwner(bot, team) && (() => {
-        const owner = ownerOf(bot, team);
-        return item(<Users size={16} className="text-ink-secondary" />, owner ? t("owner.menu", { name: owner.name }) : t("owner.menuNone"),
-          () => requestOwnerPick({ botIds: [bot.id], title: t("owner.pickTitle"), current: owner?.email ?? null, x: shown.x, y: shown.y }));
-      })()}
+      {team && mayChangeOwner(bot, team) && item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf([bot], team, shown))}
       {remoteClient ? [
         item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
           onClose();
@@ -1205,27 +1200,6 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     </>
   );
 });
-
-export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll, onSetOwner }: {
-  onAddBots: () => void;
-  onRename: () => void;
-  onShare: () => void;
-  onDelete: () => void;
-  onSetForAll?: () => void;
-  onSetOwner?: () => void;
-}) {
-  const item = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised";
-  return (
-    <>
-      <button type="button" role="menuitem" autoFocus className={item} onClick={onAddBots}><Users size={14} />{t("team.addBots")}</button>
-      {onSetOwner && <button type="button" role="menuitem" className={item} onClick={onSetOwner}><UserRound size={14} />{t("owner.setForAll")}</button>}
-      {onSetForAll && <button type="button" role="menuitem" className={item} onClick={onSetForAll}><SlidersHorizontal size={14} />{t("teamSettings.menu")}</button>}
-      <button type="button" role="menuitem" className={item} onClick={onRename}><Pencil size={14} />{t("team.rename")}</button>
-      <button type="button" role="menuitem" className={item} onClick={onShare}><Share2 size={14} />{t("team.share")}</button>
-      <button type="button" role="menuitem" className={cn(item, "text-danger")} onClick={onDelete}><Trash2 size={14} />{t("team.delete")}</button>
-    </>
-  );
-}
 
 export function Sidebar({ open, onClose, collapseToIcons = false }: {
   open: boolean;
@@ -2035,12 +2009,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}
             onSetForAll={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
-            onSetOwner={teamPeople?.admin ? () => {
-              const { name, x, y } = teamMotion.value!;
-              const members = state.bots.filter((bot) => !bot.hidden && (bot.section?.trim() || "") === name);
-              closeTeamMenu();
-              if (members.length) requestOwnerPick({ botIds: members.map((bot) => bot.id), title: t("owner.setForAllTitle", { name }), current: departmentOwner(members, teamPeople)?.email ?? null, x, y });
-            } : undefined}
+            onSetOwner={teamPeople?.admin ? () => { closeTeamMenu(); pickOwnerOf(state.bots.filter((bot) => !bot.hidden && (bot.section?.trim() || "") === teamMotion.value!.name), teamPeople, teamMotion.value!); } : undefined}
           />
         </div>
       </div>, document.body)}

@@ -15,8 +15,8 @@ const audiences: Record<string, Audience> = {
   "fox-main": "team", "fox-olive": memberAudience(OLIVE), "lead-main": "team", "stray-main": "team", "room-1": roomAudience("r1"),
 };
 
-function routing(team = true) {
-  return createAskRouting({ team, audienceOf: (threadId) => audiences[threadId] ?? "team", bot: (id) => bots[id], personKeyOf: key });
+function routing(team = true, gone: string[] = []) {
+  return createAskRouting({ team, audienceOf: (threadId) => audiences[threadId] ?? "team", bot: (id) => bots[id], personKeyOf: key, gone: (email) => gone.includes(email) });
 }
 const ada = { person: ADA, admin: true }, bob = { person: BOB, admin: false }, olive = { person: OLIVE, admin: true };
 
@@ -31,6 +31,13 @@ describe("whose a bot's ask is on a Team Cloud", () => {
     expect(route.askedPerson("fox", "room-1")).toBe(BOB);
     // A member's own MausBot is theirs, whatever else it says.
     expect(route.askedPerson("bobs-mausbot", "bobs-mausbot-main")).toBe(BOB);
+  });
+
+  it("goes to the Admins when the person a bot reports to has left the team", () => {
+    const route = routing(true, ["bob"]);
+    expect(route.askedPerson("fox", "fox-main")).toBeNull();
+    expect([ada, bob, olive].map((viewer) => route.asks(viewer, "fox", "fox-main"))).toEqual([true, false, true]);
+    expect(route.askedPerson("lead", "lead-main")).toBe(ADA);
   });
 
   it("in a private chat: that member's alone, never the owner's or an Admin's", () => {

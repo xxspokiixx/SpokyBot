@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, useTeamPeople, type TeamPerson } from "@/state/team-people";
+import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import { useHeldMenuMotion } from "./MenuMotion";
 
 export type OwnerPickerTarget = { botIds: string[]; title: string; current: string | null; x: number; y: number };
@@ -112,6 +112,20 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
     </div>,
     document.body,
   );
+}
+
+/** The bot menu's line: "Reports to Bob…". */
+export function ownerMenuLabel(bot: Bot, team: TeamPeople): string {
+  const owner = ownerOf(bot, team);
+  return owner ? t("owner.menu", { name: owner.name }) : t("owner.menuNone");
+}
+
+/** Opens the picker for one bot, or for every bot of a department ("Set owner for all bots…"). */
+export function pickOwnerOf(bots: readonly Bot[], team: TeamPeople, at: { x: number; y: number; name?: string }): void {
+  if (!bots.length) return;
+  const title = bots.length === 1 && at.name === undefined ? t("owner.pickTitle") : t("owner.setForAllTitle", { name: at.name ?? "" });
+  const current = bots.length === 1 ? ownerOf(bots[0]!, team)?.email ?? null : departmentOwner(bots, team)?.email ?? null;
+  requestOwnerPick({ botIds: bots.map((bot) => bot.id), title, current, x: at.x, y: at.y });
 }
 
 /** The person every bot in a department reports to, when they all report to one person. */
