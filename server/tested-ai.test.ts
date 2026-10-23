@@ -137,6 +137,8 @@ describe("testing an AI with one tiny message before a new bot's default trusts 
   });
 
   it("forgets a result when that AI's sign-in changes, and tests it again", async () => {
+    let clock = 0;
+    tested = make({ now: () => clock });
     answers.claude = async () => { throw new Error("Not logged in"); };
     refresh();
     await settled();
@@ -144,10 +146,32 @@ describe("testing an AI with one tiny message before a new bot's default trusts 
     answers.claude = async () => "OK";
     instances = [instances[0]!, ready("claude", "claudeAgent", { account: { email: "person@example.test" } })];
     expect(tested.state(instances[1]!)).toBeUndefined();
+    clock += 5 * 60_000;
     refresh();
     await settled();
     expect(tested.state(instances[1]!)).toBe("passed");
     expect(pick).toEqual(on("claude"));
+  });
+
+  it("tests an AI whose status keeps changing at most once in five minutes in the background", async () => {
+    let clock = 0;
+    tested = make({ now: () => clock });
+    instances = [ready("claude", "claudeAgent")];
+    refresh();
+    await settled();
+    expect(engines.get("claude")!.generateText).toHaveBeenCalledTimes(1);
+    // A status read that comes back without the account, then with it again: two different sign-ins on paper.
+    for (const account of [undefined, { email: "person@example.test" }, undefined]) {
+      clock += 60_000;
+      instances = [ready("claude", "claudeAgent", account ? { account } : { authenticated: undefined })];
+      refresh();
+      await settled();
+    }
+    expect(engines.get("claude")!.generateText).toHaveBeenCalledTimes(1);
+    clock += 5 * 60_000;
+    refresh();
+    await settled();
+    expect(engines.get("claude")!.generateText).toHaveBeenCalledTimes(2);
   });
 
   it("checks one AI on request, sharing a test already under way, and live every other time", async () => {

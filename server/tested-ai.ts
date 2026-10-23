@@ -26,7 +26,12 @@ export interface TestedAiDeps {
   /** Whether tests start on their own (backgroundAiChecks); a check asked for always runs. */
   background?: boolean;
   timeoutMs?: number;
+  now?: () => number;
 }
+
+/** A status read that drops the account now and then looks like a new sign-in each time: the background tests one AI at
+ * most this often, so it never sends a stream of test messages. A check asked for is not held back. */
+const BACKGROUND_SPACING_MS = 5 * 60_000;
 
 /** On unless OMB_AI_CHECKS=0. Under vitest or a sealed test fixture (env-path.ts) only with OMB_AI_CHECKS=1, as
  * local-inject's probe: a fake engine's turn log then holds only the turns a test sends. */
@@ -46,7 +51,9 @@ const hasModel = (instance: SelectableInstance) =>
 
 export function createTestedAi(deps: TestedAiDeps) {
   const background = deps.background ?? backgroundAiChecks();
+  const now = deps.now ?? Date.now;
   const entries = new Map<string, Entry>();
+  const startedAt = new Map<string, number>();
   let lastPick: ModelSelection | null = null;
 
   /** This AI's result as it is signed in now. */
@@ -81,7 +88,10 @@ export function createTestedAi(deps: TestedAiDeps) {
     for (const instance of rankAis(instances.filter((candidate) => readyToRun(candidate, deps.context) && hasModel(candidate)))) {
       const state = entryOf(instance)?.state;
       if (state === "failed") continue;
-      if (state === undefined) void test(instance);
+      if (state === undefined && now() - (startedAt.get(instance.instanceId) ?? -Infinity) >= BACKGROUND_SPACING_MS) {
+        startedAt.set(instance.instanceId, now());
+        void test(instance);
+      }
       return;
     }
   };
