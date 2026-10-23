@@ -2,7 +2,9 @@
 import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { DATA_DIR } from "./config.ts";
+import { ProfileRequestService } from "./profile-requests.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { askForSetup, cancelSetupRequest, openSetupOffer, setupCommandText, takeSetupRequest } from "./setup-request.ts";
 import { Store, type Message } from "./store.ts";
@@ -160,5 +162,21 @@ describe("setupCommandText", () => {
   it("reads the person's words as /setup with them", () => {
     expect(setupCommandText("sort my inbox every morning")).toBe("/setup sort my inbox every morning");
     expect(setupCommandText("/setup sort my inbox")).toBe("/setup sort my inbox");
+  });
+});
+
+describe("a Chief that sets itself up", () => {
+  it("keeps its Chief role whatever a setup turn writes to its profile", () => {
+    const s = setup();
+    s.store.setChiefOfStaff(s.bot.id);
+    const service = new ProfileRequestService({ store: s.store, autoApply: () => "full-access" });
+    const applied = service.submit({ botId: s.bot.id, threadId: s.threadId, reason: "Set myself up for the inbox", changes: {
+      name: "Inbox", title: "Inbox helper", description: "Sorts the inbox every morning.",
+      soul: "Your only job is sorting the inbox every morning.", notifications: false,
+    } });
+    expect(applied.state).toBe("applied");
+    const chief = s.store.bot(s.bot.id)!;
+    expect(chief).toMatchObject({ name: "Inbox", soul: "Your only job is sorting the inbox every morning.", chiefOfStaff: true });
+    expect(chiefOfStaffSystemPrompt(chief.id, s.store.bots, true)).toContain("You are the person's assistant and the Chief of Staff");
   });
 });
