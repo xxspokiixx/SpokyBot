@@ -142,16 +142,18 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const cards = Boolean(bridge || planBridge);
   // Promotions never land on a new install's first chat: they wait for its first reply, and the full-screen Cloud Pro popup
   // also for a launch after the one whose welcome just finished. Account and billing notices keep their own rules.
+  // Unknown (null) until the bots have loaded, so nothing lower in the queue flashes up before them.
   const firstChat = firstReplyPending(state);
-  const afterWelcome = firstChat || welcomeFinishedThisLaunch();
+  const afterWelcome = welcomeFinishedThisLaunch() || firstChat;
   // The product-updates question is a second email ask: it never follows the welcome's own in the same launch either.
-  const consentNow = afterWelcome ? false : consentFact;
+  const consentNow = afterWelcome === true || consentFact === false ? false : afterWelcome === null ? null : consentFact;
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
   const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere ? nextNotice({
-    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome === true ? false
+      : afterWelcome === null || popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
     [UPDATES_CONSENT_NOTICE]: consentNow,
-    [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
-      : organization === null || moving === null ? null : !organization,
+    [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat === true || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
+      : organization === null || moving === null || firstChat === null ? null : !organization,
     [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),
     [CLOUD_NOTICE]: !view ? false : view.kind === "unknown" ? null

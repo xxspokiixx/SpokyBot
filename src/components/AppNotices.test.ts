@@ -129,7 +129,7 @@ beforeEach(() => {
   setLocale("en"); viewer = LOCAL_VIEWER; account = signedOut; snapshot = { status: "none" }; offer = TRIAL_OFFER;
   session = new Map();
   vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value) });
-  f.state = { connected: true, bots: structuredClone(FIRST_REPLY), groups: [], routines: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
+  f.state = { connected: true, hydrated: true, bots: structuredClone(FIRST_REPLY), groups: [], routines: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
     config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen: withTourFinished(undefined) } } };
   vi.mocked(api).mockImplementation(async (_path, init) => {
     const patch = JSON.parse(String((init as RequestInit).body));
@@ -471,6 +471,13 @@ describe("the Cloud Pro popup after the update", () => {
     const html = await launch();
     expect(html).toContain(POPUP); expect(html).not.toContain(INTRO);
     expect(popupEvents("shown")).toHaveLength(1);
+  });
+
+  it("holds the cards after it until the bots have loaded, so an existing user never sees a card flash before it", async () => {
+    returning(); f.state.hydrated = undefined;
+    expect(await launch(), "bots not loaded yet").toBe("");
+    f.state.hydrated = true;
+    expect(await launch()).toContain(POPUP);
   });
 
   it("waits for a later launch when the welcome finished in this one, though a bot has answered", async () => {
