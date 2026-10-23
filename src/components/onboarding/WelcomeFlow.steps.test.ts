@@ -149,6 +149,24 @@ describe("a reload in the middle of the welcome", () => {
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(text()).toContain("Bring what you already use");
     expect(text()).toContain("Step 3 of 4");
+    await press("Skip");
+    expect(text(), "the jump holds clicks like any step change").toContain("Step 3 of 4");
+    await settle();
+    await press("Skip");
+    expect(text()).toContain("Step 4 of 4");
+  });
+
+  it("stays where the person is once they have started using the welcome, when the saved step arrives late", async () => {
+    const found: SetupDetection = { skills: [{ name: "pdf", source: "claudeCode" }], tools: [] };
+    let answer!: (value: SetupDetection) => void;
+    const client = { detect: vi.fn(() => new Promise<SetupDetection>((resolve) => { answer = resolve; })), apply: vi.fn() };
+    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: "import", name: "", email: "" }));
+    await show({ setupImport: { client } });
+    await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new Event("pointerdown", { bubbles: true })); });
+    await act(async () => { answer(found); });
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(text()).toContain("Connect an AI");
+    expect(text(), "the import step is offered next instead").toContain("Step 2 of 4");
   });
 
   it("is forgotten once the welcome is finished or skipped, which saves the name and a valid email", async () => {

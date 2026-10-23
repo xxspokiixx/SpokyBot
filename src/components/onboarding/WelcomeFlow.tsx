@@ -146,16 +146,6 @@ export function WelcomeFlow({
     if (keepsDraft && !finishing.current) saveWelcomeDraft({ beat, ...fields });
   }, [keepsDraft, beat, fields]);
 
-  const offered = beats.join(" ");
-  useEffect(() => {
-    const target = resumeTo.current;
-    if (!target || !live.current.beats.includes(target)) return;
-    resumeTo.current = null;
-    beatNow.current = target;
-    setBeat(target);
-    setMascot(MASCOT_FOR_BEAT[target]);
-  }, [offered]);
-
   // A Cloud sheet opened over the welcome never switches the window away from it (CloudAddDialog).
   useEffect(() => (embedded ? undefined : showWelcome()), [embedded]);
   // Looked for once, from the first beat; nothing found in time leaves the step out.
@@ -169,10 +159,9 @@ export function WelcomeFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Only from the step on screen, and never while a step is still arriving: a second click lands on the new step's button.
-  const go = useCallback(
-    (from: BeatId, target: BeatId) => {
-      if (movingNow.current || beatNow.current !== from) return;
+  // Every step change holds Next, Continue and Back until the new step has arrived: a second click lands on its buttons.
+  const moveTo = useCallback(
+    (target: BeatId) => {
       movingNow.current = true;
       setMoving(true);
       resumeTo.current = null;
@@ -191,6 +180,21 @@ export function WelcomeFlow({
     },
     [bump],
   );
+  // Only from the step on screen, and never while a step is still arriving.
+  const go = useCallback(
+    (from: BeatId, target: BeatId) => {
+      if (!movingNow.current && beatNow.current === from) moveTo(target);
+    },
+    [moveTo],
+  );
+
+  // The saved step, once offered, unless the person has already started using the welcome (resumeTo is then gone).
+  const offered = beats.join(" ");
+  useEffect(() => {
+    const target = resumeTo.current;
+    if (!target || movingNow.current || !live.current.beats.includes(target)) return;
+    moveTo(target);
+  }, [offered, moveTo]);
 
   const finish = useCallback(
     async (reason: "completed" | "skipped") => {
@@ -224,6 +228,7 @@ export function WelcomeFlow({
   const advance = useCallback(() => advanceFrom(beat), [advanceFrom, beat]);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    resumeTo.current = null;
     if (event.key === "Escape") {
       event.preventDefault();
       void finish("skipped");
@@ -282,6 +287,7 @@ export function WelcomeFlow({
         aria-label={t("onboarding.dialog")}
         tabIndex={-1}
         onKeyDown={onKeyDown}
+        onPointerDown={() => { resumeTo.current = null; }}
         className="welcome-card relative flex max-h-full w-full flex-col overflow-y-auto rounded-2xl border border-hairline/40 bg-panel p-5 sm:p-8 shadow-[0_30px_80px_-28px_rgba(0,0,0,0.45),0_8px_24px_-12px_rgba(0,0,0,0.25)] outline-none"
         style={{ maxWidth: beatWidth(beat) }}
       >
