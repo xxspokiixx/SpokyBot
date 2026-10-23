@@ -424,6 +424,8 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message then stays on the bot's own model. */
+  readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
   /** Set while the last run's catalog is still refreshing; a turn awaits it, listen does not. */

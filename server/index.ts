@@ -86,7 +86,7 @@ import {
   avatarImageStatus,
 } from "./avatar-image.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
-import { routeDirectTurn } from "./turn-route.ts";
+import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
@@ -1577,7 +1577,8 @@ utilityParentPort?.on("message", (event) => {
   }
 });
 
-const bus = new EventBus();
+const quickFallback = new QuickModelFallback({ file: join(DATA_DIR, "refused-quick-models.json"), publish: (event) => bus.publish(event), stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true });
+const bus = new EventBus(undefined, (event) => quickFallback.take(event));
 bus.attach(registry.instances());
 let companyRuntimeReady!: () => void;
 const companyRuntimeStarted = new Promise<void>(resolve => { companyRuntimeReady = resolve; });
@@ -2200,7 +2201,6 @@ function settleDirectFollowup(generation: string | undefined, outcome: DirectTur
 }
 // A running conversation keeps its exact bot settings: another thread or a changed default must not retarget its tools.
 const directTurnBots = new Map<string, BotRecord>();
-const routedTurnModels = new Map<string, string>();
 const turnPromptBytes = new Map<string, { stable: number; volatile: number }>();
 let providerFleetReloading = false;
 const turnResources = new TurnResources();
@@ -7179,8 +7179,7 @@ bus.subscribe((event: RuntimeEvent) => {
           settleTrackedRequest(event.threadId);
         };
         const tokens = event.usage ?? lastReported;
-        const routedModel = routedTurnModels.get(event.threadId);
-        routedTurnModels.delete(event.threadId);
+        const routedModel = quickFallback.routedModel(event.threadId);
         const contextModel = routedModel ?? store.taskByThread(bot.id, event.threadId)?.modelSelection?.model ?? bot.modelSelection.model;
         store.addTaskUsage(bot.id, event.threadId, {
           input: tokens?.input,
@@ -8097,7 +8096,7 @@ async function startTurn(
   const instanceId = instance.instanceId;
   const automated = commsDepth > 0 || opts?.automationSource !== undefined
     || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.coordination || opts?.compactOnly || opts?.computerSelectionContinuation);
-  const route = routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated);
+  const route = routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId));
   const { model, effort, variant } = route;
   assertModelVariantSupported({ variant, effort }, instance.adapter.capabilities);
   if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
@@ -8139,8 +8138,6 @@ async function startTurn(
     queueMicrotask(drainQueuedSends);
     return userMessage;
   }
-  if (route.quickModel) routedTurnModels.set(threadId, model);
-  else routedTurnModels.delete(threadId);
   if (route.quickModel && !opts?.cardContinuation && userMessage.quickModel !== route.quickModel) userMessage = store.patchMessage(threadId, userMessage.id, { quickModel: route.quickModel }) ?? userMessage;
   const recoveryUserMessageId = opts?.coordination
     ? store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id
@@ -8852,7 +8849,7 @@ async function startTurn(
       const startupRecovery = cfg.automaticRecovery?.enabled === true && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0));
       const limitedUntil = startupRecovery ? limitClock.blockedUntil(instanceId) : null;
       if (limitedUntil) throw new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, limitedUntil);
-      const dispatch = await guardTurnDispatch(shareNote.after(instance.adapter.sendTurn({
+      const dispatch = await guardTurnDispatch(shareNote.after(quickFallback.sendTurn(instance, {
         threadId,
         botId: bot.id,
         startupRecovery,
@@ -8877,7 +8874,7 @@ async function startTurn(
         ...(integrations.browser && browserIsThePlace(plan) ? { preloadBrowserTools: true } : {}),
         ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
         cwd,
-      })), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
+      }, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined)), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await instance.adapter.interruptTurn(threadId).catch(() => {});
       });
       if (dispatch.cancelled) {
