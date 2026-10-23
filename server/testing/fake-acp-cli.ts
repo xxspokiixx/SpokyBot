@@ -19,7 +19,8 @@
 //       FAKE_ACP_TOOL_GATE exists when set)
 //     | quiet-then-answer (silent for FAKE_ACP_QUIET_MS; with QWEN_HOME, append FAKE_ACP_QWEN_LOG lines to
 //       Qwen's debug log every FAKE_ACP_LOG_EVERY_MS) | mcp-tools (list each mcpServers entry's tools with
-//       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE) | lend-question (list_shared_computers around a question)
+//       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE; FAKE_ACP_MCP_SCHEMA_BYTES=1 adds each schema's length)
+//     | lend-question (list_shared_computers around a question)
 //     | list-peers (list_bots through the agents MCP; keeps the first agents server it is offered, like Hermes)
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
@@ -362,7 +363,8 @@ let sessionMcp: AnyMcpEntry[] = [];
 const GROK_MCP_HANDSHAKE = { protocolVersion: "2025-11-25", capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } }, clientInfo: { name: "grok-shell", version: "1.0.25" } };
 
 async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<string[]> {
-  const names = (result: any) => (result?.tools ?? []).map((tool: { name: string }) => tool.name);
+  const names = (result: any) => (result?.tools ?? []).map((tool: { name: string; inputSchema?: unknown }) =>
+    process.env.FAKE_ACP_MCP_SCHEMA_BYTES === "1" ? `${tool.name}=${JSON.stringify(tool.inputSchema ?? {}).length}` : tool.name);
   if (typeof entry.url === "string") {
     const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
     for (const { name, value } of entry.headers ?? []) headers[name] = value;

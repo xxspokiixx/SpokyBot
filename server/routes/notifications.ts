@@ -1,5 +1,11 @@
-import { markAllNotificationLogRead, markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
+import { markAllNotificationLogRead, markNotificationLogRead, markThreadNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+
+/** Opening a conversation reads its notifications, so every open app's badge drops them too. */
+export function readThreadNotifications(threadId: string, broadcast: (payload: Record<string, unknown>) => void): void {
+  const ids = markThreadNotificationLogRead(threadId);
+  if (ids.length) broadcast({ kind: "notifications.read", threadId, ids });
+}
 
 export function createNotificationRoutes(deps = {
   recent: recentNotificationLog,

@@ -17,6 +17,7 @@ import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSe
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
 import { runAcpOneShot } from "./background-text.ts";
+import { sanitizeAcpToolMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import {
   classifyQuiet, describeQuiet, lastSeenPhrase, LogTail, quietKey, sampleProcessTree,
@@ -91,7 +92,7 @@ interface AcpTurn {
   turnConfig: AcpConfig;
   controlsHost: boolean;
   state: {
-    settled: boolean; promptSent: boolean; text: string; producedItem: boolean; startupActivity: boolean; stopped: boolean;
+    settled: boolean; promptSent: boolean; text: string; textMessageId: string | null; producedItem: boolean; startupActivity: boolean; stopped: boolean;
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
@@ -219,6 +220,9 @@ export interface AcpSupport {
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
   restartOnMcpChange?: boolean;
+  /** hermes-agent 0.22.4 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
+   * then the reply; that chunk is dropped instead of appended. */
+  resendsReasoningReply?: boolean;
   /** Threads with the same spawn contract run their sessions in one process (OpenCode 1.19: about 100 MB a session
    * instead of about 450 MB a process), up to SHARED_SESSIONS_MAX. */
   shareProcess?: boolean;
@@ -317,6 +321,13 @@ function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknown; stat
   else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
 }
 
+function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
+  const reply = streamed.trim();
+  const replay = chunk.trim();
+  return reply !== "" && /^(?:> |-# )?💭/.test(replay) && replay.endsWith(reply)
+    && /\n\n[ \t]*$/.test(replay.slice(0, -reply.length));
+}
+
 let unkeyedToolSeq = 0;
 /** A synthetic id for a `tool_call` without `toolCallId`, paired FIFO with the first terminal update. */
 function nextUnkeyedToolId(current: AcpTurn): string {
@@ -350,7 +361,6 @@ function acpVariantOption(result: any): { configId: string; options: ModelVarian
     ...(typeof option.currentValue === "string" ? { currentValue: option.currentValue } : {}),
   };
 }
-const TOOL_LOG_TEXT_LIMIT = 64_000;
 
 export function offeredModels(result: any, configId: string): string[] {
   const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
@@ -374,39 +384,6 @@ async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
     data: (await readFile(image.path)).toString("base64"),
     mimeType: image.mime,
   })));
-}
-
-function sanitizeToolLogValue(value: unknown, budget: { nodes: number; text: number }, depth = 0): unknown {
-  if (depth > 12 || budget.nodes-- <= 0) return undefined;
-  if (typeof value === "string") {
-    if (/^data:image\//iu.test(value) || budget.text <= 0) return undefined;
-    const limit = Math.min(TOOL_LOG_TEXT_LIMIT, budget.text);
-    const text = value.length <= limit ? value : `[Earlier output truncated]\n\n${value.slice(-limit)}`;
-    budget.text -= text.length;
-    return text;
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => {
-      const sanitized = sanitizeToolLogValue(entry, budget, depth + 1);
-      return sanitized === undefined ? [] : [sanitized];
-    });
-  }
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(Object.entries(record).flatMap(([key, entry]) => {
-    if ((record.type === "image" && (key === "data" || key === "blob")) ||
-      (key === "blob" && typeof record.mimeType === "string" && record.mimeType.startsWith("image/"))) return [];
-    const sanitized = sanitizeToolLogValue(entry, budget, depth + 1);
-    return sanitized === undefined ? [] : [[key, sanitized]];
-  }));
-}
-
-function sanitizeAcpToolMessage(message: any): unknown {
-  const isToolUpdate = message?.method === "session/update"
-    && ["tool_call", "tool_call_update"].includes(message?.params?.update?.sessionUpdate);
-  const isPermission = message?.method === "session/request_permission";
-  if (!isToolUpdate && !isPermission) return message;
-  return sanitizeToolLogValue(message, { nodes: 512, text: TOOL_LOG_TEXT_LIMIT });
 }
 
 function decodeAcpConfig(defaultCli: string) {
@@ -1036,6 +1013,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   alt: "Generated image",
                 });
               } else if (typeof delta === "string" && delta) {
+                const messageId = typeof u.messageId === "string" ? u.messageId : null;
+                if (support.resendsReasoningReply && messageId && messageId === current.state.textMessageId
+                    && isHermesReasoningReplay(delta, current.state.text)) break;
+                current.state.textMessageId = messageId;
                 current.state.text += delta;
                 const trimmed = current.state.text.trimStart();
                 if (!trimmed.startsWith("<SYSTEM_MESSAGE") &&
@@ -1184,7 +1165,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env);
-        const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true });
+        const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true, engine: support.driverKind });
         support.applyTurnEnv?.(env, {
           model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
           threadId, mcpServers,
@@ -1272,7 +1253,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {

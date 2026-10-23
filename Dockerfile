@@ -111,8 +111,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat \
   && rm -rf /var/lib/apt/lists/* \
   && HOME=/tmp/omb-build-home npm install -g pnpm@10.33.0 \
-  && rm -rf /tmp/omb-build-home /tmp/node-compile-cache \
-  && bwrap --version && socat -V | head -1 && pnpm --version
+  && bwrap --version && socat -V | head -1 && HOME=/tmp/omb-build-home pnpm --version \
+  && rm -rf /tmp/omb-build-home /tmp/node-compile-cache
 # Caddy and Grok are pinned, so they sit beneath the engines, which change
 # more often.
 COPY --from=edge /caddy /usr/local/bin/caddy

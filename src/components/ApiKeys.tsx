@@ -61,6 +61,15 @@ export function desktopCredentialSlot(section: ConfigSection) {
   return ELECTRON_CREDENTIAL[section];
 }
 
+/** Saves one credential where this app keeps it ("" removes it): the desktop's encrypted store when the section has a
+ * slot there, else the server's own config, which on a Cloud home stays outside every bot's box. */
+export function saveCredential(section: ConfigSection, value: string, firstKey: boolean): Promise<ConfigStatus> {
+  const electronSlot = desktopCredentialSlot(section);
+  return window.ogb?.setCredential && electronSlot
+    ? window.ogb.setCredential(electronSlot, value)
+    : api("/api/config", { method: "PUT", body: JSON.stringify(SECTIONS[section].body(value, firstKey)) });
+}
+
 const CREDENTIALS: Record<
   ConfigSection,
   {
@@ -345,14 +354,7 @@ export function ApiKeyRow({
     setError(null);
     testGeneration.current++;
     setVerdict(null);
-    const electronSlot = desktopCredentialSlot(section);
-    const request = window.ogb?.setCredential && electronSlot
-      ? window.ogb.setCredential(electronSlot, next)
-      : api("/api/config", {
-          method: "PUT",
-          body: JSON.stringify(SECTIONS[section].body(next, !configured)),
-        });
-    request
+    saveCredential(section, next, !configured)
       .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
         setValue("");
