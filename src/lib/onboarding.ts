@@ -1,4 +1,5 @@
 import { ONBOARDING_CLOUD_HINT, WELCOME_VERSION } from "../../electron/onboarding-record.mjs";
+import { rankAis } from "../../shared/ai-ranking";
 
 export interface OnboardingStatus {
   completedAt: string;
@@ -180,14 +181,14 @@ interface AiChoice {
   driverKind: string;
   access?: string;
   readOnly?: boolean;
+  snapshot?: { freeFallback?: boolean };
 }
 
-/** The one way the welcome recommends to connect an AI (a Claude account first, then a ChatGPT plan), and every other way. */
+/** The one way the welcome recommends to connect an AI, in the new-bot default's own order (shared/ai-ranking.ts: a Claude
+ * account first, then a ChatGPT plan), and every other way. */
 export function aiChoices<Instance extends AiChoice>(instances: readonly Instance[]): { recommended?: Instance; others: Instance[] } {
   const plan = (instance: Instance) => !instance.readOnly && instance.access !== "api" && instance.access !== "custom";
-  const recommended = instances.find((instance) => plan(instance) && instance.driverKind === "claudeAgent")
-    ?? instances.find((instance) => plan(instance) && instance.driverKind === "codex")
-    ?? instances.find((instance) => !instance.readOnly);
+  const recommended = rankAis(instances.filter(plan))[0] ?? instances.find((instance) => !instance.readOnly);
   return { recommended, others: instances.filter((instance) => instance !== recommended) };
 }
 

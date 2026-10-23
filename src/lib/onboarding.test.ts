@@ -165,6 +165,15 @@ describe("connecting an AI in the welcome", () => {
     expect(aiChoices([row("company", "claudeAgent", { readOnly: true }), grok]).recommended, "an organization's model is not a sign-in").toBe(grok);
     expect(aiChoices([])).toEqual({ recommended: undefined, others: [] });
   });
+
+  it("recommends in the same order the new-bot default uses: then Gemini, then Grok, then the rest as listed", () => {
+    const kimi = row("kimi", "kimiAgent");
+    const grok = row("grok", "grokAgent");
+    const antigravity = row("antigravity", "antigravityAgent");
+    expect(aiChoices([kimi, grok, antigravity]).recommended).toBe(antigravity);
+    expect(aiChoices([kimi, grok])).toEqual({ recommended: grok, others: [kimi] });
+    expect(aiChoices([kimi, row("droid", "droidAgent")]).recommended).toBe(kimi);
+  });
 });
 
 describe("persistence patches", () => {

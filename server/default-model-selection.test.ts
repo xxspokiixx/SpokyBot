@@ -133,6 +133,51 @@ describe("new bot default model selection", () => {
   });
 });
 
+describe("new bot default: one ranking with the welcome, tested AIs first", () => {
+  const ready = (instanceId: string, driverKind: string, model: string, snapshot: Partial<ProviderSnapshot> = {}): SelectableInstance => ({
+    instanceId, driverKind, snapshot: { state: "available", authenticated: true, ...snapshot }, models: { default: model, options: [{ id: model, label: model }] },
+  });
+  const grok = ready("grok", "grokAgent", "grok-default");
+  const kimi = ready("kimi", "kimiAgent", "kimi-default");
+  const chatgpt = ready("chatgpt", "codex", "gpt-default", { chatgptPlan: true });
+  const claudeReady = ready("claude", "claudeAgent", "claude-default");
+  const openCodeFree = ready("opencodeGo", "opencodeGo", "opencode/big-pickle", { freeFallback: true });
+  const pick = (instances: SelectableInstance[], context = {}) => selectDefaultModelSelection(instances, undefined, context).instanceId;
+
+  it("picks Claude over Grok even though Grok comes first in the app's list", () => {
+    expect(pick([grok, kimi, claudeReady])).toBe("claude");
+  });
+
+  it("picks a ChatGPT plan over Grok", () => {
+    expect(pick([grok, kimi, chatgpt])).toBe("chatgpt");
+  });
+
+  it("picks OpenCode on free models only after every other ready AI, and when it is the only one", () => {
+    for (const other of [grok, kimi, chatgpt, claudeReady]) expect(pick([openCodeFree, other])).toBe(other.instanceId);
+    expect(pick([openCodeFree])).toBe("opencodeGo");
+    expect(selectDefaultModelSelection([openCodeFree])).toEqual({ instanceId: "opencodeGo", model: "opencode/big-pickle" });
+  });
+
+  it("always keeps a saved default, over the ranking and over any test", () => {
+    const saved = { instanceId: "opencodeGo", model: "opencode/big-pickle" };
+    expect(selectDefaultModelSelection([claudeReady, openCodeFree], saved, { answered: (instance) => instance.instanceId === "claude" }))
+      .toEqual(saved);
+    expect(selectDefaultModelSelection([claudeReady, grok], { instanceId: "grok", model: "grok-default" }, { answered: () => false }))
+      .toEqual({ instanceId: "grok", model: "grok-default" });
+  });
+
+  it("moves off an AI that failed its test to the best one that answered, and keeps the ranking until a test says otherwise", () => {
+    const failed = (...ids: string[]) => (instance: SelectableInstance) => ids.includes(instance.instanceId) ? false : undefined;
+    expect(pick([grok, claudeReady, chatgpt], { answered: failed("claude") })).toBe("chatgpt");
+    expect(pick([grok, claudeReady, chatgpt], { answered: (instance: SelectableInstance) => instance.instanceId === "claude" ? false : instance.instanceId === "grok" })).toBe("grok");
+    expect(pick([grok, claudeReady], { answered: () => undefined })).toBe("claude");
+    // Nothing answered: the ranking still decides, so a new bot is never left without an AI.
+    expect(pick([grok, claudeReady], { answered: () => false })).toBe("claude");
+    // The free backup that answered beats a real AI that didn't.
+    expect(pick([claudeReady, openCodeFree], { answered: (instance: SelectableInstance) => instance.instanceId === "opencodeGo" ? true : false })).toBe("opencodeGo");
+  });
+});
+
 describe("new bot default model selection while enrolled in an organisation", () => {
   const signedOut = { ...claude, instanceId: "personal-claude", snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
   const companyClaude = { ...claude, instanceId: "company.fixture.anthropic", models: { default: "company-claude", options: [{ id: "company-claude", label: "Company" }] } };

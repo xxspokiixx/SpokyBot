@@ -506,20 +506,17 @@ export interface InstanceInfo {
     reason?: string;
     authenticated?: boolean;
     chatgptPlan?: boolean;
+    /** Ready only through OpenCode's free no-login models: a backup, never "an AI already works". */
+    freeFallback?: boolean;
     authenticationUnavailableReason?: string;
     account?: { email?: string; organization?: string; method?: "login" | "api-key" };
     version?: string | null;
-    update?: {
-      title: string;
-      message: string;
-      command: string;
-    };
+    update?: { title: string; message: string; command: string };
     billing?: "metered" | "subscription";
-    warning?: {
-      title: string;
-      message: string;
-    };
+    warning?: { title: string; message: string };
   };
+  /** What one tiny test message through this AI showed, for its current sign-in; absent until one is sent. */
+  aiTest?: import("../../shared/ai-ranking").AiTestState;
   models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[] }> };
   capabilities?: {
     computerMcp?: boolean;
