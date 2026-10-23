@@ -888,6 +888,19 @@ The offer is on by default. To switch it off, start the server with
 `OMB_QUOTA_SWITCH=0`; any other value, or none, leaves it on. It has no
 setting in `config.json` yet.
 
+### Which engine a new bot uses
+
+A saved default model (Settings, or `openmausbot setup`) always wins. Without
+one, new bots get the first engine that can run, in this order: a Claude
+account, a ChatGPT plan, Gemini, Grok, then the rest in the order of
+`instances`; OpenCode running only Zen's free no-login models comes last.
+The server picks at once at start, then sends that engine one tiny test
+message in the background ("Reply with the single word OK", 90 seconds at
+most). If it doesn't answer, the next engine is tested, and the default moves
+to the best engine that answered; the first bot follows while nobody has
+written to it. A result lasts until that engine's sign-in changes. To stop
+the background test messages, start the server with `OMB_AI_CHECKS=0`.
+
 ### The decision log
 
 Every approval decision — a rule that let a tool call through, a card that

@@ -72,3 +72,25 @@ it.each(["stream", "text", "text-fallback"])("%s capture stays complete while an
     await removeTempDir(home);
   }
 });
+
+it("leaves the turn capture alone for the server's connection check, a background one-shot like memory upkeep", async () => {
+  const home = mkdtempSync(join(tmpdir(), "omb-claude-dump-"));
+  const dump = join(home, "capture.json");
+  let child: ChildProcess | undefined;
+  try {
+    child = spawn(process.execPath, [fileURLToPath(new URL("fake-claude-cli.ts", import.meta.url)), "--output-format", "text"], {
+      cwd: home,
+      env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_TEXT_DUMP: undefined },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout!.on("data", chunk => { stdout += chunk; });
+    child.stdin!.end("This is a connection check. Reply with the single word OK.");
+    await expect.poll(() => child!.exitCode, { timeout: 10_000 }).toBe(0);
+    expect(stdout.trim()).toBe("fake generated text");
+    expect(existsSync(dump)).toBe(false);
+  } finally {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await removeTempDir(home);
+  }
+});
