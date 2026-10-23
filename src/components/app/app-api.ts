@@ -31,10 +31,12 @@ function failureOf(error: unknown): AppFetchFailure {
   return { offline: true };
 }
 
-/** `rev`: an earlier version of a bot's page; the current one when omitted. */
+/** `rev`: an earlier version of a bot's page; the current one when omitted. A folder page's files load from this
+ * window's own origin, which is where /api answers. */
 export async function fetchAppDocument(threadId: string, messageId: string, signal?: AbortSignal, rev?: number): Promise<AppDocument> {
+  const query = new URLSearchParams({ origin: window.location.origin, ...(rev === undefined ? {} : { rev: String(rev) }) });
   try {
-    const doc = await api<AppDocument>(`${appDocumentPath(threadId, messageId)}${rev === undefined ? "" : `?rev=${rev}`}`, { signal });
+    const doc = await api<AppDocument>(`${appDocumentPath(threadId, messageId)}?${query}`, { signal });
     if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: "The app's page did not arrive whole." });
     return doc;
   } catch (error) {
@@ -125,7 +127,12 @@ export async function publishAppPage(threadId: string, messageId: string, rev: n
   }
 }
 
-export async function fetchAppPagePublished(threadId: string, messageId: string, signal?: AbortSignal): Promise<{ pageId: string; url: string } | null> {
-  const body = await api<{ published: { pageId: string; url: string } | null }>(`${appDocumentPath(threadId, messageId)}/publish`, { signal });
-  return body.published && typeof body.published.url === "string" ? body.published : null;
+/** Takes a published page down; its card says so once the server has patched it. */
+export async function unpublishPage(pageId: string): Promise<boolean> {
+  try {
+    await api(`/api/published-pages/${encodeURIComponent(pageId)}/unpublish`, { method: "POST", body: "{}" });
+    return true;
+  } catch {
+    return false;
+  }
 }

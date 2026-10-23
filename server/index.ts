@@ -13666,7 +13666,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
       return json(res, 200, { session: issued.session, environment });
     }
-    if (cloudSigned && await cloudSigned({ req, res, url, path, method })) return;
+    if ((cloudSigned && await cloudSigned({ req, res, url, path, method })) || chatApps.serveFile(req, res, path, method)) return;
     if (method === "POST" && path === "/api/auth/pair") {
       // JSON only: a cross-site HTML form cannot send this content type without a preflight, so no unused code is planted as a session.
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
@@ -14038,7 +14038,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
-      if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS) return; if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }), post: (text, publishedPage) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return source ? store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id : null; } }) !== PASS) return;
+      if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS) return; if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }), post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (!source.group && bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
       };
@@ -14112,7 +14112,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         requireActiveInternalCapability();
         const result = await createAgentCard({
           store,
-          bot: internalSender, apps: chatApps,
+          bot: internalSender, apps: chatApps, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }),
           threadId: internalCapability.threadId,
           input: body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });

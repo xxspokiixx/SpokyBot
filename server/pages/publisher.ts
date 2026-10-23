@@ -16,8 +16,9 @@ export interface PublishInput {
   pageId?: string;
   /** The bot's own folders: nothing outside them is read. */
   roots: readonly string[];
-  /** Puts a card in the conversation the tool was called from; its message id, or null when the turn has ended. */
-  post: (text: string, card: PublishedPageCard) => string | null;
+  /** Puts a card in the conversation the tool was called from; its message id, or null when the turn has ended. A live
+   * card comes with the files published, so it can show the page itself. */
+  post: (text: string, card: PublishedPageCard, bundle?: PageBundle) => string | null;
 }
 
 const TITLE_MAX = 200;
@@ -68,14 +69,10 @@ export function createPagePublisher(deps: {
 
     /** A page built here rather than read from a folder (a chat page the person publishes from the preview); `source`
      * keeps its link across publishes. */
-    async publishFiles(input: Pick<PublishInput, "botId" | "threadId" | "title" | "post"> & { source: string; files: PageBundle["files"] }): Promise<PageOutcome> {
+    async publishFiles(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post"> & { source: string; files: PageBundle["files"] }): Promise<PageOutcome> {
       return publishBundle(input, { source: input.source, files: input.files, bytes: input.files.reduce((sum, file) => sum + file.data.byteLength, 0), skipped: [] });
     },
 
-    published(botId: string, source: string): { pageId: string; url: string } | null {
-      const record = store.fromSource(botId, source);
-      return record ? { pageId: record.pageId, url: record.url } : null;
-    },
   };
 
   async function publishBundle(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post">, bundle: PageBundle): Promise<PageOutcome> {
@@ -99,7 +96,7 @@ export function createPagePublisher(deps: {
       return { status: failureStatus[result.reason], text: result.message };
     }
     const card: PublishedPageCard = { state: "live", title, pageId: result.pageId, url: result.url, usage: result.usage };
-    const messageId = input.post(cardText(card), card);
+    const messageId = input.post(cardText(card), card, bundle);
     store.published({ pageId: result.pageId, url: result.url, title, botId: remembered?.botId ?? input.botId, source: bundle.source,
       card: messageId ? { threadId: input.threadId, messageId } : null });
     const updated = Boolean(target) && result.pageId === target;

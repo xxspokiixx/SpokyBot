@@ -121,7 +121,6 @@ it("shows a jsx page, takes what the person pointed at to the bot as records, re
   expect(earlier.body).toMatchObject({ rev: 0 });
   expect(earlier.body.srcdoc).not.toContain("data-plan={plan.name}");
 
-  expect(await api(`/api/threads/${threadId}/messages/${appId}/app/publish`)).toEqual({ status: 200, body: { published: null } });
   const published = await api(`/api/threads/${threadId}/messages/${appId}/app/publish`, { method: "POST", body: JSON.stringify({ rev: 1 }) });
   expect(published).toMatchObject({ status: 200, body: { ok: true, card: { state: "live", title: "Pricing" } } });
   const [pageId] = [...stub.service.pages.keys()];
@@ -131,10 +130,11 @@ it("shows a jsx page, takes what the person pointed at to the bot as records, re
   expect(html).toContain("_react.useState.call(void 0, \"Pro\")");
   expect(html).not.toContain("useState(\"Pro\")");
   expect(html).not.toContain("Content-Security-Policy");
-  expect(await api(`/api/threads/${threadId}/messages/${appId}/app/publish`)).toEqual({ status: 200, body: { published: { pageId, url: `https://${pageId}.mausbot.page/` } } });
+  expect((await transcript()).find((message) => message.id === appId).publishedPage).toMatchObject({ state: "live", pageId, url: `https://${pageId}.mausbot.page/` });
   const again = await api(`/api/threads/${threadId}/messages/${appId}/app/publish`, { method: "POST", body: "{}" });
   expect(again.body.card.pageId).toBe(pageId);
   expect(stub.service.pages.size).toBe(1);
+  // Sharing gives the page's own card the link; no second card is posted.
   const cards = (await transcript()).filter((message) => message.publishedPage);
-  expect(cards.map((message) => message.publishedPage.state)).toEqual(["live", "live"]);
+  expect(cards.map((message) => [message.id, message.publishedPage.state])).toEqual([[appId, "live"]]);
 }, 120_000);

@@ -2,7 +2,7 @@
 // (`<?xml …?>`, `<![CDATA[…]>`) and the app's own doctype are stripped first; the rest follows the meta,
 // which already sits in the head the parser opened for it.
 import type { AppCan, AppDocument, AppToolDefinition, AppToolResult } from "../app.ts";
-import { BOT_HTML_CSP, BOT_HTML_NETWORK, mcpAppCsp } from "./csp.ts";
+import { BOT_HTML_CSP, BOT_HTML_NETWORK, folderPageCsp, folderPageNetwork, mcpAppCsp } from "./csp.ts";
 import { APP_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
 import { jsxPageHtml } from "./jsx-page.ts";
 import { APP_POINT_SOURCE } from "./point.ts";
@@ -30,10 +30,12 @@ export function stripDocumentPreamble(html: string): string {
   }
 }
 
-export function buildSrcdoc(input: { html: string; csp: string; botHelper?: boolean }): string {
+/** `base`: where a folder page's relative URLs resolve, ahead of anything of the page's. */
+export function buildSrcdoc(input: { html: string; csp: string; botHelper?: boolean; base?: string }): string {
   const head = `${CSP_META_PREFIX}${escapeAttribute(input.csp)}">`;
   const helper = input.botHelper ? `<style>${APP_THEME_STYLE}</style><script>${APP_HELPER_SOURCE}</script><script>${APP_POINT_SOURCE}</script>` : "";
-  return `${head}${helper}${stripDocumentPreamble(input.html)}`;
+  const base = input.base ? `<base href="${escapeAttribute(input.base)}">` : "";
+  return `${head}${base}${helper}${stripDocumentPreamble(input.html)}`;
 }
 
 /** `window.mausbot` on a published page, where no chat answers it: send and setContext do nothing, open opens a tab. */
@@ -48,16 +50,19 @@ export function publishedBotHtml(html: string): string {
 
 export const BOT_HTML_CAN: AppCan = { serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true };
 
-/** `format: "jsx"`: `html` is a React component file, served inside the page shell. */
-export function botHtmlDocument(input: { messageId: string; rev: number; html: string; format?: "jsx"; title?: string }): AppDocument {
+/** `format: "jsx"`: `html` is a React component file, served inside the page shell. `files`: a folder page, whose
+ * other files load from that folder URL (the token route's, ending in "/"). */
+export function botHtmlDocument(input: { messageId: string; rev: number; html: string; format?: "jsx"; title?: string; files?: string }): AppDocument {
   const html = input.format === "jsx" ? jsxPageHtml({ title: input.title ?? "Page", source: input.html }) : input.html;
+  const csp = input.files ? folderPageCsp(input.files) : BOT_HTML_CSP;
+  const network = input.files ? folderPageNetwork(input.files) : BOT_HTML_NETWORK;
   return {
     v: 1,
     messageId: input.messageId,
     rev: input.rev,
-    srcdoc: buildSrcdoc({ html, csp: BOT_HTML_CSP, botHelper: true }),
-    csp: BOT_HTML_CSP,
-    network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
+    srcdoc: buildSrcdoc({ html, csp, botHelper: true, ...(input.files ? { base: input.files } : {}) }),
+    csp,
+    network: { connect: [...network.connect], resources: [...network.resources] },
     can: { ...BOT_HTML_CAN },
   };
 }

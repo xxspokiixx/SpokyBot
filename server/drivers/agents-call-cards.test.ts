@@ -160,10 +160,10 @@ describe("the chat-app tools", () => {
     // Its last sentence points a dashboard at the bundled data-dashboards skill.
     expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Never put secrets in it\. Not available in rooms\. For a data dashboard, follow the data-dashboards skill\.$/);
     expect(tools.get("show_html")!.inputSchema.required).toEqual(["title"]);
-    expect(tools.get("update_html")!.description).toBe("Replace a page you showed with show_html, in place, with new `html` or `jsx`. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.");
+    expect(tools.get("update_html")!.description).toBe("Replace a page you showed with show_html, in place, with new `html`, `jsx` or `path`. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.");
     expect(tools.get("update_html")!.inputSchema.required).toEqual(["app_id"]);
     for (const name of ["show_html", "update_html"]) {
-      expect(Object.keys((tools.get(name)!.inputSchema as unknown as { properties: object }).properties), name).toEqual(expect.arrayContaining(["html", "jsx", "title"]));
+      expect(Object.keys((tools.get(name)!.inputSchema as unknown as { properties: object }).properties), name).toEqual(expect.arrayContaining(["html", "jsx", "path", "title"]));
       expect(Buffer.byteLength(JSON.stringify(tools.get(name))), name).toBeLessThan(12 * 1024);
     }
     for (const name of ["show_html", "update_html"]) expect(tools.get(name), name).not.toHaveProperty("annotations");
@@ -203,10 +203,13 @@ describe("the chat-app tools", () => {
     expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "show_html", jsx, title: "Hi" }) });
     await callTool("update_html", { app_id: "m9", jsx }, context);
     expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "update_html", app_id: "m9", jsx }) });
-    expect(apiResponse).toHaveBeenCalledTimes(2);
-    expect(await callTool("show_html", { jsx, html: "<p>x</p>", title: "Hi" }, context)).toEqual({ text: "Send html or jsx, not both.", isError: true });
+    await callTool("show_html", { path: "site", title: "Site" }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "show_html", path: "site", title: "Site" }) });
+    expect(apiResponse).toHaveBeenCalledTimes(3);
+    expect(await callTool("show_html", { path: "site", html: "<p>x</p>", title: "Hi" }, context)).toEqual({ text: "Send one of html, jsx or path.", isError: true });
+    expect(await callTool("show_html", { jsx, html: "<p>x</p>", title: "Hi" }, context)).toEqual({ text: "Send one of html, jsx or path.", isError: true });
     expect(await callTool("show_html", { jsx: "const x = 1;", title: "Hi" }, context)).toEqual({ text: "jsx: needs `export default` of the page's component.", isError: true });
-    expect(apiResponse).toHaveBeenCalledTimes(2);
+    expect(apiResponse).toHaveBeenCalledTimes(3);
   });
 
   it("update_html names the page it replaced", async () => {

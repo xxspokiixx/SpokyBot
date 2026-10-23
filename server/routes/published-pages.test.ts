@@ -9,7 +9,6 @@ function fakePublisher() {
     publish: vi.fn(async () => ({ status: 200, text: "Published “Bake sale” at https://abcdefghijklmnopqrstuvwxyz.mausbot.page/" })),
     unpublish: vi.fn(async () => ({ status: 200, text: "Unpublished.", card: { state: "unpublished" as const, title: "Bake sale" } })),
     publishFiles: vi.fn(async () => ({ status: 200, text: "Published." })),
-    published: vi.fn(() => null),
   } satisfies PagePublisher;
 }
 

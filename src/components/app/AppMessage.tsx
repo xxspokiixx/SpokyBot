@@ -150,7 +150,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
     frame: () => (fullScreen ? wide.current : frame.current)?.iframe,
     threadId, appId: message.id, rev, title: payload.title, picked: () => setFullScreen(false),
   });
-  const share = usePageShare(threadId, message.id, page && slot.live);
+  const share = usePageShare(threadId, message.id, message.publishedPage);
   const tools = { version, point, share, ready: Boolean(current), fullScreen: { open: fullScreen, toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BotEditorStore, type Message, type useStore } from "@/state/store";
 import { addPointedChip, forgetPointedChips, takePointedChips, usePointedChips } from "@/lib/pointed-chips";
 import type { AppPayload } from "../../../shared/app";
+import type { PublishedPageCard } from "../../../shared/published-page";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
 import { POINT_LIMITS, POINTED_METHOD } from "../../../shared/app-frame/point";
 import { createAppPool, type AppPool } from "./app-pool";
@@ -19,14 +20,15 @@ import { PAGE_HEIGHT } from "./PageTools";
 const payload = (more: Partial<AppPayload> = {}): AppPayload => ({
   v: 1, source: "html", title: "Pricing", doc: "d0", rev: 0, bytes: 900, border: true, network: { connect: [], resources: [] }, ...more,
 });
-const row = (app: AppPayload): Message => ({ id: "a1", role: "bot", kind: "app", at: 1, text: "[App] Pricing", app });
+const row = (app: AppPayload, publishedPage?: PublishedPageCard): Message => ({ id: "a1", role: "bot", kind: "app", at: 1, text: "[App] Pricing", app,
+  ...(publishedPage ? { publishedPage } : {}) });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const fetchMock = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>();
 const openExternal = vi.fn(async () => true);
 const store = { state: {}, dispatch: vi.fn(), flushBotPatches: vi.fn(async () => null) } as unknown as ReturnType<typeof useStore>;
 const LINK = "https://page000000000000000000001.mausbot.page/";
-let published: { pageId: string; url: string } | null = null;
+const LIVE: PublishedPageCard = { state: "live", title: "Pricing", pageId: "page000000000000000000001", url: LINK, usage: { pages: 1, limit: 5 } };
 
 let host: HTMLDivElement;
 let root: Root;
@@ -54,7 +56,8 @@ const button = (label: string, within: ParentNode = document) => Array.from(with
   .find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label)!;
 const click = (label: string, within?: ParentNode) => act(async () => { button(label, within).click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 const chips = () => JSON.parse(host.querySelector("[data-chips]")!.getAttribute("data-chips")!) as unknown[];
-const documents = () => fetchMock.mock.calls.map(([path]) => path).filter((path) => path.includes("/app") && !path.includes("/publish"));
+const documents = () => fetchMock.mock.calls.map(([path]) => new URL(path, "http://omb.test")).filter((url) => url.pathname.endsWith("/app"));
+const posts = (ending: string) => fetchMock.mock.calls.filter(([path, init]) => path.endsWith(ending) && init?.method === "POST").map(([, init]) => JSON.parse(String(init!.body)));
 const fromFrame = (data: unknown, source: unknown) => act(async () => {
   window.dispatchEvent(new MessageEvent("message", { data, source: source as MessageEventSource }));
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -62,15 +65,11 @@ const fromFrame = (data: unknown, source: unknown) => act(async () => {
 const PICK = { jsonrpc: "2.0", method: POINTED_METHOD, params: { tag: "button", role: "button", text: "Choose Pro", selector: "main > section:nth-of-type(2) > button", html: "<button>Choose Pro</button>" } };
 
 beforeEach(() => {
-  published = null;
   fetchMock.mockReset();
-  fetchMock.mockImplementation(async (path, init) => {
+  fetchMock.mockImplementation(async (path) => {
     const url = new URL(path, "http://omb.test");
-    if (url.pathname.endsWith("/app/publish")) {
-      if (init?.method !== "POST") return json(200, { published });
-      published = { pageId: "page000000000000000000001", url: LINK };
-      return json(200, { ok: true, card: { state: "live", title: "Pricing", ...published, usage: { pages: 1, limit: 5 } } });
-    }
+    if (url.pathname.endsWith("/app/publish")) return json(200, { ok: true, card: LIVE });
+    if (url.pathname.endsWith("/unpublish")) return json(200, { ok: true, card: { ...LIVE, state: "unpublished" } });
     const rev = url.searchParams.get("rev");
     return json(200, botHtmlDocument({ messageId: "a1", rev: rev === null ? 0 : Number(rev), html: `<p>${rev === null ? "newest" : `version ${Number(rev) + 1}`}</p>` }));
   });
@@ -101,7 +100,7 @@ describe("a bot's page in the chat", () => {
     for (const label of ["Point", "Share", "Full screen"]) expect(button(label, card()).disabled, label).toBe(false);
     expect(button("Open in new tab", card()).disabled).toBe(true);
     expect(button("Open in new tab", card()).title).toBe("Share the page to open it in a new tab");
-    expect(fetchMock.mock.calls.some(([path]) => path.endsWith("/app/publish"))).toBe(true);
+    expect(documents()[0]!.searchParams.get("origin")).toBe(window.location.origin);
   });
 
   it("refreshes the same card on update_html with Updated, and steps back to the versions it keeps", async () => {
@@ -112,7 +111,7 @@ describe("a bot's page in the chat", () => {
     expect(card().querySelector("[data-page-updated]")?.textContent).toBe("Updated");
     await click("Earlier version", card());
     expect(card().querySelector("[data-page-version]")?.textContent).toBe("v1 of 2");
-    expect(documents().at(-1)).toBe("/api/threads/t1/messages/a1/app?rev=0");
+    expect(documents().at(-1)!.searchParams.get("rev")).toBe("0");
     expect(inlineFrame().srcdoc).toContain("<p>version 1</p>");
     expect(button("Earlier version", card()).disabled).toBe(true);
     await click("Back to the latest", card());
@@ -140,12 +139,12 @@ describe("a bot's page in the chat", () => {
     expect(posted).toHaveBeenLastCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: false } }, "*");
   });
 
-  it("shares the version on screen, then shows the link with Copy and opens it in a new tab", async () => {
+  it("shares the version on screen; the card the server patches shows the link with Copy, opens it, and unpublishes it", async () => {
     await render(row(payload()));
     await click("Share", card());
     await settle();
-    const sent = fetchMock.mock.calls.find(([path, init]) => path.endsWith("/app/publish") && init?.method === "POST")!;
-    expect(JSON.parse(String(sent[1]!.body))).toEqual({ rev: 0 });
+    expect(posts("/app/publish")).toEqual([{ rev: 0 }]);
+    await render(row(payload(), LIVE));
     expect(card().querySelector("[data-page-link]")?.textContent).toContain(LINK);
     expect(button("Copy link", card())).toBeDefined();
     expect(button("Open in new tab", card()).disabled).toBe(false);
@@ -154,13 +153,20 @@ describe("a bot's page in the chat", () => {
     await click("Update link", card());
     await settle();
     expect(card().querySelector("[data-page-link]")?.textContent).toContain("Updated at the same link");
+    await click("Unpublish", card());
+    await settle();
+    expect(fetchMock.mock.calls.some(([path, init]) => path === `/api/published-pages/${LIVE.pageId}/unpublish` && init?.method === "POST")).toBe(true);
+    await render(row(payload(), { ...LIVE, state: "unpublished" }));
+    expect(card().querySelector("[data-page-link]")).toBeNull();
+    expect(card().textContent).toContain("Unpublished. The link no longer opens.");
+    expect(button("Open in new tab", card()).disabled).toBe(true);
   });
 
-  it("knows a page shared before, when the card comes back", async () => {
-    published = { pageId: "page000000000000000000001", url: LINK };
-    await render(row(payload()));
+  it("shows publish_page's link on the page it published", async () => {
+    await render(row(payload(), LIVE));
     expect(card().querySelector("[data-page-link]")?.textContent).toContain("Published");
     expect(button("Open in new tab", card()).disabled).toBe(false);
+    expect(fetchMock.mock.calls.some(([path]) => path.includes("/publish"))).toBe(false);
   });
 
   it("opens Full screen over the chat, points there too, and closes on Escape or after a pick", async () => {
@@ -188,7 +194,7 @@ describe("a bot's page in the chat", () => {
   it("gives an MCP app none of a page's tools", async () => {
     await render(row(payload({ source: "mcp", mcp: { server: "excalidraw", tool: "create_view", resourceUri: "ui://excalidraw/app.html" } })));
     expect(card().querySelector("[data-page-tools]")).toBeNull();
-    expect(fetchMock.mock.calls.some(([path]) => path.endsWith("/app/publish"))).toBe(false);
+    expect(card().querySelector("[data-page-link]")).toBeNull();
   });
 });
 

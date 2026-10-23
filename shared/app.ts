@@ -161,10 +161,12 @@ export interface AppDocument {
   blocked?: { reason: AppBlockedReason; text: string };
 }
 
-/** Exactly one of `html` (wrapped when it was a fragment) and `jsx`, neither yet scrubbed of secrets. */
+/** Exactly one of `html` (wrapped when it was a fragment), `jsx` and `path` (a folder with index.html, or an .html
+ * file, in the bot's own folders), none yet scrubbed of secrets. */
 export interface ShowHtmlInput {
   html?: string;
   jsx?: string;
+  path?: string;
   title: string;
   height?: number;
   fallbackText?: string;
@@ -174,6 +176,7 @@ export interface UpdateHtmlInput {
   appId: string;
   html?: string;
   jsx?: string;
+  path?: string;
   title?: string;
 }
 
@@ -228,9 +231,14 @@ function checkJsx(value: unknown): AppInputResult<string> {
   return { ok: true, value: jsx };
 }
 
-function checkPage(input: Record<string, unknown>): AppInputResult<{ html: string } | { jsx: string }> {
+function checkPage(input: Record<string, unknown>): AppInputResult<{ html: string } | { jsx: string } | { path: string }> {
   const given = (value: unknown) => value !== undefined && value !== null;
-  if (given(input.html) && given(input.jsx)) return { ok: false, error: "Send html or jsx, not both." };
+  if ([input.html, input.jsx, input.path].filter(given).length > 1) return { ok: false, error: "Send one of html, jsx or path." };
+  if (given(input.path)) {
+    const path = typeof input.path === "string" ? input.path.trim() : "";
+    if (!path || path.length > 4_096) return { ok: false, error: "path: the folder with index.html, or the .html file, in your working folder." };
+    return { ok: true, value: { path } };
+  }
   if (given(input.jsx)) {
     const jsx = checkJsx(input.jsx);
     return jsx.ok ? { ok: true, value: { jsx: jsx.value } } : jsx;
@@ -247,7 +255,7 @@ function checkTitle(value: unknown): AppInputResult<string> {
 }
 
 export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
-  if (!isRecord(input)) return { ok: false, error: "show_html needs {html or jsx, title, height?, fallback_text?}." };
+  if (!isRecord(input)) return { ok: false, error: "show_html needs {html, jsx or path, title, height?, fallback_text?}." };
   const page = checkPage(input);
   if (!page.ok) return page;
   const title = checkTitle(input.title);
@@ -267,7 +275,7 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
 }
 
 export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlInput> {
-  if (!isRecord(input)) return { ok: false, error: "update_html needs {app_id, html or jsx, title?}." };
+  if (!isRecord(input)) return { ok: false, error: "update_html needs {app_id, html, jsx or path, title?}." };
   if (typeof input.app_id !== "string" || !/^[\w-]{1,128}$/.test(input.app_id.trim())) {
     return { ok: false, error: "app_id: is required, the id show_html returned." };
   }

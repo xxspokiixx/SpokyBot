@@ -1,7 +1,7 @@
 // A bot's page in the chat, artifact-style: its version stepper, Point, Share, Open in new tab and Full screen.
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Globe, Loader2, Maximize2, Share2, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Globe, Loader2, Maximize2, Share2, Trash2, X } from "lucide-react";
 import { useStore } from "@/state/store";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
@@ -11,7 +11,7 @@ import { addPointedChip } from "@/lib/pointed-chips";
 import type { AppDocument, AppPayload } from "../../../shared/app";
 import { pointMessage, readPointEvent } from "../../../shared/app-frame/point";
 import type { PublishedPageCard } from "../../../shared/published-page";
-import { fetchAppPagePublished, publishAppPage } from "./app-api";
+import { publishAppPage, unpublishPage } from "./app-api";
 import { AppFrame, type AppFrameHandle } from "./AppFrame";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_CHIP_PICKED, ASK_PRIMARY_BUTTON } from "../AskCard";
 
@@ -48,31 +48,31 @@ export function usePageVersion(app: AppPayload): { rev: number; first: number; l
 
 type Share =
   | { kind: "idle" }
-  | { kind: "busy"; url?: string }
-  | { kind: "live"; url: string; again: boolean }
-  | { kind: "refused"; text: string; card?: PublishedPageCard; url?: string };
+  | { kind: "busy" }
+  | { kind: "refused"; text: string; card?: PublishedPageCard }
+  | { kind: "unpublishing" }
+  | { kind: "unpublish-failed" };
 
-/** The page's public link: looked up once the card is on screen, made or updated by Share. */
-export function usePageShare(threadId: string, messageId: string, active: boolean) {
+/** The page's public link, as the row's published card says (publish_page's, or this card's own Share), and Share and
+ * Unpublish. The server patches the card, so every window sees the same link. */
+export function usePageShare(threadId: string, messageId: string, published: PublishedPageCard | undefined) {
   const [share, setShare] = useState<Share>({ kind: "idle" });
-  useEffect(() => {
-    if (!active) return undefined;
-    const controller = new AbortController();
-    fetchAppPagePublished(threadId, messageId, controller.signal).then(
-      (published) => { if (published && !controller.signal.aborted) setShare((now) => (now.kind === "idle" ? { kind: "live", url: published.url, again: false } : now)); },
-      () => {},
-    );
-    return () => controller.abort();
-  }, [threadId, messageId, active]);
-  const url = share.kind === "live" ? share.url : share.kind === "busy" || share.kind === "refused" ? share.url : undefined;
+  const [again, setAgain] = useState(false);
+  const live = published?.state === "live" && published.url ? published : null;
   const run = async (rev: number) => {
-    setShare({ kind: "busy", ...(url ? { url } : {}) });
+    setShare({ kind: "busy" });
     const outcome = await publishAppPage(threadId, messageId, rev);
-    if (outcome.ok && outcome.card.url) setShare({ kind: "live", url: outcome.card.url, again: Boolean(url) });
-    else setShare({ kind: "refused", text: outcome.ok ? t("chat.preview.publishFailed") : (outcome.card?.message ?? outcome.error),
-      ...(!outcome.ok && outcome.card ? { card: outcome.card } : {}), ...(url ? { url } : {}) });
+    setAgain(Boolean(live) && outcome.ok);
+    if (outcome.ok) setShare({ kind: "idle" });
+    else setShare({ kind: "refused", text: outcome.card?.message ?? outcome.error, ...(outcome.card ? { card: outcome.card } : {}) });
   };
-  return { share, url, run };
+  const unpublish = async () => {
+    if (!live?.pageId) return;
+    setShare({ kind: "unpublishing" });
+    setShare(await unpublishPage(live.pageId) ? { kind: "idle" } : { kind: "unpublish-failed" });
+    setAgain(false);
+  };
+  return { share, url: live?.url, again, unpublished: published?.state === "unpublished", run, unpublish };
 }
 
 /** Point mode on whichever frame shows the page. Security: a pick counts only from that frame's own window and only
@@ -162,7 +162,8 @@ export function PageToolbar({ version, point, share, ready, fullScreen, classNam
   );
 }
 
-/** Under the toolbar: the public link with Copy and Update link once shared, or why sharing failed; the Point hint. */
+/** Under the toolbar: the public link with Copy, Update link and Unpublish once shared, or why sharing failed; the Point
+ * hint. */
 export function PageNotes({ version, point, share, className }: Pick<PageToolsProps, "version" | "point" | "share"> & { className?: string }) {
   const { dispatch } = useStore();
   const { state: copied, copy } = useCopyFeedback(share.url ?? "");
@@ -172,7 +173,7 @@ export function PageNotes({ version, point, share, className }: Pick<PageToolsPr
     rows.push(
       <div key="link" data-page-link className="flex min-w-0 flex-wrap items-center gap-2 rounded-2xl bg-inset px-3 py-2 text-[13px]">
         <Globe size={14} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
-        <span className="shrink-0 font-medium text-ink">{state.kind === "live" && state.again ? t("chat.preview.updatedLink") : t("chat.preview.published")}</span>
+        <span className="shrink-0 font-medium text-ink">{share.again ? t("chat.preview.updatedLink") : t("chat.preview.published")}</span>
         <a href={share.url} dir="ltr" onClick={(event) => { event.preventDefault(); void openExternalLink(share.url!); }}
           className="min-w-0 flex-1 truncate text-accent-text hover:underline">{share.url}</a>
         <button type="button" onClick={copy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
@@ -181,9 +182,14 @@ export function PageNotes({ version, point, share, className }: Pick<PageToolsPr
         <button type="button" onClick={() => void share.run(version.rev)} disabled={state.kind === "busy"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {t("chat.preview.republish")}
         </button>
+        <button type="button" onClick={() => void share.unpublish()} disabled={state.kind === "unpublishing"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
+          {state.kind === "unpublishing" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}{t("chat.page.unpublish")}
+        </button>
       </div>,
     );
   }
+  if (share.unpublished && !share.url) rows.push(<p key="gone" className="px-1 text-[13px] text-ink-secondary">{t("chat.page.unpublished")}</p>);
+  if (state.kind === "unpublish-failed") rows.push(<p key="stuck" role="alert" className="px-1 text-[13px] text-danger">{t("chat.page.unpublishFailed")}</p>);
   if (state.kind === "refused") {
     rows.push(
       <div key="refused" role="alert" className="flex items-center gap-2 rounded-2xl bg-inset px-3 py-2 text-[13px] text-ink-secondary">

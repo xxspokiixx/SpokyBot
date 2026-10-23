@@ -17,7 +17,7 @@ async function callAppTool(name: "show_html" | "update_html", args: Json, contex
   const updating = name === "update_html";
   const parsed = updating ? parseUpdateHtmlInput(args) : parseShowHtmlInput(args);
   if (!parsed.ok) return { text: parsed.error, isError: true };
-  const page = parsed.value.jsx !== undefined ? { jsx: args.jsx } : { html: args.html };
+  const page = parsed.value.jsx !== undefined ? { jsx: args.jsx } : parsed.value.path !== undefined ? { path: args.path } : { html: args.html };
   const body = updating
     ? { tool: name, app_id: args.app_id, ...page, ...(typeof args.title === "string" ? { title: args.title } : {}) }
     : {

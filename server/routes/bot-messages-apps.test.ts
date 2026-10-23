@@ -119,7 +119,7 @@ async function fixture() {
   };
   const page = (title = "Booking", thread = threadId) => {
     const result = apps.createAppCard({ bot, threadId: thread, input: { tool: "show_html", html: "<p>Pick a slot</p>", title } });
-    if (!result.ok) throw new Error(result.error);
+    if (result instanceof Promise || !result.ok) throw new Error("not shown");
     return result.messageId;
   };
   const row = (id: string): Message => store.messagesFor(threadId).find((message) => message.id === id)!;
