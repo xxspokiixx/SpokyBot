@@ -53,8 +53,14 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
   const offered = withoutCloudSecrets(withoutIgnoredCloudKeys(env));
   const allowed = Object.fromEntries(Object.entries(offered).filter(([name, value]) => value !== undefined && serverEnvironmentAllowed(name)));
   const dropped = Object.keys(offered).filter((name) => !serverEnvironmentAllowed(name) && name !== "HOME").sort();
+  const dataDir = env.OMB_DATA_DIR || posix.join(home, ".openmausbot");
   const server: NodeJS.ProcessEnv = {
-    ...allowed, HOME: home, OMB_DATA_DIR: env.OMB_DATA_DIR || posix.join(home, ".openmausbot"),
+    ...allowed, HOME: home, OMB_DATA_DIR: dataDir,
+    // V8's compiled code for the 12 MB server bundle, kept on the volume across stops: a cold wake of a sleeping home
+    // reads it instead of compiling again (about 1 s of the wake on a Pro-size machine, measured Oct 23 2026; the
+    // desktop does the same in scripts/desktop-server-entry.mjs). Node creates the folder and keys the entries by
+    // its own version and the file's hash, so an image upgrade refills it and a stale entry is never used.
+    NODE_COMPILE_CACHE: posix.join(dataDir, "cache", "node-compile"),
     OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800", OMB_PUBLIC_URL: config.publicOrigin,
     OMB_WEBHOOK_PUBLIC_URL: env.OMB_WEBHOOK_PUBLIC_URL || config.publicOrigin,
     [CLOUD_SECRETS_FD_ENV]: String(SECRETS_FD),
