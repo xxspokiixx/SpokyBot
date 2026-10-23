@@ -1327,6 +1327,7 @@
   "chat.turnStopped": "Đã dừng",
   "chat.error.signedOut": "{name} chưa đăng nhập. Hãy đăng nhập bên dưới, sau đó gửi lại tin nhắn của bạn.",
   "chat.error.details": "Chi tiết",
+  "chat.error.requestTooLarge": "Tin nhắn này quá lớn đối với {model}. Hãy bắt đầu một cuộc trò chuyện mới hoặc chọn mô hình nhận được nhiều hơn.",
   "chat.error.dismiss": "Bỏ qua",
   "error.plain.unreachable": "Không thể kết nối tới OpenMausBot. Hãy kiểm tra xem ứng dụng có đang chạy không, rồi thử lại.",
   "error.plain.rateLimited": "Hiện có quá nhiều yêu cầu. Hãy đợi một lát rồi thử lại.",

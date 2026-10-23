@@ -1707,6 +1707,7 @@
   "chat.turnStopped": "停止しました",
   "chat.error.signedOut": "{name} にまだサインインしていません。下でサインインしてから、メッセージをもう一度送信してください。",
   "chat.error.details": "詳細",
+  "chat.error.requestTooLarge": "このメッセージは {model} には大きすぎます。新しいチャットを始めるか、より多くを受け付けるモデルを選んでください。",
   "chat.error.dismiss": "閉じる",
   "error.plain.unreachable": "OpenMausBot に接続できませんでした。起動していることを確認して、もう一度お試しください。",
   "error.plain.rateLimited": "リクエストが集中しています。少し待ってから、もう一度お試しください。",
