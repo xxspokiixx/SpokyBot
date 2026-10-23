@@ -289,7 +289,7 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
   if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id);
-  retireUnusedStarter(deps.store);
+  retireUnusedStarter(deps.store, deps.dataDir);
 }
 
 /** A routine as it arrives: off unless My Cloud switched it on, with its finished runs My Cloud lacks. */

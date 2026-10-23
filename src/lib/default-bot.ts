@@ -54,3 +54,20 @@ export function setupSteps(input: { aiReady: boolean; ownBots: number; onCloud: 
     ...(fresh && !input.onCloud && !input.remote ? ["cloud" as const] : []),
   ];
 }
+
+let welcoming: string | null = null;
+const welcomingListeners = new Set<() => void>();
+
+/** The MausBot whose first-launch welcome is open: kept out of the sidebar until Add lands it there. */
+export function setWelcomingBot(id: string | null): void {
+  if (welcoming === id) return;
+  welcoming = id;
+  for (const listener of welcomingListeners) listener();
+}
+
+export function useWelcomingBot(): string | null {
+  return useSyncExternalStore((listener) => {
+    welcomingListeners.add(listener);
+    return () => welcomingListeners.delete(listener);
+  }, () => welcoming, () => null);
+}

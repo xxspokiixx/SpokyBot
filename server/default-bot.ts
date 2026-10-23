@@ -6,7 +6,7 @@ import { DEFAULT_BOT_COLOR, DEFAULT_BOT_NAME, defaultBotPerson } from "../shared
 import { takeImportName } from "../shared/import-name.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 
-export type DefaultBotStore = Pick<Store, "bots" | "bot" | "createBot" | "patchBot" | "appendMessage" | "messagesFor" | "createTask">;
+export type DefaultBotStore = Pick<Store, "bots" | "bot" | "createBot" | "patchBot" | "appendMessage" | "messagesFor" | "createTask" | "setChiefOfStaff">;
 
 /** Where each place (key "") and Team Cloud member (their email) is recorded as having had its MausBot, so one that is
  * gone is never made twice. */
@@ -93,7 +93,9 @@ export function createDefaultBot(store: DefaultBotStore, options: { person?: str
 }
 
 /** Makes sure this place (no `person`) or this Team Cloud member has had its MausBot once: the one it has, the new
- * install's own adopted, or a new one. A MausBot that is gone is never made again. Two marked ones keep the oldest. */
+ * install's own adopted, or a new one. A MausBot that is gone is never made again. Two marked ones keep the oldest. A
+ * place with no Chief of Staff at all gets MausBot as its Chief, so someone keeps an eye on the day; one that has a
+ * Chief keeps it. */
 export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: string; person?: string; team?: string | null }): BotRecord | null {
   const person = options.person?.trim().toLowerCase() ?? "";
   const marked = store.bots.filter((bot) => bot.defaultBot && defaultBotPerson(bot) === person)
@@ -105,12 +107,14 @@ export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: str
   }
   if (Object.hasOwn(ledger(options.dataDir), person)) return null;
   const adoptable = person ? undefined : seededMausBot(store.bots);
+  const chief = !person && !store.bots.some((bot) => bot.chiefOfStaff && !bot.hidden) ? (id: string) => store.setChiefOfStaff(id) : undefined;
   let bot: BotRecord;
   if (adoptable) {
     bot = store.patchBot(adoptable.id, { defaultBot: {}, ...(adoptable.color === STARTER_COLOR ? { color: DEFAULT_BOT_COLOR } : {}) }) ?? adoptable;
+    chief?.(bot.id);
     introduce(store, bot, options.team);
   } else {
-    bot = createDefaultBot(store, { person, team: options.team });
+    bot = createDefaultBot(store, { person, team: options.team, chief });
   }
   remember(options.dataDir, person, bot.id);
   return bot;
@@ -127,11 +131,13 @@ export function takeArrivingDefaultBot(store: Pick<Store, "bots" | "patchBot">, 
   if (!arriving.defaultBot || defaultBotPerson(arriving)) store.patchBot(id, { defaultBot: {} });
 }
 
-/** After a bot arrives by a move: this place's own new-install MausBot, once it is neither the MausBot nor the Chief and
- * nobody has used it, is archived, so the move leaves one MausBot and nothing of the person's is lost. */
-export function retireUnusedStarter(store: Pick<Store, "bots" | "patchBot" | "messagesFor">): void {
-  const seed = store.bots.reduce<BotRecord | undefined>((first, bot) => !first || bot.createdAt < first.createdAt ? bot : first, undefined);
-  if (!seed || seed.defaultBot || seed.chiefOfStaff || seed.hidden || seed.name !== DEFAULT_BOT_NAME) return;
+/** After a bot arrives by a move: the MausBot this place made for itself (by id, from the ledger), once it is neither
+ * the MausBot nor the Chief and nobody has used it, is archived, so the move leaves one MausBot and nothing of the
+ * person's is lost. */
+export function retireUnusedStarter(store: Pick<Store, "bot" | "patchBot" | "messagesFor">, dataDir: string): void {
+  const own = ledger(dataDir)[""];
+  const seed = own ? store.bot(own) : null;
+  if (!seed || seed.defaultBot || seed.chiefOfStaff || seed.hidden) return;
   if (seed.soul?.trim() || seed.title || seed.description || seed.avatarUrl || (seed.tasks?.length ?? 1) > 1) return;
   if (store.messagesFor(seed.threadId).some((message) => message.role === "user")) return;
   store.patchBot(seed.id, { hidden: true, pinned: undefined });

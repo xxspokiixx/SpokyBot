@@ -2179,7 +2179,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -7378,7 +7381,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -9540,7 +9546,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -11702,7 +11711,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -17497,7 +17509,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -23402,7 +23417,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -26443,7 +26461,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -30508,7 +30529,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -33147,7 +33171,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37828,7 +37855,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -42509,7 +42539,10 @@
       "helperIntro.step.bots": "dcd0c30b788e22cc6b3e026aa5f4117c6111db9ccc8c0bb911866cee3b01b693",
       "helperIntro.step.apps": "58c736a6cfcc138a2dc91b4001b56d73a5b34596322d27ec9848f79838c78db3",
       "helperIntro.step.phone": "1d3326aa87c2308f1cc576a36fc64b8ce02b96c7a1769b4e5cf288752df92da2",
-      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad"
+      "helperIntro.step.cloud": "60e1f09aa991238dc390f21d4480a39227f43c9bac0857c35d91ca902a2722ad",
+      "mausbotWelcome.customize": "3e67ddf55d3b7eeaa37d51f0683caeb545b9159b0f47b66b251e28c4daa497e4",
+      "mausbotWelcome.upload": "80be5675bc03e4a4ae1478624f163734c180f6e7b29159016529a799ad025bff",
+      "mausbotWelcome.removePicture": "1bc6f23b53041b4568c24c7537eff6ec0b7460f05c6d2649b9e37bd8fbb3498c"
     }
   }
 }

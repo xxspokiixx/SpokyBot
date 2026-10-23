@@ -10,11 +10,16 @@ import { defaultBotPatchRefusal, ensureDefaultBot } from "./default-bot.ts";
 import * as mdb from "./message-db.ts";
 import { Store, type BotRecord } from "./store.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
+import { createBrief } from "./host/brief.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 const placeMausBots = (store: Store) => store.bots.filter((bot) => bot.defaultBot && !bot.defaultBot.person);
 const intros = (store: Store, bot: BotRecord) => (bot.tasks ?? []).flatMap((task) => store.messagesFor(task.threadId)).filter((message) => message.helperIntro);
 const boot = (store: Store) => ensureDefaultBot(store, { dataDir: DATA_DIR });
+/** Who the daily brief comes from, as the server picks it. */
+const briefChief = (store: Store) => createBrief({ store, dataDir: DATA_DIR, hosted: false, watching: () => true, mainThread: (id) => store.bot(id)?.threadId,
+  threadBusy: () => false, notify: () => {}, runs: () => [], needsYou: () => [], engineName: () => "Claude", hostTimeZone: () => "UTC", session: () => null,
+  address: () => undefined, failRun: () => {}, keep: () => {}, items: () => null }).chief();
 /** A new install from before MausBot was marked: its first bot was MausBot in silver, made its Chief. */
 function seededBefore(store: Store): BotRecord {
   const seeded = store.createBot({ name: "MausBot", color: "silver" });
@@ -84,6 +89,58 @@ describe("MausBot, every person's helper", () => {
     const seeded = seededBefore(store);
     store.patchBot(seeded.id, { color: "blue" });
     expect(boot(store)).toMatchObject({ id: seeded.id, color: "blue" });
+  });
+
+  it("makes MausBot the Chief of a place that has none, so the brief has someone to come from", () => {
+    const store = new Store(selection);
+    store.createBot({ name: "Pixel" });
+    const maus = boot(store)!;
+    expect(store.bot(maus.id)?.chiefOfStaff).toBe(true);
+    expect(briefChief(store)?.id).toBe(maus.id);
+    expect(intros(store, maus)[0]?.text).toContain("As your Chief of Staff, I also keep an eye on your day");
+  });
+
+  it("makes an adopted MausBot the Chief when its place has none left", () => {
+    const store = new Store(selection);
+    const seeded = seededBefore(store);
+    store.setChiefOfStaff(null);
+    expect(store.bot(seeded.id)?.chiefOfStaff).toBeFalsy();
+    expect(boot(store)?.id).toBe(seeded.id);
+    expect(store.bot(seeded.id)?.chiefOfStaff).toBe(true);
+    expect(briefChief(store)?.id).toBe(seeded.id);
+  });
+
+  it("leaves a place's own Chief as the Chief and the one the brief comes from", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Clive" });
+    store.setChiefOfStaff(chief.id);
+    const maus = boot(store)!;
+    expect(store.bot(maus.id)?.chiefOfStaff).toBeFalsy();
+    expect(briefChief(store)?.id).toBe(chief.id);
+  });
+
+  it("keeps a MausBot Chief hidden from the sidebar working as the Chief", () => {
+    const store = new Store(selection);
+    const maus = boot(store)!;
+    store.patchBot(maus.id, { sidebarHidden: true });
+    const restarted = new Store(selection);
+    boot(restarted);
+    expect(restarted.bot(maus.id)).toMatchObject({ chiefOfStaff: true, sidebarHidden: true });
+    expect(briefChief(restarted)?.id).toBe(maus.id);
+  });
+
+  it("knows a renamed MausBot by its mark: no second one on update, Chief tools kept", () => {
+    const store = new Store(selection);
+    store.createBot({ name: "Writer" });
+    const chief = store.createBot({ name: "Clive" });
+    store.setChiefOfStaff(chief.id);
+    const maus = boot(store)!;
+    store.patchBot(maus.id, { name: "Jarvis", color: "blue" });
+    const restarted = new Store(selection);
+    boot(restarted);
+    expect(placeMausBots(restarted).map((bot) => [bot.id, bot.name])).toEqual([[maus.id, "Jarvis"]]);
+    expect(chiefLevel(restarted.bot(maus.id))).toBe(true);
+    expect(restarted.bots).toHaveLength(3);
   });
 
   it("never takes a first bot that is not a new install's MausBot: it gets a MausBot beside it", () => {
@@ -208,6 +265,19 @@ describe("MausBot, every person's helper", () => {
       expect(cloud.bot(starter.id)?.defaultBot).toBeUndefined();
       expect(cloud.bots.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id)).toEqual([pixel.id]);
       expect(placeMausBots(cloud).map((bot) => bot.id)).toEqual([arrivingMaus.id]);
+    });
+
+    it("still makes one MausBot on My Cloud when this computer's arrives renamed and with its own picture", async () => {
+      const cloud = new Store(selection);
+      cloud.seedIfEmpty();
+      boot(cloud);
+      const starter = placeMausBots(cloud)[0]!;
+      cloud.patchBot(starter.id, { name: "Starter" });
+      const arriving = cloud.createBot({ name: "Jarvis" }, { id: "desk-maus-000003", seedMessages: false });
+      cloud.patchBot(arriving.id, { avatarUrl: "/api/attachments/jarvis.png", avatarCrop: "circle" });
+      expect(await arrive(cloud, arriving.id, fields({ defaultBot: {}, welcomed: true }))).toBe(200);
+      expect(placeMausBots(cloud).map((bot) => [bot.id, bot.name, bot.avatarUrl])).toEqual([[arriving.id, "Jarvis", "/api/attachments/jarvis.png"]]);
+      expect(cloud.bot(starter.id)?.defaultBot).toBeUndefined();
     });
 
     it("keeps a My Cloud MausBot someone already used as an ordinary bot", async () => {

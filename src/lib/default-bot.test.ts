@@ -34,6 +34,15 @@ describe("MausBot in the sidebar", () => {
   });
 });
 
+describe("MausBot's identity is its mark, never its name", () => {
+  it("keeps finding a renamed MausBot for the Settings switch and the sidebar, and keeps it out of the list while its welcome is open", () => {
+    const bots = [bot("writer"), { ...bot("maus", { defaultBot: {} }), name: "Jarvis" }];
+    expect(myDefaultBot(bots, null)?.id).toBe("maus");
+    expect(partitionSidebarBots(bots, { viewerEmail: null }).unsectionedBots.map((entry) => entry.id)).toEqual(["writer", "maus"]);
+    expect(partitionSidebarBots(bots, { viewerEmail: null, welcoming: "maus" }).unsectionedBots.map((entry) => entry.id)).toEqual(["writer"]);
+  });
+});
+
 describe("what MausBot offers to set up", () => {
   const fresh = { aiReady: false, ownBots: 0, onCloud: false, team: false, remote: false };
 
