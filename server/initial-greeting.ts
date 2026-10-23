@@ -26,5 +26,5 @@ export function setupRequestLine(language?: string): string {
  * `offerSetup`: the bot has no role or instructions yet, so its greeting carries Set me up. */
 export function initialGreetingMessage(name: string, language: string | (() => string), offerSetup = false) {
   const text = initialGreeting(name, typeof language === "function" ? language() : language);
-  return { role: "bot", kind: "text", text, ...(offerSetup ? { setupOffer: true } : {}) } as const;
+  return { role: "bot", kind: "text", text, ...(offerSetup ? { setupOffer: true as const } : {}) } as const;
 }
