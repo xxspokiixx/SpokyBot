@@ -99,8 +99,7 @@ export function WelcomeFlow({
   const keepsDraft = !replay && !embedded && !hosted;
   const [resumed] = useState(() => (keepsDraft ? readWelcomeDraft() : null));
   const initialBeat = requestedBeat ?? resumed?.beat;
-  const [fields, setFields] = useState<WelcomeFields>(() =>
-    resumed ? { name: resumed.name, email: resumed.email } : { name: state.config?.profile?.name ?? "", email: state.config?.profile?.email ?? "" });
+  const [fields, setFields] = useState<WelcomeFields>(() => ({ name: resumed ? resumed.name : state.config?.profile?.name ?? "" }));
   const { capabilities } = useDesktopCapabilities();
   const offer = useCloudBeatOffer(hosted, cloudOffer);
   const importClient = setupImport === undefined ? (localSetupImport(hosted) ? setupImportApi : null) : setupImport?.client ?? null;

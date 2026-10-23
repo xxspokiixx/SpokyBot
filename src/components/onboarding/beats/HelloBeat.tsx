@@ -1,12 +1,13 @@
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { track } from "@/lib/analytics";
 import { t } from "@/lib/i18n";
-import { checkEmail, type WelcomeFields } from "@/lib/welcome-draft";
+import type { WelcomeFields } from "@/lib/welcome-draft";
 import { useStore } from "@/state/store";
 import { saveWelcomeProfile, type SavedProfile } from "../save-profile";
 import { inputClass, PrimaryButton, QuietButton, staggerIndex, type BeatProps } from "./shared";
 
-/** The name and email live in the flow (`fields`), so Skip and a reload keep them; the email is optional. */
+/** Asks for a name only; it lives in the flow (`fields`), so Skip and a reload keep it. The email is asked once, by the
+ * product-updates question, never here. */
 export function HelloBeat({
   onNext,
   onSkip,
@@ -17,25 +18,16 @@ export function HelloBeat({
 }: BeatProps & { hosted?: boolean; fields: WelcomeFields; onFields: (fields: WelcomeFields) => void; saved: SavedProfile }) {
   const { dispatch } = useStore();
   const pending = useRef(false);
-  const noteId = useId();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
-  // A wrong email is flagged once the field is left or Continue is tried, never while it is still being typed.
-  const [checked, setChecked] = useState(false);
-  const email = checkEmail(fields.email);
-  const flagged = email === "invalid" && checked;
 
   const saveProfile = async () => {
-    if (email === "invalid") {
-      setChecked(true);
-      return;
-    }
     if (pending.current) return;
     pending.current = true;
     setSaving(true);
     setFailed(false);
     try {
-      await saveWelcomeProfile(fields, saved, dispatch, true);
+      await saveWelcomeProfile(fields, saved, dispatch);
       onNext();
     } catch {
       setFailed(true);
@@ -48,7 +40,7 @@ export function HelloBeat({
   const later = () => {
     if (pending.current) return;
     track("email_skipped");
-    void saveWelcomeProfile(fields, saved, dispatch, false).catch(() => {});
+    void saveWelcomeProfile(fields, saved, dispatch).catch(() => {});
     onSkip();
   };
 
@@ -68,7 +60,7 @@ export function HelloBeat({
   return (
     <div className="stagger flex flex-col items-center">
       <p className="animate-rise mt-1.5 text-center text-[14px] leading-relaxed text-ink-secondary" style={staggerIndex(0)}>
-        {t("onboarding.introStart")}
+        {t("onboarding.introName")}
       </p>
       <input
         autoFocus
@@ -76,42 +68,16 @@ export function HelloBeat({
         aria-label={t("onboarding.name")}
         value={fields.name}
         onChange={(e) => onFields({ ...fields, name: e.target.value })}
+        onKeyDown={(e) => e.key === "Enter" && void saveProfile()}
         placeholder={t("onboarding.name")}
         className={`animate-rise mt-5 ${inputClass}`}
         style={staggerIndex(1)}
       />
-      <input
-        type="email"
-        aria-label={t("phone.signIn.email")}
-        aria-invalid={flagged}
-        aria-describedby={noteId}
-        value={fields.email}
-        onChange={(e) => onFields({ ...fields, email: e.target.value })}
-        onBlur={() => setChecked(true)}
-        onKeyDown={(e) => e.key === "Enter" && void saveProfile()}
-        placeholder="you@example.com"
-        className={`animate-rise mt-3 ${inputClass}`}
-        style={staggerIndex(2)}
-      />
-      <p id={noteId} aria-live="polite" className="animate-rise mt-1.5 w-full text-[12px] leading-snug" style={staggerIndex(2)}>
-        {flagged ? (
-          <span className="text-danger">{t("onboarding.email.invalid")}</span>
-        ) : (
-          <span className="text-ink-secondary">{t("onboarding.email.why")}</span>
-        )}
-      </p>
       {failed && <p role="alert" className="mt-3 text-[13px] text-danger">{t("onboarding.profile.error")}</p>}
-      <PrimaryButton
-        onClick={() => void saveProfile()}
-        // Held while the email is wrong, yet still pressable, so pressing it says why.
-        aria-disabled={email === "invalid"}
-        disabled={saving}
-        className="animate-rise mt-3 aria-disabled:opacity-40"
-        style={staggerIndex(3)}
-      >
+      <PrimaryButton onClick={() => void saveProfile()} disabled={saving} className="animate-rise mt-3" style={staggerIndex(2)}>
         {saving ? t("onboarding.saving") : t("onboarding.continue")}
       </PrimaryButton>
-      <QuietButton onClick={later} disabled={saving} className="animate-rise mt-3 disabled:opacity-50" style={staggerIndex(4)}>
+      <QuietButton onClick={later} disabled={saving} className="animate-rise mt-3 disabled:opacity-50" style={staggerIndex(3)}>
         {t("onboarding.maybeLater")}
       </QuietButton>
     </div>

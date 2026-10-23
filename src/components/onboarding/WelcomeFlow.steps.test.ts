@@ -39,8 +39,8 @@ const type = async (selector: string, value: string) => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 };
-const NAME = 'input[type="text"]', EMAIL = 'input[type="email"]';
-const DRAFT = { name: "", email: "" };
+const NAME = 'input[type="text"]';
+const DRAFT = { name: "" };
 const READY_AI = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true }, models: { default: "m", options: [] } };
 const draft = () => readWelcomeDraft();
 const putBodies = () => f.api.mock.calls.filter(([, init]) => init?.method === "PUT").map(([, init]) => JSON.parse(init.body));
@@ -52,7 +52,7 @@ beforeEach(() => {
   f.dispatch.mockReset();
   f.api.mockReset();
   f.api.mockImplementation(async (path: string, init?: { body?: string }) => (path === "/api/instances" ? { instances: [] } : JSON.parse(init?.body ?? "{}")));
-  f.state = { instances: [], config: { profile: { name: "", email: "" } }, cloudAdd: null, bots: [] };
+  f.state = { instances: [], config: { profile: { name: "" } }, cloudAdd: null, bots: [] };
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -106,16 +106,13 @@ describe("moving through the welcome", () => {
 });
 
 describe("a reload in the middle of the welcome", () => {
-  it("resumes on the same step with what was typed", async () => {
+  it("resumes on the same step with the name typed", async () => {
     await show();
     await type(NAME, "Ada");
-    await type(EMAIL, "ada@exa");
-    expect(draft()).toEqual({ beat: "hello", name: "Ada", email: "ada@exa" });
+    expect(draft()).toEqual({ beat: "hello", name: "Ada" });
     await reload();
     expect((host.querySelector(NAME) as HTMLInputElement).value).toBe("Ada");
-    expect((host.querySelector(EMAIL) as HTMLInputElement).value).toBe("ada@exa");
-    expect(button("Continue")!.getAttribute("aria-disabled"), "still held for the email being typed").toBe("true");
-    await type(EMAIL, "");
+    expect(host.querySelector('input[type="email"]'), "the greeting asks for no email").toBeNull();
     await press("Maybe later");
     expect(draft()).toMatchObject({ beat: "engines", name: "Ada" });
     await reload();
@@ -144,7 +141,7 @@ describe("a reload in the middle of the welcome", () => {
     const found: SetupDetection = { skills: [{ name: "pdf", source: "claudeCode" }], tools: [] };
     let answer!: (value: SetupDetection) => void;
     const client = { detect: vi.fn(() => new Promise<SetupDetection>((resolve) => { answer = resolve; })), apply: vi.fn() };
-    saveWelcomeDraft({ beat: "import", name: "", email: "" });
+    saveWelcomeDraft({ beat: "import", name: "" });
     await show({ setupImport: { client } });
     expect(text()).toContain("Connect an AI");
     await act(async () => { answer(found); });
@@ -162,7 +159,7 @@ describe("a reload in the middle of the welcome", () => {
     const found: SetupDetection = { skills: [{ name: "pdf", source: "claudeCode" }], tools: [] };
     let answer!: (value: SetupDetection) => void;
     const client = { detect: vi.fn(() => new Promise<SetupDetection>((resolve) => { answer = resolve; })), apply: vi.fn() };
-    saveWelcomeDraft({ beat: "import", name: "", email: "" });
+    saveWelcomeDraft({ beat: "import", name: "" });
     await show({ setupImport: { client } });
     await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new Event("pointerdown", { bubbles: true })); });
     await act(async () => { answer(found); });
@@ -171,16 +168,15 @@ describe("a reload in the middle of the welcome", () => {
     expect(text(), "the import step is offered next instead").toContain("Step 2 of 4");
   });
 
-  it("is forgotten once the welcome is finished or skipped, which saves the name and a valid email", async () => {
+  it("is forgotten once the welcome is finished or skipped, which saves the name", async () => {
     const onDone = vi.fn();
     await show({ onDone });
     await type(NAME, "Ada");
-    await type(EMAIL, "ada@example.com");
     await press("Skip setup");
     expect(onDone).toHaveBeenCalledOnce();
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
-    expect(putBodies()).toContainEqual({ profile: { name: "Ada", email: "ada@example.com" } });
-    expect(analytics.identifyEmail, "Skip keeps the email on this computer only").not.toHaveBeenCalled();
+    expect(putBodies()).toContainEqual({ profile: { name: "Ada" } });
+    expect(analytics.identifyEmail, "the welcome never ties analytics to an email").not.toHaveBeenCalled();
     expect(localStorage.getItem(WELCOME_DRAFT_KEY)).toBeNull();
   });
 
@@ -225,24 +221,23 @@ describe("a reload in the middle of the welcome", () => {
     expect(profiles(), "one retry after the failed save").toEqual([{ profile: { name: "Ada" } }, { profile: { name: "Ada" } }]);
   });
 
-  it("Escape keeps the name too, and leaves out an email still being typed", async () => {
+  it("Escape keeps the name too", async () => {
     await show();
     await type(NAME, "Grace");
-    await type(EMAIL, "grace@");
     await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
-    expect(putBodies()).toContainEqual({ profile: { name: "Grace" } });
+    expect(putBodies().filter((body) => "profile" in body)).toEqual([{ profile: { name: "Grace" } }]);
   });
 
   it("on a hosted workspace, never reads a draft another person left in this browser, and never saves a profile", async () => {
-    saveWelcomeDraft({ beat: "hello", name: "Someone Else", email: "someone@example.com" });
+    saveWelcomeDraft({ beat: "hello", name: "Someone Else" });
     const onDone = vi.fn();
     await show({ hosted: true, onDone });
     await press("Continue");
     expect(onDone).toHaveBeenCalledOnce();
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(putBodies().filter((body) => "profile" in body), "the shared workspace's profile is left alone").toEqual([]);
-    expect(draft(), "nor is the draft touched").toEqual({ beat: "hello", name: "Someone Else", email: "someone@example.com" });
+    expect(draft(), "nor is the draft touched").toEqual({ beat: "hello", name: "Someone Else" });
   });
 
   it("marks the welcome finished for this launch, so the Cloud Pro popup waits for the next one; a replay or the preview does not", async () => {
@@ -259,13 +254,13 @@ describe("a reload in the middle of the welcome", () => {
   });
 
   it("is neither read nor written by a replay from Settings or by the preview", async () => {
-    saveWelcomeDraft({ beat: "engines", name: "Old", email: "" });
+    saveWelcomeDraft({ beat: "engines", name: "Old" });
     for (const extra of [{ replay: true }, { embedded: true }]) {
       await reload(extra);
       expect(text(), JSON.stringify(extra)).toContain("Step 1 of 3");
       expect((host.querySelector(NAME) as HTMLInputElement).value).toBe("");
       await type(NAME, "New");
-      expect(draft()).toEqual({ beat: "engines", name: "Old", email: "" });
+      expect(draft()).toEqual({ beat: "engines", name: "Old" });
     }
   });
 });

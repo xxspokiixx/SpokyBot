@@ -2426,6 +2426,7 @@
   "onboarding.welcome": "Welcome to {app}",
   "onboarding.intro": "Bots that do real work for you. Tell us who you are and we’ll let you know when big things ship.",
   "onboarding.introStart": "Bots that do real work for you. Tell us who you are to get started.",
+  "onboarding.introName": "Bots that do real work for you. What should we call you?",
   "onboarding.name": "Your name",
   "onboarding.continue": "Continue",
   "onboarding.profile.error": "Couldn't save your details. Try again, or choose Maybe later.",
