@@ -5,7 +5,8 @@
 // quiet watch speaks at 60 s and 180 s).
 import { firstReplySettledName, firstReplyWaitingName, type FirstReplyRescue } from "../shared/first-reply-rescue.ts";
 import type { RuntimeEvent } from "./contracts.ts";
-import type { BotRecord, Store } from "./store.ts";
+import { openRescueMessages } from "./message-db.ts";
+import type { BotRecord, Message, Store } from "./store.ts";
 
 export const DEFAULT_FIRST_REPLY_NOTICE_MS = 20_000;
 
@@ -37,6 +38,8 @@ export interface FirstReplyRescueDeps {
   live(threadId: string, turnId: string): boolean;
   /** Who asked for each thread's running turn: the person's message it answers, when the harness knows it. */
   requests: { get(threadId: string): { messageId?: string; stopped?: boolean; turnId: string | null } | undefined };
+  /** The notices still open from before this start (the message log's own query unless a test passes rows). */
+  leftOpen?: () => Array<{ threadId: string; message: Message }>;
 }
 
 interface Watch {
@@ -49,6 +52,7 @@ interface Watch {
 
 export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(event: RuntimeEvent): void } {
   const watches = new Map<string, Watch>();
+  closeLeftOpen(deps);
 
   const pause = (watch: Watch) => {
     if (watch.timer) clearTimeout(watch.timer);
@@ -148,4 +152,23 @@ export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(ev
       }
     },
   };
+}
+
+/** At start no turn runs, so a notice still open belongs to a turn the restart ended: it is history, with no live
+ * buttons, and the clients that print its words keep them. */
+function closeLeftOpen(deps: FirstReplyRescueDeps): void {
+  let open: Array<{ threadId: string; message: Message }>;
+  try { open = (deps.leftOpen ?? openRescueMessages)(); } catch (error) {
+    console.error("first-reply rescue: could not read the notices left open:", error instanceof Error ? error.message : error);
+    return;
+  }
+  for (const { threadId, message } of open) {
+    const tool = message.tool;
+    if (!tool?.rescue) continue;
+    try {
+      deps.store.patchMessage(threadId, message.id, { tool: { ...tool, rescue: { ...tool.rescue, over: true } } });
+    } catch (error) {
+      console.error(`first-reply rescue: could not close a notice in ${threadId}:`, error instanceof Error ? error.message : error);
+    }
+  }
 }

@@ -13,7 +13,7 @@ const event = (fields: Record<string, unknown>): RuntimeEvent =>
 let currentTurn = "turn-1";
 const started = (turnId = "turn-1", threadId = THREAD) => { currentTurn = turnId; return event({ type: "turn.started", turnId, threadId }); };
 
-function harness(options: { quiet?: boolean; speaker?: { botId: string; name: string; color: string }; live?: () => boolean } = {}) {
+function harness(options: { quiet?: boolean; speaker?: { botId: string; name: string; color: string }; live?: () => boolean; leftOpen?: Message[] } = {}) {
   const rows = new Map<string, Message[]>();
   const append = vi.fn((threadId: string, message: Omit<Message, "id" | "at">) => {
     const row = { ...message, id: `m-${(rows.get(threadId)?.length ?? 0) + 1}`, at: Date.now() } as Message;
@@ -41,6 +41,7 @@ function harness(options: { quiet?: boolean; speaker?: { botId: string; name: st
     engineName: (instanceId) => (instanceId === "opencodeGo" ? "OpenCode" : instanceId),
     quiet: () => options.quiet === true,
     live: (_threadId, _turnId) => options.live?.() ?? true,
+    leftOpen: () => (options.leftOpen ?? []).map((message) => ({ threadId: THREAD, message })),
     requests: { get: () => ({ messageId: `request-of-${currentTurn}`, turnId: currentTurn }) },
   });
   return { rescue, rows: (threadId = THREAD) => rows.get(threadId) ?? [], append, patch };
@@ -238,6 +239,14 @@ describe("first-reply rescue", () => {
     rescue.onEvent(started());
     vi.advanceTimersByTime(10 * 60_000);
     expect(rows()).toEqual([]);
+  });
+
+  it("closes the notices a restart left open: their turns are gone", () => {
+    const left = { id: "old", at: 1, role: "bot", kind: "activity", turnId: "turn-0",
+      tool: { name: "notice: Maus hasn't heard back from OpenCode yet.", ok: true,
+        rescue: { botId: "bot-1", threadId: THREAD, turnId: "turn-0", instanceId: "opencodeGo", ai: "OpenCode" } } } as Message;
+    const { patch } = harness({ leftOpen: [left] });
+    expect(patch).toHaveBeenCalledWith(THREAD, "old", { tool: { ...left.tool, rescue: { ...left.tool!.rescue, over: true } } });
   });
 
   it("speaks from the speaking bot in a room", () => {
