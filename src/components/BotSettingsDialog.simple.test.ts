@@ -450,14 +450,14 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("picks one of the ten bodies, ten Halloween bodies, eleven colors and a face for the mascot", () => {
+  it("picks one of the ten bodies, ten Halloween bodies, twelve colors and a face for the mascot", () => {
     const bot = makeBot();
     const rendered = editor(bot);
     expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(20);
     expect(rendered.html).toContain(">Halloween<");
     click(find(rendered, "aria-label", "Use the Pumpkin body"));
     expect(patch).toHaveBeenLastCalledWith({ mascotBody: "pumpkin" });
-    expect(rendered.html.match(/aria-label="Use \w+ mascot color"/g)).toHaveLength(11);
+    expect(rendered.html.match(/aria-label="Use \w+ mascot color"/g)).toHaveLength(12);
     expect(find(rendered, "aria-label", "Use the Cursor body").props["aria-pressed"]).toBe(true);
     click(find(rendered, "aria-label", "Use the Blob body"));
     expect(patch).toHaveBeenLastCalledWith({ mascotBody: "blob" });
@@ -466,6 +466,9 @@ describe("the avatar editor", () => {
     expect(find(rendered, "aria-label", "Use silver mascot color").props.title).toBe("Silver");
     click(find(rendered, "aria-label", "Use silver mascot color"));
     expect(patch).toHaveBeenLastCalledWith({ color: "silver" });
+    expect(find(rendered, "aria-label", "Use chrome mascot color").props.title).toBe("Chrome");
+    click(find(rendered, "aria-label", "Use chrome mascot color"));
+    expect(patch).toHaveBeenLastCalledWith({ color: "chrome" });
     expect(find(rendered, "data-avatar-face", "idle").props["aria-pressed"]).toBe(true);
     click(find(rendered, "data-avatar-face", "proud"));
     expect(patch).toHaveBeenLastCalledWith({ mascotExpression: "proud" });

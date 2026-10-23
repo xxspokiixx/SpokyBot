@@ -52,6 +52,8 @@ export interface ThreadRouteDeps {
   messageFileRootsForThread(senderId: string, threadId: string): string[];
   viewerFor(auth: RequestAuth): Viewer;
   visibleTo(viewer: Viewer): VisibleSet;
+  /** A Team Cloud: gives a member their own MausBot once, before their first list of bots. */
+  memberDefaultBot?(email: string): unknown;
 }
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
@@ -64,6 +66,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
     let m: RegExpMatchArray | null = null;
+    const member = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
+    if (member && method === "GET" && path === "/api/bots") deps.memberDefaultBot?.(member);
     const visible = visibleTo(viewerFor(auth));
     const workspaceAccess = deps.workspaceAccess();
     const desktopMutationToken = deps.desktopMutationToken();

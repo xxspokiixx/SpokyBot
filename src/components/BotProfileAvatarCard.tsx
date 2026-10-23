@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import {
   PICKABLE_STATES,
   MAUS_COLOR_LABEL,
-  MAUS_COLORS,
+  colorSwatch,
   MAUS_COLOR_NAMES,
   type MausMotion,
   type MausState,
@@ -155,7 +155,7 @@ export function BotProfileAvatarCard({
                     "size-10 rounded-full border-2 border-transparent transition-transform hover:scale-110 disabled:opacity-50",
                     bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
                   )}
-                  style={{ backgroundColor: MAUS_COLORS[color] }}
+                  style={{ background: colorSwatch(color) }}
                   title={t(MAUS_COLOR_LABEL[color])}
                   aria-label={`Use ${color} mascot color`}
                 />
