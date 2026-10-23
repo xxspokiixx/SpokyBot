@@ -73,7 +73,7 @@ describe("Share team in the real renderer", () => {
     // A refused first look is not a dead end: the sentence, no counts and no
     // Save, but every skill box is drawn from the refusal.
     const saveDisabled = () => evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((button) => button.textContent === "Save file").disabled`);
-    await expect.poll(snapshot, { timeout: 20_000 }).toContain("This team is too large to share (4 MB).");
+    await expect.poll(snapshot, { timeout: 20_000 }).toContain("This department is too large to share (4 MB).");
     let dialog = await snapshot();
     for (const line of ["research-brief", "fill-01", "fill-30", "Starter notes are included", "Save file"]) expect(dialog).toContain(line);
     expect(dialog).not.toContain("What's in the file");

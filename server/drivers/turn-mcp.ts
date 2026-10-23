@@ -7,6 +7,7 @@ import { appMountFor, gateServer, mcpStdioServer, type AppMount } from "../mcp-g
 import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "../routes/own-mcp-http-path.ts";
 import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFor, type ToolSchemaProfileId } from "../tool-schema-profile.ts";
 import { AGENTS_MCP_ENV } from "./agents-mcp-env.ts";
+import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 
 export interface TurnStdioMcpServer {
   name: string;
@@ -27,6 +28,7 @@ export function turnStdioMcpServers(turn: SendTurnInput, options: { schemaProfil
   };
   add("agents", turn.integrations?.agents);
   add("composio", turn.integrations?.composio);
+  add(OWN_APPS_SERVER, turn.integrations?.composioOwn);
   add("browser", turn.integrations?.browser);
   add("data", turn.integrations?.data);
   add("highlevel", turn.integrations?.highlevel);

@@ -268,8 +268,8 @@ describe("Store", () => {
     store.setChiefOfStaff(general.id);
     expect(store.deleteSection("Studio")).toMatch(/Chief/);
     expect(store.bot(chief.id)).toMatchObject({ chiefOfStaff: true, section: "Studio" });
-    expect(store.deleteSection("missing")).toBe("No such team");
-    expect(store.deleteSection("")).toBe("No such team");
+    expect(store.deleteSection("missing")).toBe("No such department");
+    expect(store.deleteSection("")).toBe("No such department");
   });
 
   it("restores persisted membership if deleting the team cannot finish", () => {

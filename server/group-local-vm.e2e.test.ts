@@ -51,6 +51,11 @@ const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
 }, Boolean);
+// The seeded Chief answers a failed run with a Team incidents turn on this same engine, and that turn writes the dump.
+async function stepDownSeededChief() {
+  const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
+  if (seeded) await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
+}
 const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), s => !s.bots.find((b: any) => b.id === botId)?.busy);
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
 const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
@@ -127,6 +132,7 @@ beforeAll(async () => {
       if (child.exitCode !== null) throw new Error(stderr);
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
     }, Boolean);
+    await stepDownSeededChief();
   };
   await startServer();
 });
