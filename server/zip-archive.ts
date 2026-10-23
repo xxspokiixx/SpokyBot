@@ -155,8 +155,9 @@ export async function extractZipMember(archivePath: string, entry: ZipMember, de
   if (bytes !== expectedBytes) throw new Error("An extracted file was truncated.");
 }
 
-// Windows opens these as devices whatever the extension or folder: `NUL.txt` and `con/x` are not files.
-const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+// Windows opens these as devices whatever the extension or folder: `NUL.txt` and `con/x` are not files. COM and LPT
+// take 0-9 and the superscripts ¹²³.
+const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|conin\$|conout\$|clock\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(?:\..*)?$/iu;
 // A backslash, `:` (a drive or an NTFS stream) and the other characters Windows refuses in a name.
 const UNSAFE_CHARACTER = /[\\:<>"|?*]/u;
 

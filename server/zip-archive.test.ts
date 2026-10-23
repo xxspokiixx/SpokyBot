@@ -44,6 +44,7 @@ describe("extracting a verified zip", () => {
 
   it.each([
     "CON", "nul", "Aux.txt", "bin/PRN", "COM1", "lpt9.log", "con/tool", "con.d/tool",
+    "COM0", "lpt0.txt", "COM\u00b9", "lpt\u00b2.log", "COM\u00b3", "CONIN$", "conout$.txt", "CLOCK$",
     "file:stream", "C:x", "trailing.", "trailing ", "dir./tool",
     "a<b", "a>b", 'a"b', "a|b", "a?b", "a*b", "tab\there",
   ])("refuses %j, which Windows cannot hold or reads as a device or stream", async (name) => {
@@ -51,7 +52,7 @@ describe("extracting a verified zip", () => {
     await expect(extractZip(file, out, { maxEntries: 10 })).rejects.toThrow(/unsafe/);
   });
 
-  it.each(["console", "nul-device/tool", "COM10", "conman/x", "v1.2.3/opencode"])("allows the ordinary name %j", (name) => {
+  it.each(["console", "nul-device/tool", "COM10", "conman/x", "v1.2.3/opencode", "CLOCK", "conin", "com\u2074"])("allows the ordinary name %j", (name) => {
     expect(safeArchivePath(name)).toBe(true);
   });
 
