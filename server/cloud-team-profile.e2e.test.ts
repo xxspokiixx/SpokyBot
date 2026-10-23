@@ -6,11 +6,15 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { seedTeamProfile } from "../electron/team-profile-seed.mjs";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const ADA = { email: "ada@acme.test", role: "owner" as const };
 const BOB = { email: "bob@acme.test", role: "admin" as const };
+const CLEO = { email: "cleo@acme.test", role: "member" as const };
+const DEE = { email: "dee@acme.test", role: "member" as const };
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const ADA_PHOTO = "/api/attachments/ada-photo.png";
 const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";`;
 
@@ -181,3 +185,76 @@ it("leaves My Cloud's one profile as it was: the owner's, saved and shown as bef
   expect((await fx.onCloud("GET", "/api/config")).body.profile).toMatchObject({ name: "Milo", email: "milo@example.test" });
   expect((await fx.onCloud("GET", "/api/me")).status).toBe(404);
 }, hostTimeout(30_000));
+
+/** The desktop app's seed, as main runs it when a team opens: this person's own team session, and a computer whose
+ * Settings → Profile is `local`. `sent` is every request that reached the team. */
+function seedFrom(token: string, local: { name?: string; avatarUrl?: string; email?: string }) {
+  const sent: Array<{ method: string; path: string; body?: string }> = [];
+  const run = () => seedTeamProfile({
+    origin: team.base,
+    teamFetch: (async (url: string, init: RequestInit = {}) => {
+      sent.push({ method: init.method ?? "GET", path: new URL(url).pathname, ...(typeof init.body === "string" ? { body: init.body } : {}) });
+      return fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...fx.edge, authorization: `Bearer ${token}` } });
+    }) as typeof fetch,
+    localRequest: async (route) => route === "/api/config" ? Response.json({ profile: { aboutMe: "Private notes from this computer.", ...local } })
+      : route === local.avatarUrl ? new Response(PNG, { headers: { "content-type": "image/png", "content-length": String(PNG.byteLength) } })
+        : new Response("not found", { status: 404 }),
+    tries: 1,
+  });
+  return { sent, run };
+}
+
+it("fills a member's empty team profile once from their own computer's name and picture, and never what they set", async () => {
+  const cleo = (await team.pair(CLEO)).token!;
+  const others = { ada: await you(ada), bob: await you(bob) };
+  const cleos = seedFrom(cleo, { name: "Cleo Desk", avatarUrl: "/api/attachments/cleo-desk.png", email: "cleo@home.example" });
+  expect(await cleos.run()).toBe("seeded");
+  const seeded = await you(cleo);
+  expect(seeded).toMatchObject({ name: "Cleo Desk", email: CLEO.email });
+  expect(seeded.avatarUrl).toMatch(/^\/api\/attachments\/[A-Za-z0-9-]+\.png$/);
+  expect(seeded.avatarUrl).not.toBe("/api/attachments/cleo-desk.png");
+  // Her picture is her own upload on the team, which she can load.
+  expect((await fetch(`${team.base}${seeded.avatarUrl}`, { headers: { ...fx.edge, authorization: `Bearer ${cleo}` } })).status).toBe(200);
+  // Only the name and the picture went up: never the computer's address or About me.
+  expect(JSON.stringify(cleos.sent)).not.toContain("cleo@home.example");
+  expect(JSON.stringify(cleos.sent)).not.toContain("Private notes");
+  // Nobody else's profile moved.
+  expect(await you(ada)).toEqual(others.ada);
+  expect(await you(bob)).toEqual(others.bob);
+
+  // Once: a later desktop change is not carried over, and a picture she removes on the team stays removed.
+  expect((await team.as(cleo, "PUT", "/api/me", { avatarUrl: "" })).status).toBe(200);
+  const again = seedFrom(cleo, { name: "Cleo Renamed", avatarUrl: "/api/attachments/cleo-new.png" });
+  expect(await again.run()).toBe("nothing");
+  expect(again.sent.map((request) => `${request.method} ${request.path}`)).toEqual(["GET /api/me"]);
+  expect(await you(cleo)).toMatchObject({ name: "Cleo Desk" });
+  expect((await you(cleo)).avatarUrl).toBeUndefined();
+  // The server keeps that too, whatever an app sends.
+  const refilled = await team.as(cleo, "PUT", "/api/me", { avatarUrl: seeded.avatarUrl, fillEmpty: true });
+  expect(refilled.body).toMatchObject({ filled: [] });
+  expect((await you(cleo)).avatarUrl).toBeUndefined();
+  expect((await team.as(cleo, "GET", "/api/me")).body.seeded).toEqual(["name", "avatarUrl"]);
+
+  // What a person set on the team is never overwritten, and nothing is uploaded for it.
+  const bobs = seedFrom(bob, { name: "Desk Bob", avatarUrl: "/api/attachments/bob-desk.png" });
+  expect(await bobs.run()).toBe("nothing");
+  expect(bobs.sent.map((request) => `${request.method} ${request.path}`)).toEqual(["GET /api/me"]);
+  expect(await you(bob)).toEqual(others.bob);
+  // The server holds the line too: a fill never replaces what is there.
+  const forced = await team.as(bob, "PUT", "/api/me", { name: "Desk Bob", fillEmpty: true });
+  expect(forced.status).toBe(200);
+  expect(forced.body).toMatchObject({ name: others.bob.name, filled: [] });
+}, hostTimeout(60_000));
+
+it("sends no picture for a person whose computer has none, and only fills their name", async () => {
+  const dee = (await team.pair(DEE)).token!;
+  const dees = seedFrom(dee, { name: "Dee" });
+  expect(await dees.run()).toBe("seeded");
+  expect(dees.sent.map((request) => `${request.method} ${request.path}`)).toEqual(["GET /api/me", "PUT /api/me"]);
+  expect(JSON.parse(dees.sent[1]!.body!)).toEqual({ name: "Dee", fillEmpty: true });
+  expect(await you(dee)).toEqual({ name: "Dee", email: DEE.email, aboutMe: "" });
+  // Nothing at all to send: the team is never written to.
+  const blank = seedFrom(dee, {});
+  expect(await blank.run()).toBe("nothing");
+  expect(blank.sent.map((request) => request.method)).toEqual(["GET"]);
+}, hostTimeout(60_000));
