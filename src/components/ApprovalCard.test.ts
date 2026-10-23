@@ -266,7 +266,7 @@ describe("ApprovalCard learned skills", () => {
     expect(markup).toContain("shared with Colorist");
     expect(markup).not.toContain("shared with Cutter");
     expect(markup).toContain("not shared with Sound");
-    expect(markup).not.toContain("Share with team");
+    expect(markup).not.toContain("Share with department");
   });
 
   it("maps create and update choices to approval while keeping refusals denied", () => {
