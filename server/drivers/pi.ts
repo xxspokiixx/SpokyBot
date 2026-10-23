@@ -849,13 +849,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
                   if (timer) askTimers.delete(timer);
                   if (!pending.delete(reqId)) return;
                   send({ type: "extension_ui_response", id: reqId, cancelled: true });
-                  emit({
-                    ...base(threadId, turnId),
-                    requestId: reqId,
-                    type: "request.resolved",
-                    behavior: "deny",
-                    source: "timeout",
-                  });
+                  emit({ ...base(threadId, turnId), requestId: reqId, type: "request.resolved", behavior: "deny", source: "timeout" });
                 }, 15 * 60_000);
                 askTimers.add(timer);
                 timer.unref?.();
