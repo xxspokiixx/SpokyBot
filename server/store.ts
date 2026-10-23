@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
 import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
+import { reorderStable } from "../shared/bot-order.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
@@ -260,6 +261,8 @@ export type StoreChange =
   | { type: "thread.deleted"; threadId: string }
   | { type: "bot"; botId: string }
   | { type: "bot.deleted"; botId: string }
+  /** The fleet was reordered as a whole; the broadcast carries every id in its new place. */
+  | { type: "bots.order" }
   | { type: "group"; groupId: string }
   | { type: "group.deleted"; groupId: string };
 
@@ -869,9 +872,9 @@ export class Store {
   }
 
   renameSection(name: string, nextName: string, computers?: TeamComputers): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such team";
+    if (!name || !this.sections.includes(name)) return "No such department";
     nextName = nextName.trim();
-    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Team name must be 1 to 60 characters without control characters";
+    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Department name must be 1 to 60 characters without control characters";
     if (name === nextName) return undefined;
     if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A team with that name already exists";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
@@ -910,7 +913,7 @@ export class Store {
   }
 
   changeEmptySection(name: string, nextName: string | null): string | undefined {
-    if (!this.sections.includes(name)) return "No such team";
+    if (!this.sections.includes(name)) return "No such department";
     if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
       return "Move all bots (including archived bots) and group chats out of this team first";
     }
@@ -932,7 +935,7 @@ export class Store {
   }
 
   deleteSection(name: string): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such team";
+    if (!name || !this.sections.includes(name)) return "No such department";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
@@ -1034,7 +1037,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "lastReadMessageId" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes" | "holds" | "heldMessages">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "description" | "unread" | "lastReadMessageId" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes" | "holds" | "heldMessages">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
@@ -2139,6 +2142,20 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot", botId });
     return bot.projects;
+  }
+
+  /** A stable partial reorder of the fleet (shared/bot-order.ts): the listed bots take, in the order given, the positions
+   * they already share; every other bot stays put. Empty, repeated or unknown ids change nothing and give null. */
+  reorderBots(botIds: string[]): BotRecord[] | null {
+    if (!botIds.length || new Set(botIds).size !== botIds.length) return null;
+    const byId = new Map(this.bots.map((bot) => [bot.id, bot]));
+    if (botIds.some((id) => !byId.has(id))) return null;
+    const next = reorderStable(this.bots, botIds);
+    // Mutate in place: schedulers and other consumers hold this array and its records.
+    this.bots.splice(0, this.bots.length, ...next);
+    this.saveBots();
+    this.emit({ type: "bots.order" });
+    return this.bots;
   }
 
   deleteProject(botId: string, projectId: string): BotRecord | null {

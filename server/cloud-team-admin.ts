@@ -19,6 +19,10 @@ export interface TeamAdminSummary {
     keys: { id: "anthropic" | "openai" | "openrouter"; configured: boolean }[];
     engines: { id: string; name: string; authenticated: boolean; account: { email: string | null; organization: string | null; method: "login" | "api-key" | null } | null }[];
   };
+  /** The apps (slugs) and MCP servers each person connects for themselves; everything else is the team's. */
+  scopes?: { apps: string[]; mcp: string[] };
+  /** Who has connected each of those: addresses only, never a key or token. */
+  people?: { apps: Record<string, string[]>; mcp: Record<string, string[]> };
 }
 
 type ListedMcp = { name: string; enabled?: boolean; url?: string; type?: string; command?: string; headerKeys?: string[]; envKeys?: string[]; auth?: string };

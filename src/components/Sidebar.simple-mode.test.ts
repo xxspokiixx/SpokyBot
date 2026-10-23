@@ -132,6 +132,21 @@ describe("bot-first sidebar", () => {
   });
 
   it.each([
+    { advanced: false, density: "comfortable" },
+    { advanced: false, density: "compact" },
+    { advanced: true, density: "comfortable" },
+    { advanced: true, density: "compact" },
+  ] as const)("puts the bot's role in its name line in $density density (advanced $advanced)", ({ advanced, density }) => {
+    fixture.advanced = advanced;
+    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, title: "Research" })));
+    const nameLine = markup.match(/<span class="flex min-w-0 grow items-center gap-1\.5 truncate text-ink [^"]*">([\s\S]*?)<\/span><\/span><\/span>/)?.[1] ?? "";
+    expect(nameLine.indexOf(">Atlas<")).toBeGreaterThan(-1);
+    expect(nameLine.indexOf('data-testid="bot-role"')).toBeGreaterThan(nameLine.indexOf(">Atlas<"));
+    expect(nameLine).toContain("Research");
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps(density)))).not.toContain('data-testid="bot-role"');
+  });
+
+  it.each([
     { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2.5", "py-2", "pl-2", "pr-3"], name: "font-normal", preview: "text-[13px]" },
     { advanced: false, density: "icons", face: 36, spacing: ["h-[52px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
     { advanced: true, density: "icons", face: 44, spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
@@ -237,7 +252,7 @@ describe("bot-first sidebar", () => {
     expect(disabled).not.toContain("New folder");
     expect(disabled).toContain("Delete all threads…");
     expect(disabled).toContain("Edit Profile");
-    expect(disabled).toContain("Move to team");
+    expect(disabled).toContain("Move to department");
   });
 
   it("Edit profile opens the panel without naming a section", () => {
