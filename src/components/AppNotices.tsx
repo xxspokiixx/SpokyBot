@@ -9,9 +9,9 @@ import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
-import { cornerPopupWaits } from "@/lib/corner-popup";
+import { cornerPopupWaits, firstReplyPending } from "@/lib/corner-popup";
 import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
-import { cloudSignInDue, onboardingCloudOffered, type WelcomeViewer } from "@/lib/onboarding";
+import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
 import { engineReady } from "./EngineLibrary";
@@ -140,11 +140,14 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return introOpen || stage === "due" ? true : null;
   };
   const cards = Boolean(bridge || planBridge);
+  // Promotions never land on a new install's first chat: they wait for its first reply, and the full-screen Cloud Pro popup
+  // also for a launch after the one whose welcome just finished. Account and billing notices keep their own rules.
+  const firstChat = firstReplyPending(state);
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
   const notice = waits ? null : closed ? (consentFact === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere ? nextNotice({
-    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || firstChat || welcomeFinishedThisLaunch() ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
     [UPDATES_CONSENT_NOTICE]: consentFact,
-    [PRODUCT_HUNT_NOTICE]: !cards || moving || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
+    [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
       : organization === null || moving === null ? null : !organization,
     [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),

@@ -5,6 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
+import { welcomeFinishedThisLaunch } from "@/lib/onboarding";
 import { readWelcomeDraft, saveWelcomeDraft, WELCOME_DRAFT_KEY } from "@/lib/welcome-draft";
 import type { SetupDetection } from "../../../shared/setup-import";
 
@@ -47,6 +48,7 @@ const putBodies = () => f.api.mock.calls.filter(([, init]) => init?.method === "
 beforeEach(() => {
   setLocale("en");
   localStorage.clear();
+  sessionStorage.clear();
   f.dispatch.mockReset();
   f.api.mockReset();
   f.api.mockImplementation(async (path: string, init?: { body?: string }) => (path === "/api/instances" ? { instances: [] } : JSON.parse(init?.body ?? "{}")));
@@ -226,6 +228,19 @@ describe("a reload in the middle of the welcome", () => {
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(putBodies().filter((body) => "profile" in body), "the shared workspace's profile is left alone").toEqual([]);
     expect(draft(), "nor is the draft touched").toEqual({ beat: "hello", name: "Someone Else", email: "someone@example.com" });
+  });
+
+  it("marks the welcome finished for this launch, so the Cloud Pro popup waits for the next one; a replay or the preview does not", async () => {
+    await show();
+    expect(welcomeFinishedThisLaunch()).toBe(false);
+    for (const extra of [{ replay: true }, { embedded: true }]) {
+      await reload(extra);
+      await press("Skip setup");
+      expect(welcomeFinishedThisLaunch(), JSON.stringify(extra)).toBe(false);
+    }
+    await reload();
+    await press("Skip setup");
+    expect(welcomeFinishedThisLaunch()).toBe(true);
   });
 
   it("is neither read nor written by a replay from Settings or by the preview", async () => {

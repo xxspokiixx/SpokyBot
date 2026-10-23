@@ -8,7 +8,7 @@ import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-
 import type { CloudOffer, CloudTrial } from "../../electron/cloud-home.mjs";
 import { withTourFinished } from "@/lib/guided-tour";
 import { setLocale } from "@/lib/i18n";
-import { EMPTY_ONBOARDING, LOCAL_VIEWER, type WelcomeViewer } from "@/lib/onboarding";
+import { EMPTY_ONBOARDING, LOCAL_VIEWER, markWelcomeFinished, type WelcomeViewer } from "@/lib/onboarding";
 import { setPendingIntent } from "@/lib/cloud-intent";
 import { createDesktopPrefs, registerDesktopPrefs } from "../../electron/desktop-prefs.mjs";
 import { createUpdatesConsent, registerUpdatesConsent } from "../../electron/updates-consent.mjs";
@@ -116,6 +116,9 @@ const press = (label: string) => {
   const button = tree().find(node => node.type === "button" && (renderToStaticMarkup(node).includes(`>${label}<`) || node.props["aria-label"] === label));
   expect(button, label).toBeTruthy(); button!.props.onClick();
 };
+/** A bot has answered once, in this launch: what a new install has after its first chat. */
+const FIRST_REPLY = [{ tasks: [{ threadId: "first", usage: { turns: 1 } }] }];
+let session: Map<string, string>;
 const returning = () => { f.state.bots = [{ tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }]; };
 const launchCardsSeen = () => { desk.saved = { seen: [CLOUD_PRO_UPDATE_NOTICE] }; storage.set(PRODUCT_HUNT_NOTICE, "1"); };
 const hints = () => f.state.config.onboarding.hintsSeen as string[];
@@ -124,7 +127,9 @@ beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   storage = new Map(); f.values = []; f.index = 0; f.effects = []; f.updater = null; f.brand = "default"; f.dispatch = vi.fn(); now = NOW; desk = desktopMachine();
   setLocale("en"); viewer = LOCAL_VIEWER; account = signedOut; snapshot = { status: "none" }; offer = TRIAL_OFFER;
-  f.state = { connected: true, bots: [], groups: [], routines: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
+  session = new Map();
+  vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value) });
+  f.state = { connected: true, bots: structuredClone(FIRST_REPLY), groups: [], routines: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
     config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen: withTourFinished(undefined) } } };
   vi.mocked(api).mockImplementation(async (_path, init) => {
     const patch = JSON.parse(String((init as RequestInit).body));
@@ -333,6 +338,13 @@ describe("the Product Hunt launch card", () => {
   const PH = "live on Product Hunt";
   const fresh = () => { storage.delete(PRODUCT_HUNT_NOTICE); };
 
+  it("waits for a new install's first reply, so it never lands on the first chat", async () => {
+    fresh(); f.state.bots = [];
+    expect(await launch()).not.toContain(PH);
+    f.state.bots = structuredClone(FIRST_REPLY);
+    expect(await launch()).toContain(PH);
+  });
+
   it("comes first, for everyone (new or not, any plan), and the upvote opens the launch and ends it for good", async () => {
     fresh(); account = paid({ machine: ready });
     const html = await launch();
@@ -444,7 +456,7 @@ describe("the Cloud Pro popup after the update", () => {
     expect(next).not.toContain(POPUP); expect(next).toContain("live on Product Hunt");
   });
 
-  it("a new install gets it once onboarding is done, never in the middle of it", async () => {
+  it("a new install gets it once onboarding is done and a bot has answered, never in the middle of it", async () => {
     f.state.config.onboarding = { ...EMPTY_ONBOARDING };
     expect(await launch()).toBe("");
     f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-10-16", version: 1, hintsSeen: [] };
@@ -452,11 +464,21 @@ describe("the Cloud Pro popup after the update", () => {
     expect(await launch()).toBe("");
     f.state.welcomeOpen = false; f.state.tourOpen = true;
     expect(await launch(), "the app tour, started from Settings").toBe("");
+    f.state.tourOpen = false; f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    expect(await launch(), "the first chat, before its first reply").not.toContain(POPUP);
     // The welcome is the whole onboarding: an app tour never taken does not hold the popup back.
-    f.state.tourOpen = false;
+    f.state.bots = structuredClone(FIRST_REPLY);
     const html = await launch();
     expect(html).toContain(POPUP); expect(html).not.toContain(INTRO);
     expect(popupEvents("shown")).toHaveLength(1);
+  });
+
+  it("waits for a later launch when the welcome finished in this one, though a bot has answered", async () => {
+    markWelcomeFinished();
+    const html = await launch();
+    expect(html).not.toContain(POPUP);
+    session.clear();
+    expect(await launch(), "the next launch").toContain(POPUP);
   });
 
   it("is counted as shown once a day on this desktop, not on every reload, until it is closed", async () => {

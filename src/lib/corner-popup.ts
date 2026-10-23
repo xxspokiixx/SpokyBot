@@ -13,3 +13,9 @@ export function cornerPopupWaits(state: AppState, updater: UpdaterState | null,
     || state.appSettingsOpen || state.settingsOpen || state.newBotOpen || state.pluginsOpen || state.shortcutsOpen
     || Boolean(updater && !["idle", "checking"].includes(updater.status));
 }
+
+/** No bot or room has finished a turn yet: a new install's first chat. Promotions wait for its first reply. */
+export function firstReplyPending(state: Pick<AppState, "bots" | "groups">): boolean {
+  const answered = (usage: { turns: number } | null | undefined) => (usage?.turns ?? 0) > 0;
+  return !state.bots.some((bot) => bot.tasks?.some((task) => answered(task.usage))) && !state.groups.some((group) => answered(group.usage));
+}

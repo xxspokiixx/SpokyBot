@@ -14,6 +14,7 @@ import {
   beatsFor,
   completionPatch,
   flowProgress,
+  markWelcomeFinished,
   nextBeat,
   previousBeat,
   resumeBeat,
@@ -202,6 +203,7 @@ export function WelcomeFlow({
       finishing.current = true;
       track("onboarding_completed", { reason, at: beat, replay });
       setEmailGateDone("submitted");
+      if (!replay && !embedded) markWelcomeFinished();
       if (keepsDraft) clearWelcomeDraft();
       // What the greeting typed is kept however the welcome ends (Maybe later, Skip, Escape); a hosted greeting types nothing.
       if (!hosted) void saveWelcomeProfile(live.current.fields, savedProfile, dispatch, false).catch(() => {});
@@ -212,7 +214,7 @@ export function WelcomeFlow({
       } catch {
       }
     },
-    [beat, dispatch, onDone, replay, keepsDraft, hosted],
+    [beat, dispatch, onDone, replay, embedded, keepsDraft, hosted],
   );
 
   const previous = previousBeat(beats, beat);

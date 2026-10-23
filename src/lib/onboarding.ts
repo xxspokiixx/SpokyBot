@@ -139,6 +139,23 @@ export function welcomeOnScreen(): boolean {
   return welcomeShown > 0;
 }
 
+const WELCOME_FINISHED_KEY = "omb.onboarding.welcomeFinished";
+/** The first-run welcome ended in this app session (never a replay): the full-screen Cloud Pro popup waits for a later
+ * launch rather than following it. Kept for the window's session, so a reload counts as the same launch. */
+export function markWelcomeFinished(): void {
+  try {
+    sessionStorage.setItem(WELCOME_FINISHED_KEY, "1");
+  } catch {
+  }
+}
+export function welcomeFinishedThisLaunch(): boolean {
+  try {
+    return sessionStorage.getItem(WELCOME_FINISHED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** The next step offered after `current`. A step that left the list (an AI connected meanwhile) still moves on to the
  * next one offered, in BEAT_ORDER, instead of ending the welcome early. */
 export function nextBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
