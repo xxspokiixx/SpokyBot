@@ -13,38 +13,32 @@ import {
   beatWidth,
   beatsFor,
   completionPatch,
-  flowDotsShown,
+  flowProgress,
   nextBeat,
   previousBeat,
   showWelcome,
   type BeatId,
 } from "@/lib/onboarding";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, useStore } from "@/state/store";
 import { CloudBeat, useCloudBeatOffer } from "./beats/CloudBeat";
 import type { SetupDetection, SetupImportResult } from "../../../shared/setup-import";
 import { EnginesBeat } from "./beats/EnginesBeat";
 import { HelloBeat } from "./beats/HelloBeat";
 import { ImportBeat } from "./beats/ImportBeat";
-import { MeetYourBotBeat } from "./beats/MeetYourBotBeat";
 import { PermissionsBeat } from "./beats/PermissionsBeat";
-import { PhoneBeat } from "./beats/PhoneBeat";
 import { QuietButton } from "./beats/shared";
 import { withViewTransition } from "./view-transition";
 import { ProgressDots } from "./ProgressDots";
-import { FeatureReel } from "./reel/FeatureReel";
 
 const MASCOT_FOR_BEAT: Record<BeatId, MausState> = {
   hello: "happy",
-  reel: "curious",
   engines: "searching",
   import: "receiving",
   permissions: "listening",
-  phone: "sending",
   cloud: "working",
-  bot: "celebrate",
 };
 
-function beatTitle(beat: BeatId, bot: Bot | null): string | null {
+function beatTitle(beat: BeatId): string | null {
   switch (beat) {
     case "hello":
       return t("onboarding.welcome", { app: brand().name });
@@ -54,12 +48,6 @@ function beatTitle(beat: BeatId, bot: Bot | null): string | null {
       return t("onboarding.import.title");
     case "permissions":
       return t("onboarding.perms.title");
-    case "bot":
-      return t(bot?.chiefOfStaff ? "onboarding.bot.chiefTitle" : "onboarding.bot.title");
-    case "reel":
-      return t("onboarding.reel.title");
-    case "phone":
-      return t("onboarding.phone.title");
     case "cloud":
       return t("onboarding.cloud.title");
   }
@@ -68,15 +56,13 @@ function beatTitle(beat: BeatId, bot: Bot | null): string | null {
 type Motion = Exclude<MausMotion, "none">;
 
 /** Found later than these, the import step would land behind the person, so it is left out. */
-const BEFORE_IMPORT: readonly BeatId[] = ["hello", "reel", "engines"];
+const BEFORE_IMPORT: readonly BeatId[] = ["hello", "engines"];
 
 export function WelcomeFlow({
-  bot,
   onDone,
   replay = false,
   initialBeat,
   embedded = false,
-  reel = true,
   dictation,
   entrance = "arrive",
   hosted = false,
@@ -84,12 +70,10 @@ export function WelcomeFlow({
   cloudOffer,
   setupImport,
 }: {
-  bot: Bot | null;
   onDone: () => void;
   replay?: boolean;
   initialBeat?: BeatId;
   embedded?: boolean;
-  reel?: boolean;
   dictation?: boolean;
   entrance?: Motion;
   hosted?: boolean;
@@ -108,7 +92,7 @@ export function WelcomeFlow({
   const [importBusy, setImportBusy] = useState(false);
   const aiStepShown = useRef(initialBeat === "engines");
   const aiReady = !aiStepShown.current && state.instances.some(engineReady);
-  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted, setupImport: detection !== null, cloud: offer !== null, aiReady });
+  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, hosted, setupImport: detection !== null, cloud: offer !== null, aiReady });
   const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
   const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
   const [motion, setMotion] = useState<{ kind: Motion; key: number }>({ kind: "blink", key: 0 });
@@ -213,10 +197,10 @@ export function WelcomeFlow({
   }, [beat]);
 
   const hello = beat === "hello";
-  const title = beatTitle(beat, bot);
+  const title = beatTitle(beat);
   const logo = hello ? brand().logo : undefined;
   const beatProps = { onNext: advance, onSkip: advance, setMascot, bump };
-  const current = beats.indexOf(beat) + 1;
+  const { current, total } = flowProgress(beats, beat);
 
   return (
     <div
@@ -263,7 +247,6 @@ export function WelcomeFlow({
 
         <div key={beat} className={cn("flex flex-col", beat === "engines" ? "min-h-0" : "shrink-0")}>
           {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} />}
-          {beat === "reel" && <FeatureReel {...beatProps} />}
           {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
           {beat === "import" && detection && importClient && (
             <ImportBeat
@@ -276,16 +259,7 @@ export function WelcomeFlow({
             />
           )}
           {beat === "permissions" && <PermissionsBeat {...beatProps} />}
-          {beat === "phone" && <PhoneBeat {...beatProps} />}
           {beat === "cloud" && offer && <CloudBeat {...beatProps} offer={offer} />}
-          {beat === "bot" && (
-            <MeetYourBotBeat
-              bot={bot}
-              onFinish={() => void finish("completed")}
-              setMascot={setMascot}
-              bump={bump}
-            />
-          )}
         </div>
 
         <div className="mt-6 flex shrink-0 items-center justify-between">
@@ -294,10 +268,14 @@ export function WelcomeFlow({
           ) : (
             <span />
           )}
-          {flowDotsShown(beat) ? <ProgressDots items={beats.map((id) => ({ id }))} index={current - 1} /> : <span />}
-          <span className="text-[11px] text-ink-secondary" aria-live="polite">
-            {t("onboarding.progress", { current, total: beats.length })}
-          </span>
+          {total > 1 && <ProgressDots items={beats.map((id) => ({ id }))} index={current - 1} />}
+          {total > 1 ? (
+            <span className="text-[11px] text-ink-secondary" aria-live="polite">
+              {t("onboarding.progress", { current, total })}
+            </span>
+          ) : (
+            <span />
+          )}
         </div>
       </div>
     </div>
