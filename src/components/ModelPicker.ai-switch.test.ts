@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Bot, InstanceInfo } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: (() => {}) as (...args: unknown[]) => void, instances: [] as unknown[] }));
+const fixture = vi.hoisted(() => ({ dispatch: (() => {}) as (...args: unknown[]) => void, instances: [] as unknown[], advanced: true }));
 const api = vi.hoisted(() => vi.fn());
 vi.mock("@/state/api", () => ({ api, ApiError: Error }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
@@ -21,7 +21,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 
 const { ModelPicker } = await import("./ModelPicker");
-const { cancelAiSwitch, requestAiSwitch } = await import("@/lib/ai-switch");
+const { resetAiSwitch, requestAiSwitch } = await import("@/lib/ai-switch");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,6 +46,7 @@ const buttonNamed = (name: string) => Array.from(host.querySelectorAll<HTMLButto
   .find((button) => button.getAttribute("aria-label") === name || button.textContent?.includes(name));
 
 beforeEach(() => {
+  fixture.advanced = true;
   api.mockReset();
   api.mockResolvedValue({ ok: true });
   fixture.dispatch = vi.fn();
@@ -59,7 +60,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
-  cancelAiSwitch();
+  resetAiSwitch();
 });
 
 describe("the header model chip and Switch AI", () => {
@@ -77,6 +78,18 @@ describe("the header model chip and Switch AI", () => {
     act(() => buttonNamed("GPT-5.6")!.click());
     expect(api).toHaveBeenCalledWith("/api/bots/maus/interrupt", { method: "POST", body: JSON.stringify({ threadId: "thread-1", turnId: "turn-1" }) });
     expect(vi.mocked(fixture.dispatch).mock.calls.filter(([action]) => (action as { type: string }).type === "setModel")).toEqual([]);
+  });
+
+  it("shows no thinking-level buttons in the panel while the turn runs: the server refuses them until it ends", () => {
+    fixture.advanced = false;
+    fixture.instances = [{ ...opencode, capabilities: { effortLevels: ["low", "high"] } }, codex];
+    const show = (bot: Bot) => act(() => root.render(createElement(ModelPicker, { bot, threadId: "thread-1", contained: true })));
+    show(busyBot);
+    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "panel" }));
+    expect(host.querySelector("[data-model-picker-content]")).not.toBeNull();
+    expect(host.querySelector("[data-simple-effort]")).toBeNull();
+    show({ ...busyBot, busy: false });
+    expect(host.querySelector("[data-simple-effort]")).not.toBeNull();
   });
 
   it("ignores an intent for another place", () => {

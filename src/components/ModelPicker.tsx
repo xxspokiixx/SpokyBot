@@ -736,7 +736,7 @@ export function ModelPicker({
     lookForLocalIn(instance);
   };
   const activeLevels = active?.capabilities?.effortLevels ?? [];
-  const simpleEffort = activeLevels.length > 0 ? {
+  const simpleEffort = activeLevels.length > 0 && !shown.busy ? {
     levels: [...activeLevels],
     current: selection.effort,
     onPick: (level: EffortLevel) => dispatch({ type: "setModel", botId: bot.id, threadId,

@@ -9,6 +9,7 @@ import type { RuntimeEvent } from "../../shared/runtime-events";
 export const STOP_REPEAT_MS = 1_000;
 
 const liveTurns = new Map<string, string>();
+const turnStarts = new Map<string, number>();
 const lastStops = new Map<string, number>();
 const watchers = new Set<() => void>();
 const notify = () => { for (const watch of Array.from(watchers)) watch(); };
@@ -20,7 +21,10 @@ const subscribe = (watch: () => void) => {
 /** Follows turn.started and turn.completed frames; a thread between turns has no live turn to name. */
 export function noteRuntimeTurn(event: Pick<RuntimeEvent, "type" | "threadId" | "turnId">): void {
   if (!event.turnId) return;
-  if (event.type === "turn.started") liveTurns.set(event.threadId, event.turnId);
+  if (event.type === "turn.started") {
+    liveTurns.set(event.threadId, event.turnId);
+    turnStarts.set(event.threadId, (turnStarts.get(event.threadId) ?? 0) + 1);
+  }
   else if (event.type === "turn.completed" && liveTurns.get(event.threadId) === event.turnId) liveTurns.delete(event.threadId);
   else return;
   notify();
@@ -32,6 +36,11 @@ export function forgetLiveTurns(): void {
   notify();
 }
 
+/** How many turns this client has seen start in a thread: a change means another turn ran. */
+export function turnStartCount(threadId: string): number {
+  return turnStarts.get(threadId) ?? 0;
+}
+
 /** The turn this client saw start in a thread and not yet end; undefined when it has seen none. */
 export function useLiveTurn(threadId: string): string | undefined {
   return useSyncExternalStore(subscribe, () => liveTurns.get(threadId), () => undefined);
@@ -41,6 +50,7 @@ export function useLiveTurn(threadId: string): string | undefined {
 export function forgetStops(): void {
   forgetLiveTurns();
   lastStops.clear();
+  turnStarts.clear();
 }
 
 type StopAction = { type: "interrupt"; botId: string; threadId?: string; onError?: () => void };

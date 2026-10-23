@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cancelAiSwitch, useAiSwitch } from "@/lib/ai-switch";
+import { resetAiSwitch, useAiSwitch } from "@/lib/ai-switch";
 import { setAdvancedMode } from "@/lib/interface-mode";
 import { forgetStops } from "@/lib/stop-turn";
 import { runtimeFrameAction, StoreContext, type Bot, type InstanceInfo, type Message } from "@/state/store";
@@ -62,7 +62,7 @@ afterEach(() => {
   document.body.innerHTML = "";
   setAdvancedMode(false);
   delete (window as { ogb?: unknown }).ogb;
-  cancelAiSwitch();
+  resetAiSwitch();
 });
 
 describe("first-reply rescue row", () => {
