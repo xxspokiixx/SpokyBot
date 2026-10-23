@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING, LOCAL_VIEWER, WELCOME_VERSION, type WelcomeViewer } from "@/lib/onboarding";
 import { setLocale } from "@/lib/i18n";
+import { WELCOME_DRAFT_KEY } from "@/lib/welcome-draft";
 
 const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[] }));
 vi.mock("react", async (original) => ({
@@ -206,6 +207,18 @@ describe("who gets the welcome flow", () => {
     expect(gate(LOCAL_VIEWER).tree).not.toBeNull();
     store.state = { ...store.state, appSettingsOpen: false, appSettingsSection: "cloudAccount" };
     expect(gate(LOCAL_VIEWER).tree).not.toBeNull();
+  });
+
+  it("forgets a welcome draft once the welcome is done, however it was finished", () => {
+    vi.stubGlobal("window", LOCAL_PAGE);
+    localStorage.setItem(WELCOME_DRAFT_KEY, "kept");
+    gate(LOCAL_VIEWER);
+    for (const effect of fixture.effects) effect();
+    expect(localStorage.getItem(WELCOME_DRAFT_KEY), "a welcome still due keeps its draft").toBe("kept");
+    store.state = { ...store.state, config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-10-23T00:00:00.000Z", version: WELCOME_VERSION } } };
+    gate(LOCAL_VIEWER);
+    for (const effect of fixture.effects) effect();
+    expect(localStorage.getItem(WELCOME_DRAFT_KEY)).toBeNull();
   });
 
   it("resumes on the engines beat after the organisation row opens Settings", () => {

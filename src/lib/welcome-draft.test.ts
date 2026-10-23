@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WELCOME_VERSION } from "./onboarding";
 import { checkEmail, clearWelcomeDraft, profilePatch, readWelcomeDraft, saveWelcomeDraft, WELCOME_DRAFT_KEY } from "./welcome-draft";
 
 function storage() {
@@ -50,6 +51,15 @@ describe("the welcome draft", () => {
     clearWelcomeDraft();
     expect(readWelcomeDraft()).toBeNull();
     expect(local.values.has(WELCOME_DRAFT_KEY)).toBe(false);
+  });
+
+  it("forgets a draft written by another version of the welcome", () => {
+    saveWelcomeDraft({ beat: "engines", name: "Ada", email: "" });
+    expect(JSON.parse(local.values.get(WELCOME_DRAFT_KEY)!).version).toBe(WELCOME_VERSION);
+    for (const version of [undefined, WELCOME_VERSION - 1, WELCOME_VERSION + 1]) {
+      local.values.set(WELCOME_DRAFT_KEY, JSON.stringify({ version, beat: "engines", name: "Ada", email: "" }));
+      expect(readWelcomeDraft(), String(version)).toBeNull();
+    }
   });
 
   it("ignores anything it did not write, such as a step from an older welcome", () => {

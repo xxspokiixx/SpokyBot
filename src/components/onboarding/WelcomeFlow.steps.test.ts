@@ -5,7 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { WELCOME_DRAFT_KEY } from "@/lib/welcome-draft";
+import { readWelcomeDraft, saveWelcomeDraft, WELCOME_DRAFT_KEY } from "@/lib/welcome-draft";
 import type { SetupDetection } from "../../../shared/setup-import";
 
 const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), api: vi.fn() }));
@@ -41,7 +41,7 @@ const type = async (selector: string, value: string) => {
 const NAME = 'input[type="text"]', EMAIL = 'input[type="email"]';
 const DRAFT = { name: "", email: "" };
 const READY_AI = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true }, models: { default: "m", options: [] } };
-const draft = () => JSON.parse(localStorage.getItem(WELCOME_DRAFT_KEY) ?? "null");
+const draft = () => readWelcomeDraft();
 const putBodies = () => f.api.mock.calls.filter(([, init]) => init?.method === "PUT").map(([, init]) => JSON.parse(init.body));
 
 beforeEach(() => {
@@ -124,7 +124,7 @@ describe("a reload in the middle of the welcome", () => {
   });
 
   it("keeps Connect an AI when a working AI shows up after a reload, and Continue goes on to the next step", async () => {
-    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ ...DRAFT, beat: "import" }));
+    saveWelcomeDraft({ ...DRAFT, beat: "import" });
     const onDone = vi.fn();
     await show({ onDone });
     expect(text()).toContain("Connect an AI");
@@ -142,7 +142,7 @@ describe("a reload in the middle of the welcome", () => {
     const found: SetupDetection = { skills: [{ name: "pdf", source: "claudeCode" }], tools: [] };
     let answer!: (value: SetupDetection) => void;
     const client = { detect: vi.fn(() => new Promise<SetupDetection>((resolve) => { answer = resolve; })), apply: vi.fn() };
-    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: "import", name: "", email: "" }));
+    saveWelcomeDraft({ beat: "import", name: "", email: "" });
     await show({ setupImport: { client } });
     expect(text()).toContain("Connect an AI");
     await act(async () => { answer(found); });
@@ -160,7 +160,7 @@ describe("a reload in the middle of the welcome", () => {
     const found: SetupDetection = { skills: [{ name: "pdf", source: "claudeCode" }], tools: [] };
     let answer!: (value: SetupDetection) => void;
     const client = { detect: vi.fn(() => new Promise<SetupDetection>((resolve) => { answer = resolve; })), apply: vi.fn() };
-    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: "import", name: "", email: "" }));
+    saveWelcomeDraft({ beat: "import", name: "", email: "" });
     await show({ setupImport: { client } });
     await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new Event("pointerdown", { bubbles: true })); });
     await act(async () => { answer(found); });
@@ -218,7 +218,7 @@ describe("a reload in the middle of the welcome", () => {
   });
 
   it("on a hosted workspace, never reads a draft another person left in this browser, and never saves a profile", async () => {
-    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: "hello", name: "Someone Else", email: "someone@example.com" }));
+    saveWelcomeDraft({ beat: "hello", name: "Someone Else", email: "someone@example.com" });
     const onDone = vi.fn();
     await show({ hosted: true, onDone });
     await press("Continue");
@@ -229,7 +229,7 @@ describe("a reload in the middle of the welcome", () => {
   });
 
   it("is neither read nor written by a replay from Settings or by the preview", async () => {
-    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: "engines", name: "Old", email: "" }));
+    saveWelcomeDraft({ beat: "engines", name: "Old", email: "" });
     for (const extra of [{ replay: true }, { embedded: true }]) {
       await reload(extra);
       expect(text(), JSON.stringify(extra)).toContain("Step 1 of 3");

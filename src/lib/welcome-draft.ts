@@ -1,4 +1,4 @@
-import { BEAT_ORDER, type BeatId } from "./onboarding";
+import { BEAT_ORDER, WELCOME_VERSION, type BeatId } from "./onboarding";
 
 export interface WelcomeFields {
   name: string;
@@ -39,8 +39,9 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 export function readWelcomeDraft(): WelcomeDraft | null {
   try {
     const raw = localStorage.getItem(WELCOME_DRAFT_KEY);
-    const draft = raw ? (JSON.parse(raw) as Partial<WelcomeDraft> | null) : null;
-    if (!draft || typeof draft !== "object" || !BEAT_ORDER.includes(draft.beat as BeatId) || !text(draft.name) || !text(draft.email)) return null;
+    const draft = raw ? (JSON.parse(raw) as (Partial<WelcomeDraft> & { version?: unknown }) | null) : null;
+    if (!draft || typeof draft !== "object" || draft.version !== WELCOME_VERSION) return null;
+    if (!BEAT_ORDER.includes(draft.beat as BeatId) || !text(draft.name) || !text(draft.email)) return null;
     return { beat: draft.beat as BeatId, name: draft.name, email: draft.email };
   } catch {
     return null;
@@ -49,7 +50,7 @@ export function readWelcomeDraft(): WelcomeDraft | null {
 
 export function saveWelcomeDraft(draft: WelcomeDraft): void {
   try {
-    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: draft.beat, name: draft.name.slice(0, FIELD_LIMIT), email: draft.email.slice(0, FIELD_LIMIT) }));
+    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ version: WELCOME_VERSION, beat: draft.beat, name: draft.name.slice(0, FIELD_LIMIT), email: draft.email.slice(0, FIELD_LIMIT) }));
   } catch {
   }
 }
