@@ -1,7 +1,7 @@
 # Welcome flow and guided tour
 
-The first run is short (Oct 23 2026): the greeting (name and an optional
-email), Connect an AI when none works, then only the import, microphone and
+The first run is short (Oct 23 2026): the greeting (a name only; the email is
+asked once, by the separate product-updates question), Connect an AI when none works, then only the import, microphone and
 Cloud steps this computer needs, and the chat. There is no feature reel, phone
 step or first-bot step, and the app tour starts only from Settings → Replay
 app tour.
@@ -23,7 +23,7 @@ first-run onboarding through the fixture-only `?onboarding=1` entry. It uses
 the real renderer and fake-engine server. No provider login, real phone
 pairing, native permissions or user workspace is involved.
 
-Assertions cover a reload keeping the typed name and email, profile-save failure
+Assertions cover the greeting asking for a name only, a reload keeping the typed name, profile-save failure
 and retry, the one-step welcome (the fixture's Claude already works) landing in the
 chat with the first bot and no app tour (also after a reload),
 automatic starter-model selection and a successful first composer message without
@@ -156,10 +156,9 @@ combination) and the shared count behind the dots and "Step N of M".
 one step and Back waits while a step changes; the dots match the counter on
 every step; a reload resumes on the saved step with the typed fields, or on the
 step before one still loading (import, Cloud) and then on it; Skip and Escape
-keep the typed name and a valid email; a replay or the preview never touches the
+keep the typed name; a replay or the preview never touches the
 saved draft; Skip stays out of a long title's way. `HelloBeat.test.ts` covers the
-optional email, its inline message and Maybe later keeping what was typed
-(without tying analytics to the email). `GuidedTour.test.ts`,
+name-only greeting and Maybe later keeping the name typed. `GuidedTour.test.ts`,
 `FirstConversationTour.test.ts` and `WelcomeGate.test.ts` check the app tour
 never starts by itself, also after a reload, and the first-conversation
 spotlights no longer wait for it.

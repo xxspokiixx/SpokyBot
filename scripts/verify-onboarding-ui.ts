@@ -60,14 +60,15 @@ await evaluate("localStorage.clear(); sessionStorage.clear(); setTimeout(() => {
 await textVisible("Your name");
 await evaluate("document.documentElement.dataset.reducedMotion = 'true'; true");
 await screenshot("welcome");
+// The greeting asks for a name only; the email is asked once, by the separate product-updates question.
+assert.equal(await evaluate("document.querySelectorAll('.welcome-card input').length"), 1, "one field: the name");
+assert.equal(await evaluate("document.querySelectorAll('.welcome-card input[type=email]').length"), 0, "no email field");
 await type("Your name", "Onboarding fixture");
-await type("Email", "onboarding@example.test");
 // A reload in the middle of the welcome resumes with what was typed.
 await evaluate("setTimeout(() => location.reload(), 0); true");
 await textVisible("Your name");
-await poll(() => evaluate("[document.querySelector('.welcome-card input[type=text]')?.value, document.querySelector('.welcome-card input[type=email]')?.value]"),
-  ["Onboarding fixture", "onboarding@example.test"], "typed fields kept across a reload");
-console.log("PASS reload keeps the step and the typed fields");
+await poll(() => evaluate("document.querySelector('.welcome-card input[type=text]')?.value"), "Onboarding fixture", "the name kept across a reload");
+console.log("PASS the greeting asks for a name only, and a reload keeps the step and the name");
 await evaluate(`(() => {
   const original = window.fetch.bind(window);
   window.fetch = (input, init) => {
@@ -81,11 +82,12 @@ await evaluate(`(() => {
 })()`);
 await click("Continue");
 await textVisible("Couldn't save your details");
-assert.equal(await evaluate("document.querySelector('input[type=email]').value"), "onboarding@example.test");
+assert.equal(await evaluate("document.querySelector('.welcome-card input[type=text]').value"), "Onboarding fixture");
 await click("Continue");
 // The fixture's Claude already works, so the greeting is the whole welcome: no Connect an AI, reel, phone or first-bot step.
 await poll(() => evaluate("document.querySelectorAll('.welcome-card').length"), 0, "the one-step welcome ends");
-assert.equal((await config()).profile.email, "onboarding@example.test");
+assert.equal((await config()).profile.name, "Onboarding fixture");
+assert.equal((await config()).profile.email, "", "the welcome saves no email");
 console.log("PASS profile failure preserves input; retry persists, then the welcome ends");
 
 const starter = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.name === 'Pepper'))");
