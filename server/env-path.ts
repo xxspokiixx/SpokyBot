@@ -82,6 +82,15 @@ export function registerPathDir(dir: string): void {
   resetPathCache();
 }
 
+// App-installed standalone builds go last: a copy the person installs themselves, anywhere, takes over.
+const fallbackDirs: string[] = [];
+
+export function registerFallbackPathDir(dir: string): void {
+  if (fallbackDirs.includes(dir)) return;
+  fallbackDirs.push(dir);
+  resetPathCache();
+}
+
 /** `probed` resets too, or a rescan would drop rc-file PATH entries and never probe the login shell again. */
 export function resetPathCache(): void {
   cached = null;
@@ -97,6 +106,7 @@ export function augmentedPath(): string {
       // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
       ...(loginShellPath ? loginShellPath.split(delimiter) : []),
       ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
+      ...fallbackDirs.filter((d) => existsSync(d)),
     ]);
   }
   if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
@@ -122,7 +132,9 @@ function probeLoginShellPath(): void {
       const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
       if (!m || !m[1]) return;
       loginShellPath = m[1];
-      cached = mergePaths([...(cached ?? "").split(delimiter), ...m[1].split(delimiter)]);
+      // Fallback dirs stay last, behind what the person's shell adds.
+      const fallback = fallbackDirs.filter((d) => existsSync(d));
+      cached = mergePaths([...(cached ?? "").split(delimiter).filter((d) => !fallback.includes(d)), ...m[1].split(delimiter), ...fallback]);
     },
   );
 }
@@ -132,6 +144,7 @@ export function resetPathCacheForTests(): void {
   probed = false;
   loginShellPath = null;
   registeredDirs.length = 0;
+  fallbackDirs.length = 0;
 }
 
 /** Windows CLIs keep state under USERPROFILE; a HOME leaking in from a POSIX-flavoured shell is not it. */
