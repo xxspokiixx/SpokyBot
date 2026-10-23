@@ -16,6 +16,7 @@ import {
   installStandaloneEngine,
   isAppStandaloneCopy,
   plainInstallError,
+  STANDALONE_DOWNLOAD_TIMEOUT_MS,
   registerStandaloneBinDirs,
   resetStandaloneStateForTests,
   standaloneAssetFor,
@@ -25,6 +26,7 @@ import {
   type CodesignRunner,
 } from "./engine-standalone.ts";
 import { augmentedPath, findCliCandidates, resetPathCache, resetPathCacheForTests } from "./env-path.ts";
+import { INSTALL_TIMEOUT_MS } from "./headless/engine.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { buildZip } from "./testing/zip-fixture.ts";
 
@@ -35,6 +37,11 @@ const sha256 = (data: Buffer | string) => createHash("sha256").update(data).dige
 const refusal = (run: Promise<unknown>): Promise<Error> => run.then(() => {
   throw new Error("expected the install to be refused");
 }, (error: Error) => error);
+
+it("lets the headless client wait out the server's whole download, so the server's own message arrives first", () => {
+  expect(STANDALONE_DOWNLOAD_TIMEOUT_MS).toBe(20 * 60_000);
+  expect(INSTALL_TIMEOUT_MS).toBeGreaterThan(STANDALONE_DOWNLOAD_TIMEOUT_MS);
+});
 
 describe("explaining a file-system failure", () => {
   const release = fixtureRelease({});

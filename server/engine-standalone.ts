@@ -25,7 +25,7 @@ import type { StandaloneAsset, StandaloneRelease } from "./contracts.ts";
 import { findCliCandidates, registerFallbackPathDir, resetPathCache } from "./env-path.ts";
 import { extractZip, safeArchivePath } from "./zip-archive.ts";
 
-const DOWNLOAD_TIMEOUT_MS = 20 * 60_000;
+export const STANDALONE_DOWNLOAD_TIMEOUT_MS = 20 * 60_000;
 const STALL_TIMEOUT_MS = 60_000;
 const PROBE_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 5;
@@ -347,7 +347,7 @@ async function download(release: StandaloneRelease, asset: StandaloneAsset, dest
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS);
+  }, options.timeoutMs ?? STANDALONE_DOWNLOAD_TIMEOUT_MS);
   timer.unref?.();
   let stallTimer: NodeJS.Timeout | undefined;
   const progressed = () => {
