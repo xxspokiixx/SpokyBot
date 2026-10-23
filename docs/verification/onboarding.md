@@ -150,16 +150,16 @@ packaged Electron window itself.
 pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts src/components/onboarding src/components/AppNotices.test.ts
 ```
 
-`onboarding.test.ts` lists every step set (no reel, phone or bot step in any
+`src/lib/onboarding.test.ts` lists every step set (no reel, phone or bot step in any
 combination) and the shared count behind the dots and "Step N of M".
-`WelcomeFlow.steps.test.ts` renders the flow in happy-dom: a double click moves
+`src/components/onboarding/WelcomeFlow.steps.test.ts` renders the flow in happy-dom: a double click moves
 one step and Back waits while a step changes; the dots match the counter on
 every step; a reload resumes on the saved step with the typed fields, or on the
 step before one still loading (import, Cloud) and then on it; Skip and Escape
 keep the typed name; a replay or the preview never touches the
-saved draft; Skip stays out of a long title's way. `HelloBeat.test.ts` covers the
-name-only greeting and Maybe later keeping the name typed. `GuidedTour.test.ts`,
-`FirstConversationTour.test.ts` and `WelcomeGate.test.ts` check the app tour
+saved draft; Skip stays out of a long title's way. `src/components/onboarding/beats/HelloBeat.test.ts` covers the
+name-only greeting and Maybe later keeping the name typed. `src/components/onboarding/GuidedTour.test.ts`,
+`src/components/onboarding/FirstConversationTour.test.ts` and `src/components/onboarding/WelcomeGate.test.ts` check the app tour
 never starts by itself, also after a reload, and the first-conversation
 spotlights no longer wait for it.
 
@@ -168,4 +168,4 @@ in a browser of the same size. `verify-onboarding-ui.ts` passed end to end on a 
 `ui launch` fixture (Oct 23 2026). That fixture has a working AI, so it never reaches
 Connect an AI; the engines step's refresh failure is covered by
 `src/components/onboarding/beats/EnginesBeat.test.ts`, and the steps after it by
-`WelcomeFlow.steps.test.ts`.
+`src/components/onboarding/WelcomeFlow.steps.test.ts`.
