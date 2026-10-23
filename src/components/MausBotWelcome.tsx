@@ -7,7 +7,9 @@ import { t } from "@/lib/i18n";
 import { emailGateDone } from "@/lib/analytics";
 import { DEFAULT_BOT_NAME, myDefaultBot, setWelcomingBot, useViewerEmail } from "@/lib/default-bot";
 import { landInSidebar } from "@/lib/mausbot-landing";
-import { welcomeDue, type WelcomeViewer } from "@/lib/onboarding";
+import { firstReplyPending } from "@/lib/corner-popup";
+import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
+import { welcomeDue, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { useStore, type Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 import { BotAvatar } from "./Avatar";
@@ -41,19 +43,34 @@ export function mausBotWelcomeDue(input: { bot: Pick<Bot, "welcomed" | "hidden">
   return Boolean(input.bot && !input.bot.welcomed && !input.bot.hidden && !input.onboardingDue && !input.welcomeOpen && !input.tourOpen);
 }
 
-export function MausBotWelcome({ viewer }: { viewer: WelcomeViewer | null }) {
+/** MausBot's first-launch card is due now (mausBotWelcomeDue), and, like the Cloud Pro popup and the product-updates
+ * question, waits for the first reply (unknown until the bots load), for a launch after the one whose welcome finished, and
+ * for a launch the notices queue has not already used. The notices queue asks this too, so the card goes first. */
+export function useMausBotWelcomeDue(viewer: WelcomeViewer | null): { bot: Bot | undefined; due: boolean } {
   const { state } = useStore();
   const bot = myDefaultBot(state.bots, useViewerEmail());
-  const [shownFor, setShownFor] = useState<string | null>(null);
-  const [closed, setClosed] = useState(false);
   // The app tour runs only when Settings starts it; one never taken does not hold this back.
   const touring = state.tourOpen;
   const onboardingDue = !viewer || welcomeDue(state.config, {
     remoteClient: window.ogb?.remoteClient?.active === true, legacyDone: emailGateDone(),
     hosted: viewer.hosted, canSave: viewer.canSave, cloudHome: viewer.cloudHome,
   });
-  const due = !closed && Boolean(state.config) && mausBotWelcomeDue({ bot, onboardingDue, welcomeOpen: state.welcomeOpen, tourOpen: touring });
-  useEffect(() => { if (due && bot) setShownFor(bot.id); }, [due, bot]);
+  const due = Boolean(state.config) && mausBotWelcomeDue({ bot, onboardingDue, welcomeOpen: state.welcomeOpen, tourOpen: touring })
+    && firstReplyPending(state) === false && !welcomeFinishedThisLaunch() && launchDialogShown() !== "notices";
+  return { bot, due };
+}
+
+export function MausBotWelcome({ viewer }: { viewer: WelcomeViewer | null }) {
+  const { state } = useStore();
+  const { bot, due: ready } = useMausBotWelcomeDue(viewer);
+  const [shownFor, setShownFor] = useState<string | null>(null);
+  const [closed, setClosed] = useState(false);
+  const due = !closed && ready;
+  useEffect(() => {
+    if (!due || !bot) return;
+    markLaunchDialog("mausbot");
+    setShownFor(bot.id);
+  }, [due, bot]);
   useEffect(() => {
     if (!shownFor || closed) return;
     setWelcomingBot(shownFor);

@@ -9,11 +9,13 @@ import type { CloudOffer, CloudTrial } from "../../electron/cloud-home.mjs";
 import { withTourFinished } from "@/lib/guided-tour";
 import { setLocale } from "@/lib/i18n";
 import { EMPTY_ONBOARDING, LOCAL_VIEWER, markWelcomeFinished, type WelcomeViewer } from "@/lib/onboarding";
+import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { setPendingIntent } from "@/lib/cloud-intent";
 import { createDesktopPrefs, registerDesktopPrefs } from "../../electron/desktop-prefs.mjs";
 import { createUpdatesConsent, registerUpdatesConsent } from "../../electron/updates-consent.mjs";
 
-const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default" }));
+const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default",
+  viewerEmail: undefined as string | null | undefined }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = typeof initial === "function" ? initial() : initial;
     return [f.values[index], (next: unknown) => { f.values[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(f.values[index]) : next; }]; },
@@ -24,6 +26,8 @@ vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f
   CLOUD_LINK_SETTINGS: { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } }));
 vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false, track: vi.fn(), identifyEmail: vi.fn(), analyticsChoiceKnown: () => true }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => f.updater }));
+// Who MausBot belongs to: unknown (as before the session answers) unless a test says otherwise.
+vi.mock("@/lib/default-bot", async original => ({ ...await original<typeof import("@/lib/default-bot")>(), useViewerEmail: () => f.viewerEmail }));
 vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ brand: { name: "OpenMausBot" }, source: f.brand, file: "" }) }));
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: (instance: { snapshot: { state: string; authenticated?: boolean } }) =>
   instance.snapshot.state === "available" && instance.snapshot.authenticated !== false }));
@@ -127,7 +131,7 @@ beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   storage = new Map(); f.values = []; f.index = 0; f.effects = []; f.updater = null; f.brand = "default"; f.dispatch = vi.fn(); now = NOW; desk = desktopMachine();
   setLocale("en"); viewer = LOCAL_VIEWER; account = signedOut; snapshot = { status: "none" }; offer = TRIAL_OFFER;
-  session = new Map();
+  session = new Map(); f.viewerEmail = undefined;
   vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value) });
   f.state = { connected: true, hydrated: true, bots: structuredClone(FIRST_REPLY), groups: [], routines: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
     config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen: withTourFinished(undefined) } } };
@@ -478,6 +482,22 @@ describe("the Cloud Pro popup after the update", () => {
     expect(await launch(), "bots not loaded yet").toBe("");
     f.state.hydrated = true;
     expect(await launch()).toContain(POPUP);
+  });
+
+  it("goes after MausBot's first-launch card: never in the launch that card opened, then in the next one", async () => {
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    expect(await launch(), "MausBot's card is due: the popup waits for it").not.toContain(POPUP);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    expect(await launch(), "the card opened and was answered in this launch").not.toContain(POPUP);
+    session.clear();
+    expect(await launch(), "the next launch").toContain(POPUP);
+  });
+
+  it("claims the launch when it opens, so MausBot's card waits for a later one", async () => {
+    returning();
+    expect(await launch()).toContain(POPUP);
+    expect(launchDialogShown()).toBe("notices");
   });
 
   it("waits for a later launch when the welcome finished in this one, though a bot has answered", async () => {
@@ -840,6 +860,13 @@ describe("the product-updates question after the update", () => {
     expect(later).toContain(POPUP); expect(later).not.toContain(QUESTION);
     press("Not now"); await flush();
     expect(render(), "right after the popup closes, as #3379 orders it").toContain(QUESTION);
+  });
+
+  it("never in the launch MausBot's first-launch card opened", async () => {
+    returning(); markLaunchDialog("mausbot");
+    expect(await launch()).not.toContain(QUESTION);
+    session.clear();
+    expect(await launch()).toContain(QUESTION);
   });
 
   it("never during onboarding, the tour or Settings; it shows once they are done, before the other cards", async () => {
