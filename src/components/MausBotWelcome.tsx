@@ -8,8 +8,6 @@ import { emailGateDone } from "@/lib/analytics";
 import { DEFAULT_BOT_NAME, myDefaultBot, setWelcomingBot, useViewerEmail } from "@/lib/default-bot";
 import { landInSidebar } from "@/lib/mausbot-landing";
 import { welcomeDue, type WelcomeViewer } from "@/lib/onboarding";
-import { currentStep } from "@/lib/guided-tour";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { useStore, type Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 import { BotAvatar } from "./Avatar";
@@ -48,9 +46,8 @@ export function MausBotWelcome({ viewer }: { viewer: WelcomeViewer | null }) {
   const bot = myDefaultBot(state.bots, useViewerEmail());
   const [shownFor, setShownFor] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
-  const advanced = useAdvancedMode();
-  const record = state.config?.onboarding;
-  const touring = state.tourOpen || (Boolean(record?.completedAt) && currentStep(record, advanced) !== null);
+  // The app tour runs only when Settings starts it; one never taken does not hold this back.
+  const touring = state.tourOpen;
   const onboardingDue = !viewer || welcomeDue(state.config, {
     remoteClient: window.ogb?.remoteClient?.active === true, legacyDone: emailGateDone(),
     hosted: viewer.hosted, canSave: viewer.canSave, cloudHome: viewer.cloudHome,
