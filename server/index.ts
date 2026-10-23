@@ -307,7 +307,6 @@ import {
   roomResponders,
   sectionKey,
   Store,
-  titleFromLlm,
   type BotRecord,
   type GroupDefaultResponder,
   type GroupRecord,
@@ -328,7 +327,8 @@ import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./t
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractReplayImages, extractTurnImages } from "./turn-images.ts";
-import { callTitleExcerpt, threadTitlePrompt, type ThreadTitleSource } from "./thread-title.ts";
+import { callTitleExcerpt } from "./thread-title.ts";
+import { generateThreadTitle } from "./thread-title-generate.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import {
@@ -510,7 +510,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
-import { createWorkspaceAccess, describeEdition, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, LICENSE_WARN_DAYS, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type EditionStatus, type WorkspaceAccess } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
@@ -7948,32 +7948,6 @@ async function finalScreenFrame(_botId: string, threadId: string): Promise<Frame
   return frame;
 }
 
-async function generateThreadTitle(
-  provider: { generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string> },
-  text: string,
-  source: ThreadTitleSource = "first-message",
-): Promise<string | null> {
-  const prompt = threadTitlePrompt(text, source);
-  const expiry = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const reply = await Promise.race([
-      provider.generateText!(prompt, { signal: expiry.signal }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          expiry.abort();
-          reject(new Error("thread title timed out"));
-        }, 10_000);
-      }),
-    ]);
-    return titleFromLlm(reply);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; instance: ProviderInstance } | { ok: false; refusal: string } {
   if (!llmThreadTitlesEnabled(cfg)) return { ok: false, refusal: "generated thread titles are turned off on this server" };
   if (hostedModels && !hostedModels.allows(bot.modelSelection)) return { ok: false, refusal: hostedModels.error() };
@@ -12619,16 +12593,6 @@ async function perBotLocalVmCountForModeChange(): Promise<number | null> {
     return targets.some((target) => existsSync(target.workspaceDir)) ? null : 0;
   }
   return existingPerBotLocalVmCount(runtime.runtime);
-}
-
-function editionForSettings(status: EditionStatus) {
-  const expiring = status.edition === "enterprise" && status.expiresAt && status.expiresInDays !== undefined &&
-    (status.graceEndsAt !== undefined || status.expiresInDays <= LICENSE_WARN_DAYS);
-  return {
-    edition: status.edition,
-    features: status.features,
-    ...(expiring ? { license: { expiresAt: status.expiresAt!, expiresInDays: status.expiresInDays!, ...(status.graceEndsAt ? { graceEndsAt: status.graceEndsAt } : {}) } } : {}),
-  };
 }
 
 function configStatus() {
