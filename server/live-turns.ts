@@ -18,6 +18,11 @@ export class LiveTurns {
     else if (event.type === "turn.completed" && this.#byThread.get(event.threadId) === event.turnId) this.#byThread.delete(event.threadId);
   }
 
+  /** A new turn is being dispatched on the thread: whatever turn it held before is over, its end lost or not. */
+  dispatchStarted(threadId: string): void {
+    this.#byThread.delete(threadId);
+  }
+
   running(threadId: string): string | undefined {
     const turnId = this.#byThread.get(threadId);
     return turnId !== undefined && this.#busy(threadId) ? turnId : undefined;

@@ -20,9 +20,13 @@ export class PersonStops {
     return stopped === undefined || turnId === undefined || stopped === turnId;
   }
 
-  /** At a turn's start and end: a stop never outlives the turn it was pressed on. Another turn's start or end
-   * leaves it be; a Stop pressed during a dispatch goes at the next start or end. */
-  forget(threadId: string, turnId: string | undefined): void {
+  /** A turn started: a stop for any other turn on the thread is over, even if that turn's end was lost. */
+  turnStarted(threadId: string, turnId: string | undefined): void {
+    if (this.#byThread.has(threadId) && this.#byThread.get(threadId) !== turnId) this.#byThread.delete(threadId);
+  }
+
+  /** A turn ended: its own stop goes, and so does one pressed during a dispatch; another turn's end leaves it be. */
+  turnEnded(threadId: string, turnId: string | undefined): void {
     if (!this.#byThread.has(threadId)) return;
     const stopped = this.#byThread.get(threadId);
     if (stopped === undefined || stopped === turnId) this.#byThread.delete(threadId);
