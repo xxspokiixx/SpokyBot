@@ -4609,6 +4609,48 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("stores the fleet order: a partial, stable reorder every client reads back", async () => {
+    // POST /api/bots puts the newest bot first, so the four read [fourth, third, second, first].
+    const first = (await api("POST", "/api/bots")).body.bot;
+    const second = (await api("POST", "/api/bots")).body.bot;
+    const third = (await api("POST", "/api/bots")).body.bot;
+    const fourth = (await api("POST", "/api/bots")).body.bot;
+    const mine = new Set([first.id, second.id, third.id, fourth.id]);
+    const ours = (ids: string[]) => ids.filter((id) => mine.has(id));
+    const listed = async () => ours((await api("GET", "/api/bots?messages=0")).body.bots.map((bot: { id: string }) => bot.id));
+    try {
+      expect(await listed()).toEqual([fourth.id, third.id, second.id, first.id]);
+
+      const stream = await openSse(`${BASE}/api/events`);
+      try {
+        await stream.until((frame) => frame.kind === "hello");
+        const full = await api("PUT", "/api/bots/order", { botIds: [first.id, second.id, third.id, fourth.id] });
+        expect(full.status).toBe(200);
+        expect(ours(full.body.botIds)).toEqual([first.id, second.id, third.id, fourth.id]);
+        expect(full.body.botIds).toEqual((await api("GET", "/api/bots?messages=0")).body.bots.map((bot: { id: string }) => bot.id));
+        const frame = await stream.until((candidate) => candidate.kind === "bots.order");
+        expect(frame.botIds).toEqual(full.body.botIds);
+      } finally {
+        stream.close();
+      }
+
+      // Listing two bots moves only those two, into the positions they already share.
+      const partial = await api("PUT", "/api/bots/order", { botIds: [fourth.id, second.id] });
+      expect(partial.status).toBe(200);
+      expect(ours(partial.body.botIds)).toEqual([first.id, fourth.id, third.id, second.id]);
+      expect(await listed()).toEqual([first.id, fourth.id, third.id, second.id]);
+
+      expect(await api("PUT", "/api/bots/order", { botIds: [first.id, first.id] })).toMatchObject({ status: 400, body: { error: "botIds must be a non-empty array of distinct bot ids" } });
+      expect(await api("PUT", "/api/bots/order", { botIds: [] })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/bots/order", { botIds: "nope" })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/bots/order", { botIds: [first.id], extra: true })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/bots/order", { botIds: [first.id, "bot-nope"] })).toMatchObject({ status: 400, body: { error: "unknown bot: bot-nope" } });
+      expect(await listed()).toEqual([first.id, fourth.id, third.id, second.id]);
+    } finally {
+      for (const bot of [first, second, third, fourth]) await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("rejects a sidebar section Chief collision without changing any bot", async () => {
     const incumbent = (await api("POST", "/api/bots")).body.bot;
     const incoming = (await api("POST", "/api/bots")).body.bot;

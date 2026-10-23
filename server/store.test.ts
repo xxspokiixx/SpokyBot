@@ -1701,6 +1701,61 @@ describe("Store", () => {
   });
 });
 
+describe("Store bot order", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  // createBot puts the newest bot first, so four creations read [d, c, b, a].
+  const fleet = (store: Store) => {
+    const a = store.createBot({ name: "A" }, { seedMessages: false });
+    const b = store.createBot({ name: "B" }, { seedMessages: false });
+    const c = store.createBot({ name: "C" }, { seedMessages: false });
+    const d = store.createBot({ name: "D" }, { seedMessages: false });
+    return { a, b, c, d };
+  };
+  const order = (store: Store) => store.bots.map((bot) => bot.id);
+
+  it("reorders the whole fleet, persists it, and emits one whole-list change", () => {
+    const store = new Store(selection);
+    const { a, b, c, d } = fleet(store);
+    expect(order(store)).toEqual([d.id, c.id, b.id, a.id]);
+    const changes: unknown[] = [];
+    store.onChange((change) => changes.push(change));
+    const before = store.bots;
+    expect(store.reorderBots([a.id, b.id, c.id, d.id])?.map((bot) => bot.id)).toEqual([a.id, b.id, c.id, d.id]);
+    expect(changes).toEqual([{ type: "bots.order" }]);
+    // Same array and same records: schedulers and other consumers hold these objects.
+    expect(store.bots).toBe(before);
+    expect(store.bot(a.id)).toBe(a);
+    expect(order(new Store(selection))).toEqual([a.id, b.id, c.id, d.id]);
+  });
+
+  it("is stable for the bots a partial list leaves out", () => {
+    const store = new Store(selection);
+    const { a, b, c, d } = fleet(store);
+    // a and c sit at positions 3 and 1: a takes 1 and c takes 3; d and b never move.
+    expect(store.reorderBots([a.id, c.id])?.map((bot) => bot.id)).toEqual([d.id, a.id, b.id, c.id]);
+    expect(order(new Store(selection))).toEqual([d.id, a.id, b.id, c.id]);
+    // Swapping two neighbours inside one bucket leaves the rest alone.
+    expect(store.reorderBots([b.id, a.id])?.map((bot) => bot.id)).toEqual([d.id, b.id, a.id, c.id]);
+  });
+
+  it("refuses an empty list, a repeated id or an unknown id without touching anything", () => {
+    const store = new Store(selection);
+    const { a, b } = fleet(store);
+    const saved = order(store);
+    const changes: unknown[] = [];
+    store.onChange((change) => changes.push(change));
+    for (const ids of [[], [a.id, a.id], [a.id, "missing"], ["missing"], [b.id, a.id, b.id]]) {
+      expect(store.reorderBots(ids), JSON.stringify(ids)).toBeNull();
+    }
+    expect(changes).toEqual([]);
+    expect(order(store)).toEqual(saved);
+    expect(order(new Store(selection))).toEqual(saved);
+  });
+});
+
 describe("Store change stream", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });

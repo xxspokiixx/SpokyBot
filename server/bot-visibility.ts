@@ -370,6 +370,10 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       const queues = field("queues");
       return { ...payload, queues: Object.fromEntries(Object.entries(queues).filter(([threadId]) => visible.thread(threadId))) };
     }
+    case "bots.order": {
+      const botIds = Array.isArray(payload.botIds) ? payload.botIds.filter((id): id is string => typeof id === "string") : [];
+      return { ...payload, botIds: botIds.filter((id) => visible.bot(id)) };
+    }
     case "message":
     case "message.patch":
     case "thread":
