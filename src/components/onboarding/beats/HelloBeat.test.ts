@@ -91,7 +91,7 @@ describe("the greeting beat", () => {
     await flush();
     expect(putBodies()).toEqual([{ profile: { name: "Ada", email: "ada@example.com" } }]);
     expect(props.onNext).toHaveBeenCalledOnce();
-    expect(analytics.identifyEmail).toHaveBeenCalledWith("ada@example.com", { submitted: true });
+    expect(analytics.identifyEmail).toHaveBeenCalledWith("ada@example.com");
   });
 
   it("Maybe later still saves the name typed, and the email when it is valid, and goes on at once", async () => {
@@ -100,7 +100,7 @@ describe("the greeting beat", () => {
     expect(props.onSkip).toHaveBeenCalledOnce();
     await flush();
     expect(putBodies()).toEqual([{ profile: { name: "Ada", email: "ada@example.com" } }]);
-    expect(analytics.identifyEmail).toHaveBeenCalledWith("ada@example.com", { submitted: false });
+    expect(analytics.identifyEmail, "kept on this computer only: Maybe later never ties analytics to the email").not.toHaveBeenCalled();
     store.api.mockClear();
     await show({ name: "Grace", email: "grace@" });
     await press("Maybe later");
@@ -125,5 +125,17 @@ describe("the greeting beat", () => {
       name.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(props.onFields).toHaveBeenLastCalledWith({ name: "Ada", email: "" });
+  });
+});
+
+describe("Continue after Maybe later already kept the email", () => {
+  it("still ties analytics to it, as Continue always has", async () => {
+    store.state = { config: { profile: { name: "Ada", email: "ada@example.com" } } };
+    await show({ name: "Ada", email: "ada@example.com" });
+    await press("Continue");
+    await flush();
+    expect(store.api, "nothing new to save").not.toHaveBeenCalled();
+    expect(props.onNext).toHaveBeenCalledOnce();
+    expect(analytics.identifyEmail).toHaveBeenCalledWith("ada@example.com");
   });
 });

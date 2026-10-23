@@ -10,7 +10,8 @@ import type { SetupDetection } from "../../../shared/setup-import";
 
 const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), api: vi.fn() }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: f.api }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn(), setEmailGateDone: vi.fn(), identifyEmail: vi.fn() }));
+const analytics = vi.hoisted(() => ({ track: vi.fn(), setEmailGateDone: vi.fn(), identifyEmail: vi.fn() }));
+vi.mock("@/lib/analytics", () => analytics);
 vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 vi.mock("@/components/DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } } }) }));
 vi.mock("@/components/EngineSetup", () => ({ EngineSetup: () => null }));
@@ -142,6 +143,7 @@ describe("a reload in the middle of the welcome", () => {
     expect(onDone).toHaveBeenCalledOnce();
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(putBodies()).toContainEqual({ profile: { name: "Ada", email: "ada@example.com" } });
+    expect(analytics.identifyEmail, "Skip keeps the email on this computer only").not.toHaveBeenCalled();
     expect(localStorage.getItem(WELCOME_DRAFT_KEY)).toBeNull();
   });
 
