@@ -10,6 +10,8 @@ export const JEV_MODEL = "jev-latest";
 export const JEV_MAX_OPTIONS = 255;
 export const JEV_MIN_LEVELS = 2;
 export const JEV_MAX_LEVELS = 10;
+/** Sent only with Cloud's included token, to the Admin's relay. */
+export const RELAY_SEAM_HEADER = "x-omb-seam";
 
 /** Null when the key must not be sent there: https anywhere, plain http only to this machine. */
 export function jevEndpoint(baseUrl?: string | null): URL | null {
@@ -150,7 +152,11 @@ async function decide(request: BackendRequest): Promise<BackendResult> {
   try {
     response = await request.fetch(endpoint, {
       method: "POST",
-      headers: { authorization: `Bearer ${request.key}`, "content-type": "application/json", accept: "application/json" },
+      headers: {
+        authorization: `Bearer ${request.key}`, "content-type": "application/json", accept: "application/json",
+        // The relay checks the request against this seam's shape (server/decider/relay.ts); Jev itself never sees it.
+        ...(request.relaySeam ? { [RELAY_SEAM_HEADER]: request.relaySeam } : {}),
+      },
       body: JSON.stringify(jevRequestBody(request.state, request.questions)),
       signal: request.signal,
       // Never replay the key to wherever a redirect points.

@@ -3826,6 +3826,7 @@
   "room.holds.avatarHeld": "{name} — held (stopped by you)",
   "room.routedBy": "Picked by Jev · {percent}%",
   "room.routedBy.openrouter": "Picked by OpenRouter · {percent}%",
+  "room.routedBy.workersai": "Picked by Clef · {percent}%",
   "room.turnLimit.aria": "Turn limit for this conversation",
   "room.turnLimit.default": "Default ({minutes} min)",
   "room.turnLimit.minutes": "{minutes} minutes",
