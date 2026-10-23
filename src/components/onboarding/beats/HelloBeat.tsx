@@ -1,6 +1,5 @@
 import { useId, useRef, useState } from "react";
 import { track } from "@/lib/analytics";
-import { brand } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { checkEmail, type WelcomeFields } from "@/lib/welcome-draft";
 import { useStore } from "@/state/store";
@@ -69,7 +68,7 @@ export function HelloBeat({
   return (
     <div className="stagger flex flex-col items-center">
       <p className="animate-rise mt-1.5 text-center text-[14px] leading-relaxed text-ink-secondary" style={staggerIndex(0)}>
-        {t("onboarding.intro")}
+        {t("onboarding.introStart")}
       </p>
       <input
         autoFocus
@@ -98,7 +97,7 @@ export function HelloBeat({
         {flagged ? (
           <span className="text-danger">{t("onboarding.email.invalid")}</span>
         ) : (
-          <span className="text-ink-secondary">{t("onboarding.email.why", { app: brand().name })}</span>
+          <span className="text-ink-secondary">{t("onboarding.email.why")}</span>
         )}
       </p>
       {failed && <p role="alert" className="mt-3 text-[13px] text-danger">{t("onboarding.profile.error")}</p>}
