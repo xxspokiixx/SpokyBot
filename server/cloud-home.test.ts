@@ -1,5 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import {
   cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, cloudRequestSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, codeTrustProblem, edgeHold, hardenHost, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
+import { cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeHold, hardenHost, passwdIds, prepareCloudHomeData, spawnWithSecrets } from "./cloud-home-start.ts";
 import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
@@ -281,6 +281,28 @@ it("binds a fresh volume to its machine and refuses anyone else's data", () => {
   expect(readFileSync(join(unmarked, "notes.txt"), "utf8")).toBe("someone's data");
 });
 
+it("a new home on a kept volume clears the data-directory lease the previous machine left, once the volume is confirmed its own, and never this machine's or another Cloud's (2026-10-23)", () => {
+  const home = directory(), dataDir = cloudHomeDataDir({}, home);
+  expect(dataDir).toBe(join(home, ".openmausbot"));
+  expect(cloudHomeDataDir({ OMB_DATA_DIR: "/elsewhere" }, home)).toBe("/elsewhere");
+  mkdirSync(join(home, "lost+found"));
+  expect(prepareCloudHomeData(home, dataDir, "home-7f3k2")).toEqual({ volume: "new", cleared: [] });
+  // The lease the home destroyed mid-boot left (its hostname is Fly's machine id), and the previous machine's own pid.
+  const lease = join(dataDir, "openmausbot-server.lease");
+  mkdirSync(dataDir, { recursive: true });
+  const left = (host: string) => writeFileSync(lease, `${JSON.stringify({ version: 1, pid: 613, host, token: "0f5e6c4a-1b2c-4d3e-8f9a-0b1c2d3e4f5a", createdAt: 1, boot: "boot-of-the-old-machine", uptime: 44_000 })}\n`);
+  left("d8d9e0f1a2b3c4");
+  // Another Cloud's volume: refused before anything on it is read or changed.
+  expect(() => prepareCloudHomeData(home, dataDir, "home-other")).toThrow(/another Cloud machine/);
+  expect(readFileSync(lease, "utf8")).toContain("d8d9e0f1a2b3c4");
+  expect(prepareCloudHomeData(home, dataDir, "home-7f3k2")).toEqual({ volume: "existing", cleared: [{ path: lease, host: "d8d9e0f1a2b3c4", pid: 613 }] });
+  expect(existsSync(lease)).toBe(false);
+  // This machine's own lease (its server restarted by the launcher): left for the server to refuse or recover.
+  left(hostname());
+  expect(prepareCloudHomeData(home, dataDir, "home-7f3k2")).toEqual({ volume: "existing", cleared: [] });
+  expect(readFileSync(lease, "utf8")).toContain(hostname());
+});
+
 it("gives the edge only its routing name and the server the contract, never a gateway's settings or a secret", () => {
   const relay = { OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_VOICE_TOKEN: `omb_voice_${"v".repeat(43)}`, OMB_CLOUD_DECIDER_TOKEN: `omb_decide_${"d".repeat(43)}`,
     OMB_CLOUD_AI_TOKEN: `omb_ai_${"a".repeat(43)}` };
@@ -391,6 +413,9 @@ it("ships an edge and a Fly template that keep the server private", () => {
 it("the Cloud launcher starts the server again only when it asks to after a restore, and only a few times in a row", () => {
   const launcher = readFileSync(join(import.meta.dirname, "cloud-home-start.ts"), "utf8");
   expect(launcher).toContain("const policy = restartPolicy();");
+  // The volume is prepared (and the previous machine's lease cleared) through one helper, as `maus`, before any child starts.
+  expect(launcher).toContain("const prepare = () => prepareCloudHomeData(home, cloudHomeDataDir(env, home), config.machineId);");
+  expect(launcher.indexOf("prepared = prepare();")).toBeLessThan(launcher.indexOf("runServer();"));
   expect(launcher).toContain("if (!policy.again(code, stopping)) return false;");
   for (const code of [0, 1, null]) expect(restartPolicy().again(code)).toBe(false);
   expect(restartPolicy().again(RESTART_EXIT_CODE, true)).toBe(false);
