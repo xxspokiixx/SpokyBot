@@ -117,6 +117,15 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
     recede();
   };
 
+  // Escape decides nothing about the sidebar, but the card has been seen: it is shown once per person and place.
+  const dismiss = () => {
+    if (leaving) return;
+    setLeaving(true);
+    setWelcomingBot(null);
+    dispatch({ type: "updateBot", botId: bot.id, patch: { welcomed: true } });
+    onClose();
+  };
+
   const drop = (event: DragEvent) => {
     const file = event.dataTransfer.files?.[0];
     if (!file) return;
@@ -137,7 +146,7 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
           event.preventDefault();
-          if (editing && panelRef.current?.contains(event.target as Node)) { setEditing(false); pictureRef.current?.focus(); } else onClose();
+          if (editing && panelRef.current?.contains(event.target as Node)) { setEditing(false); pictureRef.current?.focus(); } else dismiss();
         }}
         className="animate-pop-in w-full max-w-[460px] rounded-3xl border border-hairline/50 bg-panel px-6 pb-5 pt-5 shadow-2xl"
       >

@@ -9,8 +9,8 @@ import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { EMPTY_ONBOARDING, LOCAL_VIEWER, markWelcomeFinished, WELCOME_VERSION } from "@/lib/onboarding";
 import { setLocale } from "@/lib/i18n";
 
-const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, welcoming: vi.fn() }));
-vi.mock("@/state/store", async (original) => ({ ...(await original<typeof import("@/state/store")>()), useStore: () => ({ state: f.state, dispatch: vi.fn() }) }));
+const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, welcoming: vi.fn(), dispatch: vi.fn() }));
+vi.mock("@/state/store", async (original) => ({ ...(await original<typeof import("@/state/store")>()), useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
 vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false, track: vi.fn() }));
 vi.mock("@/lib/default-bot", async (original) => ({
   ...(await original<typeof import("@/lib/default-bot")>()),
@@ -30,6 +30,7 @@ const opened = () => f.welcoming.mock.calls.some(([id]) => id === "maus");
 beforeEach(() => {
   setLocale("en");
   f.welcoming.mockReset();
+  f.dispatch.mockReset();
   sessionStorage.clear();
   vi.stubGlobal("ogb", undefined);
   const welcomed = { ...EMPTY_ONBOARDING, completedAt: "2026-10-23T00:00:00.000Z", version: WELCOME_VERSION };
@@ -84,4 +85,13 @@ it("never opens in a launch where the Cloud Pro popup or the updates question al
   markLaunchDialog("notices");
   await show();
   expect(opened()).toBe(false);
+});
+
+it("Escape keeps the card as seen, so it does not come back and claim every later launch", async () => {
+  await show();
+  const dialog = document.querySelector<HTMLElement>("[data-mausbot-welcome] [role=dialog]");
+  expect(dialog).toBeTruthy();
+  await act(async () => { dialog!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "maus", patch: { welcomed: true } });
+  expect(document.querySelector("[data-mausbot-welcome]"), "closed").toBeNull();
 });
