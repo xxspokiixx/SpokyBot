@@ -583,6 +583,12 @@ export class SessionRegistry {
     return this.sessions.map(publicSession);
   }
 
+  /** The live sessions a Team Cloud member's own codes opened: their phones. Never an Admin-signed pairing (an app). */
+  memberPhones(): PublicSession[] {
+    this.prune();
+    return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
+  }
+
   revoke(id: string): boolean {
     const before = this.sessions.length;
     this.sessions = this.sessions.filter((s) => s.id !== id);
