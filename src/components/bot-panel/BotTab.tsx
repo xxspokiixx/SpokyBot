@@ -15,6 +15,7 @@ import { SoulField } from "../SoulField";
 import { useManagedSkills } from "../bot-settings/SkillsSection";
 import { useBotApps } from "../bot-settings/useBotApps";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
+import { BotConversations } from "./Conversations";
 import { memoryNotes } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
 import { buttonCls, Card, ColRow, NavRow, rowCls, RowText, Segmented, type SegmentOption } from "./rows";
@@ -108,6 +109,7 @@ export function BotTab({ bot, derived, editingInstructions, onEditInstructions, 
 
   return (
     <div data-panel-tabpanel="bot">
+      <BotConversations bot={bot} />
       <Card anchor="model">
         <div data-panel-row="model" className={rowCls}>
           <ModelPicker

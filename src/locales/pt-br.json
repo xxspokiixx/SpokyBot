@@ -1662,6 +1662,7 @@
   "chat.openProfile": "Abrir o perfil do agente",
   "chat.backToMainThread": "Voltar ao seu chat",
   "chat.openProfileAria": "Abrir o perfil de {name}",
+  "chat.showConversations": "Ver as conversas com {name}",
   "chat.find": "Buscar na conversa",
   "chat.findShortcut": "Buscar na conversa (⌘F)",
   "chat.stop": "Parar",
@@ -5867,5 +5868,11 @@
   "apps.x.addKeyHelp": "Cole uma chave do treg para seus bots pesquisarem e lerem o X. As chamadas são cobradas do seu saldo no treg.",
   "apps.x.connecting": "Conectando as chamadas ao X incluídas no seu plano…",
   "apps.x.useOwnKey": "Usar minha própria chave do treg",
-  "apps.x.remove": "Remover a chave"
+  "apps.x.remove": "Remover a chave",
+  "botPanel.conversations.title": "Conversas",
+  "botPanel.conversations.search": "Buscar conversas",
+  "botPanel.conversations.searchPlaceholder": "Buscar nas conversas com {name}",
+  "botPanel.conversations.new": "Nova conversa",
+  "botPanel.conversations.showMore": "Mostrar mais {count}",
+  "botPanel.conversations.showFewer": "Mostrar menos"
 }

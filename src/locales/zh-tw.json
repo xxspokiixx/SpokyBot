@@ -1161,6 +1161,7 @@
   "chat.chiefOfStaff": "幕僚長",
   "chat.openProfile": "開啟機器人角色資料",
   "chat.openProfileAria": "開啟 {name} 的角色資料",
+  "chat.showConversations": "查看與 {name} 的對話",
   "chat.find": "在對話中尋找",
   "chat.findShortcut": "在對話中尋找（⌘F）",
   "chat.stop": "停止",
@@ -4027,5 +4028,11 @@
   "keys.treg.placeholder": "貼上你的 treg 金鑰",
   "keys.treg.link": "在 treg.to 取得金鑰",
   "keys.treg.working": "treg 運作正常 ✓",
-  "keys.treg.balance": "餘額：{balance}。"
+  "keys.treg.balance": "餘額：{balance}。",
+  "botPanel.conversations.title": "對話",
+  "botPanel.conversations.search": "搜尋對話",
+  "botPanel.conversations.searchPlaceholder": "搜尋與 {name} 的對話",
+  "botPanel.conversations.new": "新對話",
+  "botPanel.conversations.showMore": "再顯示 {count} 個",
+  "botPanel.conversations.showFewer": "顯示較少"
 }
