@@ -1,4 +1,4 @@
-import { rankAis } from "../shared/ai-ranking.ts";
+import { freeFallback, rankAis } from "../shared/ai-ranking.ts";
 import type { EffortLevel, EngineAccess, InstanceConfigMap, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 export interface SelectableInstance {
@@ -18,12 +18,13 @@ export interface DefaultSelectionContext {
   answered?: (instance: SelectableInstance) => boolean | undefined;
 }
 
-/** The shared ranking (shared/ai-ranking.ts), with an AI that answered its test ahead of one that didn't or wasn't tested. */
+/** The shared ranking (shared/ai-ranking.ts), with an AI that answered its test ahead of one that didn't or wasn't tested.
+ * OpenCode's free backup comes in only once every other AI didn't answer. */
 const best = (instances: readonly SelectableInstance[], context: DefaultSelectionContext) => {
   const ranked = rankAis(instances);
-  return ranked.find((instance) => context.answered?.(instance) === true)
-    ?? ranked.find((instance) => context.answered?.(instance) !== false)
-    ?? ranked[0];
+  const usable = (list: readonly SelectableInstance[]) => list.find((instance) => context.answered?.(instance) === true)
+    ?? list.find((instance) => context.answered?.(instance) !== false);
+  return usable(ranked.filter((instance) => !freeFallback(instance))) ?? usable(ranked) ?? ranked[0];
 };
 
 /** The saved config's enabled switch and picker group win over what the driver reports. */

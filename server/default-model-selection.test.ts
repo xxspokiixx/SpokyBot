@@ -176,6 +176,12 @@ describe("new bot default: one ranking with the welcome, tested AIs first", () =
     // The free backup that answered beats a real AI that didn't.
     expect(pick([claudeReady, openCodeFree], { answered: (instance: SelectableInstance) => instance.instanceId === "opencodeGo" ? true : false })).toBe("opencodeGo");
   });
+
+  it("never prefers the free backup to a real AI that hasn't been tested yet, or can't be", () => {
+    const backupAnswered = (instance: SelectableInstance) => instance.instanceId === "opencodeGo" ? true : undefined;
+    expect(pick([claudeReady, openCodeFree], { answered: backupAnswered })).toBe("claude");
+    expect(pick([ready("muse", "museCode", "muse-default"), openCodeFree], { answered: backupAnswered })).toBe("muse");
+  });
 });
 
 describe("new bot default model selection while enrolled in an organisation", () => {
