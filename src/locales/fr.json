@@ -547,6 +547,7 @@
   "chat.chiefOfStaff": "Chef de cabinet",
   "chat.openProfile": "Ouvrir le profil de l'agent",
   "chat.openProfileAria": "Ouvrir le profil de {name}",
+  "chat.showConversations": "Voir les conversations avec {name}",
   "chat.find": "Rechercher dans la conversation",
   "chat.findShortcut": "Rechercher dans la conversation (⌘F)",
   "chat.stop": "Arrêter",
@@ -2161,5 +2162,11 @@
   "keys.treg.working": "treg fonctionne ✓",
   "keys.treg.balance": "Solde : {balance}.",
   "keys.test": "Tester",
-  "apps.connected": "Connectée"
+  "apps.connected": "Connectée",
+  "botPanel.conversations.title": "Conversations",
+  "botPanel.conversations.search": "Rechercher dans les conversations",
+  "botPanel.conversations.searchPlaceholder": "Rechercher dans les conversations avec {name}",
+  "botPanel.conversations.new": "Nouvelle conversation",
+  "botPanel.conversations.showMore": "Afficher {count} de plus",
+  "botPanel.conversations.showFewer": "Afficher moins"
 }

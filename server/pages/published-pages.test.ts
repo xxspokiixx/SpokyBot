@@ -279,7 +279,7 @@ describe("sharing a chat page from its card", () => {
     writeSite(join(f.work, "dash"), { "index.html": "<h1>Dash</h1>", "data.csv": "a\n1" });
     await f.publish({ path: "dash", title: "Dash" });
     const [pageId] = [...f.service.pages.keys()];
-    const { call } = route(f, () => ({ ok: true, title: "Dash", rev: 0, folder: join(realpathSync(f.work), "dash"),
+    const { call } = route(f, () => ({ ok: true, title: "Dash", rev: 0, folder: join(realpathSync.native(f.work), "dash"),
       files: [{ path: "index.html", data: Buffer.from("<h1>Dash, again</h1>") }, { path: "data.csv", data: Buffer.from("a\n2") }] }));
     expect(await call("POST", "/api/threads/thread-1/messages/m9/app/publish", {})).toMatchObject({ status: 200, body: { card: { pageId } } });
     expect(Object.fromEntries(f.service.pages.get(pageId!)!.files)).toEqual({ "index.html": "<h1>Dash, again</h1>", "data.csv": "a\n2" });

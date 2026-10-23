@@ -834,6 +834,7 @@
   "chat.chiefOfStaff": "总协调机器人",
   "chat.openProfile": "打开智能体资料",
   "chat.openProfileAria": "打开 {name} 的资料",
+  "chat.showConversations": "查看与 {name} 的对话",
   "chat.find": "在对话中查找",
   "chat.findShortcut": "在对话中查找（⌘F）",
   "chat.stop": "停止",
@@ -3040,5 +3041,11 @@
   "keys.treg.link": "在 treg.to 获取密钥",
   "keys.treg.working": "treg 工作正常 ✓",
   "keys.treg.balance": "余额：{balance}。",
-  "apps.connected": "已连接"
+  "apps.connected": "已连接",
+  "botPanel.conversations.title": "对话",
+  "botPanel.conversations.search": "搜索对话",
+  "botPanel.conversations.searchPlaceholder": "搜索与 {name} 的对话",
+  "botPanel.conversations.new": "新对话",
+  "botPanel.conversations.showMore": "再显示 {count} 个",
+  "botPanel.conversations.showFewer": "收起"
 }

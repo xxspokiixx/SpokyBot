@@ -1391,6 +1391,7 @@
   "chat.openProfile": "Ajan profilini aç",
   "chat.backToMainThread": "Sohbetinize dönün",
   "chat.openProfileAria": "{name} profilini aç",
+  "chat.showConversations": "{name} ile sohbetleri göster",
   "chat.find": "Sohbette bul",
   "chat.findShortcut": "Sohbette bul (⌘F)",
   "chat.stop": "Durdur",
@@ -4680,5 +4681,11 @@
   "keys.treg.placeholder": "treg anahtarınızı yapıştırın",
   "keys.treg.link": "treg.to'dan anahtar alın",
   "keys.treg.working": "treg çalışıyor ✓",
-  "keys.treg.balance": "Bakiye: {balance}."
+  "keys.treg.balance": "Bakiye: {balance}.",
+  "botPanel.conversations.title": "Sohbetler",
+  "botPanel.conversations.search": "Sohbetlerde ara",
+  "botPanel.conversations.searchPlaceholder": "{name} ile sohbetlerde ara",
+  "botPanel.conversations.new": "Yeni sohbet",
+  "botPanel.conversations.showMore": "{count} tane daha göster",
+  "botPanel.conversations.showFewer": "Daha az göster"
 }
