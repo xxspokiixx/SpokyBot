@@ -5,7 +5,7 @@
 import type { ThreadAudiences } from "../bot-visibility.ts";
 import { type Audience, baseBotId, layerAudience, layerId, mayRead, memberAudience, audienceMember, threadAudienceFrom } from "../audience.ts";
 import type { CloudTeam, TeamRole } from "../cloud-team.ts";
-import { createPeopleAbout, type PeopleAbout, type PersonProfilePatch } from "../people-about.ts";
+import { createPeopleAbout, type PeopleAbout, type PersonProfilePatch, type SeedField } from "../people-about.ts";
 import { personKey } from "../person-key.ts";
 import { ensureWorkspace, loadMemory, workspaceDir } from "../workspace.ts";
 
@@ -29,7 +29,7 @@ export interface ServerProfile { name?: string; email?: string; aboutMe?: string
 /** "You" for a person signed in to a team: their own name, picture and About you, and the address of their verified claim. */
 export interface MemberProfile { name: string; email: string; aboutMe: string; avatarUrl?: string }
 
-export type MemberProfilePatch = Omit<PersonProfilePatch, "email"> & { aboutMe?: string };
+export type MemberProfilePatch = Omit<PersonProfilePatch, "email" | "seeded"> & { aboutMe?: string };
 
 type MemberSession = { id: string; email?: string };
 
@@ -137,6 +137,27 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
       if (name !== undefined || avatarUrl !== undefined) people.saveProfile(person, { ...(name !== undefined ? { name } : {}), ...(avatarUrl !== undefined ? { avatarUrl } : {}) });
       if (aboutMe !== undefined) people.write(person, aboutMe);
       return memberProfile(session);
+    },
+    /** The name and picture from the person's own computer fill what their team profile lacks: each field once, never
+     * over what they set here, and never again after they clear it here. */
+    seedMemberProfile(session: MemberSession, offer: { name?: string; avatarUrl?: string }): { profile: MemberProfile; filled: SeedField[] } {
+      const person = met(session) ?? personKey(session);
+      const own = people.profile(person);
+      const seeded = own.seeded ?? [];
+      const fill: PersonProfilePatch = {};
+      const filled: SeedField[] = [];
+      for (const field of ["name", "avatarUrl"] as const) {
+        const offered = offer[field]?.trim();
+        if (!offered || own[field] || seeded.includes(field)) continue;
+        fill[field] = offered;
+        filled.push(field);
+      }
+      if (filled.length) people.saveProfile(person, { ...fill, seeded: [...seeded, ...filled] });
+      return { profile: memberProfile(session), filled };
+    },
+    /** The fields this person's own computer already filled once. */
+    seededFields(session: MemberSession): SeedField[] {
+      return people.profile(met(session) ?? personKey(session)).seeded ?? [];
     },
     met,
     /** At start: the server's profile goes to the person it names when they are already known here. */

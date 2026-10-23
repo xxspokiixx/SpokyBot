@@ -29,7 +29,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   /api/config` and every config frame on your stream carry yours. Your lines, cards and reactions carry your name; a bot
   names you in your private chat, each speaker on a group chat's lines, and a routine's run its writer. config.json's one
   `profile` is nobody's on a team: it is never shown or read as anyone, and when the person whose address it names signs
-  in it becomes theirs (filling only what they have not set) and is cleared.
+  in it becomes theirs (filling only what they have not set) and is cleared. When the desktop app opens a team, the name
+  and picture of that computer's own Settings → Profile fill what the person's team profile lacks (`PUT /api/me` with
+  `fillEmpty: true`, the picture uploaded first as their own attachment): each field once (`GET /api/me` lists the
+  `seeded` ones), never over what they set on the team and never again after they clear it there. Nothing else goes up.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
   person's own* (below): then every member connects their own, and only their own private chats use it. A person's
