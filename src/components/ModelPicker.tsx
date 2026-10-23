@@ -19,6 +19,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
+import { useAiSwitch } from "@/lib/ai-switch";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
 import { Select } from "./Select";
@@ -449,7 +450,7 @@ export const SIMPLE_POPOVER_WIDTH = 380;
 const SIMPLE_SEARCH_AFTER = 12;
 
 export function ModelPicker({
-  bot,
+  bot: shown,
   threadId,
   className,
   contained = false,
@@ -461,8 +462,9 @@ export function ModelPicker({
   contained?: boolean;
   label?: ReactNode;
 }) {
-  const { state, dispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
+  const { state, dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
+  const { bot, dispatch } = useAiSwitch({ bot: shown, threadId, contained, dispatch: storeDispatch, setOpen });
   const motion = useMenuMotion(open && !bot.busy);
   const [railId, setRailId] = useState<string | null>(null);
   const [pane, setPane] = useState<"main" | "custom">("main");
@@ -567,9 +569,7 @@ export function ModelPicker({
     if (open) refreshLocalInstances();
   }, [open, refreshLocalInstances]);
 
-  useEffect(() => {
-    if (bot.busy) setOpen(false);
-  }, [bot.busy]);
+  useEffect(() => { if (bot.busy) setOpen(false); }, [bot.busy]);
 
   useEffect(() => {
     if (!open) return;
@@ -897,7 +897,7 @@ export function ModelPicker({
               botModelId={botModelId}
               onPick={(model) => railInstance && pick(railInstance, model)}
               variantsRow={active?.capabilities?.modelVariants ? (
-                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault}
+                <ModelVariantRow compact wide bot={shown} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault}
                   label={<span className="shrink-0 text-[12px] font-medium text-ink-secondary">{t("model.simple.reasoning")}</span>} />
               ) : undefined}
               effort={simpleEffort}
@@ -1113,7 +1113,7 @@ export function ModelPicker({
                 {!contained && (
                   <EffortRow
                     compact
-                    bot={bot}
+                    bot={shown}
                     threadId={threadId}
                     updateBotDefault={Boolean(threadId && scope === "bot")}
                     className="shrink-0 border-t border-hairline/40 px-4 py-2"

@@ -2,23 +2,44 @@
 // the Stop, so a Stop the server receives after that turn ended reaches nothing (it answers "already-stopped")
 // instead of the queued message that started next. A repeat within a second, the second click of a double click,
 // never leaves this client at all.
+import { useSyncExternalStore } from "react";
+
 import type { RuntimeEvent } from "../../shared/runtime-events";
 
 export const STOP_REPEAT_MS = 1_000;
 
 const liveTurns = new Map<string, string>();
 const lastStops = new Map<string, number>();
+const watchers = new Set<() => void>();
+const notify = () => { for (const watch of Array.from(watchers)) watch(); };
+const subscribe = (watch: () => void) => {
+  watchers.add(watch);
+  return () => { watchers.delete(watch); };
+};
 
 /** Follows turn.started and turn.completed frames; a thread between turns has no live turn to name. */
 export function noteRuntimeTurn(event: Pick<RuntimeEvent, "type" | "threadId" | "turnId">): void {
   if (!event.turnId) return;
   if (event.type === "turn.started") liveTurns.set(event.threadId, event.turnId);
   else if (event.type === "turn.completed" && liveTurns.get(event.threadId) === event.turnId) liveTurns.delete(event.threadId);
+  else return;
+  notify();
+}
+
+/** The live stream restarted without the frames it missed (or the server restarted): what it knew of turns is stale. */
+export function forgetLiveTurns(): void {
+  liveTurns.clear();
+  notify();
+}
+
+/** The turn this client saw start in a thread and not yet end; undefined when it has seen none. */
+export function useLiveTurn(threadId: string): string | undefined {
+  return useSyncExternalStore(subscribe, () => liveTurns.get(threadId), () => undefined);
 }
 
 /** Tests only: start from no live turns and no recent Stops. */
 export function forgetStops(): void {
-  liveTurns.clear();
+  forgetLiveTurns();
   lastStops.clear();
 }
 
@@ -38,7 +59,10 @@ export function sendStop(api: Api, action: StopAction, showError: (error: unknow
   }).then((result) => {
     // That turn was over: this client missed its end. Name none next time, so the next press reaches what runs.
     const over = (result as { outcome?: unknown } | null)?.outcome === "already-stopped";
-    if (over && action.threadId && liveTurns.get(action.threadId) === turnId) liveTurns.delete(action.threadId);
+    if (over && action.threadId && liveTurns.get(action.threadId) === turnId) {
+      liveTurns.delete(action.threadId);
+      notify();
+    }
   }).catch((error) => {
     // Refused: the next press is a new Stop, not a repeat.
     if (lastStops.get(key) === now) lastStops.delete(key);
