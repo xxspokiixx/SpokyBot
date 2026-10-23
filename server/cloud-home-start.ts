@@ -71,8 +71,11 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
   const offered = withoutCloudSecrets(withoutIgnoredCloudKeys(env));
   const allowed = Object.fromEntries(Object.entries(offered).filter(([name, value]) => value !== undefined && serverEnvironmentAllowed(name)));
   const dropped = Object.keys(offered).filter((name) => !serverEnvironmentAllowed(name) && name !== "HOME").sort();
+  const dataDir = cloudHomeDataDir(env, home);
   const server: NodeJS.ProcessEnv = {
-    ...allowed, HOME: home, OMB_DATA_DIR: cloudHomeDataDir(env, home),
+    ...allowed, HOME: home, OMB_DATA_DIR: dataDir,
+    // Node keys the entries by its own version and the file's hash, so a stale entry is never used after an image upgrade.
+    NODE_COMPILE_CACHE: posix.join(dataDir, "cache", "node-compile"),
     OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800", OMB_PUBLIC_URL: config.publicOrigin,
     OMB_WEBHOOK_PUBLIC_URL: env.OMB_WEBHOOK_PUBLIC_URL || config.publicOrigin,
     [CLOUD_SECRETS_FD_ENV]: String(SECRETS_FD),
