@@ -124,6 +124,7 @@ export function WelcomeFlow({
   const cardRef = useRef<HTMLDivElement>(null);
   const finishing = useRef(false);
   const beatNow = useRef(beat);
+  const savedProfile = useRef(state.config?.profile);
   const live = useRef({ beats, fields });
   live.current = { beats, fields };
 
@@ -199,7 +200,7 @@ export function WelcomeFlow({
       setEmailGateDone("submitted");
       if (keepsDraft) clearWelcomeDraft();
       // What the greeting typed is kept however the welcome ends (Maybe later, Skip, Escape); a hosted greeting types nothing.
-      if (!hosted) void saveWelcomeProfile(live.current.fields, state.config?.profile, dispatch, false).catch(() => {});
+      if (!hosted) void saveWelcomeProfile(live.current.fields, savedProfile, dispatch, false).catch(() => {});
       onDone();
       try {
         const config = await api("/api/config", { method: "PUT", body: JSON.stringify(completionPatch()), signal: AbortSignal.timeout(10_000) });
@@ -207,7 +208,7 @@ export function WelcomeFlow({
       } catch {
       }
     },
-    [beat, dispatch, onDone, replay, keepsDraft, hosted, state.config?.profile],
+    [beat, dispatch, onDone, replay, keepsDraft, hosted],
   );
 
   const previous = previousBeat(beats, beat);
@@ -311,7 +312,7 @@ export function WelcomeFlow({
         </div>
 
         <div key={beat} inert={moving} aria-busy={moving} className={cn("flex flex-col", beat === "engines" ? "min-h-0" : "shrink-0")}>
-          {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} fields={fields} onFields={setFields} />}
+          {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} fields={fields} onFields={setFields} saved={savedProfile} />}
           {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
           {beat === "import" && detection && importClient && (
             <ImportBeat

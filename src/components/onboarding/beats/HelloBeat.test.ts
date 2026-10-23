@@ -14,8 +14,9 @@ const { HelloBeat } = await import("./HelloBeat");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const props = { onNext: vi.fn(), onSkip: vi.fn(), setMascot: vi.fn(), bump: vi.fn(), onFields: vi.fn() };
 let host: HTMLDivElement, root: Root;
+const saved = { current: undefined as { name?: string; email?: string } | undefined };
 const show = async (fields: WelcomeFields, hosted?: boolean) => {
-  await act(async () => { root.render(createElement(HelloBeat, { ...props, fields, ...(hosted === undefined ? {} : { hosted }) })); });
+  await act(async () => { root.render(createElement(HelloBeat, { ...props, fields, saved, ...(hosted === undefined ? {} : { hosted }) })); });
 };
 const button = (label: string) => [...host.querySelectorAll("button")].find((node) => node.textContent === label)!;
 const press = async (label: string) => { await act(async () => { button(label).click(); }); };
@@ -28,6 +29,7 @@ beforeEach(() => {
   store.api.mockImplementation(async (_path: string, init: { body: string }) => ({ profile: JSON.parse(init.body).profile }));
   store.dispatch.mockReset();
   store.state = { config: { profile: { name: "", email: "" } } };
+  saved.current = { name: "", email: "" };
   for (const fn of [...Object.values(props), analytics.identifyEmail, analytics.track]) fn.mockReset();
   host = document.createElement("div");
   document.body.append(host);
@@ -109,7 +111,7 @@ describe("the greeting beat", () => {
   });
 
   it("never writes blanks over a saved profile", async () => {
-    store.state = { config: { profile: { name: "Ada", email: "ada@example.com" } } };
+    saved.current = { name: "Ada", email: "ada@example.com" };
     await show({ name: "", email: "" });
     await press("Maybe later");
     await press("Continue");
@@ -130,7 +132,7 @@ describe("the greeting beat", () => {
 
 describe("Continue after Maybe later already kept the email", () => {
   it("still ties analytics to it, as Continue always has", async () => {
-    store.state = { config: { profile: { name: "Ada", email: "ada@example.com" } } };
+    saved.current = { name: "Ada", email: "ada@example.com" };
     await show({ name: "Ada", email: "ada@example.com" });
     await press("Continue");
     await flush();

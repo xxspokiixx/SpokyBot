@@ -164,6 +164,32 @@ describe("a reload in the middle of the welcome", () => {
     expect(localStorage.getItem(WELCOME_DRAFT_KEY)).toBeNull();
   });
 
+  it("saves the profile once when the greeting is the whole welcome, by Continue or by Maybe later", async () => {
+    f.state = { ...f.state, instances: [READY_AI] };
+    for (const label of ["Continue", "Maybe later"]) {
+      f.api.mockClear();
+      const onDone = vi.fn();
+      await reload({ dictation: false, onDone });
+      await type(NAME, "Ada");
+      await press(label);
+      await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+      expect(onDone, label).toHaveBeenCalledOnce();
+      expect(putBodies().filter((body) => "profile" in body), label).toEqual([{ profile: { name: "Ada" } }]);
+    }
+  });
+
+  it("sends a profile again on Skip when Continue's save failed", async () => {
+    await show();
+    await type(NAME, "Ada");
+    f.api.mockImplementationOnce(async () => { throw new Error("offline"); });
+    await press("Continue");
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(text()).toContain("Couldn't save your details");
+    await press("Skip tour");
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(putBodies().filter((body) => "profile" in body)).toEqual([{ profile: { name: "Ada" } }, { profile: { name: "Ada" } }]);
+  });
+
   it("Escape keeps the name too, and leaves out an email still being typed", async () => {
     await show();
     await type(NAME, "Grace");

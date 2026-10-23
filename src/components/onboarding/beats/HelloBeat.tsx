@@ -4,7 +4,7 @@ import { brand } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { checkEmail, type WelcomeFields } from "@/lib/welcome-draft";
 import { useStore } from "@/state/store";
-import { saveWelcomeProfile } from "../save-profile";
+import { saveWelcomeProfile, type SavedProfile } from "../save-profile";
 import { inputClass, PrimaryButton, QuietButton, staggerIndex, type BeatProps } from "./shared";
 
 /** The name and email live in the flow (`fields`), so Skip and a reload keep them; the email is optional. */
@@ -14,14 +14,14 @@ export function HelloBeat({
   hosted = false,
   fields,
   onFields,
-}: BeatProps & { hosted?: boolean; fields: WelcomeFields; onFields: (fields: WelcomeFields) => void }) {
-  const { state, dispatch } = useStore();
+  saved,
+}: BeatProps & { hosted?: boolean; fields: WelcomeFields; onFields: (fields: WelcomeFields) => void; saved: SavedProfile }) {
+  const { dispatch } = useStore();
   const pending = useRef(false);
   const noteId = useId();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   const email = checkEmail(fields.email);
-  const saved = state.config?.profile;
 
   const saveProfile = async () => {
     if (email === "invalid" || pending.current) return;
