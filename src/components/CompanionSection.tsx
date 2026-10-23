@@ -210,7 +210,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
               )}
             </div>
           )}
-          <PhoneSetupFlowView controller={c} variant="settings" />
+          <PhoneSetupFlowView controller={c} />
         </Card>
       </div>
 
