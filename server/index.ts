@@ -71,7 +71,6 @@ import { inMyFolderCwd, validateBotCwd } from "./bot-cwd.ts";
 import {
   ATTACHMENTS_DIR,
   attachmentExists,
-  cleanupStaleAttachmentPartials,
   deleteAttachment,
   saveAudio,
   saveImage,
@@ -183,7 +182,7 @@ import {
   openCodeProviderKeys,
 } from "./config.ts";
 import { serveStatic } from "./static-files.ts";
-import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread-retention.ts";
+import { startUpkeep } from "./host/start-upkeep.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -16555,38 +16554,6 @@ const workspaceAccessTimer = workspaceAccess ? setInterval(() => {
 workspaceAccessTimer?.unref();
 console.log(describeBrand(loadBrand()));
 
-try {
-  const reclaimedPartials = cleanupStaleAttachmentPartials();
-  if (reclaimedPartials > 0) console.log(`reclaimed ${reclaimedPartials} abandoned upload partial(s)`);
-} catch (error) {
-  console.warn(`attachments: startup partial cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
-}
-
-const THREAD_LOG_RETENTION_SWEEP_MS = 24 * 60 * 60 * 1000;
-
-function sweepThreadEventLogsNow(): void {
-  const retentionDays = threadEventLogRetentionDays(cfg);
-  if (retentionDays === null) return;
-  const candidates: ThreadLogRetentionCandidate[] = store.bots.flatMap((bot) =>
-    (bot.tasks ?? []).map((task) => ({
-      threadId: task.threadId,
-      closedAt: task.closedBy?.at ?? null,
-      archivedAt: task.archivedAt ?? null,
-      unread: task.unread === true,
-      busy: threadBusy(bot.id, task.threadId),
-      openDirectHandoff: coordinator.activeDirect(task.threadId),
-    })));
-  const swept = sweepThreadEventLogs(candidates, retentionDays);
-  if (swept > 0) console.log(`[retention] removed event logs for ${swept} idle thread(s) past ${retentionDays} day(s)`);
-}
-
-try {
-  sweepThreadEventLogsNow();
-} catch (error) {
-  console.warn(`thread event log retention sweep failed: ${error instanceof Error ? error.message : String(error)}`);
-}
-setInterval(sweepThreadEventLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
-
 // Before any row below settles: an interrupted dispatch's words come back with a review notice, never to a model a second time.
 followupAtBoot("");
 for (const row of chatFollowups()) {
@@ -16642,6 +16609,7 @@ server.listen(PORT, "127.0.0.1", async () => {
   drainQueuedSends();
   drainQueuedChannelSends();
   void cloudComputerPower.armRunning();
+  startUpkeep({ bots: () => store.bots, retentionDays: () => threadEventLogRetentionDays(cfg), busy: threadBusy, openDirectHandoff: (threadId) => coordinator.activeDirect(threadId) });
   if (enginesRead) {
     await enginesRead;
     if (companyShutdown) return;
