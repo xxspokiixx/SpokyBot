@@ -114,3 +114,10 @@ it("introduces the Chief as the person's assistant on the last step", async () =
   await show({ initialBeat: "bot", bot: { ...chief, chiefOfStaff: false } });
   expect(text()).toContain("Meet your first bot");
 });
+
+it("doesn't count an AI that offers no model yet, such as OpenCode still listing its models", async () => {
+  f.state.instances = [{ ...freeOpenCode, snapshot: { state: "available", authenticated: true }, models: { default: "", options: [] }, aiTest: undefined }, claude(false)];
+  await show();
+  expect(text()).toContain("Step 1 of 4");
+  expect(f.checks).toEqual([]);
+});
