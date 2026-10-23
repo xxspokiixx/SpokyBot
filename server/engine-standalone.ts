@@ -612,17 +612,22 @@ async function prune(engineDir: string, currentDir: string): Promise<void> {
   }
 }
 
-/** Everything that is not already a plain sentence becomes one; the detail goes to the server log. */
-function plainError(release: StandaloneRelease, asset: StandaloneAsset, error: unknown): Error {
+/** Everything that is not already a plain sentence becomes one; the detail goes to the server log. Windows refuses to
+ * move or delete a file a running program holds with EBUSY, or EPERM from rename, unlink or rmdir; EACCES and any other
+ * EPERM mean the folder's permissions. */
+export function plainInstallError(release: StandaloneRelease, asset: StandaloneAsset, error: unknown): Error {
   if (error instanceof StandaloneInstallError) return error;
   warn(release, error);
-  const code = (error as NodeJS.ErrnoException).code;
+  const { code, syscall } = error as NodeJS.ErrnoException;
   if (code === "ENOSPC") {
     const megabytes = Math.ceil((asset.approxBytes * 4) / 1024 / 1024);
     return new StandaloneInstallError(`There is not enough free disk space to install ${release.name}. Free up about ${megabytes} MB, then try again.`);
   }
-  if (code === "EACCES" || code === "EPERM" || code === "EBUSY" || code === "EROFS" || code === "ENOTEMPTY") {
-    return new StandaloneInstallError(`${release.name} is open in another window, or its folder is locked. Close ${release.name} and try again.`);
+  if (code === "EBUSY" || code === "ENOTEMPTY" || (code === "EPERM" && (syscall === "rename" || syscall === "unlink" || syscall === "rmdir"))) {
+    return new StandaloneInstallError(`${release.name} is open in another window. Close it, then try again.`);
+  }
+  if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
+    return new StandaloneInstallError(`OpenMausBot can't write to its folder for ${release.name}. Check the folder's permissions, then try again.`);
   }
   return new StandaloneInstallError(`${release.name} couldn't be installed. Try again.`);
 }
@@ -703,7 +708,7 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
     await prune(engineDir, versionDir).catch(() => {});
     return installed;
   } catch (error) {
-    throw plainError(release, asset, error);
+    throw plainInstallError(release, asset, error);
   } finally {
     // Cleanup must never replace the real error.
     await rm(archivePath, { force: true }).catch(() => {});

@@ -15,6 +15,7 @@ import type { StandaloneAsset, StandaloneRelease } from "./contracts.ts";
 import {
   installStandaloneEngine,
   isAppStandaloneCopy,
+  plainInstallError,
   registerStandaloneBinDirs,
   resetStandaloneStateForTests,
   standaloneAssetFor,
@@ -34,6 +35,27 @@ const sha256 = (data: Buffer | string) => createHash("sha256").update(data).dige
 const refusal = (run: Promise<unknown>): Promise<Error> => run.then(() => {
   throw new Error("expected the install to be refused");
 }, (error: Error) => error);
+
+describe("explaining a file-system failure", () => {
+  const release = fixtureRelease({});
+  const asset: StandaloneAsset = { url: "https://downloads.example.test/a", sha256: "0".repeat(64), executableSha256: "1".repeat(64), archive: "raw", executable: "x", approxBytes: 1 };
+  const failure = (code: string, syscall: string) => Object.assign(new Error(`${code}: operation failed, ${syscall}`), { code, syscall });
+  const inUse = "Fake Engine is open in another window. Close it, then try again.";
+  const noPermission = "OpenMausBot can't write to its folder for Fake Engine. Check the folder's permissions, then try again.";
+
+  it.each([
+    ["EBUSY", "rmdir", inUse],
+    ["EPERM", "rename", inUse],
+    ["EPERM", "unlink", inUse],
+    ["ENOTEMPTY", "rename", inUse],
+    ["EACCES", "open", noPermission],
+    ["EACCES", "rename", noPermission],
+    ["EPERM", "mkdir", noPermission],
+    ["EROFS", "open", noPermission],
+  ])("says %s from %s in plain words", (code, syscall, message) => {
+    expect(plainInstallError(release, asset, failure(code, syscall)).message).toBe(message);
+  });
+});
 
 describe("which build this machine gets", () => {
   it("names the platform and architecture, with musl only on Linux without glibc", () => {
@@ -325,8 +347,7 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     chmodSync(engineDir(), 0o500);
     try {
       const error = await refusal(install(release));
-      expect(error.message).toMatch(/open in another window, or its folder is locked/);
-      expect(error.message).not.toMatch(/EACCES|EPERM/);
+      expect(error.message).toBe("OpenMausBot can't write to its folder for Fake Engine. Check the folder's permissions, then try again.");
     } finally {
       chmodSync(engineDir(), 0o700);
     }
