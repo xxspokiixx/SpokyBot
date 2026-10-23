@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelCatalog } from "./contracts.ts";
+import { afterFirstEngineRead } from "./first-engine-read.ts";
 
 const SAFE_INSTANCE_ID = /^[\w.-]+$/;
 
@@ -109,5 +110,5 @@ export function openStartupModelCatalog(input: {
       return null;
     });
   }
-  return { pending: input.refresh().then(persist, () => undefined) };
+  return { pending: afterFirstEngineRead().then(() => input.refresh()).then(persist, () => undefined) };
 }
