@@ -1,4 +1,4 @@
-// Real server, two fake Claude accounts: the first one's test message gets no answer. The new-bot default and the
+// Real server, two fake Claude accounts: the first one's test message fails. The new-bot default and the
 // first bot move to the one that answered; a saved default is never tested or moved.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -21,7 +21,7 @@ afterEach(async () => {
   for (const home of homes.splice(0)) await removeTempDir(home);
 });
 
-/** `claude` never answers a one-shot (its reply file is missing); `spare` answers every one. */
+/** `claude`'s connection check fails; `spare`'s answers. */
 async function boot(extra: Record<string, unknown> = {}) {
   const home = mkdtempSync(join(tmpdir(), "omb-tested-ai-"));
   homes.push(home);
@@ -31,9 +31,9 @@ async function boot(extra: Record<string, unknown> = {}) {
   writeFileSync(join(home, "config.json"), JSON.stringify({
     instances: {
       claude: { driver: "claudeAgent", displayName: "Silent Claude", config: { cli: FAKE_CLI },
-        environment: { FAKE_CLAUDE_TEXT_FILE: join(home, "no-reply"), FAKE_CLAUDE_TEXT_LOG: checks("claude") } },
+        environment: { FAKE_CLAUDE_CHECK: "fail", FAKE_CLAUDE_CHECK_LOG: checks("claude") } },
       spare: { driver: "claudeAgent", displayName: "Spare Claude", config: { cli: FAKE_CLI, configDir: join(home, "spare-claude") },
-        environment: { FAKE_CLAUDE_TEXT_LOG: checks("spare") } },
+        environment: { FAKE_CLAUDE_CHECK_LOG: checks("spare") } },
     },
     ...extra,
   }));

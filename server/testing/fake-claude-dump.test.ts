@@ -73,24 +73,31 @@ it.each(["stream", "text", "text-fallback"])("%s capture stays complete while an
   }
 });
 
-it("leaves the turn capture alone for the server's connection check, a background one-shot like memory upkeep", async () => {
+it("keeps the server's connection check out of every turn and one-shot capture, logging it on its own", async () => {
   const home = mkdtempSync(join(tmpdir(), "omb-claude-dump-"));
   const dump = join(home, "capture.json");
-  let child: ChildProcess | undefined;
-  try {
-    child = spawn(process.execPath, [fileURLToPath(new URL("fake-claude-cli.ts", import.meta.url)), "--output-format", "text"], {
+  const textDump = join(home, "text.json");
+  const textLog = join(home, "text.jsonl");
+  const checkLog = join(home, "checks.jsonl");
+  const check = async (extra: Record<string, string> = {}) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL("fake-claude-cli.ts", import.meta.url)), "-p", "--output-format", "text"], {
       cwd: home,
-      env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_TEXT_DUMP: undefined },
+      env: { ...process.env, HOME: home, USERPROFILE: home, FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_TEXT_DUMP: textDump,
+        FAKE_CLAUDE_TEXT_LOG: textLog, FAKE_CLAUDE_CHECK_LOG: checkLog, FAKE_CLAUDE_TEXT_FILE: join(home, "missing"), ...extra },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     child.stdout!.on("data", chunk => { stdout += chunk; });
     child.stdin!.end("This is a connection check. Reply with the single word OK.");
-    await expect.poll(() => child!.exitCode, { timeout: 10_000 }).toBe(0);
-    expect(stdout.trim()).toBe("fake generated text");
-    expect(existsSync(dump)).toBe(false);
+    await waitForExit(child);
+    return { code: child.exitCode, stdout };
+  };
+  try {
+    expect(await check()).toEqual({ code: 0, stdout: "OK" });
+    expect(await check({ FAKE_CLAUDE_CHECK: "fail" })).toEqual({ code: 1, stdout: "" });
+    for (const file of [dump, textDump, textLog]) expect(existsSync(file), file).toBe(false);
+    expect(readFileSync(checkLog, "utf8").trim().split("\n")).toHaveLength(2);
   } finally {
-    await waitForExit(child, { signal: "SIGTERM" });
     await removeTempDir(home);
   }
 });
