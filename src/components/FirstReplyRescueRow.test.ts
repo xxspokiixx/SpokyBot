@@ -80,8 +80,13 @@ describe("first-reply rescue row", () => {
     expect(host.textContent).toBe("");
   });
 
+  it("tells an ended turn's notice as history", () => {
+    render(row({ ...rescue, over: true }));
+    expect(host.textContent).toBe("Maus didn't hear back from OpenCode.");
+    expect(host.querySelectorAll("button")).toHaveLength(0);
+  });
+
   it.each([
-    ["its turn is over", () => render(row({ ...rescue, over: true }))],
     ["the chat is idle again", () => render(row(), { busy: false })],
     ["the live frames name another turn", () => { runtimeFrameAction(frame("turn.started", "turn-2")); render(row()); }],
     ["the running turn started after it", () => render(row(), { turnStartedAt: AT + 1 })],

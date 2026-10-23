@@ -1715,6 +1715,7 @@
   "chat.turnStopped": "Stopped",
   "chat.turnStoppedByYou": "You stopped this.",
   "chat.rescue.waiting": "{bot} hasn't heard back from {ai} yet.",
+  "chat.rescue.over": "{bot} didn't hear back from {ai}.",
   "chat.rescue.switchAi": "Switch AI",
   "chat.rescue.switchAiHint": "Stop waiting and pick another AI for {bot}",
   "chat.rescue.connect": "Connect your subscription",

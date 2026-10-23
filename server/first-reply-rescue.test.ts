@@ -131,8 +131,9 @@ describe("first-reply rescue", () => {
     rescue.onEvent(started("turn-1"));
     vi.advanceTimersByTime(20_000);
     rescue.onEvent(event(end));
+    // History, in words that stay true for the clients that print them.
     expect(rows()[0]!.tool).toMatchObject({
-      name: "notice: Maus hasn't heard back from OpenCode yet.",
+      name: "notice: Maus didn't hear back from OpenCode.",
       rescue: { turnId: "turn-1", over: true },
     });
     expect(rows()[0]!.tool!.rescue!.settled).toBeUndefined();
@@ -246,7 +247,9 @@ describe("first-reply rescue", () => {
       tool: { name: "notice: Maus hasn't heard back from OpenCode yet.", ok: true,
         rescue: { botId: "bot-1", threadId: THREAD, turnId: "turn-0", instanceId: "opencodeGo", ai: "OpenCode" } } } as Message;
     const { patch } = harness({ leftOpen: [left] });
-    expect(patch).toHaveBeenCalledWith(THREAD, "old", { tool: { ...left.tool, rescue: { ...left.tool!.rescue, over: true } } });
+    expect(patch).toHaveBeenCalledWith(THREAD, "old", {
+      tool: { ...left.tool, name: "notice: Maus didn't hear back from OpenCode.", rescue: { ...left.tool!.rescue, over: true } },
+    });
   });
 
   it("speaks from the speaking bot in a room", () => {

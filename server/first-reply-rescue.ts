@@ -3,7 +3,7 @@
 // and "Connect your subscription". The notice settles once the AI's first output arrives, and is over (history,
 // no live buttons) once its turn ends without one. Silence later in a turn stays the engine's own business (the ACP
 // quiet watch speaks at 60 s and 180 s).
-import { firstReplySettledName, firstReplyWaitingName, type FirstReplyRescue } from "../shared/first-reply-rescue.ts";
+import { firstReplyOverName, firstReplySettledName, firstReplyWaitingName, type FirstReplyRescue } from "../shared/first-reply-rescue.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { openRescueMessages } from "./message-db.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
@@ -47,7 +47,7 @@ interface Watch {
   timer: ReturnType<typeof setTimeout> | null;
   /** waiting: nothing from the AI yet; posted: the notice is up; over: nothing more to do this turn. */
   phase: "waiting" | "posted" | "over";
-  row: { messageId: string; name: string; rescue: FirstReplyRescue } | null;
+  row: { messageId: string; botName: string; rescue: FirstReplyRescue } | null;
 }
 
 export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(event: RuntimeEvent): void } {
@@ -94,7 +94,7 @@ export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(ev
       ...(speaker && group ? { from: { botId: speaker.botId, name: speaker.name, color: speaker.color } } : {}),
       tool: { name, ok: true, rescue },
     });
-    watch.row = { messageId: row.id, name, rescue };
+    watch.row = { messageId: row.id, botName: bot.name, rescue };
     watch.phase = "posted";
   };
 
@@ -105,8 +105,7 @@ export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(ev
     watch.phase = "over";
     if (!posted) return;
     const rescue: FirstReplyRescue = { ...posted.rescue, [how]: true };
-    // An over row keeps its words for the clients that print them; a settled one says the AI answered.
-    const name = how === "settled" ? firstReplySettledName(rescue.ai) : posted.name;
+    const name = how === "settled" ? firstReplySettledName(rescue.ai) : firstReplyOverName(posted.botName, rescue.ai);
     try {
       deps.store.patchMessage(threadId, posted.messageId, { tool: { name, ok: true, rescue } });
     } catch (error) {
@@ -155,7 +154,7 @@ export function createFirstReplyRescue(deps: FirstReplyRescueDeps): { onEvent(ev
 }
 
 /** At start no turn runs, so a notice still open belongs to a turn the restart ended: it is history, with no live
- * buttons, and the clients that print its words keep them. */
+ * buttons, told in the past for the clients that print its words. */
 function closeLeftOpen(deps: FirstReplyRescueDeps): void {
   let open: Array<{ threadId: string; message: Message }>;
   try { open = (deps.leftOpen ?? openRescueMessages)(); } catch (error) {
@@ -165,8 +164,10 @@ function closeLeftOpen(deps: FirstReplyRescueDeps): void {
   for (const { threadId, message } of open) {
     const tool = message.tool;
     if (!tool?.rescue) continue;
+    const botName = deps.store.bot(tool.rescue.botId)?.name;
+    const name = botName ? firstReplyOverName(botName, tool.rescue.ai) : tool.name;
     try {
-      deps.store.patchMessage(threadId, message.id, { tool: { ...tool, rescue: { ...tool.rescue, over: true } } });
+      deps.store.patchMessage(threadId, message.id, { tool: { ...tool, name, rescue: { ...tool.rescue, over: true } } });
     } catch (error) {
       console.error(`first-reply rescue: could not close a notice in ${threadId}:`, error instanceof Error ? error.message : error);
     }
