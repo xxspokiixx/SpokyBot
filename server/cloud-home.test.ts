@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import {
@@ -283,7 +283,9 @@ it("binds a fresh volume to its machine and refuses anyone else's data", () => {
 
 it("a new home on a kept volume clears the data-directory lease the previous machine left, once the volume is confirmed its own, and never this machine's or another Cloud's (2026-10-23)", () => {
   const home = directory(), dataDir = cloudHomeDataDir({}, home);
-  expect(dataDir).toBe(join(home, ".openmausbot"));
+  // The image runs on Linux, so the server is given a POSIX path; here only where it sits under the home is the point.
+  expect(relative(home, dataDir)).toBe(".openmausbot");
+  expect(cloudHomeDataDir({}, "/data")).toBe("/data/.openmausbot");
   expect(cloudHomeDataDir({ OMB_DATA_DIR: "/elsewhere" }, home)).toBe("/elsewhere");
   mkdirSync(join(home, "lost+found"));
   expect(prepareCloudHomeData(home, dataDir, "home-7f3k2")).toEqual({ volume: "new", cleared: [] });
