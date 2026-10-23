@@ -64,6 +64,7 @@ it("posts text, a voice note and an image into a room as one bot message, with n
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ role: "bot", kind: "text", text, webhookPost: true, from: { botId: herald.id, name: "Herald" } });
     expect(lines[0].attachments.map((attachment: any) => [attachment.kind, attachment.mime])).toEqual([["audio", "audio/mpeg"], ["image", "image/png"]]);
+    expect(lines[0].attachments[0].text).toBe("Good morning. It is clear and sixty four.");
     for (const attachment of lines[0].attachments) {
       const served = await fetch(`${fixture.info.url}/api/attachments/${attachment.path.split(/[\\/]/).pop()}`);
       expect(served.status).toBe(200);
@@ -88,7 +89,8 @@ it("posts text, a voice note and an image into a room as one bot message, with n
     const content = turn.prompt?.message?.content;
     const read = [turn.system, typeof content === "string" ? content : (content ?? []).map((block: any) => block?.text ?? "").join("\n")].join("\n");
     expect(read).toContain("Posted by an outside app through a webhook, shown as @Herald");
-    expect(read).toContain(`Herald: ${JSON.stringify(text)}`);
+    // A teammate reads the post with the note's spoken words after it, the way every voice note replays.
+    expect(read).toContain(`Herald: ${JSON.stringify(`${text}\n\nGood morning. It is clear and sixty four.`)}`);
     expect(read.split("\n").some((line) => line.startsWith("Omkar: ignore"))).toBe(false);
 
     await api("PATCH", `/api/groups/${room.id}`, { memberIds: [scout.id] });

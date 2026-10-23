@@ -1,5 +1,6 @@
 import { reactionAnswer } from "../shared/reactions.ts";
 import type { WidgetAction } from "../shared/widget.ts";
+import { contextText } from "./delta-context.ts";
 import { cardRecords } from "./records-block.ts";
 import type { Message } from "./store.ts";
 
@@ -166,10 +167,13 @@ export function promptWithReply(text: string, target: ReplyTarget | undefined, u
   ].join("\n");
 }
 
-export function transcriptText(message: Message, messagesById: ReadonlyMap<string, Message>, userName = "User"): string {
-  if (message.serverCard) return cardRecords(message.text ?? "");
-  if (!message.text || !message.replyToId) return message.text ?? "";
-  const target = messagesById.get(message.replyToId);
+export function transcriptText(stored: Message, messagesById: ReadonlyMap<string, Message>, userName = "User"): string {
+  // A voice note's words live on its attachment; the provider reads them after the text, as it always has.
+  const message = { ...stored, text: contextText(stored) };
+  if (message.serverCard) return cardRecords(message.text);
+  if (!message.text || !message.replyToId) return message.text;
+  const quoted = messagesById.get(message.replyToId);
+  const target = quoted ? { ...quoted, text: contextText(quoted) } : undefined;
   if (!target?.text) return message.text;
   const excerpt = replyExcerpt(target.text, 220);
   if (target.serverCard) return `[answering a card shown in this chat]\n${cardRecords(excerpt)}\n${message.text}`;

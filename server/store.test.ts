@@ -330,7 +330,7 @@ describe("Store", () => {
       text: "Voice note attached",
       attachments: [
         { kind: "image", path: "/attachments/shot.png", mime: "image/png" },
-        { kind: "audio", path: "/attachments/note.mp3", mime: "audio/mpeg", durationMs: 4200 },
+        { kind: "audio", path: "/attachments/note.mp3", mime: "audio/mpeg", durationMs: 4200, text: "The spoken words" },
       ],
     });
     expect(reply.attachments?.[1]).toEqual({
@@ -338,6 +338,7 @@ describe("Store", () => {
       path: "/attachments/note.mp3",
       mime: "audio/mpeg",
       durationMs: 4200,
+      text: "The spoken words",
     });
     const reloaded = new Store(selection);
     const stored = reloaded.messagesFor(bot.threadId).find((message) => message.id === reply.id);
@@ -345,6 +346,7 @@ describe("Store", () => {
     const encoded = JSON.stringify(stored);
     expect(encoded).toContain('"kind":"audio"');
     expect(encoded).toContain('"durationMs":4200');
+    expect(encoded).toContain('"text":"The spoken words"');
   });
 
   it("keeps surface pin provenance server-private and round-trips it through bots.json", () => {

@@ -13,9 +13,22 @@ export interface ContextMessage {
   steered?: boolean;
 }
 
+/** The words a bot's voice notes speak, kept on their audio attachments rather than in the message text. */
+export function voiceNoteTexts(m: Pick<Message, "attachments">): string[] {
+  return (m.attachments ?? []).flatMap((attachment) =>
+    attachment.kind === "audio" && attachment.text?.trim() ? [attachment.text.trim()] : []);
+}
+
+/** What a provider reads for a message: its text, then each voice note's words. This is the exact string the
+ * turn fold used to store as the message text, so moving the words onto the attachment changed no replay. */
+export function contextText(m: Pick<Message, "text" | "attachments">): string {
+  const spoken = voiceNoteTexts(m);
+  return spoken.length ? [m.text?.trim(), ...spoken].filter(Boolean).join("\n\n") : m.text ?? "";
+}
+
 /** A Live call's row (kind "call") is a record for people, never context. */
-export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest">): boolean {
-  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
+export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest" | "attachments">): boolean {
+  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && contextText(m)) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
 }
 
 export interface HandedState {
