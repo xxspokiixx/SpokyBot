@@ -12,17 +12,17 @@ import { useHeldMenuMotion } from "./MenuMotion";
 
 export type OwnerPickerTarget = { botIds: string[]; title: string; current: string | null; x: number; y: number };
 
-let pickRequested: ((target: OwnerPickerTarget) => void) | null = null;
-/** Opens the one picker the sidebar hosts, from a bot row, a bot's menu or a department's. */
+const hosts: Array<(target: OwnerPickerTarget) => void> = [];
+/** Opens the picker of the host mounted last, from a bot row, a bot's menu, a department's or the Team map. */
 export function requestOwnerPick(target: OwnerPickerTarget): void {
-  pickRequested?.(target);
+  hosts.at(-1)?.(target);
 }
 
 export function OwnerPickerHost() {
   const [target, setTarget] = useState<OwnerPickerTarget | null>(null);
   useEffect(() => {
-    pickRequested = setTarget;
-    return () => { if (pickRequested === setTarget) pickRequested = null; };
+    hosts.push(setTarget);
+    return () => { hosts.splice(hosts.lastIndexOf(setTarget), 1); };
   }, []);
   const close = useCallback(() => setTarget(null), []);
   return <OwnerPicker target={target} onClose={close} />;
