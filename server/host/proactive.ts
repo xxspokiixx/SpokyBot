@@ -18,7 +18,11 @@ import type { ProviderAdapter } from "../contracts.ts";
 import { createReadAndDraft } from "../read-and-draft.ts";
 import type { Routine, RoutineChecks, RoutineManager, RoutineRun } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
+import type { Decider } from "../decider/index.ts";
+import type { Extractor } from "../extractor/index.ts";
 import { createBrief, type BriefDeps } from "./brief.ts";
+import { createInboxTriage } from "./inbox-triage.ts";
+import { proactiveOwner } from "./proactive-owner.ts";
 import { createRoutineChecks } from "./routine-checks.ts";
 
 export const WATCH_NAME = "Keep an eye on my day";
@@ -58,6 +62,8 @@ export interface ProactiveDeps {
   release(threadId: string): void;
   /** A routine the server made for the owner is the owner's, as one they made here. */
   owned(routine: Routine): void;
+  /** The decision and extraction models: with them on, they sort the inbox on any engine. */
+  helpers?: { decider: Pick<Decider, "choose">; extractor: Pick<Extractor, "extract"> };
 }
 
 export function createProactive(deps: ProactiveDeps) {
@@ -83,9 +89,10 @@ export function createProactive(deps: ProactiveDeps) {
     return Boolean(bot && FENCED_ENGINES.has(deps.registry.get(bot.modelSelection.instanceId)?.driverKind ?? ""));
   };
   const runs = (): RoutineRun[] => [...(deps.routines()?.listRuns() ?? [])].reverse();
-  /** The Chief's briefing routine is on: pausing or deleting it switches the brief off. */
+  const owner = () => proactiveOwner(store);
+  /** The owner's briefing routine is on: pausing or deleting it switches the brief off. */
   const watching = (): boolean => {
-    const chief = brief.chief();
+    const chief = owner();
     return Boolean(chief && deps.routines()?.listRoutines().some((routine) => routine.botId === chief.id && routine.deliver === "brief" && routine.enabled));
   };
 
@@ -99,12 +106,14 @@ export function createProactive(deps: ProactiveDeps) {
     keep: (key) => checks.commit(key),
     items: (key) => checks.items(key),
   });
+  const inbox = deps.helpers ? createInboxTriage({ ...deps.helpers, config: () => cfg }) : undefined;
   const checks = createRoutineChecks({
     dataDir: deps.dataDir, reads, mayRead, fenced, runs, timeZone: brief.timeZone, dismissedFrom: brief.dismissedFrom, report: brief.report,
+    ...(inbox ? { inbox } : {}),
   });
   /** One brief, the main agent's: a briefing routine of any other bot finds nothing to do. */
   const routineChecks: RoutineChecks = {
-    check: (routine, context) => (deps.team || (routine.deliver === "brief" && routine.botId !== brief.chief()?.id) ? Promise.resolve({}) : checks.check(routine, context)),
+    check: (routine, context) => (deps.team || (routine.deliver === "brief" && routine.botId !== owner()?.id) ? Promise.resolve({}) : checks.check(routine, context)),
     release: checks.release,
     settled: (run) => {
       checks.settled(run);
@@ -130,7 +139,7 @@ export function createProactive(deps: ProactiveDeps) {
    * switched off, so it is never made again. Asked at start and every minute, since a Cloud's access arrives later. */
   function ensureWatch(): Routine | null {
     const manager = deps.routines();
-    const chief = brief.chief();
+    const chief = owner();
     if (deps.team || !composio.configured(cfg) || !manager || !chief || watchMade()) return null;
     const existing = manager.listRoutines().find((routine) => routine.botId === chief.id && routine.deliver === "brief" && routine.checks?.length);
     const routine = existing ?? manager.create({
