@@ -898,6 +898,8 @@ function handle(msg: any) {
         update({ sessionUpdate: "tool_call", toolCallId: "tc-denied", status: "failed", title: "rm -rf build",
           content: [{ type: "content", content: { type: "text", text: "Permission denied" } }] });
         update({ sessionUpdate: "tool_call", status: "completed", title: "echo", rawOutput: { output: "unkeyed" } });
+        update({ sessionUpdate: "tool_call", status: "failed", title: "screenshot",
+          content: [{ type: "image", data: ONE_PIXEL_PNG, mimeType: "image/png" }] });
         update({ sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "built" } });
         update({ sessionUpdate: "agent_message_chunk", content: { text: "done" } });
         complete();

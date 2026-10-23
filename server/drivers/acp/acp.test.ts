@@ -323,13 +323,18 @@ describe("ACP turns (fake CLI)", () => {
     const started = recorder.events.flatMap((e) => e.type === "item.started" && e.itemType === "tool" ? [e.itemId] : []);
     const completed = new Map(recorder.events.flatMap((e) =>
       e.type === "item.completed" && e.itemType === "tool" ? [[e.itemId, e] as const] : []));
-    expect(started).toHaveLength(4);
-    expect(new Set(started).size).toBe(4);
+    expect(started).toHaveLength(5);
+    expect(new Set(started).size).toBe(5);
     expect([...completed.keys()].sort()).toEqual([...started].sort());
     expect(completed.get("tc-done")).toMatchObject({ ok: true, output: expect.stringContaining("ok") });
     expect(completed.get("tc-denied")).toMatchObject({ ok: false, output: expect.stringContaining("Permission denied") });
     expect(completed.get(started[0])).toMatchObject({ ok: true, output: expect.stringContaining("built") });
     expect(completed.get(started[3])).toMatchObject({ ok: true, output: expect.stringContaining("unkeyed") });
+    expect(started[4]).toMatch(/^acp-tool-unkeyed-/);
+    expect(completed.get(started[4])).toMatchObject({ ok: false });
+    const failedEnd = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "tool" && e.itemId === started[4]);
+    const image = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "assistant_image");
+    expect(image).toBe(failedEnd + 1);
     // The stall watchdog sees no tool left running, so the turn's own silence limit applies.
     let now = 0;
     const limits: StallLimit[] = [];
