@@ -2569,6 +2569,7 @@
   "onboarding.shared.body": "Bots, chats and files here are shared with your team. Your administrator sets up the AI models and settings, so you can start chatting right away.",
   "settings.welcome.title": "Welcome tour",
   "settings.welcome.subtitle": "The first-run walkthrough: model providers, permissions, phone, and your first bot.",
+  "settings.welcome.subtitleShort": "The first steps: your name and connecting an AI.",
   "settings.welcome.replay": "Replay welcome tour",
   "engineSetup.copyCommand": "Copy command",
   "engineSetup.setupTitle": "Set up {name}",
