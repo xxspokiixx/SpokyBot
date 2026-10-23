@@ -137,9 +137,8 @@ export function EffortRow({
   );
 }
 
-function variantLabel(option: ModelVariantOption, driverKind?: string): string {
-  return option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
-}
+const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
+  option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
 export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false }: {
