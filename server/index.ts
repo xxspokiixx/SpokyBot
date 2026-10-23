@@ -3982,6 +3982,7 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
     if (typeof body.description !== "string") throw Object.assign(new Error("description must be a string"), { status: 400 });
     const trimmed = body.description.trim();
     if (!trimmed) patch.description = undefined;
+    else if (/[\n\r]/.test(trimmed)) throw Object.assign(new Error("description must be a single line"), { status: 400 });
     else if (trimmed.length > 120) throw Object.assign(new Error("description must be at most 120 characters"), { status: 400 });
     else patch.description = trimmed;
   }
@@ -4486,6 +4487,8 @@ function publicGroupState(record: GroupRecord): WireGroup {
   return {
     ...group,
     tasks: record.dm ? undefined : tasks,
+    // Always present (null when cleared), so a client's shallow merge clears a stale value.
+    description: record.description ?? null,
     turnTimeoutMinutes: record.turnTimeoutMinutes ?? null,
     usage: usage ?? null,
     memberContext: roomMemberContexts.forThread(group.threadId) ?? null,

@@ -1805,12 +1805,24 @@ describe("harness HTTP API", () => {
       const state = (await api("GET", "/api/bots")).body;
       expect(state.groups.find((group: { id: string }) => group.id === room.id).description).toBe("The Family Hub Kitchen");
 
-      const rejected = await api("PATCH", `/api/groups/${room.id}`, { description: "x".repeat(121) });
-      expect(rejected.status).toBe(400);
+      const overLimit = await api("PATCH", `/api/groups/${room.id}`, { description: "x".repeat(121) });
+      expect(overLimit.status).toBe(400);
+
+      const multiline = await api("PATCH", `/api/groups/${room.id}`, { description: "first\nsecond" });
+      expect(multiline.status).toBe(400);
 
       const cleared = await api("PATCH", `/api/groups/${room.id}`, { description: "   " });
       expect(cleared.status).toBe(200);
-      expect(cleared.body.group.description).toBeUndefined();
+      // Explicit null on the wire, so a connected client's shallow merge clears its stale value.
+      expect(cleared.body.group.description).toBeNull();
+
+      const reSet = await api("PATCH", `/api/groups/${room.id}`, { description: "Back again" });
+      expect(reSet.status).toBe(200);
+      expect(reSet.body.group.description).toBe("Back again");
+
+      const clearedAgain = await api("PATCH", `/api/groups/${room.id}`, { description: "" });
+      expect(clearedAgain.status).toBe(200);
+      expect(clearedAgain.body.group.description).toBeNull();
     } finally {
       await api("DELETE", `/api/groups/${room.id}`);
       for (const bot of [first, second]) await api("DELETE", `/api/bots/${bot.id}`);
