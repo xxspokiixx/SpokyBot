@@ -10,6 +10,7 @@ import { useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
 import type { EffortLevel } from "../../../shared/wire";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
+import { DefaultBotHideRow } from "../DefaultBotControls";
 import { ModelPicker, ModelVariantRow } from "../ModelPicker";
 import { SoulField } from "../SoulField";
 import { useManagedSkills } from "../bot-settings/SkillsSection";
@@ -207,6 +208,7 @@ export function BotTab({ bot, derived, editingInstructions, onEditInstructions, 
           onClick={() => onOpen("folder")}
         />
       </Card>
+      <DefaultBotHideRow bot={bot} />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { botShowsUnread } from "./bot-unread";
 import { lastNonReceipt } from "./receipts";
 import type { MausColor } from "../../shared/wire";
 import type { LocaleKey } from "@/locales";
+import { CHROME_STEEL } from "@/components/ChromeFinish";
 
 export { MAUS_COLOR_NAMES, type MausColor } from "../../shared/wire";
 
@@ -60,13 +61,25 @@ export const MAUS_COLORS = {
   teal: "#01A492",
   coral: "#E5634E",
   silver: "#A8ADB4",
+  chrome: "#B3BAC4",
 } satisfies Record<MausColor, string>;
 
 export const MAUS_COLOR_LABEL = {
   green: "mascotColor.green", blue: "mascotColor.blue", red: "mascotColor.red", orange: "mascotColor.orange",
   purple: "mascotColor.purple", cyan: "mascotColor.cyan", pink: "mascotColor.pink", yellow: "mascotColor.yellow",
   teal: "mascotColor.teal", coral: "mascotColor.coral", silver: "mascotColor.silver",
+  chrome: "mascotColor.chrome",
 } as const satisfies Record<MausColor, LocaleKey>;
+
+/** Chrome's body under its metal finish (ChromeFinish.tsx), and wherever a finish is not drawn. */
+export const CHROME_GRADIENT: [string, string, string] = ["#E4EAF1", "#A8B4C2", "#717E8E"];
+
+/** What a colour's swatch paints: chrome wears the same steel and top rim as its mascot. */
+export function colorSwatch(color: MausColor): string {
+  if (color !== "chrome") return MAUS_COLORS[color];
+  const steel = CHROME_STEEL.stops.map(([offset, tone]) => `${tone} ${offset * 100}%`).join(", ");
+  return `linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0) 22%), linear-gradient(180deg, ${steel})`;
+}
 
 export const MAUS_MOTIONS = [
   "arrive",

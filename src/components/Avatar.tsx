@@ -7,13 +7,14 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
+import { CHROME_STEEL, metalLayers, type MetalFinish } from "./ChromeFinish";
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -56,6 +57,7 @@ function mix(hex: string, toward: string, t: number): string {
 }
 
 const gradientFor = (color: MausColor): [string, string, string] => {
+  if (color === "chrome") return CHROME_GRADIENT;
   const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
@@ -91,6 +93,8 @@ export type MausAvatarProps = {
   animated?: boolean;
   bodyId?: BotBodyId;
   gradient?: [string, string, string];
+  /** Chrome's metal; absent, chrome wears CHROME_STEEL. */
+  finish?: MetalFinish;
 };
 
 function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHandle>) {
@@ -136,10 +140,12 @@ function GradientAvatarComponent(
     animated = true,
     bodyId,
     gradient,
+    finish,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
   const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
+  const metal = color === "chrome" ? finish ?? CHROME_STEEL : undefined;
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -185,6 +191,8 @@ function GradientAvatarComponent(
         size={size}
         silhouette={silhouette}
         gradient={gradient ?? gradientFor(color)}
+        overBody={metal ? (uid) => metalLayers(uid, silhouette, metal) : undefined}
+        eyeColor={metal?.eyes}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}

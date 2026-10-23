@@ -36,7 +36,7 @@ import type {
 import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
-import { initialGreetingMessage } from "./initial-greeting.ts";
+import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal } from "./default-bot.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
@@ -1483,6 +1483,7 @@ export class Store {
   deleteBot(id: string, setupRequest?: TeamSetupRequest): boolean {
     const bot = this.bot(id);
     if (!bot) return false;
+    if (bot.defaultBot) throw Object.assign(new Error(defaultBotRefusal(bot.name)), { status: 409 });
     let nextBots = this.bots.filter((b) => b.id !== id);
     if (setupRequest) {
       const chief = this.bot(setupRequest.botId);
@@ -2323,12 +2324,11 @@ export class Store {
     return { bot, deleted, missing };
   }
 
-  needsSeed() {
-    return this.bots.length === 0;
-  }
+  needsSeed() { return this.bots.length === 0; }
 
-  seedIfEmpty() {
+  /** A new place's first bot is its MausBot and its Chief; a Team Cloud's (`defaultBot: false`) is the team's Chief only. */
+  seedIfEmpty({ defaultBot = true }: { defaultBot?: boolean } = {}) {
     if (!this.needsSeed()) return;
-    this.setChiefOfStaff(this.createBot({ name: "MausBot", color: "silver" }).id);
+    if (defaultBot) createDefaultBot(this, { chief: (id) => this.setChiefOfStaff(id) }); else this.setChiefOfStaff(this.createBot().id);
   }
 }
