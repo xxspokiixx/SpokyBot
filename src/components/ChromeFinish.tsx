@@ -36,10 +36,11 @@ export const grainAt = (finish: MetalFinish, size: number): number => finish.gra
 /** A body's scale inside the face box: its rim is drawn at one width on screen whatever the body. */
 const bodyScale = (fit: string): number => Number(/scale\(([\d.]+)/.exec(fit)?.[1]) || 1;
 
-/** The finish over a mascot's body (CursorAvatar's `overBody`), clipped to it, under the face. */
-export function metalLayers(uid: string, silhouette: Pick<MascotBody, "fit" | "clip">, finish: MetalFinish, size: number): ReactNode {
+/** The finish over a mascot's body (CursorAvatar's `overBody`), clipped to it, under the face. With a rendered `image`
+ * of the body, that image is the finish, over the drawn steel without its grain in case it does not load. */
+export function metalLayers(uid: string, silhouette: Pick<MascotBody, "fit" | "clip">, finish: MetalFinish, size: number, image?: string | null): ReactNode {
   const rimWidth = 9 / bodyScale(silhouette.fit);
-  const grain = grainAt(finish, size);
+  const grain = image ? 0 : grainAt(finish, size);
   const [light, mid, edge] = finish.tones;
   return (
     <>
@@ -73,6 +74,7 @@ export function metalLayers(uid: string, silhouette: Pick<MascotBody, "fit" | "c
         <g transform={silhouette.fit || undefined} fill={`url(#${uid}-sheen)`} dangerouslySetInnerHTML={{ __html: silhouette.clip }} />
         <g transform={silhouette.fit || undefined} fill="none" stroke={`url(#${uid}-rim)`} strokeWidth={rimWidth} dangerouslySetInnerHTML={{ __html: silhouette.clip }} />
       </g>
+      {image && <image href={image} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" data-steel-body="" />}
     </>
   );
 }

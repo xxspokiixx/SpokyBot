@@ -15,6 +15,7 @@ import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
 import { CHROME_STEEL, metalLayers, type MetalFinish } from "./ChromeFinish";
+import { steelBodyImage } from "@/lib/steel-body";
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -191,7 +192,7 @@ function GradientAvatarComponent(
         size={size}
         silhouette={silhouette}
         gradient={gradient ?? gradientFor(color)}
-        overBody={metal ? (uid) => metalLayers(uid, silhouette, metal, size) : undefined}
+        overBody={metal ? (uid) => metalLayers(uid, silhouette, metal, size, steelBodyImage(silhouette.id, size, globalThis.devicePixelRatio ?? 1)) : undefined}
         eyeColor={metal?.eyes}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
