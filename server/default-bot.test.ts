@@ -296,7 +296,7 @@ describe("MausBot, every person's helper", () => {
       const mausOnCloud = boot(cloud)!;
       cloud.patchBot(mausOnCloud.id, { name: "Jarvis", sidebarHidden: true });
       const backup = readFileSync(join(DATA_DIR, "bots.json"), "utf8");
-      rmSync(DATA_DIR, { recursive: true, force: true });
+      for (const file of ["bots.json", "default-bot.json"]) rmSync(join(DATA_DIR, file), { force: true });
       const desk = new Store(selection);
       desk.seedIfEmpty();
       boot(desk);
