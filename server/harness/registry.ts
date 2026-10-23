@@ -1,6 +1,7 @@
 // Provider instance registry — port of upstream's ProviderInstanceRegistryLive behavior, minus Effect.
 import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
+import { installStandaloneEngine } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
@@ -14,6 +15,7 @@ import type {
   ProviderAuthenticationStatus,
   ProviderInstance,
   ProviderSnapshot,
+  StandaloneRelease,
 } from "../contracts.ts";
 
 export interface ShadowInstance {
@@ -29,12 +31,16 @@ export type RegistryEntry =
   | { instanceId: InstanceId; live: ProviderInstance; shadow?: undefined }
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
 
+/** The pinned standalone release (URLs, hashes) stays on the server; the client sees only `server`. */
 function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean): AnyProviderDriver["install"] {
   if (!install) return undefined;
+  const { standalone: _pins, ...shown } = install;
   const server = serverInstallFor(install, npmPresent);
   const platform = process.platform === "darwin" || process.platform === "linux" || process.platform === "win32" ? process.platform : undefined;
-  return { ...install, platform, ...(server ? { server } : {}) };
+  return { ...shown, platform, ...(server ? { server } : {}) };
 }
+
+type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<unknown>;
 
 function cliDefaultOf(driver: AnyProviderDriver | undefined): string | undefined {
   if (!driver) return undefined;
@@ -100,11 +106,16 @@ export class ProviderRegistry {
   private readonly enginesBaseDir: string | undefined;
   private readonly npmPresent: () => boolean;
   private readonly status: ReturnType<typeof engineStatusFile> | null;
+  private readonly installStandalone: InstallStandalone;
 
-  constructor(drivers: readonly AnyProviderDriver[], options: { enginesBaseDir?: string; npmAvailable?: () => boolean; statusFile?: string } = {}) {
+  constructor(
+    drivers: readonly AnyProviderDriver[],
+    options: { enginesBaseDir?: string; npmAvailable?: () => boolean; statusFile?: string; installStandalone?: InstallStandalone } = {},
+  ) {
     this.enginesBaseDir = options.enginesBaseDir;
     this.npmPresent = options.npmAvailable ?? npmAvailable;
     this.status = options.statusFile ? engineStatusFile(options.statusFile) : null;
+    this.installStandalone = options.installStandalone ?? installStandaloneEngine;
     this.driversByKind = new Map(drivers.map((d) => [d.driverKind, d]));
   }
 
@@ -314,9 +325,14 @@ export class ProviderRegistry {
         await entry.live.installRuntime();
         return true;
       }
+      // Then the vendor's own build for this platform, then npm.
       const driver = this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind);
       const server = serverInstallFor(driver?.install, this.npmPresent());
-      if (!server) return false;
+      if (server?.standalone && driver?.install?.standalone) {
+        await this.installStandalone(driver.install.standalone, { baseDir: this.enginesBaseDir });
+        return true;
+      }
+      if (!server?.package) return false;
       await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver) });
       return true;
     } finally {

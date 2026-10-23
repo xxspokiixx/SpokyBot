@@ -6,6 +6,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { EngineInstall } from "./contracts.ts";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "./config.ts";
 import { npmEnginesPrefix } from "./engine-roots.ts";
+import { registerStandaloneBinDirs, standaloneAssetFor } from "./engine-standalone.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCache } from "./env-path.ts";
 import { execCli, killCliTree, spawnCli } from "./procs.ts";
 
@@ -22,9 +23,10 @@ export function enginesBinDir(baseDir = DATA_DIR, platform: NodeJS.Platform = pr
   return platform === "win32" ? enginesPrefix(baseDir) : join(enginesPrefix(baseDir), "bin");
 }
 
-/** Called once at boot: engines installed here win over any other copy on PATH. */
+/** Called once at boot: engines installed here win over any other copy on PATH, a standalone build over the npm folder. */
 export function registerEnginesBinDir(baseDir = DATA_DIR): void {
   registerPathDir(enginesBinDir(baseDir));
+  registerStandaloneBinDirs(baseDir);
 }
 
 export function npmPackageOf(install: EngineInstall | undefined): string | null {
@@ -37,8 +39,13 @@ export function npmAvailable(): boolean {
   return findCliCandidates("npm").length > 0;
 }
 
-export function serverInstallFor(install: EngineInstall | undefined, npmPresent: boolean = npmAvailable()): { package: string } | null {
+export type ServerInstall = NonNullable<EngineInstall["server"]>;
+
+/** The vendor's own build when it has one for this platform (no Node.js needed), otherwise npm when npm is here. */
+export function serverInstallFor(install: EngineInstall | undefined, npmPresent: boolean = npmAvailable()): ServerInstall | null {
   if (!install || install.managed) return null;
+  const asset = standaloneAssetFor(install.standalone);
+  if (install.standalone && asset) return { standalone: { version: install.standalone.version, downloadBytes: asset.approxBytes } };
   const pkg = npmPackageOf(install);
   return pkg && npmPresent ? { package: pkg } : null;
 }

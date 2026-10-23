@@ -2,7 +2,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFil
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { enginesBinDir, enginesPrefix, installNpmEngine, npmPackageOf, serverInstallFor } from "./engine-install.ts";
+import type { StandaloneRelease } from "./contracts.ts";
+import { enginesBinDir, enginesPrefix, installNpmEngine, npmPackageOf, registerEnginesBinDir, serverInstallFor } from "./engine-install.ts";
+import { standaloneEngineDir, standalonePlatformKey } from "./engine-standalone.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCacheForTests } from "./env-path.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import * as procs from "./procs.ts";
@@ -184,5 +186,54 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     expect(serverInstallFor({ command: { linux: "npm install -g fake-engine" } }, false)).toBeNull();
     mkdirSync(join(ctx.scratch, "empty"));
     await expect(installNpmEngine("fake-engine", { baseDir: ctx.base, path: join(ctx.scratch, "empty") })).rejects.toThrow("npm is not installed");
+  });
+});
+
+describe("which installer Settings offers", () => {
+  const npm = { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine", win32: "npm install -g fake-engine" };
+  const release = (platform: string): StandaloneRelease => ({
+    name: "Fake Engine",
+    engine: "fake-engine",
+    version: "2.0.0",
+    hosts: ["downloads.example.test"],
+    assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), archive: "raw", executable: "fake-engine", approxBytes: 70_000_000 } },
+  });
+
+  it("offers the vendor's own build first, with or without npm", () => {
+    const here = release(standalonePlatformKey());
+    expect(serverInstallFor({ command: npm, needsNode: true, standalone: here }, false)).toEqual({ standalone: { version: "2.0.0", downloadBytes: 70_000_000 } });
+    expect(serverInstallFor({ command: npm, needsNode: true, standalone: here }, true)).toEqual({ standalone: { version: "2.0.0", downloadBytes: 70_000_000 } });
+  });
+
+  it("falls back to npm only when the vendor has no build for this platform", () => {
+    const elsewhere = release("plan9-x64");
+    expect(serverInstallFor({ command: npm, standalone: elsewhere }, true)).toEqual({ package: "fake-engine" });
+    expect(serverInstallFor({ command: npm, standalone: elsewhere }, false)).toBeNull();
+  });
+
+  it("leaves a managed engine to its own installer", () => {
+    expect(serverInstallFor({ standalone: release(standalonePlatformKey()), managed: { label: "Install", downloadBytes: 1 } }, true)).toBeNull();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("app-installed engines on PATH at start-up", () => {
+  let scratch = "";
+  afterEach(async () => {
+    resetPathCacheForTests();
+    await removeTempDir(scratch);
+  });
+
+  it("puts a standalone engine's current version ahead of the app's npm folder", () => {
+    scratch = mkdtempSync(join(tmpdir(), "omb-engine-boot-"));
+    const base = join(scratch, "data");
+    const version = join(standaloneEngineDir("fake-engine", base), "2.0.0");
+    mkdirSync(version, { recursive: true });
+    writeFileSync(join(version, "fake-engine"), "#!/bin/sh\necho 2.0.0\n", { mode: 0o755 });
+    writeFileSync(join(version, ".standalone-install.json"), JSON.stringify({ engine: "fake-engine", version: "2.0.0", sha256: "a".repeat(64), executable: "fake-engine", installedAt: 1 }));
+    writeFileSync(join(standaloneEngineDir("fake-engine", base), "current.json"), JSON.stringify({ version: "2.0.0", executable: "fake-engine", sha256: "a".repeat(64) }));
+    mkdirSync(enginesBinDir(base), { recursive: true });
+    resetPathCacheForTests();
+    registerEnginesBinDir(base);
+    expect(augmentedPath().split(delimiter).slice(0, 2)).toEqual([version, enginesBinDir(base)]);
   });
 });

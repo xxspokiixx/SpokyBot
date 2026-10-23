@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModelCatalog } from "../contracts.ts";
+import type { ModelCatalog, StandaloneRelease } from "../contracts.ts";
+import { standalonePlatformKey } from "../engine-standalone.ts";
 import { resetPathCacheForTests } from "../env-path.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
@@ -494,6 +495,65 @@ process.exit(0);
     expect(calls[0]).toEqual(["install", "-g", "--prefix", join(scratch, "data", "tools", "npm"), "--loglevel=error", "--include=optional", "--allow-scripts=fake-engine", "fake-engine@latest"]);
     expect(existsSync(join(scratch, "data", "tools", "npm", "bin", "fakebin"))).toBe(true);
     expect(await registry.installRuntime("missing")).toBe(false);
+  });
+
+  function standaloneRelease(platform: string): StandaloneRelease {
+    return {
+      name: "Fake Engine",
+      engine: "fake-engine",
+      version: "2.0.0",
+      hosts: ["downloads.example.test"],
+      assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), archive: "raw", executable: "fakebin", approxBytes: 70_000_000 } },
+    };
+  }
+
+  it("installs the vendor's own build without npm, and shows it as available", async () => {
+    withFakeNpm(false);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    const release = standaloneRelease(standalonePlatformKey());
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine" }, needsNode: true, standalone: release } });
+    const installs: unknown[][] = [];
+    const registry = new ProviderRegistry([fake.driver], {
+      enginesBaseDir: join(scratch, "data"),
+      npmAvailable: () => false,
+      installStandalone: async (...args) => { installs.push(args); },
+    });
+    await registry.load({ a: { driver: "fake" } });
+    const [described] = await registry.describe();
+    expect(described.install?.server).toEqual({ standalone: { version: "2.0.0", downloadBytes: 70_000_000 } });
+    // The pins stay on the server.
+    expect(described.install).not.toHaveProperty("standalone");
+    expect(await registry.installRuntime("a")).toBe(true);
+    expect(installs).toEqual([[release, { baseDir: join(scratch, "data") }]]);
+    expect(existsSync(process.env.FAKE_NPM_LOG!)).toBe(false);
+  });
+
+  it("installs with npm when the vendor has no build for this platform", async () => {
+    withFakeNpm(true);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine" }, standalone: standaloneRelease("plan9-x64") } });
+    const installs: unknown[] = [];
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), installStandalone: async (release) => { installs.push(release); } });
+    await registry.load({ a: { driver: "fake" } });
+    expect((await registry.describe())[0].install?.server).toEqual({ package: "fake-engine" });
+    expect(await registry.installRuntime("a")).toBe(true);
+    expect(installs).toEqual([]);
+    expect(readFileSync(process.env.FAKE_NPM_LOG!, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("lets a driver's own installer go first", async () => {
+    withFakeNpm(false);
+    const fake = makeFakeDriver();
+    Object.assign(fake.driver, { install: { standalone: standaloneRelease(standalonePlatformKey()) } });
+    const installs: unknown[] = [];
+    let own = 0;
+    const registry = new ProviderRegistry([fake.driver], { npmAvailable: () => false, installStandalone: async (release) => { installs.push(release); } });
+    await registry.load({ a: { driver: "fake" } }, (instance) => Object.assign(instance, { installRuntime: async () => { own += 1; } }));
+    expect(await registry.installRuntime("a")).toBe(true);
+    expect(own).toBe(1);
+    expect(installs).toEqual([]);
   });
 
   it("offers nothing without npm, for a curl installer, or for a managed engine", async () => {
