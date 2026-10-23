@@ -20,6 +20,13 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   the notes of where it is, and saves into where it is. What you tell a bot privately never reaches a room or another
   person's chat; what a group chat decides never reaches your private chat. "About you" is yours alone: `GET`/`PUT /api/me`
   (the app's Profile on a team), read into your own conversations only.
+- **Profile.** "You" is the person signed in: your own name, picture and About you (`people/<person>/profile.json` and
+  `about.json`, `GET`/`PUT /api/me`), with the address of your verified sign-in, which nothing here changes. Settings →
+  Profile saves yours only (an older app's `PUT /api/config` `profile` lands on the caller's own too), and `GET
+  /api/config` and every config frame on your stream carry yours. Your lines, cards and reactions carry your name; a bot
+  names you in your private chat, each speaker on a group chat's lines, and a routine's run its writer. config.json's one
+  `profile` is nobody's on a team: it is never shown or read as anyone, and when the person whose address it names signs
+  in it becomes theirs (filling only what they have not set) and is cleared.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. A person's own connections have no way in: a share code,
   a moved MCP sign-in or a HighLevel connection is refused with *"Personal connections never enter Acme. Ask an admin to

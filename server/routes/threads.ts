@@ -6,7 +6,7 @@ import {
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import type { AppConfig } from "../config.ts";
+import { speakerOf, type PersonName } from "../replies.ts";
 import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
@@ -29,7 +29,8 @@ export interface ThreadRouteDeps {
     | "onChange" | "sections" | "taskByThread" | "tasks">;
   coordinator: Pick<Coordinator, "job">;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
-  cfg: Pick<AppConfig, "profile">;
+  /** What people's lines are called in this conversation (replies.ts PersonName). */
+  userName(threadId: string): PersonName;
   sessions: ResolveOptions["sessions"];
   groupUsageReader: Pick<GroupUsageReader, "refresh">;
   hostedWorkspace: boolean;
@@ -55,7 +56,7 @@ export interface ThreadRouteDeps {
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const {
-    store, cfg, sessions, groupUsageReader, lendingEnabled,
+    store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
     hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
     pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
     botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
@@ -456,10 +457,10 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         });
         return res.end(JSON.stringify({ name: title, threadId, messages: slim }, null, 2));
       }
-      const userName = cfg.profile?.name?.trim() || "User";
+      const userName = userNameFor(threadId);
       const lines: string[] = [`# ${title}`, ""];
       for (const msg of messages) {
-        const sentBy = msg.sender?.name ?? userName;
+        const sentBy = speakerOf(userName, msg);
         const who = msg.role === "user"
           ? msg.via === "api" ? `${sentBy} (via the local API)` : sentBy
           : (msg.from?.name ?? bot?.name ?? "Bot");

@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { activeLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { useReactor } from "@/lib/cloud-guest";
+import { otherSpeaker } from "@/lib/own-profile";
 import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, Pause, Pin, Plus, Search, Square, X } from "lucide-react";
 import {
   api,
@@ -168,6 +170,8 @@ function RoomTextMessage({
 }) {
   const { state, dispatch } = useStore();
   const user = m.role === "user";
+  const reactor = useReactor();
+  const speaker = otherSpeaker(m, state.config?.team && reactor !== "user" ? reactor : null);
   const rawText = user ? (m.text ?? "") : stripLeakedSystemHarnessMessages(m.text ?? "");
   const cited = user && m.text ? splitTranscriptCitations(m.text) : null;
   const attachments = user && m.text ? splitTranscriptAttachments(cited?.display ?? m.text) : null;
@@ -199,6 +203,7 @@ function RoomTextMessage({
   const replyGroup = useMemo(() => !user && botText.trim() ? replyAttachmentGroup(botText, m.attachments) : null, [user, botText, m.attachments]);
   return (
     <div {...{ [MESSAGE_ROW]: "" }} className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
+      {speaker && <div className="mb-0.5 px-1 text-[11.5px] font-medium text-ink-secondary">{speaker}</div>}
       <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
           <MessageActions side="user" menu={userMessageMenu({ messageId: m.id, pin })}>

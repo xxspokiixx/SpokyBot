@@ -115,7 +115,8 @@ import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/li
 import { dayLabel, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations";
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
-import { useCanWriteIn } from "@/lib/cloud-guest";
+import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
+import { otherSpeaker } from "@/lib/own-profile";
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
@@ -136,6 +137,8 @@ interface ChatRows {
   hasMore: boolean;
   bots: readonly Bot[];
   mentionPeers: readonly Bot[]; mentionPerson: { profileName?: string };
+  /** On a Team Cloud, the viewer's person key: another person's line carries their name. */
+  speakerViewer?: string | null;
   focus: AppState["focusMessage"];
   showToolCalls: boolean;
   locale: string;
@@ -388,10 +391,11 @@ const Bubble = memo(function Bubble({
   replyTarget?: Message;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, voiceId, tts, localVoice, busy, bots, mentionPeers, mentionPerson, focus, dispatch, onBranch, bubbleStyle, conversational, simple, canReact, openedAt } = useChatRows();
+  const { botId, threadId, botName, voiceId, tts, localVoice, busy, bots, mentionPeers, mentionPerson, focus, dispatch, onBranch, bubbleStyle, conversational, simple, canReact, openedAt, speakerViewer } = useChatRows();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const peer = peerLine(message) ?? peerRequest(message, botId);
   const user = message.role === "user" && !peer;
+  const speaker = user ? otherSpeaker(message, speakerViewer ?? null) : null;
   const [expanded, setExpanded] = useState(false);
   const focusedSearch = focus?.messageId === message.id && Boolean(focus.matchText);
   const [viewRaw, setViewRaw] = useState(false);
@@ -463,6 +467,7 @@ const Bubble = memo(function Bubble({
   return (
     <div {...{ [MESSAGE_ROW]: "" }} className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
       {peer && <PeerLabel peer={peer} />}
+      {speaker && <div className="mb-0.5 px-1 text-[11.5px] font-medium text-ink-secondary">{speaker}</div>}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
           <MessageActions
@@ -1046,9 +1051,11 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const colorMine = useColorUserBubbles();
   const bubbleStyle = useMemo(() => (colorMine ? userBubbleStyle(bot.color) : undefined), [colorMine, bot.color]);
   const hasMore = Boolean(bot.hasMore);
+  const reactor = useReactor();
+  const speakerViewer = state.config?.team && reactor !== "user" ? reactor : null;
   const rows = useMemo<ChatRows>(
-    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, mentionPerson: { profileName: state.config?.profile?.name }, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, conversational: isConversational(bot.replyStyle), simple: !advanced, canReact: canWrite !== false, openedAt }),
-    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, state.config?.profile?.name, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, bot.replyStyle, advanced, canWrite, openedAt],
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, mentionPerson: { profileName: state.config?.profile?.name }, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, conversational: isConversational(bot.replyStyle), simple: !advanced, canReact: canWrite !== false, openedAt, speakerViewer }),
+    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, state.config?.profile?.name, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, bot.replyStyle, advanced, canWrite, openedAt, speakerViewer],
   );
   const currentTask = bot.tasks?.find((task) => task.threadId === bot.threadId), place = effectivePlace(bot, currentTask), team = state.config?.team, privateChat = Boolean(team) && currentTask?.private === true, sharedChat = Boolean(team) && !privateChat;
 
