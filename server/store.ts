@@ -743,12 +743,12 @@ export class Store {
     nextName = nextName.trim();
     if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Department name must be 1 to 60 characters without control characters";
     if (name === nextName) return undefined;
-    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A team with that name already exists";
+    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A department with that name already exists";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     const affected = this.bots.filter(bot => members.includes(bot) || bot.managedSections?.some(section => sectionKey(section) === name));
     if (affected.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-      return "Stop this team's active work before renaming the team";
+      return "Stop this department's active work before renaming it";
     }
     // Removing an empty identity revokes its old grants, so recreating it cannot restore access.
     if (!members.length && !rooms.length && !computers?.forSection(name)) return this.changeEmptySection(name, nextName);
@@ -782,10 +782,10 @@ export class Store {
   changeEmptySection(name: string, nextName: string | null): string | undefined {
     if (!this.sections.includes(name)) return "No such department";
     if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
-      return "Move all bots (including archived bots) and group chats out of this team first";
+      return "Move all bots (including archived bots) and group chats out of this department first";
     }
     if (nextName !== null && nextName !== name && this.sections.includes(nextName)) {
-      return "A team with that name already exists";
+      return "A department with that name already exists";
     }
     if (nextName === name) return undefined;
     const revoked = this.bots.filter((bot) => bot.managedSections?.some((section) => sectionKey(section) === name));
@@ -806,10 +806,10 @@ export class Store {
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-      return "Stop this team's active work before deleting the team";
+      return "Stop this department's active work before deleting it";
     }
     if (this.bots.filter(bot => bot.chiefOfStaff && (!sectionKey(bot.section) || sectionKey(bot.section) === name)).length > 1) {
-      return "General already has a Chief of Staff. Move or change this team's Chief before deleting the team";
+      return "General already has a Chief of Staff. Move or change this department's Chief before deleting it";
     }
     const nextBots = this.bots.map(bot => ({ ...bot,
       ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
