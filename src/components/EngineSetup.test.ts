@@ -176,6 +176,12 @@ describe("install from Settings on the server", () => {
     const standalone = render(opencode({ standalone: { version: "1.19.4", downloadBytes: 79_667_571 } }));
     expect(standalone).toContain("Install OpenCode here");
     expect(standalone).not.toContain("Requires Node.js");
+    // No npm on the server, so no npm command to paste into a terminal.
+    expect(standalone).not.toContain("npm install -g opencode-ai");
+    expect(standalone).toContain("About 76 MB download");
+    const withNpm = render(opencode({ standalone: { version: "1.19.4", downloadBytes: 79_667_571 }, package: "opencode-ai" }));
+    expect(withNpm).toContain("Prefer a terminal?");
+    expect(withNpm).toContain("npm install -g opencode-ai");
     const neither = render(opencode());
     expect(neither).not.toContain("Install OpenCode here");
     expect(neither).toContain("Requires Node.js");

@@ -1,7 +1,7 @@
 // Provider instance registry — port of upstream's ProviderInstanceRegistryLive behavior, minus Effect.
 import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
-import { installStandaloneEngine } from "../engine-standalone.ts";
+import { installStandaloneEngine, isAppStandaloneCopy } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
@@ -32,12 +32,13 @@ export type RegistryEntry =
   | { instanceId: InstanceId; live: ProviderInstance; shadow?: undefined }
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
 
-/** The pinned standalone release (URLs, hashes) stays on the server; the client sees only `server`. */
-function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean): AnyProviderDriver["install"] {
+/** The pinned standalone release (URLs, hashes) stays on the server; the client sees only `server`. The app's own
+ * standalone copy is not on the person's terminal PATH, so its terminal sign-in command is dropped. */
+function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean, appCopy = false): AnyProviderDriver["install"] {
   if (!install) return undefined;
   const server = serverInstallFor(install, npmPresent);
   const platform = process.platform === "darwin" || process.platform === "linux" || process.platform === "win32" ? process.platform : undefined;
-  return { ...clientInstall(install), platform, ...(server ? { server } : {}) };
+  return { ...clientInstall(install), platform, ...(server ? { server } : {}), ...(appCopy ? { signInCommand: undefined } : {}) };
 }
 
 type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<unknown>;
@@ -364,6 +365,10 @@ export class ProviderRegistry {
     return true;
   }
 
+  private appStandaloneCopy(cli: string | undefined): boolean {
+    return cli !== undefined && isAppStandaloneCopy(cli, this.enginesBaseDir);
+  }
+
   describe(options: { known?: boolean } = {}) {
     return this.describeWith((instance) => {
       const seed = options.known && this.unread?.has(instance.instanceId) ? this.seeds.get(instance.instanceId) : undefined;
@@ -450,7 +455,7 @@ export class ProviderRegistry {
             backgroundText: inst.generateText !== undefined || inst.generateMemoryText !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: withServerInstall(driver?.install, npmPresent),
+          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(this.cliByInstance.get(inst.instanceId) ?? cliDefaultOf(driver))),
           authentication: inst.startAuthentication
             ? {
                 method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication

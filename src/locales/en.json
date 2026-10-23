@@ -2635,6 +2635,7 @@
   "engineSetup.serverUpdate": "Update {name} here",
   "engineSetup.serverInstalling": "Installing. This can take a minute.",
   "engineSetup.serverInstalled": "Installed. Checking the model provider.",
+  "engineSetup.standaloneDownloadNote": "About {mb} MB download. OpenMausBot checks it before installing.",
   "engineSetup.serverInstallDesc": "OpenMausBot installs the command-line app on the machine it runs on, as its own user, in its own folder. No terminal needed; sign-in may follow.",
   "engineSetup.serverUpdateDesc": "OpenMausBot updates the command-line app on the machine it runs on. No terminal needed.",
   "engineSetup.preferTerminal": "Prefer a terminal?",

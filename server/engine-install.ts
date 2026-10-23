@@ -43,13 +43,16 @@ export function npmAvailable(): boolean {
 
 export type ServerInstall = NonNullable<EngineInstall["server"]>;
 
-/** The vendor's own build when it has one for this platform (no Node.js needed), otherwise npm when npm is here. */
+/** The vendor's own build when it has one for this platform (no Node.js needed), otherwise npm when npm is here. With a
+ * standalone build, `package` says npm is here too, so the client can still offer the npm command for a terminal. */
 export function serverInstallFor(install: EngineInstall | undefined, npmPresent: boolean = npmAvailable()): ServerInstall | null {
   if (!install || install.managed) return null;
   const asset = standaloneAssetFor(install.standalone);
-  if (install.standalone && asset) return { standalone: { version: install.standalone.version, downloadBytes: asset.approxBytes } };
-  const pkg = npmPackageOf(install);
-  return pkg && npmPresent ? { package: pkg } : null;
+  const pkg = npmPresent ? npmPackageOf(install) : null;
+  if (install.standalone && asset) {
+    return { standalone: { version: install.standalone.version, downloadBytes: asset.approxBytes }, ...(pkg ? { package: pkg } : {}) };
+  }
+  return pkg ? { package: pkg } : null;
 }
 
 interface InstallOptions {

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelCatalog, StandaloneRelease } from "../contracts.ts";
 import { standalonePlatformKey } from "../engine-standalone.ts";
-import { resetPathCacheForTests } from "../env-path.ts";
+import { registerFallbackPathDir, resetPathCache, resetPathCacheForTests } from "../env-path.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { ProviderRegistry, SNAPSHOT_DEADLINE_MS, SNAPSHOT_REUSE_MS } from "./registry.ts";
@@ -541,6 +541,25 @@ process.exit(0);
     expect(await registry.installRuntime("a")).toBe(true);
     expect(installs).toEqual([]);
     expect(readFileSync(process.env.FAKE_NPM_LOG!, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("drops the terminal sign-in command when the CLI is the app's own copy, which the person's terminal cannot reach", async () => {
+    const own = withFakeNpm(false);
+    const base = join(scratch, "data");
+    const bin = join(base, "tools", "standalone", "fake-engine", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
+    registerFallbackPathDir(bin);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { signInCommand: "fakebin auth login", standalone: standaloneRelease(standalonePlatformKey()) } });
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: base, npmAvailable: () => false });
+    await registry.load({ a: { driver: "fake" } });
+    expect((await registry.describe())[0].install?.signInCommand).toBeUndefined();
+    // A copy the person installed comes first on PATH and keeps its sign-in command.
+    writeFileSync(join(own, "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
+    resetPathCache();
+    expect((await registry.describe())[0].install?.signInCommand).toBe("fakebin auth login");
   });
 
   it("lets a driver's own installer go first", async () => {

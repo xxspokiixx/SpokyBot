@@ -200,10 +200,10 @@ describe("which installer Settings offers", () => {
     assets: { [platform]: { url: "https://downloads.example.test/fake", sha256: "a".repeat(64), archive: "raw", executable: "fake-engine", approxBytes: 70_000_000 } },
   });
 
-  it("offers the vendor's own build first, with or without npm", () => {
+  it("offers the vendor's own build first, and names the npm package only when npm is here", () => {
     const here = release(standalonePlatformKey());
     expect(serverInstallFor({ command: npm, needsNode: true, standalone: here }, false)).toEqual({ standalone: { version: "2.0.0", downloadBytes: 70_000_000 } });
-    expect(serverInstallFor({ command: npm, needsNode: true, standalone: here }, true)).toEqual({ standalone: { version: "2.0.0", downloadBytes: 70_000_000 } });
+    expect(serverInstallFor({ command: npm, needsNode: true, standalone: here }, true)).toEqual({ standalone: { version: "2.0.0", downloadBytes: 70_000_000 }, package: "fake-engine" });
   });
 
   it("falls back to npm only when the vendor has no build for this platform", () => {

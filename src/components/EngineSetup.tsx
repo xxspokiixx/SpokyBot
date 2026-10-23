@@ -163,6 +163,9 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const standalone = instance.install?.server?.standalone;
+  // The app installs its own build without npm; the npm command only helps when the server has npm.
+  const terminalCommand = standalone && !instance.install?.server?.package ? null : command;
 
   const run = async () => {
     if (busy) return;
@@ -199,12 +202,17 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
           ? t("engineSetup.serverInstalling")
           : t(mode === "update" ? "engineSetup.serverUpdate" : "engineSetup.serverInstall", { name: instance.displayName })}
       </button>
+      {standalone && mode === "install" && !busy && !done && (
+        <p className="text-center text-[11px] text-ink-tertiary">
+          {t("engineSetup.standaloneDownloadNote", { mb: Math.ceil(standalone.downloadBytes / 1024 / 1024) })}
+        </p>
+      )}
       {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.installVerified")}</p>}
       {error && <p role="alert" className="whitespace-pre-wrap text-[11.5px] leading-relaxed text-danger">{error}</p>}
-      {command && (
+      {terminalCommand && (
         <details className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[11.5px] text-ink-secondary">
           <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
-          <CommandRow command={command} actionLabel={t(mode === "update" ? "engineSetup.openUpdate" : "engineSetup.openInstall")} compact allowTerminal={state.config?.cloudHome !== true} />
+          <CommandRow command={terminalCommand} actionLabel={t(mode === "update" ? "engineSetup.openUpdate" : "engineSetup.openInstall")} compact allowTerminal={state.config?.cloudHome !== true} />
         </details>
       )}
     </div>
