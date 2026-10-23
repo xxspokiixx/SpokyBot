@@ -137,6 +137,9 @@ export interface Assignment {
   /** While a node continues in place, for the loop guard: `stale` counts consecutive continuations
    * with no successful tool call; `errors` holds the last three tool error texts. */
   guard?: { stale: number; errors: string[] };
+  /** While a turn runs: the awaited children whose open questions its input carries. A restart that cuts the turn
+   * reruns it with them once more; no other turn carries them again. */
+  carrying?: string[];
   /** A peer-review card allowed this before it was sent. */
   approved?: boolean;
   /** A room brief shown once per call: every recipient of that call shares it. */
@@ -223,7 +226,8 @@ export interface RunInput {
   answer?: string;
   /** The settled children whose results this (resume) turn returns. */
   settled?: Assignment[];
-  /** The awaited children still parked on a question for the person, which this (resume) turn passes on. */
+  /** The awaited children parked on a question this turn passes on: a question not yet delivered, or, in the rerun
+   * of a turn a restart cut, the questions that turn carried. */
   asked?: Assignment[];
   /** For a continued turn: why it continues and, after a step cap, where
    * the steps so far are listed. */

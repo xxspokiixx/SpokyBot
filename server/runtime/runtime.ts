@@ -40,8 +40,9 @@ const DETAIL_MAX = 400;
 
 const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performance.now() };
 
-/** `interruption`: a resume for a teammate's question while other work is still out; the node's restart note waits for its real resume. */
-interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean }
+/** `interruption`: a resume for a teammate's question while other work is still out; the node's restart note waits for its real resume.
+ * `carried`: the settled children whose results the turn's input carried; one that settles later owes the node another resume. */
+interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string> }
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
 
@@ -144,6 +145,7 @@ export class Runtime {
     const n = this.store.get(rootId);
     if (!n || n.parentId !== undefined || n.status !== "running") { this.log(`end(${rootId}): not a running root`); return; }
     if (!result.ok && !result.needsInput && !result.continue && this.closing) return;
+    const live = this.turns.get(rootId);
     // Dropping the handle without an abort makes turnEnded ignore the run() result that follows.
     this.turns.delete(rootId);
     const evidence = result.evidence ? { evidence: result.evidence } : {};
@@ -155,7 +157,7 @@ export class Runtime {
           ? { kind: "completed", text: result.text, ...evidence }
           : { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence };
     try {
-      this.withBatch(() => this.finishTurn(n, outcome));
+      this.withBatch(() => this.finishTurn(n, outcome, live));
     } catch (error) {
       this.log(`end(${rootId}) failed: ${String(error)}`);
     }
@@ -345,12 +347,19 @@ export class Runtime {
     if (!root) { this.log(`dispatch(${n.id}): root ${n.rootId} is missing`); return false; }
     let input: RunInput;
     let delivered: string[];
+    let carrying: string[];
+    let carried: Set<string>;
     let interruption: boolean;
     try {
       const children = this.store.children(n.id);
       // Every settled result, not only new ones: the host keeps reports out of the transcript it replays.
       const settled = awaited(children).filter(isTerminal);
-      const asked = awaited(children).filter(asking);
+      const ids = new Set(children.map(c => c.id));
+      const inbox = this.store.inbox({ threadId: n.assignee.destination.threadId }, true).filter(i => ids.has(i.assignmentId));
+      // A question goes out with the turn that delivers its inbox item, and again only in the rerun of that turn after a restart cut it.
+      const fresh = new Set(inbox.filter(i => i.kind === "needs_input").map(i => i.assignmentId));
+      const again = new Set(n.restart === "rerun" ? n.carrying : undefined);
+      const asked = awaited(children).filter(c => asking(c) && (fresh.has(c.id) || again.has(c.id)));
       interruption = resumed && n.restart !== "rerun" && asked.length > 0;
       const names = this.names(n, parent);
       const turn: RunInput["turn"] = resumed ? "resume" : n.restart === "rerun" ? "rerun" : n.answer !== undefined ? "answered"
@@ -366,14 +375,16 @@ export class Runtime {
         ...(asked.length ? { asked } : {}),
         level: n.level, mode: n.mode,
       };
-      const ids = new Set(children.map(c => c.id));
-      delivered = this.store.inbox({ threadId: n.assignee.destination.threadId }, true).filter(i => ids.has(i.assignmentId)).map(i => i.id);
+      delivered = inbox.map(i => i.id);
+      carrying = asked.map(c => c.id);
+      carried = new Set(settled.map(c => c.id));
     } catch (error) {
       this.log(`dispatch(${n.id}) could not compose the turn: ${String(error)}`);
       return false;
     }
     n.status = "running"; n.startedAt = now; n.executions += 1; n.lastActivityAt = now;
     delete n.continuation; delete n.cards;
+    if (carrying.length) n.carrying = carrying; else delete n.carrying;
     if (root.id !== n.id) root.lastActivityAt = now;
     if (root.budgets) root.budgets.executions += 1;
     try {
@@ -390,7 +401,7 @@ export class Runtime {
     this.admissionNoted.delete(n.id);
     this.touch(n, root);
     const controller = new AbortController();
-    const live: LiveTurn = { controller, rootId: root.id, activeAt: this.clock.monotonic(), interruption };
+    const live: LiveTurn = { controller, rootId: root.id, activeAt: this.clock.monotonic(), interruption, carried };
     this.turns.set(n.id, live);
     this.rootActivity.set(root.id, now);
     let turn: Promise<RunResult>;
@@ -416,16 +427,17 @@ export class Runtime {
       const n = this.store.get(id);
       if (!n || n.status !== "running") return;
       if (this.closing && result.kind === "failed") return;
-      this.withBatch(() => this.finishTurn(n, result, live.interruption));
+      this.withBatch(() => this.finishTurn(n, result, live));
     } catch (error) {
       this.log(`settling ${id} failed: ${String(error)}`);
     }
   }
 
-  private finishTurn(n: Assignment, result: RunResult, interruption = false): void {
+  /** `live`: the handle of the dispatched turn ending; a host turn begun with begin() has none. */
+  private finishTurn(n: Assignment, result: RunResult, live?: LiveTurn): void {
     const now = this.clock.now();
-    if (!interruption) delete n.restart;
-    delete n.answer;
+    if (!live?.interruption) delete n.restart;
+    delete n.answer; delete n.carrying;
     // Access is rechecked as the turn ends: a reply that lands after the route closed is never retained.
     const parentRow = n.parentId ? this.store.get(n.parentId) : undefined;
     const problem = this.safe("validate", () => this.runner.validate(n, parentRow));
@@ -466,7 +478,9 @@ export class Runtime {
     }
     n.result = clip(result.text, RESULT_MAX);
     const kids = awaited(this.store.children(n.id));
-    const outstanding = kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
+    // A child that settled while this turn ran is a result the turn never saw: the node resumes once more for it.
+    const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
+    const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {
       n.status = "waiting"; n.lastActivityAt = now;
       if (root) this.renew(root, now);
@@ -604,7 +618,7 @@ export class Runtime {
     if (detail !== undefined) n.outcomeDetail = clip(detail, DETAIL_MAX); else delete n.outcomeDetail;
     if (status !== "completed" && detail !== undefined && n.result === "") n.result = clip(detail, RESULT_MAX);
     if (outcome === "refused" && detail !== undefined) { n.result = clip(detail, RESULT_MAX); delete n.evidence; }
-    delete n.question; delete n.answer; delete n.restart;
+    delete n.question; delete n.answer; delete n.restart; delete n.carrying;
     const kind: EventKind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
     const root = n.parentId ? this.store.get(n.rootId) : n;
     this.store.transaction(() => {
