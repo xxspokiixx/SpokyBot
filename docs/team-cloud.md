@@ -12,10 +12,13 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   app); a Member (User) chats with the team's bots, uses rooms and makes routines, and changes no bot's setup, connects
   no app and makes no webhook.
 - **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. "New conversation"
-  is yours: you and the Admins see it, other Members never do, in lists, searches, files or streams. A group chat is seen
-  by whoever sees it. Every private chat says so in its header, *"Private · admins can see"*, and the first one on a
-  device also says it as a sentence: *"Chats in Acme are private from other members. Acme's admins can see them."* The
-  server marks such a conversation `private: true` on the wire (`WireTask.private`).
+  is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in
+  lists, counts, unread marks, searches, files, notifications, streams, a bot's tools or another bot. A group chat is
+  seen by whoever sees it. Every private chat says so in its header, *"Private · only you"*, and the first one on a
+  device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
+  Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
+  the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
+  (below).
 - **Memory.** Each bot keeps three kinds of notes: the team's, a group chat's and a person's. A turn reads the team's notes and
   the notes of where it is, and saves into where it is. What you tell a bot privately never reaches a room or another
   person's chat; what a group chat decides never reaches your private chat. "About you" is yours alone: `GET`/`PUT /api/me`
@@ -36,9 +39,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
-  conversation it is opened from, to whoever may read that conversation (an Admin reading a member's chat sees that
-  member's browser there); with no conversation named (a phone) it is the person's own. Every Chrome runs in its own
-  box (below).
+  conversation it is opened from, to whoever may read that conversation (a member's own browser to that member alone);
+  with no conversation named (a phone) it is the person's own. Every Chrome runs in its own box (below).
 - **Phones.** Settings → *Open on your phone* (and *Connect your phone* in the account menu) shows a code made for the
   person signed in. The phone app scans it as any `/pair#code=` link and gets that person's session: their address,
   their role, their chats, never another member's. The phone stays signed in while the person's app keeps checking in
@@ -83,7 +85,9 @@ this server shares with every bot. It exists only on a Team Cloud.
   and record is the app's own, and each change is that member's. A User's session is refused there as anywhere.
 - A Team Cloud always keeps its admin activity (`/api/admin-activity`), even with no User signed in: it is shared by
   definition. The Admin's Team admin → Activity reads it with the same session, beside the team's own record there; Usage
-  reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way.
+  reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way. A member's private chat
+  shows there as metadata only: its usage counts and cost by person and bot, an activity row's when, bot, tool and
+  outcome; never its runs' titles or a decision's words.
 - For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
   admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`).
 
@@ -95,7 +99,7 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
 
 - **Who gets a member's own connection.** Only a turn in that member's private chat (`member:<person>`) that their own
   message started (the request proven for that turn, as lent computers use). Never a group chat, the bot's main chat,
-  another member's chat, an Admin writing in theirs, a routine, a webhook, or work handed on from another conversation.
+  another member's chat (no Admin can write in theirs), a routine, a webhook, or work handed on from another conversation.
 - **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
   registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
@@ -146,12 +150,22 @@ The Admin signs the usual pairing body with two more fields:
 The session carries `teamRole` and `membershipAuthority: "team"`: the sign-in list never revalidates or revokes it, and
 `/api/auth/session` answers `team: { id, name, role }`.
 
-**Membership lives on the Admin.** Nothing is pushed to the machine and no roster read exists, so the machine checks
-membership the one way it can: at each pairing, which the Admin signs only for a current member. A team session
-therefore ends within the hour of its pairing (`TEAM_SESSION_MAX_MS`), however much it is used, and the app pairs
-again; a removed member's next pairing is refused by the Admin (404), so they are out within the hour. A session is also
-kept only across a clean restart. A signed roster read on the Admin would make this immediate; until then this is the
-truthful mechanism.
+**Membership lives on the Admin.** No roster read exists, so the machine checks membership at each pairing, which the
+Admin signs only for a current member. A team session therefore ends within the hour of its pairing
+(`TEAM_SESSION_MAX_MS`), however much it is used, and the app pairs again; a removed member's next pairing is refused by
+the Admin (404). A session is also kept only across a clean restart.
+
+**When someone leaves.** The Admin tells the machine when a member is removed or leaves: `POST
+/api/cloud/team/member-left` with `{ "email": "<address>" }`, signed with its body like the sleep request (400
+`invalid_member` for a bad address; only on a Team Cloud). The machine then deletes what was that person's alone and
+answers `{ ok, chats, layers, sessions, files, browsers }`: every session and phone of theirs and any open code of
+theirs end at once; their private chats with every bot are deleted as the app deletes a conversation (messages,
+notifications, follow-ups, a running turn stopped first), with the uploaded files only those chats used; their memory
+layers (`workspaces/<bot>--member-<person>`, their journal and search index); their "About you" and profile
+(`people/<person>/`); their own connections, keys and MCP sign-ins; and their own browser of every bot and shared
+profile. Nothing of it is handed to an admin. Each conversation keeps its starter in `thread-starters.json` (a hash), so a
+record that still names it (a usage trace, an activity row) stays theirs and no admin reads it there. An export of their
+own chats before they go is not built.
 
 **A member's own code (their phone).** `POST /api/team/phone-pairing` (any team session, Member included) makes a pairing
 code carrying the caller's `member` claim (address, role, the role's scopes) and the time the Admin last vouched for
@@ -168,7 +182,7 @@ Everything stored on a Team Cloud carries an audience (`server/audience.ts`):
 |---|---|---|
 | `team` | everyone who sees the bot | a bot's main chat, its own folder (`workspaces/<bot>`: MEMORY.md, memory/, skills), team files, routines nobody opened |
 | `room:<id>` | whoever sees the room | the room's threads, `workspaces/<bot>--room-<id>` |
-| `member:<person>` | that person and the Admins | the conversations they opened (`thread-starters.json`), `workspaces/<bot>--member-<person>`, their uploads, `people/<person>/about.json` |
+| `member:<person>` | that person only (never an Admin) | the conversations they opened (`thread-starters.json`), `workspaces/<bot>--member-<person>`, their uploads, `people/<person>/about.json` |
 
 **A turn reads only inputs whose audience includes everyone who will see its answer, and writes only into its own
 audience.** `mayRead(input, turn)` is true for the team's things and for the turn's own audience, nothing else.
@@ -179,8 +193,20 @@ audience.** `mayRead(input, turn)` is true for the team's things and for the tur
 | A room with Mira and Ben | Scout's setup, the team's notes, the room's layer and threads | the room's layer |
 | Scout's main chat | the team's notes, the team's conversations | the team's notes |
 
-Where it is applied: visibility (`VisibleSet.thread` with each conversation's audience; a member's bot list carries only
-their conversations; search, SSE and attachments go through the same check), the memory system prompt
+Where it is applied: visibility (`VisibleSet.thread` with each conversation's audience, for a member and an admin alike:
+an admin session is a viewer with a person, `{ kind: "all", email }`, that sees every bot and room but only its own
+private chats; `server/host/visibility-host.ts`). Every request names its conversations through one gate: the path
+(`/api/threads/<id>`, a bot's or room's `/tasks/<id>`), `?threadId=`, and any `threadId`, `…ThreadId` or `threadIds` in
+its JSON body (`server/host/team-private.ts`): another person's chat answers 404 *no such conversation*, as one that
+does not exist, and so does a route that would fall back to the bot's selected conversation when that one is someone
+else's. A bot sent to anyone carries only the conversations they may read; when its selected conversation is someone
+else's, the main chat is named instead, without the other's messages, and its unread mark counts only what they see.
+Search, SSE (live and replayed), attachments, notifications, usage traces, routine runs, the activity and decision rows
+(kept as when, bot, tool and outcome, without their words), a bot's activity, synced folders and a team backup go
+through the same check, a deleted private chat included. Incidents and escalations from a private chat go to its person,
+never into a Chief's thread; a conversation a bot opens from a shared chat is the team's, never the last speaker's;
+`retry_thread`, `close_thread` and `session_read` reach only what the turn may read; and team memory is never published
+from a private chat. Then the memory system prompt
 (the turn's layer, plus the team's notes read-only), recall (`buildRecall.memoryIds`: the layer and the team's), recent
 work, `session_search` (memory of the layer and the team's; conversations the turn may read), memory writes
 (`/api/internal/memory`, `/memory/log`, the turn-outcome line, capture), "About the user", and the bot box, which puts the
@@ -213,9 +239,15 @@ every browser keeps its old name and Chrome its old launcher, and nothing here c
   into it is not reachable from its box.
 - **Per-member engine state.** A Team Cloud's engines use the team's key through the broker, so the engine's config dir
   (`~/.claude`, `~/.codex`) holds no member's login; it is the team's, by design.
-- **A roster read from the Admin.** Removal takes effect within the hour (above), not at once.
-- **A removed member's own connections.** They stay on the Team Cloud, unused (nobody can start a turn as them), until
-  the server they were for is removed. Nothing drops them when the Admin removes the person yet.
+- **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
+  hour, and nothing is deleted.
+- **Engine transcripts in the shared home.** The engines keep each conversation's transcript in the server user's home
+  (`~/.claude/projects`, `~/.codex/sessions`), which every turn's box binds read-write: a turn with a shell could read
+  another conversation's transcript there. Splitting the engines' homes per audience is the next slice.
+- **What a bot keeps per bot, not per audience.** Its data sheet, the skills it stages and its own profile are the bot's
+  (the team's), whichever chat wrote them; so are a routine's definition and schedule (its runs and results are the
+  conversation's). The Owner's whole-machine export (`OMB_CLOUD_EXPORT_ONLY`, the workspace backup) still carries every
+  member's private chats.
 - **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
   service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
   config can't be connected by each person.

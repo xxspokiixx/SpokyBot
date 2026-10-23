@@ -154,9 +154,10 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
     },
     people,
     baseBotId,
-    /** How a member session sees conversations: with each one's audience and the member's own key. */
-    audiencesFor(viewer: { kind: "all" } | { kind: "member"; email?: string }): ThreadAudiences | undefined {
-      if (!team || viewer.kind !== "member") return undefined;
+    /** How a session sees conversations on a team, a member's or an admin's: with each one's audience and the person's own
+     * key, so another person's private chat is never theirs to see. Only the server itself (no address) sees everything. */
+    audiencesFor(viewer: { kind: "all"; email?: string } | { kind: "member"; email?: string }): ThreadAudiences | undefined {
+      if (!team || (viewer.kind === "all" && viewer.email === undefined)) return undefined;
       return { of: audienceOf, person: viewer.email ? personKey({ id: "", email: viewer.email }) : null };
     },
     /** Whose browser a conversation's turns use: on a team its audience's (the member's, the group chat's or the team's),
@@ -174,6 +175,11 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
     /** A session's team, for the app: the team's name and the person's role. */
     sessionInfo(session: { teamRole?: TeamRole }): TeamSessionInfo | null {
       return team && session.teamRole ? { id: team.id, name: team.name, role: session.teamRole } : null;
+    },
+    /** The person a conversation is private to on a team (theirs alone, audience.ts); null for the team's, a room's and
+     * anywhere off a team. */
+    privateTo(threadId: string): string | null {
+      return team ? audienceMember(audienceOf(threadId)) : null;
     },
     memberAudience,
   };
