@@ -67,6 +67,7 @@ export function preloadConnectedApps(force = false): Promise<ConnectorInventory>
     .then((response: { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean }) => {
       const services: Record<string, ConnectorStatus> = response.services ?? {};
       if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {
+        cachedConnectorStatusAuthoritative = false;
         return { services: readCachedInventory()?.services ?? services, authoritative: false };
       }
       cachedConnectorStatus = services;
