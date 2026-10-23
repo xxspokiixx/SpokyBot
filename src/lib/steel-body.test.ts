@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CHROME_STEEL, metalLayers } from "@/components/ChromeFinish";
+import { CursorAvatar } from "@/components/CursorAvatar";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
 import { steelBodyImage, type SteelImage } from "./steel-body";
 
@@ -23,13 +23,14 @@ describe("MausBot's rendered steel body", () => {
     expect(steelBodyImage("cursor", 44, 2, [])).toBeNull();
   });
 
-  it("draws the image over the whole avatar frame, under the face, with the drawn steel beneath it and no grain filter", () => {
-    const svg = (image?: string) => renderToStaticMarkup(createElement("svg", null, metalLayers("m1", MASCOT_BODIES.cursor, CHROME_STEEL, 112, image)));
-    const withImage = svg("/steel/cursor-256.webp");
-    expect(withImage).toContain('<image href="/steel/cursor-256.webp" x="-15" y="-15" width="258.541" height="258.541" preserveAspectRatio="none"');
-    expect(withImage).not.toContain("feTurbulence");
-    expect(withImage.indexOf("m1-steel")).toBeLessThan(withImage.indexOf("<image"));
-    expect(svg()).toContain("feTurbulence");
+  it("draws the picture over the whole avatar frame instead of the body and the face", () => {
+    const svg = (picture?: string) => renderToStaticMarkup(createElement(CursorAvatar, { size: 112, silhouette: MASCOT_BODIES.cursor, picture }));
+    const withPicture = svg("/steel/cursor-256.webp");
+    expect(withPicture).toContain('<image href="/steel/cursor-256.webp" x="-15" y="-15" width="258.541" height="258.541" preserveAspectRatio="none"');
+    expect(withPicture).not.toMatch(/fill="url\(#[^)]+-grad\)"/);
+    expect(withPicture).toMatch(/<g clip-path="url\(#[^)]+-clip\)" visibility="hidden">/);
+    expect(svg()).toMatch(/fill="url\(#[^)]+-grad\)"/);
     expect(svg()).not.toContain("<image");
+    expect(svg()).not.toContain('visibility="hidden"');
   });
 });

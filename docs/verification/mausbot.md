@@ -63,5 +63,5 @@ Evidence: [popup, light](evidence/mausbot/welcome-light.png),
 [intro and setup](evidence/mausbot/added-light.png),
 [menu](evidence/mausbot/menu-light.png),
 [Settings, switched off](evidence/mausbot/settings-off.png),
-[steel finishes, light](evidence/mausbot/steel-texture-variants-daylight.png),
-[steel finishes, dark](evidence/mausbot/steel-texture-variants-midnight.png).
+[chrome picture, light](evidence/mausbot/chrome-picture-daylight.png),
+[chrome picture, dark](evidence/mausbot/chrome-picture-midnight.png).

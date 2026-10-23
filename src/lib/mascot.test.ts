@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { t } from "./i18n";
-import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, MAUS_COLORS, stateForBot } from "./mascot";
-import { CHROME_STEEL, grainAt } from "@/components/ChromeFinish";
+import { CHROME_GRADIENT, colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, MAUS_COLORS, stateForBot } from "./mascot";
 
 describe("stateForBot", () => {
   it("still alerts on a failed tool call when a digest receipt follows it", () => {
@@ -51,18 +50,13 @@ describe("silver", () => {
 });
 
 describe("chrome", () => {
-  it("is a colour every picker offers, named Chrome, whose swatch wears the mascot's brushed steel", () => {
+  it("is a colour every picker offers, named Chrome, whose swatch is smooth polished steel", () => {
     expect(MAUS_COLOR_NAMES).toContain("chrome");
     expect(t(MAUS_COLOR_LABEL.chrome)).toBe("Chrome");
     const swatch = colorSwatch("chrome");
-    expect(swatch.startsWith("repeating-linear-gradient(0deg")).toBe(true);
-    for (const tone of CHROME_STEEL.tones) expect(swatch).toContain(tone);
+    expect(swatch.startsWith("radial-gradient(")).toBe(true);
+    expect(swatch).not.toContain("repeating");
+    for (const tone of CHROME_GRADIENT) expect(swatch).toContain(tone);
     expect(colorSwatch("blue")).toBe(MAUS_COLORS.blue);
-  });
-
-  it("shows the grain on a large avatar and none at sidebar size", () => {
-    expect(grainAt(CHROME_STEEL, 104)).toBeGreaterThan(0);
-    expect(grainAt(CHROME_STEEL, 28)).toBe(0);
-    expect(grainAt(CHROME_STEEL, 20)).toBe(0);
   });
 });

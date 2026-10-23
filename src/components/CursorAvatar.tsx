@@ -903,8 +903,7 @@ export interface CursorAvatarProps {
   paused?: boolean
   silhouette?: CursorSilhouette
   gradient?: [string, string, string]
-  /** Drawn over the body and under the face (a metal finish), given this mascot's id for its own defs. */
-  overBody?: (uid: string) => React.ReactNode
+  picture?: string | null
   eyeColor?: string
   title?: string | null
   className?: string
@@ -938,7 +937,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       autoExpression = true,
       paused = false,
       silhouette = DEFAULT_SILHOUETTE,
-      gradient = DEFAULT_GRADIENT, overBody,
+      gradient = DEFAULT_GRADIENT, picture,
       eyeColor = "#ffffff",
       title,
       className,
@@ -1271,9 +1270,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           <g ref={trailLayer} />
           <g ref={bodyGroup}>
           <g ref={bodyContent}>
-          <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
-          {overBody?.(uid)}
-          <g clipPath={`url(#${uid}-clip)`}>
+          {picture ? <image href={picture} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" /> : <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />}
+          <g clipPath={`url(#${uid}-clip)`} visibility={picture ? 'hidden' : undefined}>
             <g transform={anchorTransform(silhouette.anchor)}>
               <path ref={eye0} fill={eyeColor} />
               <path ref={eye1} fill={eyeColor} />

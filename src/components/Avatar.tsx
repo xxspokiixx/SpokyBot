@@ -7,14 +7,13 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
-import { CHROME_STEEL, metalLayers, type MetalFinish } from "./ChromeFinish";
 import { steelBodyImage } from "@/lib/steel-body";
 
 export const EYE_SCALE = 1.12;
@@ -94,8 +93,6 @@ export type MausAvatarProps = {
   animated?: boolean;
   bodyId?: BotBodyId;
   gradient?: [string, string, string];
-  /** Chrome's metal; absent, chrome wears CHROME_STEEL. */
-  finish?: MetalFinish;
 };
 
 function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHandle>) {
@@ -141,12 +138,11 @@ function GradientAvatarComponent(
     animated = true,
     bodyId,
     gradient,
-    finish,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
   const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
-  const metal = color === "chrome" ? finish ?? CHROME_STEEL : undefined;
+  const chrome = color === "chrome";
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -192,8 +188,8 @@ function GradientAvatarComponent(
         size={size}
         silhouette={silhouette}
         gradient={gradient ?? gradientFor(color)}
-        overBody={metal ? (uid) => metalLayers(uid, silhouette, metal, size, steelBodyImage(silhouette.id, size, globalThis.devicePixelRatio ?? 1)) : undefined}
-        eyeColor={metal?.eyes}
+        picture={chrome ? steelBodyImage(silhouette.id, size, globalThis.devicePixelRatio ?? 1) : null}
+        eyeColor={chrome ? CHROME_EYES : undefined}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
