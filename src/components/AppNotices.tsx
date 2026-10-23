@@ -147,11 +147,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // also for a launch after the one whose welcome just finished. Account and billing notices keep their own rules.
   // Unknown (null) until the bots have loaded, so nothing lower in the queue flashes up before them.
   const firstChat = firstReplyPending(state);
-  // MausBot's first-launch card goes first: the popup and the question wait while it is due, and skip a launch it used.
+  // MausBot's first-launch card goes first: the popup and the question wait while it is due. The popup skips a launch the
+  // card used; the question may follow the card once it closes, as it follows the popup.
   const afterWelcome = welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" || firstChat;
+  const consentWaits = welcomeFinishedThisLaunch() || firstChat;
   const mausBotFirst = mausBot.due;
-  // The product-updates question is a second email ask: it never follows the welcome's own in the same launch either.
-  const consentNow = afterWelcome === true || consentFact === false ? false : afterWelcome === null || mausBotFirst ? null : consentFact;
+  const consentNow = consentWaits === true || consentFact === false ? false : consentWaits === null || mausBotFirst ? null : consentFact;
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
   const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere ? nextNotice({
     [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome === true ? false

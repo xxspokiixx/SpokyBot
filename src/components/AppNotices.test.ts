@@ -862,11 +862,14 @@ describe("the product-updates question after the update", () => {
     expect(render(), "right after the popup closes, as #3379 orders it").toContain(QUESTION);
   });
 
-  it("never in the launch MausBot's first-launch card opened", async () => {
-    returning(); markLaunchDialog("mausbot");
-    expect(await launch()).not.toContain(QUESTION);
-    session.clear();
-    expect(await launch()).toContain(QUESTION);
+  it("waits while MausBot's first-launch card is due, then follows it in the same launch once it closes", async () => {
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    expect(await launch(), "the card is due: the question waits for it").not.toContain(QUESTION);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    const after = await launch();
+    expect(after, "the card closed in this launch: the question follows it, as it follows the popup").toContain(QUESTION);
+    expect(after, "the popup still waits for a later launch").not.toContain(POPUP);
   });
 
   it("never during onboarding, the tour or Settings; it shows once they are done, before the other cards", async () => {
