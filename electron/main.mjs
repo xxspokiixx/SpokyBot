@@ -317,7 +317,7 @@ let desktopDataDirLease = null;
 let runningDataDir = null;
 let localSwitchInFlight = false;
 let managedDesktop = null;
-let cloudAccount = null;
+let cloudAccount = null, updatesConsent = null;
 let cloudAccountStarted = Promise.resolve();
 let cloudAccountRestoring = false;
 let cloudSignInRestored = false;
@@ -882,7 +882,7 @@ function ensureCloudAccount() {
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       sendUpdaterState();
       cloudPower.changed(); computerSharing?.cloudChanged(); try { void oneHome.kick(); void homeWindow.changed(); } catch {}
-      void includedX.onState(state); void includedPages.onState(state);
+      void includedX.onState(state); void includedPages.onState(state); updatesConsent?.accountChanged(state);
       refreshCloudMenus();
       announceCloudReady(state);
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`) &&
@@ -3067,7 +3067,7 @@ app.whenReady().then(async () => {
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
-  registerDesktopPrefs({ ipcMain, ...jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")), localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
+  updatesConsent = registerDesktopPrefs({ ipcMain, cloudAccount: () => cloudAccount, ...jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")), localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
     languageChanged: (language, sender) => {
       for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
     },
