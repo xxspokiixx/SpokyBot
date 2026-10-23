@@ -1488,9 +1488,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 const wanted = cliTurn.model;
                 const offered = offeredModels(session.sessionConfigResult, configId);
                 if (support.sessionModelEnv && !session.launchModel && offered.length) accountModels = new Set(offered);
-                // A pooled process missing a catalog model predates the catalog: fail and respawn, never run another.
+                // A pooled process missing a catalog model predates the catalog: fail and respawn, never run another (the catalog holds picker ids; `wanted` may be the resolved wire id, so check both).
                 staleProcess = Boolean(support.fallbackModel && wanted && !launchedThisTurn && offered.length
-                  && !offered.includes(wanted) && models.options.some((option) => option.id === wanted));
+                  && !offered.includes(wanted) && models.options.some((option) => option.id === wanted || option.id === turn.model));
                 if (support.fallbackModel && offered.length && !skipSubscriptionAuthForLocalInject(turn.model)
                     && !staleProcess && (!wanted || !offered.includes(wanted))) {
                   const fallback = support.fallbackModel(session.sessionConfigResult, models.default);
