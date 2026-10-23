@@ -115,9 +115,19 @@ export function EnginesBeat({
       ) : (
         <>
           {tested?.state === "failed" && (
-            <p role="alert" data-ai-silent className="animate-rise mt-4 text-[13px] text-ink">
-              {t("onboarding.engines.noAnswer", { name: tested.instance.displayName })}
-            </p>
+            <div role="alert" data-ai-silent className="animate-rise mt-4 rounded-xl bg-warning/10 px-3.5 py-3 text-[13px] leading-relaxed text-ink">
+              {/* The check's own plain reason (signed out, a used-up limit…) when it gave one. */}
+              <p data-ai-reason>{tested.error ?? t("onboarding.engines.noAnswer", { name: tested.instance.displayName })}</p>
+              {tested.error && <p className="mt-1 text-ink-secondary">{t("onboarding.engines.orAnother")}</p>}
+              <button
+                type="button"
+                onClick={tested.retry}
+                className="mt-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-medium text-ink transition-colors hover:bg-raised"
+              >
+                <RefreshCw size={12} aria-hidden="true" />
+                {t("common.checkAgain")}
+              </button>
+            </div>
           )}
           {!tested && backup && (
             <p data-ai-backup className="animate-rise mt-4 text-[13px] text-ink-secondary">

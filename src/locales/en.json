@@ -2448,6 +2448,7 @@
   "onboarding.engines.answered": "Connected · {name}",
   "onboarding.engines.checkingAnswer": "Checking that {name} answers…",
   "onboarding.engines.noAnswer": "{name} is signed in but didn't answer. Try another way.",
+  "onboarding.engines.orAnother": "Or connect another AI below.",
   "onboarding.engines.freeBackup": "{name}'s free model is ready as a backup. For the best answers, connect an AI you already use.",
   "onboarding.engines.signInHint": "Use the {name} account you already have. You sign in on their own website, so your password stays with them.",
   "onboarding.engines.ready": "Ready",

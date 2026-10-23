@@ -131,7 +131,8 @@ describe("the welcome's Connect an AI step", () => {
     f.check = () => Promise.resolve({ ok: false, error: "Claude didn't answer within 90 seconds." });
     f.instances = [engine("claude", "claudeAgent", "Claude", true), engine("codex", "codex", "Codex", false), engine("kimi", "kimiAgent", "Kimi", false)];
     await show();
-    expect(host.querySelector("[role=alert]")?.textContent).toBe("Claude is signed in but didn't answer. Try another way.");
+    expect(host.querySelector("[data-ai-silent] [data-ai-reason]")?.textContent).toBe("Claude didn't answer within 90 seconds.");
+    expect(host.querySelector("[data-ai-silent]")?.textContent).toContain("Or connect another AI below.");
     expect(host.querySelector("[data-ai-connected]")).toBeNull();
     expect(host.querySelector("[data-ai-recommended]")?.getAttribute("data-ai-recommended")).toBe("codex");
     await otherWays();
@@ -142,6 +143,34 @@ describe("the welcome's Connect an AI step", () => {
     await show();
     expect(f.checks).toEqual(["/api/instances/claude/check", "/api/instances/grok/check"]);
     expect(host.querySelector("[data-ai-connected]")?.textContent).toBe("Connected · Grok");
+  });
+
+  it("says the plain reason a check gave, and Check again sends a new test message", async () => {
+    f.check = () => Promise.resolve({ ok: false, error: "Claude isn't signed in on this computer anymore. Sign in again, then check again." });
+    f.instances = [engine("claude", "claudeAgent", "Claude", true), engine("codex", "codex", "Codex", false)];
+    await show();
+    expect(host.querySelector("[data-ai-reason]")?.textContent).toBe("Claude isn't signed in on this computer anymore. Sign in again, then check again.");
+    expect(text()).not.toContain("is signed in but didn't answer");
+    let answer!: (value: object) => void;
+    f.check = () => new Promise((resolve) => { answer = resolve; });
+    const again = [...host.querySelectorAll<HTMLButtonElement>("[data-ai-silent] button")].find((button) => button.textContent === "Check again")!;
+    await act(async () => { again.click(); });
+    expect(f.checks).toEqual(["/api/instances/claude/check", "/api/instances/claude/check"]);
+    expect(host.querySelector("[data-ai-checking]")?.textContent).toBe("Checking that Claude answers…");
+    await act(async () => { answer({ ok: true }); });
+    expect(host.querySelector("[data-ai-connected]")?.textContent).toBe("Connected · Claude");
+  });
+
+  it("shows what the server's own test found, without sending another", async () => {
+    f.instances = [{ ...engine("claude", "claudeAgent", "Claude", true), aiTest: "failed", aiTestError: "Your Claude usage limit has been reached." },
+      engine("codex", "codex", "Codex", false)];
+    await show();
+    expect(f.checks).toEqual([]);
+    expect(host.querySelector("[data-ai-reason]")?.textContent).toBe("Your Claude usage limit has been reached.");
+    // With no reason given, the plain line.
+    f.instances = [{ ...engine("claude", "claudeAgent", "Claude", true), aiTest: "failed" }];
+    await show();
+    expect(host.querySelector("[data-ai-reason]")?.textContent).toBe("Claude is signed in but didn't answer. Try another way.");
   });
 
   it("asks for the person's own AI when only OpenCode's free model works, and says the free model is a backup", async () => {
