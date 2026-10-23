@@ -112,7 +112,7 @@ describe("a reload in the middle of the welcome", () => {
     await reload();
     expect((host.querySelector(NAME) as HTMLInputElement).value).toBe("Ada");
     expect((host.querySelector(EMAIL) as HTMLInputElement).value).toBe("ada@exa");
-    expect(text()).toContain("Check the email address.");
+    expect(button("Continue")!.getAttribute("aria-disabled"), "still held for the email being typed").toBe("true");
     await type(EMAIL, "");
     await press("Maybe later");
     expect(draft()).toMatchObject({ beat: "engines", name: "Ada" });

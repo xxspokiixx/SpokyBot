@@ -19,6 +19,8 @@ const show = async (fields: WelcomeFields, hosted?: boolean) => {
   await act(async () => { root.render(createElement(HelloBeat, { ...props, fields, saved, ...(hosted === undefined ? {} : { hosted }) })); });
 };
 const button = (label: string) => [...host.querySelectorAll("button")].find((node) => node.textContent === label)!;
+/** Continue stays disabled (aria-disabled) while the email is wrong, so pressing it can still say why. */
+const blocked = () => button("Continue").disabled || button("Continue").getAttribute("aria-disabled") === "true";
 const press = async (label: string) => { await act(async () => { button(label).click(); }); };
 const flush = async () => { await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); }); };
 const putBodies = () => store.api.mock.calls.filter(([, init]) => init?.method === "PUT").map(([, init]) => JSON.parse(init.body));
@@ -62,23 +64,42 @@ describe("the greeting beat", () => {
 
   it("lets Continue go on with no email at all", async () => {
     await show({ name: "", email: "" });
-    expect(button("Continue").disabled).toBe(false);
+    expect(blocked()).toBe(false);
     await press("Continue");
     expect(props.onNext).toHaveBeenCalledOnce();
     expect(store.api, "nothing typed, nothing to save").not.toHaveBeenCalled();
   });
 
-  it("says so under the field when the email is not valid, and holds Continue only while it is not", async () => {
-    await show({ name: "Ada", email: "ada@" });
+  it("holds Continue while the email is not valid, and says why once the field is left, not while typing", async () => {
+    await show({ name: "Ada", email: "a" });
+    expect(host.textContent, "nothing is flagged on the first character").not.toContain("Check the email address.");
+    expect(host.textContent).toContain("We only use your email");
+    expect(blocked()).toBe(true);
+    const email = host.querySelector<HTMLInputElement>('input[type="email"]')!;
+    await act(async () => { email.focus(); email.blur(); });
     expect(host.textContent).toContain("Check the email address.");
-    expect(button("Continue").disabled).toBe(true);
-    expect(host.querySelector('input[type="email"]')?.getAttribute("aria-invalid")).toBe("true");
+    expect(email.getAttribute("aria-invalid")).toBe("true");
     await show({ name: "Ada", email: "ada@example.com" });
     expect(host.textContent).not.toContain("Check the email address.");
-    expect(button("Continue").disabled).toBe(false);
+    expect(blocked()).toBe(false);
     await show({ name: "Ada", email: "" });
     expect(host.textContent).not.toContain("Check the email address.");
-    expect(button("Continue").disabled).toBe(false);
+    expect(blocked()).toBe(false);
+  });
+
+  it("says why when Continue is pressed, or Enter, with an email that is not valid, and does not go on", async () => {
+    await show({ name: "Ada", email: "ada@" });
+    await press("Continue");
+    expect(host.textContent).toContain("Check the email address.");
+    expect(props.onNext).not.toHaveBeenCalled();
+    expect(store.api).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await show({ name: "Ada", email: "ada@" });
+    const email = host.querySelector<HTMLInputElement>('input[type="email"]')!;
+    await act(async () => { email.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(host.textContent).toContain("Check the email address.");
+    expect(props.onNext).not.toHaveBeenCalled();
   });
 
   it("Continue saves the name and the email, shows it is saving, and goes on once saved", async () => {

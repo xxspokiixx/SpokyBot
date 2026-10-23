@@ -21,10 +21,17 @@ export function HelloBeat({
   const noteId = useId();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
+  // A wrong email is flagged once the field is left or Continue is tried, never while it is still being typed.
+  const [checked, setChecked] = useState(false);
   const email = checkEmail(fields.email);
+  const flagged = email === "invalid" && checked;
 
   const saveProfile = async () => {
-    if (email === "invalid" || pending.current) return;
+    if (email === "invalid") {
+      setChecked(true);
+      return;
+    }
+    if (pending.current) return;
     pending.current = true;
     setSaving(true);
     setFailed(false);
@@ -77,24 +84,32 @@ export function HelloBeat({
       <input
         type="email"
         aria-label={t("phone.signIn.email")}
-        aria-invalid={email === "invalid"}
+        aria-invalid={flagged}
         aria-describedby={noteId}
         value={fields.email}
         onChange={(e) => onFields({ ...fields, email: e.target.value })}
+        onBlur={() => setChecked(true)}
         onKeyDown={(e) => e.key === "Enter" && void saveProfile()}
         placeholder="you@example.com"
         className={`animate-rise mt-3 ${inputClass}`}
         style={staggerIndex(2)}
       />
       <p id={noteId} aria-live="polite" className="animate-rise mt-1.5 w-full text-[12px] leading-snug" style={staggerIndex(2)}>
-        {email === "invalid" ? (
+        {flagged ? (
           <span className="text-danger">{t("onboarding.email.invalid")}</span>
         ) : (
           <span className="text-ink-secondary">{t("onboarding.email.why", { app: brand().name })}</span>
         )}
       </p>
       {failed && <p role="alert" className="mt-3 text-[13px] text-danger">{t("onboarding.profile.error")}</p>}
-      <PrimaryButton onClick={() => void saveProfile()} disabled={email === "invalid" || saving} className="animate-rise mt-3" style={staggerIndex(3)}>
+      <PrimaryButton
+        onClick={() => void saveProfile()}
+        // Held while the email is wrong, yet still pressable, so pressing it says why.
+        aria-disabled={email === "invalid"}
+        disabled={saving}
+        className="animate-rise mt-3 aria-disabled:opacity-40"
+        style={staggerIndex(3)}
+      >
         {saving ? t("onboarding.saving") : t("onboarding.continue")}
       </PrimaryButton>
       <QuietButton onClick={later} disabled={saving} className="animate-rise mt-3 disabled:opacity-50" style={staggerIndex(4)}>
