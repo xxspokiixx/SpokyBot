@@ -56,6 +56,14 @@ options belonging to another instance, and hiding unsupported thinking
 controls. The existing ModelPicker suites also run to cover common selection
 behavior.
 
+For the before screenshot, the unmodified base commit `9596671` was exported
+into a separate directory and launched with its own isolated server and the
+same synthetic bot/provider setup. Its custom engines advertised only
+`agent-default`, with no variant capability; the picker displayed "No models
+to show here yet." No feature code was used for this baseline.
+
+![Before: custom ACP picker has no native model choices](evidence/custom-acp-models/before.png)
+
 The real renderer was also opened in an isolated browser preview backed by the
 same disposable server and fake ACP engine. The operator opened the synthetic
 `novel-zcode-flash` bot profile, opened its model picker, selected
