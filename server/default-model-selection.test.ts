@@ -239,12 +239,12 @@ describe("new bot default model selection while enrolled in an organisation", ()
 describe("new bot default model selection wiring in index.ts", () => {
   // Windows checkouts may use CRLF; match on normalised line endings.
   const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  const extract = (signature: string) => {
-    const start = source.indexOf(`\n${signature}`), end = source.indexOf("\n}\n", start);
+  const extract = (signature: string, close = "\n}\n") => {
+    const start = source.indexOf(`\n${signature}`), end = source.indexOf(close, start);
     expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
-    return source.slice(start + 1, end + 2);
+    return source.slice(start + 1, end + close.length - 1);
   };
-  const code = ts.transpileModule(`${extract("function policyModelRefusal(")}\n${extract("function selectableInstances<")}\n${extract("async function defaultSelection(")}`,
+  const code = ts.transpileModule(`${extract("function policyModelRefusal(")}\n${extract("function selectableInstances<")}\n${extract("async function defaultSelection(")}\n${extract("const selectionContext = {", "\n};\n")}`,
     { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
   const companyRouter = {
     instanceId: "company.fixture.openrouter", driverKind: "openai-compat",
@@ -253,7 +253,7 @@ describe("new bot default model selection wiring in index.ts", () => {
   };
   const companyClaude = { ...claude, instanceId: "company.fixture.anthropic", models: { default: "company-claude", options: [{ id: "company-claude", label: "Company" }] } };
   const signedOut = { ...claude, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
-  function server(instances: unknown[], { enrolled = false, companyModelsOnly = false, saved, credit = null, configs = {} }: { enrolled?: boolean; companyModelsOnly?: boolean; saved?: ModelSelection; credit?: string | null; configs?: Record<string, { enabled?: boolean; access?: EngineAccess }> } = {}) {
+  function server(instances: unknown[], { enrolled = false, companyModelsOnly = false, saved, credit = null, configs = {}, answered }: { enrolled?: boolean; companyModelsOnly?: boolean; saved?: ModelSelection; credit?: string | null; configs?: Record<string, { enabled?: boolean; access?: EngineAccess }>; answered?: (instance: SelectableInstance) => boolean | undefined } = {}) {
     const managedPolicy = new ManagedDesktopPolicy();
     if (companyModelsOnly) managedPolicy.apply({ organizationId: "11111111-1111-4111-8111-111111111111", organizationName: "Fixture Company", expiresAt: Date.now() + 60_000,
       version: 1, companyModelsOnly: true, allowedEngines: "all", mcp: { allowCustom: true, allowlist: [] },
@@ -261,9 +261,10 @@ describe("new bot default model selection wiring in index.ts", () => {
     const managedDesktop = { owns: (instanceId: string) => enrolled && instanceId.startsWith("company.") };
     const cloudCredit = credit ? { owns: (instanceId: string) => instanceId === credit } : null;
     const describe = vi.fn(async () => instances);
-    const defaultSelection = new Function("hostedModels", "cfg", "registry", "managedDesktop", "managedPolicy", "BUILT_IN_DRIVERS", "selectDefaultModelSelection", "cloudCredit", "providerConfigs", "heldKeys", "withInstanceConfig",
+    const defaultSelection = new Function("hostedModels", "cfg", "registry", "managedDesktop", "managedPolicy", "BUILT_IN_DRIVERS", "selectDefaultModelSelection", "cloudCredit", "providerConfigs", "heldKeys", "withInstanceConfig", "testedAi",
       `${code}; return defaultSelection;`)(undefined, { defaultModelSelection: saved }, { describe }, managedDesktop, managedPolicy,
-      [{ driverKind: "claudeAgent", metadata: { displayName: "Claude" } }], selectDefaultModelSelection, cloudCredit, () => configs, null, withInstanceConfig) as (saved?: ModelSelection | null, instances?: readonly SelectableInstance[]) => Promise<ModelSelection>;
+      [{ driverKind: "claudeAgent", metadata: { displayName: "Claude" } }], selectDefaultModelSelection, cloudCredit, () => configs, null, withInstanceConfig,
+      { answered: answered ?? (() => undefined) }) as (saved?: ModelSelection | null, instances?: readonly SelectableInstance[]) => Promise<ModelSelection>;
     return { defaultSelection, describe, close: () => managedPolicy.close() };
   }
 
@@ -311,6 +312,13 @@ describe("new bot default model selection wiring in index.ts", () => {
     await expect(saved.defaultSelection()).resolves.toEqual({ instanceId: "", model: "" });
     await expect(saved.defaultSelection(null)).resolves.toEqual({ instanceId: "claude", model: "claude-default" });
     saved.close();
+  });
+
+  it("passes what each AI's test message showed into the choice, and never past a saved default", async () => {
+    const claudeSilent = (instance: SelectableInstance) => instance.instanceId === "claude" ? false : undefined;
+    await expect(server([claude, codex], { answered: claudeSilent }).defaultSelection()).resolves.toEqual({ instanceId: "codex", model: "codex-default" });
+    await expect(server([claude, codex], { answered: claudeSilent, saved: { instanceId: "claude", model: "claude-default" } }).defaultSelection())
+      .resolves.toEqual({ instanceId: "claude", model: "claude-default" });
   });
 
   it("passes the organisation's policy into the choice", async () => {
