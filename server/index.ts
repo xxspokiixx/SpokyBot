@@ -10271,7 +10271,7 @@ async function runClaimedGroupMemberTurn(
   let retainRoomVmLease = false;
   let roomSpeaker: { botId: string; name: string; color: string; since?: number } | undefined;
   let providerDispatched = false;
-  let setupStallCause: string | undefined;
+  let setupStallReason: string | undefined;
   let unregisterSetupStall = () => {};
   let roomComputerKind: "local" | "vps" | "box" | null = null;
   let roomVpsBotId: string | null = null;
@@ -10496,8 +10496,8 @@ async function runClaimedGroupMemberTurn(
     });
   }
   // Latch a stall during setup so dispatch completes the turn instead of launching one the person was told was stopped.
-  setupStallCause = undefined;
-  unregisterSetupStall = roomStallCompletions.register(threadId, (cause) => { setupStallCause = cause; });
+  setupStallReason = undefined;
+  unregisterSetupStall = roomStallCompletions.register(threadId, (cause) => { setupStallReason = stoppedTurnText(threadId, undefined, cause); });
   // Watch from claim: room setup can wedge before any provider event exists.
   watchdog.watch(threadId, bot.id);
 
@@ -10844,8 +10844,8 @@ async function runClaimedGroupMemberTurn(
     deadline.start();
     // Swapped synchronously with the dispatch below, so no stall can fall between them.
     unregisterSetupStall();
-    if (setupStallCause !== undefined) {
-      if (orchestration) orchestration.result.stopReason = stoppedTurnText(threadId, undefined, setupStallCause);
+    if (setupStallReason !== undefined) {
+      if (orchestration) orchestration.result.stopReason = setupStallReason;
       finish("stalled");
       return;
     }
@@ -11145,8 +11145,8 @@ async function runClaimedGroupMemberTurn(
     // Covers every early return that never produces a provider terminal event.
     unregisterSetupStall();
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
-    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled", ...(roomOutcome === "stalled" || setupStallCause !== undefined ? { stalled: true } : {}),
-      text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || roomFailure || roomReply || roomOutcome || "The turn did not run" });
+    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled", ...(roomOutcome === "stalled" || setupStallReason !== undefined ? { stalled: true } : {}),
+      text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || setupStallReason || roomFailure || roomReply || roomOutcome || "The turn did not run" });
     if (!retainRoomVmLease) releaseRoomVmLease();
     if (!providerDispatched && roomSpeaker && groupSpeakers.get(threadId) === roomSpeaker) {
       groupSpeakers.delete(threadId);
