@@ -9072,6 +9072,112 @@ describe("harness HTTP API", () => {
     }
   });
 
+  describe("Set me up under a new bot's greeting", () => {
+    type Seen = { systemPrompt?: string; prompt?: { message?: { content?: unknown } } };
+    const userText = (seen: Seen): string => {
+      const content: unknown = seen.prompt?.message?.content;
+      return typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((block: { type?: string }) => block?.type === "text").map((block: { text?: string }) => block.text ?? "").join("") : "";
+    };
+    const blankBot = async (name: string) => {
+      const bot = (await api("POST", "/api/bots", { name })).body.bot;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+      return bot;
+    };
+    const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages as any[];
+    const task = async (botId: string, threadId: string) => (await api("GET", "/api/bots?messages=0")).body.bots
+      .find((candidate: { id: string }) => candidate.id === botId)?.tasks?.find((one: { threadId: string }) => one.threadId === threadId);
+    const turn = async (botId: string, text: string, threadId?: string) => {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${botId}/messages`, { text, ...(threadId ? { threadId } : {}) })).status).toBe(202);
+      const seen = await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+      await releaseTurn(botId);
+      return seen;
+    };
+
+    it("answers the press at once with the bot's own line and no model, and keeps the waiting mark on the server", async () => {
+      const bot = await blankBot("Press");
+      try {
+        expect(bot.messages[0]).toMatchObject({ role: "bot", kind: "text", text: "Hi, I'm Press. What would you like me to do?", setupOffer: true });
+        rmSync(fakeClaudeDump, { force: true });
+        const pressed = await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId });
+        expect(pressed.status).toBe(200);
+        const rows = await messages(bot.threadId);
+        expect(rows.map((row) => [row.role, row.setupOffer ?? null])).toEqual([["bot", null], ["bot", null]]);
+        expect(rows[1].text).toMatch(/^Great\. Tell me what you'd like help with/);
+        expect(await task(bot.id, bot.threadId)).toMatchObject({ setupRequest: { at: rows[1].at } });
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).body).toEqual({ ok: true, already: true });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(existsSync(fakeClaudeDump)).toBe(false);
+      } finally {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("runs the person's next line as setup while the chat keeps their words; other conversations and a cancel leave it alone", async () => {
+      const bot = await blankBot("Next line");
+      try {
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        const other = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Elsewhere" })).body.task;
+        const elsewhere = await turn(bot.id, "hello over here", other.threadId);
+        expect(elsewhere.systemPrompt).not.toContain("The user explicitly asked you to set yourself up");
+        expect(await task(bot.id, bot.threadId)).toMatchObject({ setupRequest: expect.any(Object) });
+
+        const setup = await turn(bot.id, "sort my inbox every morning", bot.threadId);
+        expect(setup.systemPrompt).toContain("The user explicitly asked you to set yourself up");
+        expect(userText(setup)).toContain("Set yourself up for this job: sort my inbox every morning");
+        expect(userText(setup)).not.toContain("/setup");
+        const line = (await messages(bot.threadId)).find((row) => row.role === "user");
+        expect(line).toMatchObject({ text: "sort my inbox every morning", setupRequest: true });
+        expect((await task(bot.id, bot.threadId))?.setupRequest).toBeUndefined();
+
+        const after = await turn(bot.id, "thanks", bot.threadId);
+        expect(after.systemPrompt).not.toContain("The user explicitly asked you to set yourself up");
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("forgets the request when its chip is closed", async () => {
+      const bot = await blankBot("Cancelled");
+      try {
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        expect((await api("DELETE", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        expect((await task(bot.id, bot.threadId))?.setupRequest).toBeUndefined();
+        const plain = await turn(bot.id, "sort my inbox every morning", bot.threadId);
+        expect(plain.systemPrompt).not.toContain("The user explicitly asked you to set yourself up");
+        expect(userText(plain)).not.toContain("Set yourself up for this job");
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("tells a Chief that sets itself up to stay the Chief", async () => {
+      const bot = await blankBot("Chief setup");
+      try {
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true })).status).toBe(200);
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        const setup = await turn(bot.id, "keep an eye on my inbox", bot.threadId);
+        expect(setup.systemPrompt).toContain("You are also the Chief of Staff, and setting yourself up does not change that");
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("never offers it to a bot made with a description", async () => {
+      const bot = (await api("POST", "/api/bots", { name: "Described", description: "Files bugs." })).body.bot;
+      try {
+        expect(bot.messages[0].setupOffer).toBeUndefined();
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(409);
+      } finally {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+  });
+
   it("tells a /setup turn to connect an app itself when its connected-apps tools are mounted, and names the switch when they are off", async () => {
     // This suite's server has the managed connected-apps service (the stub broker).
     type Dump = { systemPrompt: string; mcpConfig: { mcpServers: Record<string, unknown> } };
