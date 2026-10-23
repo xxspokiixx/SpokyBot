@@ -18,6 +18,7 @@
 //   FAKE_CODEX_ASYNC_QUESTIONS  async-question mode: JSON replacing the message's `questions`
 //   FAKE_CODEX_ASYNC_QUESTION_GATE  async-question mode: the turn keeps running until this file exists (default 300 ms)
 //   FAKE_CODEX_DUMP  path for {pid, argv, env, calls, decision}
+//   FAKE_CODEX_ECHO_INPUT  "1": echo turn/start's input back as a userMessage item, as codex-cli 0.164.0 does
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
@@ -778,6 +779,11 @@ process.stdin.on("data", (chunk) => {
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
         if (mode === "early-turn-events") break;
+        if (process.env.FAKE_CODEX_ECHO_INPUT === "1") {
+          const prompt = { type: "userMessage", id: "u1", content: msg.params?.input ?? [] };
+          notify("item/started", { item: prompt });
+          notify("item/completed", { item: prompt });
+        }
         if (mode === "helper-events") {
           for (const scope of [
             { threadId: "helper-thread", turnId: "helper-turn" },

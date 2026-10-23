@@ -50,7 +50,7 @@ import { CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, code
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
-import { extractMcpImages } from "../mcp-tool-images.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
 import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
@@ -427,7 +427,7 @@ function permissionProfileUnsupported(error: unknown): boolean {
   return /(?:experimental api|invalid params|unknown field|unknown.*permissions|permissions.*(?:unsupported|sandbox)|cannot.*permissions)/i.test(message);
 }
 
-/** Native instructions and private host paths stay out of diagnostics; the provider still gets the unmodified request. */
+/** Native instructions and image bytes stay out of diagnostics; the provider still gets the unmodified request. */
 function codexNativeLogMessage(message: unknown): unknown {
   if (!message || typeof message !== "object" || Array.isArray(message)) return message;
   const record = message as Record<string, unknown>;
@@ -439,22 +439,7 @@ function codexNativeLogMessage(message: unknown): unknown {
   if (record.method === "thread/inject_items") {
     return { ...record, params: { ...params, items: "[developer instruction update omitted]" } };
   }
-  if (record.method !== "turn/start") return message;
-  const input = (params as Record<string, unknown>).input;
-  if (!Array.isArray(input)) return message;
-  return {
-    ...record,
-    params: {
-      ...params,
-      input: input.map((item) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-        const entry = item as Record<string, unknown>;
-        return entry.type === "localImage"
-          ? { ...entry, path: "[private attachment path omitted]" }
-          : item;
-      }),
-    },
-  };
+  return record.method === "turn/start" ? withoutInlineImages(message) : message;
 }
 
 /** A response arriving after its request timed out is still sanitized, never a secret-bearing orphan. */
@@ -484,7 +469,7 @@ export function codexNativeIncomingLogMessage(
       },
     };
   }
-  return message;
+  return withoutInlineImages(message);
 }
 
 /** Codex's default for one MCP server's tools (openai/codex#17843): "auto"
@@ -1646,7 +1631,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (rebuiltFromReplay) emit({ ...base(threadId, turnId), type: "runtime.notice", message: rebuiltSessionNotice("Codex") });
         const turnInput = [
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
-          ...(turn.images ?? []).map((image) => ({ type: "localImage" as const, path: image.path })),
+          ...await codexImageInputs(turn.images),
         ];
         const startTurn = () => {
           promptSubmitted = true;
@@ -1778,6 +1763,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     get models() {
       return models;
     },
+    quickModelsUsable: () => !plan && loginMark() === null,
     refreshModels,
     ...(startupModelRefresh ? { startupModelRefresh } : {}),
     generateMemoryText,
