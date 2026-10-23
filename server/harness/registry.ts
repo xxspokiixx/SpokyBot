@@ -1,6 +1,6 @@
 // Provider instance registry — port of upstream's ProviderInstanceRegistryLive behavior, minus Effect.
 import { findCliCandidates } from "../env-path.ts";
-import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
+import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
 import { installStandaloneEngine, isAppStandaloneCopy } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
@@ -365,8 +365,10 @@ export class ProviderRegistry {
     return true;
   }
 
-  private appStandaloneCopy(cli: string | undefined): boolean {
-    return cli !== undefined && isAppStandaloneCopy(cli, this.enginesBaseDir);
+  /** Whether this engine's CLI runs the app's own standalone copy, looked up the way its spawns look it up. */
+  private appStandaloneCopy(driver: AnyProviderDriver | undefined, cli: string | undefined): boolean {
+    if (cli === undefined || !driver?.install?.standalone) return false;
+    return isAppStandaloneCopy(cli, this.enginesBaseDir, standaloneLookupPath(this.enginesBaseDir));
   }
 
   describe(options: { known?: boolean } = {}) {
@@ -455,7 +457,7 @@ export class ProviderRegistry {
             backgroundText: inst.generateText !== undefined || inst.generateMemoryText !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(this.cliByInstance.get(inst.instanceId) ?? cliDefaultOf(driver))),
+          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, this.cliByInstance.get(inst.instanceId) ?? cliDefaultOf(driver))),
           authentication: inst.startAuthentication
             ? {
                 method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication

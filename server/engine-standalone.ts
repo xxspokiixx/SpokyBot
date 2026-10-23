@@ -287,20 +287,20 @@ export function registerStandaloneBinDirs(baseDir = DATA_DIR, releases: readonly
   }
 }
 
-function resolvesInside(folder: string, cli: string): boolean {
-  const resolved = findCliCandidates(cli)[0];
+function resolvesInside(folder: string, cli: string, path?: string): boolean {
+  const resolved = findCliCandidates(cli, path)[0];
   return resolved !== undefined && inside(realOrResolved(folder), realOrResolved(resolved));
 }
 
-/** Whether `cli` runs a copy the app installed rather than one the person installed. */
-export function isAppStandaloneCopy(cli: string, baseDir = DATA_DIR): boolean {
-  return resolvesInside(standaloneRoot(baseDir), cli);
+/** Whether `cli`, looked up on `path` (the app's PATH unless given), runs a copy the app installed. */
+export function isAppStandaloneCopy(cli: string, baseDir = DATA_DIR, path?: string): boolean {
+  return resolvesInside(standaloneRoot(baseDir), cli, path);
 }
 
 /** The release's run settings when `cli` resolves to the app's own copy; a copy the person installed gets none. */
-export function standaloneRunEnv(release: StandaloneRelease | undefined, cli: string, baseDir = DATA_DIR): Record<string, string> {
+export function standaloneRunEnv(release: StandaloneRelease | undefined, cli: string, baseDir = DATA_DIR, path?: string): Record<string, string> {
   if (!release?.runEnv) return {};
-  return resolvesInside(standaloneEngineDir(release.engine, baseDir), cli) ? { ...release.runEnv } : {};
+  return resolvesInside(standaloneEngineDir(release.engine, baseDir), cli, path) ? { ...release.runEnv } : {};
 }
 
 function checkRelease(release: StandaloneRelease, asset: StandaloneAsset): void {

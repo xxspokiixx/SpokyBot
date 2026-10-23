@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelCatalog, StandaloneRelease } from "../contracts.ts";
 import { standalonePlatformKey } from "../engine-standalone.ts";
-import { registerFallbackPathDir, resetPathCache, resetPathCacheForTests } from "../env-path.ts";
+import { registerFallbackPathDir, registerPathDir, resetPathCache, resetPathCacheForTests } from "../env-path.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { ProviderRegistry, SNAPSHOT_DEADLINE_MS, SNAPSHOT_REUSE_MS } from "./registry.ts";
@@ -555,6 +555,11 @@ process.exit(0);
     Object.assign(fake.driver, { install: { signInCommand: "fakebin auth login", standalone: standaloneRelease(standalonePlatformKey()) } });
     const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: base, npmAvailable: () => false });
     await registry.load({ a: { driver: "fake" } });
+    expect((await registry.describe())[0].install?.signInCommand).toBeUndefined();
+    // A copy npm put in the app's folder earlier ranks behind the app's own build for such an engine.
+    mkdirSync(join(base, "tools", "npm", "bin"), { recursive: true });
+    writeFileSync(join(base, "tools", "npm", "bin", "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
+    registerPathDir(join(base, "tools", "npm", "bin"));
     expect((await registry.describe())[0].install?.signInCommand).toBeUndefined();
     // A copy the person installed comes first on PATH and keeps its sign-in command.
     writeFileSync(join(own, "fakebin"), "#!/bin/sh\n", { mode: 0o755 });

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
@@ -25,7 +25,8 @@ import {
   setOpenCodeProviderKeyPolicy,
 } from "./opencode-go.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
-import { serverInstallFor } from "../../engine-install.ts";
+import { enginesBinDir, serverInstallFor } from "../../engine-install.ts";
+import { registerFallbackPathDir, registerPathDir, resetPathCacheForTests } from "../../env-path.ts";
 import { standaloneAssetFor, standaloneEngineDir } from "../../engine-standalone.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { OPENCODE_PROVIDER_ENV } from "../../config.ts";
@@ -1162,5 +1163,67 @@ describe("OpenCode without Node.js", () => {
       await removeTempDir(standaloneEngineDir("opencode"));
       await removeTempDir(scratch);
     }
+  });
+});
+
+describe.skipIf(process.platform === "win32")("which OpenCode runs", () => {
+  async function runTurn(scratch: string, log: string, withOwnCopy: boolean) {
+    const original = process.env.PATH;
+    const dump = join(scratch, "env.json");
+    const copy = (folder: string, label: string) => {
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "opencode"), `#!/bin/sh\necho ${label} >> '${log}'\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    };
+    const own = join(scratch, "own-bin");
+    if (withOwnCopy) copy(own, "own");
+    // A copy npm put in the app's folder before OpenCode had its own build, and the app's own build.
+    copy(enginesBinDir(), "npm");
+    copy(join(standaloneEngineDir("opencode"), "bin"), "standalone");
+    process.env.PATH = withOwnCopy ? `${own}${delimiter}${original}` : original;
+    resetPathCacheForTests();
+    registerPathDir(enginesBinDir());
+    registerFallbackPathDir(join(standaloneEngineDir("opencode"), "bin"));
+    const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
+    const instance = await driver.create({
+      instanceId: `opencode-which-${withOwnCopy}`, displayName: "OpenCode", enabled: true,
+      config: { cli: "opencode", fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_DUMP: dump },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-which", botId: "bot-7", text: "hi", model: "opencode/big-pickle", approvalMode: "full" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      return (JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> }).env;
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      process.env.PATH = original;
+      resetPathCacheForTests();
+    }
+  }
+
+  let scratch = "";
+  afterEach(async () => {
+    await removeTempDir(enginesBinDir());
+    await removeTempDir(standaloneEngineDir("opencode"));
+    if (scratch) await removeTempDir(scratch);
+    scratch = "";
+  });
+
+  it("runs the person's own copy ahead of the one npm put in the app's folder, with its updater left alone", async () => {
+    scratch = mkdtempSync(join(tmpdir(), "omb-opencode-which-"));
+    const log = join(scratch, "runs.log");
+    const env = await runTurn(scratch, log, true);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["own"]);
+    expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBeUndefined();
+    expect(env.PATH.split(delimiter).at(-1)).toBe(enginesBinDir());
+  });
+
+  it("runs the app's own build ahead of the npm copy, with OpenCode's self-updater off", async () => {
+    scratch = mkdtempSync(join(tmpdir(), "omb-opencode-which-"));
+    const log = join(scratch, "runs.log");
+    const env = await runTurn(scratch, log, false);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["standalone"]);
+    expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBe("1");
   });
 });

@@ -158,12 +158,13 @@ export function harnessHome(name: string, env: Record<string, string | undefined
   return join(userHome(env), `.${name}`);
 }
 
-export function findCliCandidates(name: string): string[] {
+/** Every copy of `name` on `path` (the app's PATH unless given), in the order a lookup would find them. */
+export function findCliCandidates(name: string, path: string = augmentedPath()): string[] {
   if (!name || /[\n\r]/.test(name)) return [];
   if (/[/\\]/.test(name) || /^[a-zA-Z]:/.test(name)) return [name];
   const exts = process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
   const out: string[] = [];
-  for (const dir of augmentedPath().split(delimiter)) {
+  for (const dir of path.split(delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
       const p = join(dir, name + ext);

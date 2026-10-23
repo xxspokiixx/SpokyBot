@@ -9,7 +9,7 @@ import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
-import { standaloneRunEnv } from "../../engine-standalone.ts";
+import { applyStandaloneSpawnEnv } from "../../engine-install.ts";
 import { OPENCODE_STANDALONE } from "./opencode-release.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpSupport } from "./core.ts";
 import { offeredModels } from "./config-options.ts";
@@ -757,7 +757,7 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
   transformEnv: (env, config, instanceId, instanceEnvironment) => {
     withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
-    Object.assign(env, standaloneRunEnv(OPENCODE_STANDALONE, config.cli));
+    applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
   },
   spawnFingerprint: openCodeLoginsFingerprint,
   applyTurnEnv: (env, { fullAuto, botId, cwd }) => {

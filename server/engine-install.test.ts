@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StandaloneRelease } from "./contracts.ts";
-import { enginesBinDir, enginesPrefix, installNpmEngine, npmPackageOf, registerEnginesBinDir, serverInstallFor } from "./engine-install.ts";
+import { enginesBinDir, enginesPrefix, installNpmEngine, npmPackageOf, registerEnginesBinDir, serverInstallFor, standaloneEnginePath } from "./engine-install.ts";
 import { standaloneEngineDir, standalonePlatformKey } from "./engine-standalone.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCacheForTests } from "./env-path.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -246,5 +246,14 @@ describe.skipIf(process.platform === "win32")("app-installed engines on PATH at 
     const path = augmentedPath().split(delimiter);
     expect(path[0]).toBe(enginesBinDir(base));
     expect(path.at(-1)).toBe(join(engine, "bin"));
+  });
+});
+
+describe("PATH for an engine the app can install itself", () => {
+  it("ranks the app's npm folder last, behind the person's PATH and the app's standalone copy", () => {
+    const npm = enginesBinDir("/data");
+    const path = [npm, "/home/ada/.local/bin", "/usr/bin", "/data/tools/standalone/opencode/bin"].join(delimiter);
+    expect(standaloneEnginePath(path, "/data").split(delimiter)).toEqual(["/home/ada/.local/bin", "/usr/bin", "/data/tools/standalone/opencode/bin", npm]);
+    expect(standaloneEnginePath(["/usr/bin", "/bin"].join(delimiter), "/data")).toBe(["/usr/bin", "/bin"].join(delimiter));
   });
 });
