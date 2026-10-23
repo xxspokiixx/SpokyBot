@@ -36,7 +36,7 @@ describe("checking a just-connected engine with one tiny real message", () => {
   });
 
   it("checks an engine whose only one-off call is the background one, as Codex and the ACP engines have", async () => {
-    const generateMemoryText = vi.fn(async () => "OK");
+    const generateMemoryText = vi.fn(async (_prompt: string) => "OK");
     expect(await checkEngine({ instanceId: "opencodeGo", displayName: "OpenCode", driverKind: "opencodeGo", generateMemoryText })).toEqual({ ok: true });
     expect(generateMemoryText.mock.calls[0]![0]).toMatch(/single word OK/);
   });
