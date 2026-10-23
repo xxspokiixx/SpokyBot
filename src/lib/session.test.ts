@@ -150,14 +150,17 @@ describe("the profile shown for a signed-in session", () => {
     }
   });
 
-  it("leaves the profile unchanged for loopback and email-less sessions", () => {
+  it("keeps the configured profile for loopback sessions", () => {
+    expect(profileForSession(owner, { kind: "loopback" })).toBe(owner);
+  });
+
+  it("does not show the configured owner for email-less paired sessions", () => {
     const sessions: SessionState[] = [
-      { kind: "loopback" },
       { kind: "session", id: "s", label: "Ada's iPad", scopes: ["client"], expiresAt: 1 },
       { kind: "session", id: "s", label: "Ada's iPad", email: "  ", scopes: ["client"], expiresAt: 1 },
     ];
     for (const session of sessions) {
-      expect(profileForSession(owner, session)).toBe(owner);
+      expect(profileForSession(owner, session)).toBeUndefined();
     }
   });
 });

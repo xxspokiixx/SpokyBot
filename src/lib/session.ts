@@ -21,7 +21,7 @@ export function profileForSession(profile: SessionProfile | undefined, sessionSt
   if (!sessionState) return undefined;
   if (sessionState.kind !== "session") return sessionState.kind === "loopback" ? profile : undefined;
   const email = sessionState.email;
-  if (!email?.trim()) return profile;
+  if (!email?.trim()) return undefined;
   return profile?.email?.trim().toLowerCase() === email.trim().toLowerCase() ? profile : { email };
 }
 
