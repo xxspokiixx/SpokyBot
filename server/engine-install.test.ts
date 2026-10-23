@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -223,17 +224,24 @@ describe.skipIf(process.platform === "win32")("app-installed engines on PATH at 
     await removeTempDir(scratch);
   });
 
-  it("puts a standalone engine's current version ahead of the app's npm folder", () => {
+  it("puts the app's npm folder first and a checked standalone build last, behind the person's own PATH", () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-engine-boot-"));
     const base = join(scratch, "data");
-    const version = join(standaloneEngineDir("fake-engine", base), "2.0.0");
-    mkdirSync(version, { recursive: true });
-    writeFileSync(join(version, "fake-engine"), "#!/bin/sh\necho 2.0.0\n", { mode: 0o755 });
-    writeFileSync(join(version, ".standalone-install.json"), JSON.stringify({ engine: "fake-engine", version: "2.0.0", sha256: "a".repeat(64), executable: "fake-engine", installedAt: 1 }));
-    writeFileSync(join(standaloneEngineDir("fake-engine", base), "current.json"), JSON.stringify({ version: "2.0.0", executable: "fake-engine", sha256: "a".repeat(64) }));
+    const engine = standaloneEngineDir("fake-engine", base);
+    const program = "#!/bin/sh\necho 2.0.0\n";
+    const programSha = createHash("sha256").update(program).digest("hex");
+    mkdirSync(join(engine, "2.0.0"), { recursive: true });
+    mkdirSync(join(engine, "bin"));
+    writeFileSync(join(engine, "2.0.0", "fake-engine"), program, { mode: 0o755 });
+    linkSync(join(engine, "2.0.0", "fake-engine"), join(engine, "bin", "fake-engine"));
+    writeFileSync(join(engine, "2.0.0", ".standalone-install.json"), JSON.stringify({ engine: "fake-engine", version: "2.0.0", sha256: "a".repeat(64), executable: "fake-engine", executableSha256: programSha, installedAt: 1 }));
+    writeFileSync(join(engine, "current.json"), JSON.stringify({ version: "2.0.0", executable: "fake-engine", sha256: "a".repeat(64), executableSha256: programSha }));
     mkdirSync(enginesBinDir(base), { recursive: true });
     resetPathCacheForTests();
-    registerEnginesBinDir(base);
-    expect(augmentedPath().split(delimiter).slice(0, 2)).toEqual([version, enginesBinDir(base)]);
+    const release: StandaloneRelease = { name: "Fake Engine", engine: "fake-engine", version: "2.0.0", hosts: [], assets: {} };
+    registerEnginesBinDir(base, [release]);
+    const path = augmentedPath().split(delimiter);
+    expect(path[0]).toBe(enginesBinDir(base));
+    expect(path.at(-1)).toBe(join(engine, "bin"));
   });
 });

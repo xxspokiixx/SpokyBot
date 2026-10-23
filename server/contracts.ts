@@ -366,6 +366,8 @@ export interface StandaloneAsset {
   archive: "zip" | "tar.gz" | "raw";
   /** The executable's `/`-separated path inside the archive; a raw download is saved under this name. */
   executable: string;
+  /** SHA-256 of the executable itself, checked after unpacking, before reusing a copy and at every start. */
+  executableSha256?: string;
   /** About how big the download is; a download over twice this is stopped. */
   approxBytes: number;
 }

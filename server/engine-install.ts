@@ -3,10 +3,11 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import type { EngineInstall } from "./contracts.ts";
+import type { EngineInstall, StandaloneRelease } from "./contracts.ts";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "./config.ts";
 import { npmEnginesPrefix } from "./engine-roots.ts";
 import { registerStandaloneBinDirs, standaloneAssetFor } from "./engine-standalone.ts";
+import { STANDALONE_RELEASES } from "./standalone-releases.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCache } from "./env-path.ts";
 import { execCli, killCliTree, spawnCli } from "./procs.ts";
 
@@ -23,10 +24,11 @@ export function enginesBinDir(baseDir = DATA_DIR, platform: NodeJS.Platform = pr
   return platform === "win32" ? enginesPrefix(baseDir) : join(enginesPrefix(baseDir), "bin");
 }
 
-/** Called once at boot: engines installed here win over any other copy on PATH, a standalone build over the npm folder. */
-export function registerEnginesBinDir(baseDir = DATA_DIR): void {
+/** Called once at boot: engines npm installed here win over any other copy on PATH. A standalone build the app installed
+ * goes last instead, so a copy the person installs themselves takes over. */
+export function registerEnginesBinDir(baseDir = DATA_DIR, releases: readonly StandaloneRelease[] = STANDALONE_RELEASES): void {
   registerPathDir(enginesBinDir(baseDir));
-  registerStandaloneBinDirs(baseDir);
+  registerStandaloneBinDirs(baseDir, releases);
 }
 
 export function npmPackageOf(install: EngineInstall | undefined): string | null {

@@ -2,7 +2,9 @@
 // installer's own HTTPS, host and redirect checks run unchanged. Nothing here reaches the internet.
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync,
+} from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -12,6 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { StandaloneAsset, StandaloneRelease } from "./contracts.ts";
 import {
   installStandaloneEngine,
+  isAppStandaloneCopy,
   registerStandaloneBinDirs,
   resetStandaloneStateForTests,
   standaloneAssetFor,
@@ -20,13 +23,17 @@ import {
   standaloneRunEnv,
   type CodesignRunner,
 } from "./engine-standalone.ts";
-import { augmentedPath, findCliCandidates, resetPathCacheForTests } from "./env-path.ts";
+import { augmentedPath, findCliCandidates, resetPathCache, resetPathCacheForTests } from "./env-path.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { buildZip } from "./testing/zip-fixture.ts";
 
 const VERSION = "1.2.3";
 const ENGINE = "fake-engine";
-const sha256 = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+const sha256 = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
+/** The error an install was refused with; an install that succeeds fails the test. */
+const refusal = (run: Promise<unknown>): Promise<Error> => run.then(() => {
+  throw new Error("expected the install to be refused");
+}, (error: Error) => error);
 
 describe("which build this machine gets", () => {
   it("names the platform and architecture, with musl only on Linux without glibc", () => {
@@ -58,7 +65,17 @@ function fixtureRelease(assets: StandaloneRelease["assets"], extra: Partial<Stan
   };
 }
 
-interface Route { status?: number; headers?: Record<string, string>; body?: Buffer; chunked?: boolean }
+interface Route {
+  status?: number;
+  headers?: Record<string, string>;
+  body?: Buffer;
+  chunked?: boolean;
+  /** Send this many bytes, then hold the connection open, or drop it. */
+  stallAfter?: number;
+  dropAfter?: number;
+  /** Send the body a few bytes at a time. */
+  trickle?: { bytes: number; everyMs: number };
+}
 
 function useAssetServer() {
   const routes = new Map<string, Route>();
@@ -75,13 +92,34 @@ function useAssetServer() {
         return;
       }
       const body = route.body ?? Buffer.alloc(0);
-      res.writeHead(route.status ?? 200, { ...(route.chunked ? {} : { "content-length": String(body.length) }), ...route.headers });
-      res.end(body);
+      const partial = route.stallAfter ?? route.dropAfter;
+      res.writeHead(route.status ?? 200, { ...(route.chunked || partial !== undefined ? {} : { "content-length": String(body.length) }), ...route.headers });
+      if (route.trickle) {
+        const { bytes, everyMs } = route.trickle;
+        let sent = 0;
+        const next = () => {
+          res.write(body.subarray(sent, sent + bytes));
+          sent += bytes;
+          if (sent >= body.length) res.end();
+          else setTimeout(next, everyMs);
+        };
+        next();
+        return;
+      }
+      if (partial === undefined) {
+        res.end(body);
+        return;
+      }
+      res.write(body.subarray(0, partial));
+      if (route.dropAfter !== undefined) setTimeout(() => res.socket?.destroy(), 20);
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     port = (server.address() as AddressInfo).port;
   });
-  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  afterAll(() => new Promise<void>((resolve) => {
+    server.closeAllConnections();
+    server.close(() => resolve());
+  }));
   beforeEach(() => {
     routes.clear();
     hits.clear();
@@ -93,17 +131,33 @@ function useAssetServer() {
   return { routes, hits: (key: string) => hits.get(key) ?? 0, fetchImpl };
 }
 
+const DEVELOPER_ID = [
+  "=anchor apple generic",
+  "certificate 1[field.1.2.840.113635.100.6.2.6] exists",
+  "certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
+];
+
+/** Like codesign: the requirement passes only for a Developer ID certificate Apple issued to the team that signed. */
+const signedBy = (team: string): CodesignRunner => async (args) => {
+  const requirement = args[args.indexOf("-R") + 1] ?? "";
+  const clauses = requirement.split(" and ");
+  const ok = DEVELOPER_ID.every((clause) => clauses.includes(clause)) && clauses.includes(`certificate leaf[subject.OU] = "${team}"`);
+  return { code: ok ? 0 : 3, output: ok ? "" : "test-requirement: code failed to satisfy specified code requirement(s)" };
+};
+
 describe.skipIf(process.platform === "win32")("installing a standalone engine", () => {
   const server = useAssetServer();
   let scratch = "";
   let base = "";
   let log = "";
+  let failFlag = "";
   let originalPath: string | undefined;
 
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), "omb-standalone-"));
     base = join(scratch, "data");
     log = join(scratch, "runs.log");
+    failFlag = join(scratch, "fail-for-this-machine");
     originalPath = process.env.PATH;
     process.env.PATH = "/usr/bin:/bin";
     resetPathCacheForTests();
@@ -117,16 +171,20 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
   });
 
   const engineDir = () => standaloneEngineDir(ENGINE, base);
+  const binDir = () => join(engineDir(), "bin");
+  const binPath = () => join(binDir(), "fake-engine");
   const leftovers = () => existsSync(engineDir()) ? readdirSync(engineDir()).sort() : [];
+  const pathDirs = () => augmentedPath().split(delimiter);
+  // The program records each run; it fails, as a broken machine would, while the flag file exists.
   const script = (printed = `fake-engine ${VERSION}`, exit = 0) =>
-    `#!/bin/sh\necho "$* $FAKE_RUN_ENV" >> '${log}'\necho '${printed}'\nexit ${exit}\n`;
+    `#!/bin/sh\n[ -f '${failFlag}' ] && { echo 'cannot open its data folder' >&2; exit 7; }\necho "$* $FAKE_RUN_ENV \${OPENAI_API_KEY:-nokey}" >> '${log}'\necho '${printed}'\nexit ${exit}\n`;
 
-  async function tarGz(files: Record<string, string>): Promise<Buffer> {
+  async function tarGz(files: Record<string, { data: string; mode: number }>): Promise<Buffer> {
     const source = mkdtempSync(join(scratch, "tar-src-"));
-    for (const [name, data] of Object.entries(files)) {
+    for (const [name, { data, mode }] of Object.entries(files)) {
       mkdirSync(dirname(join(source, name)), { recursive: true });
       writeFileSync(join(source, name), data);
-      chmodSync(join(source, name), 0o755);
+      chmodSync(join(source, name), mode);
     }
     const file = join(scratch, `fixture-${Math.random().toString(36).slice(2)}.tar.gz`);
     await tar.c({ gzip: true, file, cwd: source, portable: true }, Object.keys(files));
@@ -134,91 +192,225 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
   }
 
   /** Serves `body` the way GitHub does: the release URL redirects to an asset host. */
-  function serve(body: Buffer, archive: StandaloneAsset["archive"], executable: string, overrides: Partial<StandaloneAsset> = {}): StandaloneAsset {
+  function serve(body: Buffer, archive: StandaloneAsset["archive"], executable: string, program: string, overrides: Partial<StandaloneAsset> = {}): StandaloneAsset {
     server.routes.set("downloads.example.test/releases/fake", { status: 302, headers: { location: "https://assets.example.test/blob/fake" } });
     server.routes.set("assets.example.test/blob/fake", { body });
-    return { url: "https://downloads.example.test/releases/fake", sha256: sha256(body), archive, executable, approxBytes: body.length, ...overrides };
+    return { url: "https://downloads.example.test/releases/fake", sha256: sha256(body), executableSha256: sha256(program), archive, executable, approxBytes: body.length, ...overrides };
   }
 
-  async function build(kind: StandaloneAsset["archive"], body = script()): Promise<{ data: Buffer; executable: string }> {
-    if (kind === "zip") return { data: buildZip([{ name: "fake-engine", data: body, mode: 0o100755 }]), executable: "fake-engine" };
-    if (kind === "tar.gz") return { data: await tarGz({ "bin/fake-engine": body }), executable: "bin/fake-engine" };
-    return { data: Buffer.from(body), executable: "fake-engine" };
+  async function build(kind: StandaloneAsset["archive"], program = script()): Promise<{ data: Buffer; executable: string; program: string }> {
+    if (kind === "zip") return { data: buildZip([{ name: "fake-engine", data: program, mode: 0o100755 }]), executable: "fake-engine", program };
+    if (kind === "tar.gz") return { data: await tarGz({ "bin/fake-engine": { data: program, mode: 0o755 } }), executable: "bin/fake-engine", program };
+    return { data: Buffer.from(program), executable: "fake-engine", program };
+  }
+
+  async function served(kind: StandaloneAsset["archive"] = "raw", overrides: Partial<StandaloneAsset> = {}, program = script()): Promise<StandaloneRelease> {
+    const { data, executable } = await build(kind, program);
+    return fixtureRelease({ [standalonePlatformKey()]: serve(data, kind, executable, program, overrides) });
   }
 
   const install = (release: StandaloneRelease, extra: Parameters<typeof installStandaloneEngine>[1] = {}) =>
     installStandaloneEngine(release, { baseDir: base, fetchImpl: server.fetchImpl, ...extra });
+  const downloads = () => server.hits("assets.example.test/blob/fake");
 
-  it.each(["zip", "tar.gz", "raw"] as const)("installs a verified %s build, points current.json at it and puts it first on PATH", async (kind) => {
-    const { data, executable } = await build(kind);
-    const asset = serve(data, kind, executable);
+  it.each(["zip", "tar.gz", "raw"] as const)("installs a verified %s build behind a stable bin folder at the end of PATH", async (kind) => {
+    const { data, executable, program } = await build(kind);
+    const asset = serve(data, kind, executable, program);
     const installed = await install(fixtureRelease({ [standalonePlatformKey()]: asset }));
 
-    const expectedPath = join(engineDir(), VERSION, ...executable.split("/"));
-    expect(installed).toEqual({ version: VERSION, executablePath: expectedPath, binDir: dirname(expectedPath) });
-    expect(JSON.parse(readFileSync(join(engineDir(), "current.json"), "utf8"))).toMatchObject({ version: VERSION, executable, sha256: asset.sha256 });
-    expect(augmentedPath().split(delimiter)[0]).toBe(dirname(expectedPath));
-    expect(findCliCandidates("fake-engine")[0]).toBe(expectedPath);
-    // The probe ran the installed copy with its run settings.
-    expect(readFileSync(log, "utf8")).toBe("--version app-copy\n");
-    expect(leftovers()).toEqual([VERSION, "current.json"]);
+    expect(installed).toEqual({ version: VERSION, executablePath: binPath(), binDir: binDir() });
+    expect(readFileSync(binPath(), "utf8")).toBe(program);
+    expect(readFileSync(join(engineDir(), VERSION, ...executable.split("/")), "utf8")).toBe(program);
+    expect(readdirSync(binDir())).toEqual(["fake-engine"]);
+    expect(JSON.parse(readFileSync(join(engineDir(), "current.json"), "utf8"))).toMatchObject({
+      version: VERSION, executable, sha256: asset.sha256, executableSha256: sha256(program),
+    });
+    expect(pathDirs().at(-1)).toBe(binDir());
+    expect(findCliCandidates("fake-engine")).toEqual([binPath()]);
+    // The version check ran once, with the app copy's run settings.
+    expect(readFileSync(log, "utf8")).toBe("--version app-copy nokey\n");
+    expect(leftovers()).toEqual([VERSION, "bin", "current.json"]);
   });
 
   it("refuses a download that fails its SHA-256 check and leaves nothing behind", async () => {
-    const { data, executable } = await build("zip");
-    const asset = serve(data, "zip", executable, { sha256: "0".repeat(64) });
-    await expect(install(fixtureRelease({ [standalonePlatformKey()]: asset }))).rejects.toThrow(/safety check/);
+    await expect(install(await served("zip", { sha256: "0".repeat(64) }))).rejects.toThrow(/safety check/);
+    expect(leftovers()).toEqual([]);
+    expect(existsSync(log)).toBe(false);
+  });
+
+  it("refuses an archive whose program is not the pinned one, and never runs it", async () => {
+    await expect(install(await served("tar.gz", { executableSha256: "0".repeat(64) }))).rejects.toThrow(/safety check/);
     expect(leftovers()).toEqual([]);
     expect(existsSync(log)).toBe(false);
   });
 
   it.each([["without", true], ["with", false]] as const)("stops a download over twice its expected size, %s a Content-Length", async (_label, chunked) => {
     const body = Buffer.alloc(4096, 1);
-    const asset = serve(body, "raw", "fake-engine", { approxBytes: 1000 });
+    const asset = serve(body, "raw", "fake-engine", script(), { approxBytes: 1000 });
     server.routes.set("assets.example.test/blob/fake", { body, chunked });
     await expect(install(fixtureRelease({ [standalonePlatformKey()]: asset }))).rejects.toThrow(/larger than expected/);
     expect(leftovers()).toEqual([]);
   });
 
+  it("stops a download that stalls, without waiting for the overall time limit", async () => {
+    const release = await served("raw");
+    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), stallAfter: 10 });
+    await expect(install(release, { stallMs: 300 })).rejects.toThrow(/stopped partway/);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("lets a slow download finish while bytes keep arriving", async () => {
+    const release = await served("raw");
+    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), trickle: { bytes: 16, everyMs: 120 } });
+    await expect(install(release, { stallMs: 400 })).resolves.toMatchObject({ version: VERSION });
+  });
+
   it("refuses a redirect to a host it does not trust, without contacting that host", async () => {
-    const { data, executable } = await build("raw");
-    const asset = serve(data, "raw", executable);
+    const release = await served("raw");
     server.routes.set("downloads.example.test/releases/fake", { status: 302, headers: { location: "https://mirror.evil.test/blob/fake" } });
-    server.routes.set("mirror.evil.test/blob/fake", { body: data });
-    await expect(install(fixtureRelease({ [standalonePlatformKey()]: asset }))).rejects.toThrow(/official site/);
+    server.routes.set("mirror.evil.test/blob/fake", { body: Buffer.from(script()) });
+    await expect(install(release)).rejects.toThrow(/official site/);
     expect(server.hits("mirror.evil.test/blob/fake")).toBe(0);
     expect(leftovers()).toEqual([]);
   });
 
   it("refuses plain HTTP, for the first request and for a redirect", async () => {
-    const { data, executable } = await build("raw");
-    const asset = serve(data, "raw", executable);
+    const release = await served("raw");
+    const asset = standaloneAssetFor(release)!;
     await expect(install(fixtureRelease({ [standalonePlatformKey()]: { ...asset, url: "http://downloads.example.test/releases/fake" } }))).rejects.toThrow(/official site/);
     expect(server.hits("downloads.example.test/releases/fake")).toBe(0);
     server.routes.set("downloads.example.test/releases/fake", { status: 302, headers: { location: "http://assets.example.test/blob/fake" } });
-    await expect(install(fixtureRelease({ [standalonePlatformKey()]: asset }))).rejects.toThrow(/official site/);
-    expect(server.hits("assets.example.test/blob/fake")).toBe(0);
+    await expect(install(release)).rejects.toThrow(/official site/);
+    expect(downloads()).toBe(0);
+  });
+
+  it.each([
+    [404, /no longer available to download/],
+    [429, /limiting downloads/],
+    [503, /isn't answering/],
+  ])("explains an HTTP %i answer in plain words", async (status, message) => {
+    const release = await served("raw");
+    server.routes.set("assets.example.test/blob/fake", { status });
+    const error = await refusal(install(release));
+    expect(error.message).toMatch(message);
+    expect(error.message).not.toMatch(/HTTP|\d{3}/);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("explains a dropped connection in plain words", async () => {
+    const release = await served("raw");
+    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), dropAfter: 10 });
+    const error = await refusal(install(release));
+    expect(error.message).toBe("Fake Engine couldn't be downloaded. Check the internet connection and try again.");
+    expect(leftovers()).toEqual([]);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("explains a folder it cannot write to in plain words", async () => {
+    const release = await served("raw");
+    mkdirSync(engineDir(), { recursive: true });
+    chmodSync(engineDir(), 0o500);
+    try {
+      const error = await refusal(install(release));
+      expect(error.message).toMatch(/open in another window, or its folder is locked/);
+      expect(error.message).not.toMatch(/EACCES|EPERM/);
+    } finally {
+      chmodSync(engineDir(), 0o700);
+    }
   });
 
   it("shares one download between installs that start together, and reuses the verified copy later", async () => {
-    const { data, executable } = await build("tar.gz");
-    const release = fixtureRelease({ [standalonePlatformKey()]: serve(data, "tar.gz", executable) });
+    const release = await served("tar.gz");
     const [first, second] = await Promise.all([install(release), install(release)]);
     expect(second).toEqual(first);
-    expect(server.hits("assets.example.test/blob/fake")).toBe(1);
+    expect(downloads()).toBe(1);
     await install(release);
-    expect(server.hits("assets.example.test/blob/fake")).toBe(1);
+    expect(downloads()).toBe(1);
   });
 
-  it("downloads again when the installed copy of this version no longer starts", async () => {
-    const { data, executable } = await build("raw");
-    const release = fixtureRelease({ [standalonePlatformKey()]: serve(data, "raw", executable) });
-    const installed = await install(release);
-    // A scanner or a person broke the program but left its install record.
-    writeFileSync(installed.executablePath, "#!/bin/sh\nexit 1\n");
-    await expect(install(release)).resolves.toEqual(installed);
-    expect(server.hits("assets.example.test/blob/fake")).toBe(2);
-    expect(readFileSync(installed.executablePath)).toEqual(data);
+  it("reports a copy whose files are intact but that no longer starts, and changes nothing", async () => {
+    const release = await served("raw");
+    await install(release);
+    const pointer = readFileSync(join(engineDir(), "current.json"), "utf8");
+    writeFileSync(failFlag, "");
+    await expect(install(release)).rejects.toThrow(/doesn't start on this computer \(cannot open its data folder\)/);
+    expect(downloads()).toBe(1);
+    expect(readFileSync(binPath(), "utf8")).toBe(script());
+    expect(readFileSync(join(engineDir(), "current.json"), "utf8")).toBe(pointer);
+    expect(leftovers()).toEqual([VERSION, "bin", "current.json"]);
+  });
+
+  it("never runs or keeps a swapped program, even one that prints the right version", async () => {
+    const release = await served("raw");
+    await install(release);
+    // The bin entry and the version folder share one file, so this swaps both.
+    writeFileSync(binPath(), `#!/bin/sh\necho TAMPERED >> '${log}'\necho 'fake-engine ${VERSION}'\n`);
+    await install(release);
+    expect(downloads()).toBe(2);
+    expect(readFileSync(log, "utf8")).not.toContain("TAMPERED");
+    expect(readFileSync(binPath(), "utf8")).toBe(script());
+  });
+
+  it("keeps the installed copy when its replacement fails too", async () => {
+    const release = await served("raw");
+    await install(release);
+    writeFileSync(binPath(), "#!/bin/sh\necho changed\n");
+    writeFileSync(failFlag, "");
+    await expect(install(release)).rejects.toThrow(/doesn't start on this computer/);
+    expect(downloads()).toBe(2);
+    expect(readFileSync(binPath(), "utf8")).toBe("#!/bin/sh\necho changed\n");
+    expect(existsSync(join(engineDir(), VERSION, "fake-engine"))).toBe(true);
+    expect(leftovers()).toEqual([VERSION, "bin", "current.json"]);
+  });
+
+  it("checks a macOS build's Developer ID signer at install and again before reusing it", async () => {
+    const { data, executable, program } = await build("zip");
+    const release = fixtureRelease({ "darwin-arm64": serve(data, "zip", executable, program) }, { macTeamId: "PINNED0001" });
+    const mac = { platformKey: "darwin-arm64" };
+    await expect(install(release, { ...mac, codesign: signedBy("OTHER00001") })).rejects.toThrow(/not signed by its maker/);
+    expect(leftovers()).toEqual([]);
+    await expect(install(release, { ...mac, codesign: signedBy("PINNED0001") })).resolves.toMatchObject({ version: VERSION });
+    // The installed copy no longer passes: it is downloaded again, and the new one fails the same check, so the old stays.
+    await expect(install(release, { ...mac, codesign: signedBy("OTHER00001") })).rejects.toThrow(/not signed by its maker/);
+    expect(downloads()).toBe(3);
+    expect(readFileSync(binPath(), "utf8")).toBe(script());
+  });
+
+  it.each([["exits with an error", script(`fake-engine ${VERSION}`, 1)], ["reports another version", script("fake-engine 9.9.9")]])("refuses a build that %s, and keeps none of it", async (_label, program) => {
+    await expect(install(await served("raw", {}, program))).rejects.toThrow(/doesn't start on this computer/);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("never hands provider keys to the version check", async () => {
+    const saved = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-must-not-leak";
+    try {
+      await install(await served("raw"));
+      expect(readFileSync(log, "utf8")).toBe("--version app-copy nokey\n");
+    } finally {
+      if (saved === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = saved;
+    }
+  });
+
+  it("gives every file from a tar.gz plain permissions, whatever the archive says", async () => {
+    const program = script();
+    const data = await tarGz({
+      "bin/fake-engine": { data: program, mode: 0o4777 },
+      "bin/helper": { data: "#!/bin/sh\n", mode: 0o700 },
+      "share/notes": { data: "x", mode: 0o600 },
+    });
+    await install(fixtureRelease({ [standalonePlatformKey()]: serve(data, "tar.gz", "bin/fake-engine", program) }));
+    expect(statSync(join(engineDir(), VERSION, "bin", "fake-engine")).mode & 0o7777).toBe(0o755);
+    expect(statSync(join(engineDir(), VERSION, "bin", "helper")).mode & 0o7777).toBe(0o755);
+    expect(statSync(join(engineDir(), VERSION, "share", "notes")).mode & 0o7777).toBe(0o644);
+  });
+
+  it("refuses a release whose version or executable could leave its folder", async () => {
+    const release = await served("raw");
+    const asset = standaloneAssetFor(release)!;
+    await expect(install({ ...release, version: "../1.2.3" })).rejects.toThrow(/invalid/);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: { ...asset, executable: "../fake-engine" } }))).rejects.toThrow(/invalid/);
+    expect(server.hits("downloads.example.test/releases/fake")).toBe(0);
   });
 
   it("refuses a tar.gz holding a link, and keeps none of it", async () => {
@@ -227,111 +419,156 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     symlinkSync("/etc/hosts", join(source, "hosts"));
     const file = join(scratch, "link.tar.gz");
     await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "hosts"]);
-    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine") }))).rejects.toThrow(/unsafe/);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }))).rejects.toThrow(/unsafe/);
     expect(leftovers()).toEqual([]);
   });
 
-  it("refuses a macOS build signed by someone other than its maker", async () => {
-    // Like codesign: the requirement passes only for a certificate Apple issued to the team that signed the file.
-    const signedBy = (team: string): CodesignRunner => async (args) => {
-      const requirement = args[args.indexOf("-R") + 1] ?? "";
-      const ok = requirement.startsWith("=anchor apple generic and ") && requirement.includes(`certificate leaf[subject.OU] = "${team}"`);
-      return { code: ok ? 0 : 3, output: ok ? "" : "test-requirement: code failed to satisfy specified code requirement(s)" };
-    };
-    const { data, executable } = await build("zip");
-    const release = fixtureRelease({ "darwin-arm64": serve(data, "zip", executable) }, { macTeamId: "PINNED0001" });
-    await expect(install(release, { platformKey: "darwin-arm64", codesign: signedBy("OTHER00001") })).rejects.toThrow(/not signed by its maker/);
-    expect(leftovers()).toEqual([]);
-    await expect(install(release, { platformKey: "darwin-arm64", codesign: signedBy("PINNED0001") })).resolves.toMatchObject({ version: VERSION });
+  it("clears what an interrupted install left before it starts", async () => {
+    mkdirSync(join(engineDir(), ".staging-old", "deep"), { recursive: true });
+    mkdirSync(binDir(), { recursive: true });
+    for (const leftover of [join(engineDir(), ".download-old.part"), join(engineDir(), "current.json.123.abc.tmp"), join(binDir(), ".new-old")]) writeFileSync(leftover, "");
+    await expect(install(await served("raw", { sha256: "0".repeat(64) }))).rejects.toThrow(/safety check/);
+    expect(leftovers()).toEqual(["bin"]);
+    expect(readdirSync(binDir())).toEqual([]);
   });
 
-  it.each([["exits with an error", script(`fake-engine ${VERSION}`, 1)], ["reports another version", script("fake-engine 9.9.9")]])("refuses a build that %s, and keeps none of it", async (_label, body) => {
-    const { data, executable } = await build("raw", body);
-    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(data, "raw", executable) }))).rejects.toThrow(/does not start/);
-    expect(leftovers()).toEqual([]);
-  });
+  describe("whose copy runs", () => {
+    it("lets a copy the person installed win, and gives run settings to the app's copy only", async () => {
+      const installed = await install(await served("raw"));
+      const own = join(scratch, "own-bin");
+      mkdirSync(own);
+      writeFileSync(join(own, "fake-engine"), script(), { mode: 0o755 });
+      process.env.PATH = `${own}${delimiter}/usr/bin`;
+      resetPathCache();
+      expect(findCliCandidates("fake-engine")).toEqual([join(own, "fake-engine"), installed.executablePath]);
+      const release = fixtureRelease({});
+      expect(standaloneRunEnv(release, "fake-engine", base)).toEqual({});
+      expect(standaloneRunEnv(release, join(own, "fake-engine"), base)).toEqual({});
+      expect(standaloneRunEnv(release, installed.executablePath, base)).toEqual({ FAKE_RUN_ENV: "app-copy" });
+      expect(isAppStandaloneCopy("fake-engine", base)).toBe(false);
+      expect(isAppStandaloneCopy(installed.executablePath, base)).toBe(true);
+    });
 
-  it("refuses a release whose version or executable could leave its folder", async () => {
-    const { data } = await build("raw");
-    const asset = serve(data, "raw", "fake-engine");
-    await expect(install({ ...fixtureRelease({ [standalonePlatformKey()]: asset }), version: "../1.2.3" })).rejects.toThrow(/invalid/);
-    await expect(install(fixtureRelease({ [standalonePlatformKey()]: { ...asset, executable: "../fake-engine" } }))).rejects.toThrow(/invalid/);
-    expect(server.hits("downloads.example.test/releases/fake")).toBe(0);
+    it("recognises the app's copy however its folder is spelled", async () => {
+      const installed = await install(await served("raw"));
+      const linked = join(scratch, "linked-data");
+      symlinkSync(base, linked);
+      const release = fixtureRelease({});
+      expect(standaloneRunEnv(release, realpathSync(installed.executablePath), base)).toEqual({ FAKE_RUN_ENV: "app-copy" });
+      expect(standaloneRunEnv(release, installed.executablePath, linked)).toEqual({ FAKE_RUN_ENV: "app-copy" });
+      expect(standaloneRunEnv(release, join(linked, "tools", "standalone", ENGINE, "bin", "fake-engine"), base)).toEqual({ FAKE_RUN_ENV: "app-copy" });
+    });
   });
 
   describe("old versions", () => {
-    function seedVersion(version: string, installedAt: number): void {
+    function seedVersion(version: string, installedAt: number): string {
       const directory = join(engineDir(), version);
+      const program = script(`fake-engine ${version}`);
       mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, "fake-engine"), script(`fake-engine ${version}`), { mode: 0o755 });
-      writeFileSync(join(directory, ".standalone-install.json"), JSON.stringify({ engine: ENGINE, version, sha256: "a".repeat(64), executable: "fake-engine", installedAt }));
+      writeFileSync(join(directory, "fake-engine"), program, { mode: 0o755 });
+      writeFileSync(join(directory, ".standalone-install.json"), JSON.stringify({
+        engine: ENGINE, version, sha256: "a".repeat(64), executable: "fake-engine", executableSha256: sha256(program), installedAt,
+      }));
+      return program;
     }
-    function pointCurrentAt(version: string): void {
-      writeFileSync(join(engineDir(), "current.json"), JSON.stringify({ version, executable: "fake-engine", sha256: "a".repeat(64) }));
+    function makeCurrent(version: string, program: string): void {
+      mkdirSync(binDir(), { recursive: true });
+      linkSync(join(engineDir(), version, "fake-engine"), binPath());
+      writeFileSync(join(engineDir(), "current.json"), JSON.stringify({ version, executable: "fake-engine", sha256: "a".repeat(64), executableSha256: sha256(program) }));
     }
 
     it("keeps the new version and the one before it, and deletes older ones", async () => {
       seedVersion("1.0.0", 1);
-      seedVersion("1.1.0", 2);
-      pointCurrentAt("1.1.0");
-      const { data, executable } = await build("raw");
-      await install(fixtureRelease({ [standalonePlatformKey()]: serve(data, "raw", executable) }));
-      expect(leftovers()).toEqual(["1.1.0", VERSION, "current.json"]);
+      makeCurrent("1.1.0", seedVersion("1.1.0", 2));
+      await install(await served("raw"));
+      expect(leftovers()).toEqual(["1.1.0", VERSION, "bin", "current.json"]);
     });
 
     it("never deletes a version this server started with, since its processes may still be running", async () => {
-      seedVersion("1.0.0", 1);
+      makeCurrent("1.0.0", seedVersion("1.0.0", 1));
       seedVersion("1.1.0", 2);
-      pointCurrentAt("1.0.0");
-      registerStandaloneBinDirs(base);
-      const { data, executable } = await build("raw");
-      const release = fixtureRelease({ [standalonePlatformKey()]: serve(data, "raw", executable) });
+      registerStandaloneBinDirs(base, [fixtureRelease({})]);
+      const release = await served("raw");
       await install(release);
-      expect(leftovers()).toEqual(["1.0.0", "1.1.0", VERSION, "current.json"]);
+      expect(leftovers()).toEqual(["1.0.0", "1.1.0", VERSION, "bin", "current.json"]);
       // After a restart nothing runs 1.0.0 any more.
       resetStandaloneStateForTests();
       await install(release);
-      expect(leftovers()).toEqual(["1.1.0", VERSION, "current.json"]);
+      expect(leftovers()).toEqual(["1.1.0", VERSION, "bin", "current.json"]);
+    });
+
+    it("keeps a copy from an earlier pin on PATH at start-up while its program is unchanged", () => {
+      makeCurrent("1.0.0", seedVersion("1.0.0", 1));
+      registerStandaloneBinDirs(base, [fixtureRelease({})]);
+      expect(pathDirs().at(-1)).toBe(binDir());
+      writeFileSync(binPath(), "#!/bin/sh\necho changed\n");
+      resetPathCacheForTests();
+      registerStandaloneBinDirs(base, [fixtureRelease({})]);
+      expect(pathDirs()).not.toContain(binDir());
     });
   });
 
   describe("at start-up", () => {
-    it("puts each engine's current version first on PATH", async () => {
-      const { data, executable } = await build("tar.gz");
-      const installed = await install(fixtureRelease({ [standalonePlatformKey()]: serve(data, "tar.gz", executable) }));
+    const boot = (releases: StandaloneRelease[]) => {
       resetPathCacheForTests();
       resetStandaloneStateForTests();
-      registerStandaloneBinDirs(base);
-      expect(augmentedPath().split(delimiter)[0]).toBe(installed.binDir);
+      registerStandaloneBinDirs(base, releases);
+    };
+
+    it("puts a known engine's verified bin folder at the end of PATH", async () => {
+      const release = await served("tar.gz");
+      const installed = await install(release);
+      boot([release]);
+      expect(pathDirs().at(-1)).toBe(installed.binDir);
     });
 
-    it("ignores a current.json that points outside its folder or at nothing", () => {
-      // A complete-looking install outside the engine's folder.
-      const outside = join(base, "elsewhere");
-      mkdirSync(outside, { recursive: true });
-      writeFileSync(join(outside, "fake-engine"), script(), { mode: 0o755 });
-      writeFileSync(join(outside, ".standalone-install.json"), JSON.stringify({ engine: ENGINE, version: VERSION, sha256: "a".repeat(64), executable: "fake-engine", installedAt: 1 }));
-      mkdirSync(join(engineDir(), "1.0.0"), { recursive: true });
-      writeFileSync(join(engineDir(), "current.json"), JSON.stringify({ version: "../../../elsewhere", executable: "fake-engine", sha256: "a".repeat(64) }));
-      registerStandaloneBinDirs(base);
-      writeFileSync(join(engineDir(), "current.json"), JSON.stringify({ version: "1.0.0", executable: "missing", sha256: "a".repeat(64) }));
-      registerStandaloneBinDirs(base);
-      writeFileSync(join(engineDir(), "current.json"), "{ not json");
-      registerStandaloneBinDirs(base);
-      expect(augmentedPath().split(delimiter)[0]).toBe("/usr/bin");
+    it("ignores an engine this app does not pin, such as a planted git", async () => {
+      const release = await served("raw");
+      await install(release);
+      const planted = standaloneEngineDir("git", base);
+      const program = "#!/bin/sh\necho planted\n";
+      mkdirSync(join(planted, "1"), { recursive: true });
+      mkdirSync(join(planted, "bin"), { recursive: true });
+      writeFileSync(join(planted, "1", "git"), program, { mode: 0o755 });
+      linkSync(join(planted, "1", "git"), join(planted, "bin", "git"));
+      writeFileSync(join(planted, "1", ".standalone-install.json"), JSON.stringify({ engine: "git", version: "1", sha256: "a".repeat(64), executable: "git", executableSha256: sha256(program), installedAt: 1 }));
+      writeFileSync(join(planted, "current.json"), JSON.stringify({ version: "1", executable: "git", sha256: "a".repeat(64), executableSha256: sha256(program) }));
+      boot([release]);
+      expect(pathDirs()).not.toContain(join(planted, "bin"));
+      expect(findCliCandidates("git")).not.toContain(join(planted, "bin", "git"));
     });
-  });
 
-  it("gives run settings to the app's own copy only, never to a copy installed elsewhere", async () => {
-    const { data, executable } = await build("raw");
-    const release = fixtureRelease({ [standalonePlatformKey()]: serve(data, "raw", executable) });
-    expect(standaloneRunEnv(release, "fake-engine", base)).toEqual({});
-    const installed = await install(release);
-    expect(standaloneRunEnv(release, "fake-engine", base)).toEqual({ FAKE_RUN_ENV: "app-copy" });
-    expect(standaloneRunEnv(release, installed.executablePath, base)).toEqual({ FAKE_RUN_ENV: "app-copy" });
-    const own = join(scratch, "own-bin");
-    mkdirSync(own);
-    writeFileSync(join(own, "fake-engine"), script(), { mode: 0o755 });
-    expect(standaloneRunEnv(release, join(own, "fake-engine"), base)).toEqual({});
+    it.each([
+      ["its program was changed", () => writeFileSync(binPath(), "#!/bin/sh\necho changed\n")],
+      ["its bin folder holds anything else", () => writeFileSync(join(binDir(), "git"), "#!/bin/sh\n", { mode: 0o755 })],
+      ["its current.json is a link", () => {
+        const real = join(scratch, "elsewhere.json");
+        renameSync(join(engineDir(), "current.json"), real);
+        symlinkSync(real, join(engineDir(), "current.json"));
+      }],
+      ["its program is a link", () => {
+        renameSync(binPath(), join(scratch, "moved"));
+        symlinkSync(join(scratch, "moved"), binPath());
+      }],
+    ])("keeps the app's copy off PATH when %s", async (_label, change) => {
+      const release = await served("raw");
+      await install(release);
+      change();
+      boot([release]);
+      expect(pathDirs()).not.toContain(binDir());
+    });
+
+    it("finishes an interrupted swap and clears the other leftovers", async () => {
+      const release = await served("raw");
+      await install(release);
+      // Stopped between moving the old folder aside and moving the new one in.
+      renameSync(join(engineDir(), VERSION), join(engineDir(), ".old-interrupted"));
+      mkdirSync(join(engineDir(), ".staging-old"));
+      for (const leftover of [join(engineDir(), ".download-old.part"), join(engineDir(), "current.json.1.x.tmp"), join(binDir(), ".old-x")]) writeFileSync(leftover, "");
+      boot([release]);
+      expect(leftovers()).toEqual([VERSION, "bin", "current.json"]);
+      expect(readdirSync(binDir())).toEqual(["fake-engine"]);
+      expect(pathDirs().at(-1)).toBe(binDir());
+    });
   });
 });
