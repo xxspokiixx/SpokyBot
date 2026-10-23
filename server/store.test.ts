@@ -531,6 +531,15 @@ describe("Store", () => {
     expect(bot.modelSelection).toEqual(selection());
   });
 
+  it("offers Set me up on a blank bot's greeting, never on one given a role or instructions", () => {
+    const store = new Store(selection, undefined, undefined, "en");
+    const greeting = (bot: BotRecord) => store.messagesFor(bot.threadId)[0];
+    expect(greeting(store.createBot())).toMatchObject({ role: "bot", kind: "text", setupOffer: true });
+    expect(greeting(store.createBot({ soul: "Only water the garden." }))?.setupOffer).toBeUndefined();
+    expect(greeting(store.createBot({ description: "Files bugs." }))?.setupOffer).toBeUndefined();
+    expect(greeting(store.createBot({ soul: "  \n", description: " " }))?.setupOffer).toBe(true);
+  });
+
   it("reads the current language when creating a bot", () => {
     let language = "en";
     const store = new Store(selection, undefined, undefined, () => language);

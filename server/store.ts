@@ -1388,7 +1388,7 @@ export class Store {
     // Before its transcript: clients need the bot/thread mapping to place either message.
     this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
-      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage));
+      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim()));
     }
     return bot;
   }
