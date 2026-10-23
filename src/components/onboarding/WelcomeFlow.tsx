@@ -321,21 +321,19 @@ export function WelcomeFlow({
           {beat === "cloud" && offer && <CloudBeat {...beatProps} offer={offer} />}
         </div>
 
-        <div className="mt-6 flex shrink-0 items-center justify-between">
-          {previous ? (
-            <QuietButton onClick={() => go(beat, previous)} disabled={importBusy || moving} className="disabled:opacity-50">{t("onboarding.back")}</QuietButton>
-          ) : (
-            <span />
-          )}
-          {total > 1 && <ProgressDots items={beats.map((id) => ({ id }))} index={current - 1} />}
-          {total > 1 ? (
+        {total > 1 && (
+          <div className="mt-6 flex shrink-0 items-center justify-between">
+            {previous ? (
+              <QuietButton onClick={() => go(beat, previous)} disabled={importBusy || moving} className="disabled:opacity-50">{t("onboarding.back")}</QuietButton>
+            ) : (
+              <span />
+            )}
+            <ProgressDots items={beats.map((id) => ({ id }))} index={current - 1} />
             <span className="text-[11px] text-ink-secondary" aria-live="polite">
               {t("onboarding.progress", { current, total })}
             </span>
-          ) : (
-            <span />
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
