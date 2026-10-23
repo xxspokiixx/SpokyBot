@@ -6,6 +6,7 @@ import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 export { engineMemory } from "../engine-memory.ts";
+import { clientInstall } from "../contracts.ts";
 import type {
   AnyProviderDriver,
   EngineAccess,
@@ -34,10 +35,9 @@ export type RegistryEntry =
 /** The pinned standalone release (URLs, hashes) stays on the server; the client sees only `server`. */
 function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean): AnyProviderDriver["install"] {
   if (!install) return undefined;
-  const { standalone: _pins, ...shown } = install;
   const server = serverInstallFor(install, npmPresent);
   const platform = process.platform === "darwin" || process.platform === "linux" || process.platform === "win32" ? process.platform : undefined;
-  return { ...shown, platform, ...(server ? { server } : {}) };
+  return { ...clientInstall(install), platform, ...(server ? { server } : {}) };
 }
 
 type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<unknown>;

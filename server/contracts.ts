@@ -346,6 +346,13 @@ export interface EngineInstall {
   server?: { package?: string; standalone?: { version: string; downloadBytes: number } };
 }
 
+/** What a client may see of an install descriptor: the standalone pins (URLs, hashes) stay on the server. */
+export function clientInstall(install: EngineInstall | undefined): EngineInstall | undefined {
+  if (!install) return undefined;
+  const { standalone: _pins, ...shown } = install;
+  return shown;
+}
+
 /** `${platform}-${arch}`, with `-musl` on a Linux without glibc. */
 export type StandalonePlatform =
   | "darwin-arm64" | "darwin-x64"
