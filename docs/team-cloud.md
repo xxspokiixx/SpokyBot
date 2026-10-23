@@ -216,6 +216,37 @@ work, `session_search` (memory of the layer and the team's; conversations the tu
 turn's layer folder back read-write for that conversation's boxes only (`botBox.lend`). Member layers are sibling
 folders of the bot's own, never inside it, so no other turn of that bot can read them.
 
+### Engine homes
+
+The engines keep each conversation's transcript and session files in their HOME (`~/.claude/projects`,
+`~/.codex/sessions`, prompt history, file snapshots). On a Team Cloud each audience has its own engine home,
+`engine-homes/<key>` in the data folder, keyed like its browser: `team`, `room-<hash>` or `member-<hash>` (16 hex
+characters of the room id's or person key's SHA-256). Every engine a turn starts runs with HOME set to its
+conversation's home (`server/engine-homes`): the drivers' spawns know their conversation (each adapter's `sendTurn` and
+keep-warm ping run inside it), and an engine folder the environment names (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`GROK_HOME`, the XDG folders, a ChatGPT plan's or a hosted model's folder) moves into that home too. Engines that share
+one process between conversations (OpenCode) never share it across audiences.
+
+In the bot box the turn's engine home is bound read-write **in place of** the server's HOME, after the data folder is
+emptied: a shell in that turn finds its own audience's transcripts, and neither the server's HOME nor another audience's
+home exists for it, by any path. Only the engines' sign-ins are the team's: each sign-in file (Claude's
+`.credentials.json`, Codex's and Grok's `auth.json` and `config.toml`, and the other engines' named in
+`engine-homes/layout.ts`) is kept in the home as a copy of the server's, and inside a box the server's own file is bound
+over that copy read-write, so a token an engine refreshes there lands in the team's file (Claude Code 2.1.294 renames a
+temp file over its credentials and, refused on a bind, writes in place; Codex writes in place). Outside a box an
+engine writes its copy, and the next spawn in any audience takes the newest settled copy back for the team. Signing in
+or out from the app still happens in the server's HOME and reaches every audience's next turn. Session resume works
+within an audience: its home is the same at each turn. A member who leaves takes their engine home with them.
+
+**The move.** The first turn after a Team Cloud starts with engine homes moves what the engines kept in the server's
+HOME. A Claude Code project's session (`projects/<folder>/<session>.jsonl` and its session folder, `file-history`,
+`session-env`, `todos`, `debug`) or a Codex rollout (`sessions/…/rollout-…-<id>.jsonl`, `archived_sessions`) goes to
+the home of the conversation whose saved resume session id it is, or, for Claude, the conversation that alone runs in
+that project's folder. What matches no conversation (a group chat's session, which the server keeps only in memory,
+one of a deleted conversation, the prompt history, shell snapshots, Codex's logs) goes to the **held folder**,
+`engine-homes/.held/<time>`: no route serves it, no box binds it, no backup carries it (the workspace backup leaves out
+all of `engine-homes`), and it is deleted 30 days later. `engine-homes/.migrated` marks the move done.
+
 Browsers follow the same rule (`server/browser/audience.ts`). A non-team audience adds a fixed suffix to the browser's
 name, `--member-<hash>` or `--room-<hash>` (16 hex characters of the person key's or the room id's SHA-256: agent-browser
 refuses a socket path over 103 bytes), to the agent-browser session, its saved state, its profile folder, the new
@@ -231,7 +262,8 @@ turn uploads is linked into that profile's `omb-uploads/` first. The agent-brows
 holds the session's saved-state key and talks to the server's runtime by its own socket and pid files.
 
 On a My Cloud and on a desktop there is one person: every audience is the team's, every layer is the bot's own folder,
-every browser keeps its old name and Chrome its old launcher, and nothing here changes what those do.
+every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
+changes what those do.
 
 ## What is not closed here
 
@@ -240,13 +272,16 @@ every browser keeps its old name and Chrome its old launcher, and nothing here c
 - **The new browser engine and temporary browsers in a box.** The new engine (`browserEngine.engine: "chrome"`, off by
   default) starts Chrome itself over a pipe and is not boxed; a temporary browser is boxed, but a file a turn uploads
   into it is not reachable from its box.
-- **Per-member engine state.** A Team Cloud's engines use the team's key through the broker, so the engine's config dir
-  (`~/.claude`, `~/.codex`) holds no member's login; it is the team's, by design.
+- **Per-member engine sign-ins.** Every audience's engine signs in as the team (its key through the broker, or the
+  team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
 - **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
   hour, and nothing is deleted.
-- **Engine transcripts in the shared home.** The engines keep each conversation's transcript in the server user's home
-  (`~/.claude/projects`, `~/.codex/sessions`), which every turn's box binds read-write: a turn with a shell could read
-  another conversation's transcript there. Splitting the engines' homes per audience is the next slice.
+- **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
+  off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
+  whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines
+  installed into the server's HOME by hand are not reachable from a team turn's box; the image's are.
+- **An engine that replaces its sign-in file by renaming.** Inside a box the rename is refused (the team's file is bound
+  there); an engine that does not then write in place keeps a refreshed token for that process only.
 - **What a bot keeps per bot, not per audience.** Its data sheet, the skills it stages and its own profile are the bot's
   (the team's), whichever chat wrote them; so are a routine's definition and schedule (its runs and results are the
   conversation's). The Owner's whole-machine export (`OMB_CLOUD_EXPORT_ONLY`, the workspace backup) still carries every
