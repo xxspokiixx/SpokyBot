@@ -233,6 +233,38 @@ holds the session's saved-state key and talks to the server's runtime by its own
 On a My Cloud and on a desktop there is one person: every audience is the team's, every layer is the bot's own folder,
 every browser keeps its old name and Chrome its old launcher, and nothing here changes what those do.
 
+## Who a bot reports to
+
+Every team bot has an **owner**: the member it reports to. `reportsTo` (an email) names them; without it the bot
+reports to `createdBy`, the member who created it or moved it in (a bot a Chief creates gets the Chief's owner). Bots
+made before owners were recorded have none until someone picks one, and their asks go to the Admins. The sidebar shows
+the owner's face at the end of each bot's row and "→ Ada" beside a department whose bots all report to Ada.
+
+| Route | Who | What |
+|---|---|---|
+| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?}` |
+| `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
+| `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set owner for all bots…" on a department |
+| `GET /api/needs-you` | any member | what bots ask of this person now |
+
+**Routing** (`server/ask-routing.ts`). A bot's ask is a question or approval card, a sign-in, a failure, or a routine's
+result. In a member's private chat it is that member's alone: never the owner's, never an Admin's. Anywhere else (the
+bot's shared chats, a group chat, a routine nobody opened) it is the owner's, or the Admins' when nobody owns the bot.
+The asked person alone gets it in their Needs you (`/api/needs-you`, `/api/today`), in their notifications (live and in
+the feed) and in their brief. The card itself stays in its conversation, where everyone who sees it may answer it, and
+says "Asking Ada". Everyone can still chat with every shared bot: routing decides only whose inbox a bot's own asks reach.
+
+**One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
+person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). It coordinates
+exactly the bots that person owns, in every department, and only those bots reach it: its roster, `coordinate_bots`,
+incidents and escalations (into a notices chat of the person's own; a notice from someone else's private chat goes to
+that person instead). Each person with a Chief gets a brief of their own (`server/host/team-briefs.ts`): one card a day
+in their private chat with their Chief listing their Needs you and the runs routed to them, opened on their first
+arrival of the day. Without a Chief, the same asks wait in their Needs you. A crowned bot nobody owns stays its
+department's Chief, as on any other server.
+
+On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
+
 ## What is not closed here
 
 - **Saved logins per member.** A login saved from a sign-in card is the team's (an Admin saves it, for every bot in the

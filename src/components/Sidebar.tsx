@@ -31,6 +31,7 @@ import {
   SlidersHorizontal,
   TextQuote,
   Trash2,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -122,6 +123,8 @@ import { useCloudOwner } from "./CloudOwner";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import { NeedsYouButton, OwnerFace, OwnerPickerHost, departmentOwner, requestOwnerPick } from "./TeamOwner";
+import { mayChangeOwner, ownerOf, useTeamPeople } from "@/state/team-people";
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
@@ -544,6 +547,7 @@ export function BotContextMenu({
   const clearThreads = useDeleteAllThreads(), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
+  const team = useTeamPeople();
   const menuRef = useRef<HTMLDivElement>(null);
   const latestMenu = useRef(menu);
   useLayoutEffect(() => { latestMenu.current = menu; }, [menu]);
@@ -665,6 +669,11 @@ export function BotContextMenu({
       </>}
       {item(<Trash2 size={16} />, t("task.deleteAll"), () => clearThreads.ask(bot.id), { danger: true })}
       {divider("threads")}
+      {team && mayChangeOwner(bot, team) && (() => {
+        const owner = ownerOf(bot, team);
+        return item(<Users size={16} className="text-ink-secondary" />, owner ? t("owner.menu", { name: owner.name }) : t("owner.menuNone"),
+          () => requestOwnerPick({ botIds: [bot.id], title: t("owner.pickTitle"), current: owner?.email ?? null, x: shown.x, y: shown.y }));
+      })()}
       {remoteClient ? [
         item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
           onClose();
@@ -1003,7 +1012,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       ? railTile ? "h-[52px] justify-center" : "justify-center px-1 py-1.5"
       : density === "compact"
         ? cn(showThreads ? "gap-1.5 py-1" : "gap-2.5 py-1.5", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-[5.75rem] touch:pr-[5.75rem]" : "pl-2 pr-9")
-        : simpleRow ? "gap-2.5 py-2 pl-2 pr-3 group-hover:pr-9 group-focus-within:pr-9 max-md:pr-9 touch:pr-9"
+        : simpleRow ? cn("gap-2.5 py-2 pl-2", selected ? "pr-9" : "pr-3 group-hover:pr-9 group-focus-within:pr-9 max-md:pr-9 touch:pr-9")
         : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-[5.75rem] touch:pr-[5.75rem]" : "pl-2.5 pr-9"),
     selected ? "bg-raised shadow-[0_1px_2px_rgb(0_0_0/0.10)]" : "hover:bg-raised/50",
   );
@@ -1096,6 +1105,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           )}
           {density === "compact" && <BotModelMark bot={bot} instances={instances} />}
           {(expanded || (quiet && !statusLine)) && unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
+          {!renaming && <span className="flex shrink-0 self-center"><OwnerFace bot={bot} /></span>}
         </div>
         {(!expanded || deleting) && (!quiet || statusLine) && <div className="flex items-center justify-between gap-2">
           {deleting ? (
@@ -1177,8 +1187,9 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           className="pointer-events-none absolute right-[3.75rem] top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><Plus size={14} /></button>}
         {showThreads && <button type="button" aria-label={t("folder.newNamed", { name: bot.name })} title={t("folder.new")} onClick={() => { setThreadsOpen(true); setCreatingProject(true); }}
           className="pointer-events-none absolute right-8 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><FolderPlus size={14} /></button>}
-        <button type="button" aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
-          className="pointer-events-none absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><MoreHorizontal size={15} /></button>
+        <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
+          className={cn("absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink",
+            selected ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70")}><MoreHorizontal size={15} /></button>
       </>}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
@@ -1195,17 +1206,19 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 });
 
-export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll }: {
+export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll, onSetOwner }: {
   onAddBots: () => void;
   onRename: () => void;
   onShare: () => void;
   onDelete: () => void;
   onSetForAll?: () => void;
+  onSetOwner?: () => void;
 }) {
   const item = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised";
   return (
     <>
       <button type="button" role="menuitem" autoFocus className={item} onClick={onAddBots}><Users size={14} />{t("team.addBots")}</button>
+      {onSetOwner && <button type="button" role="menuitem" className={item} onClick={onSetOwner}><UserRound size={14} />{t("owner.setForAll")}</button>}
       {onSetForAll && <button type="button" role="menuitem" className={item} onClick={onSetForAll}><SlidersHorizontal size={14} />{t("teamSettings.menu")}</button>}
       <button type="button" role="menuitem" className={item} onClick={onRename}><Pencil size={14} />{t("team.rename")}</button>
       <button type="button" role="menuitem" className={item} onClick={onShare}><Share2 size={14} />{t("team.share")}</button>
@@ -1221,6 +1234,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 }) {
   const { state, dispatch } = useStore();
   const now = useRelativeNow();
+  const teamPeople = useTeamPeople();
   const cloudOwner = useCloudOwner(state.config?.cloudHome === true);
   const endHowTo = useCallback(() => {
     track("cloud_howto", { result: "closed" });
@@ -1793,6 +1807,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           {matchingBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
           )}
+          {!q && <NeedsYouButton compact={rail} />}
           {unsectionedChief && (
             <div className="mb-1.5">
               <BotListItem {...botRow(unsectionedChief)} />
@@ -1848,6 +1863,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                 {density !== "icons" && !headless && (
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
+                    lead={sectionName ? departmentOwner([...sectionChiefItems, ...sectionBotItems], teamPeople)?.name : undefined}
                     line={simple}
                     onMenu={simple && !remoteClient && sectionName ? (button) => {
                       const rect = button.getBoundingClientRect();
@@ -2003,6 +2019,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           else dispatch({ type: "deleteBot", botId: bot.id });
         }}
       />
+      <OwnerPickerHost />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
       {renameTeam && <TeamDialog section={renameTeam} rename onRenamed={renamedTeam} onClose={() => setRenameTeam(null)} />}
       {teamMotion.shown && teamMotion.value && createPortal(<div className={cn("fixed inset-0 z-40", teamMotion.closing && "pointer-events-none")} onMouseDown={closeTeamMenu}>
@@ -2018,6 +2035,12 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}
             onSetForAll={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
+            onSetOwner={teamPeople?.admin ? () => {
+              const { name, x, y } = teamMotion.value!;
+              const members = state.bots.filter((bot) => !bot.hidden && (bot.section?.trim() || "") === name);
+              closeTeamMenu();
+              if (members.length) requestOwnerPick({ botIds: members.map((bot) => bot.id), title: t("owner.setForAllTitle", { name }), current: departmentOwner(members, teamPeople)?.email ?? null, x, y });
+            } : undefined}
           />
         </div>
       </div>, document.body)}
