@@ -869,9 +869,9 @@ export class Store {
   }
 
   renameSection(name: string, nextName: string, computers?: TeamComputers): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such team";
+    if (!name || !this.sections.includes(name)) return "No such department";
     nextName = nextName.trim();
-    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Team name must be 1 to 60 characters without control characters";
+    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Department name must be 1 to 60 characters without control characters";
     if (name === nextName) return undefined;
     if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A team with that name already exists";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
@@ -910,7 +910,7 @@ export class Store {
   }
 
   changeEmptySection(name: string, nextName: string | null): string | undefined {
-    if (!this.sections.includes(name)) return "No such team";
+    if (!this.sections.includes(name)) return "No such department";
     if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
       return "Move all bots (including archived bots) and group chats out of this team first";
     }
@@ -932,7 +932,7 @@ export class Store {
   }
 
   deleteSection(name: string): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such team";
+    if (!name || !this.sections.includes(name)) return "No such department";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
