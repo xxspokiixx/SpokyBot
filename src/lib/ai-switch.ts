@@ -4,7 +4,7 @@
 // is stopped, and once the chat has gone idle the new AI is set (wherever the person is by then). The same message is
 // sent again on it only while the row is still on screen, the message is still the conversation's last word from the
 // person, no other turn has run since, and a resend would carry all of it; otherwise Retry stays theirs to press.
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import { api } from "@/state/api";
 import type { Action, Bot, Message } from "@/state/store";
@@ -26,11 +26,25 @@ type SetModel = Extract<Action, { type: "setModel" }>;
 /** `opened`: its picker has opened for it once; a picker that mounts again does not open again. */
 type Held = AiSwitchIntent & { nonce: number; opened: boolean };
 /** A pick waiting for its turn to end: `stopped` is null until the Stop is answered, false when the turn was over.
- * `starts`: how many turns this client had seen start in the thread when the pick was made. */
-type Pending = { intent: Held; action: SetModel; stopped: boolean | null; starts: number };
+ * `starts`: how many turns this client had seen start in the thread when the pick was made. `refused`: how many
+ * times the server said the chat was working when the switch landed (a turn began just before it). */
+type Pending = { intent: Held; action: SetModel; stopped: boolean | null; starts: number; refused: number; version?: number };
+
+/** After this many refusals the switch gives up and says why. */
+const MAX_REFUSALS = 8;
 
 let intent: Held | null = null;
-let pending: Pending | null = null;
+/** One pick per conversation: a pick in another chat never replaces this one. Replaced, never mutated, on change. */
+let pending: ReadonlyMap<string, Pending> = new Map();
+let version = 0;
+const pendingKey = (held: { botId: string; threadId: string }) => `${held.botId}\n${held.threadId}`;
+const setPending = (key: string, next: Pending | null) => {
+  const map = new Map(pending);
+  if (next) map.set(key, { ...next, version: ++version });
+  else map.delete(key);
+  pending = map;
+  notify();
+};
 let nonce = 0;
 const rowsOnScreen = new Set<string>();
 const watchers = new Set<() => void>();
@@ -58,7 +72,7 @@ export function releaseAiSwitchIntent(match: { threadId: string; turnId: string 
 /** Tests only: no intent, no pick, no rows. */
 export function resetAiSwitch(): void {
   intent = null;
-  pending = null;
+  pending = new Map();
   rowsOnScreen.clear();
   notify();
 }
@@ -67,20 +81,17 @@ const sameAi = (a: SetModel["selection"], b: SetModel["selection"]) => a.instanc
 
 function beginSwitch(held: Held, action: SetModel, showError: (message: string) => void): void {
   intent = null;
+  const key = pendingKey(held);
   const starts = turnStartCount(held.threadId);
-  pending = { intent: held, action, stopped: null, starts };
-  notify();
-  const mine = () => pending?.intent === held;
+  setPending(key, { intent: held, action, stopped: null, starts, refused: 0 });
+  const mine = () => pending.get(key)?.intent === held;
   // The Stop names the row's turn: if another turn runs by now, the server stops nothing.
   api(`/api/bots/${held.botId}/interrupt`, { method: "POST", body: JSON.stringify({ threadId: held.threadId, turnId: held.turnId }) })
     .then((result: { outcome?: unknown } | null) => {
-      if (!mine()) return;
-      pending = { intent: held, action, stopped: result?.outcome !== "already-stopped", starts };
-      notify();
+      if (mine()) setPending(key, { intent: held, action, stopped: result?.outcome !== "already-stopped", starts, refused: 0 });
     })
     .catch((error: unknown) => {
-      if (mine()) pending = null;
-      notify();
+      if (mine()) setPending(key, null);
       showError(error instanceof Error ? error.message : String(error));
     });
 }
@@ -158,23 +169,74 @@ function resendable(waiting: Pending, bot: Bot | undefined): Message | undefined
   return carried ? last : undefined;
 }
 
-/** For the app shell, always mounted: once the stopped turn's chat has stayed idle, sets the new AI, and sends the
- * same message again when it still can. */
+/** Saves the new AI on the conversation the way the store does, so the keeper hears whether the server took it. */
+async function saveSwitch(action: SetModel): Promise<unknown> {
+  const threadId = action.threadId!;
+  const { selection: modelSelection, updateBotDefault, resetApprovalToAsk } = action;
+  if (resetApprovalToAsk && window.ogb?.approvals) {
+    return window.ogb.approvals.setMode(action.botId, "ask", { threadId, modelSelection, updateBotDefault: Boolean(updateBotDefault) });
+  }
+  const body = { modelSelection, ...(updateBotDefault ? { updateBotDefault: true } : {}), ...(resetApprovalToAsk ? { resetApprovalToAsk: true } : {}) };
+  const result = await api(`/api/bots/${action.botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify(body) }) as { bot?: unknown } | null;
+  return result?.bot;
+}
+
+/** The server refuses a model change while the conversation works: a turn began just before the switch landed. */
+const refusedAsWorking = (error: unknown) =>
+  (error as { status?: unknown } | null)?.status === 409 && /\b(?:working|running)\b/i.test(error instanceof Error ? error.message : "");
+
+/** For the app shell, always mounted: once a stopped turn's chat has stayed idle, sets the new AI, and sends the same
+ * message again when it still can. A refusal because a turn began just before keeps the switch for the next idle. */
 export function useAiSwitchKeeper(input: { bots: readonly Bot[]; dispatch: (action: Action) => void }): void {
   const { bots, dispatch } = input;
-  const waiting = useSyncExternalStore(subscribe, () => pending, () => null);
-  const bot = waiting ? bots.find((candidate) => candidate.id === waiting.intent.botId) : undefined;
-  const busy = waiting ? threadBusy(bot, waiting.intent.threadId) : false;
+  const waiting = useSyncExternalStore(subscribe, () => pending, () => pending);
+  const latest = useRef({ bots, dispatch });
+  latest.current = { bots, dispatch };
+  const botOf = (entry: Pending) => latest.current.bots.find((candidate) => candidate.id === entry.intent.botId);
+  // Only what decides the wait: each pick, its Stop's answer and its refusals, and whether its chat works.
+  const ready = Array.from(waiting, ([key, entry]) => ({ key, entry, busy: threadBusy(bots.find((candidate) => candidate.id === entry.intent.botId), entry.intent.threadId) }))
+    .filter(({ entry, busy }) => entry.stopped !== null && !busy);
+  const signature = ready.map(({ key, entry }) => `${key}\t${entry.version}`).join("\n");
+  // One wait per pick, kept across renders: a pick landing or a new one elsewhere never restarts another's wait.
+  const timers = useRef(new Map<string, { version: number | undefined; timer: ReturnType<typeof setTimeout> }>());
   useEffect(() => {
-    if (!waiting || waiting.stopped === null || busy) return;
-    const timer = setTimeout(() => {
-      if (pending !== waiting) return;
-      pending = null;
-      notify();
-      const again = resendable(waiting, bot);
-      dispatch(waiting.action);
-      if (again?.text) dispatch({ type: "editMessage", botId: waiting.intent.botId, threadId: waiting.intent.threadId, messageId: again.id, text: again.text });
-    }, AI_SWITCH_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [waiting, busy, bot, dispatch]);
+    const land = (key: string, entry: Pending) => {
+      if (pending.get(key) !== entry) return;
+      const bot = botOf(entry);
+      if (threadBusy(bot, entry.intent.threadId)) return;
+      const again = resendable(entry, bot);
+      void saveSwitch(entry.action).then((saved) => {
+        if (pending.get(key) !== entry) return;
+        setPending(key, null);
+        if (saved) latest.current.dispatch({ type: "botPatched", bot: saved as never });
+        if (again?.text) latest.current.dispatch({ type: "editMessage", botId: entry.intent.botId, threadId: entry.intent.threadId, messageId: again.id, text: again.text });
+      }, (error: unknown) => {
+        if (pending.get(key) !== entry) return;
+        if (refusedAsWorking(error) && entry.refused + 1 < MAX_REFUSALS) {
+          setPending(key, { ...entry, refused: entry.refused + 1 });
+          return;
+        }
+        setPending(key, null);
+        latest.current.dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
+      });
+    };
+    const keep = new Set<string>();
+    for (const { key, entry } of ready) {
+      keep.add(key);
+      const held = timers.current.get(key);
+      if (held?.version === entry.version) continue;
+      if (held) clearTimeout(held.timer);
+      timers.current.set(key, { version: entry.version, timer: setTimeout(() => { timers.current.delete(key); land(key, entry); }, AI_SWITCH_SETTLE_MS) });
+    }
+    for (const [key, held] of timers.current) {
+      if (keep.has(key)) continue;
+      clearTimeout(held.timer);
+      timers.current.delete(key);
+    }
+    // `ready` is read through `signature`: a new bot object (another conversation streaming) must not restart a wait.
+  }, [signature]);
+  useEffect(() => () => {
+    for (const held of timers.current.values()) clearTimeout(held.timer);
+    timers.current.clear();
+  }, []);
 }
