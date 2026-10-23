@@ -56,12 +56,18 @@ const holdConfigWrite = () => evaluate(`(() => {
 
 // The standard fixture suppresses onboarding. This opt-in entry skips that
 // suppression; only this fixture browser's localStorage is cleared.
-await evaluate("localStorage.clear(); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
+await evaluate("localStorage.clear(); sessionStorage.clear(); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
 await textVisible("Your name");
 await evaluate("document.documentElement.dataset.reducedMotion = 'true'; true");
 await screenshot("welcome");
 await type("Your name", "Onboarding fixture");
 await type("Email", "onboarding@example.test");
+// A reload in the middle of the welcome resumes with what was typed.
+await evaluate("setTimeout(() => location.reload(), 0); true");
+await textVisible("Your name");
+await poll(() => evaluate("[document.querySelector('.welcome-card input[type=text]')?.value, document.querySelector('.welcome-card input[type=email]')?.value]"),
+  ["Onboarding fixture", "onboarding@example.test"], "typed fields kept across a reload");
+console.log("PASS reload keeps the step and the typed fields");
 await evaluate(`(() => {
   const original = window.fetch.bind(window);
   window.fetch = (input, init) => {
@@ -77,32 +83,11 @@ await click("Continue");
 await textVisible("Couldn't save your details");
 assert.equal(await evaluate("document.querySelector('input[type=email]').value"), "onboarding@example.test");
 await click("Continue");
-await textVisible("Connect an AI");
+// The fixture's Claude already works, so the greeting is the whole welcome: no Connect an AI, reel, phone or first-bot step.
+await poll(() => evaluate("document.querySelectorAll('.welcome-card').length"), 0, "the one-step welcome ends");
 assert.equal((await config()).profile.email, "onboarding@example.test");
-console.log("PASS profile failure preserves input; retry persists before advancing");
+console.log("PASS profile failure preserves input; retry persists, then the welcome ends");
 
-// The welcome is short: no feature reel, no phone step, no first-bot step. A reload resumes on the same step.
-await evaluate("setTimeout(() => location.reload(), 0); true");
-await textVisible("Connect an AI");
-console.log("PASS reload resumes on Connect an AI");
-await screenshot("engines");
-const inventoryBefore = await evaluate("[...document.querySelectorAll('.welcome-card [aria-expanded]')].map(e => e.textContent)");
-await evaluate(`(() => {
-  const original = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    if (String(input) === '/api/instances') {
-      window.fetch = original;
-      return Promise.resolve(new Response(JSON.stringify({error:'Fixture inventory unavailable'}), {status:503}));
-    }
-    return original(input, init);
-  };
-  return true;
-})()`);
-await click("Check again");
-await textVisible("Couldn't check your AI connections");
-assert.deepEqual(await evaluate("[...document.querySelectorAll('.welcome-card [aria-expanded]')].map(e => e.textContent)"), inventoryBefore);
-await click("Check again");
-await poll(async () => (await snapshot()).includes("Couldn't check your AI connections"), false, "inventory retry");
 const starter = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.name === 'Pepper'))");
 assert.ok(starter?.modelSelection?.instanceId && starter.modelSelection.model, "starter has a model without opening the picker");
 const engines = await evaluate("fetch('/api/instances').then(r => r.json()).then(data => data.instances)");
@@ -110,21 +95,25 @@ const selected = engines.find((engine: any) => engine.instanceId === starter.mod
 assert.equal(selected?.snapshot.state, "available", "starter uses an available provider");
 assert.notEqual(selected?.snapshot.authenticated, false, "starter uses a connected account");
 assert.equal(starter.modelSelection.model, selected.models.default);
-await click("Continue");
-await textVisible("Message Pepper");
+// The welcome lands in the chat with the Chief (the server's first bot).
+const first = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.chiefOfStaff && !bot.hidden))");
+assert.ok(first?.name, "the first bot");
+const composer = `Message ${first.name}`;
+await textVisible(composer);
 await poll(async () => Boolean((await config()).onboarding.completedAt), true, "welcome completion saved");
 await delay(1500);
 assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0, "no app tour after the welcome");
 await evaluate("setTimeout(() => location.reload(), 0); true");
-await textVisible("Message Pepper");
+await textVisible(composer);
 await delay(1500);
 assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0, "no app tour after a reload");
+assert.equal((await config()).onboarding.hintsSeen.filter((id: string) => id.startsWith("tour.")).length, 0, "no tour step was shown");
 await screenshot("chat");
-console.log("PASS short welcome lands in the chat; the app tour never starts by itself, nor after a reload");
+console.log("PASS short welcome lands in the chat with the first bot; the app tour never starts by itself, nor after a reload");
 
-await type("Message Pepper", "FIRST_MESSAGE_AFTER_ONBOARDING_7J");
+await type(composer, "FIRST_MESSAGE_AFTER_ONBOARDING_7J");
 await ui("press", "--keys", "Enter");
-await poll(() => evaluate(`fetch('/api/threads/${starter.threadId}/messages?limit=20').then(r => r.json()).then(data => data.messages.some(message => message.role === 'bot' && message.kind === 'text' && message.turnSucceeded === true))`), true, "first onboarding message completes");
+await poll(() => evaluate(`fetch('/api/threads/${first.threadId}/messages?limit=20').then(r => r.json()).then(data => data.messages.some(message => message.role === 'bot' && message.kind === 'text' && message.turnSucceeded === true))`), true, "first onboarding message completes");
 console.log("PASS connected default selected automatically; first message succeeds without a model pick");
 
 // The app tour still runs from Settings. Complete every live-interface step and verify its server record. A missing
@@ -140,7 +129,7 @@ for (const step of TOUR_STEPS) {
 }
 await poll(() => evaluate("document.querySelectorAll('[data-tour-card]').length"), 0, "tour closed");
 await evaluate("setTimeout(() => location.reload(), 0); true");
-await textVisible("Message Pepper");
+await textVisible(composer);
 assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0);
 console.log("PASS full app tour from Settings, saved progress, reload stays dismissed");
 
@@ -170,7 +159,7 @@ await poll(async () => Boolean((await config()).onboarding.completedAt), true, "
 // works without a new welcome completion, and failures keep Settings open.
 await evaluate("fetch('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({onboarding:{completedAt:'', version:0}})}).then(r=>r.ok)");
 await evaluate("setTimeout(() => location.reload(), 0); true");
-await textVisible("Message Pepper");
+await textVisible(composer);
 await openSettings();
 await evaluate(`(() => {
   const original = window.fetch.bind(window);

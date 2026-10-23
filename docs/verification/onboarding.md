@@ -23,9 +23,9 @@ first-run onboarding through the fixture-only `?onboarding=1` entry. It uses
 the real renderer and fake-engine server. No provider login, real phone
 pairing, native permissions or user workspace is involved.
 
-Assertions cover profile-save failure and retry, a reload resuming on Connect an
-AI, engine refresh failure without losing inventory, welcome completion landing in
-the chat with no app tour (also after a reload),
+Assertions cover a reload keeping the typed name and email, profile-save failure
+and retry, the one-step welcome (the fixture's Claude already works) landing in the
+chat with the first bot and no app tour (also after a reload),
 automatic starter-model selection and a successful first composer message without
 opening the model picker,
 every app tour step from Settings, persistence after reload, Settings replay, skipping
@@ -165,5 +165,8 @@ never starts by itself, also after a reload, and the first-conversation
 spotlights no longer wait for it.
 
 Layout was checked in `onboarding-preview.html` (`?w=375&h=667`, `?w=1920&h=1080`)
-in a browser of the same size. `verify-onboarding-ui.ts` was updated to this flow
-but not rerun for this change.
+in a browser of the same size. `verify-onboarding-ui.ts` passed end to end on a fresh
+`ui launch` fixture (Oct 23 2026). That fixture has a working AI, so it never reaches
+Connect an AI; the engines step's refresh failure is covered by
+`src/components/onboarding/beats/EnginesBeat.test.ts`, and the steps after it by
+`WelcomeFlow.steps.test.ts`.
