@@ -26,6 +26,8 @@ export type DeciderFailure =
   | "rate_limited"
   /** 529 or 503 */
   | "overloaded"
+  /** 413: the request is over what the relay or the model takes. Never retried: it would be refused again. */
+  | "too_large"
   | "http_error"
   | "malformed";
 

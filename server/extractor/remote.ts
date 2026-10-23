@@ -1,6 +1,6 @@
 // Extraction through Cloud's included relay (POST <relay>/v1/extract) and the OpenRouter LLM fallback (a chat model
 // asked for strict JSON). Error bodies are never read into a message: they can echo the request.
-import { refusal } from "../decider/jev.ts";
+import { refusal, RELAY_SEAM_HEADER } from "../decider/jev.ts";
 import { openrouterEndpoint } from "../decider/openrouter.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { EXTRACT_PATH, parseExtractResponse, parseExtractValues } from "./contract.ts";
@@ -54,7 +54,8 @@ export function relayExtractEndpoint(baseUrl: string): URL | null {
 export async function extractWithRelay(request: ExtractBackendRequest): Promise<ExtractBackendResult> {
   const url = relayExtractEndpoint(request.baseUrl);
   if (!url) return { ok: false, reason: "misconfigured" };
-  const answered = await post(request, url, {}, { seam: request.seam, fields: request.fields, input: request.input });
+  // The seam goes in the header, as on /v1/systemone, and in the body.
+  const answered = await post(request, url, { [RELAY_SEAM_HEADER]: request.seam }, { seam: request.seam, fields: request.fields, input: request.input });
   if (!answered.ok || !("body" in answered)) return answered as ExtractBackendResult;
   const parsed = parseExtractResponse(answered.body, request.fields);
   return parsed ? { ok: true, ...parsed } : { ok: false, reason: "malformed" };

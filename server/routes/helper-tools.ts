@@ -49,6 +49,7 @@ const FAILURE: Partial<Record<DeciderFailure, string>> = {
   timeout: "The helper model took too long. Try a smaller input.",
   unreachable: "The helper model could not be reached. Try again shortly.",
   misconfigured: "That request is outside what the helper model takes.",
+  too_large: "That is too large for the helper model. Send less text or a smaller image; trying the same again will not work.",
 };
 const BY: Record<DeciderProvider, string> = { jev: "Jev", workersai: "Cloudflare Workers AI", openrouter: "OpenRouter" };
 

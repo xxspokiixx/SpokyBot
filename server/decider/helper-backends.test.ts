@@ -135,7 +135,7 @@ describe("Clef on Workers AI", () => {
   });
 
   it.each([
-    [401, "rejected"], [403, "rejected"], [429, "rate_limited"], [503, "overloaded"], [500, "http_error"],
+    [401, "rejected"], [403, "rejected"], [413, "too_large"], [429, "rate_limited"], [503, "overloaded"], [500, "http_error"],
   ] as const)("HTTP %s → %s, never the body", async (status, reason) => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response(`echo ${CF_TOKEN}`, { status }));
     const result = await decider(config, fetchImpl).yesNo("botDecide", "x", "Is it?");
@@ -200,6 +200,13 @@ describe("the relay's seams, from the fixtures shared with Cloud's Admin", () =>
     await expect(d.choose("inboxTriage", { ...triage.state, body: "the whole email" }, triage.question)).resolves.toEqual({ ok: false, reason: "misconfigured" });
     await expect(d.yesNo("botDecide", "", "Is it?")).resolves.toEqual({ ok: false, reason: "misconfigured" });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("the relay's 413 is too large, said plainly and called once: it is never retried", async () => {
+    cloud();
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("too big", { status: 413 }));
+    await expect(decider({}, fetchImpl).yesNo("botDecide", "x".repeat(20_000), "Is it?")).resolves.toMatchObject({ ok: false, reason: "too_large", status: 413 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("an own key never names a seam: the header is the relay's alone", async () => {

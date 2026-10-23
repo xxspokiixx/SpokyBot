@@ -59,6 +59,8 @@ export function createInboxTriage(deps: InboxTriageDeps) {
         const details = read?.ok ? Object.fromEntries(Object.entries(read.values).filter(([, value]) => value !== null)) as InboxDetails : undefined;
         const { state, question } = inboxTriageRequest({ email, ...(details ? { details } : {}), dismissedFrom });
         const decided = await deps.decider.choose("inboxTriage", state, question, { timeoutMs: INBOX_TRIAGE_TIMEOUT_MS });
+        // Too large for the relay is too large every time: that email is skipped, never asked about again.
+        if (!decided.ok && decided.reason === "too_large") return { email, details, verdict: "skip" as const, keep: 0 };
         return decided.ok ? { email, details, verdict: decided.answers.choice, keep: 1 - (decided.answers.probabilities.skip ?? 0) } : null;
       });
       if (judged.some((one) => one === null)) return null;

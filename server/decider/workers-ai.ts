@@ -38,7 +38,7 @@ export function workersAiResult(body: unknown): unknown {
   return "result" in body ? body.result : body;
 }
 
-export type WorkersAiCall = { ok: true; result: unknown } | { ok: false; reason: "unreachable" | "malformed" | "rejected" | "rate_limited" | "overloaded" | "http_error"; status?: number };
+export type WorkersAiCall = { ok: true; result: unknown } | { ok: false; reason: "unreachable" | "malformed" | "rejected" | "rate_limited" | "overloaded" | "too_large" | "http_error"; status?: number };
 
 /** One POST to a Workers AI model. Never follows a redirect with the token. */
 export async function callWorkersAi(input: { fetch: typeof fetch; url: URL; token: string; body: unknown; signal: AbortSignal }): Promise<WorkersAiCall> {

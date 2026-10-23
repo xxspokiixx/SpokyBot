@@ -79,6 +79,12 @@ describe("decide", () => {
     expect(ask).not.toHaveBeenCalled();
   });
 
+  it("too large says so, and that the same again will not work", async () => {
+    const { status, payload } = await call("/api/internal/helpers/decide", { state: "x", questions: QUESTIONS }, { ask: (async () => ({ ok: false, reason: "too_large", status: 413 })) as never });
+    expect(status).toBe(502);
+    expect(payload?.error).toMatch(/too large .* will not work/);
+  });
+
   it("a failing model says what to do, never the vendor's words", async () => {
     const { status, payload } = await call("/api/internal/helpers/decide", { state: "x", questions: QUESTIONS }, { ask: (async () => ({ ok: false, reason: "rate_limited", status: 429 })) as never });
     expect(status).toBe(502);

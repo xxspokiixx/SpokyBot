@@ -72,6 +72,15 @@ describe("inbox triage on the helper models", () => {
     expect(extractor.calls.mock.calls[0]!.slice(0, 2)).toEqual(["inboxTriage", INBOX_FIELDS]);
   });
 
+  it("an email the relay says is too large (413) is skipped, not retried, and the rest are still sorted", async () => {
+    const decider = fakeDecider({ Dana: "reply" });
+    const choose = decider.calls.getMockImplementation()!;
+    decider.calls.mockImplementation((async (seam: string, state: unknown, question?: unknown) =>
+      (state as { email: { from: string } }).email.from.includes("Huge") ? { ok: false, reason: "too_large", status: 413 } : choose(seam, state, question)) as never);
+    const triage = createInboxTriage({ decider, extractor: fakeExtractor(), config: () => HELPERS_ON });
+    await expect(triage.triage([email("h", "Huge <h@x.test>", "Big"), email("b", "Dana <d@x.test>", "Hi")], [])).resolves.toEqual([{ id: "b", why: "", needsReply: true }]);
+  });
+
   it("one failed decision fails the batch, so nothing is dropped half-sorted", async () => {
     const triage = createInboxTriage({ decider: fakeDecider({ Dana: "reply", Bank: "fail" }), extractor: fakeExtractor(), config: () => HELPERS_ON });
     await expect(triage.triage([email("b", "Dana <d@x.test>", "Hi"), email("c", "Bank <b@x.test>", "Due")], [])).resolves.toBeNull();

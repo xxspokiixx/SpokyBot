@@ -27,7 +27,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const extractor = (config: AppConfig, fetchImpl: FetchMock) => createExtractor({ config: () => config, fetch: fetchImpl as unknown as typeof fetch, timeZone: () => "UTC" });
 const sent = (fetchImpl: FetchMock, index = 0) => {
   const [url, init] = fetchImpl.mock.calls[index]!;
-  return { url: String(url), auth: (init!.headers as Record<string, string>).authorization, body: JSON.parse(String(init!.body)) };
+  const headers = init!.headers as Record<string, string>;
+  return { url: String(url), auth: headers.authorization, body: JSON.parse(String(init!.body)), ...(headers["x-omb-seam"] ? { seam: headers["x-omb-seam"] } : {}) };
 };
 /** Answers like Workers AI, by model, from the fixture. */
 const workersAi = () => vi.fn<typeof fetch>(async (url) => json(String(url).endsWith("/clairic") ? workersFixture.clairic.response : workersFixture.clef.response));
@@ -100,7 +101,7 @@ describe("Clairic and Clef on the person's own Workers AI account", () => {
     for (const index of [0, 1]) expect(sent(fetchImpl, index).body.images).toEqual([{ content_type: "image/png", base64: image.data }]);
   });
 
-  it.each([[401, "rejected"], [429, "rate_limited"], [500, "http_error"]] as const)("HTTP %s → %s, and the body is never read", async (status, reason) => {
+  it.each([[401, "rejected"], [413, "too_large"], [429, "rate_limited"], [500, "http_error"]] as const)("HTTP %s → %s, and the body is never read", async (status, reason) => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response(`echo ${CF_TOKEN}`, { status }));
     const result = await extractor(OWN, fetchImpl).extract("botExtract", FIELDS, INPUT);
     expect(result).toMatchObject({ ok: false, provider: "workersai", reason });
@@ -127,7 +128,7 @@ describe("whose key reads: own Workers AI, Cloud's relay, OpenRouter, nothing", 
     const fields: FieldSchema = { total: { type: "number" }, currency: { type: "enum", options: ["USD", "EUR"] } };
     const result = await extractor({}, fetchImpl).extract("botExtract", fields, INPUT);
     expect(result).toMatchObject({ ok: true, provider: "jev", values: { total: 1080, currency: "USD" }, model: "clairic" });
-    expect(sent(fetchImpl)).toEqual({ url: `${RELAY}/v1/extract`, auth: `Bearer ${INCLUDED}`, body: { seam: "botExtract", fields, input: INPUT } });
+    expect(sent(fetchImpl)).toEqual({ url: `${RELAY}/v1/extract`, auth: `Bearer ${INCLUDED}`, seam: "botExtract", body: { seam: "botExtract", fields, input: INPUT } });
     expect(describeExtractor({})).toEqual({ provider: "jev", included: true, ready: true });
   });
 
@@ -174,6 +175,13 @@ describe("whose key reads: own Workers AI, Cloud's relay, OpenRouter, nothing", 
     await expect(extractor({ decider: { ...OWN.decider, provider: "off" } }, fetchImpl).extract("botExtract", FIELDS, INPUT)).resolves.toEqual({ ok: false, reason: "disabled" });
     await expect(extractor({ decider: { ...OWN.decider, jobs: { inboxTriage: false } } }, fetchImpl).extract("inboxTriage", INBOX_FIELDS, { text: "x" })).resolves.toEqual({ ok: false, reason: "job_off" });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("the relay's 413 is too large, and is asked once", async () => {
+    cloud();
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("too big", { status: 413 }));
+    await expect(extractor({}, fetchImpl).extract("botExtract", FIELDS, INPUT)).resolves.toMatchObject({ ok: false, reason: "too_large", status: 413 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("the key check is one fixed extraction, through the relay too", async () => {
