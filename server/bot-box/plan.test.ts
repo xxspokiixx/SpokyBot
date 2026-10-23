@@ -84,6 +84,33 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-y"))).toBe("none");
   });
 
+  it("on a Team Cloud the turn's HOME is its audience's engine home: the server's HOME and every other audience's home are not there", () => {
+    const own = join(dataDir, "engine-homes", "member-aaaaaaaaaaaaaaaa"), other = join(dataDir, "engine-homes", "member-bbbbbbbbbbbbbbbb");
+    const plan = planBox(setup(), {
+      command: "/usr/local/bin/claude", args: [], cwd, env: { HOME: own, CLAUDE_CONFIG_DIR: `${own}/.claude-work`, CODEX_HOME: `${own}/.omb-folders/CODEX_HOME-abc` },
+      home: own, shared: [{ source: "/data/.claude/.credentials.json", target: `${own}/.claude/.credentials.json` }, { source: "/data/x", target: "/elsewhere/x" }],
+    });
+    expect(visibleInBox(plan, `${own}/.claude/projects/p/s.jsonl`)).toBe("rw");
+    expect(visibleInBox(plan, `${own}/.claude/.credentials.json`)).toBe("rw");
+    for (const hidden of [`${other}/.claude/projects/p/s.jsonl`, "/data/.claude/projects/p/s.jsonl", "/data/.claude/.credentials.json", "/data/.codex/sessions/x.jsonl",
+      "/data/notes.txt", join(dataDir, "engine-homes", ".held", "1", "x"), join(dataDir, "messages.db"), "/elsewhere/x"]) {
+      expect(visibleInBox(plan, hidden), hidden).toBe("none");
+    }
+    expect(visibleInBox(plan, cwd)).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-a", "MEMORY.md"))).toBe("rw");
+    // The home goes back after the data folder is emptied, the team's sign-in over its name in the home after that.
+    const args = bwrapArgs(plan);
+    const at = (flag: string, target: string) => args.findIndex((arg, i) => arg === flag && args[i + (flag === "--tmpfs" ? 1 : 2)] === target);
+    expect(args).not.toContain(home);
+    expect(at("--tmpfs", dataDir)).toBeGreaterThan(-1);
+    expect(at("--tmpfs", dataDir)).toBeLessThan(at("--bind", own));
+    expect(at("--bind", own)).toBeLessThan(at("--bind-try", `${own}/.claude/.credentials.json`));
+    expect(args.join(" ")).toContain(`--bind-try /data/.claude/.credentials.json ${own}/.claude/.credentials.json`);
+    expect(args.filter((arg) => arg.startsWith(`${own}/.omb-folders`) || arg === `${own}/.claude-work`)).toEqual([]);
+    // Without an engine home (a My Cloud, a desktop) the box has the server's HOME as before.
+    expect(visibleInBox(turn(), "/data/.claude/projects/p/s.jsonl")).toBe("rw");
+  });
+
   it("a data folder outside HOME is simply not there", () => {
     const plan = planBox({ ...setup(), dataDir: "/srv/omb", home: "/home/maus" }, { command: "/usr/bin/x", args: [], cwd: "/srv/omb/task-workspaces/b/t", env: {} });
     expect(visibleInBox(plan, "/srv/omb/messages.db")).toBe("none");
