@@ -552,9 +552,11 @@ function ownOpenCodeAccess(env: Record<string, string | undefined>): boolean {
 const OPENCODE_OWN_MODEL = /^opencode(?:-go)?\//u;
 
 /** Ready only through Zen's free no-login models: no access of the person's own and no other provider's model. A local
- * model the app found (`custom`) is not the person signing OpenCode in to anything. */
+ * model the app found (`custom`) is not the person signing OpenCode in to anything. An empty catalog is no fallback: it
+ * offers nothing to run. */
 export function openCodeFreeFallback(ownAccess: boolean, models: ModelCatalog): boolean {
-  return !ownAccess && models.options.every((option) => option.custom === true || OPENCODE_OWN_MODEL.test(option.id));
+  return !ownAccess && models.options.length > 0
+    && models.options.every((option) => option.custom === true || OPENCODE_OWN_MODEL.test(option.id));
 }
 
 function withinFolder(path: string, folder: string): boolean {

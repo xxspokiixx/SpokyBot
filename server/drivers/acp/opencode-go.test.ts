@@ -15,6 +15,7 @@ import {
   createOpenCodeDriver,
   describeOpenCodeAccountError,
   discoverOpenCodeModels,
+  openCodeFreeFallback,
   openCodeOwnedDirectories,
   openCodeProviderKeysAllowed,
   openMausOwnsWorkingFolder,
@@ -1151,6 +1152,12 @@ describe("OpenCode ready only through its free models", () => {
       expect(snapshot.authenticated).toBe(true);
       expect(snapshot).not.toHaveProperty("freeFallback");
     }
+  });
+
+  it("is no fallback with an empty catalog, which is not ready at all; local models alone still are one", () => {
+    expect(openCodeFreeFallback(false, { default: "", options: [] })).toBe(false);
+    expect(openCodeFreeFallback(false, { default: "ollama/qwen3", options: [{ id: "ollama/qwen3", label: "Qwen 3", custom: true }] })).toBe(true);
+    expect(openCodeFreeFallback(true, catalog("opencode/big-pickle"))).toBe(false);
   });
 
   it("is a normal AI when OpenCode offers another provider's models", async () => {
