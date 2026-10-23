@@ -550,6 +550,38 @@ describe("#Title thread links in markdown", () => {
   });
 });
 
+describe("a bot's Use my Mac link", () => {
+  const text = "To let me use your apps, press [Use my Mac](openmausbot://use-my-computer).";
+
+  it("opens this app's own popup from the person's click, and never leaves the app", async () => {
+    const offer = vi.fn(async () => {});
+    window.ogb = { platform: "darwin", cloudLending: { open: async () => {}, offer } } as unknown as typeof window.ogb;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(createElement(ChatMarkdown, { text })));
+      const button = host.querySelector<HTMLButtonElement>("button[data-use-my-computer]")!;
+      expect(button.textContent).toBe("Use my Mac");
+      expect(host.querySelector('a[href^="openmausbot:"]')).toBeNull();
+      await act(async () => button.click());
+      expect(offer).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      delete window.ogb;
+    }
+  });
+
+  it("is plain text where there is no popup to open, such as a browser or the phone", () => {
+    const markup = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(markup).toContain(">Use my Mac<");
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain('href="openmausbot://');
+    expect(chatUrlTransform("openmausbot://use-my-computer")).toBe("openmausbot://use-my-computer");
+  });
+});
+
 describe("Markdown image metadata", () => {
   it("prefers alt text and otherwise derives a readable filename", () => {
     expect(markdownImageName("https://example.test/random.png", "Final render")).toBe("Final render");

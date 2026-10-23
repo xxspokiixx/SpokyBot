@@ -18,6 +18,7 @@ import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
+import { readThreadNotifications } from "./notifications.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -48,6 +49,7 @@ export interface TaskRouteDeps {
   sharedWorkspaceFullAccessEnabled(): boolean;
   supportsApprovalMode(selection: ModelSelection, mode: ApprovalMode): boolean;
   threadBusy(botId: string, threadId: string): boolean;
+  broadcast(payload: Record<string, unknown>): void;
   publicBot(bot: BotRecord): WireBot;
   wireBot(bot: BotRecord): WireBot;
   wireTask(task: TaskRecord, botModel: ModelSelection): WireTask;
@@ -72,7 +74,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
   const {
     store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations,
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
-    supportsApprovalMode, threadBusy, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
+    supportsApprovalMode, threadBusy, broadcast, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
     checkedTaskModelSwitch, threadTitleGate, generateThreadTitle, settleDirectFollowup, clearTurnDigestState,
     revokeInternalCapabilitiesForThread, stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
   } = deps;
@@ -224,6 +226,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
+      readThreadNotifications(m[2], broadcast);
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).

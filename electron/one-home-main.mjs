@@ -11,6 +11,7 @@ import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
 import { createMoveSession } from "./move-session.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
 import { createOneHome } from "./one-home.mjs";
+import { teamPlan } from "./cloud-team-plan.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
 
 const MOVE_LABEL = "Move to My Cloud";
@@ -37,7 +38,7 @@ export function oneHomeCloud(state) {
     ready: connected && machine?.status === "ready" && Boolean(machine.origin),
     moves: connected && machine?.moves === true,
     ended: connected && Boolean(machine?.hold),
-    paid: connected && state.entitlement?.status === "active" && !trialOn,
+    paid: connected && state.entitlement?.status === "active" && !trialOn && !teamPlan(state),
     ...(homecoming ? { homecoming: { installationId: homecoming.installationId, name: homecoming.name } } : {}),
     ...(connected && typeof state.deviceId === "string" && state.deviceId ? { signIn: state.deviceId } : {}),
   };
@@ -68,6 +69,7 @@ async function answer(response) {
  *   journalFile(): string,
  *   tempRoot(): string,
  *   lend?(projects: string[]): Promise<unknown>,
+ *   offer?(): unknown,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
@@ -82,7 +84,7 @@ async function answer(response) {
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
  * `teamJournal`, team-moves.json beside this one by default). The rest are installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, openTeam, teamJournal, ...sendDeps }) {
+export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, offer, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, openTeam, teamJournal, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -174,7 +176,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     },
     session: () => moveSession.open(target()),
     release: () => moveSession.end(),
-    lend, phone, openHome, openLocal, restart, version, log,
+    lend, offer, phone, openHome, openLocal, restart, version, log,
     again,
     installation,
     async reportMove() {

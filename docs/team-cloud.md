@@ -33,7 +33,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Phones.** Settings → *Open on your phone* (and *Connect your phone* in the account menu) shows a code made for the
   person signed in. The phone app scans it as any `/pair#code=` link and gets that person's session: their address,
   their role, their chats, never another member's. The phone stays signed in while the person's app keeps checking in
-  with the Admin (it does so while the team is open in it) and ends within the hour after the last check.
+  with the Admin (it does so while the team is open in it) and ends within the hour after the last check. Under the code,
+  *Paired devices* lists the phones those codes opened as *device · member* (`GET /api/team/phones`): a member sees their
+  own, the Super admin and Admins every member's. **Remove** (`DELETE /api/team/phones/<id>`, the same rule) signs that
+  phone out at once and closes its open streams; the app windows the Admin signs in are not listed there.
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
@@ -48,6 +51,32 @@ What the role turns off: the personal settlement (`cloud-owner.ts`: no session i
 earlier-owner adoption), lending a Mac (nobody's Mac serves a team), the guest confinement of a My Cloud (a member's turn
 runs at the bot's own level inside the box; only what came in from outside, a webhook, runs confined), and the "only the
 owner" card rule (whoever started a conversation, or an Admin, answers its cards, as on a hosted workspace).
+
+`OMB_CLOUD_TEAM_LANGUAGE` (optional, one of the app's locales: `de`, `pt-br`…) is the team's default language, set on
+the Admin's Team admin → Settings. It is this server's language while its own settings set none (the app's words and the
+language new bots start in); a value that isn't a locale is ignored, never refused.
+
+## Team admin: the Admin's signed read
+
+The Admin's Team admin pages (openmaus-cloud docs/team-cloud.md "Team admin") show a team's Super admin and Admins what
+this server shares with every bot. It exists only on a Team Cloud.
+
+- `GET /api/cloud/team/admin`, signed like `/api/cloud/health` → `{ v: 1, apps: { available, services: [{ slug, status,
+  accounts: [{ id, alias, status }] }] }, mcp: [{ name, transport, host, enabled, signedIn, secrets }], keys: [{ id:
+  "treg" | "voice", configured, included? }], ai: { keys: [{ id: "anthropic" | "openai" | "openrouter", configured }],
+  engines: [{ id, name, authenticated, account: { email, organization, method } | null }] } }` (`cloud-team-admin.ts`).
+  Names, states and the identities the providers report: never a key, a token, a header or environment value (`secrets`
+  are their names), nor any part of an MCP address but its host.
+- Changes are never signed calls of their own. The Admin pairs as the admin making the change (the usual signed pairing
+  with their `member` claim: an `owner` or `admin` gets the admin scope) and uses that session with the routes the app
+  uses: `PATCH /api/config` for a key, `/api/mcp/servers` to add, test, sign in to and remove a server,
+  `/api/connectors/:slug/authorize` and `DELETE /api/connectors/:slug/accounts/:id` for apps. Every check, side effect
+  and record is the app's own, and each change is that member's. A User's session is refused there as anywhere.
+- A Team Cloud always keeps its admin activity (`/api/admin-activity`), even with no User signed in: it is shared by
+  definition. The Admin's Team admin → Activity reads it with the same session, beside the team's own record there; Usage
+  reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way.
+- For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
+  admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`).
 
 ## The pairing claim (contract v1)
 
@@ -106,7 +135,7 @@ audience.** `mayRead(input, turn)` is true for the team's things and for the tur
 | Scout's main chat | the team's notes, the team's conversations | the team's notes |
 
 Where it is applied: visibility (`VisibleSet.thread` with each conversation's audience; a member's bot list carries only
-their conversations; search, SSE, attachments and the Today page go through the same check), the memory system prompt
+their conversations; search, SSE and attachments go through the same check), the memory system prompt
 (the turn's layer, plus the team's notes read-only), recall (`buildRecall.memoryIds`: the layer and the team's), recent
 work, `session_search` (memory of the layer and the team's; conversations the turn may read), memory writes
 (`/api/internal/memory`, `/memory/log`, the turn-outcome line, capture), "About the user", and the bot box, which puts the

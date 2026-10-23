@@ -29,7 +29,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
-  useShowThreads: () => fixture.showThreads,
+  useShowThreads: () => fixture.advanced && fixture.showThreads,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // The trigger still renders, so the markup assertions in this file see the same header.

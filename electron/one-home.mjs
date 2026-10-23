@@ -38,12 +38,24 @@ const FROZEN = new Set(["freeze", "final", "check"]);
 const MOVING = new Set(["copy", "wait", "freeze", "final", "check", "switch"]);
 const AUTOMATION = /^(routine|call|webhook|app-event):([\w-]{1,128})$/u;
 
-/** What a check found missing, by kind and count only: "2 chats, 1 memory". */
+/** At most this many ids of a kind in the log line. */
+const LOGGED_IDS = 10;
+const ID = /^[\w-]{1,200}$/u;
+/** Rooms and conversations are named by their ids, never their names: what a person can be asked about, nothing they wrote. */
+const IDS_OF = { rooms: (entry) => entry?.id, conversations: (entry) => entry, settings: (entry) => entry };
+const named = (ids) => {
+  const kept = ids.filter((id) => typeof id === "string" && ID.test(id));
+  return kept.length ? ` (${kept.slice(0, LOGGED_IDS).join(", ")}${kept.length > LOGGED_IDS ? `, ${kept.length - LOGGED_IDS} more` : ""})` : "";
+};
+
+/** What a check found missing, by kind and count, and the rooms and conversations by id: "3 rooms (r1, r2, r3), 1 memory". */
 export function missingOf(report) {
-  const counts = Object.entries(record(report?.gaps) ? report.gaps : {}).flatMap(([kind, list]) => (Array.isArray(list) && list.length ? [`${list.length} ${kind}`] : []));
-  const chats = (Array.isArray(report?.chats) ? report.chats : []).filter((entry) => entry.missing || entry.unstamped || entry.path === "broken").length;
+  const counts = Object.entries(record(report?.gaps) ? report.gaps : {}).flatMap(([kind, list]) => (Array.isArray(list) && list.length
+    ? [`${list.length} ${kind}${IDS_OF[kind] ? named(list.map(IDS_OF[kind])) : ""}`] : []));
+  const chats = (Array.isArray(report?.chats) ? report.chats : []).filter((entry) => entry.missing || entry.unstamped || entry.path === "broken");
   const secrets = (report?.secrets?.differs?.length ?? 0) + (report?.secrets?.missing?.length ?? 0);
-  return [...counts, ...(chats ? [`${chats} chat paths`] : []), ...(report?.attachments?.length ? [`${report.attachments.length} attachments`] : []), ...(secrets ? [`${secrets} credentials`] : [])].join(", ") || "something";
+  return [...counts, ...(chats.length ? [`${chats.length} chat paths${named(chats.map((entry) => entry.threadId))}`] : []), ...(report?.attachments?.length ? [`${report.attachments.length} attachments`] : []),
+    ...(secrets ? [`${secrets} credentials`] : [])].join(", ") || "something";
 }
 
 /** The Admin's "too many requests" (429) anywhere in an error's causes, as an owner session's pairing refuses it. */
@@ -95,6 +107,7 @@ export function arrivedCounts(here, there) {
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
  *   release?(): Promise<void>,
  *   lend?(projects: string[]): Promise<unknown>,
+ *   offer?(): unknown,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
@@ -258,7 +271,8 @@ export function createOneHome(deps) {
     return null;
   }
 
-  /** Once home is My Cloud: this computer is lent to it, its own phone link stops, and the Admin is told it moved, once per
+  /** Once home is My Cloud: this computer is lent to it and offers the rest of itself (`offer`, which asks the person at
+   * most once, without waiting for the answer), its own phone link stops, and the Admin is told it moved, once per
    * sign-in (tried again at most hourly while the Admin can't take it). */
   async function settle(journal, cloud = deps.cloud()) {
     let next = journal;
@@ -276,6 +290,7 @@ export function createOneHome(deps) {
         next = write({ ...next, lent: true });
       } catch (error) { log(`one home: this computer is lent later (${error?.message ?? error})`); }
     }
+    if (next.lent) void Promise.resolve().then(() => deps.offer?.()).catch(() => {});
     if (!next.phoneStopped) {
       try {
         if (next.phone) await deps.phone?.stop();
