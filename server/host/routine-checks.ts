@@ -69,6 +69,8 @@ export interface CheckReport {
   unfenced?: boolean;
   /** The helper models sort the mail here, whatever the engine: only meeting prep needs a fenced AI. */
   helpersSort?: boolean;
+  /** Whether Gmail is connected, and the person's address once read: the add-a-key suggestion's cue. */
+  gmail?: { connected: boolean; address?: string };
   /** Emails the helper models picked for the brief, with a why built in plain code. */
   picked?: Array<{ email: EmailHeader; why: string; needsReply: boolean }>;
   /** The reads of this check, for the brief's own follow-ups (a reply already sent). */
@@ -305,6 +307,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
       } else if (!finished.length) entry.runsCursor = at;
     }
 
+    if (apps) report.gmail = { connected: apps.gmail === true, ...(entry.address ? { address: entry.address } : {}) };
     if (trouble.length) report.trouble = trouble;
     let run: RoutineCheckResult["run"];
     const work = brief ? items.mail.length + items.prep.length : items.mail.length + items.prep.length + items.runs.length;

@@ -47,7 +47,7 @@ export function createDeciderRoutes(deps: DeciderRouteDeps): RouteHandler {
       ...(accountId ? { accountId } : {}),
     });
     // The saved keys also read: say whether extraction works too. A draft key is checked for decisions only.
-    const read = !draft && !provider && deps.extractor ? await deps.extractor.testKey() : null;
+    const read = !draft && (!provider || provider === "workersai") && deps.extractor ? await deps.extractor.testKey() : null;
     const extraction = read && !(read.ok === false && read.reason === "no_key")
       ? { extraction: read.ok ? { ok: true } : { ok: false, reason: read.reason, ...(read.status ? { status: read.status } : {}) } }
       : {};
