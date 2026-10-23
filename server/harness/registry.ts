@@ -1,7 +1,7 @@
 // Provider instance registry — port of upstream's ProviderInstanceRegistryLive behavior, minus Effect.
 import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
-import { installStandaloneEngine, isAppStandaloneCopy } from "../engine-standalone.ts";
+import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
@@ -41,7 +41,10 @@ function withServerInstall(install: AnyProviderDriver["install"], npmPresent: bo
   return { ...clientInstall(install), platform, ...(server ? { server } : {}), ...(appCopy ? { signInCommand: undefined } : {}) };
 }
 
-type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<unknown>;
+type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<StandaloneInstalled>;
+
+/** Installed; `useCli` when the copy this engine's CLI finds does not start and it should run the app's own copy instead. */
+export type InstallResult = true | { useCli: string };
 
 function cliDefaultOf(driver: AnyProviderDriver | undefined): string | undefined {
   if (!driver) return undefined;
@@ -317,7 +320,7 @@ export class ProviderRegistry {
     return true;
   }
 
-  async installRuntime(instanceId: InstanceId): Promise<boolean> {
+  async installRuntime(instanceId: InstanceId): Promise<InstallResult | false> {
     const entry = this.byId.get(instanceId);
     if (!entry) return false;
     // A failed install changes the status too: Antigravity reports the failure as its reason.
@@ -330,8 +333,8 @@ export class ProviderRegistry {
       const driver = this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind);
       const server = serverInstallFor(driver?.install, this.npmPresent());
       if (server?.standalone && driver?.install?.standalone) {
-        await this.installStandalone(driver.install.standalone, { baseDir: this.enginesBaseDir });
-        return true;
+        const installed = await this.installStandalone(driver.install.standalone, { baseDir: this.enginesBaseDir });
+        return (await this.appCopyAdvice(instanceId, driver, installed)) ?? true;
       }
       if (!server?.package) return false;
       await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver) });
@@ -363,6 +366,23 @@ export class ProviderRegistry {
     if (!instance?.cancelAuthentication) return false;
     await instance.cancelAuthentication();
     return true;
+  }
+
+  /** After the app's own copy installed: when this engine's CLI still finds another copy (a launcher stranded when Node.js
+   * was removed, an old npm install) and that copy does not start, the engine should run the app's copy. Its own status
+   * read is the check, so the copy is found and started exactly as the engine's processes do it. */
+  private async appCopyAdvice(instanceId: InstanceId, driver: AnyProviderDriver, installed: StandaloneInstalled): Promise<{ useCli: string } | null> {
+    const live = this.get(instanceId);
+    const cli = this.cliByInstance.get(instanceId) ?? cliDefaultOf(driver);
+    if (!live || !cli || !installed.executablePath || this.appStandaloneCopy(driver, cli)) return null;
+    this.forgetSnapshots();
+    let state: ProviderSnapshot["state"];
+    try {
+      state = (await live.snapshot()).state;
+    } catch {
+      state = "unavailable";
+    }
+    return state === "available" ? null : { useCli: installed.executablePath };
   }
 
   /** Whether this engine's CLI runs the app's own standalone copy, looked up the way its spawns look it up. */
