@@ -1782,6 +1782,7 @@
   "teamPhone.title": "Auf dem Handy öffnen",
   "teamPhone.subtitle": "Scanne diesen Code mit der OpenMausBot-App auf deinem Handy. Dein Handy öffnet {team} als du, mit den Chats, die du hier siehst.",
   "teamPhone.stays": "Dein Handy bleibt angemeldet, solange {team} in dieser App geöffnet ist.",
+  "teamPhone.remove": "Entfernen",
   "remote.serverPairing.creating": "Wird erstellt…",
   "remote.serverPairing.expires": "Läuft in {minutes} Min. ab",
   "remote.serverPairing.expired": "Dieser Code ist abgelaufen. Erstelle einen neuen.",

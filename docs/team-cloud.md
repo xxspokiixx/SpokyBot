@@ -33,7 +33,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Phones.** Settings → *Open on your phone* (and *Connect your phone* in the account menu) shows a code made for the
   person signed in. The phone app scans it as any `/pair#code=` link and gets that person's session: their address,
   their role, their chats, never another member's. The phone stays signed in while the person's app keeps checking in
-  with the Admin (it does so while the team is open in it) and ends within the hour after the last check.
+  with the Admin (it does so while the team is open in it) and ends within the hour after the last check. Under the code,
+  *Paired devices* lists the phones those codes opened as *device · member* (`GET /api/team/phones`): a member sees their
+  own, the Super admin and Admins every member's. **Remove** (`DELETE /api/team/phones/<id>`, the same rule) signs that
+  phone out at once and closes its open streams; the app windows the Admin signs in are not listed there.
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 

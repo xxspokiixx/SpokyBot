@@ -4451,6 +4451,7 @@
   "teamPhone.title": "スマートフォンで開く",
   "teamPhone.subtitle": "このコードをスマートフォンの OpenMausBot アプリでスキャンしてください。スマートフォンにあなたとして {team} が開き、ここで見ているチャットが表示されます。",
   "teamPhone.stays": "このアプリで {team} を開いている間、スマートフォンはサインインしたままです。",
+  "teamPhone.remove": "削除",
   "remote.serverPairing.creating": "作成中…",
   "remote.serverPairing.expires": "あと {minutes} 分で期限切れ",
   "remote.serverPairing.expired": "そのコードは期限切れです。新しく作成してください。",

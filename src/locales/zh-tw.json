@@ -3302,6 +3302,7 @@
   "teamPhone.title": "在手機上開啟",
   "teamPhone.subtitle": "用手機上的 OpenMausBot App 掃描此碼。手機會以你的身分開啟 {team}，顯示你在這裡看到的聊天。",
   "teamPhone.stays": "只要在此 App 中開著 {team}，手機就會保持登入。",
+  "teamPhone.remove": "移除",
   "remote.serverPairing.creating": "正在建立…",
   "remote.serverPairing.expires": "{minutes} 分鐘後失效",
   "remote.serverPairing.expired": "該配對碼已失效，請建立新的配對碼。",

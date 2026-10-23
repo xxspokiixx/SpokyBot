@@ -4522,6 +4522,7 @@
   "teamPhone.title": "Abrir no seu celular",
   "teamPhone.subtitle": "Escaneie este código com o app OpenMausBot no seu celular. Seu celular abre {team} como você, com os chats que você vê aqui.",
   "teamPhone.stays": "Seu celular continua conectado enquanto {team} estiver aberto neste app.",
+  "teamPhone.remove": "Remover",
   "remote.serverPairing.creating": "Criando…",
   "remote.serverPairing.expires": "Expira em {minutes} min",
   "remote.serverPairing.expired": "Esse código expirou. Crie outro.",

@@ -4720,6 +4720,7 @@
   "teamPhone.title": "Open on your phone",
   "teamPhone.subtitle": "Scan this code with the OpenMausBot phone app. Your phone opens {team} as you, with the chats you see here.",
   "teamPhone.stays": "Your phone stays signed in while {team} is open in this app.",
+  "teamPhone.remove": "Remove",
   "remote.serverPairing.creating": "Creating…",
   "remote.serverPairing.expires": "Expires in {minutes} min",
   "remote.serverPairing.expired": "That code expired. Create a new one.",
