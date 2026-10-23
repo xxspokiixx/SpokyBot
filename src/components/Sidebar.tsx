@@ -40,7 +40,7 @@ import { liveActivityLabel } from "@/lib/live-activity";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar } from "./Avatar";
-import { BotModelBadge, BotModelMark } from "./BotModelBadge";
+import { BotModelBadge, BotModelMark } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
@@ -1237,12 +1237,12 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
                 <title>{t("sidebar.bot.chiefOfStaff")}</title>
               </Crown>
             )}
-            {title && !renaming && <span className="sr-only">{`, ${title}`}</span>}
             {onLiveCall && !iconOnly && !renaming && (
               <Phone className="size-3 shrink-0 text-success" role="img" aria-label={t("call.live.badge")} data-testid="live-call-badge">
                 <title>{t("call.live.badge")}</title>
               </Phone>
             )}
+            {title && !renaming && <SidebarBotRole role={title} />}
           </span>
           {selected && last && !renaming && !expanded && (
             <span className="shrink-0 text-[12px] tabular-nums text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0">
