@@ -11,17 +11,20 @@ import { PASS } from "./table.ts";
 
 const person: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
 
-function setup(refusal: string | null = null) {
+function setup(refusal: string | null = null, options: { canSetUp?: boolean } = {}) {
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }), undefined, undefined, "en");
   const bot = store.createBot({ name: "Ava" });
-  const route = createSetupRequestRoutes({ store, language: () => "es", sendRefusal: () => refusal });
+  let presser: string | undefined;
+  const route = createSetupRequestRoutes({ store, language: () => "es", sendRefusal: () => refusal, presser: () => presser,
+    canSetUp: () => options.canSetUp ?? true });
+  const as = (who: string | undefined) => { presser = who; };
   const call = async (method: string, body: unknown, botId = bot.id, path = `/api/bots/${botId}/setup-request`) => {
     let answer: { status: number; body: any } | undefined;
     const handled = await route({ req: {} as never, res: {} as never, url: new URL(`http://x${path}`), path, method, auth: person,
       json: (_res: unknown, status: number, value: unknown) => { answer = { status, body: value }; }, readBody: async () => body } as never);
     return handled === PASS ? "pass" : answer!;
   };
-  return { store, bot, call, waiting: () => store.taskByThread(bot.id, bot.threadId)?.setupRequest };
+  return { store, bot, call, as, waiting: () => store.taskByThread(bot.id, bot.threadId)?.setupRequest };
 }
 
 beforeEach(() => {
@@ -58,6 +61,30 @@ describe("the Set me up route", () => {
     expect(await guest.call("POST", { threadId: guest.bot.threadId })).toMatchObject({ status: 403 });
     expect(await guest.call("DELETE", { threadId: guest.bot.threadId })).toMatchObject({ status: 403 });
     expect(guest.store.messagesFor(guest.bot.threadId)).toHaveLength(1);
+  });
+
+  it("records who pressed it where people share the place, and only they may close its chip", async () => {
+    const s = setup();
+    s.as("member-a");
+    expect(await s.call("POST", { threadId: s.bot.threadId })).toMatchObject({ status: 200 });
+    expect(s.waiting()).toMatchObject({ by: "member-a" });
+    s.as("member-b");
+    expect(await s.call("DELETE", { threadId: s.bot.threadId })).toEqual({
+      status: 403, body: { error: "Only the person who pressed Set me up can stop it." },
+    });
+    expect(s.waiting()).toBeDefined();
+    s.as("member-a");
+    expect(await s.call("DELETE", { threadId: s.bot.threadId })).toMatchObject({ status: 200 });
+    expect(s.waiting()).toBeUndefined();
+  });
+
+  it("refuses the press, in plain words, when the bot's AI cannot set it up", async () => {
+    const s = setup(null, { canSetUp: false });
+    expect(await s.call("POST", { threadId: s.bot.threadId })).toEqual({
+      status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead." },
+    });
+    expect(s.store.messagesFor(s.bot.threadId)).toHaveLength(1);
+    expect(s.waiting()).toBeUndefined();
   });
 
   it("leaves other paths alone", async () => {
