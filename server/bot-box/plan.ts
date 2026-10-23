@@ -9,7 +9,8 @@
 //     on a Team Cloud that HOME is the audience's engine home instead (server/engine-homes), with only the team's engine
 //     sign-ins bound into it, so no other audience's transcripts are there;
 //   - put back inside that empty folder: this turn's working folder, the bot's own folder (workspaces/<bot>) and what the
-//     caller names (the turn's permission socket, a read-only file the command line points at);
+//     caller names (the turn's permission socket, a read-only file the command line points at); and, read-only, the
+//     engines OpenMausBot installed there, whole, since npm's bin links point into the prefix by relative paths;
 //   - a private /proc (its own PID namespace: other turns' processes do not exist for it), /dev, /tmp and /run;
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
@@ -33,6 +34,8 @@ export interface BoxSetup {
   home: string;
   /** Folders of code the box may read: the server's own files, the bots' browser. */
   codeRoots: readonly string[];
+  /** Folders of engine code OpenMausBot installed in the data folder, read-only at their own paths; absent ones are skipped. */
+  engineRoots: readonly string[];
   /** Host unix sockets bridged to loopback ports inside the box, when the box has its own network. */
   bridges: readonly BoxBridge[];
   /** The descriptor number the box reads its seccomp filter from (`--seccomp FD`), or none. */
@@ -42,8 +45,8 @@ export interface BoxSetup {
 }
 
 /** Each removes one protection, so a test can prove the matching check fails without it. */
-export type BoxMutation = "bind-data" | "bind-otherws" | "share-pid" | "share-net" | "env-all" | "tmp-shared" | "no-seccomp";
-export const BOX_MUTATIONS: readonly BoxMutation[] = ["bind-data", "bind-otherws", "share-pid", "share-net", "env-all", "tmp-shared", "no-seccomp"];
+export type BoxMutation = "bind-data" | "bind-otherws" | "share-pid" | "share-net" | "env-all" | "tmp-shared" | "no-seccomp" | "engines-rw";
+export const BOX_MUTATIONS: readonly BoxMutation[] = ["bind-data", "bind-otherws", "share-pid", "share-net", "env-all", "tmp-shared", "no-seccomp", "engines-rw"];
 
 export interface BoxRequest {
   command: string;
@@ -103,7 +106,7 @@ export function argvPaths(args: readonly string[]): string[] {
 }
 
 /** Environment values that name folders the engine writes: its own config and caches. */
-export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "TMPDIR"] as const;
+export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "GEMINI_HOME", "TMPDIR"] as const;
 
 /** Folders the box always has its own copy of, so no setting may put the host's back. */
 const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
@@ -175,12 +178,17 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
       if (under(resolve(file.target), ownHome)) mounts.push({ kind: "bind", source: resolve(file.source), target: resolve(file.target), optional: true });
     }
   }
+  // After every read-write line, so none of them can make an engine another conversation also runs writable.
+  for (const root of setup.engineRoots) {
+    const engines = resolve(root);
+    mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
+  }
   const readOnly = new Set<string>();
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args)]) {
     const full = resolve(path);
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
     if (covered(full) || readOnly.has(full)) continue;
-    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots].some((base) => under(full, resolve(base)))) continue;
+    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
     readOnly.add(full);
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
   }
