@@ -77,23 +77,14 @@ await click("Continue");
 await textVisible("Couldn't save your details");
 assert.equal(await evaluate("document.querySelector('input[type=email]').value"), "onboarding@example.test");
 await click("Continue");
-await textVisible("What your bots can do");
+await textVisible("Connect an AI");
 assert.equal((await config()).profile.email, "onboarding@example.test");
 console.log("PASS profile failure preserves input; retry persists before advancing");
 
-// Reduced motion must hold every scene, particularly the timed /setup
-// scene. Scene navigation is driven by the real Next button.
-await click("Next");
-await click("Next");
-await textVisible("Start a message with /setup and describe the job");
-await screenshot("reel");
-await delay(5500);
-await textVisible("Start a message with /setup and describe the job");
-await click("Next");
-await click("Next");
-await click("Next");
-await click("Continue");
-await textVisible("Check again");
+// The welcome is short: no feature reel, no phone step, no first-bot step. A reload resumes on the same step.
+await evaluate("setTimeout(() => location.reload(), 0); true");
+await textVisible("Connect an AI");
+console.log("PASS reload resumes on Connect an AI");
 await screenshot("engines");
 const inventoryBefore = await evaluate("[...document.querySelectorAll('.welcome-card [aria-expanded]')].map(e => e.textContent)");
 await evaluate(`(() => {
@@ -120,16 +111,26 @@ assert.equal(selected?.snapshot.state, "available", "starter uses an available p
 assert.notEqual(selected?.snapshot.authenticated, false, "starter uses a connected account");
 assert.equal(starter.modelSelection.model, selected.models.default);
 await click("Continue");
-await textVisible("Your phone");
-await click("Not now");
-await textVisible("Start chatting");
-await screenshot("meet-bot");
-await click("Start chatting");
-await textVisible("This is where you talk to your bots");
-console.log("PASS reel, engine failure/retry, phone skip and welcome completion");
+await textVisible("Message Pepper");
+await poll(async () => Boolean((await config()).onboarding.completedAt), true, "welcome completion saved");
+await delay(1500);
+assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0, "no app tour after the welcome");
+await evaluate("setTimeout(() => location.reload(), 0); true");
+await textVisible("Message Pepper");
+await delay(1500);
+assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0, "no app tour after a reload");
+await screenshot("chat");
+console.log("PASS short welcome lands in the chat; the app tour never starts by itself, nor after a reload");
 
-// Complete every live-interface step and verify its server record. A missing
+await type("Message Pepper", "FIRST_MESSAGE_AFTER_ONBOARDING_7J");
+await ui("press", "--keys", "Enter");
+await poll(() => evaluate(`fetch('/api/threads/${starter.threadId}/messages?limit=20').then(r => r.json()).then(data => data.messages.some(message => message.role === 'bot' && message.kind === 'text' && message.turnSucceeded === true))`), true, "first onboarding message completes");
+console.log("PASS connected default selected automatically; first message succeeds without a model pick");
+
+// The app tour still runs from Settings. Complete every live-interface step and verify its server record. A missing
 // optional browser tab may skip itself, but every required anchor must work.
+await openSettings();
+await click("Replay app tour");
 for (const step of TOUR_STEPS) {
   if ((await config()).onboarding.hintsSeen.includes(step.id)) continue;
   await poll(() => evaluate("Boolean(document.querySelector('[data-tour-card] button'))"), true, step.id);
@@ -138,14 +139,10 @@ for (const step of TOUR_STEPS) {
   await poll(async () => (await config()).onboarding.hintsSeen.includes(step.id), true, `saved ${step.id}`);
 }
 await poll(() => evaluate("document.querySelectorAll('[data-tour-card]').length"), 0, "tour closed");
-await type("Message Pepper", "FIRST_MESSAGE_AFTER_ONBOARDING_7J");
-await ui("press", "--keys", "Enter");
-await poll(() => evaluate(`fetch('/api/threads/${starter.threadId}/messages?limit=20').then(r => r.json()).then(data => data.messages.some(message => message.role === 'bot' && message.kind === 'text' && message.turnSucceeded === true))`), true, "first onboarding message completes");
-console.log("PASS connected default selected automatically; first message succeeds without a model pick");
 await evaluate("setTimeout(() => location.reload(), 0); true");
 await textVisible("Message Pepper");
 assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0);
-console.log("PASS full guided tour, saved progress, reload stays dismissed");
+console.log("PASS full app tour from Settings, saved progress, reload stays dismissed");
 
 await openSettings();
 await click("Replay app tour");
