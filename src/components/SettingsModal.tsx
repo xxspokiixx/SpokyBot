@@ -9,6 +9,7 @@ import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
 import { AnalyticsRow } from "./AnalyticsRow";
 import { UpdatesConsentRow } from "./UpdatesConsent";
+import { DefaultBotSidebarRow } from "./DefaultBotControls";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { OtherOpenAiCompatServers } from "./OpenAiCompatServers";
 import { DecisionModelSettings } from "./DecisionModelSettings";
@@ -666,6 +667,7 @@ export function SettingsModal() {
         return (
           <>
             <AdvancedModeRow />
+            <DefaultBotSidebarRow />
 
             <ProSettingsCard />
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>

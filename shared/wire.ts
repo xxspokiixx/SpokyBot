@@ -10,7 +10,7 @@ import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
-import type { TeamSetupRequest } from "./team-setup.ts";
+import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
@@ -58,7 +58,7 @@ export type Surface = "cloud" | "vm" | "local" | "browser";
 
 export const MAUS_COLOR_NAMES = [
   "green", "blue", "red", "orange", "purple", "cyan", "pink",
-  "yellow", "teal", "coral", "silver",
+  "yellow", "teal", "coral", "silver", "chrome",
 ] as const;
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
 
@@ -260,7 +260,7 @@ export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => b
 
 /** A bot as a client may see it. avatarUrl is always present (null when the
  * bot has none). */
-export interface WireBot {
+export interface WireBot extends DefaultBotFields {
   waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */
@@ -349,6 +349,11 @@ export interface WireBot {
   chiefOfStaff?: boolean;
   /** Owner-selected additional teams this Chief may coordinate. */
   managedSections?: string[];
+  /** Team Cloud only: the lowercased email of the member who created the bot (or moved it in). */
+  createdBy?: string;
+  /** Team Cloud only: the lowercased email of the member the bot reports to, whose inbox its questions, approvals,
+   * failures and routine results reach. Absent: it reports to `createdBy`. */
+  reportsTo?: string;
   /** Pause for human approval before this bot talks to a peer. */
   approvePeerComms?: boolean;
   /** Bot ids this bot is allowed to contact. */
@@ -425,7 +430,7 @@ export type CardAnswerer = (
 };
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage {
+export interface WireMessage extends HelperIntroField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
