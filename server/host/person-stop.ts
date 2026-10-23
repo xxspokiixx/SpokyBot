@@ -13,6 +13,8 @@ export interface PersonStopDeps {
   handoffs(): Pick<Handoffs, "stoppedByPerson">;
   interruptDirectThread(botId: string, threadId: string): Promise<void>;
   clearUnattended(threadId: string): void;
+  /** Remembers that the person stopped the turn running in this thread, so it ends as their stop. */
+  markStopped(threadId: string): void;
 }
 
 export interface TypedStop {
@@ -38,6 +40,7 @@ export function createPersonStop(deps: PersonStopDeps) {
       return;
     }
     deps.handoffs().stoppedByPerson(threadId);
+    deps.markStopped(threadId);
     await deps.interruptDirectThread(botId, threadId);
   }
 
