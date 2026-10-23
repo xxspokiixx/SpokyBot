@@ -18,10 +18,12 @@ describe("PersonStops", () => {
     expect(stops.stopped("t1", "turn-1")).toBe(false);
   });
 
-  it("takes a Stop pressed while the turn was still being dispatched for whatever that turn turns out to be", () => {
+  it("lets a Stop pressed during a dispatch cover any turn until a turn starts, and drops it at that start", () => {
     const stops = new PersonStops();
     stops.stop("t1", undefined, true);
     expect(stops.stopped("t1", "turn-1")).toBe(true);
+    // The dispatched turn's own start drops the mark: a stopped dispatch's events never reach here, so a turn that
+    // does start is one the Stop did not catch.
     stops.turnStarted("t1", "turn-9");
     expect(stops.stopped("t1", "turn-1")).toBe(false);
   });

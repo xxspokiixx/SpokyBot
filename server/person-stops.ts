@@ -20,7 +20,8 @@ export class PersonStops {
     return stopped === undefined || turnId === undefined || stopped === turnId;
   }
 
-  /** A turn started: a stop for any other turn on the thread is over, even if that turn's end was lost. */
+  /** A turn started: a mark for any other turn on the thread is over (even if that turn's end was lost), and a mark
+   * made during a dispatch is dropped at this start too, since it named no turn. */
   turnStarted(threadId: string, turnId: string | undefined): void {
     if (this.#byThread.has(threadId) && this.#byThread.get(threadId) !== turnId) this.#byThread.delete(threadId);
   }
