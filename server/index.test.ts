@@ -9171,8 +9171,49 @@ describe("harness HTTP API", () => {
       const bot = (await api("POST", "/api/bots", { name: "Described", description: "Files bugs." })).body.bot;
       try {
         expect(bot.messages[0].setupOffer).toBeUndefined();
-        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(409);
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+        expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
+          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do." },
+        });
       } finally {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("refuses the press when the bot's AI cannot set it up", async () => {
+      const bot = (await api("POST", "/api/bots", { name: "No tools" })).body.bot;
+      try {
+        // A plain chat model with its tools off cannot propose a profile.
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "plainApi", model: "fixture-plain-model" } })).status).toBe(200);
+        expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
+          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead." },
+        });
+        expect(await messages(bot.threadId)).toHaveLength(1);
+      } finally {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("reads the line as a typed /setup would, leaving out the Data tab's context, and an edit of it sets up again", async () => {
+      const bot = await blankBot("Edited setup");
+      try {
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "sort my inbox", threadId: bot.threadId, dataContext: { cardId: "c_1" } })).status).toBe(202);
+        const first = await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+        await releaseTurn(bot.id);
+        expect(userText(first)).toContain("Set yourself up for this job: sort my inbox");
+        expect(userText(first)).not.toContain("data-context");
+        const line = (await messages(bot.threadId)).find((row) => row.role === "user");
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages/${line.id}/edit`, { text: "sort my inbox and my calendar", threadId: bot.threadId })).status).toBe(202);
+        const edited = await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+        await releaseTurn(bot.id);
+        expect(edited.systemPrompt).toContain("The user explicitly asked you to set yourself up");
+        expect(userText(edited)).toContain("Set yourself up for this job: sort my inbox and my calendar");
+        expect((await messages(bot.threadId)).find((row) => row.role === "user" && row.text === "sort my inbox and my calendar")).toMatchObject({ setupRequest: true });
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
         await api("DELETE", `/api/bots/${bot.id}`);
       }
     });
