@@ -213,7 +213,7 @@ describe("a folder page", () => {
     expect(row("m1")).toMatchObject({ text: "[App] Dash\nDash", app: { source: "html", bytes: 58 } });
     const stored = docs.read(row("m1").app!.doc)!;
     expect(stored.html).toBe("<h1>Dash</h1><script src=\"app.js\"></script>");
-    expect(stored.data).toMatchObject({ folder: join(realpathSync(where.mine), "dash"), files: { "app.js": expect.any(String), "data.parquet": expect.any(String) } });
+    expect(stored.data).toMatchObject({ folder: join(realpathSync.native(where.mine), "dash"), files: { "app.js": expect.any(String), "data.parquet": expect.any(String) } });
     expect(docs.readFile(row("m1").app!.doc, "data.parquet")?.toString()).toBe("PAR1 PAR1");
     const doc = appDocument({ store, docs, threadId: THREAD, messageId: "m1", files: FILES })!;
     expect(doc.csp).toBe(folderPageCsp("http://127.0.0.1:5174/api/page-files/tok/"));
@@ -246,7 +246,7 @@ describe("a folder page", () => {
     await createAppCard({ store, docs, bot: SCOUT, threadId: THREAD, input: { tool: "show_html", path: "dash", title: "Dash" }, folders: where.of });
     const page = publishablePage({ store, docs, threadId: THREAD, messageId: "m1" });
     if (!page.ok) throw new Error("not publishable");
-    expect(page.folder).toBe(join(realpathSync(where.mine), "dash"));
+    expect(page.folder).toBe(join(realpathSync.native(where.mine), "dash"));
     expect(Object.fromEntries(page.files.map((file) => [file.path, file.data.toString()]))).toMatchObject({ "app.js": "draw()", "data.parquet": "PAR1 PAR1" });
     writeFileSync(join(where.mine, "dash", "app.js"), "drawMore()");
     expect(await createAppCard({ store, docs, bot: SCOUT, threadId: THREAD, input: { tool: "update_html", app_id: "m1", path: "dash" }, folders: where.of })).toEqual({ ok: true, messageId: "m1" });
