@@ -16,6 +16,7 @@ import { compileToolSchema } from "../mcp-schema-validator.ts";
 import { fitToolList } from "../mcp-tool-schema.ts";
 import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
+import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 
 export interface ChatToolDefinition {
   type: "function";
@@ -267,6 +268,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const agentsServer = integrations?.agents && scope !== undefined ? unbridgedServer(integrations.agents) : integrations?.agents;
   if (agentsServer && eligible("agents")) servers.push(["agents", agentsServer]);
   if (integrations?.composio && eligible("composio")) servers.push(["composio", integrations.composio]);
+  if (integrations?.composioOwn && eligible(OWN_APPS_SERVER)) servers.push([OWN_APPS_SERVER, integrations.composioOwn]);
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.highlevel && eligible("highlevel")) servers.push(["highlevel", integrations.highlevel]);
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {
