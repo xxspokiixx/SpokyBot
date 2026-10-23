@@ -4,6 +4,7 @@ import type { Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import {
   PICKABLE_STATES,
+  MAUS_COLOR_LABEL,
   MAUS_COLORS,
   MAUS_COLOR_NAMES,
   type MausMotion,
@@ -155,7 +156,7 @@ export function BotProfileAvatarCard({
                     bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
                   )}
                   style={{ backgroundColor: MAUS_COLORS[color] }}
-                  title={color}
+                  title={t(MAUS_COLOR_LABEL[color])}
                   aria-label={`Use ${color} mascot color`}
                 />
               ))}

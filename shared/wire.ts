@@ -58,7 +58,7 @@ export type Surface = "cloud" | "vm" | "local" | "browser";
 
 export const MAUS_COLOR_NAMES = [
   "green", "blue", "red", "orange", "purple", "cyan", "pink",
-  "yellow", "teal", "coral",
+  "yellow", "teal", "coral", "silver",
 ] as const;
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
 
