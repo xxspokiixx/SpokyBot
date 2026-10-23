@@ -513,7 +513,7 @@ describe("the Cloud Pro popup after the update", () => {
     // Compare plans stays in the app: the Add a Cloud dialog lists every plan.
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "update_popup" });
     expect(window.ogb?.openExternal).not.toHaveBeenCalled();
-    expect(identifyEmail).toHaveBeenCalledWith("person@example.test", { submitted: false });
+    expect(identifyEmail).toHaveBeenCalledWith("person@example.test");
     expect(popupEvents("see_plans")).toEqual([event("see_plans", "none", true, "local")]);
     expect(lastOrder(vi.mocked(identifyEmail))).toBeLessThan(lastOrder(vi.mocked(track)));
     expect(render()).toBe("");
@@ -523,7 +523,7 @@ describe("the Cloud Pro popup after the update", () => {
     vi.clearAllMocks(); fresh(); await launch();
     press("Upgrade to Cloud Pro");
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "update_popup" });
-    expect(identifyEmail).toHaveBeenCalledWith("person@example.test", { submitted: false });
+    expect(identifyEmail).toHaveBeenCalledWith("person@example.test");
     expect(popupEvents("upgrade")).toEqual([event("upgrade", "none", true, "local")]);
     expect(lastOrder(vi.mocked(identifyEmail))).toBeLessThan(lastOrder(vi.mocked(track)));
   });
@@ -546,7 +546,7 @@ describe("the Cloud Pro popup after the update", () => {
       expect(bridges.cloud.openDashboard, plan).not.toHaveBeenCalled(); expect(window.ogb?.openExternal, plan).not.toHaveBeenCalled();
       expect(bridges.plan.manage, plan).not.toHaveBeenCalled();
       expect(f.dispatch, plan).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openCloudAdd" }));
-      expect(identifyEmail, plan).toHaveBeenCalledWith("person@example.test", { submitted: false });
+      expect(identifyEmail, plan).toHaveBeenCalledWith("person@example.test");
       expect(popupEvents("manage"), plan).toEqual([event("manage", plan, true, "local")]);
       expect(seenOnDesktop(), plan).toEqual([ID]); expect(render(), plan).toBe("");
       expect(bridges.cloud.offer, plan).not.toHaveBeenCalled();
