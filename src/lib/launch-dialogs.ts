@@ -4,20 +4,24 @@
 export type LaunchDialog = "mausbot" | "notices";
 
 const KEY = "omb.launch.dialog";
+// Where browser storage is blocked, this page's memory stands in for it, so a claim still holds for the session.
+let remembered: LaunchDialog | null = null;
 
 export function launchDialogShown(): LaunchDialog | null {
   try {
     const owner = sessionStorage.getItem(KEY);
     return owner === "mausbot" || owner === "notices" ? owner : null;
   } catch {
-    return null;
+    return remembered;
   }
 }
 
 /** The first claim of a launch holds; a later one changes nothing. */
 export function markLaunchDialog(owner: LaunchDialog): void {
+  if (launchDialogShown()) return;
   try {
-    if (!launchDialogShown()) sessionStorage.setItem(KEY, owner);
+    sessionStorage.setItem(KEY, owner);
   } catch {
+    remembered = owner;
   }
 }

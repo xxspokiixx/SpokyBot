@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   aiChoices,
   beatWidth,
@@ -26,6 +26,8 @@ import {
   welcomeDue,
   welcomeViewer,
   WELCOME_VERSION,
+  markWelcomeFinished,
+  welcomeFinishedThisLaunch,
 } from "./onboarding";
 
 const done = { completedAt: "2026-09-09T10:00:00.000Z", version: WELCOME_VERSION, reelSeen: false, hintsSeen: [] };
@@ -313,5 +315,14 @@ describe("the welcome's MausBot Cloud beat", () => {
     expect(welcomeOnScreen(), "a second hide of the same mount changes nothing").toBe(true);
     second();
     expect(welcomeOnScreen()).toBe(false);
+  });
+});
+
+describe("welcomeFinishedThisLaunch", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("remembers in memory that the welcome finished when browser storage is blocked", () => {
+    vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
+    expect(() => markWelcomeFinished()).not.toThrow();
+    expect(welcomeFinishedThisLaunch()).toBe(true);
   });
 });

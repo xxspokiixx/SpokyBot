@@ -17,8 +17,10 @@ it("keeps the first ask that opened in this launch, and only that one", () => {
   expect(launchDialogShown(), "a new launch").toBeNull();
 });
 
-it("works on without browser storage", () => {
+it("remembers the launch's ask in memory when browser storage is blocked", () => {
   vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
   expect(() => markLaunchDialog("notices")).not.toThrow();
-  expect(launchDialogShown()).toBeNull();
+  expect(launchDialogShown()).toBe("notices");
+  markLaunchDialog("mausbot");
+  expect(launchDialogShown(), "the first claim still holds").toBe("notices");
 });
