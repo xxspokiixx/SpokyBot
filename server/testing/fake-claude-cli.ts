@@ -375,7 +375,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   };
   // The server's connection check (server/engine-check.ts) stays out of every turn and one-shot capture and knob
   // above, so a test sees only the calls it makes: FAKE_CLAUDE_CHECK_LOG records it, FAKE_CLAUDE_CHECK fail | hang scripts it.
-  if (/^This is a connection check\./.test(prompt)) {
+  if (prompt.startsWith("This is a connection check.")) {
     if (process.env.FAKE_CLAUDE_CHECK_LOG) appendFileSync(process.env.FAKE_CLAUDE_CHECK_LOG, `${JSON.stringify({ prompt })}\n`);
     if (process.env.FAKE_CLAUDE_CHECK === "hang") await new Promise(() => setInterval(() => {}, 1 << 30));
     if (process.env.FAKE_CLAUDE_CHECK === "fail") {
