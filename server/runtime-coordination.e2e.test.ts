@@ -173,10 +173,11 @@ it("S1 assigns a teammate under the envelope and resumes the Chief once with the
   expect(f.eventsOf(child.id).map((event: any) => event.kind)).toEqual(expect.arrayContaining(["enqueued", "started", "settled", "reported"]));
 }), hostTimeout(60_000));
 
-it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her next turn, and resumes the Chief once", () => scenario(async (f) => {
+it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, carries the person's answer into her next turn, and resumes the Chief with the result", () => scenario(async (f) => {
   const brief = "S2-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
     { key: "C0", match: ["S2-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },
+    { key: "C-ASKED", match: ["stopped on a question for", "[OpenMausBot question from @Mira", "which repository?"], reply: "C-ASKED: Mira needs the repository." },
     { key: "C1", match: [SETTLED, REPORT_FROM_MIRA], reply: "S2-FINAL: the release is tagged." });
   f.script(f.mira.id,
     { key: "M2", match: ["S2-BRIEF", "The person answered"], reply: "S2-RESULT: tagged v1.2.0 in the main repository." },
@@ -192,8 +193,10 @@ it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her nex
   expect(work).not.toBe(f.mira.activeTaskId);
   await expect.poll(async () => (await f.chips(job, "needs your input")).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
   expect((await f.chips(job, "needs your input")).some((message: any) => chipText(message).includes("which repository?"))).toBe(true);
-  expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["C0"]);
-  expect(f.roots()[0].status).toBe("waiting");
+  await expect.poll(async () => await f.said(job, "C-ASKED: Mira needs the repository.") === 1 && f.roots()[0]?.status === "waiting", { timeout: 30_000 }).toBe(true);
+  // `resumed`: the turn was sent the settled-results text; the question turn is not.
+  const chiefTurns = () => (f.turns(f.clive.id) as Array<{ planKey?: string; resumed?: boolean }>).map((record) => [record.planKey, record.resumed]);
+  expect(chiefTurns()).toEqual([["C0", false], ["C-ASKED", false]]);
 
   await f.say(f.mira.id, work, "the main one");
   await expect.poll(() => f.turns(f.mira.id).map((record: any) => record.planKey), { timeout: 30_000 }).toEqual(["M1", "M2"]);
@@ -204,7 +207,8 @@ it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her nex
   await f.final(job, "S2-FINAL", 45_000);
   await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("completed");
   expect(f.turns(f.mira.id).map((record: any) => record.planKey)).toEqual(["M1", "M2"]);
-  expect(f.turns(f.clive.id).map((record: any) => [record.planKey, record.resumed])).toEqual([["C0", false], ["C1", true]]);
+  expect(chiefTurns()).toEqual([["C0", false], ["C-ASKED", false], ["C1", true]]);
+  expect(f.told(f.turn("C1"))).not.toContain("[OpenMausBot question from @Mira");
   expect(f.told(f.turn("C1"))).toContain(REPORT_FROM_MIRA);
   expect(f.told(f.turn("C1"))).toContain("S2-RESULT: tagged v1.2.0");
   expect(f.children()[0]).toMatchObject({ status: "completed", outcome: "done", executions: 2 });
