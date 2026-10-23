@@ -238,7 +238,9 @@ every browser keeps its old name and Chrome its old launcher, and nothing here c
 Every team bot has an **owner**: the member it reports to. `reportsTo` (an email) names them; without it the bot
 reports to `createdBy`, the member who created it or moved it in (a bot a Chief creates gets the Chief's owner). Bots
 made before owners were recorded have none until someone picks one, and their asks go to the Admins. The sidebar shows
-the owner's face at the end of each bot's row and "→ Ada" beside a department whose bots all report to Ada.
+the owner's face at the end of each bot's row and "→ Ada" beside a department whose bots all report to Ada. The Team map's
+"Who reports to whom" (also "See who reports to whom" in a department's menu) shows each person with their Chief and
+the bots that report to them by department; dragging a bot onto a person changes its owner.
 
 | Route | Who | What |
 |---|---|---|
