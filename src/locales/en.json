@@ -1854,6 +1854,7 @@
   "chat.voiceNote.pause": "Pause voice note",
   "chat.voiceNote.seek": "Seek voice note",
   "chat.voiceNote.onLiveCall": "Voice notes can't play during a Live call.",
+  "chat.voiceNote.transcript": "Transcript",
   "chat.activity.thinking": "Thinking",
   "chat.activity.working": "Working",
   "chat.activity.runCommand": "Running a command",

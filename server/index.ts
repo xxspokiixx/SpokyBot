@@ -2515,7 +2515,7 @@ async function interruptAllDirectThreads(botId: string): Promise<void> {
 }
 const retiredProviderTurns = new RetiredTurnRegistry();
 const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
-type ParkedTurnAttachment = NonNullable<Message["attachments"]>[number] & { text?: string };
+type ParkedTurnAttachment = NonNullable<Message["attachments"]>[number];
 
 const turnAttachmentsByTurn = new Map<string, Array<ParkedTurnAttachment>>();
 
@@ -7140,32 +7140,27 @@ bus.subscribe((event: RuntimeEvent) => {
             message.kind === "text" &&
             message.turnId === completedTurnId,
         );
-        const transcript = settled
-          .filter((attachment) => attachment.kind === "audio" && attachment.text)
-          .map((attachment) => attachment.text!.trim())
-          .filter(Boolean)
-          .join("\n\n");
+        // A note's words stay on its attachment as the transcript, never appended to the reply: every client
+        // would otherwise read the reply twice. The model still sees them after the text (contextText).
         const staged = settled.map((attachment) =>
           attachment.kind === "audio"
-            ? { kind: "audio" as const, path: attachment.path, mime: attachment.mime }
+            ? {
+                kind: "audio" as const,
+                path: attachment.path,
+                mime: attachment.mime,
+                ...(attachment.text?.trim() ? { text: redactSecretsInText(attachment.text.trim()) } : {}),
+              }
             : attachment,
         );
         if (response) {
           store.patchMessage(event.threadId, response.id, {
             attachments: [...(response.attachments ?? []), ...staged],
-            ...(transcript
-              ? {
-                  text: [response.text?.trim(), redactSecretsInText(transcript)]
-                    .filter(Boolean)
-                    .join("\n\n"),
-                }
-              : {}),
           });
         } else {
           pushMessage({
             role: "bot",
             kind: "text",
-            text: transcript,
+            text: "",
             attachments: staged,
             turnId: completedTurnId,
           });
@@ -15110,6 +15105,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             kind: "audio" as const,
             path: attachment.path,
             mime: attachment.mime,
+            ...(attachment.text?.trim() ? { text: redactSecretsInText(attachment.text.trim()) } : {}),
           }));
           attachedVoiceNote = true;
           // Unpark only after the append lands: a persistence failure must leave the clip parked.

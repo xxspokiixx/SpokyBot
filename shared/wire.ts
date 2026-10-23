@@ -442,7 +442,9 @@ export interface WireMessage {
   attachments?: Array<
     | { kind: "image"; path: string; mime: string; name?: string }
     | { kind: "file"; path: string; mime: string; name: string }
-    | { kind: "audio"; path: string; mime: string; durationMs?: number }
+    /** `text` is the words the note speaks (secret-redacted when stored): clients show it behind a
+     * collapsed transcript, never as message body, and the model's replay folds it back after `text`. */
+    | { kind: "audio"; path: string; mime: string; durationMs?: number; text?: string }
   >;
   card?: OptionCardData;
   /** widget rows (kind "widget"): a bot-authored UI tree. `text` is its
