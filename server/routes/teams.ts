@@ -58,6 +58,8 @@ export interface TeamRouteDeps {
     | { ok: false; error: string; available: string[] };
   /** The optional Cursor sign-in behind the one-click Grok Bot import; the app's own by default. */
   cursor?: () => CursorSession;
+  /** On a Team Cloud: false for someone else's private chat, which a team backup never carries. */
+  threadShown?(auth: RequestAuth): (threadId: string) => boolean;
 }
 
 export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
@@ -161,7 +163,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if ((body.format === "backup" ? store.bots.length : memberIds.length) === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
         if (body.format === "backup") {
-          return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name));
+          return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name, deps.threadShown?.(auth)));
         }
         if (body.format === "package") {
           const selectedBots = store.bots.filter((bot) => !bot.hidden);

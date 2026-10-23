@@ -6,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BoxReport } from "../bot-box/box.ts";
 import { boxSummary } from "../cloud-health.ts";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, createCloudPairing, createCloudRequestVerifier, readSignedBody } from "../cloud-home.ts";
-import type { CloudTeam } from "../cloud-team.ts";
+import { teamMemberEmail, type CloudTeam } from "../cloud-team.ts";
 import { CLOUD_TEAM_ADMIN_PATH, type TeamAdminSummary } from "../cloud-team-admin.ts";
 import type { CloudHealth } from "../cloud-health.ts";
 import { CLOUD_IDLE_ACTIVITY_MS, CLOUD_POWER_PATH, CLOUD_POWER_SLEEP_PATH, type CloudPower } from "../cloud-power.ts";
@@ -18,6 +18,10 @@ export interface CloudSignedRequest { req: IncomingMessage; res: ServerResponse;
 
 /** The bot box's self-report (server/bot-box): `{ box: "bwrap" | "off" | …, checks: "n/n" }`, read like health. */
 export const CLOUD_BOX_PATH = "/api/cloud/box";
+
+/** A Team Cloud's member left (removed, or they left): `{ email }`, signed with the body like the sleep request. What was
+ * theirs alone is deleted here (host/team-member-left.ts). */
+export const CLOUD_TEAM_MEMBER_LEFT_PATH = "/api/cloud/team/member-left";
 
 export function createCloudSignedRoutes(deps: {
   secret: string;
@@ -31,6 +35,8 @@ export function createCloudSignedRoutes(deps: {
   box?: () => BoxReport;
   /** A Team Cloud's shared connections and AI for its admins on the Admin; absent on a My Cloud. */
   teamAdmin?: { summary(): Promise<TeamAdminSummary> } | null;
+  /** A Team Cloud's member left: delete what was theirs alone; absent on a My Cloud. */
+  memberLeft?: ((email: string) => Promise<Record<string, unknown>>) | null;
   now?: () => number;
 }) {
   const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, now: deps.now });
@@ -39,11 +45,13 @@ export function createCloudSignedRoutes(deps: {
   const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const boxReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const teamAdminReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
+  const memberLeftRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   /** True when the request was one of these and has been answered. */
   return async ({ req, res, url, path, method }: CloudSignedRequest): Promise<boolean> => {
     const power = path === CLOUD_POWER_PATH || path === CLOUD_POWER_SLEEP_PATH ? deps.power?.() ?? null : null;
     const teamAdmin = path === CLOUD_TEAM_ADMIN_PATH && deps.team ? deps.teamAdmin ?? null : null;
-    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin) return false;
+    const memberLeft = path === CLOUD_TEAM_MEMBER_LEFT_PATH && deps.team ? deps.memberLeft ?? null : null;
+    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft) return false;
     res.setHeader("cache-control", "no-store");
     const source = requestSource(req);
     const header = (name: string) => { const value = req.headers[name]; return typeof value === "string" ? value : undefined; };
@@ -76,6 +84,19 @@ export function createCloudSignedRoutes(deps: {
       const verdict = teamAdminReads.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
       if (!verdict.ok) { console.warn(`team admin read refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
       json(res, 200, await teamAdmin.summary());
+      return true;
+    }
+    if (memberLeft) {
+      if (method !== "POST") { json(res, 405, { error: "method_not_allowed" }); return true; }
+      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) { json(res, 415, { error: "send the request as JSON (content-type: application/json)" }); return true; }
+      const body = await readSignedBody(req);
+      const verdict = memberLeftRequests.verify({ ...signed, method, target: `${path}${url.search}`, body });
+      if (!verdict.ok) { console.warn(`team member-left request refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
+      let parsed: unknown;
+      try { parsed = JSON.parse(body.toString("utf8")); } catch { json(res, 400, { error: "invalid_body" }); return true; }
+      const email = teamMemberEmail((parsed as { email?: unknown } | null)?.email);
+      if (!email) { json(res, 400, { error: "invalid_member" }); return true; }
+      json(res, 200, { ok: true, ...(await memberLeft(email)) });
       return true;
     }
     if (path === CLOUD_BOX_PATH) {

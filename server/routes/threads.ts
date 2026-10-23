@@ -79,17 +79,21 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       return json(res, 200, {
         bots: shownBots.map((bot) => {
           const wired = wireBot(bot);
-          return memberBot({ ...wired, tasks: wired.tasks ?? [], ...messagePage(bot.threadId, limit) }, visible);
+          // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
+          const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
+          return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
         }),
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
         groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
           const room = { ...publicGroupState(g), ...messagePage(g.threadId, limit) };
-          return visible.everything ? room : memberGroup(room);
+          return visible.everything || !visible.member ? room : memberGroup(room);
         }),
         computerControl: Object.fromEntries(
           shownBots.map((bot) => {
             const snapshot = botComputerControlSnapshot(bot.id);
+            // A plea from someone else's private chat (a Team Cloud) names its site and reason: held is all that is shared.
+            if (snapshot.help && visible.hides(snapshot.help.threadId)) return [bot.id, { held: snapshot.held, helpReason: null }];
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];
           }),
         ),
