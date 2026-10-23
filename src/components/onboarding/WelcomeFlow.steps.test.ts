@@ -165,3 +165,22 @@ describe("a reload in the middle of the welcome", () => {
     }
   });
 });
+
+describe("on a phone-width screen", () => {
+  it("keeps Skip in the title's own row after the greeting, so a long title wraps beside it instead of under it", async () => {
+    await show({ initialBeat: "engines" });
+    const skip = button("Skip tour")!;
+    const title = host.querySelector("h1")!;
+    expect(skip.className).not.toContain("absolute");
+    expect(skip.parentElement).toBe(title.parentElement);
+    expect(title.className).toContain("min-w-0");
+  });
+
+  it("shows no keyboard shortcut hints on any step", async () => {
+    for (const initialBeat of ["hello", "engines", "permissions"]) {
+      await reload({ initialBeat });
+      expect(host.querySelector("kbd"), initialBeat).toBeNull();
+      expect(text(), initialBeat).not.toMatch(/\b(?:Ctrl|Cmd)\b|⌘/);
+    }
+  });
+});

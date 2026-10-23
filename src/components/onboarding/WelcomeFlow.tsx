@@ -255,6 +255,11 @@ export function WelcomeFlow({
   const logo = hello ? brand().logo : undefined;
   const beatProps = { onNext: advance, onSkip: advance, setMascot, bump };
   const { current, total } = flowProgress(beats, beat);
+  const skip = (className: string) => (
+    <QuietButton onClick={() => void finish("skipped")} className={className}>
+      {t("onboarding.skipTour")}
+    </QuietButton>
+  );
 
   return (
     <div
@@ -273,9 +278,7 @@ export function WelcomeFlow({
         className="welcome-card relative flex max-h-full w-full flex-col overflow-y-auto rounded-2xl border border-hairline/40 bg-panel p-5 sm:p-8 shadow-[0_30px_80px_-28px_rgba(0,0,0,0.45),0_8px_24px_-12px_rgba(0,0,0,0.25)] outline-none"
         style={{ maxWidth: beatWidth(beat) }}
       >
-        <QuietButton onClick={() => void finish("skipped")} className="absolute right-4 top-4">
-          {t("onboarding.skipTour")}
-        </QuietButton>
+        {hello && skip("absolute right-4 top-4")}
 
         <div className={cn("flex shrink-0", hello ? "flex-col items-center" : "items-center gap-3")}>
           <div className="welcome-maus flex shrink-0">
@@ -293,10 +296,12 @@ export function WelcomeFlow({
             )}
           </div>
           {title && (
-            <h1 className={cn("welcome-title font-semibold text-ink", hello ? "mt-4 text-[20px]" : "text-[18px]")}>
+            <h1 className={cn("welcome-title min-w-0 font-semibold text-ink [overflow-wrap:anywhere]", hello ? "mt-4 text-center text-[20px]" : "flex-1 text-[18px]")}>
               {title}
             </h1>
           )}
+          {/* In the title's row, never over it: a long title (or a narrow phone) wraps beside Skip. */}
+          {!hello && skip("shrink-0 self-start")}
         </div>
 
         <div key={beat} inert={moving} aria-busy={moving} className={cn("flex flex-col", beat === "engines" ? "min-h-0" : "shrink-0")}>
