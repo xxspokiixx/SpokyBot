@@ -214,10 +214,11 @@ it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her nex
   expect((await f.messages(job)).filter((message: any) => message.tool?.name === "Mira replied")).toHaveLength(1);
 }), hostTimeout(60_000));
 
-it("S2b keeps one question chip across a restart and names the parked thread as waiting on the person", () => scenario(async (f) => {
+it("S2b resumes the Chief once with a parked question, keeps one question chip across a restart and names the parked thread as waiting on the person", () => scenario(async (f) => {
   const brief = "S2B-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
-    { key: "C0", match: ["S2B-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." });
+    { key: "C0", match: ["S2B-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },
+    { key: "C-ASKED", match: ["stopped on a question for", "[OpenMausBot question from @Mira", "which repository?"], reply: "C-ASKED: Mira needs the repository." });
   f.script(f.mira.id, { key: "M1", match: ["S2B-BRIEF"], reply: "I can tag it once I know where.\nNEEDS INPUT: which repository?" });
   const job = f.clive.activeTaskId;
   await f.say(f.clive.id, job, "S2B-JOB: have Mira tag the release and own the result.");
@@ -225,6 +226,7 @@ it("S2b keeps one question chip across a restart and names the parked thread as 
   const parked = f.children()[0];
   const work = parked.assignee.destination.threadId as string;
   await expect.poll(async () => (await f.chips(job, "needs your input")).length, { timeout: 15_000 }).toBe(1);
+  await expect.poll(async () => await f.said(job, "C-ASKED: Mira needs the repository.") === 1 && f.roots()[0]?.status === "waiting", { timeout: 30_000 }).toBe(true);
 
   const unread = async (botId: string, threadId: string) => ((await f.api("GET", "/api/bots?messages=0")).body.bots as any[])
     .find((bot) => bot.id === botId)?.tasks.find((task: any) => task.threadId === threadId)?.unread === true;
@@ -234,6 +236,9 @@ it("S2b keeps one question chip across a restart and names the parked thread as 
   await expect.poll(() => f.eventsOf(parked.id).some((event: any) => event.kind === "restart_reconciled"), { timeout: 15_000 }).toBe(true);
   await f.settle(500);
   expect(f.children()[0]).toMatchObject({ status: "needs_input", question: expect.stringContaining("which repository?") });
+  expect((f.turns(f.clive.id) as Array<{ planKey?: string }>).filter((record) => record.planKey === "C-ASKED")).toHaveLength(1);
+  const resumes = (f.eventsOf(f.roots()[0].id) as Array<{ kind: string; detail?: string }>).filter((event) => event.kind === "resume_due");
+  expect(resumes.map((event) => event.detail)).toEqual(["resume: a teammate asks"]);
   expect(await f.chips(job, "needs your input")).toHaveLength(1);
   expect(await unread(f.clive.id, job)).toBe(false);
   expect(await unread(f.mira.id, work)).toBe(false);

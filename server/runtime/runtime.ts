@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
-import { awaited, childrenSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.ts";
+import { asking, awaited, childrenSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.ts";
 import { DEFAULT_LIMITS, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
   type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
@@ -40,7 +40,8 @@ const DETAIL_MAX = 400;
 
 const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performance.now() };
 
-interface LiveTurn { controller: AbortController; rootId: string; activeAt: number }
+/** `interruption`: a resume for a teammate's question while other work is still out; the node's restart note waits for its real resume. */
+interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean }
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
 
@@ -282,13 +283,13 @@ export class Runtime {
       if (snapshot.status !== "waiting") continue;
       const n = this.store.get(snapshot.id);
       if (!n || n.status !== "waiting") continue;
-      const kids = awaited(this.store.children(n.id));
-      if (kids.length === 0 || !kids.every(c => isTerminal(c) && c.reportedAt !== undefined)) continue;
-      if (!n.parentId && n.reply === "poll") {
+      const due = this.resumeReason(n);
+      if (!due) continue;
+      if (due === "settled" && !n.parentId && n.reply === "poll") {
         this.settle(n, "completed", "done");
       } else {
         n.status = "resume";
-        this.store.update(n, { kind: "resume_due", at: now, detail: "resume" });
+        this.store.update(n, { kind: "resume_due", at: now, detail: due === "settled" ? "resume" : "resume: a teammate asks" });
         this.touch(n);
       }
     }
@@ -302,6 +303,12 @@ export class Runtime {
       if (snapshot.status !== "queued" && snapshot.status !== "resume") continue;
       const n = this.store.get(snapshot.id);
       if (!n || (n.status !== "queued" && n.status !== "resume")) continue;
+      if (n.status === "resume" && n.restart !== "rerun" && !this.resumeReason(n)) {
+        n.status = "waiting";
+        this.store.update(n, { kind: "waiting", at: this.clock.now(), detail: "waiting: nothing left to resume for" });
+        this.touch(n);
+        continue;
+      }
       const thread = n.assignee.destination.threadId;
       // Same-conversation turns never overlap; same-room speakers take turns.
       if (busyThreads.has(thread)) continue;
@@ -338,21 +345,25 @@ export class Runtime {
     if (!root) { this.log(`dispatch(${n.id}): root ${n.rootId} is missing`); return false; }
     let input: RunInput;
     let delivered: string[];
+    let interruption: boolean;
     try {
       const children = this.store.children(n.id);
       // Every settled result, not only new ones: the host keeps reports out of the transcript it replays.
       const settled = awaited(children).filter(isTerminal);
+      const asked = awaited(children).filter(asking);
+      interruption = resumed && n.restart !== "rerun" && asked.length > 0;
       const names = this.names(n, parent);
       const turn: RunInput["turn"] = resumed ? "resume" : n.restart === "rerun" ? "rerun" : n.answer !== undefined ? "answered"
         : n.continuation ? "continued" : "first";
       input = {
         turn,
         resumed: turn !== "first",
-        restartNote: restartNote(n, children, child => this.names(child, n).assignee),
+        restartNote: interruption ? "" : restartNote(n, children, child => this.names(child, n).assignee),
         envelope: composeEnvelope(n, names, parent),
         ...(n.answer !== undefined ? { answer: n.answer } : {}),
         ...(n.continuation ? { continuation: { note: n.continuation.note, ...(n.continuation.handoffPath ? { handoffPath: n.continuation.handoffPath } : {}) } } : {}),
         ...(settled.length ? { settled } : {}),
+        ...(asked.length ? { asked } : {}),
         level: n.level, mode: n.mode,
       };
       const ids = new Set(children.map(c => c.id));
@@ -379,7 +390,7 @@ export class Runtime {
     this.admissionNoted.delete(n.id);
     this.touch(n, root);
     const controller = new AbortController();
-    const live: LiveTurn = { controller, rootId: root.id, activeAt: this.clock.monotonic() };
+    const live: LiveTurn = { controller, rootId: root.id, activeAt: this.clock.monotonic(), interruption };
     this.turns.set(n.id, live);
     this.rootActivity.set(root.id, now);
     let turn: Promise<RunResult>;
@@ -405,15 +416,15 @@ export class Runtime {
       const n = this.store.get(id);
       if (!n || n.status !== "running") return;
       if (this.closing && result.kind === "failed") return;
-      this.withBatch(() => this.finishTurn(n, result));
+      this.withBatch(() => this.finishTurn(n, result, live.interruption));
     } catch (error) {
       this.log(`settling ${id} failed: ${String(error)}`);
     }
   }
 
-  private finishTurn(n: Assignment, result: RunResult): void {
+  private finishTurn(n: Assignment, result: RunResult, interruption = false): void {
     const now = this.clock.now();
-    delete n.restart;
+    if (!interruption) delete n.restart;
     delete n.answer;
     // Access is rechecked as the turn ends: a reply that lands after the route closed is never retained.
     const parentRow = n.parentId ? this.store.get(n.parentId) : undefined;
@@ -654,6 +665,19 @@ export class Runtime {
 
   private since(at: number): number {
     return Math.max(at, this.bootAt);
+  }
+
+  /** Each needs_input inbox item resumes its waiting requester at most once: dispatch marks it delivered in the
+   * same transaction that starts the turn, and a delivered item never counts again, across restarts too. */
+  private resumeReason(n: Assignment): "settled" | "asked" | undefined {
+    const kids = awaited(this.store.children(n.id));
+    if (kids.length === 0) return undefined;
+    if (kids.every(c => isTerminal(c) && c.reportedAt !== undefined)) return "settled";
+    if (!n.parentId && n.reply === "poll") return undefined;
+    const parked = new Set(kids.filter(asking).map(c => c.id));
+    if (parked.size === 0) return undefined;
+    const items = this.store.inbox({ threadId: n.assignee.destination.threadId }, true);
+    return items.some(i => i.kind === "needs_input" && parked.has(i.assignmentId)) ? "asked" : undefined;
   }
 
   private inputExpires(n: Assignment): boolean {

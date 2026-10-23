@@ -52,7 +52,7 @@ export type Status =
   | "running"         // a turn of the assignee is executing it
   | "needs_input"     // parked on the person (a card or a NEEDS INPUT line)
   | "waiting"         // its turn ended after handing out work; waits on children
-  | "resume"          // every child settled; owes its own follow-up turn
+  | "resume"          // every child settled, or one it waits on parked a new question; owes its own follow-up turn
   | "completed"
   | "failed"
   | "cancelled";
@@ -211,7 +211,7 @@ export type EnqueueResult =
   | { ok: false; reason: string; outcome: "refused" | "budget" | "duplicate" };
 
 export interface RunInput {
-  /** first; resume (returns settled children's results); rerun (after a restart cut it); answered; continued. */
+  /** first; resume (returns settled children's results and awaited children's open questions); rerun (after a restart cut it); answered; continued. */
   turn: "first" | "resume" | "rerun" | "answered" | "continued";
   /** Not the node's first turn (any `turn` but "first"). */
   resumed: boolean;
@@ -223,6 +223,8 @@ export interface RunInput {
   answer?: string;
   /** The settled children whose results this (resume) turn returns. */
   settled?: Assignment[];
+  /** The awaited children still parked on a question for the person, which this (resume) turn passes on. */
+  asked?: Assignment[];
   /** For a continued turn: why it continues and, after a step cap, where
    * the steps so far are listed. */
   continuation?: { note: string; handoffPath?: string };
