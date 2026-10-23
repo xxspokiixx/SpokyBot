@@ -57,6 +57,10 @@
 //   FAKE_CLAUDE_EXIT_DELAY_MS  ms to keep running after SIGTERM, like a slow taskkill on Windows
 //   FAKE_CLAUDE_PROBE_LOG  path: each snapshot probe appends `<version|help|auth> <pid>`
 //   FAKE_CLAUDE_HOLD_VERSION / _HELP / _AUTH  path: that snapshot probe answers only once it exists
+//   FAKE_CLAUDE_MODE=slow-write: says it will build the page, then streams a Write of index.html as partial
+//     input_json_delta frames (2.1.306 with --include-partial-messages) before its tool_use, runs it and replies.
+//     FAKE_CLAUDE_WRITE_BYTES (default 16384) is the file's size, sent 512 bytes every FAKE_CLAUDE_WRITE_STEP_MS
+//     (default 100); FAKE_CLAUDE_WRITE_HOLD  path: the call's input stays open once written until it exists
 // total_cost_usd and modelUsage are running totals (0.01 per result), as the real CLI reports them.
 import { splitLaunchNote } from "./launch-note.ts";
 import { spawnSync } from "node:child_process";
@@ -844,6 +848,48 @@ const playTurn = (prompt: JsonValue, late = false) => {
     turnRunning = false;
     finishIfDone();
   };
+
+  if (mode === "slow-write") {
+    const total = Number(process.env.FAKE_CLAUDE_WRITE_BYTES) || 16_384;
+    const stepMs = Number(process.env.FAKE_CLAUDE_WRITE_STEP_MS) || 100;
+    const id = `toolu-write-${process.pid}-${++toolUseCount}`;
+    const filePath = join(process.cwd(), "index.html");
+    const content = `<!doctype html>\n<title>Dashboard</title>\n${"<div class=\"card\">sales</div>\n".repeat(Math.ceil(total / 32))}`.slice(0, total);
+    const event = (e: unknown) => out({ type: "stream_event", event: e, parent_tool_use_id: null, session_id: "fake-session" });
+    out({ type: "assistant", message: { id: "msg-intro", content: [{ type: "text", text: "I'll build the dashboard now." }], usage } });
+    event({ type: "message_start", message: { id: "msg-write", usage } });
+    event({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id, name: "Write", input: {} } });
+    const head = `{"file_path": ${JSON.stringify(filePath)}, "content": "`;
+    const body = JSON.stringify(content).slice(1, -1);
+    event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: head } });
+    let at = 0;
+    const closeCall = () => {
+      event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "\"}" } });
+      event({ type: "content_block_stop", index: 0 });
+      out({ type: "assistant", message: { id: "msg-write", content: [{ type: "tool_use", id, name: "Write", input: { file_path: filePath, content } }], usage } });
+      event({ type: "message_stop" });
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: `File created successfully at: ${filePath}` }] } });
+      out({ type: "assistant", message: { content: [{ type: "text", text: "Done: index.html is ready." }], usage } });
+      finish();
+    };
+    const step = () => {
+      if (at < body.length) {
+        event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: body.slice(at, at + 512) } });
+        at += 512;
+        setTimeout(step, stepMs);
+        return;
+      }
+      const hold = process.env.FAKE_CLAUDE_WRITE_HOLD;
+      if (!hold) return closeCall();
+      const poll = setInterval(() => {
+        if (!existsSync(hold)) return;
+        clearInterval(poll);
+        closeCall();
+      }, 50);
+    };
+    setTimeout(step, stepMs);
+    return;
+  }
 
   if (streamCadence && mode === "happy") {
     // Deterministic delta replay for the voice-latency harness: stream each

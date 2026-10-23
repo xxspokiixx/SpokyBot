@@ -1935,6 +1935,18 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.find(e => e.type === "item.completed" && e.itemType === "tool")).toMatchObject({ ok: true });
   });
 
+  it("reports a running tool's kind for the chat's status line while it runs silently", async () => {
+    process.env.FAKE_ACP_TOOL_MS = "300";
+    await create(QwenAgentDriver, "slow-tool");
+    await instance.adapter.sendTurn({ threadId: "t-slow-kind", text: "go" });
+    await recorder.until(e => e.type === "turn.completed");
+    const types = recorder.events.map(e => e.type);
+    const progress = recorder.events.filter(e => e.type === "turn.progress");
+    expect(progress[0]).toMatchObject({ activity: "command", itemId: "tc-slow" });
+    expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
+    expect(types.lastIndexOf("turn.progress")).toBeLessThan(types.indexOf("item.completed"));
+  });
+
   it.each([GrokAgentDriver, QwenAgentDriver])("still fails $driverKind when it goes silent once its tool has finished", async (driver) => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     await create(driver, "stall-after-tool");
