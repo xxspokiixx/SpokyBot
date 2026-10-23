@@ -2488,6 +2488,7 @@
   "teamPhone.title": "在手机上打开",
   "teamPhone.subtitle": "用手机上的 OpenMausBot 应用扫描此码。手机会以你的身份打开 {team}，显示你在这里看到的聊天。",
   "teamPhone.stays": "只要在此应用中打开着 {team}，手机就会保持登录。",
+  "teamPhone.remove": "移除",
   "remote.serverPairing.creating": "生成中…",
   "remote.serverPairing.expires": "{minutes} 分钟后失效",
   "remote.serverPairing.expired": "该代码已失效，请重新生成。",

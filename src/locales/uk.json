@@ -2207,6 +2207,7 @@
   "teamPhone.title": "Відкрити на телефоні",
   "teamPhone.subtitle": "Відскануйте цей код у застосунку OpenMausBot на телефоні. Телефон відкриє {team} від вашого імені, з тими самими чатами, що й тут.",
   "teamPhone.stays": "Телефон залишається в системі, поки {team} відкрито в цьому застосунку.",
+  "teamPhone.remove": "Прибрати",
   "remote.serverPairing.creating": "Створюємо…",
   "remote.serverPairing.expires": "Спливає через {minutes} хв",
   "remote.serverPairing.expired": "Цей код сплив. Створіть новий.",

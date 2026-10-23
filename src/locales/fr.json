@@ -1775,6 +1775,7 @@
   "teamPhone.title": "Ouvrir sur votre téléphone",
   "teamPhone.subtitle": "Scannez ce code avec l’app OpenMausBot sur votre téléphone. Votre téléphone ouvre {team} en votre nom, avec les chats que vous voyez ici.",
   "teamPhone.stays": "Votre téléphone reste connecté tant que {team} est ouvert dans cette app.",
+  "teamPhone.remove": "Retirer",
   "remote.serverPairing.creating": "Création…",
   "remote.serverPairing.expires": "Expire dans {minutes} min",
   "remote.serverPairing.expired": "Ce code a expiré. Créez-en un nouveau.",

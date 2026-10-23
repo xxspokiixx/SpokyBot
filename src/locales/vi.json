@@ -3796,6 +3796,7 @@
   "teamPhone.title": "Mở trên điện thoại của bạn",
   "teamPhone.subtitle": "Quét mã này bằng ứng dụng OpenMausBot trên điện thoại của bạn. Điện thoại sẽ mở {team} với tư cách của bạn, cùng các cuộc trò chuyện bạn thấy ở đây.",
   "teamPhone.stays": "Điện thoại vẫn đăng nhập khi {team} đang mở trong ứng dụng này.",
+  "teamPhone.remove": "Gỡ",
   "remote.serverPairing.creating": "Đang tạo…",
   "remote.serverPairing.expires": "Hết hạn sau {minutes} phút",
   "remote.serverPairing.expired": "Mã đó đã hết hạn. Hãy tạo mã mới.",
