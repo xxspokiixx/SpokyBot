@@ -653,7 +653,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           emit({
             ...base(threadId, current.turnId),
             type: "runtime.error",
-            message: `${support.displayName} ended the turn with no reply, image, or tool result`,
+            message: `${support.displayName} finished without replying.`,
           });
         }
         emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: finalOk, stopReason: finalStopReason, cost: null });
@@ -1526,8 +1526,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               () => {
                 const last = quiet.lastState();
                 return `${support.displayName} sent nothing for ${formatQuietLimit(promptIdleMs)} with no tool running, so the turn was stopped as stuck` +
-                  `${last ? ` (last seen: ${lastSeenPhrase(last)})` : ""}. ` +
-                  "Send the message again to retry. On a self-hosted server, OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS sets this limit (0 turns it off).";
+                  `${last ? ` (last seen: ${lastSeenPhrase(last)})` : ""}. Send the message again to retry.`;
               },
               );
             if (pendingSplitReceipt) {

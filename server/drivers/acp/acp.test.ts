@@ -2139,7 +2139,9 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ type: "turn.completed", ok: false, stopReason: "rpc_error" });
     const err = recorder.events.find((e) => e.type === "runtime.error");
     expect(err?.message).toMatch(/no tool running/i);
-    expect(err?.message).toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
+    // Plain words for the person: no setting names.
+    expect(err?.message).toMatch(/Send the message again to retry\.$/);
+    expect(err?.message).not.toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
     expect(err).toMatchObject({ stalled: true });
     expect(recorder.events.some((e) => e.type === "content.delta")).toBe(true);
     expect(instance.adapter.hasSession("t-stall")).toBe(false);
@@ -2151,9 +2153,8 @@ describe("ACP turns (fake CLI)", () => {
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: false, stopReason: "empty_turn" });
     const message = recorder.events.find((e) => e.type === "runtime.error")?.message;
-    expect(message).toMatch(/no reply, image, or tool result/);
-    // The person reads the AI's name, never the internal id.
-    expect(message).toMatch(/^Grok /);
+    // The person reads the AI's name in plain words, never the internal id.
+    expect(message).toBe("Grok finished without replying.");
     expect(message).not.toContain("grokAgent");
   });
 
@@ -2174,7 +2175,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "content.delta" && (e as any).streamKind === "reasoning_text")).toBe(true);
     expect(recorder.events.some((e) => e.type === "item.completed")).toBe(false);
     expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
-      .toMatch(/no reply, image, or tool result/);
+      .toBe("Grok finished without replying.");
   });
 
   it("preserves ACP error codes for provider setup classification", async () => {
