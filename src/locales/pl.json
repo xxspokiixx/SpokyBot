@@ -547,7 +547,7 @@
   "approval.action.confirm": "Potwierdź",
   "approval.action.allowOnce": "Zezwól raz",
   "approval.held.native": "Dostawca wymaga twojego zatwierdzenia dla tej akcji.",
-  "approval.held.sandbox": "To poluzowuje własne limity bezpieczeństwa AI, więc tylko pełny dostęp może to zatwierdzić automatycznie.",
+  "approval.held.sandbox": "To poluzowuje własne limity bezpieczeństwa AI, więc tylko Pełny dostęp może to zatwierdzić automatycznie.",
   "approval.opaqueCode": "To uruchamia kod, który może wysyłać lub zmieniać rzeczy w twoich aplikacjach, dlatego zawsze najpierw pyta.",
   "approval.held.outbound": "To wysyła coś w twoim imieniu, dlatego najpierw pyta ciebie.",
   "approval.held.undeliveredFull": "Pełny dostęp nie mógł przekazać tego zatwierdzenia.",
