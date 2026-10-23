@@ -192,6 +192,12 @@ export interface CloudAccountClient {
   /** This sign-in's own X research relay access while its plan is paid; null without one. */
   xResearchAccess(): Promise<{ url: string; token: string } | null>;
   pagesAccess(): Promise<{ url: string; token: string } | null>;
+  /** GET /api/cloud/desktop/updates-consent, as the Admin answers it (updates-consent.mjs parseAccountConsent reads it). */
+  updatesConsent(): Promise<unknown>;
+  recordUpdatesConsent(status: import("./updates-consent.mjs").UpdatesConsentStatus, textVersion: string): Promise<void>;
+  /** No sign-in needed: returns the Admin's receipt for this email-only answer. */
+  updatesConsentByEmail(input: { email: string; installId: string; textVersion: string }): Promise<string>;
+  withdrawUpdatesConsent(input: { status: "declined" | "withdrawn"; receipt: string }): Promise<void>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {
