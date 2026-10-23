@@ -62,7 +62,7 @@ import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
 import { engineFailureKind, engineFailureMessage } from "../engine-errors.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts";
+import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpToolProgress } from "../tool-progress.ts";
 
 /** Failures fixed on the provider account, not by retrying; the reporting process stays pooled. */
 export type AccountErrorCode = Extract<ProviderErrorCode,
@@ -1027,9 +1027,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "agent_thought_chunk": {
               const delta = u.content?.text;
-              if (typeof delta === "string" && delta) {
-                emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "reasoning_text", delta });
-              }
+              if (typeof delta === "string" && delta) emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "reasoning_text", delta });
               break;
             }
             case "tool_call": {
@@ -1077,6 +1075,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               break;
             }
           }
+          // A call still running (its kind, file and diff so far) feeds the chat's status line.
+          const draft = acpToolProgress(u); if (draft) emit({ ...base(threadId, current.turnId), ...draft });
         };
 
         const session: AcpSession = {

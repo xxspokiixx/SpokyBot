@@ -591,6 +591,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(beat).toBeLessThan(types.lastIndexOf("item.completed"));
   });
 
+  it("reports a long Write's input as it streams, after the bot's words and before its tool call", async () => {
+    await create("slow-write", { FAKE_CLAUDE_WRITE_BYTES: "6144", FAKE_CLAUDE_WRITE_STEP_MS: "5" });
+    await instance.adapter.sendTurn({ threadId: "t-slow-write", text: "build a dashboard" });
+    await recorder.until((e) => e.type === "turn.completed", 20_000);
+
+    const types = recorder.events.map((e) => e.type);
+    const started = recorder.events.find((e) => e.type === "item.started") as any;
+    const progress = recorder.events.filter((e) => e.type === "turn.progress") as any[];
+    expect(progress.length, "one report per streamed chunk, before the bus coalesces them").toBeGreaterThan(10);
+    expect(progress.every((e) => e.activity === "write" && e.itemId === started.itemId && e.turnId === started.turnId)).toBe(true);
+    expect(progress.at(-1)).toMatchObject({ file: "index.html" });
+    expect(progress.at(-1).bytes).toBeGreaterThanOrEqual(6144);
+    const intro = recorder.events.findIndex((e: any) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect(types.indexOf("turn.progress")).toBeGreaterThan(intro);
+    expect(types.lastIndexOf("turn.progress")).toBeLessThan(types.indexOf("item.started"));
+  });
+
   it("turns a signed-out CLI into a setup error, not a bot reply", async () => {
     const dump = join(scratch, "signed-out-session.json");
     process.env.FAKE_CLAUDE_DUMP = dump;

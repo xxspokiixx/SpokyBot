@@ -77,7 +77,7 @@ import { shortPath } from "@/lib/short-path";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
-import { liveActivityPhrases } from "@/lib/live-activity";
+import { turnNowPhrases } from "@/lib/live-activity"; import { useTurnLive } from "@/state/turn-status";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
@@ -1136,12 +1136,12 @@ export function GroupView({ group }: { group: Group }) {
 
   const lastGroupMessage = group.messages.at(-1);
   const toolInFlight = lastGroupMessage?.kind === "activity" && lastGroupMessage.tool?.ok === undefined;
-  const activity = liveActivityPhrases(lastGroupMessage);
+  const live = useTurnLive(group.threadId), activity = turnNowPhrases(live.status, lastGroupMessage);
   const awaited = members.find(
     (b) => b.id === awaitedMemberId(threadWorking, group.busyBotId, lastGroupMessage),
   );
   const waiting =
-    Boolean(speaker && showWorkingDots(true, group.messages.at(-1), speaker.id)) || awaited !== undefined;
+    Boolean(speaker && showWorkingDots(true, group.messages.at(-1), speaker.id, live.ended)) || awaited !== undefined;
   const wasWaiting = useRef(false);
   const [popping, setPopping] = useState<{ id: string; botId?: string } | null>(null);
   const poppingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1155,11 +1155,10 @@ export function GroupView({ group }: { group: Group }) {
     setPopping(null);
   }, [group.id, group.threadId]);
   useEffect(() => {
-    if (waiting) wasWaiting.current = true;
+    wasWaiting.current = waiting;
   }, [waiting]);
   useLayoutEffect(() => {
     if (lastGroupMessage?.role !== "bot" || lastGroupMessage.kind !== "text" || !wasWaiting.current) return;
-    wasWaiting.current = false;
     setPopping({
       id: lastGroupMessage.id,
       botId: lastGroupMessage.from?.botId,
@@ -1540,8 +1539,9 @@ export function GroupView({ group }: { group: Group }) {
                 />
               }
               visible={presenceVisible}
-              phrases={activity.phrases}
-              phase={activity.phase}
+              phrases={activity?.phrases}
+              phase={activity?.phase}
+              size={activity?.size}
               seed={`${group.id}:${group.turnStartedAt ?? ""}:${speaker?.id ?? ""}`}
               answering={popping !== null}
               since={speaker ? group.turnStartedAt ?? null : null}
