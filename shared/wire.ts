@@ -442,7 +442,9 @@ export interface WireMessage {
   attachments?: Array<
     | { kind: "image"; path: string; mime: string; name?: string }
     | { kind: "file"; path: string; mime: string; name: string }
-    | { kind: "audio"; path: string; mime: string; durationMs?: number }
+    /** `text` is the words the note speaks (secret-redacted when stored): clients show it behind a
+     * collapsed transcript, never as message body, and the model's replay folds it back after `text`. */
+    | { kind: "audio"; path: string; mime: string; durationMs?: number; text?: string }
   >;
   card?: OptionCardData;
   /** widget rows (kind "widget"): a bot-authored UI tree. `text` is its
@@ -865,6 +867,10 @@ export interface WireGroup {
   defaultResponder: GroupDefaultResponder;
   /** The room's shared instructions. */
   bulletin: string;
+  /** Short one-line description shown under the room name; distinct from
+   * the bulletin (long-form instructions) and any member bot's title.
+   * null = explicitly cleared, so a client's shallow merge drops a stale value. */
+  description?: string | null;
   unread: boolean;
   /** The newest message on screen the last time the person read this
    * conversation. The New divider goes after it. */
@@ -991,6 +997,8 @@ export type ServerFrame =
   /** A bot's data sheet changed. Whole sheet each time. */
   | DataBroadcast
   | { kind: "bot.deleted"; botId: string }
+  /** The whole fleet in its new order (PUT /api/bots/order); a member is sent only the bots they see. */
+  | { kind: "bots.order"; botIds: string[] }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

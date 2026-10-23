@@ -69,7 +69,7 @@ describe("reviewed Chief team setup", () => {
     const before = structuredClone(h.store.bots);
     const request = h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }]);
     expect(request.detail).toContain("Chief of Staff: No → Yes");
-    expect(request.detail).toContain("May coordinate and configure bots in this team");
+    expect(request.detail).toContain("May coordinate and configure bots in this department");
     expect(h.store.bots).toEqual(before);
     expect((await h.resolve(request.requestId, "deny"))?.result.state).toBe("denied");
     expect(h.store.bots).toEqual(before);
@@ -104,7 +104,7 @@ describe("reviewed Chief team setup", () => {
       { action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } },
       { action: "update", botId: h.chief.id, fields: { chiefOfStaff: false } },
     ]);
-    expect(replace.detail).toContain("Additional managed-team access is removed");
+    expect(replace.detail).toContain("Access to additional departments is removed");
     expect((await h.resolve(replace.requestId))?.result.state).toBe("applied");
     expect(h.chief.chiefOfStaff).toBe(false);
     expect(h.peer.chiefOfStaff).toBe(true);
@@ -137,7 +137,7 @@ describe("reviewed Chief team setup", () => {
   it("does not advertise new team access for a Chief being demoted in the same plan", () => {
     const h = harness();
     const card = h.propose([specialist("Mira", "Research"), { action: "update", botId: h.chief.id, fields: { chiefOfStaff: false } }], ["Research"]);
-    expect(card.detail).toContain('Create teams: "Research"');
+    expect(card.detail).toContain('Create departments: "Research"');
     expect(card.detail).not.toContain("Authorize @Clive");
   });
   it("shows what stays owner-owned after creation on create cards, and keeps update cards lean", () => {
@@ -187,7 +187,7 @@ describe("reviewed Chief team setup", () => {
   it("reviews Research, Engineering and Growth with multiple providers and explicit new-team access", async () => {
     const h = harness();
     const request = h.propose([specialist("Mira", "Research"), specialist("Patch", "Engineering", { instanceId: "codex", model: "gpt-fixture" }), specialist("Quill", "Growth")], ["Research", "Growth"]);
-    expect(request.detail).toContain('Create teams: "Research", "Growth"');
+    expect(request.detail).toContain('Create departments: "Research", "Growth"');
     expect(request.detail).toContain("Authorize @Clive");
     expect(h.store.bots).toHaveLength(2);
     expect((await h.resolve(request.requestId))?.result.bots).toHaveLength(3);
@@ -317,7 +317,7 @@ describe("reviewed Chief team setup", () => {
       title: "Research lead", section: "Engineering", modelSelection: { instanceId: "codex", model: "gpt-fixture" },
     } }]);
     expect(card.detail).toContain('Title: "Researcher" → "Research lead"');
-    expect(card.detail).toContain('Section: "Work" → "Engineering"');
+    expect(card.detail).toContain('Department: "Work" → "Engineering"');
     expect(card.detail).toContain("Default AI and model: claude/sonnet (no variant) → codex/gpt-fixture (no variant)");
   });
   it("shows the model variant on the current selection and its absence on the proposed one", () => {
