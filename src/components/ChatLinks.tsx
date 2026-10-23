@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
 export { isUseMyComputerUrl } from "../../shared/use-my-computer";
+/** A published page's link in a message opens like its card's Open. */
+export { usePageOpener, withPageOpen } from "@/lib/page-open";
 
 export const LINK_CLASS = "break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]";
 export const GITHUB_REF_CLASS =
