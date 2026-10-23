@@ -11,7 +11,13 @@ export function releaseNotesText(notes) {
   return trimmed ? trimmed.slice(0, 8000) : undefined;
 }
 
-export function createUpdaterCoordinator(updater, setState, { handOffInstall = null, nativeStaging = false } = {}) {
+// `elevatedInstall` (Ubuntu .deb, electron/elevated-install.mjs) resolves { ok } or { ok: false, reason, detail }; `relaunch` reopens the app after it.
+// Anything but a closed prompt or a checksum failure falls back to `handOffInstall`.
+export function createUpdaterCoordinator(
+  updater,
+  setState,
+  { handOffInstall = null, elevatedInstall = null, relaunch = null, nativeStaging = false } = {},
+) {
   let checkOperation = null;
   let downloadedFiles = null;
   let downloadOperation = null;
@@ -174,6 +180,10 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
   function install() {
     if (recoveryRequired || installOperation || downloadOperation || (nativeStaging && !nativeReady)) return;
     actionOwnsState = true;
+    if (elevatedInstall) {
+      elevate();
+      return;
+    }
     if (handOffInstall) {
       handOff();
       return;
@@ -187,27 +197,68 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       routeError(true, error);
       return;
     }
-      // quitAndInstall is void and cannot be canceled: a Retry here would arm another native quit callback.
-    if (installOperation === operation) {
-      operation.timer = setTimeout(() => {
-        if (installOperation !== operation) return;
-        updater.logger?.warn?.("Update restart handoff exceeded two minutes; keeping installation locked to prevent overlapping retries.");
-        setState({ status: "installing", message: "Restart is taking longer than expected. Quit and reopen OpenMausBot to finish the update." });
-      }, 2 * 60 * 1000);
-      operation.timer.unref?.();
-    }
+    watchSlowRestart(operation);
   }
 
-  function handOff() {
+  // quitAndInstall is void and cannot be canceled: a Retry here would arm another native quit callback.
+  function watchSlowRestart(operation) {
+    if (installOperation !== operation) return;
+    operation.timer = setTimeout(() => {
+      if (installOperation !== operation) return;
+      updater.logger?.warn?.("Update restart handoff exceeded two minutes; keeping installation locked to prevent overlapping retries.");
+      setState({ status: "installing", message: "Restart is taking longer than expected. Quit and reopen OpenMausBot to finish the update." });
+    }, 2 * 60 * 1000);
+    operation.timer.unref?.();
+  }
+
+  function elevate() {
     const operation = { failed: false, timer: null };
     installOperation = operation;
-    setState({ status: "installing" });
+    setState({ status: "installing", message: "Installing the update. Enter your password if asked." });
+    Promise.resolve()
+      .then(() => elevatedInstall(downloadedFiles, { sha512: updater.downloadedUpdateHelper?.downloadedFileInfo?.sha512 }))
+      .then((result) => {
+        if (installOperation !== operation) return;
+        if (result?.ok) {
+          setState({ status: "installing", message: undefined });
+          try {
+            relaunch?.();
+          } catch (error) {
+            routeError(true, error);
+            return;
+          }
+          watchSlowRestart(operation);
+          return;
+        }
+        installOperation = null;
+        updater.logger?.warn?.(`Elevated install did not finish (${result?.reason}): ${result?.detail}`);
+        if (result?.reason === "declined") {
+          setState({ status: "downloaded", message: undefined });
+          return;
+        }
+        if (result?.reason === "checksum" || !handOffInstall) {
+          routeError(true, new Error(result?.detail || "The update could not be installed."));
+          return;
+        }
+        handOff(result?.detail);
+      })
+      .catch((error) => {
+        if (installOperation !== operation) return;
+        routeError(true, error);
+      });
+  }
+
+  // `note` says why the automatic install did not run, when that is why.
+  function handOff(note) {
+    const operation = { failed: false, timer: null };
+    installOperation = operation;
+    setState({ status: "installing", message: undefined });
     Promise.resolve()
       .then(() => handOffInstall(downloadedFiles))
       .then((patch) => {
         if (installOperation !== operation) return;
         installOperation = null;
-        setState({ status: "handed-off", ...patch });
+        setState({ status: "handed-off", message: note, ...patch });
       })
       .catch((error) => {
         if (installOperation !== operation) return;
