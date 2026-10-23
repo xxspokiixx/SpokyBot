@@ -210,6 +210,21 @@ describe("a reload in the middle of the welcome", () => {
     expect(putBodies().filter((body) => "profile" in body)).toEqual([{ profile: { name: "Ada" } }, { profile: { name: "Ada" } }]);
   });
 
+  it("Skip while Continue is still saving waits for that save, and sends the name again if it failed", async () => {
+    await show();
+    await type(NAME, "Ada");
+    let fail!: (error: Error) => void;
+    f.api.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    await press("Continue");
+    await press("Skip setup");
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    const profiles = () => putBodies().filter((body) => "profile" in body);
+    expect(profiles(), "nothing sent twice while the first save is on its way").toEqual([{ profile: { name: "Ada" } }]);
+    await act(async () => { fail(new Error("offline")); });
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(profiles(), "one retry after the failed save").toEqual([{ profile: { name: "Ada" } }, { profile: { name: "Ada" } }]);
+  });
+
   it("Escape keeps the name too, and leaves out an email still being typed", async () => {
     await show();
     await type(NAME, "Grace");

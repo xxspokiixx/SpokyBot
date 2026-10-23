@@ -30,7 +30,7 @@ import { HelloBeat } from "./beats/HelloBeat";
 import { ImportBeat } from "./beats/ImportBeat";
 import { PermissionsBeat } from "./beats/PermissionsBeat";
 import { QuietButton } from "./beats/shared";
-import { saveWelcomeProfile } from "./save-profile";
+import { settleWelcomeProfile, type SavedProfile } from "./save-profile";
 import { withViewTransition } from "./view-transition";
 import { ProgressDots } from "./ProgressDots";
 
@@ -125,7 +125,7 @@ export function WelcomeFlow({
   const cardRef = useRef<HTMLDivElement>(null);
   const finishing = useRef(false);
   const beatNow = useRef(beat);
-  const savedProfile = useRef(state.config?.profile);
+  const savedProfile = useRef<SavedProfile>({ current: state.config?.profile }).current;
   const live = useRef({ beats, fields });
   live.current = { beats, fields };
 
@@ -206,7 +206,7 @@ export function WelcomeFlow({
       if (!replay && !embedded) markWelcomeFinished();
       if (keepsDraft) clearWelcomeDraft();
       // What the greeting typed is kept however the welcome ends (Maybe later, Skip, Escape); a hosted greeting types nothing.
-      if (!hosted) void saveWelcomeProfile(live.current.fields, savedProfile, dispatch, false).catch(() => {});
+      if (!hosted) void settleWelcomeProfile(live.current.fields, savedProfile, dispatch).catch(() => {});
       onDone();
       try {
         const config = await api("/api/config", { method: "PUT", body: JSON.stringify(completionPatch()), signal: AbortSignal.timeout(10_000) });
