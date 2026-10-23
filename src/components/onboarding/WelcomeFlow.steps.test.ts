@@ -173,6 +173,17 @@ describe("a reload in the middle of the welcome", () => {
     expect(putBodies()).toContainEqual({ profile: { name: "Grace" } });
   });
 
+  it("on a hosted workspace, never reads a draft another person left in this browser, and never saves a profile", async () => {
+    localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: "hello", name: "Someone Else", email: "someone@example.com" }));
+    const onDone = vi.fn();
+    await show({ hosted: true, onDone });
+    await press("Continue");
+    expect(onDone).toHaveBeenCalledOnce();
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(putBodies().filter((body) => "profile" in body), "the shared workspace's profile is left alone").toEqual([]);
+    expect(draft(), "nor is the draft touched").toEqual({ beat: "hello", name: "Someone Else", email: "someone@example.com" });
+  });
+
   it("is neither read nor written by a replay from Settings or by the preview", async () => {
     localStorage.setItem(WELCOME_DRAFT_KEY, JSON.stringify({ beat: "engines", name: "Old", email: "" }));
     for (const extra of [{ replay: true }, { embedded: true }]) {

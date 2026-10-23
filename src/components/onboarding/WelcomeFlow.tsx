@@ -94,7 +94,8 @@ export function WelcomeFlow({
 }) {
   const { state, dispatch } = useStore();
   // A first run keeps its step and typed fields in this browser as it goes, so a reload resumes it; a replay starts over.
-  const keepsDraft = !replay && !embedded;
+  // A hosted workspace's greeting asks nothing, and its browser may hold another person's draft.
+  const keepsDraft = !replay && !embedded && !hosted;
   const [resumed] = useState(() => (keepsDraft ? readWelcomeDraft() : null));
   const initialBeat = requestedBeat ?? resumed?.beat;
   const [fields, setFields] = useState<WelcomeFields>(() =>
@@ -197,8 +198,8 @@ export function WelcomeFlow({
       track("onboarding_completed", { reason, at: beat, replay });
       setEmailGateDone("submitted");
       if (keepsDraft) clearWelcomeDraft();
-      // What the greeting typed is kept however the welcome ends (Maybe later, Skip, Escape).
-      void saveWelcomeProfile(live.current.fields, state.config?.profile, dispatch, false).catch(() => {});
+      // What the greeting typed is kept however the welcome ends (Maybe later, Skip, Escape); a hosted greeting types nothing.
+      if (!hosted) void saveWelcomeProfile(live.current.fields, state.config?.profile, dispatch, false).catch(() => {});
       onDone();
       try {
         const config = await api("/api/config", { method: "PUT", body: JSON.stringify(completionPatch()), signal: AbortSignal.timeout(10_000) });
@@ -206,7 +207,7 @@ export function WelcomeFlow({
       } catch {
       }
     },
-    [beat, dispatch, onDone, replay, keepsDraft, state.config?.profile],
+    [beat, dispatch, onDone, replay, keepsDraft, hosted, state.config?.profile],
   );
 
   const previous = previousBeat(beats, beat);
