@@ -158,6 +158,18 @@ describe("the Simple composer in a bot chat", () => {
   });
 });
 
+describe("the composer after Set me up", () => {
+  it("asks for the job and shows a chip to stop it while the conversation waits, and neither once it does not", () => {
+    render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1, setupRequest: { at: 2 } }] } });
+    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Tell Atlas what you'd like help with");
+    expect(container.querySelector("[data-setup-request]")?.textContent).toContain("Setting up Atlas");
+    expect(container.querySelector(`[aria-label="Stop setting up Atlas"]`)).not.toBeNull();
+    render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1 }] } });
+    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Atlas");
+    expect(container.querySelector("[data-setup-request]")).toBeNull();
+  });
+});
+
 describe("the Simple composer in a group chat", () => {
   it("offers Finish together in the + menu and keeps the Goal chip in view while it is on", () => {
     render({ group: room, members: [bot, peer] });
