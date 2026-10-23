@@ -138,9 +138,9 @@ export function createTestedAi(deps: TestedAiDeps) {
   };
   const state = (subject: Subject): AiTestState | undefined =>
     running.get(subject.instanceId)?.key === keyOf(subject) ? "testing" : resultOf(subject)?.state;
-  /** For selectDefaultModelSelection: true it answered, false it missed twice in a row, undefined not known yet. */
+  /** For selectDefaultModelSelection: true it answered, false it missed twice in a row, undefined not known yet. A test
+   * under way changes nothing until it ends, so the default never bounces back to an AI while it is tried again. */
   const answered = (subject: Subject): boolean | undefined => {
-    if (running.get(subject.instanceId)?.key === keyOf(subject)) return undefined;
     const result = resultOf(subject);
     return result?.state === "passed" ? true : result?.state === "failed" && result.misses >= MISSES_TO_FAIL ? false : undefined;
   };

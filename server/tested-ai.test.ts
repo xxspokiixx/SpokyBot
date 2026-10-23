@@ -192,6 +192,24 @@ describe("testing an AI with one tiny message before a new bot's default trusts 
     expect(chief().modelSelection).toEqual({ ...on("grok"), effort: "high" });
   });
 
+  it("keeps the default on the AI that answered while one that didn't is being tried again", async () => {
+    instances = [ready("claude", "claudeAgent"), ready("opencodeGo", "opencodeGo", { freeFallback: true })];
+    answers.claude = silent;
+    await boot();
+    await wait(2 * MINUTE);
+    expect(pick).toEqual(on("opencodeGo"));
+    let claudeAnswers!: (text: string) => void;
+    answers.claude = () => new Promise<string>((resolve) => { claudeAnswers = resolve; });
+    clock += 10 * MINUTE;
+    for (const timer of timers.splice(0)) timer.run();
+    await vi.waitFor(() => expect(tested.state(instances[0]!)).toBe("testing"));
+    expect(refresh()).toEqual(on("opencodeGo"));
+    claudeAnswers("OK");
+    await settled();
+    expect(pick).toEqual(on("claude"));
+    expect(chief().modelSelection.instanceId).toBe("claude");
+  });
+
   it("moves the first bot back once the person's own AI answers again, even after a restart", async () => {
     instances = [ready("claude", "claudeAgent"), ready("opencodeGo", "opencodeGo", { freeFallback: true })];
     answers.claude = silent;
