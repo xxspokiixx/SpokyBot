@@ -30,7 +30,8 @@ test("the Cloud verdict: same account and machine run, anything else ends or pau
 
 async function scratch(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-cloud-lending-")));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  // Windows keeps a just-ended shell's working folder busy for a moment after the command's result.
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   return dir;
 }
 

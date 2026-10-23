@@ -12,7 +12,8 @@ import { createComputerSharing, validateSharedFolders } from "./computer-sharing
 
 async function fixture(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-shared-access-")));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  // Windows keeps a just-ended shell's working folder busy for a moment after the command's result.
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const folder = { id: randomUUID(), name: "Fixture", path: dir, write: false };
   const grant = { enabled: true, folders: [folder], terminal: false, computer: false };
   const run = async operation => executeSharedOperation(grant, { folder_id: folder.id, ...operation }, new AbortController().signal);
