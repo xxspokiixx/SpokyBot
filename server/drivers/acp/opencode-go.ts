@@ -9,9 +9,9 @@ import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
-import { createAcpDriver, type AccountErrorCode, type AcpSupport } from "./core.ts";
+import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { offeredModels } from "./config-options.ts";
-import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
+import type { ModelCatalog, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli, killCliTree, spawnCli } from "../../procs.ts";
 
@@ -543,6 +543,20 @@ function hasStoredOpenCodeAuth(env: Record<string, string | undefined>) {
   });
 }
 
+/** A login, a key or a provider key of the person's own: what makes OpenCode more than Zen's free models. */
+function ownOpenCodeAccess(env: Record<string, string | undefined>): boolean {
+  return Boolean(env.OPENCODE_API_KEY) || hasStoredOpenCodeAuth(env) || OPENCODE_PROVIDER_ENV.some((key) => Boolean(env[key]?.trim()));
+}
+
+/** OpenCode's own providers: Zen (some models free without a login) and Go (a subscription). */
+const OPENCODE_OWN_MODEL = /^opencode(?:-go)?\//u;
+
+/** Ready only through Zen's free no-login models: no access of the person's own and no other provider's model. A local
+ * model the app found (`custom`) is not the person signing OpenCode in to anything. */
+export function openCodeFreeFallback(ownAccess: boolean, models: ModelCatalog): boolean {
+  return !ownAccess && models.options.every((option) => option.custom === true || OPENCODE_OWN_MODEL.test(option.id));
+}
+
 function withinFolder(path: string, folder: string): boolean {
   const rest = relative(resolvePath(folder), resolvePath(path));
   return rest === "" || (rest !== ".." && !rest.startsWith(`..${sep}`) && !isAbsolute(rest));
@@ -721,7 +735,8 @@ function openCodeLoginsFingerprint(env: Record<string, string | undefined>): str
   }).join("|");
 }
 
-const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
+/** `ownAccess` hears, per instance, whether its last sign-in read found access of the person's own. */
+const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string, boolean>()): AcpSupport => ({
   driverKind: "opencodeGo",
   displayName: "OpenCode",
   models: NO_MODELS,
@@ -769,11 +784,12 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   },
   pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: async (env, config) => (
-    Boolean(env.OPENCODE_API_KEY)
-    || hasStoredOpenCodeAuth(env)
-    || await canRunOpenCode(env, config.cli, loadCatalog)
-  ),
+  isAuthenticated: async (env, config, instanceId) => {
+    ownAccess.set(instanceId, ownOpenCodeAccess(env));
+    return Boolean(env.OPENCODE_API_KEY)
+      || hasStoredOpenCodeAuth(env)
+      || await canRunOpenCode(env, config.cli, loadCatalog);
+  },
   classifyError: classifyOpenCodeError,
   describeAccountError: describeOpenCodeAccountError,
   resolveModels: async (environment, config) => mergeLocalInject(
@@ -815,8 +831,24 @@ export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undef
 
 export const classifyOpenCodeGoError = classifyOpenCodeError;
 
-export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels) {
-  return createAcpDriver(support(loadCatalog));
+/** Its status says `freeFallback` while only Zen's free no-login models make it ready (contracts.ts). */
+export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels): ProviderDriver<AcpConfig> {
+  const ownAccess = new Map<string, boolean>();
+  const driver = createAcpDriver(support(loadCatalog, ownAccess));
+  return {
+    ...driver,
+    async create(input) {
+      const instance = await driver.create(input);
+      const read = instance.snapshot.bind(instance);
+      instance.snapshot = async () => {
+        const snapshot = await read();
+        const own = ownAccess.get(input.instanceId);
+        return snapshot.state === "available" && snapshot.authenticated === true && own !== undefined
+          && openCodeFreeFallback(own, instance.models) ? { ...snapshot, freeFallback: true } : snapshot;
+      };
+      return instance;
+    },
+  };
 }
 
 export const createOpenCodeGoDriver = createOpenCodeDriver;

@@ -1106,3 +1106,56 @@ describe("OpenCode model choice without a saved model", () => {
     }]);
   });
 });
+
+describe("OpenCode ready only through its free models", () => {
+  const noKeys = { OPENCODE_API_KEY: "", OPENCODE_AUTH_CONTENT: "", ...Object.fromEntries(OPENCODE_PROVIDER_ENV.map((key) => [key, ""])) };
+  async function snapshotWith(models: ModelCatalog, environment: Record<string, string> = {}, login?: Record<string, unknown>) {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-fallback-"));
+    if (login) {
+      mkdirSync(join(scratch, "data", "opencode"), { recursive: true });
+      writeFileSync(join(scratch, "data", "opencode", "auth.json"), JSON.stringify(login));
+    }
+    resetOpenCodeModelCache();
+    const driver = createOpenCodeDriver(async () => models);
+    const instance = await driver.create({
+      instanceId: "opencode-fallback",
+      displayName: "OpenCode",
+      environment: { HOME: scratch, USERPROFILE: scratch, XDG_DATA_HOME: join(scratch, "data"), ...noKeys, ...environment },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      return await instance.snapshot();
+    } finally {
+      await instance.dispose();
+      await removeTempDir(scratch);
+      resetOpenCodeModelCache();
+    }
+  }
+
+  it("is a free fallback with only Zen's models and no login or key", async () => {
+    expect(await snapshotWith(catalog("opencode/big-pickle", "opencode/grok-code"))).toMatchObject({ authenticated: true, freeFallback: true });
+    // A local model the app found is not the person signing OpenCode in to anything.
+    expect(await snapshotWith({ default: "opencode/big-pickle", options: [
+      { id: "opencode/big-pickle", label: "Big Pickle" }, { id: "ollama/qwen3", label: "Qwen 3", custom: true },
+    ] })).toMatchObject({ freeFallback: true });
+  });
+
+  it("is a normal AI with an OpenCode login, an OpenCode key, or a provider key", async () => {
+    const zen = catalog("opencode/big-pickle");
+    for (const snapshot of [
+      await snapshotWith(zen, {}, { opencode: { type: "oauth", access: "acc-token", refresh: "ref-token" } }),
+      await snapshotWith(zen, { OPENCODE_API_KEY: "zen-key" }),
+      await snapshotWith(zen, { ANTHROPIC_API_KEY: "provider-key" }),
+    ]) {
+      expect(snapshot.authenticated).toBe(true);
+      expect(snapshot).not.toHaveProperty("freeFallback");
+    }
+  });
+
+  it("is a normal AI when OpenCode offers another provider's models", async () => {
+    const snapshot = await snapshotWith(catalog("opencode/big-pickle", "openrouter/vendor/model-v2"));
+    expect(snapshot.authenticated).toBe(true);
+    expect(snapshot).not.toHaveProperty("freeFallback");
+  });
+});
