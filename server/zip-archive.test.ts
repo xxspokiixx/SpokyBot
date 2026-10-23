@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { extractZip } from "./zip-archive.ts";
+import { extractZip, safeArchivePath } from "./zip-archive.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { buildZip, type ZipFixtureMember } from "./testing/zip-fixture.ts";
 
@@ -40,6 +40,19 @@ describe("extracting a verified zip", () => {
     await expect(extractZip(file, out, { maxEntries: 10 })).rejects.toThrow(/unsafe/);
     expect(existsSync(join(scratch, "escape"))).toBe(false);
     expect(readdirSync(out)).toEqual([]);
+  });
+
+  it.each([
+    "CON", "nul", "Aux.txt", "bin/PRN", "COM1", "lpt9.log", "con/tool", "con.d/tool",
+    "file:stream", "C:x", "trailing.", "trailing ", "dir./tool",
+    "a<b", "a>b", 'a"b', "a|b", "a?b", "a*b", "tab\there",
+  ])("refuses %j, which Windows cannot hold or reads as a device or stream", async (name) => {
+    const { file, out } = archive([{ name, data: "x" }]);
+    await expect(extractZip(file, out, { maxEntries: 10 })).rejects.toThrow(/unsafe/);
+  });
+
+  it.each(["console", "nul-device/tool", "COM10", "conman/x", "v1.2.3/opencode"])("allows the ordinary name %j", (name) => {
+    expect(safeArchivePath(name)).toBe(true);
   });
 
   it("refuses a symbolic link", async () => {

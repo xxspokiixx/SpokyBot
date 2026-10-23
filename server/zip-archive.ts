@@ -155,10 +155,18 @@ export async function extractZipMember(archivePath: string, entry: ZipMember, de
   if (bytes !== expectedBytes) throw new Error("An extracted file was truncated.");
 }
 
-/** A relative, `/`-separated path with no empty, `.` or `..` segment, no backslash and no drive letter. */
+// Windows opens these as devices whatever the extension or folder: `NUL.txt` and `con/x` are not files.
+const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+// A backslash, `:` (a drive or an NTFS stream) and the other characters Windows refuses in a name.
+const UNSAFE_CHARACTER = /[\\:<>"|?*]/u;
+
+/** A relative, `/`-separated path every platform can hold as plain files: no empty, `.` or `..` segment, no drive,
+ * stream, device name or Windows-forbidden character, and no segment ending in a dot or a space. */
 export function safeArchivePath(name: string): boolean {
-  if (!name || name.includes("\\") || name.includes("\0") || name.startsWith("/") || /^[a-z]:/iu.test(name)) return false;
-  return name.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+  if (!name || name.startsWith("/") || UNSAFE_CHARACTER.test(name)) return false;
+  if ([...name].some((character) => (character.codePointAt(0) ?? 0) < 0x20)) return false;
+  return name.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."
+    && !segment.endsWith(".") && !segment.endsWith(" ") && !WINDOWS_DEVICE.test(segment));
 }
 
 /** Every member of a verified ZIP into `outputDirectory`: plain files and folders only, each under the folder. */
