@@ -1124,6 +1124,7 @@ describe("OpenCode without Node.js", () => {
     expect(release!.hosts).toContain(url.hostname);
     expect(url.pathname).toBe(`/anomalyco/opencode/releases/download/v${release!.version}/${url.pathname.split("/").at(-1)}`);
     expect(asset!.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(asset!.executableSha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("offers Settings' Install button with no npm on this machine", () => {
