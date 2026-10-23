@@ -143,10 +143,13 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // Promotions never land on a new install's first chat: they wait for its first reply, and the full-screen Cloud Pro popup
   // also for a launch after the one whose welcome just finished. Account and billing notices keep their own rules.
   const firstChat = firstReplyPending(state);
+  const afterWelcome = firstChat || welcomeFinishedThisLaunch();
+  // The product-updates question is a second email ask: it never follows the welcome's own in the same launch either.
+  const consentNow = afterWelcome ? false : consentFact;
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
-  const notice = waits ? null : closed ? (consentFact === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere ? nextNotice({
-    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || firstChat || welcomeFinishedThisLaunch() ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
-    [UPDATES_CONSENT_NOTICE]: consentFact,
+  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere ? nextNotice({
+    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    [UPDATES_CONSENT_NOTICE]: consentNow,
     [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
       : organization === null || moving === null ? null : !organization,
     [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),

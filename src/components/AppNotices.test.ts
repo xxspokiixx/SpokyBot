@@ -819,6 +819,22 @@ describe("the product-updates question after the update", () => {
     expect(await launch(), "a restart reads it from the desktop's file").not.toContain(QUESTION);
   });
 
+  it("waits for a new install's first reply and for a launch after the one whose welcome finished, then keeps its place after the Cloud Pro popup", async () => {
+    desk.saved = null; storage.delete(CLOUD_PRO_UPDATE_NOTICE);
+    f.state.bots = [];
+    markWelcomeFinished();
+    const first = await launch();
+    expect(first, "the welcome just closed and no bot has answered").not.toContain(QUESTION); expect(first).not.toContain(POPUP);
+    f.state.bots = structuredClone(FIRST_REPLY);
+    const answered = await launch();
+    expect(answered, "a bot has answered, but in the launch the welcome finished").not.toContain(QUESTION); expect(answered).not.toContain(POPUP);
+    session.clear();
+    const later = await launch();
+    expect(later).toContain(POPUP); expect(later).not.toContain(QUESTION);
+    press("Not now"); await flush();
+    expect(render(), "right after the popup closes, as #3379 orders it").toContain(QUESTION);
+  });
+
   it("never during onboarding, the tour or Settings; it shows once they are done, before the other cards", async () => {
     returning();
     f.state.welcomeOpen = true; expect(await launch()).toBe("");
