@@ -150,9 +150,10 @@ there is no brief at all. Its row says
   start. A scripted test install without the fake connected-apps service
   behaves as before.
 - Routines carry `checks`, `access` and `deliver` through Cloud moves and team
-  backups. The watch moves to My Cloud with MausBot, which a move carries
-  whenever it has routines, even if nobody has opened it. On My Cloud it pauses
-  My Cloud's own watch. The move freeze pauses the watch like any routine, so two
+  backups. The watch moves to My Cloud with MausBot. A move carries MausBot
+  when it has a routine the person set up, paused or changed, even if nobody
+  has opened MausBot; the watch exactly as the server made it does not count.
+  On My Cloud the arrived watch pauses My Cloud's own. The move freeze pauses the watch like any routine, so two
   homes never watch the same inbox. MausBot never moves into a team.
 
 ## Not in v1

@@ -29,7 +29,7 @@ export interface CloudSendSources {
   greetingOnly(threadId: string, name: string): boolean;
   /** The bot is in a room, whose chats go to My Cloud only with their bots. */
   inRoom?(botId: string): boolean;
-  /** The bot has routines here, which go to My Cloud only with their bot. */
+  /** The bot has routines here the person set up or changed, which a move takes to My Cloud only with their bot. */
   automated?(botId: string): boolean;
   skills(bot: BotRecord): ReadonlyArray<{ name: string; description?: string; sha256: string; enabled: boolean }>;
   /** The stored picture's bytes, or null when it is gone. */
@@ -101,7 +101,7 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   for (const bot of sources.bots()) {
     if (only !== undefined && bot.id !== only) continue;
     const skills = sources.skills(bot);
-    if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom, sources.automated)) continue;
+    if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom, move ? sources.automated : undefined)) continue;
     carried.add(bot.id);
     const parts: Record<string, string> = { ...botParts(bot, sources.picture), ...(move && sources.move ? sources.move.botParts(bot) : {}) };
     if (only !== undefined) for (const part of TEAM_HELD_PARTS) delete parts[part];

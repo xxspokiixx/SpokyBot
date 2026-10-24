@@ -23,17 +23,13 @@ import type { BotRecord, Store } from "../store.ts";
 import { deciderEnabled, type Decider } from "../decider/index.ts";
 import type { Extractor } from "../extractor/index.ts";
 import { createBrief, type BriefDeps } from "./brief.ts";
+import { WATCH_EVERY_MINUTES, WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 import { createHelperSuggestion } from "./helper-suggestion.ts";
 import { createInboxTriage } from "./inbox-triage.ts";
 import { mainChief, proactiveOwner } from "./proactive-owner.ts";
 import { createRoutineChecks } from "./routine-checks.ts";
 
-export const WATCH_NAME = "Keep an eye on my day";
-export const WATCH_INSTRUCTIONS = [
-  "Keep an eye on my day for me.",
-  "- Email: pick what I must not miss: mail that needs my reply, mail from someone I meet today, and anything with a deadline. Leave out newsletters, receipts and notifications.",
-  "- Meetings: before a meeting with other people, prepare me in a few lines: who they are, why we are meeting, what is still open, and one next step.",
-].join("\n");
+export { WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 export const WATCH_FILE = "watch.json";
 /** The engines whose every tool use outside a run's allowlist reaches OpenMausBot's answerer and is refused there. */
 const FENCED_ENGINES = new Set(["claudeAgent"]);
@@ -220,7 +216,7 @@ export function createProactive(deps: ProactiveDeps) {
     const existing = manager.listRoutines().find((routine) => routine.botId === bot.id && isWatch(routine));
     const routine = existing ?? manager.create({
       name: WATCH_NAME, prompt: WATCH_INSTRUCTIONS, botId: bot.id, enabled: true, timeoutMinutes: 15,
-      schedule: { type: "interval", everyMinutes: 15, anchorAt: Date.now() + 15 * 60_000 },
+      schedule: { type: "interval", everyMinutes: WATCH_EVERY_MINUTES, anchorAt: Date.now() + WATCH_EVERY_MINUTES * 60_000 },
       checks: ["calendar", "mail", "runs"], access: "read-and-draft", deliver: "brief",
     });
     if (!existing) deps.owned(routine);

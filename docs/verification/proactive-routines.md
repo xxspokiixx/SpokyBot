@@ -75,9 +75,11 @@ Expected:
   Chief's chat.
 - On a Team Cloud there is no watch and nothing is handed over, and a member's
   MausBot is never the proactive bot, so its briefing routine reads nothing.
-- A move to My Cloud carries MausBot with the watch even when nobody opened
-  MausBot. On My Cloud the arrived watch is the only one on, and My Cloud's own
-  is paused.
+- A move to My Cloud leaves an untouched MausBot behind while its watch is
+  exactly as the server made it, and carries MausBot with the watch once the
+  person changed it, even when nobody opened MausBot. A send that carries no
+  routines is unchanged. On My Cloud the arrived watch is the only one on, and
+  My Cloud's own is paused.
 
 ## Unit tests
 

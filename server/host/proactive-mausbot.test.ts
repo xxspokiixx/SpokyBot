@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Notification } from "../../shared/notification.ts";
 import { cloudSendSummary, type CloudSendSources } from "../cloud-send.ts";
-import { kindRecord, MOVE_BOT_FIELDS, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
+import { automatedBot, kindRecord, MOVE_BOT_FIELDS, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { EmailHeader } from "../connected-reads.ts";
 import { ensureDefaultBot } from "../default-bot.ts";
@@ -255,11 +255,10 @@ describe("MausBot keeps an eye on the day", () => {
     expect([...first.reads, ...untagged.reads]).toEqual([]);
   });
 
-  it("moves to My Cloud with MausBot, untouched as it looks, and is the only watch on there", async () => {
+  it("moves to My Cloud with MausBot, untouched as it looks, once the person changed the watch, and is the only watch on there", async () => {
     // This computer: the watch was handed to a MausBot nobody has opened yet.
     const { first, clive, watch } = existingInstall();
     const maus = ensureDefaultBot(first.store, { dataDir: DATA_DIR })!;
-    first.routines.update(watch.id, { prompt: "Watch for Ada." });
     const here = start();
     here.proactive.ensureWatch();
     const deps = (place: ReturnType<typeof start>): MoveKindsDeps => ({ dataDir: DATA_DIR, store: place.store, routines: () => place.routines, calls: () => null, webhooks: () => null,
@@ -270,9 +269,13 @@ describe("MausBot keeps an eye on the day", () => {
         const rows = here.store.messagesFor(threadId);
         return rows.length === 1 && rows[0]!.role === "bot" && Boolean(rows[0]!.text?.includes(name));
       },
-      ...(withRoutines ? { automated: (botId: string) => here.routines.listRoutines().some((routine) => routine.botId === botId) } : {}),
+      ...(withRoutines ? { automated: (botId: string) => automatedBot(deps(here), botId) } : {}),
       move: { items: (bots, only) => moveItems(deps(here), bots, only), botParts: () => ({}) },
     });
+    const carries = (key: string, options: { move: boolean }) => cloudSendSummary(sources(true), options).items.some((item) => item.key === key);
+    expect(carries(`bot:${maus.id}`, { move: true }), "the watch as the server made it is nobody's use").toBe(false);
+    here.routines.update(watch.id, { prompt: "Watch for Ada." });
+    expect(carries(`bot:${maus.id}`, { move: false }), "a send without the routines leaves it as it was").toBe(false);
     const carried = cloudSendSummary(sources(true), { move: true }).items;
     expect(carried.some((item) => item.key === `bot:${maus.id}`)).toBe(true);
     expect(carried.find((item) => item.key === `routine:${watch.id}`)).toMatchObject({ bot: maus.id });
