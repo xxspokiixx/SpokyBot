@@ -4603,6 +4603,7 @@
   "cloudSend.move.bringingChats": "Bu bilgisayarın botları Cloud'a getiriliyor… {total} sohbetten {done} tanesi",
   "cloudSend.move.waiting": "Botların Cloud'a taşınıyor… {name} işini bitirene kadar bekleniyor",
   "cloudSend.move.waitingAny": "Botların Cloud'a taşınıyor… botların işini bitirene kadar bekleniyor",
+  "cloudSend.move.waitingSignIn": "Botların Cloud'a taşınıyor… bir oturum açma işleminin bitmesi bekleniyor",
   "cloudSend.move.finishing": "Cloud'a taşınıyor… neredeyse bitti",
   "cloudSend.move.updating": "Cloud'un güncelleniyor. Güncelleme bitince taşınma başlar.",
   "cloudSend.move.failing": "Botların henüz Cloud'a taşınamadı: {error}",

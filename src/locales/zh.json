@@ -2966,6 +2966,7 @@
   "cloudSend.move.bringingChats": "正在把这台电脑的机器人搬到 Cloud… 第 {done}/{total} 个对话",
   "cloudSend.move.waiting": "正在把你的机器人搬到 Cloud… 等 {name} 完成手头的事",
   "cloudSend.move.waitingAny": "正在把你的机器人搬到 Cloud… 等你的机器人完成手头的事",
+  "cloudSend.move.waitingSignIn": "正在把你的机器人搬到 Cloud… 等一次登录完成",
   "cloudSend.move.finishing": "正在搬到 Cloud… 快好了",
   "cloudSend.move.updating": "My Cloud 正在更新。更新完成后就开始搬过去。",
   "cloudSend.move.failing": "你的机器人还没能搬到 Cloud：{error}",

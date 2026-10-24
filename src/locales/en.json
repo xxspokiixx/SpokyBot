@@ -688,6 +688,7 @@
   "cloudSend.move.bringingChats": "Bringing this computer's bots to My Cloud… {done} of {total} chats",
   "cloudSend.move.waiting": "Moving your bots to My Cloud… waiting for {name} to finish",
   "cloudSend.move.waitingAny": "Moving your bots to My Cloud… waiting for your bots to finish",
+  "cloudSend.move.waitingSignIn": "Moving your bots to My Cloud… waiting for a sign-in to finish",
   "cloudSend.move.finishing": "Moving to My Cloud… almost done",
   "cloudSend.move.updating": "My Cloud is updating. Your move starts when it's done.",
   "cloudSend.move.failing": "Your bots couldn't move to My Cloud yet: {error}",
