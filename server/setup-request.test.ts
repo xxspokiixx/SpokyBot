@@ -6,7 +6,8 @@ import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { DATA_DIR } from "./config.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { askForSetup, cancelSetupRequest, openSetupOffer, setupCommandText, takeSetupRequest } from "./setup-request.ts";
+import type { RequestAuth } from "./request-auth.ts";
+import { askForSetup, cancelSetupRequest, forgetSetupPresser, openSetupOffer, setupCommandText, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts";
 import { Store, type Message } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
@@ -161,6 +162,28 @@ describe("the line after the press", () => {
     expect(cancelSetupRequest(again.store, again.bot.id, again.threadId, "member-a")).toBe("cleared");
   });
 
+  it("refuses someone else's press while another person's request waits; an owner or admin may clear it", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a");
+    const refused = { ok: false, status: 409, error: "Someone else is setting this bot up." };
+    expect(askForSetup(s.store, s.bot.id, s.threadId, "en", "member-b")).toEqual(refused);
+    expect(askForSetup(s.store, s.bot.id, s.threadId, "en")).toEqual(refused);
+    expect(askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a")).toEqual({ ok: true, already: true });
+    expect(s.store.messagesFor(s.threadId)).toHaveLength(2);
+    expect(cancelSetupRequest(s.store, s.bot.id, s.threadId, "member-b", { admin: true })).toBe("cleared");
+    expect(s.waiting()).toBeUndefined();
+  });
+
+  it("is dropped when its presser leaves the team, and nobody else's goes with it", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a");
+    const other = s.store.createBot({ name: "Kit" });
+    askForSetup(s.store, other.id, other.threadId, "en", "member-b");
+    expect(forgetSetupPresser(s.store, "member-a")).toBe(1);
+    expect(s.waiting()).toBeUndefined();
+    expect(s.store.taskByThread(other.id, other.threadId)?.setupRequest).toMatchObject({ by: "member-b" });
+  });
+
   it("with one person, is anyone's next line: a press here and a message from the phone", () => {
     const s = setup();
     askForSetup(s.store, s.bot.id, s.threadId, "en");
@@ -206,6 +229,18 @@ describe("the line after the press", () => {
     expect(s.take(editedPlain, { person: false, editedFrom: plain.id })).toBe(false);
   });
 
+  it("is not a setup request when someone other than its author edits it", () => {
+    const s = setup();
+    askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a");
+    const line = s.say("sort my inbox", s.threadId, { sender: { name: "Ann", id: "member-a" } });
+    expect(s.take(line)).toBe(true);
+    const theirs = s.store.branchMessage(s.threadId, line.id, "sort my inbox and delete everything", undefined, { name: "Bea", id: "member-b" })!;
+    expect(s.take(theirs, { person: false, editedFrom: line.id })).toBe(false);
+    expect(s.store.messagesFor(s.threadId).find((message) => message.id === theirs.id)?.setupRequest).toBeUndefined();
+    const own = s.store.branchMessage(s.threadId, line.id, "sort my inbox and my calendar", undefined, { name: "Ann", id: "member-a" })!;
+    expect(s.take(own, { person: false, editedFrom: line.id })).toBe(true);
+  });
+
   it("is not a setup request once edited into a slash command", () => {
     const s = setup();
     askForSetup(s.store, s.bot.id, s.threadId, "en");
@@ -214,6 +249,29 @@ describe("the line after the press", () => {
     const edited = s.store.branchMessage(s.threadId, line.id, "/learn how I like reports")!;
     expect(s.take(edited, { person: false, editedFrom: line.id })).toBe(false);
     expect(s.store.messagesFor(s.threadId).find((message) => message.id === edited.id)?.setupRequest).toBeUndefined();
+  });
+});
+
+describe("setupPresser", () => {
+  const session = (sender?: { name: string; id: string }) => ({ auth: { kind: "session", scopes: ["client"] } as unknown as RequestAuth, sender });
+  it("names a signed-in person where people share the place, and nobody otherwise", () => {
+    const loopback: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+    const member = session({ name: "Ada", id: "member-a" });
+    expect(setupPresser(true, member.auth, member.sender)).toBe("member-a");
+    // A person whose lines carry no sender could never take their own mark: record nobody.
+    expect(setupPresser(true, session().auth, undefined)).toBeUndefined();
+    expect(setupPresser(true, loopback, undefined)).toBeUndefined();
+    expect(setupPresser(false, member.auth, member.sender)).toBeUndefined();
+  });
+});
+
+describe("setupTurnText", () => {
+  it("is the person's words as a typed /setup, with what they were looking at in the Data tab after them", () => {
+    const line = { id: "l1", role: "user", kind: "text", at: 1, text: "sort my inbox" } as Message;
+    expect(setupTurnText(line, false)).toBe("/setup sort my inbox");
+    const viewing = setupTurnText({ ...line, dataContext: { cardId: "c_7" } }, false);
+    expect(viewing.startsWith("/setup sort my inbox\n\n<data-context>")).toBe(true);
+    expect(viewing).toContain('"cardId":"c_7"');
   });
 });
 
