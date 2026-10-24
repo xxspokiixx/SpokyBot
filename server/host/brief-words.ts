@@ -111,8 +111,8 @@ const en: BriefWords = {
 
 const ptBr: BriefWords = {
   title: "Seu resumo",
-  intro: "Fico de olho na sua agenda e no seu e-mail e coloco aqui o que precisa de você, uma vez por dia e quando você volta. Me diga para parar ou o que observar.",
-  needsYou: "Precisa de você",
+  intro: "Fico de olho na sua agenda e no seu e-mail e coloco aqui o que precisa da sua atenção, uma vez por dia e quando você volta. Me diga para parar ou o que observar.",
+  needsYou: "Precisa da sua atenção",
   nothingNeedsYou: "Nada precisa de você agora.",
   yourDay: "Seu dia",
   noMoreMeetings: "Não há mais reuniões hoje.",
