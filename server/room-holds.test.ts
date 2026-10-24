@@ -100,7 +100,8 @@ describe("isStopCommand", () => {
   });
 
   it("reads any other message as a message, including a quoted or coded stop", () => {
-    for (const text of ["", "all right", "stop using tabs", "don't stop", "pause", "stop the build and run tests", "`stop`", "\"stop\"", "> stop"]) {
+    for (const text of ["", "all right", "stop using tabs", "don't stop", "pause", "stop the build and run tests", "`stop`", "\"stop\"", "> stop",
+      "why did it stop?", "it stopped", "never stop", "non-stop", "stop-loss at 5%", "cancel my 3pm", "please stop the server and restart it", "stop\nthen deploy"]) {
       expect(isStopCommand(text), text).toBe(false);
     }
   });

@@ -89,7 +89,8 @@ import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback }
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
-import { applyHoldDirective, classifyHoldDirective, heldMemberLine, isStopCommand, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
+import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
+import { createPersonStop } from "./host/person-stop.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts";
@@ -2405,31 +2406,6 @@ async function interruptDirectThread(botId: string, threadId: string, cause?: st
   if (directTurnGenerationByThread.get(threadId) === generation) closeOpenApprovals(threadId);
 }
 
-async function stopThreadForPerson(botId: string, threadId: string): Promise<void> {
-  const routine = routines?.activeBotRunForBot(botId);
-  if (routine?.threadId === threadId) {
-    await routines!.cancelRun(routine.id);
-    return;
-  }
-  handoffs.stoppedByPerson(threadId);
-  await interruptDirectThread(botId, threadId);
-}
-
-/** Stop left teammates mid-turn: one pill each links to the conversation where Stop reaches that turn. */
-function noteTeammatesLeftRunning(threadId: string, running: HandoffView[]): void {
-  if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return;
-  for (const node of running) {
-    const name = store.bot(node.botId)?.name ?? "A teammate";
-    const task = store.taskByThread(node.botId, node.threadId);
-    store.appendMessage(threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `Stopped here — ${name} is still working; open to stop it too`, ok: true },
-      ...(task ? { threadRef: { botId: node.botId, threadId: node.threadId, title: task.title } } : {}),
-    });
-  }
-}
-
 async function interruptParkedTurn(botId: string, threadId: string): Promise<void> {
   const owner = botForThread(botId, threadId);
   const generation = directTurnGenerationByThread.get(threadId);
@@ -2963,6 +2939,7 @@ const store = new Store(
   (instanceId) => registry.cliTarget(instanceId)?.driverKind,
   () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
 );
+const { stopThreadForPerson, stopOnTypedCommand, noteTeammatesLeftRunning } = createPersonStop({ store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended });
 const creditMoves = cloudCredit && createCreditMoves({ credit: cloudCredit, store, context: selectionContext, threadBusy, saveDefault: saveNewBotModel,
   defaults: () => [cfg.defaultModelSelection, cfg.newBotDefaults?.profile.modelSelection], engineName: id => registry.get(id)?.displayName ?? id,
   log: line => console.warn(line) });
@@ -7729,14 +7706,8 @@ async function acceptDirectSend(
       if (guardedStart) return guardedStart(currentAtStart);
 
       if (currentAtStart.busy) {
-        if (!app && (trigger.kind === "user" || trigger.kind === "owner") && isStopCommand(text)) {
-          if (personPresent) clearUnattended(threadId);
-          const message = store.appendMessage(threadId, {
-            role: "user", kind: "text", text, replyToId: replyTo?.id, sendId, sender, ...spokenLineFields(via, callId),
-          });
-          await stopThreadForPerson(botId, threadId);
-          return { ok: true as const, threadId, message };
-        }
+        const typedStop = await stopOnTypedCommand({ botId, threadId, text, trigger, personPresent, fromApp: Boolean(app), row: { replyToId: replyTo?.id, sendId, sender, ...spokenLineFields(via, callId) } });
+        if (typedStop) return typedStop;
         const instance = runningTurnInstance(currentAtStart, threadId);
         let steered: SteerOutcome = "refused";
         const steerInput = extractTurnImages(text);
