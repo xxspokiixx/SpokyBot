@@ -18,6 +18,7 @@ import type { BotRecord, Message, Store } from "../store.ts";
 import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
 import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard } from "./brief-cards.ts";
+import { briefWords, type BriefWords } from "./brief-words.ts";
 import { proactiveOwner } from "./proactive-owner.ts";
 import type { CheckReport } from "./routine-checks.ts";
 import { clip, oneLine } from "./text-clip.ts";
@@ -39,6 +40,8 @@ const id = z.string().min(1).max(512);
 const stateSchema = z.object({
   version: z.literal(1),
   timeZone: z.string().max(128).optional(),
+  /** The language the person's app shows, from their last open. */
+  language: z.string().max(35).optional(),
   lastActiveAt: at.optional(),
   home: z.object({ botId: id, threadId: id }).optional(),
   /** The day the first brief was posted: that day's card says what it does. */
@@ -68,6 +71,8 @@ export interface BriefDeps {
   engineName(instanceId: string): string;
   /** The computer's own zone; undefined on a Cloud home, whose zone of record comes from the person's device. */
   hostTimeZone(): string | undefined;
+  /** The server's configured language, for a brief no app has opened with a language yet. */
+  language(): string | undefined;
   /** Reads for the brief's own follow-ups: an email's sender and subject after a restart, a reply already sent. */
   session(): ReadSession | null;
   /** The person's own Gmail address, once a check has read it. */
@@ -174,7 +179,7 @@ export function createBrief(deps: BriefDeps) {
     return deps.store.messagesFor(run.threadId).findLast((row) => row.publishedPage?.state === "live" && row.at >= from && row.at <= to)?.publishedPage?.url;
   }
 
-  function routineRows(since: number): { needs: BriefRow[]; done: BriefRow[] } {
+  function routineRows(since: number, w: BriefWords): { needs: BriefRow[]; done: BriefRow[] } {
     const needs: BriefRow[] = [], done: BriefRow[] = [];
     const latest = new Map<string, RoutineRun>();
     for (const run of deps.runs()) {
@@ -188,43 +193,44 @@ export function createBrief(deps: BriefDeps) {
       const bot = deps.store.bot(run.botId);
       if (!bot || bot.hidden) continue;
       const open = run.threadId && deps.store.taskByThread(run.botId, run.threadId) ? { botId: run.botId, threadId: run.threadId } : undefined;
+      const name = oneLine(run.routineName, 80);
       const page = run.status === "completed" && open ? publishedPage(run) : undefined;
-      if (run.status === "completed") done.push({ text: oneLine(run.routineName, 80), note: clip(firstSentence(run.output ?? "") || "Finished", 140), ...(open ? { open } : {}), ...(page ? { page } : {}) });
-      else needs.push({ text: `${oneLine(run.routineName, 80)} ${run.status === "missed" ? "was missed" : "failed"}`, note: clip(oneLine(run.error ?? "", 140) || "It did not finish", 140), ...(open ? { open } : {}) });
+      if (run.status === "completed") done.push({ text: name, note: clip(firstSentence(run.output ?? "") || w.finished, 140), ...(open ? { open } : {}), ...(page ? { page } : {}) });
+      else needs.push({ text: run.status === "missed" ? w.missed(name) : w.failed(name), note: clip(oneLine(run.error ?? "", 140) || w.didNotFinish, 140), ...(open ? { open } : {}) });
     }
     return { needs, done };
   }
 
-  function needsYouRows(): BriefRow[] {
+  function needsYouRows(w: BriefWords): BriefRow[] {
     return deps.needsYou().map((item): BriefRow => {
       const open = item.threadId ? { botId: "botId" in item ? item.botId : item.botIds[0]!, threadId: item.threadId } : undefined;
       const row = (text: string, note: string): BriefRow => ({ text, note, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
       switch (item.kind) {
-        case "signed-out": return row(`${deps.engineName(item.instanceId)} is signed out`, "Sign in again in Settings, Model providers.");
-        case "usage-limit": return row("An AI reached its usage limit", clip(item.text, 140));
-        case "out-of-credit": return row("The trial credit can't run this", "Sign in with your own AI account, or add a key.");
-        case "connection": return row(`${item.app} needs reconnecting`, clip(item.text, 140));
-        case "place": return row("A bot couldn't reach its computer", "Open it to choose another place.");
-        case "question": return row(`${deps.store.bot(item.botId)?.name ?? "A bot"} asked you`, clip(item.text, 140));
+        case "signed-out": return row(w.signedOut(deps.engineName(item.instanceId)), w.signInAgain);
+        case "usage-limit": return row(w.usageLimit, clip(item.text, 140));
+        case "out-of-credit": return row(w.outOfCredit, w.ownAccount);
+        case "connection": return row(w.reconnecting(item.app), clip(item.text, 140));
+        case "place": return row(w.unreachable, w.chooseAnother);
+        case "question": return row(w.asked(deps.store.bot(item.botId)?.name ?? w.aBot), clip(item.text, 140));
       }
     });
   }
 
   function facts(chiefBot: BotRecord): BriefFacts {
-    const at = now(), zone = timeZone(), day = today();
-    const { needs: failed, done } = routineRows(dayStart());
+    const at = now(), zone = timeZone(), day = today(), language = state.language ?? deps.language(), w = briefWords(language);
+    const { needs: failed, done } = routineRows(dayStart(), w);
     const clashRows: BriefRow[] = (calendar?.clashes ?? []).map(([first, second]) => ({
-      text: `${oneLine(first.title, 52)} and ${oneLine(second.title, 52)} overlap`,
-      note: `${clockTime(first.start, zone)} and ${clockTime(second.start, zone)}`,
+      text: w.overlap(oneLine(first.title, 52), oneLine(second.title, 52)),
+      note: w.both(clockTime(first.start, zone, language), clockTime(second.start, zone, language)),
     }));
     const troubleRows: BriefRow[] = (trouble ?? []).map((one) => {
       const app = one.app === "gmail" ? "Gmail" : "Google Calendar";
-      return { text: `Couldn't read ${app}`, note: one.signedOut ? `Reconnect ${app} in Connected apps.` : "I'll try again soon." };
+      return { text: w.couldNotRead(app), note: one.signedOut ? w.reconnect(app) : w.tryAgainSoon };
     });
     const unfencedRows: BriefRow[] = !unfenced ? []
       : helpersSort
-        ? [{ text: "I didn't prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your email is still sorted, and your day, reminders and clashes show here.` }]
-        : [{ text: "I didn't sort email or prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your day, reminders and clashes still show here.` }];
+        ? [{ text: w.unpreparedMeetings, note: w.unpreparedNote(chiefBot.name) }]
+        : [{ text: w.unsorted, note: w.unsortedNote(chiefBot.name) }];
     const meetings = calendar === undefined ? null : calendar.meetings
       .filter((meeting) => qualifies(meeting) || (meeting.ownedCalendar === true && meeting.status !== "cancelled" && !meeting.allDay && !meeting.selfDeclined))
       .filter((meeting) => meeting.end > at && localDate(meeting.start, zone) === day)
@@ -234,8 +240,8 @@ export function createBrief(deps: BriefDeps) {
       return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why } : {}) }] : [];
     });
     return {
-      now: at, ...(zone ? { timeZone: zone } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
-      needs: [...troubleRows, ...failed, ...clashRows, ...needsYouRows(), ...unfencedRows],
+      now: at, ...(zone ? { timeZone: zone } : {}), ...(language ? { language } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
+      needs: [...troubleRows, ...failed, ...clashRows, ...needsYouRows(w), ...unfencedRows],
       meetings, emails, ...(waiting !== undefined ? { waiting } : {}), routines: done,
     };
   }
@@ -405,18 +411,23 @@ export function createBrief(deps: BriefDeps) {
 
   /** The person arrived: the first open of a day, or a return after 3 hours away, shows today's brief when it has anything
    * in it. Any other ping only records the time, so the brief never takes the screen from a chat in use. */
-  async function active(source: "desktop" | "phone", zone?: string): Promise<PresenceAnswer> {
+  async function active(source: "desktop" | "phone", zone?: string, language?: string): Promise<PresenceAnswer> {
     if (deps.hosted) return { returned: false };
     const at = now();
     if (zone && validZone(zone) && zone !== state.timeZone) state.timeZone = zone;
+    const relabel = language !== undefined && language !== state.language;
+    if (relabel) state.language = language;
     const previous = state.lastActiveAt;
     state.lastActiveAt = at;
     const skewed = previous !== undefined && previous > at + CLOCK_SKEW_MS;
     const returned = previous !== undefined && !skewed && at - previous >= AWAY_MS;
     const firstToday = previous === undefined || (!skewed && localDate(previous, timeZone()) !== today());
-    if (returned || firstToday || persistedAt === undefined || at - persistedAt >= PERSIST_EVERY_MS) save();
+    if (relabel || returned || firstToday || persistedAt === undefined || at - persistedAt >= PERSIST_EVERY_MS) save();
     void source;
-    if (!returned && !firstToday) return { returned: false };
+    if (!returned && !firstToday) {
+      if (relabel && currentCard()) await render({ create: false, notify: false });
+      return { returned: false };
+    }
     const shown = await render({ create: true, notify: false });
     return shown?.worth ? { returned, open: { botId: shown.botId, threadId: shown.threadId } } : { returned };
   }

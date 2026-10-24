@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { duePing, openTarget, presenceBody } from "@/lib/presence-client";
+import { duePing, openTarget, presenceBody, shownLanguage } from "@/lib/presence-client";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { existingThreadTarget } from "@/lib/thread-target";
 import { openThread } from "@/state/thread-navigation";
@@ -26,7 +26,7 @@ export function usePresence(state: AppState, dispatch: (action: Action) => void)
       if (!duePing(lastPing.current, now)) return;
       lastPing.current = now;
       const sentFrom = selection(latest.current.state);
-      void api("/api/presence/active", { method: "POST", body: JSON.stringify(presenceBody()) }).then((answer) => {
+      void api("/api/presence/active", { method: "POST", body: JSON.stringify(presenceBody(Intl.DateTimeFormat().resolvedOptions().timeZone, shownLanguage(latest.current.state.config?.language))) }).then((answer) => {
         const live = latest.current;
         const target = existingThreadTarget(openTarget(answer), live.state);
         if (target && selection(live.state) === sentFrom) openThread(live.dispatch, target, live.state, live.showThreads);

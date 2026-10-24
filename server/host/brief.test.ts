@@ -10,7 +10,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
 import { Store, type Message } from "../store.ts";
 import { AWAY_MS, createBrief } from "./brief.ts";
-import { BRIEF_INTRO } from "./brief-cards.ts";
+import { ENGLISH_BRIEF } from "./brief-words.ts";
 
 const MINUTE = 60_000;
 const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
@@ -24,7 +24,7 @@ const standup: CalendarEvent = {
   attendees: [{ email: "me@x.test", self: true, organizer: true }, { email: "ada@x.test", name: "Ada", self: false, organizer: false }],
 };
 
-function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[] } = {}) {
+function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?: string } = {}) {
   let watching = true;
   const dir = mkdtempSync(join(tmpdir(), "omb-brief-"));
   dirs.push(dir);
@@ -41,7 +41,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[] } = {}) {
   const make = () => createBrief({
     store, dataDir: dir, now: () => now, hosted: options.hosted ?? false, watching: () => watching, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => busy,
     notify: (_bot, _thread, detail) => notified.push(detail), runs: () => runs, needsYou: () => options.needsYou ?? [], engineName: () => "Claude",
-    hostTimeZone: () => "UTC", session: () => null, address: () => "me@x.test",
+    hostTimeZone: () => "UTC", language: () => options.language, session: () => null, address: () => "me@x.test",
     failRun: (id, why) => failed.push([id, why]), keep: (key) => kept.push(key), items: (key) => items.get(key) ?? null,
   });
   let brief = make();
@@ -76,7 +76,7 @@ describe("the brief", () => {
     // A check's news posts it, still without taking the screen.
     await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false }] });
     expect(s.shown()).toContain("Couldn't read Gmail");
-    expect(s.shown()).toContain(BRIEF_INTRO);
+    expect(s.shown()).toContain(ENGLISH_BRIEF.intro);
     s.advance(5 * MINUTE);
     expect(await s.brief.active("desktop")).toEqual({ returned: false });
   });
@@ -84,7 +84,7 @@ describe("the brief", () => {
   it("shows on the first open of a day, saying what it does, and once more only after three hours away", async () => {
     const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
     expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false, open: { botId: s.chief.id, threadId: s.thread() } });
-    expect(s.shown()).toContain(BRIEF_INTRO);
+    expect(s.shown()).toContain(ENGLISH_BRIEF.intro);
     expect(s.shown()).toContain("Claude is signed out");
     const first = s.card()!;
     s.advance(30 * MINUTE);
@@ -93,7 +93,7 @@ describe("the brief", () => {
     expect(await s.brief.active("desktop")).toMatchObject({ returned: true, open: { threadId: s.thread() } });
     expect(s.card()!.id).toBe(first.id);
     expect(s.card()!.widget!.rev ?? 0).toBe(0);
-    expect(s.shown()).toContain(BRIEF_INTRO);
+    expect(s.shown()).toContain(ENGLISH_BRIEF.intro);
     await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false }] });
     expect(s.card()!.id).toBe(first.id);
     expect(s.card()!.widget!.rev).toBe(1);
@@ -110,7 +110,39 @@ describe("the brief", () => {
     const today = s.store.messagesFor(home).findLast((message) => message.serverCard)!;
     expect(today.id).not.toBe(first);
     expect(today.widget!.root.title).toBe("Your brief");
-    expect(JSON.stringify(today.widget!.root)).not.toContain(BRIEF_INTRO);
+    expect(JSON.stringify(today.widget!.root)).not.toContain(ENGLISH_BRIEF.intro);
+  });
+
+  it("speaks the language set in Settings, dates included", async () => {
+    const s = setup({ language: "pt-BR", needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    await s.brief.active("desktop", "UTC");
+    s.notified.length = 0;
+    s.items.set("chk-1", { mail: [ada], prep: [] });
+    await s.brief.consume(s.watchRun("chk-1", '{"important": [{"id": "m1", "why": "Ada precisa dos números.", "needsReply": true}], "prep": []}'), "turn-1");
+    const root = s.rows().findLast((message) => message.serverCard && message.widget?.root.title === "Seu resumo")!.widget!.root as WidgetRoot;
+    const shown = JSON.stringify(root);
+    expect(shown).toContain("quinta-feira, 22 de outubro");
+    expect(shown).toContain("Precisa de você");
+    expect(shown).toContain("Aguardando sua resposta · Ada precisa dos números.");
+    expect(shown).toContain("Sessão encerrada em Claude");
+    expect(shown).not.toMatch(/Needs you|Waiting on your reply|Thursday/);
+    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Rascunhar resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
+    expect(s.notified).toEqual(["Seu resumo: 2 precisam de você"]);
+  });
+
+  it("follows the language the person's app shows over the server's, and switches today's card in place", async () => {
+    const s = setup({ language: "pt-br", needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    await s.brief.active("desktop", "UTC", "es");
+    const title = () => s.rows().findLast((message) => message.serverCard)!.widget!.root.title;
+    const first = s.rows().findLast((message) => message.serverCard)!.id;
+    expect(title()).toBe("Tu resumen");
+    s.advance(2 * MINUTE);
+    expect(await s.brief.active("desktop", "UTC", "de")).toEqual({ returned: false });
+    expect(title()).toBe("Dein Überblick");
+    expect(s.rows().filter((message) => message.serverCard).map((message) => message.id)).toEqual([first]);
+    s.restart();
+    await s.brief.refresh();
+    expect(title()).toBe("Dein Überblick");
   });
 
   it("a routine run that published a page offers Open page, which opens the page itself, beside Open for its chat", async () => {

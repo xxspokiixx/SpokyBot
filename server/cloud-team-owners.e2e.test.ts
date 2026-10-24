@@ -246,6 +246,12 @@ it("keeps a member's private chat theirs: its asks reach only them, never the bo
   expect(adasBrief).toContain("Can I merge the auth refactor?");
   expect(adasBrief).not.toContain("Which landing page");
   expect(adasBrief).not.toContain("resignation");
+  // Bob's app shows Portuguese: his brief follows it in place; Ada's stays in hers.
+  await team.as(bob, "POST", "/api/presence/active", { source: "desktop", language: "pt-br" });
+  const portuguese = JSON.stringify(await messages(bob, arrived.body.open.threadId));
+  expect(portuguese).toContain("Fox está perguntando a você");
+  expect(portuguese).not.toContain("Fox is asking you");
+  expect(JSON.stringify(await messages(ada, adaArrived.body.open.threadId))).toContain("is asking you");
 }, hostTimeout(90_000));
 
 it("routes nothing on a server that is not a team", async () => {
