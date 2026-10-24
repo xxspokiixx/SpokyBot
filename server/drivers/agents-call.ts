@@ -229,7 +229,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       && optional("done_when", "string") && optional("reason", "string") && optional("title", "string");
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, thread ("standing" or "new"), title, reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
