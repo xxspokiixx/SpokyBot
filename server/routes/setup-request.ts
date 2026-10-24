@@ -1,7 +1,7 @@
 // Set me up under a new bot's greeting (server/setup-request.ts): POST is the press, DELETE the x on its chip.
 // Open to anyone who may write in that conversation (client scope, like sending a message): the press does nothing a
 // typed /setup could not.
-import type { RequestAuth } from "../request-auth.ts";
+import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { askForSetup, cancelSetupRequest, type SetupRequestStore } from "../setup-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -33,9 +33,10 @@ export function createSetupRequestRoutes(deps: SetupRequestRouteDeps): RouteHand
     const refused = deps.sendRefusal(auth, threadId);
     if (refused) return json(res, 403, { error: refused });
     if (method === "DELETE") {
-      const outcome = cancelSetupRequest(deps.store, botId, threadId, deps.presser(auth));
+      // An owner or admin may clear someone else's, so one never strands the chat.
+      const outcome = cancelSetupRequest(deps.store, botId, threadId, deps.presser(auth), { admin: ownerOrAdmin(auth) });
       if (outcome === "unknown") return json(res, 404, { error: "There is no such conversation." });
-      if (outcome === "refused") return json(res, 403, { error: "Only the person who pressed Set me up can stop it." });
+      if (outcome === "refused") return json(res, 403, { error: "Only the person who pressed Set me up, or an owner or admin, can stop it." });
       return json(res, 200, { ok: true });
     }
     if (deps.store.taskByThread(botId, threadId) && !deps.canSetUp(botId, threadId)) return json(res, 409, { error: NO_TOOLS });

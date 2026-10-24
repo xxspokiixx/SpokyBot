@@ -10,17 +10,20 @@ import { createSetupRequestRoutes } from "./setup-request.ts";
 import { PASS } from "./table.ts";
 
 const person: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+const member = { kind: "session", scopes: ["client"], via: "bearer", session: { id: "s1" } } as unknown as RequestAuth;
+const admin = { kind: "session", scopes: ["admin", "client"], via: "bearer", session: { id: "s2" } } as unknown as RequestAuth;
 
 function setup(refusal: string | null = null, options: { canSetUp?: boolean } = {}) {
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }), undefined, undefined, "en");
   const bot = store.createBot({ name: "Ava" });
   let presser: string | undefined;
+  let auth = person;
   const route = createSetupRequestRoutes({ store, language: () => "es", sendRefusal: () => refusal, presser: () => presser,
     canSetUp: () => options.canSetUp ?? true });
-  const as = (who: string | undefined) => { presser = who; };
+  const as = (who: string | undefined, caller: RequestAuth = member) => { presser = who; auth = caller; };
   const call = async (method: string, body: unknown, botId = bot.id, path = `/api/bots/${botId}/setup-request`) => {
     let answer: { status: number; body: any } | undefined;
-    const handled = await route({ req: {} as never, res: {} as never, url: new URL(`http://x${path}`), path, method, auth: person,
+    const handled = await route({ req: {} as never, res: {} as never, url: new URL(`http://x${path}`), path, method, auth,
       json: (_res: unknown, status: number, value: unknown) => { answer = { status, body: value }; }, readBody: async () => body } as never);
     return handled === PASS ? "pass" : answer!;
   };
@@ -70,11 +73,21 @@ describe("the Set me up route", () => {
     expect(s.waiting()).toMatchObject({ by: "member-a" });
     s.as("member-b");
     expect(await s.call("DELETE", { threadId: s.bot.threadId })).toEqual({
-      status: 403, body: { error: "Only the person who pressed Set me up can stop it." },
+      status: 403, body: { error: "Only the person who pressed Set me up, or an owner or admin, can stop it." },
     });
     expect(s.waiting()).toBeDefined();
     s.as("member-a");
     expect(await s.call("DELETE", { threadId: s.bot.threadId })).toMatchObject({ status: 200 });
+    expect(s.waiting()).toBeUndefined();
+  });
+
+  it("refuses another person's press while one waits, and lets an owner or admin clear it", async () => {
+    const s = setup();
+    s.as("member-a");
+    expect(await s.call("POST", { threadId: s.bot.threadId })).toMatchObject({ status: 200 });
+    s.as("owner", admin);
+    expect(await s.call("POST", { threadId: s.bot.threadId })).toEqual({ status: 409, body: { error: "Someone else is setting this bot up." } });
+    expect(await s.call("DELETE", { threadId: s.bot.threadId })).toEqual({ status: 200, body: { ok: true } });
     expect(s.waiting()).toBeUndefined();
   });
 
