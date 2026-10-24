@@ -373,7 +373,10 @@ export class ProviderRegistry {
    * read is the check, so the copy is found and started exactly as the engine's processes do it. */
   private async appCopyAdvice(instanceId: InstanceId, driver: AnyProviderDriver, installed: StandaloneInstalled): Promise<{ useCli: string } | null> {
     const live = this.get(instanceId);
-    const cli = this.cliByInstance.get(instanceId) ?? cliDefaultOf(driver);
+    const cli = cliDefaultOf(driver);
+    // A CLI the person set with Set CLI is theirs to change; only the default name gets pointed elsewhere.
+    const configured = this.cliByInstance.get(instanceId);
+    if (configured !== undefined && configured !== cli) return null;
     if (!live || !cli || !installed.executablePath || this.appStandaloneCopy(driver, cli)) return null;
     this.forgetSnapshots();
     let state: ProviderSnapshot["state"];

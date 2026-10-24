@@ -605,6 +605,10 @@ process.exit(0);
       },
     });
     expect(await registry.installRuntime("a")).toEqual({ useCli: join(bin, "fakebin") });
+    // A CLI the person chose with Set CLI is theirs to change, even when it does not start.
+    await registry.load({ b: { driver: "fake", config: { cli: join(own, "fakebin") } } });
+    Object.assign(registry.get("b")!, { snapshot: async () => ({ state: "unavailable", reason: "fakebin does not start" }) });
+    expect(await registry.installRuntime("b")).toBe(true);
     // A working copy of the person's own is left alone.
     writeFileSync(join(own, "fakebin"), "#!/bin/sh\necho 1.0.0\n", { mode: 0o755 });
     expect(await registry.installRuntime("a")).toBe(true);
