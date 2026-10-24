@@ -20,7 +20,7 @@ import { DroidAgentDriver } from "./droid.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { TurnWatchdog, type StallLimit } from "../../turn-watchdog.ts";
+import { TurnWatchdog } from "../../turn-watchdog.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import { wideSchema } from "../../testing/oversized-tool-schema.ts";
 import * as procs from "../../procs.ts";
@@ -338,13 +338,13 @@ describe("ACP turns (fake CLI)", () => {
     expect(image).toBe(failedEnd + 1);
     // The stall watchdog sees no tool left running, so the turn's own silence limit applies.
     let now = 0;
-    const limits: StallLimit[] = [];
-    const dog = new TurnWatchdog({ stallMs: 10, toolStallMs: 1_000, checkMs: 60_000, now: () => now, onStall: (_turn, limit) => limits.push(limit) });
+    const limits: number[] = [];
+    const dog = new TurnWatchdog({ stallMs: 10, toolStallMs: 1_000, checkMs: 60_000, now: () => now, onStall: (_turn, silentMs) => limits.push(silentMs) });
     dog.watch("t-finished-tools", "bot");
     for (const event of recorder.events) dog.observe(event);
     now = 10;
     dog.sweep();
-    expect(limits).toEqual([{ kind: "silence", ms: 10 }]);
+    expect(limits).toEqual([10]);
   });
 
   it("completes a finished tool call once, though a later terminal update names it again", async () => {

@@ -7,7 +7,7 @@ import type { RuntimeEvent } from "./contracts.ts";
 import { EngineMemory } from "./engine-memory.ts";
 import type { Message } from "./store.ts";
 import { TurnStops, stoppedTurnOutcome } from "./turn-outcome.ts";
-import { stallDescription, stallLimitMs, TurnWatchdog, type StallLimit, type WatchedTurn } from "./turn-watchdog.ts";
+import { stallLimitMs, TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts";
 
 const STALL = 10_000;
 const TOOL_STALL = 50_000;
@@ -19,12 +19,12 @@ const toolEnded = (itemId: string): RuntimeEvent => ({ ...base, type: "item.comp
 function rig() {
   let now = 0;
   const stalls: WatchedTurn[] = [];
-  const limits: StallLimit[] = [];
+  const limits: number[] = [];
   const dog = new TurnWatchdog({
     stallMs: STALL,
     toolStallMs: TOOL_STALL,
     checkMs: 60_000,
-    onStall: (turn, limit) => { stalls.push(turn); limits.push(limit); },
+    onStall: (turn, silentMs) => { stalls.push(turn); limits.push(silentMs); },
     now: () => now,
   });
   return { dog, stalls, limits, tick: (ms: number) => (now += ms) };
@@ -141,7 +141,7 @@ describe("TurnWatchdog", () => {
     tick(2);
     dog.sweep();
     expect(stalls).toEqual([expect.objectContaining({ threadId: "t1" })]);
-    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
+    expect(limits).toEqual([TOOL_STALL]);
   });
 
   it("goes back to the turn limit once every running tool has ended", () => {
@@ -159,7 +159,19 @@ describe("TurnWatchdog", () => {
     expect(stalls).toHaveLength(0);
     tick(2);
     dog.sweep();
-    expect(limits).toEqual([{ kind: "silence", ms: STALL }]);
+    expect(limits).toEqual([STALL]);
+  });
+
+  it("sets no deadline of its own on a tool while the turn keeps talking", () => {
+    const { dog, stalls, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.observe(toolStarted("long"));
+    for (let i = 0; i < 6; i++) {
+      tick(TOOL_STALL / 2);
+      dog.observe(text);
+      dog.sweep();
+    }
+    expect(stalls).toHaveLength(0);
   });
 
   it("never carries a running tool into a turn that did not start it", () => {
@@ -171,125 +183,7 @@ describe("TurnWatchdog", () => {
     tick(STALL);
     dog.sweep();
     expect(stalls).toHaveLength(1);
-    expect(limits).toEqual([{ kind: "silence", ms: STALL }]);
-  });
-
-  it("stops a hung tool at its own deadline while a parallel tool and text keep the turn busy", () => {
-    const { dog, limits, tick } = rig();
-    dog.watch("t1", "bot1");
-    dog.observe(toolStarted("hung"));
-    for (let i = 0; i < 10; i++) {
-      dog.observe(toolStarted(`busy-${i}`));
-      tick(TOOL_STALL / 10 - 1);
-      dog.observe(text);
-      dog.observe(toolEnded(`busy-${i}`));
-      dog.sweep();
-    }
-    expect(limits).toEqual([]);
-    tick(10);
-    dog.observe(text);
-    dog.sweep();
-    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
-  });
-
-  it("keeps a tool's first deadline when its start is reported again", () => {
-    const { dog, limits, tick } = rig();
-    dog.watch("t1", "bot1");
-    dog.observe(toolStarted("tool-1"));
-    tick(TOOL_STALL - 1);
-    dog.observe(toolStarted("tool-1"));
-    tick(1);
-    dog.sweep();
-    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
-  });
-
-  it("does not count a tool's time waiting on a person toward its deadline", () => {
-    const { dog, limits, tick } = rig();
-    dog.watch("t1", "bot1");
-    dog.observe(toolStarted("ask"));
-    tick(TOOL_STALL / 2);
-    dog.setWaitingOnHuman("t1", true);
-    tick(TOOL_STALL / 2);
-    dog.sweep();
-    dog.setWaitingOnHuman("t1", false);
-    tick(TOOL_STALL / 2 - 1);
-    dog.observe(text);
-    dog.sweep();
-    expect(limits).toEqual([]);
-    tick(1);
-    dog.sweep();
-    expect(limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
-  });
-
-  // Keeps the turn talking every 10 ms and sweeps until the watchdog stops it; returns when.
-  interface Rig { dog: TurnWatchdog; limits: StallLimit[]; tick: (ms: number) => number }
-  function untilStopped({ dog, limits, tick }: Rig, from: number): number {
-    let at = from;
-    while (limits.length === 0 && at < from + TOOL_STALL * 3) {
-      at = tick(10);
-      dog.observe(text);
-      dog.sweep();
-    }
-    return at;
-  }
-
-  it("stops a hung tool beside another that keeps waiting on a person, at the cap", () => {
-    const { dog, limits, tick } = rig();
-    dog.watch("t1", "bot1");
-    dog.observe(toolStarted("hung"));
-    let at = 0;
-    while (limits.length === 0 && at < TOOL_STALL * 10) {
-      dog.setWaitingOnHuman("t1", true);
-      at = tick(1_000);
-      dog.sweep();
-      dog.setWaitingOnHuman("t1", false);
-      dog.sweep();
-    }
-    expect({ at, limits, watching: dog.watching("t1") }).toEqual({ at: 2 * TOOL_STALL, limits: [{ kind: "tool-cap", ms: 2 * TOOL_STALL }], watching: false });
-  });
-
-  it.each(["setWaitingOnHuman", "setWaitingOnComputer"] as const)("credits a tool started mid-wait only the wait it lived through (%s)", (wait) => {
-    const r = rig();
-    r.dog.watch("t1", "bot1");
-    r.dog[wait]("t1", true);
-    r.tick(1_000);
-    r.dog.observe(toolStarted("late"));
-    r.tick(1);
-    r.dog[wait]("t1", false);
-    expect(untilStopped(r, 1_001)).toBe(1_001 + TOOL_STALL);
-    expect(r.limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
-  });
-
-  it("stops a tool at the cap while the turn is still waiting", () => {
-    const { dog, limits, tick } = rig();
-    dog.watch("t1", "bot1");
-    dog.observe(toolStarted("ask"));
-    dog.setWaitingOnComputer("t1", true);
-    tick(2 * TOOL_STALL - 1);
-    dog.sweep();
-    expect(limits).toEqual([]);
-    tick(1);
-    dog.sweep();
-    expect(limits).toEqual([{ kind: "tool-cap", ms: 2 * TOOL_STALL }]);
-    expect(dog.waiting("t1")).toBe(false);
-  });
-
-  it("credits overlapping person and computer waits once, and only within the tool's life", () => {
-    const r = rig();
-    r.dog.watch("t1", "bot1");
-    r.dog.setWaitingOnHuman("t1", true);
-    r.tick(1_500);
-    r.dog.observe(toolStarted("tool-1"));
-    r.tick(500);
-    r.dog.setWaitingOnComputer("t1", true);
-    r.tick(1_000);
-    r.dog.setWaitingOnHuman("t1", false);
-    r.tick(1_000);
-    r.dog.setWaitingOnComputer("t1", false);
-    // The person waited 0-3000 and the computer 2000-4000; the tool, started at 1500, waited 1500-4000 once: 2500 ms.
-    // Counting each wait apart would credit 3500 ms, and the whole turn's wait 4000 ms.
-    expect(untilStopped(r, 4_000)).toBe(1_500 + 2_500 + TOOL_STALL);
-    expect(r.limits).toEqual([{ kind: "tool", ms: TOOL_STALL }]);
+    expect(limits).toEqual([STALL]);
   });
 
   it("says a bot is answering while one of its turns runs unparked, and not once it waits or ends", () => {
@@ -327,7 +221,7 @@ describe("the stall handler", () => {
     const context = vm.createContext({
       process: { env },
       RoomTurnStallRegistry: class { stall() {} },
-      TurnStops, stoppedTurnOutcome, reportsToRequester: () => true, stallDescription, stallLimitMs,
+      TurnStops, stoppedTurnOutcome, reportsToRequester: () => true, stallLimitMs,
       TurnWatchdog: class { options: unknown; constructor(options: { onStall: (turn: WatchedTurn) => void }) { this.options = options; } },
       store: { messagesFor: () => messages, activePath: () => messages, appendMessage() {} },
       turnResourceOwners: new Map(), directTurnGenerationByThread: new Map([["t1", "gen-1"]]), directRequestOwners: new Map(),
@@ -347,22 +241,16 @@ describe("the stall handler", () => {
 
   it("tells a stalled turn's requester why it stopped and what it did", () => {
     const { context, settled, delegations } = load();
-    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, { kind: "silence", ms: 20 * 60_000 });
+    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, 20 * 60_000);
     const told = 'No activity for 20 minutes — the turn was stopped. Before it stopped it made 1 tool call: Bash ×1.\nIts last message, quoted: "Exporting the second half now."';
     expect(settled).toEqual([{ generation: "gen-1", text: told }]);
     expect(delegations).toEqual([]);
   });
 
-  it("says when a tool ran past its own deadline", () => {
+  it("names the silence that stopped a turn whose tool was running", () => {
     const { context, settled } = load();
-    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, { kind: "tool", ms: 120 * 60_000 });
-    expect(settled[0]!.text).toMatch(/^A tool ran for 120 minutes without finishing — the turn was stopped\. Before it stopped/);
-  });
-
-  it("says when a tool ran past the cap that counts its waits", () => {
-    const { context, settled } = load();
-    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, { kind: "tool-cap", ms: 240 * 60_000 });
-    expect(settled[0]!.text).toMatch(/^A tool ran too long: 240 minutes since it started, waits included — the turn was stopped\. Before it stopped/);
+    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, 120 * 60_000);
+    expect(settled[0]!.text).toMatch(/^No activity for 120 minutes — the turn was stopped\. Before it stopped/);
   });
 
   it("never lets the environment switch the watchdog off", () => {
@@ -380,7 +268,7 @@ describe("the stall handler", () => {
     memory.turnStarted("t1");
     memory.tick();
     const { context, settled } = load(memory);
-    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, { kind: "silence", ms: 20 * 60_000 });
+    context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, 20 * 60_000);
     expect(settled[0]!.text).toMatch(/^No activity for 20 minutes — the turn was stopped\. This Cloud ran out of memory while 1 task ran at once \(not a problem with the AI provider\)\. Before it stopped/);
   });
 
@@ -429,7 +317,7 @@ describe("a Stop that wins against a provider dispatch", () => {
     expect(r.stalls).toHaveLength(0);
     r.tick(2);
     r.dog.sweep();
-    expect(r.limits).toEqual([{ kind: "silence", ms: STALL }]);
+    expect(r.limits).toEqual([STALL]);
     // The stall handler cancels the dispatch after the sweep dropped the turn: that must not watch it again.
     r.dog.eventsDiscarded("t1");
     expect(r.dog.watching("t1")).toBe(false);
