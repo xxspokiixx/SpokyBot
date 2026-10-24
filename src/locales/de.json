@@ -2299,5 +2299,7 @@
   "usageMeter.err.unavailable": "Dein Tarif lässt sich gerade nicht in der App ändern. Es wurde nichts berechnet. Öffne deine Tarifseite, um deine Möglichkeiten zu sehen.",
   "usageMeter.err.priceChanged": "Der Preis hat sich seit dem Ansehen geändert, es wurde nichts berechnet. Wähle Upgraden, um den neuen Preis zu sehen.",
   "usageMeter.err.rateLimited": "Zu viele Versuche. Warte ein paar Minuten und versuch es dann erneut.",
-  "usageMeter.err.failed": "Wir konnten deinen Tarif nicht ändern. Es wurde nichts berechnet. Versuch es in einer Minute erneut."
+  "usageMeter.err.failed": "Wir konnten deinen Tarif nicht ändern. Es wurde nichts berechnet. Versuch es in einer Minute erneut.",
+  "chat.compactionExcerptTitle": "Früherer Kontext auf aktuelle Auszüge gekürzt",
+  "chat.compactionExcerptHint": "Es gab keine geschriebene Zusammenfassung, deshalb macht der Agent mit diesen Auszügen und den letzten Nachrichten weiter. Ältere Details können in seinem Kontext fehlen. Dein ganzes Gespräch ist weiterhin hier."
 }
