@@ -1,6 +1,6 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
-import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type SetStateAction } from "react";
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -36,7 +36,7 @@ import { PointedChips } from "./app/PointedChips";
 import { takePointedChips } from "@/lib/pointed-chips";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
-import { PlaceChip } from "./PlaceChip";
+import { PlaceChip, usePlaceMenuItem } from "./PlaceChip";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
 import { CommandAllowlistDialog } from "./CommandAllowlistDialog";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
@@ -92,6 +92,18 @@ interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
 }
 
+type PhonePlusProps = Pick<ComponentProps<typeof ComposerPlusMenu>, "onAttach" | "goal" | "approval" | "callBotId">;
+
+function PhonePlusWithPlace({ place, ...rest }: PhonePlusProps & { place: Parameters<typeof usePlaceMenuItem>[0] }) {
+  const item = usePlaceMenuItem(place);
+  return <ComposerPlusMenu {...rest} extraItems={[item]} circle />;
+}
+
+/** The phone composer's round +: attach, Finish together, where the bot works, approval level and call mode. */
+function PhonePlus({ place, ...rest }: PhonePlusProps & { place?: Parameters<typeof usePlaceMenuItem>[0] }) {
+  return place ? <PhonePlusWithPlace place={place} {...rest} /> : <ComposerPlusMenu {...rest} circle />;
+}
+
 export function Composer({
   bot: profile,
   group,
@@ -120,8 +132,8 @@ export function Composer({
   const { threads, currentBotId } = useThreadRefs();
   const { capabilities } = useDesktopCapabilities();
   const advanced = useAdvancedMode();
-  // On a phone in Simple mode the composer is one row: + , the field and its buttons, like a dock.
-  const singleRow = useMediaQuery(PHONE_LAYOUT) && !advanced;
+  // On a phone the composer is a dock: a round + (attach and every other tool), then one pill with the field, the mic and the voice button.
+  const singleRow = useMediaQuery(PHONE_LAYOUT);
   const sendKey = useSendKey();
   const sendLabel = sendKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -823,7 +835,24 @@ export function Composer({
             data-composer-backdrop
             className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
           />}
-        <div data-tour="composer" className="@container/composer relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
+        <div data-tour="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : "rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring")}>
+        {singleRow && !locked && (
+          <div className="flex shrink-0 items-center">
+            <PhonePlus
+              onAttach={() => fileInput.current?.click()}
+              goal={goal}
+              approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
+              callBotId={bot && !group ? bot.id : undefined}
+              place={modeBot && !remoteClient && advanced ? {
+                bot: modeBot,
+                task: composerTask,
+                disabled: Boolean(modeBot.busy),
+                onPin: (surface) => dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } }),
+              } : undefined}
+            />
+          </div>
+        )}
+        <div className={singleRow ? "min-w-0 flex-1 rounded-[26px] bg-composer px-3 py-1.5 ring-1 ring-composer-ring" : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
         <div data-composer-row className={cn("flex items-end gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap")}>
           <input
@@ -837,7 +866,7 @@ export function Composer({
               e.target.value = "";
             }}
           />
-          {!locked && (
+          {!locked && !singleRow && (
             <div className="flex flex-wrap items-center gap-1">
               {!advanced && <ComposerPlusMenu
                 onAttach={() => fileInput.current?.click()}
@@ -1005,14 +1034,14 @@ export function Composer({
               "flex size-8 shrink-0 items-center justify-center rounded-full",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
-                : advanced ? "text-ink-secondary hover:bg-raised hover:text-ink" : "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]",
+                : advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]",
             )}
             title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
           >
-            <Mic size={advanced ? 18 : 16} />
+            <Mic size={advanced || singleRow ? 18 : 16} />
           </button>
         )}
-        {bot && !group && <CallButton bot={bot} placement="composer" fill={advanced ? undefined : MAUS_COLORS[bot.color] ?? MAUS_COLORS.green} />}
+        {bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : MAUS_COLORS[bot.color] ?? MAUS_COLORS.green} inverse={singleRow} />}
         {group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill="var(--color-accent)" />}
         {hasContent && !locked && (
           <button
@@ -1043,6 +1072,7 @@ export function Composer({
           </button>
           )}
           </div>
+        </div>
         </div>
         </div>
         </div>
