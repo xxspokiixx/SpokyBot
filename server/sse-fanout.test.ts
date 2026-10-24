@@ -182,7 +182,8 @@ describe("openSseHeartbeat", () => {
     fanout.add(client);
     stream.recordErrors();
     await vi.waitFor(() => expect(liveChecks).toBeGreaterThan(1));
-    expect(stream.res.writableLength).toBeGreaterThan(SSE_MAX_BUFFERED_BYTES);
+    // How much of a stalled socket's queue stays in writableLength is up to the OS (Windows hands all 16 MiB to the kernel), so the response reports past the bound.
+    Object.defineProperty(stream.res, "writableLength", { value: SSE_MAX_BUFFERED_BYTES + 1 });
 
     if (deliverSseFrame(client, "message", "data: durable\n\n") === "disconnected") client.close();
 
