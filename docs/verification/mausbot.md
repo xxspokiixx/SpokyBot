@@ -28,6 +28,9 @@ pnpm exec vitest run server/default-bot.test.ts server/default-bot.e2e.test.ts \
   `set_app_setting`; they change only "Show MausBot in the sidebar" and "Tool
   calls", say what changed and how to undo it, and refuse every other name
   (language, theme, keys, approval levels and the rest stay in Settings).
+  Hiding MausBot from the sidebar changes nothing on the first call: it returns
+  what will happen and where to undo it, and applies only when called again with
+  `confirm: true` after the person said yes; turning it back on never asks.
   A workspace-wide setting is refused on a team (an Owner's or Admin's MausBot
   included): the person changes it in Settings. A failed save is reported, not
   swallowed. `server/drivers/agents-mausbot-tools.test.ts` pins the four tools'

@@ -9,7 +9,7 @@ export const MAUSBOT_TOOL_NAMES: ReadonlySet<string> = new Set(["list_app_settin
 export async function callMausBotTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { apiResponse } = context.client;
   const { ok, body } = name === "list_app_settings" ? await apiResponse("/api/internal/settings")
-    : name === "set_app_setting" ? await apiResponse("/api/internal/settings/set", { method: "POST", body: JSON.stringify({ setting: args.setting, value: args.value }) })
+    : name === "set_app_setting" ? await apiResponse("/api/internal/settings/set", { method: "POST", body: JSON.stringify({ setting: args.setting, value: args.value, confirm: args.confirm }) })
     : name === "list_unread_notifications" ? await apiResponse("/api/internal/notifications")
     : await apiResponse("/api/internal/notifications/read", { method: "POST", body: JSON.stringify({ ids: args.ids }) });
   return ok ? { text: String(body.text ?? "") } : { text: String(body.error ?? "That could not be done."), isError: true };
@@ -23,13 +23,14 @@ export const MAUSBOT_TOOL_DEFINITIONS = [
   },
   {
     name: "set_app_setting",
-    description: "MausBot only. Switch one setting from list_app_settings on or off because the person asked for it in this chat, never on your own. The result says what changed, from what to what, and how to undo it: tell the person exactly that. An unknown setting is refused with the valid names.",
+    description: "MausBot only. Switch one setting from list_app_settings on or off because the person asked for it in this chat, never on your own. A change that takes away a way the person reaches something (hiding MausBot from the sidebar) changes nothing on the first call and returns what will happen: tell the person and ask; only after they say yes in chat, call again with confirm true. Turning something on never needs it. The result says what changed, from what to what, and how to undo it: tell the person exactly that. An unknown setting is refused with the valid names.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         setting: { type: "string", maxLength: 60, description: "A name from list_app_settings, such as show_tool_calls." },
         value: { type: "string", enum: ["on", "off"], description: "on or off." },
+        confirm: { type: "boolean", description: "true only after the person said yes in this chat to the warning a first call returned." },
       },
       required: ["setting", "value"],
     },

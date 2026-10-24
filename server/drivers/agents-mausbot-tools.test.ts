@@ -10,7 +10,7 @@ describe("MausBot's four tools on the wire", () => {
 
   it("are listed last, in this order, only with OMB_MAUSBOT", () => {
     expect(maus.map((tool) => tool.name)).toEqual(["list_app_settings", "set_app_setting", "list_unread_notifications", "mark_notifications_read"]);
-    for (const env of [{}, { OMB_MAUSBOT: "0" }, { OMB_MAUSBOT: "true" }]) {
+    for (const env of [{}, { OMB_MAUSBOT: "0" }, { OMB_MAUSBOT: "true" }] as Array<Record<string, string>>) {
       expect(listed(env).map((tool) => tool.name)).not.toEqual(expect.arrayContaining(["set_app_setting"]));
     }
   });
@@ -18,11 +18,12 @@ describe("MausBot's four tools on the wire", () => {
   it("keep flat, closed schemas with the required fields", () => {
     expect(maus.map((tool) => [tool.inputSchema.type, tool.inputSchema.additionalProperties, Object.keys(tool.inputSchema.properties), tool.inputSchema.required ?? []])).toEqual([
       ["object", false, [], []],
-      ["object", false, ["setting", "value"], ["setting", "value"]],
+      ["object", false, ["setting", "value", "confirm"], ["setting", "value"]],
       ["object", false, [], []],
       ["object", false, ["ids"], ["ids"]],
     ]);
     expect(maus[1]!.inputSchema.properties.value.enum).toEqual(["on", "off"]);
+    expect(maus[1]!.inputSchema.properties.confirm.type).toBe("boolean");
     expect(maus[3]!.inputSchema.properties.ids).toMatchObject({ type: "array", maxItems: 40, items: { type: "string" } });
     expect(JSON.stringify(MAUSBOT_TOOL_DEFINITIONS)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)"/);
   });

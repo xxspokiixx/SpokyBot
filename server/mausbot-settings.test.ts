@@ -77,11 +77,34 @@ describe("the allowlist", () => {
 describe("changing a setting", () => {
   it("hides MausBot from the sidebar and says what changed and how to undo it", () => {
     const { api, records } = host([MAUS]);
-    const result = changeSetting(api, "maus", "mausbot_in_sidebar", "off");
+    const result = changeSetting(api, "maus", "mausbot_in_sidebar", "off", true);
     expect(result).toEqual({ ok: true, text: 'Changed "Show MausBot in the sidebar" (Settings → General) from on to off. To undo, ask me to set mausbot_in_sidebar back to on, or switch it in Settings → General.' });
     expect(records.get("maus")?.sidebarHidden).toBe(true);
     expect(changeSetting(api, "maus", "mausbot_in_sidebar", "on")).toMatchObject({ ok: true });
     expect(records.get("maus")?.sidebarHidden).toBe(false);
+  });
+
+  it("asks before hiding MausBot, changes nothing, and applies on confirm", () => {
+    const { api, records } = host([MAUS]);
+    const asked = changeSetting(api, "maus", "mausbot_in_sidebar", "off");
+    expect(asked).toEqual({ ok: true, text: expect.stringContaining('Nothing changed yet. This will hide MausBot from the sidebar. You can bring it back with "Show MausBot in the sidebar" in Settings → General.') });
+    expect((asked as { text: string }).text).toContain("confirm: true");
+    expect(records.get("maus")?.sidebarHidden).toBeUndefined();
+    for (const no of [false, "false", "yes please", undefined, 1]) {
+      expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off", no)).toMatchObject({ text: expect.stringContaining("Nothing changed yet") });
+    }
+    expect(records.get("maus")?.sidebarHidden).toBeUndefined();
+    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off", true)).toMatchObject({ ok: true, text: expect.stringContaining("from on to off") });
+    expect(records.get("maus")?.sidebarHidden).toBe(true);
+  });
+
+  it("never asks to turn something on, and a harmless confirm changes nothing extra", () => {
+    const { api, records, saveFeatures } = host([{ ...MAUS, sidebarHidden: true }]);
+    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "on")).toMatchObject({ ok: true, text: expect.stringContaining("from off to on") });
+    expect(records.get("maus")?.sidebarHidden).toBe(false);
+    expect(changeSetting(api, "maus", "show_tool_calls", "on", true)).toMatchObject({ ok: true, text: expect.stringContaining("from off to on") });
+    expect(saveFeatures).toHaveBeenCalledTimes(1);
+    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "on", true)).toMatchObject({ text: expect.stringContaining("already on") });
   });
 
   it("saves the tool-calls switch once and reports an unchanged value without saving", () => {
@@ -118,7 +141,7 @@ describe("changing a setting", () => {
     for (const id of ["pip", "chief", "missing"]) expect(changeSetting(api, id, "show_tool_calls", "on")).toEqual({ ok: false, error: "Only MausBot changes settings in chat." });
     expect(changeSetting(api, "ada", "show_tool_calls", "on")).toMatchObject({ ok: false, error: expect.stringContaining("applies to everyone on this team") });
     expect(saveFeatures).not.toHaveBeenCalled();
-    expect(changeSetting(api, "ada", "mausbot_in_sidebar", "off")).toMatchObject({ ok: true });
+    expect(changeSetting(api, "ada", "mausbot_in_sidebar", "off", true)).toMatchObject({ ok: true });
     expect(records.get("ada")?.sidebarHidden).toBe(true);
     expect(records.get("pip")?.sidebarHidden).toBeUndefined();
   });
@@ -134,7 +157,7 @@ describe("changing a setting", () => {
     const { api, saveFeatures } = host([MAUS], {} as AppConfig, true);
     expect(changeSetting(api, "maus", "show_tool_calls", "on")).toMatchObject({ ok: false, error: expect.stringContaining("applies to everyone on this team") });
     expect(saveFeatures).not.toHaveBeenCalled();
-    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off")).toMatchObject({ ok: true });
+    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off", true)).toMatchObject({ ok: true });
   });
 
   it("turns a failed save into the plain change-it-in-Settings text", () => {
@@ -142,7 +165,7 @@ describe("changing a setting", () => {
     api.saveFeatures = () => { throw new Error("EACCES: config.json is read-only"); };
     expect(changeSetting(api, "maus", "show_tool_calls", "on")).toEqual({ ok: false, error: "Tool calls could not be saved (EACCES: config.json is read-only). Nothing was changed; tell the person to change it in Settings → Appearance." });
     api.patchBot = () => { throw "disk full"; };
-    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off")).toMatchObject({ ok: false, error: expect.stringContaining("the write failed") });
+    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off", true)).toMatchObject({ ok: false, error: expect.stringContaining("the write failed") });
   });
 
   it("does not report a change that did not stick", () => {

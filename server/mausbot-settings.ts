@@ -17,6 +17,10 @@ interface Setting {
   where: string;
   /** A change here is felt by everyone on the workspace, so on a team it is the person's to make in Settings, never a MausBot's (an Owner's or Admin's included). */
   workspaceWide: boolean;
+  /** Setting this to `value` takes away a way the person has to reach something, so it waits for their yes. */
+  reducesAccessWhen?: "off";
+  /** What the person is told before they say yes. */
+  warning?: (bot: BotRecord) => string;
   read(host: SettingsHost, bot: BotRecord): "on" | "off";
   write(host: SettingsHost, bot: BotRecord, value: "on" | "off"): void;
 }
@@ -29,6 +33,8 @@ const SETTINGS: readonly Setting[] = [
     title: (bot) => `Show ${bot.name} in the sidebar`,
     where: "Settings → General",
     workspaceWide: false,
+    reducesAccessWhen: "off",
+    warning: (bot) => `This will hide ${bot.name} from the sidebar. You can bring it back with "Show ${bot.name} in the sidebar" in Settings → General.`,
     read: (_host, bot) => (bot.sidebarHidden ? "off" : "on"),
     write: (host, bot, value) => void host.patchBot(bot.id, { sidebarHidden: value === "off" }),
   },
@@ -76,7 +82,9 @@ export function listSettings(host: SettingsHost, bot: BotRecord): string {
   return `${JSON.stringify({ settings })}\n${CANNOT_CHANGE}`;
 }
 
-export function changeSetting(host: SettingsHost, botId: string, name: unknown, value: unknown): SettingsResult {
+const yes = (confirm: unknown): boolean => confirm === true || String(confirm).trim().toLowerCase() === "true";
+
+export function changeSetting(host: SettingsHost, botId: string, name: unknown, value: unknown, confirm?: unknown): SettingsResult {
   const bot = host.bot(botId);
   if (!holdsMausBotTools(bot)) return { ok: false, error: "Only MausBot changes settings in chat." };
   const setting = SETTINGS.find((candidate) => candidate.name === normal(name));
@@ -89,6 +97,9 @@ export function changeSetting(host: SettingsHost, botId: string, name: unknown, 
   const title = setting.title(bot);
   const before = setting.read(host, bot);
   if (before === next) return { ok: true, text: `${title} is already ${next}. Nothing changed.` };
+  if (setting.reducesAccessWhen === next && !yes(confirm)) {
+    return { ok: true, text: `Nothing changed yet. ${setting.warning?.(bot) ?? "This takes away a way you have to reach something."} Ask the person; if they say yes, call set_app_setting again with the same setting and value and confirm: true.` };
+  }
   try {
     setting.write(host, bot, next);
   } catch (error) {

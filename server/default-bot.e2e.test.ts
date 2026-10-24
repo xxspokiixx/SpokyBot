@@ -106,7 +106,10 @@ it("lets MausBot list and change the allowlisted settings, refuses the rest, and
     expect(text(changed)).toContain('Changed "Tool calls" (Settings → Appearance) from off to on. To undo, ask me to set show_tool_calls back to off');
     expect((await api("/api/config")).features.showToolCalls).toBe(true);
 
-    const hidden = await callTool(agents, "set_app_setting", { setting: "mausbot_in_sidebar", value: "off" });
+    const asked = await callTool(agents, "set_app_setting", { setting: "mausbot_in_sidebar", value: "off" });
+    expect(text(asked)).toContain("Nothing changed yet. This will hide");
+    expect(((await api("/api/bots")).bots as any[]).find((bot) => bot.id === maus.id).sidebarHidden).toBeFalsy();
+    const hidden = await callTool(agents, "set_app_setting", { setting: "mausbot_in_sidebar", value: "off", confirm: true });
     expect(hidden.result?.isError, text(hidden)).toBeFalsy();
     expect(((await api("/api/bots")).bots as any[]).find((bot) => bot.id === maus.id).sidebarHidden).toBe(true);
 

@@ -27,7 +27,7 @@ export function createMausBotSettingsRoutes(host: SettingsHost) {
     if (ctx.path === LIST) return void ctx.json(ctx.res, 200, { text: listSettings(host, bot) });
     const body = await ctx.readBody();
     const args = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
-    const result = changeSetting(host, ctx.botId, args.setting, args.value);
+    const result = changeSetting(host, ctx.botId, args.setting, args.value, args.confirm);
     return void ctx.json(ctx.res, result.ok ? 200 : 400, result.ok ? { text: result.text } : { error: result.error });
   };
 }
