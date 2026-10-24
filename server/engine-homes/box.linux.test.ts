@@ -22,7 +22,7 @@ const put = (path: string, text: string) => { mkdirSync(dirname(path), { recursi
 const cwd = join(dataDir, "task-workspaces", "bot-a", "t-owner");
 
 function runInBox(request: Omit<BoxRequest, "command" | "args" | "cwd">, script: string): string {
-  const plan = planBox({ dataDir, home: serverHome, codeRoots: [], bridges: [] }, { command: "/bin/sh", args: [], cwd, ...request });
+  const plan = planBox({ dataDir, home: serverHome, codeRoots: [], engineRoots: [], bridges: [] }, { command: "/bin/sh", args: [], cwd, ...request });
   const ran = spawnSync(detection.tools!.bwrap, [...bwrapArgs(plan), "--", "/bin/sh", "-c", script], {
     env: Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), encoding: "utf8", timeout: 30_000,
   });
