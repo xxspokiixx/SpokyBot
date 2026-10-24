@@ -16,6 +16,7 @@ let server: Server;
 const seen: Array<{ method: string; url: string; headers: Record<string, string>; body: string }> = [];
 let refuse: { status: number; body: unknown } | null = null;
 
+const SHARED_VOICE = "SharedVoiceId0000001";
 const FISH_LONG_TAIL = "0327fdb5da9e4fd782899a8058c8ae2b";
 const MP3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]);
 const WAV = Buffer.from("RIFF....WAVEfmt ");
@@ -51,6 +52,23 @@ beforeAll(async () => {
           voices: [{ voice_id: "v-1", name: "Rachel", labels: { accent: "american", description: "calm" } }],
         });
       }
+      if (path === "/v1/shared-voices") {
+        const query = new URL(req.url ?? "/", "http://stub").searchParams;
+        if (query.get("owner_id") === "owner1") {
+          return send(200, {
+            has_more: false,
+            voices: [{ voice_id: SHARED_VOICE, public_owner_id: "owner1", name: "Deep Narrator", accent: "british", description: "Gravelly", is_added_by_user: false }],
+          });
+        }
+        return send(200, {
+          has_more: false,
+          voices: [
+            { voice_id: "lib-1", public_owner_id: "owner2", name: "Library Rachel", accent: "irish", is_added_by_user: false },
+            { voice_id: "v-1", public_owner_id: "owner3", name: "Rachel", is_added_by_user: true },
+          ],
+        });
+      }
+      if (path.startsWith("/v1/voices/add/")) return send(200, { voice_id: path.split("/").at(-1) });
       if (/^\/v1\/text-to-speech\/[^/]+\/stream$/.test(path)) {
         if (speakStreamed) {
           const { first, rest, release } = speakStreamed;
@@ -217,6 +235,43 @@ describe("ElevenLabs", () => {
     expect(await listVoices(cfg(ready))).toEqual([
       { id: "v-1", label: "Rachel", description: "american · calm" },
     ]);
+  });
+
+  it("searches the account and the Voice Library, marking voices that are not in the account yet", async () => {
+    seen.length = 0;
+    const { listVoices } = await voice();
+    expect(await listVoices(cfg(ready), undefined, { query: "rachel" })).toEqual([
+      { id: "v-1", label: "Rachel", description: "american · calm" },
+      { id: "lib-1", label: "Library Rachel", description: "irish", publicOwnerId: "owner2" },
+    ]);
+    expect(seen.map((call) => call.url)).toContain("/v1/shared-voices?page_size=100&search=rachel");
+  });
+
+  it("resolves a pasted Voice Library share link through its owner", async () => {
+    seen.length = 0;
+    const { listVoices } = await voice();
+    expect(await listVoices(cfg(ready), undefined, { query: `https://elevenlabs.io/app/voice-lab/share/owner1/${SHARED_VOICE}` })).toEqual([
+      { id: SHARED_VOICE, label: "Deep Narrator", description: "british · Gravelly", publicOwnerId: "owner1" },
+    ]);
+    expect(seen.map((call) => call.url)).toEqual(["/v1/voices", "/v1/shared-voices?page_size=100&owner_id=owner1"]);
+  });
+
+  it("reads a voice id from a share link, a voiceId link or a bare id", () => {
+    expect(elevenlabs.pastedVoice(`elevenlabs.io/app/voice-lab/share/abc123/${SHARED_VOICE}/`)).toEqual({ owner: "abc123", id: SHARED_VOICE });
+    expect(elevenlabs.pastedVoice(`https://elevenlabs.io/app/voice-library?voiceId=${SHARED_VOICE}`)).toEqual({ id: SHARED_VOICE });
+    expect(elevenlabs.pastedVoice(` ${SHARED_VOICE} `)).toEqual({ id: SHARED_VOICE });
+    expect(elevenlabs.pastedVoice("calm british narrator")).toBeUndefined();
+  });
+
+  it("adds a shared voice to the account under its library name", async () => {
+    seen.length = 0;
+    const { addSharedVoice } = await voice();
+    expect(await addSharedVoice(cfg(ready), "owner1", SHARED_VOICE, "Deep Narrator")).toBe(SHARED_VOICE);
+    const call = seen.at(-1)!;
+    expect([call.method, call.url]).toEqual(["POST", `/v1/voices/add/owner1/${SHARED_VOICE}`]);
+    expect(JSON.parse(call.body)).toEqual({ new_name: "Deep Narrator" });
+    expect(call.headers["xi-api-key"]).toBe("el-key");
+    await expect(addSharedVoice(cfg({ ...ready, provider: "fish", fishKey: "fish-key" }), "owner1", SHARED_VOICE, "x")).rejects.toThrow();
   });
 
   it("asks for mp3 and sends the key as a header, never in the URL", async () => {

@@ -224,7 +224,7 @@ describe("voice set-up pop-up", () => {
     const actual = await vi.importActual<typeof import("./VoiceSettings")>("./VoiceSettings");
     const card = () => renderToStaticMarkup(createElement(actual.VoiceSettings, { bot: pepper, onPatch: () => {} }));
     const key = 'aria-label="ElevenLabs key"';
-    const pickerTag = (html: string) => html.match(/<select\b[^>]*>/g)?.find((tag) => tag.includes("data-voice-picker"));
+    const pickerTag = (html: string) => html.match(/<\w+\b[^>]*>/g)?.find((tag) => tag.includes("data-voice-picker"));
 
     fixture.config = { tts: { configured: false, provider: "elevenlabs" } };
     const needsKey = card();

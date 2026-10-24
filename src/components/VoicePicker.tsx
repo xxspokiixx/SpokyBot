@@ -5,13 +5,14 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 
-interface Voice {
+export interface PickerVoice {
   id: string;
   label: string;
   description?: string;
+  publicOwnerId?: string;
 }
 
-export function FishVoicePicker({
+export function VoicePicker({
   value,
   voices,
   loading,
@@ -20,31 +21,33 @@ export function FishVoicePicker({
   onPick,
   defaultLabel,
   ariaLabel,
+  pending,
 }: {
   value: string;
-  voices: Voice[];
+  voices: PickerVoice[];
   loading: boolean;
   query: string;
   onQuery: (query: string) => void;
-  onPick: (voiceId: string) => void;
+  onPick: (voice: PickerVoice) => void;
   defaultLabel: string;
   ariaLabel: string;
+  pending?: PickerVoice;
 }) {
   const [open, setOpen] = useState(false);
   const motion = useMenuMotion(open);
   const ref = useRef<HTMLDivElement>(null);
-  const lastSelected = useRef<Voice | undefined>(undefined);
+  const lastSelected = useRef<PickerVoice | undefined>(undefined);
   const listed = voices.find((voice) => voice.id === value);
   if (listed) lastSelected.current = listed;
   const selected = listed ?? (lastSelected.current?.id === value ? lastSelected.current : undefined);
-  const rows: Voice[] = query.trim() ? voices : [{ id: "", label: defaultLabel }, ...voices];
+  const rows: PickerVoice[] = query.trim() ? voices : [{ id: "", label: defaultLabel }, ...voices];
 
   const close = () => {
     setOpen(false);
     onQuery("");
   };
-  const pick = (voiceId: string) => {
-    onPick(voiceId);
+  const pick = (voice: PickerVoice) => {
+    onPick(voice);
     close();
   };
 
@@ -66,13 +69,19 @@ export function FishVoicePicker({
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-busy={Boolean(pending)}
+        disabled={Boolean(pending)}
         onClick={() => (open ? close() : setOpen(true))}
-        className="flex w-full items-center gap-2 rounded-lg border border-hairline/40 bg-inset py-2 pl-3 pr-2 text-left text-[13px] text-ink"
+        className="flex w-full items-center gap-2 rounded-lg border border-hairline/40 bg-inset py-2 pl-3 pr-2 text-left text-[13px] text-ink disabled:cursor-default"
       >
         <span className="min-w-0 flex-1 truncate">
-          {selected?.label ?? (value ? t("voice.current") : loading ? t("voice.loading") : defaultLabel)}
+          {pending?.label ?? selected?.label ?? (loading ? t("voice.loading") : value ? t("voice.current") : defaultLabel)}
         </span>
-        <ChevronDown size={14} aria-hidden className="shrink-0 text-ink-secondary" />
+        {pending ? (
+          <Loader2 size={14} aria-hidden className="shrink-0 animate-spin text-ink-secondary" />
+        ) : (
+          <ChevronDown size={14} aria-hidden className="shrink-0 text-ink-secondary" />
+        )}
       </button>
 
       {motion.shown && (
@@ -101,11 +110,11 @@ export function FishVoicePicker({
                   }
                   if (e.key === "Enter" && !e.nativeEvent.isComposing && voices[0]) {
                     e.preventDefault();
-                    pick(voices[0].id);
+                    pick(voices[0]);
                   }
                 }}
-                placeholder={t("voice.fish.search")}
-                aria-label={t("voice.fish.search")}
+                placeholder={t("voice.search")}
+                aria-label={t("voice.search")}
                 autoComplete="off"
                 spellCheck={false}
                 className="w-full bg-transparent text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none [&::-webkit-search-cancel-button]:hidden"
@@ -113,8 +122,20 @@ export function FishVoicePicker({
             </div>
           </div>
           <div role="listbox" aria-label={ariaLabel} className="max-h-[320px] overflow-y-auto">
-            {query.trim() && !loading && voices.length === 0 ? (
-              <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("voice.fish.noMatches")}</div>
+            {loading && voices.length === 0 ? (
+              <div role="status" aria-label={t("voice.loading")}>
+                {[0, 1, 2, 3].map((row) => (
+                  <div key={row} className="flex items-start gap-2 px-2.5 py-2">
+                    <span className="size-[13px] shrink-0" />
+                    <span className="min-w-0 flex-1 animate-pulse">
+                      <span className="block h-3.5 w-2/5 rounded bg-raised" />
+                      <span className="mt-1.5 block h-3 w-4/5 rounded bg-raised/70" />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : query.trim() && !loading && voices.length === 0 ? (
+              <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("voice.noMatches")}</div>
             ) : (
               rows.map((voice) => {
                 const active = voice.id === value;
@@ -124,12 +145,17 @@ export function FishVoicePicker({
                     type="button"
                     role="option"
                     aria-selected={active}
-                    onClick={() => pick(voice.id)}
+                    onClick={() => pick(voice)}
                     className={cn("flex w-full items-start gap-2 px-2.5 py-2 text-left", active ? "bg-raised/60" : "hover:bg-raised/40")}
                   >
                     <Check size={13} className={cn("mt-0.5 shrink-0", active ? "text-accent" : "opacity-0")} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] text-ink">{voice.label}</span>
+                      <span className="flex items-baseline gap-2">
+                        <span className="min-w-0 truncate text-[13px] text-ink">{voice.label}</span>
+                        {voice.publicOwnerId && (
+                          <span className="shrink-0 text-[11px] text-ink-secondary">{t("voice.addsToAccount")}</span>
+                        )}
+                      </span>
                       {voice.description && (
                         <span className="mt-0.5 line-clamp-2 block text-[11.5px] leading-snug text-ink-secondary">
                           {voice.description}

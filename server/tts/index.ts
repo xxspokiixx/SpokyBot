@@ -84,7 +84,7 @@ export function verifyKey(provider: "elevenlabs" | "fish", key: string) {
 export async function listVoices(
   cfg: AppConfig,
   run?: systemVoices.Runner,
-  fishSearch?: fish.VoiceSearch,
+  search?: fish.VoiceSearch,
 ): Promise<elevenlabs.Voice[]> {
   const provider = voiceProvider(cfg);
   if (provider === "xai") return cfg.xai?.key ? grok.listVoices(cfg.xai.key) : [];
@@ -95,11 +95,17 @@ export async function listVoices(
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;
-    return key ? fish.listVoices(key, fishSearch) : [];
+    return key ? fish.listVoices(key, search) : [];
   }
   const credential = elevenLabs(cfg);
   if (!credential) return [];
-  return elevenlabs.listVoices(credential.token, credential.api);
+  return elevenlabs.listVoices(credential.token, credential.api, search);
+}
+
+export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voiceId: string, name: string): Promise<string> {
+  const credential = voiceProvider(cfg) === "elevenlabs" ? elevenLabs(cfg) : null;
+  if (!credential) throw new NoVoiceConfigured("key");
+  return elevenlabs.addSharedVoice(credential.token, credential.api, publicOwnerId, voiceId, name);
 }
 
 export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner) {
