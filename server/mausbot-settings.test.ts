@@ -46,7 +46,7 @@ describe("who may change settings", () => {
     expect(names({ OMB_CHIEF_OF_STAFF: "1" })).not.toContain("set_app_setting");
     expect(names({ OMB_CHIEF_OF_STAFF: "1", OMB_MAUSBOT: "1" })).toEqual(expect.arrayContaining(["list_app_settings", "set_app_setting"]));
     const base = names({ OMB_CHIEF_OF_STAFF: "1" });
-    expect(names({ OMB_CHIEF_OF_STAFF: "1", OMB_MAUSBOT: "1" })).toEqual([...base, "list_app_settings", "set_app_setting"]);
+    expect(names({ OMB_CHIEF_OF_STAFF: "1", OMB_MAUSBOT: "1" })).toEqual([...base, ...MAUSBOT_TOOL_NAMES]);
   });
 
   it("advertises a flat schema", () => {

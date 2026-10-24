@@ -121,6 +121,16 @@ it("lets MausBot list and change the allowlisted settings, refuses the rest, and
     const denied = await callTool(other, "set_app_setting", { setting: "show_tool_calls", value: "off" });
     expect(denied.result?.isError ?? true).toBe(true);
     expect((await api("/api/config")).features.showToolCalls).toBe(true);
+
+    const unread = await callTool(agents, "list_unread_notifications", {});
+    expect(unread.result?.isError, text(unread)).toBeFalsy();
+    expect(text(unread)).toContain('"notifications":[');
+    const marked = await callTool(agents, "mark_notifications_read", { ids: ["no-such-notification"] });
+    expect(marked.result?.isError, text(marked)).toBeFalsy();
+    expect(text(marked)).toContain("Marked none read.");
+    expect(text(marked)).toContain("no-such-notification: not an unread notification");
+    expect((await callTool(agents, "mark_notifications_read", { ids: "all" })).result?.isError).toBe(true);
+    expect((await callTool(other, "list_unread_notifications", {})).result?.isError ?? true).toBe(true);
     await control(["interrupt", "--bot", maus.id]);
     await control(["interrupt", "--bot", clive.id]);
   } finally {

@@ -28,6 +28,12 @@ pnpm exec vitest run server/default-bot.test.ts server/default-bot.e2e.test.ts \
   `set_app_setting`; they change only "Show MausBot in the sidebar" and "Tool
   calls", say what changed and how to undo it, and refuse every other name
   (language, theme, keys, approval levels and the rest stay in Settings).
+- `server/mausbot-notifications.test.ts`: `list_unread_notifications` returns the
+  unread feed (bounded, trimmed) with a lean per item; `mark_notifications_read`
+  marks only finished work and notices (`done`, `delegation-settled`,
+  `routine-deferred`), leaves questions, approvals, failures, sign-ins, money,
+  mentions and unrecognised kinds unread, has no mark-all, and says what it
+  marked and what it left. Personal installs only; no other bot may call it.
 - `server/team-setup-requests.test.ts` ("MausBot's Chief-level team setup"):
   it adds specialists like a Chief but never changes who the Chief is.
 - `src/components/MausBotWelcome.test.ts` and `src/lib/default-bot.test.ts`:
