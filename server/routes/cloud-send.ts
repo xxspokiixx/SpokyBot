@@ -55,6 +55,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       return !tail.hasMore && tail.messages.length === 1 && tail.messages[0]!.role === "bot" && Boolean(tail.messages[0]!.text?.includes(name));
     },
     inRoom: (botId) => (deps.chats?.store.groups ?? []).some((group) => !group.dm && group.memberIds.includes(botId)),
+    automated: (botId) => (deps.move?.routines()?.listRoutines() ?? []).some((routine) => routine.botId === botId),
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),

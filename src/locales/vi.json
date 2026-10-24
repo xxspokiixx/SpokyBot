@@ -4564,6 +4564,7 @@
   "helperIntro.title": "Chào bạn, mình là {name}, trợ lý cho mọi việc ở đây.",
   "helperIntro.body": "Mình hiểu rõ ứng dụng này, nên cứ hỏi mình cách làm bất cứ điều gì. Mình có thể cùng bạn thiết lập bot, ứng dụng và quy trình mới, và cho bạn biết các bot đang làm gì.",
   "helperIntro.chief": "Là Chief of Staff của bạn, mình cũng theo dõi ngày của bạn và gửi bạn một bản tóm tắt ngắn.",
+  "helperIntro.watch": "Mình cũng theo dõi ngày của bạn và gửi bạn một bản tóm tắt ngắn.",
   "helperIntro.team": "Ở {team}, mình ở đây vì bạn và trông coi các bot của riêng bạn.",
   "helperIntro.try": "Thử một trong những câu này, hoặc cứ nói điều bạn cần.",
   "helperIntro.asks": "Gợi ý để hỏi",
