@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -119,6 +120,8 @@ export function Composer({
   const { threads, currentBotId } = useThreadRefs();
   const { capabilities } = useDesktopCapabilities();
   const advanced = useAdvancedMode();
+  // On a phone in Simple mode the composer is one row: + , the field and its buttons, like a dock.
+  const singleRow = useMediaQuery(PHONE_LAYOUT) && !advanced;
   const sendKey = useSendKey();
   const sendLabel = sendKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -822,7 +825,7 @@ export function Composer({
           />}
         <div data-tour="composer" className="@container/composer relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
-        <div data-composer-row className="flex items-end gap-1 @max-[30rem]/composer:flex-wrap">
+        <div data-composer-row className={cn("flex items-end gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap")}>
           <input
             ref={fileInput}
             type="file"
@@ -866,7 +869,7 @@ export function Composer({
             </div>
           )}
           <MentionTextarea
-          wrapperClassName="@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"
+          wrapperClassName={singleRow ? undefined : "@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"}
           inputRef={inputRef}
           peers={group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)}
           everyone={Boolean(group && !group.dm)}
@@ -983,7 +986,7 @@ export function Composer({
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className="block max-h-[9rem] min-h-6 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-[15px] leading-6 placeholder:text-ink-secondary focus:outline-none"
           />
-          <div data-composer-actions className="flex items-center gap-1 @max-[30rem]/composer:ml-auto">
+          <div data-composer-actions className={cn("flex items-center gap-1", !singleRow && "@max-[30rem]/composer:ml-auto")}>
           {busy && !locked && (
           <button
             onClick={interruptTurn}

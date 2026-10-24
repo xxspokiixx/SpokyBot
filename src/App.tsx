@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Menu } from "lucide-react";
+import { ChevronLeft, Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { addBot } from "@/lib/add-bot";
@@ -290,9 +290,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-label="Open bot list"
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
-        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
+        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card max-md:p-0 max-md:text-ink md:hidden"
       >
-        <Menu size={18} />
+        <Menu size={18} className="max-md:hidden" />
+        <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block" />
       </button>}
       {drawerOpen && !calendarFocus && (
         <div
