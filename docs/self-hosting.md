@@ -906,7 +906,9 @@ An engine that already answered (for example one the welcome checked) can
 take the default after a single miss. An organization's models and the
 trial credit are never tested this way. Results are kept for a day per
 engine and sign-in in `<data dir>/providers/ai-checks.json`, so a restart
-doesn't send them again.
+doesn't send them again. On a later start, where the engines are read one at
+a time, nothing is tested or moved until that read ends: never on the status
+the last run recorded.
 
 The first bot the app made follows the default until someone writes to it
 or picks a model for it or one of its conversations: it moves only after a
