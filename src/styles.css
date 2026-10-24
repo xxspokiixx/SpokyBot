@@ -1191,6 +1191,18 @@ body {
   height: min(760px, 100%);
   min-height: 0;
 }
+/* On a phone Settings is a sheet: it fills the width, rises from the bottom and rounds only its top corners. */
+@media (max-width: 767.98px) {
+  .glass-popup-frame[data-settings-sheet] {
+    align-items: flex-end;
+    padding: 44px 0 0;
+  }
+  .glass-popup-frame[data-settings-sheet] > .glass-popup {
+    width: 100%;
+    height: 100%;
+    border-radius: 24px 24px 0 0;
+  }
+}
 /* Cards and rails sitting on the glass: a second, thinner pane. */
 .glass-card {
   background: color-mix(in srgb, var(--color-card) 60%, transparent);
