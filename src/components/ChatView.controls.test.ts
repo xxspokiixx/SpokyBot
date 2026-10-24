@@ -125,6 +125,34 @@ describe("the header's right side", () => {
   });
 });
 
+describe("header conversation title", () => {
+  it("reads Bot / Conversation ▾ in Simple mode, in place of the other-activity picker and the way back, and only there", () => {
+    const busyElsewhere: Bot = { ...bot, mainThreadId: "other", tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 0, busy: true, activity: "working" }] };
+    fixture.advanced = false;
+    const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+    const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
+    expect(identity.indexOf("data-chathead-conversation")).toBeGreaterThan(identity.indexOf("data-chathead-pill"));
+    expect(identity).toMatch(/data-chathead-conversation[^>]*><span dir="auto" class="truncate">Selected<\/span>/);
+    expect(simple).not.toContain("data-background-activity");
+    expect(simple).not.toContain("data-chathead-back");
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const remote = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+      expect(remote).not.toContain("data-chathead-conversation");
+      expect(remote).toContain("data-background-activity");
+    } finally {
+      delete window.ogb;
+    }
+    fixture.advanced = true;
+    fixture.showThreads = false;
+    const advanced = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+    expect(advanced).not.toContain("data-chathead-conversation");
+    expect(advanced).toContain("data-background-activity");
+    expect(advanced).toContain("data-chathead-back");
+    fixture.showThreads = true;
+  });
+});
+
 describe("header name", () => {
   it("renames only from the bot's settings in Simple mode: no pencil, and the whole pill opens them", () => {
     fixture.advanced = false;

@@ -1,5 +1,5 @@
-// The main agent's brief: one server-built card a day in a fixed chat of the Chief's, edited in place, rendered with no
-// AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
+// The main agent's brief: one server-built card a day in a fixed chat of the proactive bot's, edited in place, rendered
+// with no AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
 // on the first open of the day and after three hours away, and tells the person once per update. Presence, the brief's home and its rows live in brief.json,
 // ids and times only; the senders and subjects it shows are read back from Gmail by id after a restart.
 import { readFileSync } from "node:fs";
@@ -14,10 +14,11 @@ import type { CalendarEvent, EmailHeader, ReadSession } from "../connected-reads
 import { recordsBlock, clean } from "../records-block.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
-import { sectionKey, type BotRecord, type Message, type Store } from "../store.ts";
+import type { BotRecord, Message, Store } from "../store.ts";
 import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
 import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard } from "./brief-cards.ts";
+import { proactiveOwner } from "./proactive-owner.ts";
 import type { CheckReport } from "./routine-checks.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
@@ -57,7 +58,7 @@ export interface BriefDeps {
   now?: () => number;
   /** A hosted team workspace or a Team Cloud: the people there are not one person, so there is no brief. */
   hosted: boolean;
-  /** The Chief's briefing routine is on; with it paused or deleted there is no brief. */
+  /** The proactive bot's briefing routine is on; with it paused or deleted there is no brief. */
   watching(): boolean;
   mainThread(botId: string): string | undefined;
   threadBusy(botId: string, threadId: string): boolean;
@@ -123,6 +124,7 @@ export function createBrief(deps: BriefDeps) {
   let trouble: CheckReport["trouble"] = [];
   let waiting: CheckReport["waiting"];
   let unfenced = false;
+  let helpersSort = false;
   const headers = new Map<string, EmailHeader & { why?: string }>();
   let dirty = false;
   let rendering = false;
@@ -140,13 +142,10 @@ export function createBrief(deps: BriefDeps) {
     return start;
   };
 
-  /** The main agent: the Chief of the whole workspace, or the first Chief there is. */
-  function chief(): BotRecord | null {
-    const chiefs = deps.store.bots.filter((bot) => bot.chiefOfStaff && !bot.hidden);
-    return chiefs.find((bot) => sectionKey(bot.section) === "") ?? chiefs[0] ?? null;
-  }
+  /** The bot the brief belongs to: proactiveOwner decides. */
+  const chief = (): BotRecord | null => proactiveOwner(deps.store);
 
-  /** The brief's chat: chosen once, the Chief's main chat at the time, and chosen again only if it is gone. */
+  /** The brief's chat: chosen once, the bot's main chat at the time, and chosen again only if it is gone. */
   function home(bot: BotRecord): string | undefined {
     if (state.home?.botId === bot.id && deps.store.taskByThread(bot.id, state.home.threadId)) return state.home.threadId;
     const threadId = deps.mainThread(bot.id);
@@ -156,9 +155,10 @@ export function createBrief(deps: BriefDeps) {
     return threadId;
   }
 
-  const currentCard = (): { row: Message; card: NonNullable<BriefState["card"]> } | null => {
+  /** Today's card, while it is this bot's: one the brief's earlier bot posted stays where it is. */
+  const currentCard = (bot: BotRecord): { row: Message; card: NonNullable<BriefState["card"]> } | null => {
     const card = state.card;
-    if (!card || card.day !== today()) return null;
+    if (!card || card.day !== today() || card.botId !== bot.id) return null;
     const row = deps.store.messagesFor(card.threadId).find((message) => message.id === card.messageId);
     return row?.serverCard ? { row, card } : null;
   };
@@ -222,9 +222,10 @@ export function createBrief(deps: BriefDeps) {
       const app = one.app === "gmail" ? "Gmail" : "Google Calendar";
       return { text: `Couldn't read ${app}`, note: one.signedOut ? `Reconnect ${app} in Connected apps.` : "I'll try again soon." };
     });
-    const unfencedRows: BriefRow[] = unfenced
-      ? [{ text: "I didn't sort email or prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your day, reminders and clashes still show here.` }]
-      : [];
+    const unfencedRows: BriefRow[] = !unfenced ? []
+      : helpersSort
+        ? [{ text: "I didn't prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your email is still sorted, and your day, reminders and clashes show here.` }]
+        : [{ text: "I didn't sort email or prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your day, reminders and clashes still show here.` }];
     const meetings = calendar === undefined ? null : calendar.meetings
       .filter((meeting) => qualifies(meeting) || (meeting.ownedCalendar === true && meeting.status !== "cancelled" && !meeting.allDay && !meeting.selfDeclined))
       .filter((meeting) => meeting.end > at && localDate(meeting.start, zone) === day)
@@ -276,7 +277,7 @@ export function createBrief(deps: BriefDeps) {
     rendering = true;
     try {
       await rereadHeaders();
-      const existing = currentCard();
+      const existing = currentCard(bot);
       const built = facts(bot);
       const threadId = existing?.card.threadId ?? home(bot);
       if (!threadId) return null;
@@ -328,7 +329,7 @@ export function createBrief(deps: BriefDeps) {
     return edited.messageId;
   }
 
-  /** A server card of its own in the brief's chat: a prep or a reminder. Null when there is no Chief or chat. */
+  /** A server card of its own in the brief's chat: a prep or a reminder. Null when there is no proactive bot or chat. */
   function postCard(built: BuiltCard): { bot: BotRecord; threadId: string; messageId: string } | null {
     const bot = chief();
     const threadId = bot ? home(bot) : undefined;
@@ -339,16 +340,28 @@ export function createBrief(deps: BriefDeps) {
     return { bot, threadId, messageId };
   }
 
-  /** What the checks found that needs no AI: today's meetings, clashes, reminders, other routines, trouble. */
+  /** An email picked for the brief, by a watch run or by the helper models: its row, with the why kept for this process. */
+  function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number): void {
+    headers.set(email.id, { ...email, why });
+    state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply }].slice(-MAX_ROWS);
+  }
+
+  /** What the checks found that needs no AI: today's meetings, clashes, reminders, other routines, trouble, and the
+   * emails the helper models picked. */
   async function report(found: CheckReport): Promise<void> {
     if (deps.hosted) return;
     if (found.meetings) calendar = { meetings: found.meetings, clashes: found.clashes ?? [] };
     trouble = found.trouble ?? [];
     waiting = found.waiting;
     unfenced = found.unfenced === true;
+    helpersSort = found.helpersSort === true;
     for (const event of found.remind ?? []) postCard(reminderCard({ event, timeZone: timeZone(), now: now() }));
+    const picked = found.picked ?? [];
+    for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at);
+    if (picked.length) save();
     await followUpReplies(found.session);
-    if (state.lastActiveAt !== undefined) await render({ create: false, notify: true });
+    if (picked.length) await render({ create: true, notify: true });
+    else if (state.lastActiveAt !== undefined) await render({ create: false, notify: true });
   }
 
   /** An email waiting on a reply leaves the brief once the person has replied in its thread. */
@@ -379,11 +392,7 @@ export function createBrief(deps: BriefDeps) {
     }
     const at = now();
     if (!result.quiet) {
-      for (const pick of result.important) {
-        const email = items.mail.find((one) => one.id === pick.id)!;
-        headers.set(email.id, { ...email, why: pick.why });
-        state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply: pick.needsReply }].slice(-MAX_ROWS);
-      }
+      for (const pick of result.important) keepImportant(items.mail.find((one) => one.id === pick.id)!, pick.why, pick.needsReply, at);
       for (const prep of result.prep) {
         const meeting = items.prep.find((one) => one.key === prep.id)!;
         if (state.preps.some((one) => one.key === meeting.key && one.at > at - DAY)) continue;
@@ -456,8 +465,18 @@ export function createBrief(deps: BriefDeps) {
     /** Each minute: an edit a busy chat held back. */
     tick: (): void => { if (dirty) void render({ create: false, notify: false }); },
     card: (): WidgetRoot | undefined => {
-      const shown = currentCard();
-      return shown?.row.widget?.root;
+      const bot = chief();
+      return bot ? currentCard(bot)?.row.widget?.root : undefined;
+    },
+    /** The brief moved to another bot: from now on it lives in that bot's main chat, and its next card says what it
+     * does. Cards already posted stay where they are. */
+    moveTo: (botId: string): void => {
+      if (state.home?.botId === botId) return;
+      const threadId = deps.mainThread(botId);
+      if (threadId) state.home = { botId, threadId };
+      else delete state.home;
+      delete state.introducedOn;
+      save();
     },
   };
 }

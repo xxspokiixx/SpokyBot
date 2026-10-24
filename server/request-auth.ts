@@ -369,6 +369,13 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}\/connect|mcp\/[a-z][a-z0-9_-]{0,31}\/sign-in)$/ },
   { methods: ["PUT"], path: /^\/api\/team\/my-connections\/mcp\/[a-z][a-z0-9_-]{0,31}\/key$/ },
   { methods: ["DELETE"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}|mcp\/[a-z][a-z0-9_-]{0,31})$/ },
+  // the person opened the app: their own brief on a Team Cloud, nothing recorded for anyone else
+  { methods: ["POST"], path: /^\/api\/presence\/active$/ },
+  // what a bot asks of this person: their own questions and approvals only
+  { methods: ["GET"], path: /^\/api\/needs-you$/ },
+  // who a Team Cloud bot can report to, and handing over a bot the member owns: the handler checks who may
+  { methods: ["GET"], path: /^\/api\/team\/people$/ },
+  { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
@@ -383,11 +390,12 @@ export function requiredScope(method: string, path: string, features: { sharedCo
 /** A client may change how a bot looks, never what it may do. */
 const CLIENT_BOT_PATCH_FIELDS = new Set([
   "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody",
-  "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY",
+  "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY", "sidebarHidden", "welcomed",
 ]);
-export function clientBotPatchViolation(body: unknown): string | null {
+/** `ownMausBot`: the session's own MausBot on a Team Cloud, which its member may also rename. */
+export function clientBotPatchViolation(body: unknown, ownMausBot = false): string | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
-  for (const key of Object.keys(body)) if (!CLIENT_BOT_PATCH_FIELDS.has(key)) return key;
+  for (const key of Object.keys(body)) if (!CLIENT_BOT_PATCH_FIELDS.has(key) && !(ownMausBot && key === "name")) return key;
   return null;
 }
 

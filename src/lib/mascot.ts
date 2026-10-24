@@ -60,13 +60,24 @@ export const MAUS_COLORS = {
   teal: "#01A492",
   coral: "#E5634E",
   silver: "#A8ADB4",
+  chrome: "#B3BAC4",
 } satisfies Record<MausColor, string>;
 
 export const MAUS_COLOR_LABEL = {
   green: "mascotColor.green", blue: "mascotColor.blue", red: "mascotColor.red", orange: "mascotColor.orange",
   purple: "mascotColor.purple", cyan: "mascotColor.cyan", pink: "mascotColor.pink", yellow: "mascotColor.yellow",
   teal: "mascotColor.teal", coral: "mascotColor.coral", silver: "mascotColor.silver",
+  chrome: "mascotColor.chrome",
 } as const satisfies Record<MausColor, LocaleKey>;
+
+export const CHROME_GRADIENT: [string, string, string] = ["#F1F4F7", "#AEB8C3", "#66717E"];
+export const CHROME_EYES = "#1E2833";
+
+export function colorSwatch(color: MausColor): string {
+  if (color !== "chrome") return MAUS_COLORS[color];
+  const [light, mid, edge] = CHROME_GRADIENT;
+  return `radial-gradient(circle at 34% 26%, #ffffff 0%, ${light} 20%, ${mid} 55%, ${edge} 100%)`;
+}
 
 export const MAUS_MOTIONS = [
   "arrive",
