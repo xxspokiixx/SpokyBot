@@ -21,6 +21,7 @@ import * as tar from "tar";
 import { writeFileAtomic } from "./atomic.ts";
 import { cliProbeEnvironment } from "./cli-probe.ts";
 import { DATA_DIR, stripControlPlaneEnv } from "./config.ts";
+import { standaloneEnginesRoot } from "./engine-roots.ts";
 import type { StandaloneAsset, StandaloneRelease } from "./contracts.ts";
 import { findCliCandidates, registerFallbackPathDir, resetPathCache } from "./env-path.ts";
 import { extractZip, safeArchivePath } from "./zip-archive.ts";
@@ -120,7 +121,7 @@ export function standaloneAssetFor(release: StandaloneRelease | undefined, key: 
 }
 
 export function standaloneRoot(baseDir = DATA_DIR): string {
-  return join(baseDir, "tools", "standalone");
+  return standaloneEnginesRoot(baseDir);
 }
 
 export function standaloneEngineDir(engine: string, baseDir = DATA_DIR): string {
