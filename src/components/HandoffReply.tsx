@@ -1,7 +1,8 @@
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
-import type { Message } from "@/state/store";
+import type { Bot, Message } from "@/state/store";
 import { handoffResult } from "@/lib/handoff-result";
+import { BotAvatar } from "./Avatar";
 
 export function HandoffReply({ message, children }: { message: Message; children: ReactNode }) {
   const result = handoffResult(message);
@@ -21,5 +22,21 @@ export function HandoffReply({ message, children }: { message: Message; children
           </details>
         )}
     </div>
+  );
+}
+
+/** A row about a teammate's work elsewhere (a chat or a room): a pill with their avatar and the row's name, and their reply under it. */
+export function HandoffChip({ message, bots, title, onClick }: { message: Message; bots: readonly Bot[]; title: string; onClick: () => void }) {
+  const comm = message.comm;
+  if (!comm || !message.tool) return null;
+  const withBot = bots.find((bot) => bot.id === comm.withBotId);
+  return (
+    <HandoffReply message={message}>
+      <button type="button" onClick={onClick} title={title} className="ui-pill">
+        <BotAvatar bot={withBot ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />
+        <span className="max-w-[480px] truncate">{message.tool.name}</span>
+        <ChevronRight size={13} />
+      </button>
+    </HandoffReply>
   );
 }

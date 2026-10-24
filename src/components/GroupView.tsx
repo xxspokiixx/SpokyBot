@@ -3,7 +3,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useReactor } from "@/lib/cloud-guest";
 import { otherSpeaker } from "@/lib/own-profile";
-import { Check, ChevronDown, ChevronRight, FolderOpen, Loader2, Pause, Pin, Plus, Search, Square, X } from "lucide-react";
+import { Check, ChevronDown, FolderOpen, Loader2, Pause, Pin, Plus, Search, Square, X } from "lucide-react";
 import {
   api,
   useStore,
@@ -96,7 +96,7 @@ import { roomSpeakerIds, roomThreadSpeakerId, roomThreadWorking } from "@/lib/ro
 import { RoomQueueList, RoutedByLine, roomMemberQueueTitle } from "./RoomQueueList";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { Select } from "./Select";
-import { HandoffReply } from "./HandoffReply";
+import { HandoffChip } from "./HandoffReply";
 import { RoomWorkingFolder, RoomWorkingFolderChip } from "./RoomWorkingFolder";
 
 export function RoomToolChip({ message, roomId }: { message: Message; roomId?: string }) {
@@ -109,27 +109,13 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
   }
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
-    const withBot = state.bots.find((b) => b.id === comm.withBotId);
-    return (
-      <HandoffReply message={message}>
-        <button
-          type="button"
-          onClick={() => {
-            dispatch({ type: "select", id: comm.groupId });
-            const destination = state.groups.find(g => g.id === comm.groupId);
-            if (comm.threadId && destination?.tasks?.some(task => task.threadId === comm.threadId)) {
-              dispatch({ type: "switchGroupTask", groupId: comm.groupId, threadId: comm.threadId });
-            }
-          }}
-          title={t("room.openBot", { name: comm.withName })}
-          className="ui-pill"
-        >
-          <BotAvatar bot={withBot ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />
-          <span className="max-w-[480px] truncate">{tool.name}</span>
-          <ChevronRight size={13} />
-        </button>
-      </HandoffReply>
-    );
+    return <HandoffChip message={message} bots={state.bots} title={t("room.openBot", { name: comm.withName })} onClick={() => {
+      dispatch({ type: "select", id: comm.groupId });
+      const destination = state.groups.find(g => g.id === comm.groupId);
+      if (comm.threadId && destination?.tasks?.some(task => task.threadId === comm.threadId)) {
+        dispatch({ type: "switchGroupTask", groupId: comm.groupId, threadId: comm.threadId });
+      }
+    }} />;
   }
   if (!comm) return <ToolActivity tool={tool} />;
   return (
