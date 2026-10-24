@@ -2520,6 +2520,51 @@ button:disabled.bg-danger {
   }
 }
 
+/* ── Phone ─────────────────────────────────────────────────────────────────
+   Below the width where the sidebar stops being inline (SIDEBAR_INLINE in
+   src/lib/use-media-query.ts, 768px), Midnight and Meadow take softer ground,
+   a firmer outline on the composer and rounder corners. Only tokens move, so
+   every surface follows without a component change; wider windows and the
+   other skins keep the values above.
+
+   Midnight lifts its near-black ground to a charcoal ramp; the ink tokens stay
+   as they are. Meadow's ground goes from white to the sidebar's pale green and
+   bot messages, menus and the composer stay white on it.
+
+   scripts/check-skin-contrast.mjs measures these as "<skin> (phone)", so the
+   AA pairs hold here exactly as on desktop. */
+@media (max-width: 767.98px) {
+  :is([data-skin="midnight"]) {
+    --color-app: #141414;
+    --color-panel: #1c1c1e;
+    --color-raised: #2c2c2e;
+    --color-raised-hover: #3a3a3c;
+    --color-composer: #2c2c2e;
+    --color-composer-ring: #3a3a3c;
+    --color-card: #242426;
+    --color-menu: #2c2c2e;
+    --color-inset: #1c1c1e;
+    --color-control: #2c2c2e;
+    --color-hairline: #3a3a3c;
+    --radius-lg: 12px;
+    --radius-xl: 18px;
+    --radius-2xl: 22px;
+    --radius-3xl: 28px;
+  }
+  :is([data-skin="meadow"]) {
+    --color-app: #f6f8f6;
+    --color-panel: #fcfdfc;
+    --color-card: #ffffff;
+    --color-inset: #e9eeea;
+    --color-composer-ring: #cfd8d1;
+    --color-hairline: #c1ccc4;
+    --radius-lg: 12px;
+    --radius-xl: 18px;
+    --radius-2xl: 22px;
+    --radius-3xl: 28px;
+  }
+}
+
 /* Window drag regions. A header marked by useCaptionChrome().dragProps is
    the window's title bar on macOS and frameless Windows; every control in it
    opts back out so it stays clickable, and so do menus and dialogs, which
