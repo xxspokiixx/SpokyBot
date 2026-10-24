@@ -5813,6 +5813,7 @@
   "helperIntro.title": "Hi, I'm {name}, your helper for everything here.",
   "helperIntro.body": "I know this app inside out, so ask me how to do anything. I can set up new bots, apps and routines with you, and tell you what your bots are up to.",
   "helperIntro.chief": "As your Chief of Staff, I also keep an eye on your day and send you a short brief.",
+  "helperIntro.watch": "I also keep an eye on your day and send you a short brief.",
   "helperIntro.team": "On {team}, I'm here for you and look after your own bots.",
   "helperIntro.try": "Try one of these, or just say what you need.",
   "helperIntro.asks": "Things to ask",

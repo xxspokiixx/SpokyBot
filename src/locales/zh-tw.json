@@ -3948,6 +3948,7 @@
   "helperIntro.title": "你好，我是 {name}，這裡一切事務的助手。",
   "helperIntro.body": "我對這個應用程式瞭若指掌，任何操作都可以問我。我可以和你一起設定新的機器人、應用程式和例行工作，並告訴你各個機器人在忙什麼。",
   "helperIntro.chief": "身為你的幕僚長，我也會留意你的一天，並寄給你一份簡短摘要。",
+  "helperIntro.watch": "我也會留意你的一天，並寄給你一份簡短摘要。",
   "helperIntro.team": "在 {team}，我為你服務，照看你自己的機器人。",
   "helperIntro.try": "試試下面這些，或直接說你需要什麼。",
   "helperIntro.asks": "可以問的事",

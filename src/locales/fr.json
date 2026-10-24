@@ -2020,6 +2020,7 @@
   "helperIntro.title": "Bonjour, je suis {name}, votre assistant pour tout ici.",
   "helperIntro.body": "Je connais cette app par cœur, alors demandez-moi comment faire n'importe quoi. Je peux configurer avec vous de nouveaux bots, apps et routines, et vous dire ce que font vos bots.",
   "helperIntro.chief": "En tant que chef de cabinet, je garde aussi un œil sur votre journée et vous envoie un court résumé.",
+  "helperIntro.watch": "Je garde aussi un œil sur votre journée et vous envoie un court résumé.",
   "helperIntro.team": "Sur {team}, je suis là pour vous et je m'occupe de vos propres bots.",
   "helperIntro.try": "Essayez l'une de ces demandes, ou dites simplement ce qu'il vous faut.",
   "helperIntro.asks": "Idées de demandes",

@@ -6178,5 +6178,6 @@
   "usageMeter.err.unavailable": "Teraz nie można zmienić planu w aplikacji. Nic nie zostało pobrane. Otwórz swoją stronę planu, aby zobaczyć dostępne opcje.",
   "usageMeter.err.priceChanged": "Cena zmieniła się od chwili, gdy ją sprawdzono, więc nic nie zostało pobrane. Wybierz Zmień na wyższy plan, aby zobaczyć nową cenę.",
   "usageMeter.err.rateLimited": "Zbyt wiele prób. Odczekaj kilka minut i spróbuj ponownie.",
-  "usageMeter.err.failed": "Nie udało się zmienić planu. Nic nie zostało pobrane. Spróbuj ponownie za minutę."
+  "usageMeter.err.failed": "Nie udało się zmienić planu. Nic nie zostało pobrane. Spróbuj ponownie za minutę.",
+  "helperIntro.watch": "Pilnuję też Twojego dnia i wysyłam Ci krótkie podsumowanie."
 }
