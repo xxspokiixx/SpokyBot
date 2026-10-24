@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { SkillsLibrarySkillWire } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
-import { importedSkillListings, setImportedSkillEnabled } from "../imported-skills.ts";
+import { setImportedSkillEnabled } from "../imported-skills.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { installLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillReviewState, skillsLibraryEnabled } from "../skill-library.ts";
@@ -47,8 +47,9 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       if (skillsLibraryEnabled(cfg)) {
         const { skills, library } = listBotSkillsWithOrigin(m[1]!, store.bot(m[1])!.assignedSkills);
+        const names = new Set(skills.map((skill) => skill.name));
         return json(res, 200, {
-          skills: [...skills, ...importedSkillListings(m[1]!, new Set(skills.map((skill) => skill.name)))],
+          skills: [...skills, ...listBotSkills(store.bot(m[1])!).filter((skill) => !names.has(skill.name))],
           library,
           assignedSkills: store.bot(m[1])!.assignedSkills,
           staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
