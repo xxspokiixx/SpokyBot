@@ -11,7 +11,9 @@ describe("the one-time move's line", () => {
     expect(moveLine({ phase: "copy", chats: { done: 34, total: 120 } }, "local")?.text).toBe("Moving your bots to My Cloud… 34 of 120 chats");
     expect(moveLine({ phase: "copy", chats: { done: 34, total: 120 } }, "cloud")?.text).toBe("Bringing this computer's bots to My Cloud… 34 of 120 chats");
     expect(moveLine({ phase: "wait", waitingFor: "Scout" }, "local")?.text).toBe("Moving your bots to My Cloud… waiting for Scout to finish");
-    expect(moveLine({ phase: "wait", waitingFor: "" }, "local")?.text).toBe("Moving your bots to My Cloud… waiting for your bots to finish");
+    expect(moveLine({ phase: "wait", waitingFor: "Launch room", waitingWhat: "room" }, "cloud")?.text).toBe("Moving your bots to My Cloud… waiting for Launch room to finish");
+    expect(moveLine({ phase: "wait", waitingFor: "", waitingWhat: "sign-in" }, "local")?.text, "no name: what it is").toBe("Moving your bots to My Cloud… waiting for a sign-in to finish");
+    expect(moveLine({ phase: "wait" }, "local")?.text, "a quiet moment, nobody holding it").toBe("Moving your bots to My Cloud…");
     expect(moveLine({ phase: "finishing" }, "cloud")).toMatchObject({ kind: "sending", text: "Moving to My Cloud… almost done" });
   });
 
@@ -41,6 +43,7 @@ describe("the one-time move's line", () => {
     setLocale("de");
     expect(moveLine({ phase: "copy" }, "local")?.text).toBe("Deine Bots ziehen in die Cloud um…");
     expect(moveLine({ phase: "copy", updating: true }, "local")?.text).toBe("My Cloud wird gerade aktualisiert. Dein Umzug beginnt, sobald das erledigt ist.");
+    expect(moveLine({ phase: "wait", waitingFor: "", waitingWhat: "sign-in" }, "local")?.text).toBe("Deine Bots ziehen in die Cloud um… warte, bis eine Anmeldung fertig ist");
   });
 });
 
@@ -54,5 +57,17 @@ describe("the line on a computer whose bots came home to another one", () => {
     setLocale("de");
     expect(moveLine({ phase: "back", elsewhere: { name: "MacBook Air", since } }, "local")?.text)
       .toBe("Deine Bots sind zurück auf MacBook Air. Dieser Computer behält seine Kopie vom 21. Oktober 2026, mit ausgeschalteten Automatisierungen.");
+  });
+});
+
+describe("the line on a computer whose bots come home because the person keeps them here", () => {
+  it("says they are on their way on either page (or wait for My Cloud's update), and once home, on this computer only, that they run here", () => {
+    for (const page of ["local", "cloud"] as const) {
+      expect(moveLine({ phase: "keeping" }, page)).toEqual({ kind: "sending", text: "Bringing this computer's bots back from My Cloud…", extra: [] });
+      expect(moveLine({ phase: "keeping", updating: true }, page)?.text).toBe("My Cloud is updating. This computer's bots come back once it's done.");
+    }
+    expect(moveLine({ phase: "back", kept: true }, "local"))
+      .toEqual({ kind: "done", text: "This computer's bots are back here, and their automations run on this computer. My Cloud keeps a copy of them with their automations off.", extra: [] });
+    expect(moveLine({ phase: "back", kept: true }, "cloud")).toBeNull();
   });
 });

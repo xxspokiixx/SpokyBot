@@ -53,7 +53,8 @@ export function moveQuietUntil(move: OneHomeView | null | undefined): number {
 }
 
 /** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
- * day (with Try again), what arrived (on My Cloud's page, once), coming home, or where the bots came home instead.
+ * day (with Try again), what arrived (on My Cloud's page, once), coming home, where the bots came home instead, or this
+ * computer's bots on their way home and home because the person keeps them here.
  * `page`: which page shows it. */
 export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true } | null {
   if (move.phase === "done") {
@@ -62,8 +63,10 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
     return { kind: "done", text: list.length ? t("cloudSend.move.done", { list: listOf(list) }) : t("cloudSend.move.doneAll"),
       extra: move.held.map((key) => t("cloudSend.result.held", { key })), ...(move.phone ? { phone: true as const } : {}) };
   }
+  if (move.phase === "keeping") return { kind: "sending", text: t(move.updating ? "cloudSend.move.keepingUpdating" : "cloudSend.move.keeping"), extra: [] };
   if (move.phase === "home-again" || move.phase === "back") {
     if (page !== "local") return null;
+    if (move.phase === "back" && move.kept) return { kind: "done", text: t("cloudSend.move.kept"), extra: [] };
     const elsewhere = move.phase === "back" ? move.elsewhere : undefined;
     if (elsewhere) {
       return { kind: "done", extra: [], text: elsewhere.since
@@ -76,8 +79,11 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   const failing = "failing" in move ? move.failing : undefined;
   if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: failing.error }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };
-  if (move.phase === "wait") {
-    return { kind: "sending", text: move.waitingFor ? t("cloudSend.move.waiting", { name: move.waitingFor }) : t("cloudSend.move.waitingAny"), extra: [] };
+  // Who holds the move, by name, or what it is; nothing is claimed while it only waits for a quiet moment.
+  if (move.phase === "wait" && move.waitingFor !== undefined) {
+    const text = move.waitingFor ? t("cloudSend.move.waiting", { name: move.waitingFor })
+      : move.waitingWhat === "sign-in" ? t("cloudSend.move.waitingSignIn") : t("cloudSend.move.waitingAny");
+    return { kind: "sending", text, extra: [] };
   }
   const chats = move.phase === "copy" ? move.chats : undefined;
   const key = page === "cloud" ? (chats ? "cloudSend.move.bringingChats" : "cloudSend.move.bringing") : (chats ? "cloudSend.move.copyChats" : "cloudSend.move.copy");

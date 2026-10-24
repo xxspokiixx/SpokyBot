@@ -8,7 +8,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "the chat and the composer": [
     "chat.", "composer.", "attach.", "toolStep.", "approval.", "question.", "signIn.", "limits.", "call.", "task.", "room.",
   ],
-  "Today, notifications and alerts": ["today.", "attention.", "notifications.", "error.", "readyBots.", "app.loading."],
+  "notifications and alerts": ["attention.", "notifications.", "error.", "readyBots.", "app.loading."],
   "the sidebar and the switcher": ["sidebar."],
   "the bot panel": [
     "botPanel.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
@@ -20,12 +20,13 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "MausBot Cloud: buying it, setting it up, moving to it and sharing with it": [
     "cloudBuy.", "cloudIntro.", "cloudTrial.", "cloudSetup.", "cloudIntent.", "cloudNotice.", "cloudHowTo.", "cloudScene.", "cloudProPopup.",
     "cloudCredit.", "cloudPower.", "cloudSignIn.", "cloudAdd.", "cloudHome.", "cloudPhone.", "cloudAccount.", "pro.", "lending.",
-    "files.",
+    "files.", "usageMeter.",
   ],
   "routines and automations": ["routines.", "automations."],
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],
   "Apps": ["apps.", "connectors."],
   "the Settings pages Simple mode shows": ["settings.section.", "settings.group.", "settings.mcpCalls.", "settings.logins."],
+  "the Usage page and its traces": ["trace.", "usage.page."],
 };
 
 const EVERYDAY_KEYS: Record<string, readonly string[]> = {
