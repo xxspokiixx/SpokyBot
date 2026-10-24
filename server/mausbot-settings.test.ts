@@ -12,7 +12,7 @@ import type { BotRecord } from "./store.ts";
 const bot = (fields: Partial<BotRecord>): BotRecord => ({ id: "b1", name: "MausBot", ...fields }) as BotRecord;
 const MAUS = bot({ id: "maus", defaultBot: {} });
 
-function host(bots: BotRecord[], config: AppConfig = {} as AppConfig) {
+function host(bots: BotRecord[], config: AppConfig = {} as AppConfig, team = false) {
   const records = new Map(bots.map((record) => [record.id, { ...record }]));
   const saveFeatures = vi.fn((patch: { showToolCalls: boolean }) => { config = { ...config, features: { ...config.features, ...patch } }; });
   const api: SettingsHost = {
@@ -20,6 +20,7 @@ function host(bots: BotRecord[], config: AppConfig = {} as AppConfig) {
     patchBot: (id, patch) => { Object.assign(records.get(id)!, patch); },
     config: () => config,
     saveFeatures,
+    team: () => team,
   };
   return { api, records, saveFeatures };
 }
@@ -120,6 +121,28 @@ describe("changing a setting", () => {
     expect(changeSetting(api, "ada", "mausbot_in_sidebar", "off")).toMatchObject({ ok: true });
     expect(records.get("ada")?.sidebarHidden).toBe(true);
     expect(records.get("pip")?.sidebarHidden).toBeUndefined();
+  });
+
+  it("tells a team's Owner or Admin MausBot that workspace-wide settings are the person's to change", () => {
+    readTeamRolesWith(() => "owner");
+    const { api, saveFeatures } = host([bot({ id: "ada", defaultBot: { person: "ada@example.com" } })]);
+    expect(changeSetting(api, "ada", "show_tool_calls", "on")).toEqual({ ok: false, error: "Tool calls applies to everyone on this team, so it is changed by the person in Settings → Appearance, not from chat." });
+    expect(saveFeatures).not.toHaveBeenCalled();
+  });
+
+  it("refuses a workspace-wide setting whenever the server is a team, even for a person-less MausBot", () => {
+    const { api, saveFeatures } = host([MAUS], {} as AppConfig, true);
+    expect(changeSetting(api, "maus", "show_tool_calls", "on")).toMatchObject({ ok: false, error: expect.stringContaining("applies to everyone on this team") });
+    expect(saveFeatures).not.toHaveBeenCalled();
+    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off")).toMatchObject({ ok: true });
+  });
+
+  it("turns a failed save into the plain change-it-in-Settings text", () => {
+    const { api } = host([MAUS]);
+    api.saveFeatures = () => { throw new Error("EACCES: config.json is read-only"); };
+    expect(changeSetting(api, "maus", "show_tool_calls", "on")).toEqual({ ok: false, error: "Tool calls could not be saved (EACCES: config.json is read-only). Nothing was changed; tell the person to change it in Settings → Appearance." });
+    api.patchBot = () => { throw "disk full"; };
+    expect(changeSetting(api, "maus", "mausbot_in_sidebar", "off")).toMatchObject({ ok: false, error: expect.stringContaining("the write failed") });
   });
 
   it("does not report a change that did not stick", () => {

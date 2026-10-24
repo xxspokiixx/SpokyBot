@@ -28,6 +28,12 @@ pnpm exec vitest run server/default-bot.test.ts server/default-bot.e2e.test.ts \
   `set_app_setting`; they change only "Show MausBot in the sidebar" and "Tool
   calls", say what changed and how to undo it, and refuse every other name
   (language, theme, keys, approval levels and the rest stay in Settings).
+  A workspace-wide setting is refused on a team (an Owner's or Admin's MausBot
+  included): the person changes it in Settings. A failed save is reported, not
+  swallowed. `server/drivers/agents-mausbot-tools.test.ts` pins the four tools'
+  flat schemas. The four tools are listed last, so under a model's tool-count
+  limit they are the first to be left out (the server still answers a call to
+  one); `OMB_MAUSBOT` is documented in `server/drivers/agents-proxy.ts`.
 - `server/mausbot-notifications.test.ts`: `list_unread_notifications` returns the
   unread feed (bounded, trimmed) with a lean per item; `mark_notifications_read`
   marks only finished work and notices (`done`, `delegation-settled`,
