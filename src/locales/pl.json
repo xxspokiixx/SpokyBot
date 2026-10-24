@@ -688,6 +688,7 @@
   "cloudSend.move.bringingChats": "Przenoszenie botów tego komputera do My Cloud… Czaty: {done} z {total}",
   "cloudSend.move.waiting": "Przenoszenie botów do My Cloud… czekanie, aż {name} zakończy",
   "cloudSend.move.waitingAny": "Przenoszenie botów do My Cloud… czekanie, aż boty zakończą",
+  "cloudSend.move.waitingSignIn": "Przenoszenie botów do My Cloud… czekanie, aż zakończy się logowanie",
   "cloudSend.move.finishing": "Przenoszenie do My Cloud… prawie gotowe",
   "cloudSend.move.updating": "My Cloud się aktualizuje. Przenoszenie zacznie się po zakończeniu.",
   "cloudSend.move.failing": "Boty nie mogły jeszcze przejść do My Cloud: {error}",

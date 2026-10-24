@@ -4603,6 +4603,7 @@
   "cloudSend.move.bringingChats": "Đang đưa bot của máy tính này lên Cloud… {done}/{total} cuộc trò chuyện",
   "cloudSend.move.waiting": "Đang chuyển bot của bạn lên Cloud… chờ {name} làm xong",
   "cloudSend.move.waitingAny": "Đang chuyển bot của bạn lên Cloud… chờ các bot làm xong",
+  "cloudSend.move.waitingSignIn": "Đang chuyển bot của bạn lên Cloud… chờ một lần đăng nhập hoàn tất",
   "cloudSend.move.finishing": "Đang chuyển lên Cloud… sắp xong",
   "cloudSend.move.updating": "My Cloud đang cập nhật. Việc chuyển sẽ bắt đầu khi cập nhật xong.",
   "cloudSend.move.failing": "Bot của bạn chưa chuyển lên Cloud được: {error}",
