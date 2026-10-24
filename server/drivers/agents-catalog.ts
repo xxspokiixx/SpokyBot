@@ -4,6 +4,7 @@ import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/o
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
+import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 
 /** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
@@ -20,7 +21,7 @@ export interface CatalogProfile {
   /** Written into start_thread's schema: the only bot_id it accepts. */
   botId: string;
   /** features.chiefEscalations: raise_escalation is mounted. */
-  escalations?: boolean;
+  escalations?: boolean; mausbot?: boolean;
 }
 
 /** Everything is off unless the harness says "1". */
@@ -34,7 +35,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
     chief: env.OMB_CHIEF_OF_STAFF === "1",
     botId: env.OMB_BOT_ID ?? "",
-    escalations: env.OMB_ESCALATIONS === "1",
+    escalations: env.OMB_ESCALATIONS === "1", mausbot: env.OMB_MAUSBOT === "1",
   };
 }
 
@@ -806,7 +807,6 @@ const TOOL_DEFINITIONS = [
         detail: { type: "string", maxLength: 600, description: "The fact, decision or result, with its context and brief rationale." },
         aliases: { type: "array", maxItems: 8, items: { type: "string", maxLength: 120 }, description: "Other names or abbreviations." },
         key: { type: "string", maxLength: 240, description: "Stable project/fact key (tapa/colour). Reuse for corrections, even if the name changes." },
-
       },
       required: ["kind", "name", "detail"],
     },
@@ -991,7 +991,7 @@ function catalogTools(profile: CatalogProfile) {
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
     });
-  return ROLE_TOOLS.map(tool => tool.name === "start_thread" ? {
+  return [...ROLE_TOOLS, ...(profile.mausbot === true ? MAUSBOT_TOOL_DEFINITIONS : [])].map(tool => tool.name === "start_thread" ? {
     ...tool,
     inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
       bot_id: { type: "string", enum: [profile.botId], description: START_THREAD_SELF_ID },

@@ -23,6 +23,11 @@ pnpm exec vitest run server/default-bot.test.ts server/default-bot.e2e.test.ts \
 - `server/default-bot.e2e.test.ts`: on a real fixture server, `DELETE
   /api/bots/:id` answers 409, the switch hides and shows it, and a MausBot that
   is not the Chief creates a bot with `create_bot`.
+- `server/mausbot-settings.test.ts` and the second case of
+  `server/default-bot.e2e.test.ts`: MausBot alone gets `list_app_settings` and
+  `set_app_setting`; they change only "Show MausBot in the sidebar" and "Tool
+  calls", say what changed and how to undo it, and refuse every other name
+  (language, theme, keys, approval levels and the rest stay in Settings).
 - `server/team-setup-requests.test.ts` ("MausBot's Chief-level team setup"):
   it adds specialists like a Chief but never changes who the Chief is.
 - `src/components/MausBotWelcome.test.ts` and `src/lib/default-bot.test.ts`:

@@ -79,3 +79,51 @@ it("makes MausBot a new install's first bot, never deleted, hidden by its switch
     await fixture.close();
   }
 }, 120_000);
+
+it("lets MausBot list and change the allowlisted settings, refuses the rest, and gives no other bot the tools", async () => {
+  const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  const api = async (path: string) => (await (await fetch(`${fixture.info.url}${path}`, { signal: AbortSignal.timeout(10_000) })).json()) as any;
+  const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
+  const launch = async (botId: string) => {
+    await control(["send", "--bot", botId, "--text", "Stay active."]);
+    await expect.poll(() => existsSync(fixture.fixtureDumpPath), { timeout: 30_000 }).toBe(true);
+    const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")) as { mcpConfig: { mcpServers: Record<string, McpServer> } };
+    rmSync(fixture.fixtureDumpPath, { force: true });
+    return dump.mcpConfig.mcpServers.agents!;
+  };
+  const text = (answer: Answer) => answer.result?.content?.[0]?.text ?? "";
+  try {
+    const [maus] = (await api("/api/bots")).bots as any[];
+    const agents = await launch(maus.id);
+    expect(agents.env.OMB_MAUSBOT).toBe("1");
+
+    const listed = await callTool(agents, "list_app_settings", {});
+    expect(listed.result?.isError, text(listed)).toBeFalsy();
+    expect(text(listed)).toContain('"name":"show_tool_calls","title":"Tool calls","value":"off"');
+
+    const changed = await callTool(agents, "set_app_setting", { setting: "show_tool_calls", value: "on" });
+    expect(changed.result?.isError, text(changed)).toBeFalsy();
+    expect(text(changed)).toContain('Changed "Tool calls" (Settings → Appearance) from off to on. To undo, ask me to set show_tool_calls back to off');
+    expect((await api("/api/config")).features.showToolCalls).toBe(true);
+
+    const hidden = await callTool(agents, "set_app_setting", { setting: "mausbot_in_sidebar", value: "off" });
+    expect(hidden.result?.isError, text(hidden)).toBeFalsy();
+    expect(((await api("/api/bots")).bots as any[]).find((bot) => bot.id === maus.id).sidebarHidden).toBe(true);
+
+    const refused = await callTool(agents, "set_app_setting", { setting: "anthropic_key", value: "on" });
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("I can change: mausbot_in_sidebar, show_tool_calls.");
+    expect((await api("/api/config")).features.showToolCalls).toBe(true);
+
+    const { bot: clive } = await control(["new-bot", "--name", "Clive"]);
+    const other = await launch(clive.id);
+    expect(other.env.OMB_MAUSBOT).toBe("0");
+    const denied = await callTool(other, "set_app_setting", { setting: "show_tool_calls", value: "off" });
+    expect(denied.result?.isError ?? true).toBe(true);
+    expect((await api("/api/config")).features.showToolCalls).toBe(true);
+    await control(["interrupt", "--bot", maus.id]);
+    await control(["interrupt", "--bot", clive.id]);
+  } finally {
+    await fixture.close();
+  }
+}, 180_000);
