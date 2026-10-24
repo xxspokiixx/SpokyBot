@@ -2281,5 +2281,7 @@
   "usageMeter.err.unavailable": "Votre forfait ne peut pas être changé depuis l'app pour le moment. Rien n'a été facturé. Ouvrez votre page Forfait pour voir vos options.",
   "usageMeter.err.priceChanged": "Le prix a changé depuis que vous l'avez consulté, rien n'a donc été facturé. Choisissez Passer au forfait supérieur pour voir le nouveau prix.",
   "usageMeter.err.rateLimited": "Trop d'essais. Attendez quelques minutes, puis réessayez.",
-  "usageMeter.err.failed": "Nous n'avons pas pu changer votre forfait. Rien n'a été facturé. Réessayez dans une minute."
+  "usageMeter.err.failed": "Nous n'avons pas pu changer votre forfait. Rien n'a été facturé. Réessayez dans une minute.",
+  "chat.compactionExcerptTitle": "Contexte antérieur réduit à des extraits récents",
+  "chat.compactionExcerptHint": "Aucun résumé rédigé n'était disponible : l'agent continue donc à partir de ces extraits et des messages récents. Des détails plus anciens peuvent manquer dans son contexte. Toute votre conversation est toujours là."
 }
