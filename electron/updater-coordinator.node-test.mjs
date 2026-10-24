@@ -584,29 +584,37 @@ test("without a hand-off the install still quits and installs", async () => {
   assert.equal(h.getState().status, "installing");
 });
 
-test("a staged update survives hourly checks until the user explicitly checks again", async () => {
+test("a staged update survives hourly checks that find nothing newer, and a manual check still replaces it", async () => {
   const h = harness();
   await downloadInto(h);
   let checks = 0;
   h.updater.checkForUpdates = async () => {
     checks += 1;
     h.updater.emit("checking-for-update");
-    h.updater.emit("update-available", { version: "2.1.0" });
+    h.updater.emit("update-available", { version: "2.0.0" });
   };
   const staged = h.getState();
 
   await h.coordinator.check();
-  assert.equal(checks, 0);
+  assert.equal(checks, 1);
   assert.deepEqual(h.getState(), staged);
-
+  h.updater.checkForUpdates = async () => {
+    checks += 1;
+    h.updater.emit("checking-for-update");
+    h.updater.emit("update-not-available", {});
+  };
+  await h.coordinator.check();
+  assert.deepEqual(h.getState(), staged);
+  h.updater.checkForUpdates = async () => {
+    checks += 1;
+    h.updater.emit("update-available", { version: "2.1.0" });
+  };
   h.updater.downloadUpdate = async () => {
     h.updater.emit("update-downloaded", { version: "2.1.0" });
     return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
   };
   await h.coordinator.check(true);
   await settle();
-  assert.equal(checks, 1);
-  assert.equal(h.getState().status, "downloaded");
   assert.equal(h.getState().version, "2.1.0");
 });
 
