@@ -117,6 +117,9 @@ export function createTestedAi(deps: TestedAiDeps) {
   let settledRead = 0;
   let lastSelection: ModelSelection | null = null;
   let lastInstances: readonly SelectableInstance[] = [];
+  /** A result landed before any read of the engines settled (a later start reads them one at a time): the first bot
+   * moves on it once one does, never on the last run's status. */
+  let followOwed = false;
   let unsubscribe: (() => void) | null = null;
 
   const fixed = () => deps.hosted?.() === true || deps.saved().some((selection) => !empty(selection));
@@ -186,6 +189,7 @@ export function createTestedAi(deps: TestedAiDeps) {
   const follow = () => {
     const follower = saved.follower;
     const target = lastSelection;
+    if (follower && !target) followOwed = true;
     if (!follower || !target || empty(target) || fixed()) return;
     const store = deps.store();
     const bot = store.bot(follower.botId);
@@ -302,6 +306,10 @@ export function createTestedAi(deps: TestedAiDeps) {
       lastSelection = selection;
       lastInstances = instances;
       sweep();
+      if (followOwed) {
+        followOwed = false;
+        follow();
+      }
       return selection;
     },
     /** Replaces store.seedIfEmpty at start: the bot it makes follows the default. */

@@ -247,6 +247,27 @@ describe("testing an AI with one tiny message before a new bot's default trusts 
     expect(chief().modelSelection.instanceId).toBe("claude");
   });
 
+  it("moves the first bot on a result that lands while a later start still reads the engines, once that read settles", async () => {
+    answers.claude = silent;
+    await boot();
+    expect(chief().modelSelection).toEqual(on("claude"));
+    // The app restarts mid-welcome; the engines are read one at a time, and nothing settles until that read ends.
+    engines = new Map();
+    timers = [];
+    let reading = true;
+    tested = make({ changed: async () => { if (!reading) refresh(); } });
+    tested.seed();
+    await tested.check({ ...engineFor("grok"), snapshot: async () => instances[0]!.snapshot });
+    await settled();
+    expect(chief().modelSelection, "nothing moves on the last run's status").toEqual(on("claude"));
+    reading = false;
+    refresh();
+    await settled();
+    expect(pick).toEqual(on("grok"));
+    expect(chief().modelSelection).toEqual({ ...on("grok"), effort: "high" });
+    expect(sent("claude"), "Claude's retry is still two minutes off").toBe(0);
+  });
+
   it("moves the first bot off an AI that can't run once one that can has answered", async () => {
     instances = [ready("claude", "claudeAgent", { authenticated: false })];
     await boot();
