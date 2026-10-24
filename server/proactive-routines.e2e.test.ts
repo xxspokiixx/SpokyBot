@@ -177,6 +177,18 @@ describe("MausBot keeps an eye on the day, hidden from the sidebar", () => {
     expect(String(dump.systemPrompt)).toContain("MEMORY.md");
     await expect.poll(async () => (await messages()).some((message) => message.automation?.runId === run.id && message.text === "hello from fake claude"), { timeout: 10_000 }).toBe(true);
   });
+
+  it("the brief follows the language set in Settings", async () => {
+    await api("PATCH", "/api/config", { language: "pt-br" });
+    apps.gmailError = "Connected account is not ACTIVE: token expired";
+    await settled((await runNow()).id);
+    const portuguese = async () => (await messages()).findLast((message) => message.serverCard && message.widget?.root.title === "Seu resumo");
+    await expect.poll(async () => JSON.stringify((await portuguese())?.widget.root ?? null), { timeout: 10_000 }).toContain("Reconecte Gmail em Apps conectados.");
+    const shown = JSON.stringify((await portuguese()).widget.root);
+    expect(shown).toContain("Precisa da sua atenção");
+    expect(shown).not.toMatch(/Needs you|Your day|Reconnect Gmail/);
+    delete apps.gmailError;
+  });
 });
 
 describe("a read-and-draft run", () => {
