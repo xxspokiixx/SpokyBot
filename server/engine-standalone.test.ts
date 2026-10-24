@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import {
-  chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -33,6 +33,13 @@ import { buildZip } from "./testing/zip-fixture.ts";
 const VERSION = "1.2.3";
 const ENGINE = "fake-engine";
 const sha256 = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
+const realDirectoryNow = (path: string) => {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
 /** The error an install was refused with; an install that succeeds fails the test. */
 const refusal = (run: Promise<unknown>): Promise<Error> => run.then(() => {
   throw new Error("expected the install to be refused");
@@ -499,6 +506,121 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
       expect(standaloneRunEnv(release, realpathSync(installed.executablePath), base)).toEqual({ FAKE_RUN_ENV: "app-copy" });
       expect(standaloneRunEnv(release, installed.executablePath, linked)).toEqual({ FAKE_RUN_ENV: "app-copy" });
       expect(standaloneRunEnv(release, join(linked, "tools", "standalone", ENGINE, "bin", "fake-engine"), base)).toEqual({ FAKE_RUN_ENV: "app-copy" });
+    });
+  });
+
+  describe("a person's files behind a link", () => {
+    /** A folder of the person's own, which no install may touch. */
+    function personsFolder(): string {
+      const folder = join(scratch, "person");
+      mkdirSync(join(folder, "projects", "alpha"), { recursive: true });
+      mkdirSync(join(folder, "beta"), { recursive: true });
+      writeFileSync(join(folder, "notes.txt"), "mine");
+      writeFileSync(join(folder, "projects", "alpha", "plan.md"), "mine");
+      writeFileSync(join(folder, ".old-notes"), "mine");
+      writeFileSync(join(folder, ".new-draft"), "mine");
+      writeFileSync(join(folder, ".download-list.part"), "mine");
+      mkdirSync(join(folder, ".staging-area"));
+      return folder;
+    }
+    const untouched = (folder: string) => {
+      for (const file of ["notes.txt", "projects/alpha/plan.md", ".old-notes", ".new-draft", ".download-list.part"]) {
+        expect(readFileSync(join(folder, ...file.split("/")), "utf8"), file).toBe("mine");
+      }
+      expect(existsSync(join(folder, "beta"))).toBe(true);
+      expect(existsSync(join(folder, ".staging-area"))).toBe(true);
+    };
+
+    it("refuses to install when bin/ is a link, and deletes nothing it points to", async () => {
+      const release = await served("raw");
+      const folder = personsFolder();
+      mkdirSync(engineDir(), { recursive: true });
+      symlinkSync(folder, binDir());
+      await expect(install(release)).rejects.toThrow(/not a plain folder/);
+      untouched(folder);
+    });
+
+    it("refuses to install when the engine's folder is a link, and deletes nothing it points to", async () => {
+      const release = await served("raw");
+      const folder = personsFolder();
+      mkdirSync(dirname(engineDir()), { recursive: true });
+      symlinkSync(folder, engineDir());
+      await expect(install(release)).rejects.toThrow(/not a plain folder/);
+      untouched(folder);
+    });
+
+    it("refuses to install when the standalone folder itself is a link", async () => {
+      const release = await served("raw");
+      const folder = personsFolder();
+      mkdirSync(dirname(dirname(engineDir())), { recursive: true });
+      symlinkSync(folder, dirname(engineDir()));
+      await expect(install(release)).rejects.toThrow(/not a plain folder/);
+      untouched(folder);
+    });
+
+    it("sweeps nothing through a linked folder at start-up", async () => {
+      const release = await served("raw");
+      await install(release);
+      const folder = personsFolder();
+      rmSync(binDir(), { recursive: true });
+      symlinkSync(folder, binDir());
+      registerStandaloneBinDirs(base, [release]);
+      untouched(folder);
+      rmSync(folder, { recursive: true });
+      const engineFolder = personsFolder();
+      rmSync(engineDir(), { recursive: true });
+      symlinkSync(engineFolder, engineDir());
+      registerStandaloneBinDirs(base, [release]);
+      untouched(engineFolder);
+    });
+
+    it("refuses when bin/ becomes a link while the download runs, and deletes nothing it points to", async () => {
+      const release = await served("raw");
+      await install(release);
+      // A changed program makes the next install download again, which is when bin/ is swapped.
+      writeFileSync(binPath(), "#!/bin/sh\necho changed\n");
+      const folder = personsFolder();
+      const swapping = ((input: string | URL, init?: RequestInit) => {
+        if (realDirectoryNow(binDir())) {
+          rmSync(binDir(), { recursive: true });
+          symlinkSync(folder, binDir());
+        }
+        return server.fetchImpl(input, init);
+      }) as typeof fetch;
+      await expect(install(release, { fetchImpl: swapping })).rejects.toThrow(/not a plain folder/);
+      untouched(folder);
+    });
+
+    it("sweeps nothing at start-up when the standalone folder itself is a link", () => {
+      const folder = personsFolder();
+      mkdirSync(join(folder, ENGINE, "bin"), { recursive: true });
+      writeFileSync(join(folder, ENGINE, ".download-mine.part"), "mine");
+      writeFileSync(join(folder, ENGINE, "bin", ".old-mine"), "mine");
+      mkdirSync(dirname(dirname(engineDir())), { recursive: true });
+      symlinkSync(folder, dirname(engineDir()));
+      registerStandaloneBinDirs(base, [fixtureRelease({})]);
+      expect(readFileSync(join(folder, ENGINE, ".download-mine.part"), "utf8")).toBe("mine");
+      expect(readFileSync(join(folder, ENGINE, "bin", ".old-mine"), "utf8")).toBe("mine");
+    });
+
+    it("never removes a folder from bin/, only plain files", async () => {
+      mkdirSync(join(binDir(), "projects"), { recursive: true });
+      writeFileSync(join(binDir(), "projects", "plan.md"), "mine");
+      await expect(install(await served("raw"))).rejects.toThrow(/holds something/);
+      expect(readFileSync(join(binDir(), "projects", "plan.md"), "utf8")).toBe("mine");
+    });
+
+    it("prunes only folders whose own install record names this engine and version", async () => {
+      mkdirSync(join(engineDir(), "alpha"), { recursive: true });
+      writeFileSync(join(engineDir(), "alpha", "plan.md"), "mine");
+      mkdirSync(join(engineDir(), "0.9.0"), { recursive: true });
+      writeFileSync(join(engineDir(), "0.9.0", ".standalone-install.json"), JSON.stringify({ engine: "another-engine", version: "0.9.0", sha256: "a".repeat(64), executable: "fake-engine", executableSha256: "b".repeat(64), installedAt: 1 }));
+      mkdirSync(join(engineDir(), "0.8.0"), { recursive: true });
+      writeFileSync(join(engineDir(), "0.8.0", ".standalone-install.json"), JSON.stringify({ engine: ENGINE, version: "0.7.0", sha256: "a".repeat(64), executable: "fake-engine", executableSha256: "b".repeat(64), installedAt: 1 }));
+      await install(await served("raw"));
+      expect(readFileSync(join(engineDir(), "alpha", "plan.md"), "utf8")).toBe("mine");
+      expect(existsSync(join(engineDir(), "0.9.0"))).toBe(true);
+      expect(existsSync(join(engineDir(), "0.8.0"))).toBe(true);
     });
   });
 

@@ -11,9 +11,9 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, createReadStream, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync,
+  closeSync, createReadStream, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, unlinkSync,
 } from "node:fs";
-import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as tar from "tar";
@@ -209,7 +209,14 @@ function hashFileSync(path: string): string {
   return hash.digest("hex");
 }
 
-/** An interrupted swap left the old folder aside with nothing in its place: it goes back. Anything else is removed. */
+/** Removes one leftover without ever following a link: a link or file is unlinked, only a real folder is emptied. */
+function removeLeftover(path: string): void {
+  if (lstatSync(path).isDirectory()) rmSync(path, { recursive: true, force: true });
+  else unlinkSync(path);
+}
+
+/** An interrupted swap left the old folder aside with nothing in its place: it goes back. Anything else is removed. Only
+ * for an engine folder that is a real folder; bin/ is swept only when it is one too, and only of plain files and links. */
 function sweepLeftovers(engineDir: string): void {
   let names: string[];
   try {
@@ -221,7 +228,7 @@ function sweepLeftovers(engineDir: string): void {
     const path = join(engineDir, name);
     try {
       if (name.startsWith(OLD_PREFIX)) {
-        const version = readRecord(path)?.version;
+        const version = realDirectory(path) ? readRecord(path)?.version : undefined;
         if (version && !existsSync(join(engineDir, version))) {
           renameSync(path, join(engineDir, version));
           continue;
@@ -229,16 +236,20 @@ function sweepLeftovers(engineDir: string): void {
       } else if (!name.startsWith(DOWNLOAD_PREFIX) && !name.startsWith(STAGING_PREFIX) && !POINTER_TEMP.test(name)) {
         continue;
       }
-      rmSync(path, { recursive: true, force: true });
+      removeLeftover(path);
     } catch {
       // A file something still holds open (Windows) goes at a later sweep.
     }
   }
-  try {
-    for (const name of readdirSync(join(engineDir, BIN))) {
-      if (name.startsWith(NEW_PREFIX) || name.startsWith(OLD_PREFIX)) rmSync(join(engineDir, BIN, name), { force: true });
+  const bin = join(engineDir, BIN);
+  if (!realDirectory(bin)) return;
+  for (const entry of readdirSync(bin, { withFileTypes: true })) {
+    if ((entry.name.startsWith(NEW_PREFIX) || entry.name.startsWith(OLD_PREFIX)) && (entry.isFile() || entry.isSymbolicLink())) {
+      try {
+        unlinkSync(join(bin, entry.name));
+      } catch {}
     }
-  } catch {}
+  }
 }
 
 /** The current version when its record, pointer and bin/ program agree with the code: the program the pin names, hashing
@@ -275,6 +286,8 @@ function verifiedCurrent(engineDir: string, release: StandaloneRelease): Standal
 
 /** At boot: the bin/ folder of each engine this app pins, once its program is checked, goes on PATH after everything else. */
 export function registerStandaloneBinDirs(baseDir = DATA_DIR, releases: readonly StandaloneRelease[] = []): void {
+  // Never through a link: a linked folder could lead to the person's own files.
+  if (!realDirectory(standaloneRoot(baseDir))) return;
   for (const release of releases) {
     if (!ENGINE_NAME.test(release.engine)) continue;
     const engineDir = standaloneEngineDir(release.engine, baseDir);
@@ -559,11 +572,35 @@ async function replaceFile(from: string, to: string): Promise<void> {
   await rm(aside, { force: true }).catch(() => {});
 }
 
+/** A folder of the app's own: created when missing, refused when it is a link or anything but a real folder, since
+ * removing things inside a link would remove the person's own files. */
+async function realFolder(path: string, release: StandaloneRelease): Promise<void> {
+  const info = await lstat(path).catch(() => null);
+  if (!info) {
+    await mkdir(path, { mode: 0o700 });
+    return;
+  }
+  if (!info.isDirectory()) {
+    throw new StandaloneInstallError(`OpenMausBot's folder for ${release.name} is not a plain folder (${path}), so nothing was changed. Move it away, then try again.`);
+  }
+}
+
+/** bin/ holds the program and nothing else the app did not put there; a folder in it is never the app's to remove. */
+async function checkBinFolder(binDir: string, release: StandaloneRelease): Promise<void> {
+  if (!(await lstat(binDir).catch(() => null))) return;
+  await realFolder(binDir, release);
+  const folder = (await readdir(binDir, { withFileTypes: true })).find((entry) => entry.isDirectory());
+  if (folder) {
+    throw new StandaloneInstallError(`OpenMausBot's folder for ${release.name} holds something it did not put there (${join(binDir, folder.name)}), so nothing was changed. Move it away, then try again.`);
+  }
+}
+
 /** Puts this version's program in bin/, points current.json at it and bin/ on PATH. */
 async function activate(engineDir: string, release: StandaloneRelease, asset: StandaloneAsset, programSha256: string): Promise<StandaloneInstalled> {
   const versionDir = join(engineDir, release.version);
   const binDir = join(engineDir, BIN);
-  await mkdir(binDir, { recursive: true, mode: 0o700 });
+  await checkBinFolder(binDir, release);
+  await realFolder(binDir, release);
   const name = programName(asset.executable);
   const source = executableIn(versionDir, asset.executable);
   const target = join(binDir, name);
@@ -581,10 +618,10 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
     // Renaming one hard link onto another of the same file leaves both names in place.
     await rm(fresh, { force: true }).catch(() => {});
   }
-  // Only the program goes on PATH: anything else here, planted or left over, goes. A program Windows still holds open
-  // under an .old- name stays for a later sweep.
-  for (const entry of await readdir(binDir)) {
-    if (entry !== name) await rm(join(binDir, entry), { recursive: true, force: true }).catch(() => {});
+  // Only the program goes on PATH: any other file or link here, planted or left over, is unlinked (never followed, never
+  // emptied). A program Windows still holds open under an .old- name stays for a later sweep.
+  for (const entry of await readdir(binDir, { withFileTypes: true })) {
+    if (entry.name !== name && (entry.isFile() || entry.isSymbolicLink())) await unlink(join(binDir, entry.name)).catch(() => {});
   }
   const pointer: CurrentPointer = { version: release.version, executable: asset.executable, sha256: asset.sha256, executableSha256: programSha256 };
   writeFileAtomic(join(engineDir, CURRENT), `${JSON.stringify(pointer)}\n`, { mode: 0o600 });
@@ -594,15 +631,16 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   return { version: release.version, executablePath: target, binDir };
 }
 
-/** Keeps the current version and the newest other; anything older goes unless this server made it current. */
-async function prune(engineDir: string, currentDir: string): Promise<void> {
+/** Keeps the current version and the newest other; anything older goes unless this server made it current. Only a real
+ * folder whose own install record names this engine and its version counts: anything else is left alone. */
+async function prune(engineDir: string, currentDir: string, engine: string): Promise<void> {
   const versions: Array<{ dir: string; installedAt: number }> = [];
   for (const entry of await readdir(engineDir, { withFileTypes: true })) {
     const dir = join(engineDir, entry.name);
     if (!entry.isDirectory() || !usableVersionName(entry.name) || dir === currentDir) continue;
-    const installedAt = readRecord(dir)?.installedAt;
-    const modified = (await stat(dir).catch(() => null))?.mtimeMs ?? 0;
-    versions.push({ dir, installedAt: typeof installedAt === "number" ? installedAt : modified });
+    const record = readRecord(dir);
+    if (!record || record.engine !== engine || record.version !== entry.name) continue;
+    versions.push({ dir, installedAt: typeof record.installedAt === "number" ? record.installedAt : 0 });
   }
   versions.sort((a, b) => b.installedAt - a.installedAt);
   for (const old of versions.slice(1)) {
@@ -644,7 +682,12 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
   const archivePath = join(engineDir, `${DOWNLOAD_PREFIX}${tag}.part`);
   const staging = join(engineDir, `${STAGING_PREFIX}${tag}`);
   try {
-    await mkdir(engineDir, { recursive: true, mode: 0o700 });
+    // Never through a link: the standalone folder, this engine's folder and its bin/ are real folders or nothing changes.
+    const root = standaloneRoot(options.baseDir);
+    await mkdir(dirname(root), { recursive: true, mode: 0o700 });
+    await realFolder(root, release);
+    await realFolder(engineDir, release);
+    await checkBinFolder(join(engineDir, BIN), release);
     // Installs of one engine never overlap in this process, and the data folder lease keeps other servers out.
     sweepLeftovers(engineDir);
 
@@ -656,7 +699,7 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
         throw new StandaloneInstallError(`${release.name} is installed, but it doesn't start on this computer (${failure}). Nothing was changed.`);
       }
       const installed = await activate(engineDir, release, asset, existing.sha256);
-      await prune(engineDir, versionDir).catch(() => {});
+      await prune(engineDir, versionDir, release.engine).catch(() => {});
       return installed;
     }
 
@@ -705,7 +748,7 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
       throw error;
     }
     if (aside) await removeDir(aside).catch(() => {});
-    await prune(engineDir, versionDir).catch(() => {});
+    await prune(engineDir, versionDir, release.engine).catch(() => {});
     return installed;
   } catch (error) {
     throw plainInstallError(release, asset, error);
