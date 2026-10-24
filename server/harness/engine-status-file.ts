@@ -57,12 +57,23 @@ export function snapshotFrom(value: unknown): ProviderSnapshot | null {
  * rename onto a file a scanner holds is retried for up to ~155 ms. */
 export const STATUS_SAVE_DELAY_MS = 1_000;
 
+const unsaved = new Set<() => void>();
+let exitHooked = false;
+
+/** Writes what every file's delay still holds. A clean exit runs it, so a stopped Cloud's next wake starts from the
+ * latest status; a hard kill (SIGKILL, kill() on Windows) loses at most that second, until the next read corrects it. */
+export function flushEngineStatusFiles(): void {
+  for (const write of unsaved) write();
+}
+
 /** Account display identity only, never credentials; kept beside the engines' other local state under providers/. */
 export function engineStatusFile(file: string) {
   let saved: string | undefined;
   let pending: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   const write = () => {
+    unsaved.delete(write);
+    if (timer) clearTimeout(timer);
     timer = undefined;
     const body = pending;
     pending = undefined;
@@ -102,6 +113,11 @@ export function engineStatusFile(file: string) {
       if (!timer) {
         timer = setTimeout(write, STATUS_SAVE_DELAY_MS);
         timer.unref?.();
+        unsaved.add(write);
+        if (!exitHooked) {
+          exitHooked = true;
+          process.once("exit", flushEngineStatusFiles);
+        }
       }
     },
   };
