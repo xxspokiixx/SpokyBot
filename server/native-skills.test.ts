@@ -88,6 +88,8 @@ describe("skills the engine loads by itself", () => {
     expect(listed(project.host.listBotSkills(project.bot))).toEqual(["repo-skill:native"]);
     const pinned = hostFor("claudeAgent", { threadCwd: repo });
     expect(pinned.host.expandSkillCommand(pinned.bot, "pinned", "/repo-skill")).toContain("repo-skill");
+    expect(listed(pinned.host.listBotSkills(pinned.bot, "pinned"))).toEqual(["repo-skill:native"]);
+    expect(listed(pinned.host.listBotSkills(pinned.bot))).toEqual(["task-folder-skill:native"]);
     expect(pinned.host.expandSkillCommand(pinned.bot, "main", "/repo-skill")).toBe("/repo-skill");
     const none = hostFor("claudeAgent", { threadCwd: null });
     expect(none.host.expandSkillCommand(none.bot, "pinned", "/task-folder-skill")).toBe("/task-folder-skill");

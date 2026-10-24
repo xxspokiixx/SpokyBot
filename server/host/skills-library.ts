@@ -79,11 +79,11 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   /** The bot's own skills, and its library skills while the library is on; an imported skill of the same name yields. */
   const ownSkills = (bot: BotRecord) =>
     skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills) : listSkills(bot.id);
-  const listBotSkills = (bot: BotRecord): SkillListing[] => {
+  const listBotSkills = (bot: BotRecord, threadId = bot.threadId): SkillListing[] => {
     const own = ownSkills(bot);
     const listed = [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)))];
     const names = new Set(listed.map((skill) => skill.name));
-    return [...listed, ...nativesFor(bot).filter((skill) => !names.has(skill.name)).map(nativeSkillListing)];
+    return [...listed, ...nativesFor(bot, threadId).filter((skill) => !names.has(skill.name)).map(nativeSkillListing)];
   };
   const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
     const own = readSkillFile(bot.id, name);
