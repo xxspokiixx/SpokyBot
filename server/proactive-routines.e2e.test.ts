@@ -185,7 +185,7 @@ describe("MausBot keeps an eye on the day, hidden from the sidebar", () => {
     const portuguese = async () => (await messages()).findLast((message) => message.serverCard && message.widget?.root.title === "Seu resumo");
     await expect.poll(async () => JSON.stringify((await portuguese())?.widget.root ?? null), { timeout: 10_000 }).toContain("Reconecte Gmail em Apps conectados.");
     const shown = JSON.stringify((await portuguese()).widget.root);
-    expect(shown).toContain("Precisa de você");
+    expect(shown).toContain("Precisa da sua atenção");
     expect(shown).not.toMatch(/Needs you|Your day|Reconnect Gmail/);
     delete apps.gmailError;
   });

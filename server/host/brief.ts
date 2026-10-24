@@ -428,7 +428,8 @@ export function createBrief(deps: BriefDeps) {
     if (relabel || returned || firstToday || persistedAt === undefined || at - persistedAt >= PERSIST_EVERY_MS) save();
     void source;
     if (!returned && !firstToday) {
-      if (relabel && currentCard()) await render({ create: false, notify: false });
+      const owner = relabel ? chief() : null;
+      if (owner && currentCard(owner)) await render({ create: false, notify: false });
       return { returned: false };
     }
     const shown = await render({ create: true, notify: false });

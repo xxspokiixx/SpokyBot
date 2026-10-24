@@ -130,7 +130,7 @@ describe("the brief", () => {
     const root = s.rows().findLast((message) => message.serverCard && message.widget?.root.title === "Seu resumo")!.widget!.root as WidgetRoot;
     const shown = JSON.stringify(root);
     expect(shown).toContain("quinta-feira, 22 de outubro");
-    expect(shown).toContain("Precisa de você");
+    expect(shown).toContain("Precisa da sua atenção");
     expect(shown).toContain("Aguardando sua resposta · Ada precisa dos números.");
     expect(shown).toContain("Sessão encerrada em Claude");
     expect(shown).not.toMatch(/Needs you|Waiting on your reply|Thursday/);
