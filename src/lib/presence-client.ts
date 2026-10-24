@@ -5,8 +5,8 @@ import { locales } from "@/locales";
 export const PRESENCE_MIN_INTERVAL_MS = 60_000;
 
 /** The pack the app shows, worked out as App does rather than read from i18n, which a first ping can reach before App applies it. */
-export function shownLanguage(serverDefault: string | undefined): string {
-  return resolveLocale(effectiveLanguage(languageChoice(), serverDefault) || globalThis.navigator?.language, new Set(Object.keys(locales)));
+export function shownLanguage(serverDefault: string | undefined, choice: string | null = languageChoice()): string {
+  return resolveLocale(effectiveLanguage(choice, serverDefault) || globalThis.navigator?.language, new Set(Object.keys(locales)));
 }
 
 /** The language lets the brief the server writes match the app. */
