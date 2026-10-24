@@ -166,7 +166,7 @@ export function cliVersionReader(cli: string): (err: Error | null, stdout: strin
     const version = err ? "" : stdout.trim();
     if (version) return { version: (last = version) };
     const failure = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
-    const timedOut = failure?.killed === true && failure.code == null;
+    const timedOut = failure?.killed === true && typeof failure.code !== "string";
     if (timedOut && last) return { version: last };
     return { reason: timedOut ? `\`${cli}\` took longer than 8 seconds to answer --version. The machine may be busy; check again.` : `\`${cli}\` CLI not found` };
   };

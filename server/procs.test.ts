@@ -113,6 +113,10 @@ describe("CLI version probes", () => {
     const read = cliVersionReader("claude");
     expect(read(null, " 2.1.302\n")).toEqual({ version: "2.1.302" });
     expect(read(timedOut, "")).toEqual({ version: "2.1.302" });
+    const trapped = await new Promise<Error | null>((resolve) => {
+      execCli(process.execPath, ["-e", "process.on('SIGTERM', () => process.exit(1)); setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
+    });
+    expect(read(trapped, "")).toEqual({ version: "2.1.302" });
     expect(read(Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }), "")).toEqual({ reason: "`claude` CLI not found" });
   }, hostTimeout(20_000));
 });
