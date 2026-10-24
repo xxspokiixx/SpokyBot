@@ -574,7 +574,7 @@ import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./h
 import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { applyIncludedPagesMessage } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createXResearchInternalRoutes } from "./routes/x-research.ts"; import { createHelperToolRoutes } from "./routes/helper-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { assertBotHere, createBotMoves } from "./bot-moves.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
-import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
+import { createBotMemoryRoutes } from "./routes/bot-memory.ts"; import { createBotGoals } from "./bot-goal.ts"; import { createBotGoalRoutes } from "./routes/bot-goal.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts";
 import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
@@ -2387,7 +2387,7 @@ function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
   return task;
 }
 
-async function interruptDirectThread(botId: string, threadId: string, cause?: string): Promise<void> {
+async function interruptDirectThread(botId: string, threadId: string, cause?: string): Promise<void> {  botGoals.stopped(threadId);
   if (store.taskByThread(botId, threadId)?.activity === "parked.computer") store.setTaskActivity(botId, threadId, "idle");
   const requestOwner = directRequestOwners.get(threadId);
   if (requestOwner) {
@@ -7573,7 +7573,7 @@ function drainQueuedSends() {
   if (!followupsReady) return;
   if (drainingQueuedSends) { queuedSendsDrainOwed = true; return; }
   drainingQueuedSends = true;
-  try { drainQueuedSendsNow(); } finally {
+  try { drainQueuedSendsNow(); botGoals.wake(); } finally {
     drainingQueuedSends = false;
     if (queuedSendsDrainOwed) { queuedSendsDrainOwed = false; drainQueuedSends(); }
   }
@@ -12987,7 +12987,7 @@ ROUTES.push(createBotMessageRoutes({
 }));
 const chatApps = createChatApps({ store, dataDir: DATA_DIR });
 const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, oauth: mcpOAuth });
-ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc }));
+ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc })); const botGoals = createBotGoals({ store, subscribe: (fn) => bus.subscribe(fn), ignore: shouldIgnoreProviderEvent, idle: (botId, threadId) => !threadBusy(botId, threadId) && !botAtThreadCapacity(botId) && !activeGroupTurnForBot(botId) && !hasQueuedSteeredMessages(botId, threadId) && !directRootQueued(threadId) && !parksBehindCoordination(botId, threadId) && store.taskByThread(botId, threadId)?.activity !== "waiting-on-you", start: (botId, threadId, prompt, onDispatchError) => startTurn(botId, prompt, { threadId, cardContinuation: true, unattended: isUnattended(botId, threadId), onDispatchError, requestMessageId: store.activePath(threadId).findLast((m) => m.role === "user")?.id }) }); ROUTES.push(createBotGoalRoutes({ store, goals: botGoals, cloudGuestSendRefusal, directSendRefusal }));
 const { react } = createReactions({
   store, reply: (input) => personReplies.deliver({ ...input, about: "message" }),
   answerCard: (input) => respondToCard({ ...input, via: "reaction" }), withdraw: personReplies.withdraw,

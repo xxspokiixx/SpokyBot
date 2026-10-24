@@ -9,6 +9,7 @@ import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
+import type { ThreadGoal } from "./bot-goal.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
@@ -191,6 +192,7 @@ export interface WireTask {
   cacheKeepWarm?: CacheKeepWarmStatus;
   /** the folder this task's turns run in, pinned on its first turn. */
   cwd?: string | null;
+  goal?: ThreadGoal;
 }
 
 /** One thread's keep-warm window as a client shows it. Times are epoch ms. */
