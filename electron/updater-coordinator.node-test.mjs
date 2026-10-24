@@ -707,3 +707,43 @@ test("carries the release notes with the version, as one capped string", async (
   assert.equal(h.getState().version, "2.0.0");
   assert.equal(h.getState().releaseNotes, "- **Faster start.** Opens at once.");
 });
+
+test("repeated silent check failures surface a retryable notice instead of staying idle forever", async () => {
+  const { updater, coordinator, getState } = harness();
+  updater.checkForUpdates = () => Promise.reject(new Error("getaddrinfo ENOTFOUND github.com"));
+
+  await coordinator.check();
+  await coordinator.check();
+  assert.equal(getState().status, "idle");
+  await coordinator.check();
+
+  assert.equal(getState().status, "error");
+  assert.match(getState().message, /Couldn't check for updates/);
+  assert.notEqual(getState().retryable, false);
+});
+
+test("a successful check resets the silent failure count", async () => {
+  const { updater, coordinator, getState } = harness();
+  updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  await coordinator.check();
+  await coordinator.check();
+  updater.checkForUpdates = async () => updater.emit("update-not-available");
+  await coordinator.check();
+  updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  await coordinator.check();
+  await coordinator.check();
+
+  assert.equal(getState().status, "idle");
+});
+
+test("a manual retry after the notice clears it and checks again", async () => {
+  const { updater, coordinator, getState } = harness();
+  updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  for (let i = 0; i < 3; i++) await coordinator.check();
+  assert.equal(getState().status, "error");
+
+  updater.checkForUpdates = async () => updater.emit("update-not-available");
+  await coordinator.check(true);
+
+  assert.equal(getState().status, "idle");
+});

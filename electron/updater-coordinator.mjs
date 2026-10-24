@@ -11,6 +11,9 @@ export function releaseNotesText(notes) {
   return trimmed ? trimmed.slice(0, 8000) : undefined;
 }
 
+/** Three consecutive hourly failures: the app has gone about three hours without seeing the release feed. */
+export const QUIET_FAILURES_BEFORE_NOTICE = 3;
+
 export function createUpdaterCoordinator(updater, setState, { handOffInstall = null, nativeStaging = false } = {}) {
   let checkOperation = null;
   let downloadedFiles = null;
@@ -23,6 +26,9 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
   // A staged update, hand-off or failed action stays until the person acts; hourly checks must not replace it.
   let actionOwnsState = false;
   const routedErrors = new WeakSet();
+  // Hourly checks fail quietly one at a time (offline laptop, a feed still uploading), but a feed that stays
+  // unreachable must not leave the app on an old version with no sign of it.
+  let quietFailures = 0;
 
   const routeError = (manual, error) => {
     if (recoveryRequired) return;
@@ -50,6 +56,12 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       return;
     }
     if (!shown) {
+      quietFailures += 1;
+      if (quietFailures >= QUIET_FAILURES_BEFORE_NOTICE) {
+        actionOwnsState = true;
+        setState({ status: "error", message: `Couldn't check for updates. ${updateErrorMessage(error)}` });
+        return;
+      }
       setState({ status: "idle" });
       return;
     }
@@ -69,6 +81,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
     if (checkOwnsState()) setState({ status: "checking" });
   });
   updater.on("update-available", (info) => {
+    quietFailures = 0;
     if (checkOwnsState()) {
       download(Boolean(checkOperation?.manual), {
         version: info?.version,
@@ -79,6 +92,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
     }
   });
   updater.on("update-not-available", () => {
+    quietFailures = 0;
     if (checkOwnsState()) setState({ status: "idle" });
   });
   // macOS native staging (quitAndInstall) reports failure only through this event; quitAndInstall returns void.
