@@ -111,7 +111,7 @@ it("a refused folder says why plainly, with no Try again; only a failure trying 
 it("on the phone or in a browser, a computer that lends its internet connection says so, and while it is away that the sites that turn away data centres open from My Cloud's own connection", () => {
   const computer = { id: "c", name: "Ash's MacBook", platform: "darwin" as const, online: true, busy: false, lent: true, lastSeenAt: Date.now(), lastUsedAt: null,
     scopes: { folders: 3, terminal: false, screen: false, internet: true } };
-  expect(lentComputerLines(computer)).toEqual(["Online now", "Shares: internet connection, 3 folders", "Not used yet"]);
+  expect(lentComputerLines(computer)).toEqual(["Online now", "Shares: internet connection, 3 folders", "Terminal is off on Ash's MacBook, so Cloud bots cannot run commands there. To allow it, open OpenMausBot on Ash's MacBook and turn on Terminal under Server → This computer → Settings → MausBot Cloud → Terminal.", "Not used yet"]);
   expect(lentComputerLines({ ...computer, scopes: { ...computer.scopes, folders: 1 } })).toContain("Shares: internet connection, 1 folder");
   const away = lentComputerLines({ ...computer, online: false, lastSeenAt: Date.now() - 5 * 60_000 });
   expect(away).toContain("While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own connection and may turn your bots away.");

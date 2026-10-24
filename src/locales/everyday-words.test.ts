@@ -84,6 +84,7 @@ const ALLOWED: Record<string, string> = {
   "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
   "lending.viaAccess": "points at the Settings → Servers page by its label",
   "lending.viaAccessTerminal": "points at the Settings → Servers page by its label",
+  "lending.cloudSide.terminalOff": "points at the app menu's Server menu entry by its label",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",
 };
 
