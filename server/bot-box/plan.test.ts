@@ -1,12 +1,13 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { engineInstallRoots } from "../engine-roots.ts";
 import { BOX_MUTATIONS, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
 const setup = (mutate?: BoxMutation[]): BoxSetup => ({
-  dataDir, home, codeRoots: ["/app"], seccompFd: 3,
+  dataDir, home, codeRoots: ["/app"], engineRoots: engineInstallRoots(dataDir), seccompFd: 3,
   bridges: [{ name: "egress", port: 3128, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }],
   mutate: mutate ? new Set(mutate) : undefined,
 });
@@ -59,6 +60,37 @@ linuxBox("the box plan", () => {
     expect(text).not.toContain("--new-session");
   });
 
+  it("puts the engines OpenMausBot installed back whole and read-only, whatever else the turn may write", () => {
+    // npm's bin entries are relative links into the prefix: `bin/opencode -> ../lib/node_modules/opencode-ai/bin/opencode.exe`.
+    const prefix = join(dataDir, "tools", "npm");
+    const engineFiles = [`${prefix}/bin/opencode`, `${prefix}/lib/node_modules/opencode-ai/bin/opencode.exe`, `${prefix}/bin/codex`,
+      `${prefix}/lib/node_modules/@openai/codex/bin/codex.js`, join(dataDir, "tools", "antigravity-acp", "linux-x64", "versions", "abc", "agy_acp_server")];
+    const asked = planBox(setup(), {
+      command: `${prefix}/bin/opencode`, args: ["acp", `${prefix}/lib/node_modules/opencode-ai/package.json`], cwd,
+      env: { HOME: home, XDG_CACHE_HOME: `${prefix}/cache`, OPENCODE_HOME: `${prefix}/lib` }, rw: [`${prefix}/bin`, join(dataDir, "tools")],
+    });
+    for (const plan of [turn(), turn(["bind-data"]), asked]) {
+      for (const file of engineFiles) expect(visibleInBox(plan, file), file).toBe("ro");
+    }
+    for (const other of ["tools/chrome/131/linux/chrome", "tools/agent-browser/0.37/agent-browser", "tools/token"]) {
+      expect(visibleInBox(turn(), join(dataDir, other)), other).toBe("none");
+    }
+    const args = bwrapArgs(turn());
+    const engines = args.findIndex((arg, i) => arg === "--ro-bind-try" && args[i + 1] === prefix && args[i + 2] === prefix);
+    expect(engines).toBeGreaterThan(args.findIndex((arg, i) => arg === "--tmpfs" && args[i + 1] === dataDir));
+    const lastWritable = args.reduce((last, arg, i) => (arg === "--bind" || arg === "--bind-try") && !args[i + 2]!.startsWith("/run/omb/") ? i : last, -1);
+    expect(engines).toBeGreaterThan(lastWritable);
+  });
+
+  it("the engines are there wherever HOME and the data folder are", () => {
+    const own = join(dataDir, "engine-homes", "member-aaaaaaaaaaaaaaaa");
+    const team = planBox(setup(), { command: "opencode", args: [], cwd, env: { HOME: own }, home: own });
+    expect(visibleInBox(team, join(dataDir, "tools", "npm", "bin", "opencode"))).toBe("ro");
+    const apart = planBox({ ...setup(), dataDir: "/srv/omb", home: "/home/maus", engineRoots: engineInstallRoots("/srv/omb") }, { command: "opencode", args: [], cwd: "/srv/omb/task-workspaces/b/t", env: {} });
+    expect(visibleInBox(apart, "/srv/omb/tools/npm/bin/opencode")).toBe("ro");
+    expect(visibleInBox(apart, "/srv/omb/messages.db")).toBe("none");
+  });
+
   it("TMPDIR never puts the host's /tmp back; another temp folder is put back", () => {
     const plan = planBox(setup(), { command: "/usr/bin/x", args: [], cwd, env: { TMPDIR: "/tmp" } });
     expect(visibleInBox(plan, "/tmp/other-turn/mcp.json")).toBe("none");
@@ -74,6 +106,14 @@ linuxBox("the box plan", () => {
     expect(bwrapArgs(plan).join(" ")).not.toContain("/run/omb");
     expect(visibleInBox(plan, "/data/.openmausbot/browser/profiles/p1/Default")).toBe("rw");
     expect(visibleInBox(plan, "/data/.openmausbot/messages.db")).toBe("none");
+  });
+
+  it("Antigravity's own profile (GEMINI_HOME) goes back read-write, and no other account's", () => {
+    const profile = join(dataDir, "providers", "antigravity", "a".repeat(64));
+    const plan = planBox(setup(), { command: join(dataDir, "tools", "antigravity-acp", "linux-x64", "versions", "abc", "agy_acp_server"), args: ["--uid="], cwd, env: { HOME: home, GEMINI_HOME: profile } });
+    expect(visibleInBox(plan, join(profile, "antigravity-acp", "acp_token.json"))).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "providers", "antigravity", "b".repeat(64), "antigravity-acp", "acp_token.json"))).toBe("none");
+    expect(visibleInBox(plan, join(dataDir, "providers", "key"))).toBe("none");
   });
 
   it("a cwd outside the data folder is the turn's folder; a bot named by the caller gets its own folder", () => {
@@ -129,6 +169,7 @@ linuxBox("the box plan", () => {
       "env-all": () => true,
       "tmp-shared": (plan) => visibleInBox(plan, "/tmp/other-turn/mcp.json") === "rw",
       "no-seccomp": (plan) => !plan.options.includes("--seccomp"),
+      "engines-rw": (plan) => visibleInBox(plan, join(dataDir, "tools", "npm", "bin", "opencode")) === "rw",
     };
     for (const mutation of BOX_MUTATIONS) {
       if (mutation === "env-all") continue;
