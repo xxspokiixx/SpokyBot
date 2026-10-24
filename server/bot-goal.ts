@@ -6,7 +6,7 @@ import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import type { Store } from "./store.ts";
 
 export interface BotGoalDeps {
-  store: Pick<Store, "bots" | "botByThread" | "taskByThread" | "patchTask" | "activePath" | "patchMessage">;
+  store: Pick<Store, "bots" | "botByThread" | "taskByThread" | "patchTask">;
   subscribe(listener: (event: RuntimeEvent) => void): unknown;
   ignore(event: RuntimeEvent): boolean;
   /** Nothing else is running, queued or waiting on the person for this conversation. */
@@ -15,6 +15,9 @@ export interface BotGoalDeps {
   start(botId: string, threadId: string, prompt: string, onDispatchError: (message: string) => void): Promise<unknown>;
   now?(): number;
 }
+
+/** A started goal turn that is not running and has not settled by now is gone. */
+const LAUNCH_GRACE_MS = 60_000;
 
 export class BotGoalRefused extends Error {
   readonly status = 409;
@@ -26,7 +29,7 @@ export function createBotGoals(deps: BotGoalDeps) {
   const { store } = deps;
   const now = () => deps.now?.() ?? Date.now();
   const due = new Set<string>();
-  const launching = new Set<string>();
+  const launching = new Map<string, number>();
   const handled = new Map<string, string>();
 
   const read = (threadId: string): ThreadGoal | null => readStoredGoal(store.botByThread(threadId)
@@ -39,14 +42,23 @@ export function createBotGoals(deps: BotGoalDeps) {
   function launch(threadId: string): void {
     const bot = store.botByThread(threadId);
     const goal = read(threadId);
-    if (!bot || goal?.status !== "active" || launching.has(threadId)) { due.delete(threadId); return; }
+    if (!bot || goal?.status !== "active") { due.delete(threadId); return; }
     if (!deps.idle(bot.id, threadId)) return;
+    const startedAt = launching.get(threadId);
+    if (startedAt !== undefined) {
+      if (now() - startedAt < LAUNCH_GRACE_MS) return;
+      launching.delete(threadId);
+      due.delete(threadId);
+      save(threadId, pauseGoal(goal, "failed", now(), "the goal turn never finished"));
+      return;
+    }
     const gate = afterTurn(goal, { ok: true, stopped: false, signal: null }, now());
     due.delete(threadId);
     if (!gate.run) { save(threadId, gate.goal); return; }
     const running = startGoalTurn(goal, now());
     save(threadId, running);
-    launching.add(threadId);
+    launching.set(threadId, now());
+    due.add(threadId);
     const failed = (message: string) => {
       launching.delete(threadId);
       const current = read(threadId);
@@ -59,21 +71,27 @@ export function createBotGoals(deps: BotGoalDeps) {
     for (const threadId of due) launch(threadId);
   }
 
-  function signalOf(threadId: string, turnId: string | undefined): GoalSignal | null {
-    const reply = store.activePath(threadId).findLast((m) => m.role === "bot" && m.kind === "text" && (turnId === undefined || m.turnId === turnId));
-    if (!reply?.text) return null;
-    const { visibleText, signal } = parseGoalSignal(reply.text);
-    if (visibleText !== reply.text) store.patchMessage(threadId, reply.id, { text: visibleText });
-    return signal;
-  }
+  const signals = new Map<string, GoalSignal | null>();
 
   deps.subscribe((event) => {
-    if (event.type !== "turn.completed" || deps.ignore(event)) return;
-    launching.delete(event.threadId);
-    const goal = read(event.threadId);
-    if (goal?.status === "active" && (event.turnId === undefined || handled.get(event.threadId) !== event.turnId)) {
+    if ((event.type !== "turn.completed" && event.type !== "session.exited") || deps.ignore(event)) return;
+    if (event.type === "session.exited") {
+      const goal = read(event.threadId);
+      if (launching.delete(event.threadId) && goal?.status === "active") {
+        due.delete(event.threadId);
+        save(event.threadId, pauseGoal(goal, "failed", now(), "the engine session ended"));
+      }
+      return;
+    }
+    const signal = signals.get(event.threadId) ?? null;
+    signals.delete(event.threadId);
+    const fresh = event.turnId === undefined || handled.get(event.threadId) !== event.turnId;
+    if (fresh) {
+      launching.delete(event.threadId);
       if (event.turnId !== undefined) handled.set(event.threadId, event.turnId);
-      const signal = signalOf(event.threadId, event.turnId);
+    }
+    const goal = read(event.threadId);
+    if (fresh && goal?.status === "active") {
       const next = afterTurn(goal, { ok: event.ok, stopped: event.stopReason === "interrupted", signal }, now());
       save(event.threadId, next.goal);
       if (next.run) due.add(event.threadId);
@@ -91,6 +109,13 @@ export function createBotGoals(deps: BotGoalDeps) {
 
   return {
     get: read,
+    /** The visible part of a bot reply as it is stored; the marker never reaches the transcript, a notification or a digest. */
+    intake(threadId: string, text: string): string {
+      if (!store.botByThread(threadId)) return text;
+      const { visibleText, signal } = parseGoalSignal(text);
+      signals.set(threadId, signal);
+      return visibleText;
+    },
     wake,
     set(botId: string, threadId: string, text: string): ThreadGoal {
       const task = store.taskByThread(botId, threadId);

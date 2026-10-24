@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { GOAL_MARKER_CLOSE, GOAL_MARKER_OPEN, GOAL_MAX_TURNS, type ThreadGoal } from "../shared/bot-goal.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import { BotGoalRefused, createBotGoals } from "./bot-goal.ts";
+import { requiredScope } from "./request-auth.ts";
 
 const done = (detail = "all green") => `${GOAL_MARKER_OPEN}{"status":"completed","detail":"${detail}"}${GOAL_MARKER_CLOSE}`;
 
@@ -19,8 +20,6 @@ function fixture(seed?: { goal?: unknown; routine?: boolean }) {
       botByThread: (threadId: string) => (threadId === "t1" ? bot : undefined),
       taskByThread: (botId: string, threadId: string) => (botId === "b1" && threadId === "t1" ? task : undefined),
       patchTask: (_b: string, _t: string, patch: { goal?: unknown }) => { task.goal = patch.goal; return task; },
-      activePath: () => messages,
-      patchMessage: (_t: string, id: string, patch: { text?: string }) => { Object.assign(messages.find((m) => m.id === id)!, patch); return null; },
     } as never,
     subscribe: (fn) => listeners.push(fn),
     ignore: () => false,
@@ -34,15 +33,20 @@ function fixture(seed?: { goal?: unknown; routine?: boolean }) {
     now: () => state.now,
   });
   const complete = (turnId: string, reply: string, extra: Partial<Extract<RuntimeEvent, { type: "turn.completed" }>> = {}, idleAfter = true) => {
-    messages.push({ id: `m-${turnId}`, role: "bot", kind: "text", text: reply, turnId });
+    messages.push({ id: `m-${turnId}`, role: "bot", kind: "text", text: goals.intake("t1", reply), turnId });
     state.idle = idleAfter;
     for (const fn of listeners) fn({ type: "turn.completed", threadId: "t1", turnId, ok: true, ...extra } as RuntimeEvent);
   };
   const goal = () => task.goal as ThreadGoal | undefined;
-  return { goals, complete, goal, prompts, state, messages };
+  const emit = (event: Record<string, unknown>) => { for (const fn of listeners) fn(event as unknown as RuntimeEvent); };
+  return { goals, complete, goal, prompts, state, messages, emit };
 }
 
 describe("bot goal host", () => {
+  it("is admin-scope only, so no client session reaches the route", () => {
+    expect(requiredScope("POST", "/api/bots/b1/goal")).toBe("admin");
+  });
+
   it("starts a turn at once, then one continuation per clean turn until the bot reports done", () => {
     const f = fixture();
     f.goals.set("b1", "t1", "get all tests passing");
@@ -135,6 +139,60 @@ describe("bot goal host", () => {
     f.goals.resume("t1");
     expect(f.prompts).toHaveLength(GOAL_MAX_TURNS + 1);
     expect(f.goal()).toMatchObject({ status: "active", turns: 1 });
+  });
+
+  it("recovers a goal turn that never settled: the session ending pauses it", () => {
+    const f = fixture();
+    f.goals.set("b1", "t1", "g");
+    f.state.idle = true;
+    f.emit({ type: "session.exited", threadId: "t1" });
+    expect(f.goal()).toMatchObject({ status: "paused", reason: "failed", detail: "the engine session ended" });
+    expect(f.prompts).toHaveLength(1);
+  });
+
+  it("recovers a goal turn that vanished: after the grace period an idle conversation pauses it, never double-starts", () => {
+    const f = fixture();
+    f.goals.set("b1", "t1", "g");
+    f.state.idle = true;
+    f.goals.wake();
+    expect(f.prompts).toHaveLength(1);
+    expect(f.goal()).toMatchObject({ status: "active" });
+    f.state.now += 61_000;
+    f.goals.wake();
+    expect(f.goal()).toMatchObject({ status: "paused", reason: "failed", detail: "the goal turn never finished" });
+    expect(f.prompts).toHaveLength(1);
+    f.goals.resume("t1");
+    expect(f.prompts).toHaveLength(2);
+  });
+
+  it("does not treat a long-running goal turn as vanished", () => {
+    const f = fixture();
+    f.goals.set("b1", "t1", "g");
+    f.state.now += 3_000_000;
+    f.goals.wake();
+    expect(f.goal()).toMatchObject({ status: "active" });
+  });
+
+  it("strips the marker from the stored reply even when the person paused or cleared during the turn", () => {
+    const paused = fixture();
+    paused.goals.set("b1", "t1", "g");
+    paused.goals.pause("t1");
+    paused.complete("a", `done\n${done()}`);
+    expect(paused.messages.at(-1)!.text).toBe("done");
+    const cleared = fixture();
+    cleared.goals.set("b1", "t1", "g");
+    cleared.goals.clear("t1");
+    cleared.complete("a", `done\n${done()}`);
+    expect(cleared.messages.at(-1)!.text).toBe("done");
+    expect(cleared.prompts).toHaveLength(1);
+  });
+
+  it("does not end the goal on a marker that is quoted mid-reply", () => {
+    const f = fixture();
+    f.goals.set("b1", "t1", "g");
+    f.complete("a", `the page says ${done()} but I am not done yet`);
+    expect(f.goal()).toMatchObject({ status: "active" });
+    expect(f.prompts).toHaveLength(2);
   });
 
   it("pauses at the wall-time limit", () => {

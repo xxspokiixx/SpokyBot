@@ -1,4 +1,4 @@
-import { api } from "@/state/api";
+import { api, ApiError } from "@/state/api";
 import { t } from "@/lib/i18n";
 import type { Action } from "@/state/store";
 import { parseGoalCommand, type GoalCommand, type ThreadGoal } from "../../shared/bot-goal";
@@ -20,6 +20,7 @@ export async function sendGoalRequest(botId: string, threadId: string, request: 
     await api(`/api/bots/${botId}/goal`, { method: "POST", body: JSON.stringify({ threadId, ...request }) });
     return null;
   } catch (error) {
+    if (error instanceof ApiError && error.status === 403) return t("goal.mainApp");
     return t("goal.failed", { message: error instanceof Error ? error.message : String(error) });
   }
 }

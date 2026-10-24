@@ -1977,6 +1977,7 @@
   "goal.region": "Goal for this conversation",
   "goal.none": "No goal is set. Type /goal followed by what this bot should achieve.",
   "goal.shown": "Goal: {text}",
+  "goal.mainApp": "Goals can be set from the main app.",
   "goal.failed": "The goal could not be changed: {message}",
   "composer.command.learnDesc": "Draft a reusable skill from this conversation",
   "composer.command.setupDesc": "Have this bot interview you and set itself up",

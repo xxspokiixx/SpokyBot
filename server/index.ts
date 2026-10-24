@@ -6762,7 +6762,7 @@ bus.subscribe((event: RuntimeEvent) => {
     pushMessage({ role: "bot", kind: "activity", tool: { name: STOPPED_TURN_NAME, ok: true }, turnId });
   };
   const pushAssistantText = (text: string, turnId: string | undefined) => {
-    const spoken = assistantTranscript(text);
+    const spoken = assistantTranscript(botGoals.intake(event.threadId, text));
     if (spoken.kind === "stopped") {
       pushStoppedTurn(turnId);
       return;
@@ -12987,7 +12987,7 @@ ROUTES.push(createBotMessageRoutes({
 }));
 const chatApps = createChatApps({ store, dataDir: DATA_DIR });
 const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, oauth: mcpOAuth });
-ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc })); const botGoals = createBotGoals({ store, subscribe: (fn) => bus.subscribe(fn), ignore: shouldIgnoreProviderEvent, idle: (botId, threadId) => !threadBusy(botId, threadId) && !botAtThreadCapacity(botId) && !activeGroupTurnForBot(botId) && !hasQueuedSteeredMessages(botId, threadId) && !directRootQueued(threadId) && !parksBehindCoordination(botId, threadId) && store.taskByThread(botId, threadId)?.activity !== "waiting-on-you", start: (botId, threadId, prompt, onDispatchError) => startTurn(botId, prompt, { threadId, cardContinuation: true, unattended: isUnattended(botId, threadId), onDispatchError, requestMessageId: store.activePath(threadId).findLast((m) => m.role === "user")?.id }) }); ROUTES.push(createBotGoalRoutes({ store, goals: botGoals, cloudGuestSendRefusal, directSendRefusal }));
+ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc })); const botGoals = createBotGoals({ store, subscribe: (fn) => bus.subscribe(fn), ignore: shouldIgnoreProviderEvent, idle: (botId, threadId) => !threadBusy(botId, threadId) && !botAtThreadCapacity(botId) && !activeGroupTurnForBot(botId) && !hasQueuedSteeredMessages(botId, threadId) && !directRootQueued(threadId) && !parksBehindCoordination(botId, threadId) && store.taskByThread(botId, threadId)?.activity !== "waiting-on-you", start: (botId, threadId, prompt, onDispatchError) => startTurn(botId, prompt, { threadId, cardContinuation: true, unattended: isUnattended(botId, threadId), onDispatchError, requestMessageId: store.activePath(threadId).findLast((m) => m.role === "user")?.id }) }); ROUTES.push(createBotGoalRoutes({ store, goals: botGoals, directSendRefusal }));
 const { react } = createReactions({
   store, reply: (input) => personReplies.deliver({ ...input, about: "message" }),
   answerCard: (input) => respondToCard({ ...input, via: "reaction" }), withdraw: personReplies.withdraw,

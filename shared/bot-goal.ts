@@ -38,9 +38,16 @@ export function parseGoalCommand(input: string): GoalCommand | null {
   return { kind: "set", text: rest };
 }
 
-/** The goal text never carries a control marker or a closing tag into the prompt that quotes it. */
+const LOOKALIKE_DELIMITER = /<\s*\/?\s*(?:openmaus-goal|goal)\s*>/gi;
+
+/** The goal text never carries a control marker or a goal fence into the prompt that quotes it, however it is nested. */
 export function cleanGoalText(input: string): string {
-  return input.replaceAll(GOAL_MARKER_OPEN, "").replaceAll(GOAL_MARKER_CLOSE, "").replace(/<\/?goal>/gi, "").trim().slice(0, GOAL_MAX_TEXT);
+  let text = input;
+  for (let previous = ""; previous !== text;) {
+    previous = text;
+    text = text.replace(LOOKALIKE_DELIMITER, "");
+  }
+  return text.trim().slice(0, GOAL_MAX_TEXT);
 }
 
 export function newGoal(input: string, now: number): ThreadGoal | null {
@@ -89,14 +96,35 @@ export function afterTurn(goal: ThreadGoal, outcome: GoalTurnOutcome, now: numbe
   return { goal, run: true };
 }
 
-/** The last complete marker in a reply wins, so a quoted example earlier in it cannot steer the goal. */
+const insideFence = (text: string, at: number): boolean => (text.slice(0, at).match(/```/g)?.length ?? 0) % 2 === 1;
+
+function withoutStrayMarkers(text: string): string {
+  let out = text;
+  for (let from = 0; ;) {
+    const open = out.indexOf(GOAL_MARKER_OPEN, from);
+    if (open < 0) return out;
+    const close = out.indexOf(GOAL_MARKER_CLOSE, open);
+    if (close < 0 || insideFence(out, open)) { from = open + GOAL_MARKER_OPEN.length; continue; }
+    out = `${out.slice(0, open)}${out.slice(close + GOAL_MARKER_CLOSE.length)}`;
+    from = open;
+  }
+}
+
+/** Only a marker that ends the reply and sits outside a code fence counts; a quoted, mid-reply or forged one never steers
+ * the goal. A half-written trailing marker is hidden and ignored. */
 export function parseGoalSignal(reply: string): { visibleText: string; signal: GoalSignal | null } {
-  const closeAt = reply.lastIndexOf(GOAL_MARKER_CLOSE);
-  const openAt = closeAt < 0 ? -1 : reply.lastIndexOf(GOAL_MARKER_OPEN, closeAt);
-  if (openAt < 0) return { visibleText: reply, signal: null };
-  const visibleText = `${reply.slice(0, openAt)}${reply.slice(closeAt + GOAL_MARKER_CLOSE.length)}`.trim();
+  const text = reply.trimEnd();
+  const openAt = text.lastIndexOf(GOAL_MARKER_OPEN);
+  const trailing = text.endsWith(GOAL_MARKER_CLOSE);
+  if (openAt >= 0 && !trailing && text.indexOf(GOAL_MARKER_CLOSE, openAt) < 0 && !insideFence(text, openAt)) {
+    return { visibleText: withoutStrayMarkers(text.slice(0, openAt)).trimEnd(), signal: null };
+  }
+  if (!trailing || openAt < 0 || insideFence(text, openAt)) {
+    return { visibleText: withoutStrayMarkers(reply), signal: null };
+  }
+  const visibleText = withoutStrayMarkers(text.slice(0, openAt)).trimEnd();
   try {
-    const raw = JSON.parse(reply.slice(openAt + GOAL_MARKER_OPEN.length, closeAt)) as Record<string, unknown>;
+    const raw = JSON.parse(text.slice(openAt + GOAL_MARKER_OPEN.length, text.length - GOAL_MARKER_CLOSE.length)) as Record<string, unknown>;
     const status = raw.status;
     if (status !== "completed" && status !== "continue" && status !== "needs-input" && status !== "blocked") return { visibleText, signal: null };
     const detail = typeof raw.detail === "string" ? raw.detail.trim().slice(0, 500) : "";

@@ -101,7 +101,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
     stopScreenPoller: (_botId: string, threadId: string) => screens.delete(threadId),
     watchdog: { settle: (threadId: string) => watched.delete(threadId) },
     closeOpenApprovals: (threadId: string) => approvals.delete(threadId),
-    finalizeDelegationWatch() {}, routines: { failThread() {} },
+    finalizeDelegationWatch() {}, routines: { failThread() {} }, botGoals: { stopped() {} },
     settleDirectFollowup: (generation: string) => settled.push(generation),
   });
   context.runningTurnInstance = (bot: Bot) => context.registry.get(bot.modelSelection.instanceId);
