@@ -4564,6 +4564,7 @@
   "helperIntro.title": "Merhaba, ben {name}, buradaki her şey için yardımcın.",
   "helperIntro.body": "Bu uygulamayı çok iyi bilirim, her şeyin nasıl yapıldığını bana sorabilirsin. Seninle yeni botlar, uygulamalar ve rutinler kurabilir, botlarının ne yaptığını anlatabilirim.",
   "helperIntro.chief": "Kurmay Başkanın olarak gününü de takip eder, sana kısa bir özet gönderirim.",
+  "helperIntro.watch": "Gününü de takip eder, sana kısa bir özet gönderirim.",
   "helperIntro.team": "{team} içinde senin için buradayım ve kendi botlarınla ilgilenirim.",
   "helperIntro.try": "Bunlardan birini dene ya da ne istediğini söyle.",
   "helperIntro.asks": "Sorabileceklerin",
