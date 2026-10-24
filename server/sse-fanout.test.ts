@@ -13,10 +13,10 @@ function fakeClient(resOverrides: Partial<SseFanoutClient["res"]> = {}): TestCli
   return {
     backpressured: false,
     drains,
+    close: () => {},
     res: {
       writableLength: 0,
       write: () => true,
-      end: () => {},
       once: (_event: "drain", listener: () => void) => drains.push(listener),
       ...resOverrides,
     },
@@ -53,18 +53,6 @@ describe("deliverSseFrame", () => {
     expect(deliverSseFrame(client, "message", "message-1")).toBe("sent");
 
     expect(written).toEqual(["screen-1", "message-1"]);
-  });
-
-  it("disconnects a client once buffered bytes exceed the bound, even for a durable event", () => {
-    let ended = false;
-    const client = fakeClient({
-      writableLength: SSE_MAX_BUFFERED_BYTES + 1,
-      end: () => {
-        ended = true;
-      },
-    });
-    expect(deliverSseFrame(client, "message", "message-1")).toBe("disconnected");
-    expect(ended).toBe(true);
   });
 
   it("resumes screen frames once the socket drains", () => {
@@ -173,5 +161,41 @@ describe("openSseHeartbeat", () => {
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     close();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("ends a client past the buffer bound only after it left the fanout and its heartbeat stopped", async () => {
+    const stream = await stalledStream();
+    const fanout = new Set<SseFanoutClient>();
+    let liveChecks = 0;
+    const onClose = vi.fn(() => fanout.delete(client));
+    const atEnd: { inFanout: boolean; closes: number; liveChecks: number }[] = [];
+    const end = stream.res.end.bind(stream.res) as () => ServerResponse;
+    stream.res.end = (() => {
+      atEnd.push({ inFanout: fanout.has(client), closes: onClose.mock.calls.length, liveChecks });
+      return end();
+    }) as typeof stream.res.end;
+    const client: SseFanoutClient = {
+      res: stream.res,
+      backpressured: false,
+      close: openSseHeartbeat(stream.res, { everyMs: 10, live: () => ++liveChecks > 0, onClose }),
+    };
+    fanout.add(client);
+    stream.recordErrors();
+    await vi.waitFor(() => expect(liveChecks).toBeGreaterThan(1));
+    expect(stream.res.writableLength).toBeGreaterThan(SSE_MAX_BUFFERED_BYTES);
+
+    if (deliverSseFrame(client, "message", "data: durable\n\n") === "disconnected") client.close();
+
+    expect(atEnd).toEqual([{ inFanout: false, closes: 1, liveChecks }]);
+    const checksAtEnd = liveChecks;
+    client.close();
+    client.close();
+    await sleep(60);
+    expect(atEnd).toHaveLength(1);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(liveChecks).toBe(checksAtEnd);
+    expect(stream.res.writableFinished).toBe(false);
+    expect(stream.writesAfterEnd).toEqual([]);
+    expect(stream.errors).toEqual([]);
   });
 });

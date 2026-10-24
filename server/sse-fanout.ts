@@ -1,11 +1,12 @@
 export interface SseFanoutClient {
   res: {
     write(chunk: string): boolean;
-    end(): void;
     writableLength: number;
     once(event: "drain", listener: () => void): unknown;
   };
   backpressured: boolean;
+  /** The client's idempotent lifecycle owner: it leaves the fanout and stops the heartbeat before ending the response. */
+  close(): void;
 }
 
 /** Past this, cut the client loose; its EventSource reconnects and replays via Last-Event-ID. */
@@ -16,10 +17,7 @@ export type SseFanoutOutcome = "sent" | "dropped" | "disconnected";
 /** Only screen captures are skipped while backpressured; durable events are always written, or the client is disconnected to replay them. */
 export function deliverSseFrame(client: SseFanoutClient, kind: string, frame: string): SseFanoutOutcome {
   if (client.res.writableLength > SSE_MAX_BUFFERED_BYTES) {
-    try {
-      client.res.end();
-    } catch {
-    }
+    client.close();
     return "disconnected";
   }
   if (client.backpressured && kind === "screen") return "dropped";
