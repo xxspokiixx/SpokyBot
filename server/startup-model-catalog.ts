@@ -110,5 +110,7 @@ export function openStartupModelCatalog(input: {
       return null;
     });
   }
-  return { pending: afterFirstEngineRead().then(() => input.refresh()).then(persist, () => undefined) };
+  // A saved list stands in while the refresh waits; with none the engine would offer no model at all until it runs.
+  const startAfter = cached ? afterFirstEngineRead() : Promise.resolve();
+  return { pending: startAfter.then(() => input.refresh()).then(persist, () => undefined) };
 }

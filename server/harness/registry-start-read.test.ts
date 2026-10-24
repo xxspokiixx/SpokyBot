@@ -1,6 +1,6 @@
 // The start-up read on a later start: the most used engine probed alone first, a turn's own engine at once, and the
 // engine list answered from the last run's status until the read reaches each engine.
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InstanceConfigMap } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver, type FakeDriverOptions } from "../testing/fake-driver.ts";
-import { snapshotFrom } from "./engine-status-file.ts";
+import { snapshotFrom, STATUS_SAVE_DELAY_MS } from "./engine-status-file.ts";
 import { enginesByUse, ProviderRegistry, SNAPSHOT_DEADLINE_MS, START_READ_STEP_MS } from "./registry.ts";
 
 const AVAILABLE = { state: "available", version: "0.0.0-fake" } as const;
@@ -21,6 +21,9 @@ function gate() {
 }
 
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+/** The recorded status is written a second after the last probe lands. */
+const saved = async () => { await vi.advanceTimersByTimeAsync(STATUS_SAVE_DELAY_MS); };
+const timersForTheFile = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
 async function engines(options: Record<string, FakeDriverOptions>, registryOptions: ConstructorParameters<typeof ProviderRegistry>[1] = {}, configs?: InstanceConfigMap) {
   const fakes = Object.entries(options).map(([kind, opts]) => {
@@ -115,8 +118,11 @@ describe("the start-up read", () => {
   it("answers the engine list from the last run's status until it reaches an engine, and never decides from that status", async () => {
     const file = statusFile();
     const options: FakeDriverOptions = {};
+    timersForTheFile();
     const lastRun = await engines({ fake: options }, { statusFile: file });
     await lastRun.registry.describe();
+    expect(existsSync(file)).toBe(false);
+    await saved();
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ v: 1, engines: [{ instanceId: "fake", driverKind: "fake", cli: "fake-cli", snapshot: AVAILABLE }] });
     if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
 
@@ -143,6 +149,7 @@ describe("the start-up read", () => {
     expect(registry.provisional()).toBe(false);
     expect(registry.provisional([listed])).toBe(true);
     expect(registry.provisional(described)).toBe(false);
+    await saved();
     expect(JSON.parse(readFileSync(file, "utf8")).engines[0].snapshot).toEqual(GONE);
     expect(probes()).toEqual({ fake: 2 });
   });
@@ -150,7 +157,9 @@ describe("the start-up read", () => {
   it("probes once more, warm, an engine the last run saw available that a cold probe found unavailable", async () => {
     const file = statusFile();
     const options: FakeDriverOptions = {};
+    timersForTheFile();
     await (await engines({ fake: options }, { statusFile: file })).registry.describe();
+    await saved();
     const probe = gate();
     Object.assign(options, { holdSnapshot: probe.promise, answer: GONE });
     const { registry, probes } = await engines({ fake: options }, { statusFile: file });
@@ -172,7 +181,9 @@ describe("the start-up read", () => {
 
   it("reports no change when the probe agrees with the last run", async () => {
     const file = statusFile();
+    timersForTheFile();
     await (await engines({ fake: {} }, { statusFile: file })).registry.describe();
+    await saved();
     const { registry } = await engines({ fake: {} }, { statusFile: file });
     expect((await registry.readAtStart()).changed).toBe(false);
   });

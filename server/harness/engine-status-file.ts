@@ -53,9 +53,27 @@ export function snapshotFrom(value: unknown): ProviderSnapshot | null {
   };
 }
 
+/** At most one write a second, of the latest rows: the start-up read lands a probe at a time, and on Windows each
+ * rename onto a file a scanner holds is retried for up to ~155 ms. */
+export const STATUS_SAVE_DELAY_MS = 1_000;
+
 /** Account display identity only, never credentials; kept beside the engines' other local state under providers/. */
 export function engineStatusFile(file: string) {
   let saved: string | undefined;
+  let pending: string | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  const write = () => {
+    timer = undefined;
+    const body = pending;
+    pending = undefined;
+    if (body === undefined || body === saved) return;
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileAtomicIfChanged(file, body, { mode: 0o600, durable: false });
+      saved = body;
+    } catch {
+    }
+  };
   return {
     /** The statuses the last run recorded, for the engines still configured with the same driver and CLI. */
     read(target: Target): Map<InstanceId, ProviderSnapshot> {
@@ -76,13 +94,14 @@ export function engineStatusFile(file: string) {
       return seeds;
     },
     save(rows: readonly EngineStatusRow[]): void {
-      const body = JSON.stringify({ v: 1, engines: rows });
-      if (body === saved) return;
-      try {
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileAtomicIfChanged(file, body, { mode: 0o600, durable: false });
-        saved = body;
-      } catch {
+      pending = JSON.stringify({ v: 1, engines: rows });
+      if (pending === saved) {
+        pending = undefined;
+        return;
+      }
+      if (!timer) {
+        timer = setTimeout(write, STATUS_SAVE_DELAY_MS);
+        timer.unref?.();
       }
     },
   };

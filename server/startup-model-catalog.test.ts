@@ -126,14 +126,18 @@ describe("startup model catalogs", () => {
     expect(registry.get("slow")!.models).toEqual(FRESH);
   });
 
-  it("starts a later start's refresh only once the start-up read lets it, and a first run's at once", async () => {
+  it("holds a later start's refresh behind the first engine read only while a saved list stands in, and a first run's never", async () => {
     seedBots();
     let refreshes = 0;
-    const open = () => openStartupModelCatalog({ instanceId: "held", use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; } });
+    const open = (instanceId = "held") => openStartupModelCatalog({ instanceId, use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; } });
+    writeStartupModelCache("held", CACHED);
     const release = holdUntilFirstEngineRead();
     const opened = open() as { pending: Promise<void> };
     for (let i = 0; i < 12; i += 1) await Promise.resolve();
     expect(refreshes).toBe(0);
+    await (open("nothing-saved") as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(1);
+    refreshes = 0;
     release();
     await opened.pending;
     expect(refreshes).toBe(1);
