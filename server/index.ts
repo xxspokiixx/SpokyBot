@@ -14783,14 +14783,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           reason: z.string().trim().max(200).optional(),
           rework: z.boolean().default(false),
           thread: z.enum(["standing", "new"]).default("standing"),
+          title: z.string().trim().max(80).optional(),
           reply: z.enum(["resume", "none"]).default("resume"),
           consult: z.boolean().default(false),
           inMyFolder: z.boolean().default(false),
           done_when: z.string().trim().max(1000).optional(),
         }).safeParse(await readInternalBody());
-        if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds and a message of 1-4000 characters; thread is standing or new, reply is resume or none, consult is a boolean, done_when at most 1000 characters." });
-        const { groupId, botIds, message, reason, rework, thread, reply, consult, inMyFolder, done_when: doneWhen } = parsed.data;
-        const result = await coordinateBots({ groupId, botIds, message, reason: reason || undefined, rework, thread, reply, consult, inMyFolder, doneWhen: doneWhen || undefined });
+        if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds and a message of 1-4000 characters; thread is standing or new, title at most 80 characters, reply is resume or none, consult is a boolean, done_when at most 1000 characters." });
+        const { groupId, botIds, message, reason, rework, thread, title, reply, consult, inMyFolder, done_when: doneWhen } = parsed.data;
+        const result = await coordinateBots({ groupId, botIds, message, reason: reason || undefined, rework, thread, title: title || undefined, reply, consult, inMyFolder, doneWhen: doneWhen || undefined });
         return json(res, result.status, result.body);
       }
       if (method === "GET" && path === "/api/internal/room-targets") {

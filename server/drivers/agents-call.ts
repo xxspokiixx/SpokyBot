@@ -226,10 +226,10 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       && (canonical.thread === undefined || canonical.thread === "standing" || canonical.thread === "new")
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
-      && optional("done_when", "string") && optional("reason", "string");
+      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string");
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, thread ("standing" or "new"), title, reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
@@ -237,7 +237,8 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       groupId: canonical.group_id, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
-      thread: canonical.thread, reply: canonical.reply, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
+      thread: canonical.thread, reply: canonical.reply,
+      title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
