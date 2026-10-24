@@ -81,7 +81,11 @@ export function verifyKey(provider: "elevenlabs" | "fish", key: string) {
   return provider === "fish" ? fish.verifyKey(key) : elevenlabs.verifyKey(key);
 }
 
-export async function listVoices(cfg: AppConfig, run?: systemVoices.Runner): Promise<elevenlabs.Voice[]> {
+export async function listVoices(
+  cfg: AppConfig,
+  run?: systemVoices.Runner,
+  fishSearch?: fish.VoiceSearch,
+): Promise<elevenlabs.Voice[]> {
   const provider = voiceProvider(cfg);
   if (provider === "xai") return cfg.xai?.key ? grok.listVoices(cfg.xai.key) : [];
   if (provider === "system") return systemVoices.listSystemVoices(run);
@@ -91,7 +95,7 @@ export async function listVoices(cfg: AppConfig, run?: systemVoices.Runner): Pro
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;
-    return key ? fish.listVoices(key) : [];
+    return key ? fish.listVoices(key, fishSearch) : [];
   }
   const credential = elevenLabs(cfg);
   if (!credential) return [];

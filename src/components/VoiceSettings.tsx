@@ -17,6 +17,7 @@ import {
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
+import { FishVoicePicker } from "./FishVoicePicker";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 
@@ -49,6 +50,8 @@ export function VoiceSettings({
   const [error, setError] = useState<string | null>(null);
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
+  const [voiceQuery, setVoiceQuery] = useState("");
+  const [searchedQuery, setSearchedQuery] = useState("");
 
   const { capabilities } = useDesktopCapabilities();
   const localMacClient = workspaceConfigurationLocked && localSystemVoicesAvailable();
@@ -56,6 +59,9 @@ export function VoiceSettings({
   const [deviceVoice, setDeviceVoice] = useState(() => remoteSystemVoice(bot.id));
   const usesLocalSystem = localMacClient && deviceProvider === "system";
   const provider = tts?.provider ?? "elevenlabs";
+  const fishSearchable = provider === "fish" && !usesLocalSystem;
+  const fishQuery = fishSearchable ? searchedQuery : "";
+  const currentFishVoice = fishSearchable ? (bot.voice ?? "") : "";
   const cloudProvider = provider === "fish"
     ? {
         id: "fish" as const,
@@ -93,6 +99,13 @@ export function VoiceSettings({
   }, [bot.id]);
 
   useEffect(() => {
+    const timer = setTimeout(() => setSearchedQuery(voiceQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [voiceQuery]);
+
+  useEffect(() => setVoiceQuery(""), [provider]);
+
+  useEffect(() => {
     setServerUrl(tts?.baseUrl ?? "");
     setModel(tts?.model ?? "");
   }, [tts?.baseUrl, tts?.model]);
@@ -116,7 +129,11 @@ export function VoiceSettings({
     }
     let alive = true;
     setLoadingVoices(true);
-    api("/api/tts/voices")
+    const params = new URLSearchParams();
+    if (fishQuery) params.set("q", fishQuery);
+    if (currentFishVoice) params.set("current", currentFishVoice);
+    const query = params.toString();
+    api(`/api/tts/voices${query ? `?${query}` : ""}`)
       .then((r: { voices?: typeof voices; error?: string }) => {
         if (!alive) return;
         setVoices(r.voices ?? []);
@@ -127,7 +144,7 @@ export function VoiceSettings({
     return () => {
       alive = false;
     };
-  }, [hostConfigured, provider, usesLocalSystem]);
+  }, [hostConfigured, provider, usesLocalSystem, fishQuery, currentFishVoice]);
 
   const chooseDeviceProvider = (next: RemoteVoiceProvider) => {
     setRemoteVoiceProvider(next);
@@ -204,6 +221,7 @@ export function VoiceSettings({
 
   const selectedVoice = usesLocalSystem ? deviceVoice : (bot.voice ?? "");
   const ready = usesLocalSystem || (hostConfigured && Boolean(selectedVoice || tts.voice));
+  const selectedDescription = voices.find((voice) => voice.id === selectedVoice)?.description;
 
   return (
     <div className="rounded-xl bg-card p-4">
@@ -405,32 +423,44 @@ export function VoiceSettings({
         <div className="mt-4">
           <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.title")}</div>
           <div className="flex gap-2">
-            <Select
-              value={selectedVoice}
-              onChange={(e) => chooseVoice(e.target.value)}
-              aria-label={`${bot.name}'s voice`}
-              data-voice-picker
-              className="w-full"
-            >
-              <option value="">
-                {loadingVoices
-                  ? t("voice.loading")
-                  : usesLocalSystem
-                    ? t("voice.macDefault")
-                    : tts.voice
-                      ? t("voice.installDefault")
-                      : t("voice.pick")}
-              </option>
-              {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (
-                <option value={selectedVoice}>{t("voice.current")}</option>
-              )}
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                  {v.description ? ` — ${v.description}` : ""}
+            {fishSearchable ? (
+              <FishVoicePicker
+                value={selectedVoice}
+                voices={voices}
+                loading={loadingVoices}
+                query={voiceQuery}
+                onQuery={setVoiceQuery}
+                onPick={chooseVoice}
+                defaultLabel={tts.voice ? t("voice.installDefault") : t("voice.pick")}
+                ariaLabel={`${bot.name}'s voice`}
+              />
+            ) : (
+              <Select
+                value={selectedVoice}
+                onChange={(e) => chooseVoice(e.target.value)}
+                aria-label={`${bot.name}'s voice`}
+                data-voice-picker
+                className="w-full"
+              >
+                <option value="">
+                  {loadingVoices
+                    ? t("voice.loading")
+                    : usesLocalSystem
+                      ? t("voice.macDefault")
+                      : tts.voice
+                        ? t("voice.installDefault")
+                        : t("voice.pick")}
                 </option>
-              ))}
-            </Select>
+                {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (
+                  <option value={selectedVoice}>{t("voice.current")}</option>
+                )}
+                {voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </Select>
+            )}
             <button
               onClick={() => void speaker.speak(SAMPLE, { voiceId: bot.voice, botId: bot.id })}
               disabled={!ready}
@@ -441,6 +471,9 @@ export function VoiceSettings({
               <Volume2 size={14} /> {t("voice.try")}
             </button>
           </div>
+          {!fishSearchable && selectedDescription && (
+            <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">{selectedDescription}</div>
+          )}
         </div>
       )}
 

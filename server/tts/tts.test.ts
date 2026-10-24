@@ -16,6 +16,7 @@ let server: Server;
 const seen: Array<{ method: string; url: string; headers: Record<string, string>; body: string }> = [];
 let refuse: { status: number; body: unknown } | null = null;
 
+const FISH_LONG_TAIL = "0327fdb5da9e4fd782899a8058c8ae2b";
 const MP3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]);
 const WAV = Buffer.from("RIFF....WAVEfmt ");
 let modelsFail = false;
@@ -62,8 +63,24 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "audio/mpeg" });
         return res.end(MP3);
       }
+      if (path === `/model/${FISH_LONG_TAIL}`) {
+        return send(200, { _id: FISH_LONG_TAIL, type: "tts", state: "trained", title: "Calm Narrator", description: "British" });
+      }
+      if (path.startsWith("/model/")) return send(404, { message: "not found" });
       if (path === "/model") {
         const query = new URL(req.url ?? "/", "http://stub").searchParams;
+        if (query.get("title")) {
+          const title = query.get("title");
+          return send(200, {
+            has_more: false,
+            items: query.get("self") === "true"
+              ? [{ _id: "fish-own", type: "tts", state: "trained", title: `My ${title}` }]
+              : [
+                { _id: "fish-3", type: "tts", state: "trained", title: `Public ${title}` },
+                { _id: "fish-own", type: "tts", state: "trained", title: `My ${title}` },
+              ],
+          });
+        }
         if (query.get("self") === "true" && req.headers.authorization !== "Bearer fish-key") {
           return send(401, { message: "unauthorized" });
         }
@@ -314,6 +331,44 @@ describe("Fish Audio", () => {
     ]);
     expect(urls.indexOf("/model?page_size=100&self=true&sort_by=created_at&page_number=1"))
       .toBeLessThan(urls.indexOf("/model?page_size=100&self=true&sort_by=created_at&page_number=2"));
+  });
+
+  it("searches public and owned Fish voices by title", async () => {
+    seen.length = 0;
+    const { listVoices } = await voice();
+    expect(await listVoices(cfg(ready), undefined, { query: " calm voice " })).toEqual([
+      { id: "fish-3", label: "Public calm voice", description: undefined },
+      { id: "fish-own", label: "My calm voice", description: undefined },
+    ]);
+    expect(seen.map((call) => call.url).sort()).toEqual([
+      "/model?page_size=100&self=true&title=calm%20voice",
+      "/model?page_size=100&sort_by=task_count&title=calm%20voice",
+    ]);
+  });
+
+  it("looks up a pasted Fish voice id or link instead of searching", async () => {
+    const { listVoices } = await voice();
+    for (const query of [FISH_LONG_TAIL, `https://fish.audio/m/${FISH_LONG_TAIL}/`, `fish.audio/m/${FISH_LONG_TAIL.toUpperCase()}?x=1`]) {
+      seen.length = 0;
+      expect(await listVoices(cfg(ready), undefined, { query })).toEqual([
+        { id: FISH_LONG_TAIL, label: "Calm Narrator", description: "British" },
+      ]);
+      expect(seen.map((call) => call.url)).toEqual([`/model/${FISH_LONG_TAIL}`]);
+    }
+    expect(await listVoices(cfg(ready), undefined, { query: "f".repeat(32) })).toEqual([]);
+  });
+
+  it("names the selected Fish voice even when the popular list leaves it out", async () => {
+    const { listVoices } = await voice();
+    const voices = await listVoices(cfg(ready), undefined, { current: FISH_LONG_TAIL });
+    expect(voices[0]).toEqual({ id: FISH_LONG_TAIL, label: "Calm Narrator", description: "British" });
+    expect(voices.map((v) => v.id)).toContain("fish-1");
+    expect(await listVoices(cfg(ready), undefined, { query: "calm voice", current: FISH_LONG_TAIL }))
+      .not.toContainEqual(expect.objectContaining({ id: FISH_LONG_TAIL }));
+
+    seen.length = 0;
+    await listVoices(cfg(ready), undefined, { current: `../v1/tts?${FISH_LONG_TAIL}` });
+    expect(seen.some((call) => !call.url.startsWith("/model?"))).toBe(false);
   });
 
   it("requests s2.1-pro mp3 speech and returns its raw audio", async () => {

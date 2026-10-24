@@ -16101,7 +16101,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (method === "GET" && path === "/api/tts/voices") {
       try {
-        return json(res, 200, { voices: await tts.listVoices(cfg) });
+        const fishSearch = {
+          query: url.searchParams.get("q")?.slice(0, 200),
+          current: url.searchParams.get("current") ?? undefined,
+        };
+        return json(res, 200, { voices: await tts.listVoices(cfg, undefined, fishSearch) });
       } catch (e) {
         return json(res, 200, { voices: [], error: e instanceof Error ? e.message : String(e) });
       }

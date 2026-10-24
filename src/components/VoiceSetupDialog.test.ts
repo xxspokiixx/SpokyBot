@@ -79,7 +79,7 @@ class FakeElement {
   querySelector = vi.fn((_selector: string): FakeElement | null => null);
   querySelectorAll = vi.fn((): FakeElement[] => []);
 }
-const VOICE_PICKER = "select[data-voice-picker]:not([disabled])";
+const VOICE_PICKER = "[data-voice-picker]:not([disabled])";
 const FIRST_FIELD = "input:not([disabled]), select:not([disabled])";
 function paneWith(fields: { voicePicker?: FakeElement; firstField?: FakeElement }) {
   const pane = new FakeElement();
