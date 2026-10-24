@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
+import { skillExport } from "./skill-export.ts";
 import { installSkill, setSkillEnabled } from "./skills.ts";
 import type { BotRecord, Store } from "./store.ts";
 import { TASK_WORKSPACES_DIR } from "./workspace.ts";
@@ -65,7 +66,19 @@ describe("skills the engine loads by itself", () => {
     expect(host.readBotSkillFile(bot, "growth-data-expert")).toBe(skillMd("growth-data-expert"));
     expect(host.expandSkillCommand(bot, "main", "/growth-data-expert find churn")).toContain(`Read ${JSON.stringify(shared)}`);
     expect(host.expandSkillCommand(bot, "main", "/bot-notes")).toContain(`Read ${JSON.stringify(own)}`);
-    expect(host.expandSkillCommand(bot, "main", "/mine go")).toContain(join("workspaces", bot.id, "skills", "mine"));
+    expect(host.expandSkillCommand(bot, "main", "/mine go")).toContain(JSON.stringify(join("workspaces", bot.id, "skills", "mine")).slice(1, -1));
+  });
+
+  it("stay out of a bot or team package, which carries only the bot's own, library and imported skills", () => {
+    const { host, bot } = hostFor("claudeAgent", { cfg: { features: { claudeUserSkills: true } } as AppConfig });
+    plant(USER_SKILLS, "personal-notes");
+    plant(SHARED, "growth-data-expert");
+    installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine") }]);
+    setSkillEnabled(bot.id, "mine", true);
+    expect(listed(host.listBotSkills(bot))).toEqual(["mine:own", "personal-notes:native", "growth-data-expert:native"]);
+    const team = skillExport(host).collectTeamSkills([bot], "all");
+    expect(team.ok && [...team.skillsByBot.values()].flat().map((skill) => skill.name)).toEqual(["mine"]);
+    expect(skillExport(host).checkedExportSkillNames(["personal-notes"], [bot])).toMatchObject({ ok: false });
   });
 
   it("never run one under the name of the bot's own skill that is switched off", () => {
