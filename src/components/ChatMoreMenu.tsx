@@ -154,7 +154,7 @@ function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolea
           data-testid="chat-more"
           className={cn(
             "flex size-8 items-center justify-center rounded-full bg-raised/50 transition-colors hover:bg-raised",
-            phoneHeader && "size-9 border border-hairline bg-card",
+            "max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card",
             open || on ? "text-accent" : "text-ink",
           )}
         >
