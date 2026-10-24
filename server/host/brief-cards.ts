@@ -108,6 +108,8 @@ export const DRAFT_ACTION = "draft_reply";
 export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; needsReply: boolean }
 /** `page`: the live page a routine's run published; its row's Open page opens it, while Open opens the run's chat. */
 export interface BriefRow { text: string; note: string; open?: OpenTarget; page?: string }
+/** A row that needs the person. `key` names what it is about in no particular language, so a new language is not news. */
+export type NeedRow = BriefRow & { key: string };
 export interface BriefMeeting { title: string; start: number; joinUrl?: string }
 export interface BriefFacts {
   now: number;
@@ -116,7 +118,7 @@ export interface BriefFacts {
   language?: string;
   intro: boolean;
   /** Things only the person can fix: failed routines, clashes, a read that failed, a signed-out AI, a question waiting. */
-  needs: BriefRow[];
+  needs: NeedRow[];
   /** null: no calendar is read, so Your day is left out. */
   meetings: BriefMeeting[] | null;
   emails: BriefEmail[];
@@ -142,8 +144,8 @@ function capped(rows: Node[], w: BriefWords): Node[] {
   const shown = rows.slice(0, BRIEF_ROWS);
   return rows.length > shown.length ? [...shown, caption(w.more(rows.length - shown.length))] : shown;
 }
-const section = (title: string, rows: Node[], w: BriefWords, empty?: string): Node[] =>
-  [{ type: "Title", value: title, size: "sm" }, ...(rows.length ? capped(rows, w) : empty ? [text(empty)] : [])];
+const section = (title: string, rows: Node[], w: BriefWords, empty?: string, after: Node[] = []): Node[] =>
+  [{ type: "Title", value: title, size: "sm" }, ...(rows.length ? capped(rows, w) : empty ? [text(empty)] : []), ...after];
 const openButton = (target: OpenTarget | undefined, w: BriefWords): Node[] => (target ? [button(w.open, { type: "open_thread", payload: target })] : []);
 const pageButton = (url: string | undefined, w: BriefWords): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button(w.openPage, open)] : []; };
 
@@ -170,13 +172,14 @@ export function briefCard(facts: BriefFacts): BuiltCard {
   const meetings = [...(facts.meetings ?? [])].sort((a, b) => a.start - b.start);
   const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone, language)} · ${meeting.title}`, "", joinButton(meeting, w.join)));
   const waiting = facts.waiting === true ? w.waitingMany : facts.waiting ? w.waitingCount(facts.waiting) : undefined;
-  const importantRows = [...important.map((email) => emailRow(email, w)), ...(waiting ? [caption(waiting)] : [])];
+  const importantRows = important.map((email) => emailRow(email, w));
+  const waitingNotice = waiting ? [caption(waiting)] : [];
   const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page, w), ...openButton(row.open, w)]));
   const children: Node[] = [
     ...(facts.intro ? [caption(w.intro)] : []),
     ...section(w.needsYou, needRows, w, w.nothingNeedsYou),
     ...(facts.meetings === null ? [] : section(w.yourDay, meetingRows, w, w.noMoreMeetings)),
-    ...(importantRows.length ? section(w.importantEmails, importantRows, w) : []),
+    ...(importantRows.length || waitingNotice.length ? section(w.importantEmails, importantRows, w, undefined, waitingNotice) : []),
     ...(routineRows.length ? section(w.routines, routineRows, w) : []),
   ];
   const parts = [

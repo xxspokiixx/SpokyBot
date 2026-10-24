@@ -17,7 +17,7 @@ import type { RoutineRun } from "../routines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
-import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard } from "./brief-cards.ts";
+import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
 import { proactiveOwner } from "./proactive-owner.ts";
 import type { CheckReport } from "./routine-checks.ts";
@@ -179,8 +179,8 @@ export function createBrief(deps: BriefDeps) {
     return deps.store.messagesFor(run.threadId).findLast((row) => row.publishedPage?.state === "live" && row.at >= from && row.at <= to)?.publishedPage?.url;
   }
 
-  function routineRows(since: number, w: BriefWords): { needs: BriefRow[]; done: BriefRow[] } {
-    const needs: BriefRow[] = [], done: BriefRow[] = [];
+  function routineRows(since: number, w: BriefWords): { needs: NeedRow[]; done: BriefRow[] } {
+    const needs: NeedRow[] = [], done: BriefRow[] = [];
     const latest = new Map<string, RoutineRun>();
     for (const run of deps.runs()) {
       const end = run.finishedAt ?? run.createdAt;
@@ -196,22 +196,23 @@ export function createBrief(deps: BriefDeps) {
       const name = oneLine(run.routineName, 80);
       const page = run.status === "completed" && open ? publishedPage(run) : undefined;
       if (run.status === "completed") done.push({ text: name, note: clip(firstSentence(run.output ?? "") || w.finished, 140), ...(open ? { open } : {}), ...(page ? { page } : {}) });
-      else needs.push({ text: run.status === "missed" ? w.missed(name) : w.failed(name), note: clip(oneLine(run.error ?? "", 140) || w.didNotFinish, 140), ...(open ? { open } : {}) });
+      else needs.push({ key: `routine:${name}:${run.status}`, text: run.status === "missed" ? w.missed(name) : w.failed(name), note: clip(oneLine(run.error ?? "", 140) || w.didNotFinish, 140), ...(open ? { open } : {}) });
     }
     return { needs, done };
   }
 
-  function needsYouRows(w: BriefWords): BriefRow[] {
-    return deps.needsYou().map((item): BriefRow => {
+  function needsYouRows(w: BriefWords): NeedRow[] {
+    return deps.needsYou().map((item): NeedRow => {
       const open = item.threadId ? { botId: "botId" in item ? item.botId : item.botIds[0]!, threadId: item.threadId } : undefined;
-      const row = (text: string, note: string): BriefRow => ({ text, note, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
+      const row = (about: string, text: string, note: string): NeedRow =>
+        ({ key: `${item.kind}:${about}`, text, note, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
       switch (item.kind) {
-        case "signed-out": return row(w.signedOut(deps.engineName(item.instanceId)), w.signInAgain);
-        case "usage-limit": return row(w.usageLimit, clip(item.text, 140));
-        case "out-of-credit": return row(w.outOfCredit, w.ownAccount);
-        case "connection": return row(w.reconnecting(item.app), clip(item.text, 140));
-        case "place": return row(w.unreachable, w.chooseAnother);
-        case "question": return row(w.asked(deps.store.bot(item.botId)?.name ?? w.aBot), clip(item.text, 140));
+        case "signed-out": { const engine = deps.engineName(item.instanceId); return row(engine, w.signedOut(engine), w.signInAgain); }
+        case "usage-limit": return row("", w.usageLimit, clip(item.text, 140));
+        case "out-of-credit": return row("", w.outOfCredit, w.ownAccount);
+        case "connection": return row(item.app, w.reconnecting(item.app), clip(item.text, 140));
+        case "place": return row("", w.unreachable, w.chooseAnother);
+        case "question": { const bot = deps.store.bot(item.botId)?.name; return row(bot ?? "", w.asked(bot ?? w.aBot), clip(item.text, 140)); }
       }
     });
   }
@@ -219,18 +220,19 @@ export function createBrief(deps: BriefDeps) {
   function facts(chiefBot: BotRecord): BriefFacts {
     const at = now(), zone = timeZone(), day = today(), language = state.language ?? deps.language(), w = briefWords(language);
     const { needs: failed, done } = routineRows(dayStart(), w);
-    const clashRows: BriefRow[] = (calendar?.clashes ?? []).map(([first, second]) => ({
+    const clashRows: NeedRow[] = (calendar?.clashes ?? []).map(([first, second]) => ({
+      key: `clash:${oneLine(first.title, 52)}:${oneLine(second.title, 52)}`,
       text: w.overlap(oneLine(first.title, 52), oneLine(second.title, 52)),
       note: w.both(clockTime(first.start, zone, language), clockTime(second.start, zone, language)),
     }));
-    const troubleRows: BriefRow[] = (trouble ?? []).map((one) => {
+    const troubleRows: NeedRow[] = (trouble ?? []).map((one) => {
       const app = one.app === "gmail" ? "Gmail" : "Google Calendar";
-      return { text: w.couldNotRead(app), note: one.signedOut ? w.reconnect(app) : w.tryAgainSoon };
+      return { key: `trouble:${one.app}`, text: w.couldNotRead(app), note: one.signedOut ? w.reconnect(app) : w.tryAgainSoon };
     });
-    const unfencedRows: BriefRow[] = !unfenced ? []
+    const unfencedRows: NeedRow[] = !unfenced ? []
       : helpersSort
-        ? [{ text: w.unpreparedMeetings, note: w.unpreparedNote(chiefBot.name) }]
-        : [{ text: w.unsorted, note: w.unsortedNote(chiefBot.name) }];
+        ? [{ key: "unfenced:meetings", text: w.unpreparedMeetings, note: w.unpreparedNote(chiefBot.name) }]
+        : [{ key: "unfenced:all", text: w.unsorted, note: w.unsortedNote(chiefBot.name) }];
     const meetings = calendar === undefined ? null : calendar.meetings
       .filter((meeting) => qualifies(meeting) || (meeting.ownedCalendar === true && meeting.status !== "cancelled" && !meeting.allDay && !meeting.selfDeclined))
       .filter((meeting) => meeting.end > at && localDate(meeting.start, zone) === day)
@@ -248,7 +250,7 @@ export function createBrief(deps: BriefDeps) {
 
   /** The rows a person would be told about: a new one among them is worth one notification. */
   const signature = (built: BriefFacts): string[] => [
-    ...built.needs.map((row) => `need:${row.text}`),
+    ...built.needs.map((row) => `need:${row.key}`),
     ...built.emails.map((email) => `email:${email.messageId}`),
   ];
 

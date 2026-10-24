@@ -10,6 +10,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
 import { Store, type Message } from "../store.ts";
 import { AWAY_MS, createBrief } from "./brief.ts";
+import { briefCard } from "./brief-cards.ts";
 import { ENGLISH_BRIEF } from "./brief-words.ts";
 
 const MINUTE = 60_000;
@@ -63,6 +64,13 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
 }
 
 describe("the brief", () => {
+  it("counts only the emails it leaves out, and still says how many new ones wait", () => {
+    const emails = Array.from({ length: 8 }, (_, at) => ({ messageId: `m${at}`, threadId: `t${at}`, from: `Sender ${at} <s${at}@x.test>`, subject: `Subject ${at}`, needsReply: false }));
+    const shown = JSON.stringify(briefCard({ now: Date.parse("2026-10-22T08:00:00Z"), timeZone: "UTC", intro: false, needs: [], meetings: null, emails, waiting: 3, routines: [] }).card);
+    expect(shown).toContain("and 2 more");
+    expect(shown).toContain(ENGLISH_BRIEF.waitingCount(3));
+  });
+
   it("is not there while it has nothing for the person, so an open never takes the screen for an empty card", async () => {
     const needsYou: NeedsYouItem[] = [];
     const s = setup({ needsYou });
@@ -143,6 +151,17 @@ describe("the brief", () => {
     s.restart();
     await s.brief.refresh();
     expect(title()).toBe("Dein Überblick");
+  });
+
+  it("does not tell the person again about the same rows when only the language changed", async () => {
+    const options = { language: "es", needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] as NeedsYouItem[] };
+    const s = setup(options);
+    await s.brief.active("desktop", "UTC");
+    expect(s.notified).toEqual(["Tu resumen: 1 te necesita"]);
+    options.language = "de";
+    await s.brief.refresh();
+    expect(s.rows().findLast((message) => message.serverCard)!.widget!.root.title).toBe("Dein Überblick");
+    expect(s.notified).toHaveLength(1);
   });
 
   it("a routine run that published a page offers Open page, which opens the page itself, beside Open for its chat", async () => {

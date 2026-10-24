@@ -14,7 +14,7 @@ import { createAgentCard } from "../chat-widgets.ts";
 import type { RoutineRun } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { localDate } from "./check-plan.ts";
-import { briefCard, type BriefRow, type BuiltCard } from "./brief-cards.ts";
+import { briefCard, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
@@ -98,12 +98,13 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
     return created.threadId;
   }
 
-  function rows(person: string, w: BriefWords): { needs: BriefRow[]; done: BriefRow[] } {
-    const named = (botId: string) => deps.store.bot(botId)?.name ?? w.aBot;
+  function rows(person: string, w: BriefWords): { needs: NeedRow[]; done: BriefRow[] } {
     const opens = (botId: string, threadId: string | undefined) => threadId && deps.store.taskByThread(botId, threadId) ? { open: { botId, threadId } } : {};
-    const needs: BriefRow[] = deps.needsYou(person).flatMap((item): BriefRow[] => item.kind === "question"
-      ? [{ text: w.isAsking(named(item.botId)), note: clip(item.text, 140), ...opens(item.botId, item.threadId) }]
-      : []);
+    const needs: NeedRow[] = deps.needsYou(person).flatMap((item): NeedRow[] => {
+      if (item.kind !== "question") return [];
+      const bot = deps.store.bot(item.botId)?.name, note = clip(item.text, 140);
+      return [{ key: `question:${bot ?? ""}:${note}`, text: w.isAsking(bot ?? w.aBot), note, ...opens(item.botId, item.threadId) }];
+    });
     const done: BriefRow[] = [];
     const since = dayStart();
     const latest = new Map<string, RoutineRun>();
@@ -121,7 +122,10 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
       const open = opens(run.botId, run.resultsThreadId ?? run.threadId);
       const name = oneLine(run.routineName, 80);
       if (run.status === "completed") done.push({ text: name, note: clip(oneLine(run.output ?? "", 140) || w.finished, 140), ...open });
-      else needs.push({ text: run.status === "missed" ? w.missed(name) : w.failed(name), note: clip(oneLine(run.error ?? "", 140) || w.didNotFinish, 140), ...open });
+      else {
+        const error = clip(oneLine(run.error ?? "", 140), 140);
+        needs.push({ key: `routine:${name}:${run.status}:${error}`, text: run.status === "missed" ? w.missed(name) : w.failed(name), note: error || w.didNotFinish, ...open });
+      }
     }
     return { needs, done };
   }
@@ -156,7 +160,7 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
     }
     if (!current) deps.store.patchTask(chief.id, threadId, { unread: true });
     const seen = new Set(state?.notified ?? []);
-    const fresh = needs.map((row) => `need:${row.text}:${row.note}`).filter((key) => !seen.has(key));
+    const fresh = needs.map((row) => `need:${row.key}`).filter((key) => !seen.has(key));
     if (fresh.length) deps.notify(chief, threadId, built.summary);
     people[person] = { ...state, card: { day, botId: chief.id, threadId, messageId: current?.messageId ?? written.messageId }, notified: [...seen, ...fresh].slice(-200) };
     save();
