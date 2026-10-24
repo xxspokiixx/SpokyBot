@@ -9154,6 +9154,33 @@ describe("harness HTTP API", () => {
       }
     });
 
+    it("reads a queued line the same way, once the bot has a free slot", async () => {
+      const bot = await blankBot("Queued setup");
+      try {
+        expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        const holder = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Hold the slot" })).body.task;
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hold the one slot", threadId: holder.threadId })).status).toBe(202);
+        await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+        const queued = await api("POST", `/api/bots/${bot.id}/messages`, { text: "sort my inbox", threadId: bot.threadId, dataContext: { cardId: "c_2" } });
+        expect(queued.body).toMatchObject({ queued: true, reason: "capacity" });
+        rmSync(fakeClaudeDump, { force: true });
+        await releaseTurn(bot.id);
+        await expect.poll(() => existsSync(fakeClaudeDump) && userText(JSON.parse(readFileSync(fakeClaudeDump, "utf8")) as Seen).includes("sort my inbox"),
+          { timeout: 15_000 }).toBe(true);
+        const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8")) as Seen;
+        await releaseTurn(bot.id);
+        expect(seen.systemPrompt).toContain("The user explicitly asked you to set yourself up");
+        expect(userText(seen)).toContain("Set yourself up for this job: sort my inbox\n\n<data-context>");
+        expect(userText(seen)).toContain('"cardId":"c_2"');
+      } finally {
+        await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 3 } });
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
     it("tells a Chief that sets itself up to stay the Chief", async () => {
       const bot = await blankBot("Chief setup");
       try {
@@ -9194,7 +9221,7 @@ describe("harness HTTP API", () => {
       }
     });
 
-    it("reads the line as a typed /setup would, leaving out the Data tab's context, and an edit of it sets up again", async () => {
+    it("reads the line as a typed /setup would, with the Data tab's context after the words, and an edit of it sets up again", async () => {
       const bot = await blankBot("Edited setup");
       try {
         expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
@@ -9202,8 +9229,8 @@ describe("harness HTTP API", () => {
         expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "sort my inbox", threadId: bot.threadId, dataContext: { cardId: "c_1" } })).status).toBe(202);
         const first = await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
         await releaseTurn(bot.id);
-        expect(userText(first)).toContain("Set yourself up for this job: sort my inbox");
-        expect(userText(first)).not.toContain("data-context");
+        expect(userText(first)).toContain("Set yourself up for this job: sort my inbox\n\n<data-context>");
+        expect(userText(first)).toContain('"cardId":"c_1"');
         const line = (await messages(bot.threadId)).find((row) => row.role === "user");
         rmSync(fakeClaudeDump, { force: true });
         expect((await api("POST", `/api/bots/${bot.id}/messages/${line.id}/edit`, { text: "sort my inbox and my calendar", threadId: bot.threadId })).status).toBe(202);
