@@ -33,12 +33,12 @@ export type RegistryEntry =
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
 
 /** The pinned standalone release (URLs, hashes) stays on the server; the client sees only `server`. The app's own
- * standalone copy is not on the person's terminal PATH, so its terminal sign-in command is dropped. */
+ * standalone copy is not on the person's terminal PATH, so its terminal sign-in command is dropped and `appCopy` says so. */
 function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean, appCopy = false): AnyProviderDriver["install"] {
   if (!install) return undefined;
   const server = serverInstallFor(install, npmPresent);
   const platform = process.platform === "darwin" || process.platform === "linux" || process.platform === "win32" ? process.platform : undefined;
-  return { ...clientInstall(install), platform, ...(server ? { server } : {}), ...(appCopy ? { signInCommand: undefined } : {}) };
+  return { ...clientInstall(install), platform, ...(server ? { server } : {}), ...(appCopy ? { signInCommand: undefined, appCopy: true } : {}) };
 }
 
 type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<StandaloneInstalled>;

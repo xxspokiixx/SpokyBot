@@ -344,6 +344,8 @@ export interface EngineInstall {
   /** Settings can install this on the server as its own user into an app-owned dir: the vendor's standalone build when one
    * exists for this platform, otherwise this npm package. Set by the registry, never by a client. */
   server?: { package?: string; standalone?: { version: string; downloadBytes: number } };
+  /** Set by the registry: the CLI runs the copy the app installed, which the person's terminal does not reach. */
+  appCopy?: boolean;
 }
 
 /** What a client may see of an install descriptor: the standalone pins (URLs, hashes) stay on the server. */

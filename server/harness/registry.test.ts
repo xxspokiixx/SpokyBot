@@ -563,6 +563,8 @@ process.exit(0);
     const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: base, npmAvailable: () => false });
     await registry.load({ a: { driver: "fake" } });
     expect((await registry.describe())[0].install?.signInCommand).toBeUndefined();
+    // So Settings can offer the in-app way to finish setting it up instead.
+    expect((await registry.describe())[0].install?.appCopy).toBe(true);
     // A copy npm put in the app's folder earlier ranks behind the app's own build for such an engine.
     mkdirSync(join(base, "tools", "npm", "bin"), { recursive: true });
     writeFileSync(join(base, "tools", "npm", "bin", "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
@@ -572,6 +574,7 @@ process.exit(0);
     writeFileSync(join(own, "fakebin"), "#!/bin/sh\n", { mode: 0o755 });
     resetPathCache();
     expect((await registry.describe())[0].install?.signInCommand).toBe("fakebin auth login");
+    expect((await registry.describe())[0].install?.appCopy).toBeUndefined();
   });
 
   it("points the engine at the app's own copy when the copy its CLI finds does not start", async () => {
