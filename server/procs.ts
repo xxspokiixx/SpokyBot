@@ -317,7 +317,7 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
       captureCliTree(child);
       signalLinuxDescendants(child, value);
       try {
-        if (group && linuxRootIdentityMatches(child) === true) process.kill(-pid, value);
+        if (group && (!exited() || linuxRootIdentityMatches(child) === true)) process.kill(-pid, value);
         else if (!group && !exited()) child.kill(value);
       } catch {
         if (!exited()) {
