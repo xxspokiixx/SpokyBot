@@ -149,6 +149,22 @@ describe("Antigravity initialization diagnostics", () => {
     acp.close();
   });
 
+  it("keeps waiting when a count runs out of time, since it proves no lack of progress", async () => {
+    vi.mocked(folderBytes)
+      .mockResolvedValueOnce({ bytes: 500_000_000, complete: true })
+      .mockResolvedValue({ bytes: 100_000_000, complete: false });
+    const child = fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize();
+    let settled = false;
+    void result.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(settled).toBe(false);
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initialized })}\n`);
+    await expect(result).resolves.toEqual(initialized);
+    acp.close();
+  });
+
   it("fails after one window when nothing was unpacked, and says so", async () => {
     unpackSizes(0);
     fakeChild(null);

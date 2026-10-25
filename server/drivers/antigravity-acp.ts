@@ -343,9 +343,10 @@ export class AntigravityAcpClient {
     });
   }
 
-  private async unpackedBytes(): Promise<number> {
-    if (!this.tempDirectory) return 0;
-    return (await folderBytes(this.tempDirectory, Date.now() + UNPACK_COUNT_BUDGET_MS)).bytes;
+  /** `complete` is false when the count ran out of time: `bytes` is then only a lower bound. */
+  private async unpackedBytes(): Promise<{ bytes: number; complete: boolean }> {
+    if (!this.tempDirectory) return { bytes: 0, complete: true };
+    return folderBytes(this.tempDirectory, Date.now() + UNPACK_COUNT_BUDGET_MS);
   }
 
   async initialize(windowMs = STARTUP_TIMEOUT_MS, deadline = Date.now() + STARTUP_CAP_MS): Promise<any> {
@@ -353,12 +354,13 @@ export class AntigravityAcpClient {
     const counting = this.unpackedBytes();
     let unpacked: number | undefined;
     const expired = async (): Promise<number | Error> => {
-      const before = await counting;
-      const now = await this.unpackedBytes();
-      const grew = now > (unpacked ?? before);
-      unpacked = now;
+      const before = (await counting).bytes;
+      const count = await this.unpackedBytes();
+      const now = count.bytes;
+      const progressing = !count.complete || now > (unpacked ?? before);
+      if (count.complete) unpacked = now;
       const left = deadline - Date.now();
-      if (grew && left > 0) return Math.min(windowMs, left);
+      if (progressing && left > 0) return Math.min(windowMs, left);
       this.noteStartupDiagnostic(this.diagnosticBuffer);
       return new Error(
         `Antigravity initialization timed out after ${Math.ceil((Date.now() - started) / 1_000)} seconds (${process.platform}-${process.arch}). ` +
