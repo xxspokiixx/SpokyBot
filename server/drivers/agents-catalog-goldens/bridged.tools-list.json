@@ -81,6 +81,11 @@
             ],
             "description": "standing (default): this conversation's one work thread with each teammate. new: a new thread on the teammate, its own history and run (in_my_folder: in your folder); its result still returns here."
           },
+          "title": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "With thread \"new\": the new thread's sidebar name, short and specific (e.g. \"Launch: Reddit draft\"). Defaults to the start of message."
+          },
           "in_my_folder": {
             "type": "boolean"
           },

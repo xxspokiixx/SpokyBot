@@ -10,6 +10,7 @@ import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListe
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { linuxDisablesGpu } from "./linux-gpu.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState } from "./updater.mjs";
 import {
@@ -224,9 +225,8 @@ function applyUnreadBadge(win = mainWindow) {
 }
 
 // GNOME groups the window with its desktop entry only when both identities match; set before ready.
-// Chromium's GPU process crashed on NVIDIA/libGLES and left an invisible window intercepting input.
 if (process.platform === "linux") {
-  app.disableHardwareAcceleration();
+  if (linuxDisablesGpu()) app.disableHardwareAcceleration();
   app.setDesktopName("com.openmausbot.app.desktop");
 }
 
