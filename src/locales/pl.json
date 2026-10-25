@@ -2327,7 +2327,7 @@
   "model.variant.unverifiedChoice": "Zapisany wariant „{variant}” nie został sprawdzony w tej sesji.",
   "model.variant.none": "Nie wybrano wariantu.",
   "model.variant.sessionValue": "Sesja: {variant}.",
-  "model.variant.clearHint": "Nie wysyłaj wyboru wariantu; OpenCode zachowa ustawienie sesji lub skonfigurowaną wartość",
+  "model.variant.clearHint": "Nie wysyłaj wyboru myślenia; agent zachowa ustawienie sesji lub skonfigurowaną wartość",
   "model.variant.clear": "Wyczyść wybór wariantu",
   "model.variant.use": "Użyj wariantu {variant} dla tego modelu",
   "model.scope.label": "Zastosuj zmiany modelu do",
