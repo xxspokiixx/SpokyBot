@@ -178,7 +178,9 @@ describe("install from Settings on the server", () => {
     expect(standalone).not.toContain("Requires Node.js");
     // No npm on the server, so no npm command to paste into a terminal.
     expect(standalone).not.toContain("npm install -g opencode-ai");
-    expect(standalone).toContain("About 76 MB download");
+    // Decimal megabytes, as macOS and Windows show file sizes: 79,667,571 bytes is about 80 MB.
+    expect(standalone).toContain("About 80 MB download");
+    expect(render(opencode({ standalone: { version: "1.19.4", downloadBytes: 64_291_659 } }))).toContain("About 64 MB download");
     const withNpm = render(opencode({ standalone: { version: "1.19.4", downloadBytes: 79_667_571 }, package: "opencode-ai" }));
     expect(withNpm).toContain("Prefer a terminal?");
     expect(withNpm).toContain("npm install -g opencode-ai");

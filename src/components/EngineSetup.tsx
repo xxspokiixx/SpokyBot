@@ -207,7 +207,8 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
       </button>
       {standalone && mode === "install" && !busy && !done && (
         <p className="text-center text-[11px] text-ink-tertiary">
-          {t("engineSetup.standaloneDownloadNote", { mb: Math.ceil(standalone.downloadBytes / 1024 / 1024) })}
+          {/* Decimal megabytes, as macOS and Windows show file sizes. */}
+          {t("engineSetup.standaloneDownloadNote", { mb: Math.max(1, Math.round(standalone.downloadBytes / 1_000_000)) })}
         </p>
       )}
       {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.installVerified")}</p>}
