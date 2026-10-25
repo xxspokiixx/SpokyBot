@@ -22,10 +22,17 @@ describe("Run log", () => {
     expect(html).toContain("pnpm control:omb doctor");
     expect(html).toContain("Completed");
     expect(html).toContain("Failed");
-    expect(html).toContain("In progress");
+    expect(html).toContain("Result/status unrecorded and unverified.");
+    expect(html).not.toContain("animate-spin");
     expect(html).toContain("Commands may be shortened");
     expect(html).toContain('aria-label="Copy redacted run log"');
     expect(html).not.toContain("tests passed");
+  });
+
+  it("retains the live indicator only for the active tool turn", () => {
+    const html = render(timelineEvents([{ id: "live", at: 100, role: "bot", kind: "activity", tool: { name: "Bash" } }], { busy: true, turnStartedAt: 90 }));
+    expect(html).toContain("In progress");
+    expect(html).toContain("animate-spin");
   });
 
   it("keeps long histories bounded and wraps command text", () => {
