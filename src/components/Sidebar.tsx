@@ -66,6 +66,7 @@ import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { NewTaskFolderDialog } from "./NewTaskFolderDialog";
+import { GroupThreadList } from "./SidebarGroupThreadList";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { botUnreadThreadIds, folderUnreadThreadIds, markBotRead, markFolderRead } from "@/lib/folder-read";
@@ -114,6 +115,7 @@ import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarPhoneBar } from "./SidebarPhoneBar";
+import { PhoneHero } from "./SidebarPhoneHero";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
@@ -135,7 +137,6 @@ import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
-import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { addBot } from "@/lib/add-bot"; import { useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
@@ -163,13 +164,13 @@ function sectionLabel(id: string): string {
   return key ? t(key) : sidebarSectionLabel(id);
 }
 
-interface MenuState {
+export interface MenuState {
   botId: string;
   x: number;
   y: number;
 }
 
-function openBotContextMenu(onMenu: (menu: MenuState) => void, botId: string, event: React.MouseEvent) {
+export function openBotContextMenu(onMenu: (menu: MenuState) => void, botId: string, event: React.MouseEvent) {
   event.preventDefault();
   onMenu({ botId, x: event.clientX, y: event.clientY });
 }
@@ -260,44 +261,6 @@ export function GroupListItem({
     {expanded && <GroupThreadList group={group} selected={selected} density={density} query={group.name.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
     </>
   );
-}
-
-export function GroupThreadList({ group, selected, density = "comfortable", query = "" }: { group: Group; selected: boolean; density?: SidebarDensity; query?: string }) {
-  const { state, dispatch } = useStore();
-  const now = useRelativeNow();
-  const [showAll, setShowAll] = useState(false);
-  const tasks = (group.tasks ?? [{ threadId: group.threadId, title: group.name, createdAt: group.createdAt }]).map((task) => {
-    const speakerId = roomThreadSpeakerId(group, task.threadId);
-    const waiting = Boolean(speakerId) && state.bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
-    return {
-      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && group.unread,
-      activity: waiting ? "waiting-on-you" as const : undefined,
-    };
-  });
-  const bulk = useBulkSelect();
-  const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], showAll || bulk.active));
-  const selection = bulk.forRows(visible);
-  useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
-  const latest = useRef(group);
-  latest.current = group;
-  const groupId = group.id;
-  const actions = useMemo(() => ({
-    onSelect: (task: { threadId: string }) => {
-      if (task.threadId !== latest.current.threadId) dispatch({ type: "switchGroupTask", groupId, threadId: task.threadId });
-      else dispatch({ type: "select", id: groupId });
-    },
-    onRename: (task: { threadId: string }, title: string) => dispatch({ type: "renameGroupTask", groupId, threadId: task.threadId, title }),
-    onDelete: (task: { threadId: string }) => dispatch({ type: "deleteGroupTask", groupId, threadId: task.threadId }),
-    onPin: (task: { threadId: string; title: string }, pinned: boolean) => dispatch({ type: "pinGroupTask", groupId, threadId: task.threadId, pinned, title: task.title }),
-  }), [groupId, dispatch]);
-  const locale = activeLocale();
-  return <div className="mb-2 space-y-0.5" role="group" aria-label={t("task.namedList", { name: group.name })}>
-    {bulk.active && <BulkSelectFilters rows={visible} selected={selection} now={now} onChange={bulk.setSelected} onDone={bulk.finish} />}
-    {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} ownerId={group.id} current={selected && task.threadId === group.threadId} compact={density === "compact"}
-      now={stampClock(threadRecency(task), now)} locale={locale} {...actions} selectMode={bulk.active} checked={selection.has(task.threadId)} onToggleSelect={bulk.toggle} />)}
-    <ThreadListFooter bulk={bulk} rows={visible} selected={selection} total={tasks.length} canShowAll={!query && !showAll && tasks.length > visible.length} canSelect={tasks.length > 1 && !group.dm}
-      onShowAll={() => setShowAll(true)} maxDeletable={tasks.length - 1} freshConversation={false} onDelete={(threadIds) => deleteThreadsInBulk({ groupId }, threadIds, dispatch)} />
-  </div>;
 }
 
 export function roomDeleteCopy(group: Pick<Group, "name" | "dm">) {
@@ -975,7 +938,7 @@ export function botRowProps(
   };
 }
 
-function useVisibleMessages(bot: Bot): Message[] {
+export function useVisibleMessages(bot: Bot): Message[] {
   const { messages, activeLeafId } = bot;
   return useMemo(() => visibleMessages({ messages, activeLeafId }), [messages, activeLeafId]);
 }
@@ -1205,36 +1168,6 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     </>
   );
 });
-
-/** The phone's home leads with the chief of staff, large and centred, instead of a row. */
-function PhoneHero({ bot, selected, onOpen, onMenu }: { bot: Bot; selected: boolean; onOpen: () => void; onMenu: (menu: MenuState) => void }) {
-  const visible = useVisibleMessages(bot);
-  return (
-    <div className="relative mb-2 flex flex-col items-center pb-2 pt-1">
-      <button
-        type="button"
-        data-sidebar-hero={bot.id}
-        data-sidebar-bot-row={bot.id}
-        aria-current={selected ? "page" : undefined}
-        onClick={onOpen}
-        onContextMenu={(event) => openBotContextMenu(onMenu, bot.id, event)}
-        className="flex flex-col items-center gap-1.5 rounded-2xl px-6 py-1 outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
-      >
-        <span className="relative flex">
-          <BotAvatar bot={bot} state={stateForBot({ ...bot, messages: visible })} size={88} motion="none" motionKey={0} animated={Boolean(bot.busy)} />
-          <span className="absolute -bottom-0.5 -right-0.5 flex rounded-full border-2 border-app bg-raised p-1">
-            <Crown size={13} strokeWidth={2.25} className="text-accent" aria-hidden="true" />
-          </span>
-        </span>
-        <span className="text-[17px] font-semibold leading-6 text-ink">{bot.name}</span>
-        <span className="text-[13px] leading-4 text-ink-secondary">{t("sidebar.bot.chiefOfStaff")}</span>
-      </button>
-      <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu"
-        onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
-        className="absolute right-1 top-1 flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><MoreHorizontal size={16} /></button>
-    </div>
-  );
-}
 
 export function Sidebar({ open, onClose, collapseToIcons = false }: {
   open: boolean;

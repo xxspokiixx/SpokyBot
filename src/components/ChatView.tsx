@@ -3,7 +3,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AlertTriangle, ChevronLeft, ChevronRight, Crown, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "@/components/MessageActions";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
@@ -86,7 +86,7 @@ import { CallRecordRow } from "./CallRecordRow";
 import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMessageAttachments } from "./AttachmentGallery";
 import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
-import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole } from "./BotRole";
+import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaffBadge } from "./BotRole";
 import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadConversation } from "./ChatHeadConversation";
 import { ModelPicker } from "./ModelPicker";
 import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine";
@@ -872,15 +872,6 @@ const MessagesList = memo(function MessagesList({
 });
 
 const CHATHEAD_PILL = "flex min-w-0 items-center gap-2 rounded-full border border-hairline/40 bg-control/60 py-0.5 pl-1.5 text-ink";
-
-function chiefOfStaffBadge(bot: Bot) {
-  if (!bot.chiefOfStaff) return null;
-  return (
-    <span title={t("chat.chiefOfStaff")} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent @max-4xl/chathead:px-1.5">
-      <Crown size={11} aria-hidden="true" /> <span className="@max-4xl/chathead:sr-only">{t("chat.chiefOfStaff")}</span>
-    </span>
-  );
-}
 
 export function ChatView({ bot: profile }: { bot: Bot }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
