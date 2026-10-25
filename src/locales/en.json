@@ -2636,6 +2636,7 @@
   "engineSetup.serverInstalling": "Installing. This can take a minute.",
   "engineSetup.serverInstalled": "Installed. Checking the model provider.",
   "engineSetup.usingAppCopy": "Another copy of {name} on this computer doesn't start, so {name} now uses the copy OpenMausBot installed.",
+  "engineSetup.usingAppCopyDismiss": "Dismiss",
   "engineSetup.appCopy.title": "{name} is installed",
   "engineSetup.appCopy.description": "{name} works with its free models, so choose Check again to load them. To use your own account instead, add your {name} API key in Settings → API keys.",
   "engineSetup.appCopy.remote": "{name} works with its free models, so choose Check again to load them. To use your own account instead, add your {name} API key in Settings → API keys on the computer running OpenMausBot.",

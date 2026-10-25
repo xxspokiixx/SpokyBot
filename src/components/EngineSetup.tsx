@@ -7,7 +7,8 @@ import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 import { RefreshEngines } from "./EngineLibrary";
-import { AppCopySetup } from "./EngineAppCopy";
+import { AppCopyNotice, AppCopySetup } from "./EngineAppCopy";
+import { noteAppCopySwitch } from "@/state/engine-install";
 
 type Platform = "darwin" | "win32" | "linux";
 
@@ -164,7 +165,6 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [usingAppCopy, setUsingAppCopy] = useState(false);
   const standalone = instance.install?.server?.standalone;
   // The app installs its own build without npm; the npm command only helps when the server has npm.
   const terminalCommand = standalone && !instance.install?.server?.package ? null : command;
@@ -174,10 +174,9 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
     setBusy(true);
     setDone(false);
     setError(null);
-    setUsingAppCopy(false);
     try {
-      const { instances, usingAppCopy: switched } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
-      setUsingAppCopy(switched === true);
+      const { instances, usingAppCopy } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
+      noteAppCopySwitch(instance.instanceId, usingAppCopy === true);
       const installed = (instances as InstanceInfo[] | undefined)?.find((candidate) => candidate.instanceId === instance.instanceId);
       if (instances) dispatch({ type: "instances", instances });
       if (installed?.snapshot.state !== "available") {
@@ -213,9 +212,7 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
         </p>
       )}
       {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.installVerified")}</p>}
-      {usingAppCopy && !busy && (
-        <p className="text-center text-[11px] leading-relaxed text-ink-secondary">{t("engineSetup.usingAppCopy", { name: instance.displayName })}</p>
-      )}
+      {!busy && <AppCopyNotice instance={instance} />}
       {error && <p role="alert" className="whitespace-pre-wrap text-[11.5px] leading-relaxed text-danger">{error}</p>}
       {terminalCommand && (
         <details className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[11.5px] text-ink-secondary">

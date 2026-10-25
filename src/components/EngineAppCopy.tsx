@@ -1,10 +1,31 @@
 // An engine whose CLI runs the copy OpenMausBot installed: the person's terminal does not reach it, so it is
 // finished here, never with a terminal step.
-import { Check, KeyRound } from "lucide-react";
+import { Check, KeyRound, X } from "lucide-react";
 import { useStore, type InstanceInfo } from "@/state/store";
+import { dismissAppCopySwitch, useAppCopySwitch } from "@/state/engine-install";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { RefreshEngines } from "./EngineLibrary";
+
+/** After an install pointed this engine at the app's own copy: says so on its card, Ready or not, until dismissed. */
+export function AppCopyNotice({ instance, className }: { instance: InstanceInfo; className?: string }) {
+  if (!useAppCopySwitch(instance.instanceId)) return null;
+  return (
+    <div data-app-copy-notice className={cn("flex items-start gap-2", className)}>
+      <p role="status" className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-ink-secondary">
+        {t("engineSetup.usingAppCopy", { name: instance.displayName })}
+      </p>
+      <button
+        type="button"
+        aria-label={t("engineSetup.usingAppCopyDismiss")}
+        onClick={() => dismissAppCopySwitch(instance.instanceId)}
+        className="shrink-0 rounded-md p-1 text-ink-tertiary hover:bg-control hover:text-ink"
+      >
+        <X size={12} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
 
 /** Installed but not signed in. Only OpenCode ships such a build today, and its free models need no account. */
 export function AppCopySetup({ instance, className, unframed }: { instance: InstanceInfo; className?: string; unframed: boolean }) {
@@ -23,6 +44,7 @@ export function AppCopySetup({ instance, className, unframed }: { instance: Inst
           </p>
         </div>
       </div>
+      <AppCopyNotice instance={instance} className="mt-2" />
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {!remote && (
           <button
