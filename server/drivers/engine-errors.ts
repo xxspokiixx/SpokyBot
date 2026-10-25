@@ -116,10 +116,19 @@ export function plainFailureMessage(provider: string, text: string): string {
   return kind === "credits" || kind === "tool_schema" || kind === "tool_count" ? engineFailureMessage(provider, text, { kind })! : text;
 }
 
+/** ACP's StopReason values (protocol v1) that do say why a turn ended early. */
+const STOP_REASON_WORDS: Record<string, string> = {
+  refusal: "The AI refused to go on with this request",
+  max_tokens: "The AI's reply reached its maximum length before it finished",
+  max_turn_requests: "The turn made as many model requests as one turn may before it finished",
+};
+
 /** A failed turn's stop reason as its cause: a bare provider token ("stop_sequence", "rpc_error") is never the whole
  * message, and the token stays in it so its class still reads. */
 export function stopCause(stopReason: string | null | undefined): string | undefined {
   const reason = stopReason?.trim();
   if (!reason) return undefined;
+  const words = Object.hasOwn(STOP_REASON_WORDS, reason) ? STOP_REASON_WORDS[reason] : undefined;
+  if (words) return `${words} (stop reason: ${reason}). Try again, reword the request, or switch this bot to another AI.`;
   return /^[a-z][a-z0-9_]*$/i.test(reason) ? `The engine stopped without saying why (stop reason: ${reason}).` : reason;
 }

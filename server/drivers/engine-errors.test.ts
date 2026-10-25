@@ -115,4 +115,16 @@ describe("stopCause", () => {
     expect(stopCause("  ")).toBeUndefined();
     expect(stopCause(null)).toBeUndefined();
   });
+
+  it("says in plain words what an ACP stop reason that names its cause means, and what to do", () => {
+    expect(stopCause("refusal")).toMatch(/^The AI refused\b/);
+    for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
+      const cause = stopCause(token)!;
+      expect(cause).toContain(`(stop reason: ${token})`);
+      expect(cause).not.toContain("without saying why");
+      expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
+      expect(engineFailureKind(cause)).toBeNull();
+    }
+    expect(stopCause("constructor")).toBe("The engine stopped without saying why (stop reason: constructor).");
+  });
 });
