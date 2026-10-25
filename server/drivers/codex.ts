@@ -15,7 +15,7 @@ import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
-import { describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
+import { cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
 import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
 
@@ -770,7 +770,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.integrations?.browser) {
           mountSelected("browser", "browser", turn.integrations.browser);
         }
-        for (const name of ["data", "highlevel"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
+        for (const name of ["data", "highlevel", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
         // A `-c` override merges with a same-named server in config.toml, and stdio over url is
         // "invalid configuration" that kills the turn, so such a server mounts under its own name.
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
@@ -1683,15 +1683,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     return { turnId };
   };
 
+  const versionOf = cliVersionReader(config.cli);
   const snapshot = async (): Promise<ProviderSnapshot> => {
     if (planUnavailable) return { state: "unavailable", authenticated: false, chatgptPlan: true, reason: planUnavailable, authenticationUnavailableReason: planUnavailable };
     const env = childEnv();
-    const version = await new Promise<string | null>((resolve) => {
-      execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
-        resolve(err ? null : stdout.trim()),
-      );
+    const probe = await new Promise<ReturnType<typeof versionOf>>((resolve) => {
+      execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) => resolve(versionOf(err, stdout)));
     });
-    if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found`, ...(plan ? { chatgptPlan: true } : {}) };
+    if (!("version" in probe)) return { state: "unavailable", reason: probe.reason, ...(plan ? { chatgptPlan: true } : {}) };
+    const { version } = probe;
     if (planAuth) return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
       ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}) };
     if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
@@ -1808,7 +1808,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       customMcp: true,
         phoneMcp: true,
         browserMcp: true,
-        dataMcp: true, highlevelMcp: true,
+        dataMcp: true, highlevelMcp: true, deviceMcp: true,
         images: true,
         nativeImageInput: true,
         effortLevels: ["low", "medium", "high", "xhigh", "max"],
