@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { setLocale } from "@/lib/i18n";
 
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true }));
 const { ToolActivity } = await import("./ToolActivity");
@@ -25,5 +26,14 @@ describe("ToolActivity", () => {
     expect(render(false)).toContain("Failed");
     expect(render(false)).toContain("No output was recorded");
     expect(render(true)).toContain("No output was recorded");
+  });
+  it("translates unverified status in active locale", () => {
+    try {
+      setLocale("es");
+      const html = renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Read" } }));
+      expect(html).toContain("Resultado/estado no registrado y no verificado.");
+    } finally {
+      setLocale("en");
+    }
   });
 });

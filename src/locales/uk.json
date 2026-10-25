@@ -664,6 +664,7 @@
   "inspector.run.complete": "Завершено",
   "inspector.run.failed": "Не вдалося",
   "inspector.run.observed": "Записано",
+  "inspector.run.unverified": "Результат/статус не записано та не перевірено.",
   "inspector.run.userInput": "Ввід користувача",
   "inspector.run.screen": "Спостережено екран",
   "inspector.run.response": "Відповідь записано",
@@ -744,6 +745,7 @@
   "chat.verify.verifiedTag": "перевірено",
   "chat.verify.failed": "{count} не вдалося",
   "chat.verify.running": "{count} виконується",
+  "chat.verify.unverified": "{count} результат/статус не записано та не перевірено",
   "chat.verify.dryRunOne": "1 пробний запуск",
   "chat.verify.dryRunMany": "{count} пробних запусків",
   "chat.verify.collapse": "Згорнути запуск",
@@ -2803,5 +2805,6 @@
   "voice.yourVoices": "Ваші голоси",
   "voice.library": "Бібліотека голосів ElevenLabs",
   "voice.libraryHint": "Вибраний голос буде додано до ваших голосів.",
-  "voice.adding": "Додавання…"
+  "voice.adding": "Додавання…",
+  "toolDetail.unverified": "Результат/статус не записано та не перевірено."
 }

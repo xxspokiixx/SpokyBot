@@ -15,7 +15,7 @@ export function ToolActivity({ tool, place = null, live = false }: { tool: NonNu
   const failed = tool.ok === false;
   const advanced = useAdvancedMode();
   const label = advanced ? tool.name : toolStepLabel(tool);
-  const status = tool.ok === undefined ? (live ? t("toolDetail.running") : "Result/status unrecorded and unverified.") : failed ? t("toolDetail.failed") : t("toolDetail.completed");
+  const status = tool.ok === undefined ? (live ? t("toolDetail.running") : t("toolDetail.unverified")) : failed ? t("toolDetail.failed") : t("toolDetail.completed");
   return (
     <details onToggle={(event) => setExpanded(event.currentTarget.open)} className="group/tool w-fit max-w-full rounded-xl border border-hairline/40 bg-panel text-[13px] open:w-[min(38rem,100%)]" data-testid="tool-activity">
       <summary
@@ -42,7 +42,7 @@ export function ToolActivity({ tool, place = null, live = false }: { tool: NonNu
         </div>
         <div>
           <div className="mb-1 text-[11px] font-medium">{t("toolDetail.output")}</div>
-          {tool.output ? <pre dir="ltr" className="max-h-64 overflow-auto rounded-lg bg-inset p-2.5 font-mono text-xs whitespace-pre-wrap break-words text-ink">{tool.output}</pre> : <p className="text-xs">{tool.ok === undefined ? (live ? t("toolDetail.waiting") : "Result/status unrecorded and unverified.") : t("toolDetail.noOutput")}</p>}
+          {tool.output ? <pre dir="ltr" className="max-h-64 overflow-auto rounded-lg bg-inset p-2.5 font-mono text-xs whitespace-pre-wrap break-words text-ink">{tool.output}</pre> : <p className="text-xs">{tool.ok === undefined ? (live ? t("toolDetail.waiting") : t("toolDetail.unverified")) : t("toolDetail.noOutput")}</p>}
         </div>
         <p className="text-[11px] text-ink-secondary">{t("toolDetail.previewHint")}</p>
       </div>

@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { setLocale } from "@/lib/i18n";
 import { RunLog } from "./RunLog";
 import { timelineEvents, type TimelineEvent } from "@/lib/taskTimeline";
 
@@ -33,6 +34,15 @@ describe("Run log", () => {
     const html = render(timelineEvents([{ id: "live", at: 100, role: "bot", kind: "activity", tool: { name: "Bash" } }], { busy: true, turnStartedAt: 90 }));
     expect(html).toContain("In progress");
     expect(html).toContain("animate-spin");
+  });
+  it("translates unverified status in active locale", () => {
+    try {
+      setLocale("es");
+      const html = render(timelineEvents([{ id: "c", at: 3, role: "bot", kind: "activity", tool: { name: "Read" } }]));
+      expect(html).toContain("Resultado/estado no registrado y no verificado.");
+    } finally {
+      setLocale("en");
+    }
   });
 
   it("keeps long histories bounded and wraps command text", () => {

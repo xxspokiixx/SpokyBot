@@ -2326,5 +2326,8 @@
   "voice.yourVoices": "Vos voix",
   "voice.library": "Bibliothèque de voix ElevenLabs",
   "voice.libraryHint": "En choisir une l'ajoute à vos voix.",
-  "voice.adding": "Ajout en cours…"
+  "voice.adding": "Ajout en cours…",
+  "toolDetail.unverified": "Résultat/état non enregistré et non vérifié.",
+  "inspector.run.unverified": "Résultat/état non enregistré et non vérifié.",
+  "chat.verify.unverified": "{count} résultat/état non enregistré et non vérifié"
 }

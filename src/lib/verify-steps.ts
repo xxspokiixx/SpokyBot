@@ -236,7 +236,7 @@ export function runSummary(steps: RunStep[]): {
     counts.verified > 0 && t("chat.verify.verifiedCount", { count: counts.verified }),
     counts.failed > 0 && t("chat.verify.failed", { count: counts.failed }),
     counts.running > 0 && t("chat.verify.running", { count: counts.running }),
-    counts.unverified > 0 && `${counts.unverified} result/status unrecorded and unverified`,
+    counts.unverified > 0 && t("chat.verify.unverified", { count: counts.unverified }),
     counts.dryRuns === 1 ? t("chat.verify.dryRunOne") : counts.dryRuns > 1 && t("chat.verify.dryRunMany", { count: counts.dryRuns }),
   ].filter(Boolean).join(" · ");
   return { ...counts, label };

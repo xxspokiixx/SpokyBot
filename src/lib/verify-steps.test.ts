@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-
+import { setLocale } from "@/lib/i18n";
 import { SAVE_RUN_AS_SKILL_LINE } from "../../shared/learn-request";
 import {
   askText,
@@ -254,6 +254,17 @@ describe("runSummary", () => {
       total: 3, verified: 3, passed: 0, failed: 0, running: 0, unverified: 1, dryRuns: 2, label: "3 steps · 3 verified · 1 result/status unrecorded and unverified · 2 dry runs",
     });
     expect(runSummary(steps.slice(0, 1)).label).toBe("1 step · 1 verified · 1 dry run");
+  });
+  it("translates unverified and status labels using the active locale", () => {
+    const steps = runSteps([claude(DOCTOR, true), acp(PRESS)]);
+    try {
+      setLocale("es");
+      expect(runSummary(steps).label).toBe("2 pasos · 2 verificados · 1 resultado/estado no registrado y no verificado");
+      setLocale("ja");
+      expect(runSummary(steps).label).toBe("2 ステップ · 2 件検証済み · 1 件結果/ステータス未記録・未検証");
+    } finally {
+      setLocale("en");
+    }
   });
 });
 
