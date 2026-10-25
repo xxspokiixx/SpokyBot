@@ -189,6 +189,37 @@ describe("install from Settings on the server", () => {
     expect(neither).toContain("Requires Node.js");
   });
 
+  it("finishes the app's own signed-out copy in the app, never in a terminal", () => {
+    const appCopy = (snapshot: InstanceInfo["snapshot"]): InstanceInfo => ({
+      ...instance(snapshot),
+      instanceId: "opencodeGo",
+      driverKind: "opencodeGo",
+      displayName: "OpenCode",
+      install: {
+        command: { linux: "npm install -g opencode-ai", darwin: "npm install -g opencode-ai", win32: "npm install -g opencode-ai" },
+        needsNode: true,
+        docsUrl: "https://opencode.ai/docs/",
+        server: { standalone: { version: "1.19.4", downloadBytes: 64_291_659 } },
+        appCopy: true,
+      },
+    });
+    const markup = render(appCopy({ state: "available", authenticated: false, version: "1.19.4" }));
+    expect(markup).toContain("OpenCode is installed");
+    expect(markup).toContain("free models");
+    expect(markup).toContain("Open API keys");
+    expect(markup).toContain("Check again");
+    for (const line of ["Terminal", "terminal", "one-line installer", "npm install", "Install and sign in on the computer", "Sign in to OpenCode"]) {
+      expect(markup).not.toContain(line);
+    }
+    // A remote client's Settings has no keys, so it names the computer instead of offering the button.
+    vi.stubGlobal("window", { ogb: { platform: "linux", remoteClient: { active: true } } });
+    const remote = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: appCopy({ state: "available", authenticated: false, version: "1.19.4" }) })));
+    expect(remote).toContain("on the computer running OpenMausBot");
+    expect(remote).not.toContain("Open API keys");
+    // Missing or broken, the app's copy is installed again from here.
+    expect(render(appCopy({ state: "unavailable", reason: "`opencode` version check failed." }))).toContain("Install OpenCode here");
+  });
+
   it("never offers an install when only sign-in is missing", () => {
     const markup = render(npmEngine({ state: "available", authenticated: false, version: "1.0.0" }));
     expect(markup).not.toContain("Install Kimi here");

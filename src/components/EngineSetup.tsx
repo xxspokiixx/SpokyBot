@@ -7,6 +7,7 @@ import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 import { RefreshEngines } from "./EngineLibrary";
+import { AppCopySetup } from "./EngineAppCopy";
 
 type Platform = "darwin" | "win32" | "linux";
 
@@ -551,6 +552,11 @@ export function EngineSetup({
         </p>
       </div>
     );
+  }
+
+  // The app's own copy is out of reach of the person's terminal, so its sign-in is finished here.
+  if (signInOnly && install.appCopy && !deviceSignIn && !browserSignIn && !pasteSignIn) {
+    return <AppCopySetup instance={instance} className={className} unframed={unframed} />;
   }
 
   return (
