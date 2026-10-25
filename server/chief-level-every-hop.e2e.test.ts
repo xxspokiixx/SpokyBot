@@ -1,4 +1,4 @@
-// Real server + injected MCP tools; only the provider's planning is scripted. Ported from @AdityaUmale's #1877.
+// Real server + injected MCP tools; only the provider's planning is scripted. Ported from @AdityaUmale's test.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
