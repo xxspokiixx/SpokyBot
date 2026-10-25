@@ -6022,5 +6022,12 @@
   "usageMeter.err.unavailable": "No momento, não dá para mudar seu plano pelo app. Nada foi cobrado. Abra sua página do plano para ver suas opções.",
   "usageMeter.err.priceChanged": "O preço mudou desde que você viu, então nada foi cobrado. Escolha Fazer upgrade para ver o novo preço.",
   "usageMeter.err.rateLimited": "Tentativas demais. Espere alguns minutos e tente de novo.",
-  "usageMeter.err.failed": "Não conseguimos mudar seu plano. Nada foi cobrado. Tente de novo em um minuto."
+  "usageMeter.err.failed": "Não conseguimos mudar seu plano. Nada foi cobrado. Tente de novo em um minuto.",
+  "voice.search": "Busque vozes ou cole um link",
+  "voice.noMatches": "Nenhuma voz corresponde",
+  "voice.noMatchesHint": "Tente outro nome ou cole um link para a voz.",
+  "voice.yourVoices": "Suas vozes",
+  "voice.library": "Biblioteca de vozes do ElevenLabs",
+  "voice.libraryHint": "Ao escolher uma, ela é adicionada às suas vozes.",
+  "voice.adding": "Adicionando…"
 }

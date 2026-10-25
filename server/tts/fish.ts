@@ -165,7 +165,8 @@ export async function listVoices(key: string, { query, current }: VoiceSearch = 
     ? [await modelById(key, pastedId)].filter((voice) => voice !== undefined)
     : (trimmed ? await searchModels(key, trimmed) : await popularAndOwnedModels(key)).flatMap((item) => toVoice(item) ?? []);
   if (!trimmed && current && fishVoiceId(current) === current && !voices.some((voice) => voice.id === current)) {
-    const voice = await modelById(key, current);
+    // The list already loaded: a current voice this key cannot read (private, or a passing Fish error) only goes unnamed.
+    const voice = await modelById(key, current).catch(() => undefined);
     if (voice) voices.unshift(voice);
   }
   return [...new Map(voices.map((voice) => [voice.id, voice])).values()];

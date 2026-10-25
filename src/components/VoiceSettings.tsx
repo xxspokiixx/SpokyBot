@@ -1,5 +1,5 @@
 // Security: the harness holds the cloud provider keys; the renderer never talks to ElevenLabs or Fish Audio itself.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, Volume2 } from "lucide-react";
 
 import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
@@ -52,6 +52,7 @@ export function VoiceSettings({
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
   const [addingVoice, setAddingVoice] = useState<PickerVoice | null>(null);
+  const addGeneration = useRef(0);
   const [addError, setAddError] = useState<string | null>(null);
   const [voiceQuery, setVoiceQuery] = useState("");
   const [searchedQuery, setSearchedQuery] = useState("");
@@ -174,17 +175,26 @@ export function VoiceSettings({
     onPatch({ voice: voiceId });
   };
 
+  // An add that settles after the bot or the provider changed belongs to neither: it must not set this voice.
+  useEffect(() => {
+    addGeneration.current += 1;
+    setAddingVoice(null);
+    setAddError(null);
+  }, [bot.id, provider]);
+
   const pickVoice = (voice: PickerVoice) => {
     setAddError(null);
     if (!voice.publicOwnerId) return chooseVoice(voice.id);
+    const generation = ++addGeneration.current;
+    const current = () => generation === addGeneration.current;
     setAddingVoice(voice);
     api("/api/tts/voices/add", {
       method: "POST",
       body: JSON.stringify({ publicOwnerId: voice.publicOwnerId, voiceId: voice.id, name: voice.label }),
     })
-      .then((r: { voiceId: string }) => chooseVoice(r.voiceId))
-      .catch((e: Error) => setAddError(e.message))
-      .finally(() => setAddingVoice(null));
+      .then((r: { voiceId: string }) => current() && chooseVoice(r.voiceId))
+      .catch((e: Error) => current() && setAddError(e.message))
+      .finally(() => current() && setAddingVoice(null));
   };
 
   const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai") => {
@@ -300,13 +310,14 @@ export function VoiceSettings({
       {!workspaceConfigurationLocked && (
         <div className="mt-4">
           <div className="mb-2 text-[13px] text-ink-secondary">{t("voice.engine")}</div>
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("voice.engine")}>
+          {/* Six columns: the three online services share the top row, the two on this computer the bottom one. */}
+          <div className="grid grid-cols-6 gap-1 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("voice.engine")}>
             {([
-              { value: "elevenlabs", label: t("voice.elevenlabs.label"), available: true },
-              { value: "fish", label: t("voice.fish.label"), available: true },
-              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable },
-              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true },
-              { value: "xai", label: t("voice.grok.label"), available: true },
+              { value: "elevenlabs", label: t("voice.elevenlabs.label"), available: true, span: "col-span-2" },
+              { value: "fish", label: t("voice.fish.label"), available: true, span: "col-span-2" },
+              { value: "xai", label: t("voice.grok.label"), available: true, span: "col-span-2" },
+              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-3" },
+              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-3" },
             ] as const).map((option) => (
               <button
                 key={option.value}
@@ -317,7 +328,8 @@ export function VoiceSettings({
                 title={!option.available ? t("voice.macOnly") : undefined}
                 onClick={() => setProvider(option.value)}
                 className={cn(
-                  "rounded-lg px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50",
+                  "min-w-0 rounded-lg px-2 py-1.5 text-[12.5px] leading-tight transition-colors disabled:opacity-50",
+                  option.span,
                   provider === option.value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink",
                 )}
               >
@@ -454,7 +466,7 @@ export function VoiceSettings({
                 key={provider}
                 value={selectedVoice}
                 voices={voices}
-                loading={loadingVoices}
+                loading={loadingVoices || voiceQuery.trim() !== searchedQuery}
                 query={voiceQuery}
                 onQuery={setVoiceQuery}
                 onPick={pickVoice}

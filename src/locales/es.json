@@ -5316,5 +5316,12 @@
   "usageMeter.err.unavailable": "Ahora mismo no se puede cambiar tu plan desde la app. No se cobró nada. Abre tu página del plan para ver tus opciones.",
   "usageMeter.err.priceChanged": "El precio cambió desde que lo viste, así que no se cobró nada. Elige Mejorar plan para ver el nuevo precio.",
   "usageMeter.err.rateLimited": "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.",
-  "usageMeter.err.failed": "No pudimos cambiar tu plan. No se cobró nada. Inténtalo de nuevo en un minuto."
+  "usageMeter.err.failed": "No pudimos cambiar tu plan. No se cobró nada. Inténtalo de nuevo en un minuto.",
+  "voice.search": "Busca voces o pega un enlace",
+  "voice.noMatches": "Ninguna voz coincide",
+  "voice.noMatchesHint": "Prueba con otro nombre o pega un enlace a la voz.",
+  "voice.yourVoices": "Tus voces",
+  "voice.library": "Biblioteca de voces de ElevenLabs",
+  "voice.libraryHint": "Al elegir una, se añade a tus voces.",
+  "voice.adding": "Añadiendo…"
 }

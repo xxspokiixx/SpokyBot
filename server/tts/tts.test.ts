@@ -18,6 +18,8 @@ let refuse: { status: number; body: unknown } | null = null;
 
 const SHARED_VOICE = "SharedVoiceId0000001";
 const FISH_LONG_TAIL = "0327fdb5da9e4fd782899a8058c8ae2b";
+// Someone else's private voice: Fish refuses to describe it to this key.
+const FISH_PRIVATE = "9f8e7d6c5b4a39281706f5e4d3c2b1a0";
 const MP3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]);
 const WAV = Buffer.from("RIFF....WAVEfmt ");
 let modelsFail = false;
@@ -84,6 +86,7 @@ beforeAll(async () => {
       if (path === `/model/${FISH_LONG_TAIL}`) {
         return send(200, { _id: FISH_LONG_TAIL, type: "tts", state: "trained", title: "Calm Narrator", description: "British" });
       }
+      if (path === `/model/${FISH_PRIVATE}`) return send(403, { message: "forbidden" });
       if (path.startsWith("/model/")) return send(404, { message: "not found" });
       if (path === "/model") {
         const query = new URL(req.url ?? "/", "http://stub").searchParams;
@@ -420,6 +423,9 @@ describe("Fish Audio", () => {
     expect(voices.map((v) => v.id)).toContain("fish-1");
     expect(await listVoices(cfg(ready), undefined, { query: "calm voice", current: FISH_LONG_TAIL }))
       .not.toContainEqual(expect.objectContaining({ id: FISH_LONG_TAIL }));
+
+    const unreadable = await listVoices(cfg(ready), undefined, { current: FISH_PRIVATE });
+    expect(unreadable.map((v) => v.id)).toEqual(["fish-1", "fish-2"]);
 
     seen.length = 0;
     await listVoices(cfg(ready), undefined, { current: `../v1/tts?${FISH_LONG_TAIL}` });
