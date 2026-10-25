@@ -566,6 +566,8 @@ export interface WireMessage extends HelperIntroField {
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
    * Team incidents report or Team escalations notice about that bot's thread
    * in `threadId`, not its words; `notified`: the person was already buzzed. */
+  /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
+  doneWhen?: string;
   peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean } };
   /** One reaction per person (shared/reactions.ts REACTIONS). `by` is "user"
    * on a workspace one person uses, otherwise that person's opaque key, the
