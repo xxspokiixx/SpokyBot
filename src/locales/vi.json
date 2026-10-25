@@ -4798,5 +4798,12 @@
   "usageMeter.err.unavailable": "Hiện không thể đổi gói từ ứng dụng. Bạn không bị tính phí. Hãy mở trang Gói để xem các lựa chọn.",
   "usageMeter.err.priceChanged": "Giá đã thay đổi kể từ lúc bạn xem nên bạn không bị tính phí. Chọn Nâng cấp để xem giá mới.",
   "usageMeter.err.rateLimited": "Bạn đã thử quá nhiều lần. Hãy đợi vài phút rồi thử lại.",
-  "usageMeter.err.failed": "Chúng tôi không thể đổi gói của bạn. Bạn không bị tính phí. Hãy thử lại sau một phút."
+  "usageMeter.err.failed": "Chúng tôi không thể đổi gói của bạn. Bạn không bị tính phí. Hãy thử lại sau một phút.",
+  "voice.search": "Tìm giọng nói hoặc dán liên kết",
+  "voice.noMatches": "Không có giọng nói nào khớp",
+  "voice.noMatchesHint": "Hãy thử tên khác hoặc dán liên kết tới giọng nói.",
+  "voice.yourVoices": "Giọng nói của bạn",
+  "voice.library": "Thư viện giọng nói ElevenLabs",
+  "voice.libraryHint": "Khi bạn chọn một giọng, giọng đó sẽ được thêm vào giọng nói của bạn.",
+  "voice.adding": "Đang thêm…"
 }

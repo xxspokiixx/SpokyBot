@@ -4182,5 +4182,12 @@
   "usageMeter.err.unavailable": "目前無法在應用程式中變更你的方案。沒有產生任何費用。請開啟方案頁面查看可選方案。",
   "usageMeter.err.priceChanged": "價格在你查看後有所變動，因此沒有收費。請選擇升級查看新價格。",
   "usageMeter.err.rateLimited": "嘗試次數過多。請等幾分鐘後再試。",
-  "usageMeter.err.failed": "無法變更你的方案。沒有產生任何費用。請過一分鐘再試。"
+  "usageMeter.err.failed": "無法變更你的方案。沒有產生任何費用。請過一分鐘再試。",
+  "voice.search": "搜尋語音或貼上連結",
+  "voice.noMatches": "沒有符合的語音",
+  "voice.noMatchesHint": "請試試其他名稱，或貼上語音的連結。",
+  "voice.yourVoices": "你的語音",
+  "voice.library": "ElevenLabs 語音庫",
+  "voice.libraryHint": "選擇後會加入你的語音。",
+  "voice.adding": "正在加入…"
 }

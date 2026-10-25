@@ -6179,5 +6179,12 @@
   "usageMeter.err.priceChanged": "Cena zmieniła się od chwili, gdy ją sprawdzono, więc nic nie zostało pobrane. Wybierz Zmień na wyższy plan, aby zobaczyć nową cenę.",
   "usageMeter.err.rateLimited": "Zbyt wiele prób. Odczekaj kilka minut i spróbuj ponownie.",
   "usageMeter.err.failed": "Nie udało się zmienić planu. Nic nie zostało pobrane. Spróbuj ponownie za minutę.",
-  "helperIntro.watch": "Pilnuję też Twojego dnia i wysyłam Ci krótkie podsumowanie."
+  "helperIntro.watch": "Pilnuję też Twojego dnia i wysyłam Ci krótkie podsumowanie.",
+  "voice.search": "Szukaj głosów lub wklej link",
+  "voice.noMatches": "Brak pasujących głosów",
+  "voice.noMatchesHint": "Spróbuj innej nazwy lub wklej link do głosu.",
+  "voice.yourVoices": "Twoje głosy",
+  "voice.library": "Biblioteka głosów ElevenLabs",
+  "voice.libraryHint": "Wybrany głos zostanie dodany do twoich głosów.",
+  "voice.adding": "Dodawanie…"
 }

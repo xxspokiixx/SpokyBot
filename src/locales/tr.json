@@ -4798,5 +4798,12 @@
   "usageMeter.err.unavailable": "Planınız şu anda uygulamadan değiştirilemiyor. Hiçbir ücret alınmadı. Seçeneklerinizi görmek için Plan sayfanızı açın.",
   "usageMeter.err.priceChanged": "Fiyat siz baktıktan sonra değişti, bu yüzden hiçbir ücret alınmadı. Yeni fiyatı görmek için Yükselt'i seçin.",
   "usageMeter.err.rateLimited": "Çok fazla deneme yapıldı. Birkaç dakika bekleyip yeniden deneyin.",
-  "usageMeter.err.failed": "Planınızı değiştiremedik. Hiçbir ücret alınmadı. Bir dakika sonra yeniden deneyin."
+  "usageMeter.err.failed": "Planınızı değiştiremedik. Hiçbir ücret alınmadı. Bir dakika sonra yeniden deneyin.",
+  "voice.search": "Ses arayın veya bağlantı yapıştırın",
+  "voice.noMatches": "Eşleşen ses yok",
+  "voice.noMatchesHint": "Başka bir ad deneyin veya sesin bağlantısını yapıştırın.",
+  "voice.yourVoices": "Sesleriniz",
+  "voice.library": "ElevenLabs Ses Kitaplığı",
+  "voice.libraryHint": "Birini seçtiğinizde seslerinize eklenir.",
+  "voice.adding": "Ekleniyor…"
 }

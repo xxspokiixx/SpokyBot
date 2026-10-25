@@ -3162,5 +3162,12 @@
   "usageMeter.err.unavailable": "目前无法在应用中更改你的套餐。没有产生任何费用。请打开方案页面查看可选方案。",
   "usageMeter.err.priceChanged": "价格在你查看后发生了变化，因此没有收费。请选择升级查看新价格。",
   "usageMeter.err.rateLimited": "尝试次数过多。请等几分钟后再试。",
-  "usageMeter.err.failed": "无法更改你的套餐。没有产生任何费用。请过一分钟再试。"
+  "usageMeter.err.failed": "无法更改你的套餐。没有产生任何费用。请过一分钟再试。",
+  "voice.search": "搜索语音或粘贴链接",
+  "voice.noMatches": "没有匹配的语音",
+  "voice.noMatchesHint": "试试其他名称，或粘贴语音的链接。",
+  "voice.yourVoices": "你的语音",
+  "voice.library": "ElevenLabs 语音库",
+  "voice.libraryHint": "选择后会添加到你的语音中。",
+  "voice.adding": "正在添加…"
 }
