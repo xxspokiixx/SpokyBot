@@ -31,7 +31,7 @@ import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
-import { useTeamPeopleLoader } from "@/state/team-people";
+import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -61,7 +61,7 @@ import { useAiSwitchKeeper } from "@/lib/ai-switch";
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   useTeamChats(state.config);
-  useTeamPeopleLoader(state.config, state.bots.map((bot) => `${bot.id}:${bot.reportsTo ?? ""}:${bot.activity ?? ""}:${(bot.tasks ?? []).filter((task) => task.activity === "waiting-on-you").length}`).join("|"));
+  useTeamPeopleLoader(state.config, needsYouVersion(state.bots, state.groups, state.notifications));
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
   useAiSwitchKeeper({ bots: state.bots, dispatch });
   const showThreads = useShowThreads();
