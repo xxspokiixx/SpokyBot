@@ -473,9 +473,9 @@ export function ModelPicker({
   const [scope, setScope] = useState<"bot" | "thread">("thread");
   const advanced = useAdvancedMode();
   const ownerOrAdmin = useOwnerOrAdmin();
-  // Cloud guests change only their own conversation's model, never the shared bot's default; thread-only until
+  // A guest changes only their own conversation's model, never the shared bot's default; thread-only until
   // authority loads.
-  const simpleUpdatesBotDefault = !state.config?.cloudHome || ownerOrAdmin === true;
+  const simpleUpdatesBotDefault = ownerOrAdmin === true;
   const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
     selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
