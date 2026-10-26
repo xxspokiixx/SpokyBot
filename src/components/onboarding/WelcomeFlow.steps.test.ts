@@ -45,10 +45,20 @@ const READY_AI = { instanceId: "claude", driverKind: "claudeAgent", displayName:
 const draft = () => readWelcomeDraft();
 const putBodies = () => f.api.mock.calls.filter(([, init]) => init?.method === "PUT").map(([, init]) => JSON.parse(init.body));
 
+// A fresh store per test: Node's own Web Storage (Node 25+) stands in for happy-dom's and keeps nothing without a file.
+const memoryStorage = () => {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, String(value)),
+    removeItem: (key: string) => void values.delete(key),
+    clear: () => values.clear(),
+  };
+};
 beforeEach(() => {
   setLocale("en");
-  localStorage.clear();
-  sessionStorage.clear();
+  vi.stubGlobal("localStorage", memoryStorage());
+  vi.stubGlobal("sessionStorage", memoryStorage());
   f.dispatch.mockReset();
   f.api.mockReset();
   f.api.mockImplementation(async (path: string, init?: { body?: string }) => (path === "/api/instances" ? { instances: [] } : JSON.parse(init?.body ?? "{}")));
@@ -60,6 +70,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  vi.unstubAllGlobals();
 });
 
 describe("moving through the welcome", () => {
