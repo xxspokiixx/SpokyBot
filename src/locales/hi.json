@@ -1550,6 +1550,7 @@
   "computer.botSettings": "बॉट सेटिंग्स",
   "computer.tab.computer": "स्क्रीन",
   "routines.retried.stalled": "AI अटकने के बाद फिर कोशिश की गई · {status}",
+  "routines.retried.failed": "विफल होने के बाद फिर कोशिश की गई · {status}",
   "automations.editor.app.cloud": "क्लाउड डेस्कटॉप",
   "automations.app.placeCloud": "Cloud में",
   "routines.runsOn.botCloud": "बॉट का क्लाउड डेस्कटॉप",

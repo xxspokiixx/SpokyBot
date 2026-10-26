@@ -2897,6 +2897,7 @@
   "routines.status.missed": "已錯過",
   "routines.status.problems": "問題",
   "routines.retried.stalled": "AI 停滯後已重試 · {status}",
+  "routines.retried.failed": "失敗後已重試 · {status}",
   "routines.goal.completed": "已完成",
   "routines.goal.needs-input": "需要你的輸入",
   "routines.goal.blocked": "受阻",

@@ -2211,6 +2211,7 @@
   "routines.status.missed": "已错过",
   "routines.status.problems": "问题",
   "routines.retried.stalled": "AI 卡住后已重试 · {status}",
+  "routines.retried.failed": "失败后已重试 · {status}",
   "routines.goal.completed": "已完成",
   "routines.goal.needs-input": "需要你的输入",
   "routines.goal.blocked": "受阻",

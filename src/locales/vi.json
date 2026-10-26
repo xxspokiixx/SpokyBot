@@ -3382,6 +3382,7 @@
   "routines.status.missed": "Đã bỏ lỡ",
   "routines.status.problems": "Có vấn đề",
   "routines.retried.stalled": "Đã thử lại sau khi AI bị treo · {status}",
+  "routines.retried.failed": "Đã thử lại sau khi thất bại · {status}",
   "routines.goal.completed": "Đã hoàn thành",
   "routines.goal.needs-input": "Cần bạn phản hồi",
   "routines.goal.blocked": "Bị chặn",

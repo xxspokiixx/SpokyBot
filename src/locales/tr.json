@@ -3382,6 +3382,7 @@
   "routines.status.missed": "Kaçırıldı",
   "routines.status.problems": "Sorunlar",
   "routines.retried.stalled": "AI takıldıktan sonra yeniden denendi · {status}",
+  "routines.retried.failed": "Başarısız olduktan sonra yeniden denendi · {status}",
   "routines.goal.completed": "Tamamlandı",
   "routines.goal.needs-input": "Girdiniz gerekiyor",
   "routines.goal.blocked": "Engellendi",

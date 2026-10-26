@@ -1949,6 +1949,7 @@
   "routines.status.cancelled": "Скасовано",
   "routines.status.missed": "Пропущено",
   "routines.retried.stalled": "Повторено після того, як ШІ завис · {status}",
+  "routines.retried.failed": "Повторено після збою · {status}",
   "routines.goal.completed": "Завершено",
   "routines.goal.needs-input": "Потрібен ваш ввід",
   "routines.goal.blocked": "Заблоковано",
