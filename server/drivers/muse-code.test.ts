@@ -237,6 +237,45 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
       }
     }, 20_000);
 
+    it("waits for the shutdown of an acknowledged interrupt when Stop is pressed again", async () => {
+      const { instance, settled } = await runningTurn("ack");
+      try {
+        await instance.adapter.interruptTurn("t-stop");
+        await instance.adapter.interruptTurn("t-stop");
+        expect(settled.completed).toMatchObject({ ok: false, stopReason: "interrupted" });
+        expect(settled.hostExited).toBe(true);
+      } finally {
+        await instance.dispose();
+      }
+    }, 20_000);
+
+    it("disposes after an acknowledged interrupt only once the host has ended", async () => {
+      const { instance, settled } = await runningTurn("ack");
+      await instance.adapter.interruptTurn("t-stop");
+      await instance.dispose();
+      expect(settled.completed).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(settled.hostExited).toBe(true);
+    }, 20_000);
+
+    it("ends the host before dispose reports a running turn stopped", async () => {
+      const { instance, settled } = await runningTurn("ack");
+      await instance.dispose();
+      expect(settled.completed).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(settled.hostExited).toBe(true);
+    }, 20_000);
+
+    it("lets overlapping shutdowns and Stop wait for the same host shutdown", async () => {
+      vi.stubEnv("FAKE_MUSE_EXIT_DELAY_MS", "500");
+      const { instance, settled, exited } = await runningTurn("ack");
+      const first = instance.adapter.stopAll();
+      await Promise.all([instance.adapter.stopAll(), instance.adapter.interruptTurn("t-stop")]);
+      expect(exited()).toBe(true);
+      expect(settled.completed).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(settled.hostExited).toBe(true);
+      await first;
+      await instance.dispose();
+    }, 20_000);
+
     it("ends the host when Muse never answers the interrupt", async () => {
       const { instance, settled } = await runningTurn("silent");
       try {
