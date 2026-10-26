@@ -430,12 +430,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           kill.unref?.();
         }
       };
-      // A session that ignores session/cancel goes on working. In a shared process only a confirmed session/close or the
-      // end of the process stops it, and ending the process ends the other sessions' turns too.
+      // A session that ignores session/cancel goes on working, and EOF on stdin does not stop it either. Only a confirmed
+      // session/close or the end of its process stops it, and ending a shared process ends the other sessions' turns too.
       const endUncancelled = async (threadId: string, session: AcpSession): Promise<void> => {
         const { host } = session;
         closeSession(threadId, "cancel-timeout");
-        if (host.key === null || (host.links.size && await session.closeConfirmed)) return;
+        if (host.links.size && await session.closeConfirmed) return;
         for (const link of host.links) {
           const other = sessions.get(link.threadId);
           if (other?.host !== host) continue;

@@ -293,6 +293,16 @@ describe("ACP threads sharing one agent process", () => {
       expect((await f.run("thread-a")).done).toMatchObject({ ok: true });
       expect(f.spawned).toHaveLength(1);
     });
+
+    it("ends its own process before Stop settles in a driver that does not share", async () => {
+      const f = await fixture({ shareProcess: false }, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1" });
+      const stopped = f.run("thread-a", { text: "HANG" });
+      await promptsSent(f, 1);
+      const [child] = f.spawned;
+      await f.instance.adapter.interruptTurn("thread-a");
+      expect((await stopped).done).toMatchObject({ ok: true, stopReason: "cancelled" });
+      expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
+    });
   });
 
   it("asks for admission before it starts a process or adds a session, never for a thread already running", async () => {
