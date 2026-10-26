@@ -106,6 +106,7 @@ describe("the statement gate", () => {
     ["SHOW TABLES", { kind: "read", materialisable: false }],
     ["EXPLAIN SELECT 1", { kind: "read", materialisable: false }],
     ["EXPLAIN ANALYZE SELECT 1", { kind: "read", materialisable: false }],
+    ["EXPLAIN ANALYZE WITH a AS (SELECT 1) SELECT * FROM a", { kind: "read", materialisable: false }],
     ["SELECT comment, load, \"set\", copy AS attach FROM t", { kind: "read", materialisable: true }],
     ["SELECT ';' AS semi, 'DROP TABLE t' AS s FROM t -- ; DELETE", { kind: "read", materialisable: true }],
     ["SELECT \"a;b\" FROM t /* ; INSERT */", { kind: "read", materialisable: true }],
@@ -124,6 +125,9 @@ describe("the statement gate", () => {
     "SET threads = 1", "PRAGMA memory_limit = '1GB'", "ATTACH 'x.db' AS x", "COPY t TO 'out.csv'", "CALL something()",
     "INSTALL httpfs", "LOAD httpfs", "CREATE TABLE t (a INT)", "CREATE SCHEMA s", "CREATE INDEX i ON t(a)",
     "WITH a AS (SELECT 1) DELETE FROM t", "WITH a(x) AS (SELECT 1) INSERT INTO t SELECT * FROM a", "EXPLAIN ANALYZE DELETE FROM t",
+    "EXPLAIN ANALYZE WITH x AS (SELECT 1) DELETE FROM victim", "EXPLAIN WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x",
+    "EXPLAIN /* plan */ ANALYZE -- run\nWITH x AS (SELECT 1) UPDATE t SET a = 1", "EXPLAIN EXPLAIN ANALYZE DELETE FROM t",
+    "EXPLAIN ANALYZE (DELETE FROM t)", "EXPLAIN ANALYZE CREATE TABLE x AS SELECT 1", "EXPLAIN ANALYZE",
     "BEGIN", "EXPORT DATABASE 'd'", "TRUNCATE t",
   ])("refuses %s", (sql) => {
     expect(classifySql(sql).kind).toBe("refused");
@@ -266,6 +270,18 @@ describe("data_load", () => {
     const again = await loadData(ctx, { source: join(dir, "Orders 2024.csv"), replace: false });
     expect(again.tables[0]!.name).toBe("orders_2024_2");
     expect(database.calls.at(-2)!.sql).toMatch(/^CREATE TABLE "orders_2024_2"/);
+  });
+
+  it("shortens a 63-character name to fit the suffix that keeps it unique", async () => {
+    const { ctx } = context();
+    const dir = freshDir();
+    writeFileSync(join(dir, "data.csv"), "id\n1\n");
+    const long = "t".repeat(63);
+    await loadData(ctx, { source: join(dir, "data.csv"), name: long });
+    const second = await loadData(ctx, { source: join(dir, "data.csv"), name: long, replace: false });
+    const third = await loadData(ctx, { source: join(dir, "data.csv"), name: long, replace: false });
+    expect(second.tables[0]!.name).toBe(`${"t".repeat(61)}_2`);
+    expect(third.tables[0]!.name).toBe(`${"t".repeat(61)}_3`);
   });
 
   it("snapshots a database read-only, detaches it even on failure, and never records the password", async () => {

@@ -210,6 +210,10 @@ export function classifySql(sql: string): SqlClass {
   const { tokens, statements } = topLevelTokens(sql);
   if (statements > 1) throw fail("invalid_input", "One statement per call.", { hint: "Send each statement in its own data_sql call." });
   if (!tokens.length || tokens[0]!.kind !== "word") throw fail("invalid_input", "The statement is empty.");
+  return classifyTokens(tokens);
+}
+
+function classifyTokens(tokens: Token[]): SqlClass {
   let i = 0;
   let verb = tokens[0]!.text;
   const withClause = verb === "WITH";
@@ -233,8 +237,11 @@ export function classifySql(sql: string): SqlClass {
   }
   if (verb === "EXPLAIN") {
     // EXPLAIN plans without running; EXPLAIN ANALYZE runs the statement.
-    const planned = tokens[i + 1]?.text === "ANALYZE" ? tokens[i + 2]?.text : tokens[i + 1]?.text;
-    if (planned && !READ_VERBS.has(planned)) return { kind: "refused", verb: planned };
+    const operand = tokens.slice(tokens[i + 1]?.text === "ANALYZE" ? i + 2 : i + 1);
+    if (!operand.length) return { kind: "refused", verb };
+    const planned = classifyTokens(operand);
+    if (planned.kind === "refused") return planned;
+    if (planned.kind === "create") return { kind: "refused", verb: "CREATE" };
     return { kind: "read", materialisable: false };
   }
   if (READ_VERBS.has(verb)) return { kind: "read", materialisable: withClause || MATERIALISABLE.has(verb) };
@@ -505,7 +512,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const unique = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
-    for (let n = 2; !replace && existing.has(name.toLowerCase()); n++) name = `${stem}_${n}`.slice(0, 63);
+    for (let n = 2; !replace && existing.has(name.toLowerCase()); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
     existing.add(name.toLowerCase());
     return name;
   };
