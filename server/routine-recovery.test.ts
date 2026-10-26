@@ -87,7 +87,7 @@ function harness(extra: Partial<RoutineManagerOptions> = {}) {
 
 describe("classifyRoutineFailure", () => {
   it.each<[string, Parameters<typeof classifyRoutineFailure>[1], ReturnType<typeof classifyRoutineFailure>]>([
-    // The turn watchdog's stall (#3324) is never retried; an engine's own stall is.
+    // The turn watchdog's stall is never retried; an engine's own stall is.
     [STALL, { cause: "stalled" }, { kind: "final" }],
     ["OpenCode sent nothing for 10 minutes with no tool running, so the turn was stopped as stuck.", { stalled: true, stopReason: "rpc_error" }, { kind: "retry", cause: "stalled" }],
     [BUSY, { cause: "busy" }, { kind: "busy" }],

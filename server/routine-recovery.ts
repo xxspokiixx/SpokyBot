@@ -72,7 +72,7 @@ const FIRST_START: Record<RoutineRetryCause, string> = {
   provider: "failed on a temporary AI error", usage_limit: "was refused by the AI's usage limit", failed: "failed",
 };
 
-/** Any failure gets one automatic retry, except a stall the turn watchdog stopped (#3324: its Chief hears instead), a
+/** Any failure gets one automatic retry, except a stall the turn watchdog stopped (its Chief hears instead), a
  * stop someone pressed or typed, a refusal, and a spent cap. Routine runs and teammate threads both judge by this. */
 export function classifyRoutineFailure(failure: string, facts: RoutineFailureFacts = {}): RoutineFailureClass {
   if (facts.cause === "busy") return { kind: "busy" };
