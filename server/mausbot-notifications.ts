@@ -5,7 +5,7 @@ import type { BotRecord } from "./store.ts";
 export interface NotificationsHost {
   bot(id: string): BotRecord | null;
   recent(): NotificationLogEntry[];
-  markRead(id: string): void;
+  markRead(ids: readonly string[]): void;
   announceRead(threadId: string, ids: string[]): void;
   now(): number;
   /** A Team Cloud: the feed is filtered per viewer by the app, which a bot cannot be. */
@@ -96,10 +96,8 @@ export function markRead(host: NotificationsHost, botId: string, ids: unknown): 
     else marked.push(entry);
   }
   const byThread = new Map<string, string[]>();
-  for (const entry of marked) {
-    host.markRead(entry.id);
-    byThread.set(entry.threadId, [...(byThread.get(entry.threadId) ?? []), entry.id]);
-  }
+  if (marked.length) host.markRead(marked.map((entry) => entry.id));
+  for (const entry of marked) byThread.set(entry.threadId, [...(byThread.get(entry.threadId) ?? []), entry.id]);
   for (const [threadId, threadIds] of byThread) host.announceRead(threadId, threadIds);
   const lines = [
     marked.length ? `Marked ${marked.length} read: ${marked.map((entry) => `"${trim(entry.title, 60)}" (${entry.botName})`).join("; ")}.` : "Marked none read.",

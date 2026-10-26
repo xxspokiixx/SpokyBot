@@ -20,7 +20,7 @@ function setup(entries: NotificationLogEntry[], bots: BotRecord[] = [MAUS], team
   const host: NotificationsHost = {
     bot: (id) => bots.find((bot) => bot.id === id) ?? null,
     recent: () => rows,
-    markRead: (id) => { rows.find((row) => row.id === id)!.read = true; },
+    markRead: (ids) => { for (const id of ids) rows.find((row) => row.id === id)!.read = true; },
     announceRead,
     now: () => NOW,
     team: () => team,

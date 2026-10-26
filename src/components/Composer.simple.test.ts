@@ -29,6 +29,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   }) };
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/cloud-guest", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/cloud-guest")>(), useReactor: () => "user" }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("./CallView", () => ({ CallButton: (props: Record<string, unknown>) => {
@@ -92,16 +93,17 @@ afterEach(() => {
 });
 
 describe("the Simple composer in a bot chat", () => {
-  it("puts attach and the approval level behind a round +, and fills the call button with the bot's colour", () => {
+  it("puts attach, work until done and the approval level behind a round +, and fills the call button with the bot's colour", () => {
     render({ bot });
     expect(plus()?.getAttribute("aria-label")).toBe("Add");
     expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();
     expect(container.querySelector('[aria-label^="Ask for approval for"]')).toBeNull();
-    expect(container.querySelector('[aria-label="Finish together"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Work until done"]')).toBeNull();
     expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer", fill: MAUS_COLORS.purple });
     openPlus();
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key")))
-      .toEqual(["attach", "approval", "call:turns", "call:live"]);
+      .toEqual(["attach", "goal", "approval", "call:turns", "call:live"]);
+    expect(menu()!.textContent).toContain("Work until done");
     expect(menu()!.textContent).toContain("Before Atlas acts");
     expect(menu()!.textContent).toContain("Call mode");
   });
@@ -155,6 +157,18 @@ describe("the Simple composer in a bot chat", () => {
     expect(ask.querySelector(".lucide-check")).not.toBeNull();
     click(submenu.querySelector('[data-menu-key="approval:full"]'));
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "atlas", threadId: "atlas-thread", patch: { approvalMode: "full" } });
+  });
+});
+
+describe("the composer after Set me up", () => {
+  it("asks for the job and shows a chip to stop it while the conversation waits, and neither once it does not", () => {
+    render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1, setupRequest: { at: 2 } }] } });
+    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Tell Atlas what you'd like help with");
+    expect(container.querySelector("[data-setup-request]")?.textContent).toContain("Atlas is ready to be set up");
+    expect(container.querySelector(`[aria-label="Stop setting up Atlas"]`)).not.toBeNull();
+    render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1 }] } });
+    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Atlas");
+    expect(container.querySelector("[data-setup-request]")).toBeNull();
   });
 });
 

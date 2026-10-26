@@ -130,7 +130,7 @@ import { createSkillReview, turnToolSteps } from "./skill-review.ts";
 import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
-import { canAccessTeam, canReachPeer, inScope, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -227,17 +227,17 @@ import {
 import { attachCustomMcp } from "./mcp-result-budget.ts";
 import { MCP_OAUTH_CALLBACK_PATH, McpOAuthManager, mcpOAuthRedirectUri } from "./mcp-oauth.ts";
 import {
-  GROUP_GOAL_MAX_TURNS,
-  groupGoalAssignmentKey,
+  GROUP_GOAL_WAIT_MAX_MS,
   groupGoalCompletionTurnId,
-  groupGoalCoordinatorInstructions,
-  groupGoalWorkerInstructions,
   parseGroupGoalDecision,
-  resolveGroupGoalMember,
+  runGoalRun,
   selectGroupGoalCoordinator,
-  type GoalRunMember,
+  type GoalStepOutcome,
 } from "./group-goal-run.ts";
-import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-goal-run.ts";
+import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
+import { createGoalTurns } from "./host/goal-turns.ts";
+import { createGoalCards, type LiveGoalRun } from "./host/goal-cards.ts";
+import { createOneOnOneGoals } from "./host/one-on-one-goals.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
@@ -253,7 +253,7 @@ const SESSION_READ_MAX_CHARS = 8_000;
 import { personOf, promptWithReply, replyTargetIn, speakerOf, transcriptText, type PersonName, type ReplyTarget } from "./replies.ts";
 import type { DataContext } from "./data-context.ts";
 import { promptWithDataContext } from "../shared/data-context.ts";
-import { admit } from "./admission.ts";
+import { admit, roomTurnHolds } from "./admission.ts";
 import {
   drainSteeredMessages,
   hasQueuedSteeredMessages,
@@ -299,7 +299,7 @@ import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
-import { createRoomAccess } from "./host/room-access.ts";
+import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
@@ -392,7 +392,7 @@ import { skillExport } from "./skill-export.ts";
 import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
-import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts";
+import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
@@ -2355,9 +2355,9 @@ function parksBehindCoordination(botId: string, threadId: string): boolean {
   return (store.projectBotForTask(botId, threadId) ?? store.bot(botId))?.parkDirectMessages === true;
 }
 
-function botAtThreadCapacity(botId: string): boolean {
-  // threadBusy, not the stored flag: a reservation holds its slot after an early completion clears the flag.
-  return store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
+function botAtThreadCapacity(botId: string, personThreadId?: string): boolean {
+  // The person's main chat is never at capacity. threadBusy, not the stored flag: a reservation holds its slot after an early completion clears the flag.
+  return (!personThreadId || personThreadId !== botMainThread(botId)) && store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
 }
 
 function hasDirectDispatch(botId: string): boolean {
@@ -2526,7 +2526,7 @@ const {
   browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions,
   currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, browserSessionSpec, browserIntegration,
   browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, closeBrowser, browserEngineSwitched, eraseDeletedBrowser, engineSummary, browserSessionsOf, signedInSitesTarget, uploadPaths, eraseAudienceBrowsers,
-} = createBrowserHost({ cfg, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), mayLend: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }) === null, device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) });
+} = createBrowserHost({ cfg, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), mayLend: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }) === null, device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) ?? { unshared: true as const } });
 
 const dataSheets = new DataSheetRegistry({
   broadcast: (frame) => broadcast({ ...frame }),
@@ -2948,7 +2948,10 @@ const store = new Store(
   (instanceId) => registry.cliTarget(instanceId)?.driverKind,
   () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
 );
-const { stopThreadForPerson, stopOnTypedCommand, noteTeammatesLeftRunning } = createPersonStop({ store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended });
+const { stopThreadForPerson, stopOnTypedCommand, noteTeammatesLeftRunning } = createPersonStop({
+  store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended,
+  stopGoal: (threadId) => oneOnOneGoals.stop(threadId),
+});
 const creditMoves = cloudCredit && createCreditMoves({ credit: cloudCredit, store, context: selectionContext, threadBusy, saveDefault: saveNewBotModel,
   defaults: () => [cfg.defaultModelSelection, cfg.newBotDefaults?.profile.modelSelection], engineName: id => registry.get(id)?.displayName ?? id,
   log: line => console.warn(line) });
@@ -2965,7 +2968,7 @@ const phones = createPhones({
   active: (turn) => internalCapabilityIsActive(turn as InternalCapability),
 });
 let cloudPower: CloudPower | null = null; // The sleep handshake of a plan that sleeps (server/cloud-power.ts), made just before the server listens.
-const { cloudHealth, cloudSigned } = createCloudSignedHost({ cloudHome: CLOUD_HOME, sessions, power: () => cloudPower, box: () => botBox.report(), teamAdmin: teamAdminHost(), memberLeft: (email) => leaveTeam ? leaveTeam(email).then((result) => { teamOwners.left(email); return result; }) : Promise.reject(new Error("not a team")), health: { store, bus, dataDir: DATA_DIR, eventsDir: EVENTS_DIR, version: serverVersion(), image: process.env.OMB_CLOUD_IMAGE,
+const { cloudHealth, cloudSigned } = createCloudSignedHost({ cloudHome: CLOUD_HOME, sessions, power: () => cloudPower, box: () => botBox.report(), teamAdmin: teamAdminHost(), memberLeft: (email) => leaveTeam ? leaveTeam(email).then((result) => { teamOwners.left(email); forgetSetupPresser(store, personKey({ id: "", email })); return result; }) : Promise.reject(new Error("not a team")), health: { store, bus, dataDir: DATA_DIR, eventsDir: EVENTS_DIR, version: serverVersion(), image: process.env.OMB_CLOUD_IMAGE,
   engines: () => registry.instances().map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, snapshot: registry.knownSnapshot(instance.instanceId) })),
   connectors: () => highlevelHost.health(composio.configured(cfg) ? composio.connectedServices(cfg) : null),
   browser: () => ({ available: browserReady(undefined), installing: Boolean(browserEngineInstall), interrupted: browserRuntime.interruptedCount() }) } });
@@ -3079,7 +3082,7 @@ function previewSystemPrompt(bot: BotRecord) {
   const coordination = chiefLevel(bot)
     ? chiefOfStaffSystemPrompt(bot.id, store.bots, true, chiefEscalationsEnabled(cfg))
     : peers.length > 0
-      ? peerRosterSystemPrompt(peers)
+      ? peerRosterSystemPrompt(peers, bot)
       : "";
   const agentsMounted = caps?.agentsMcp === true;
   const previewPlan = resolveSurface({
@@ -3668,17 +3671,7 @@ type GroupTurnOperation = {
   providerHandshakePending: boolean;
   queuedQueueIds?: string[];
   line?: RoomRoundLine;
-  goalRun?: {
-    runId: string;
-    cardMessageId: string;
-    goal: string;
-    coordinatorBotId: string;
-    coordinatorName: string;
-    turnCount: number;
-    maxTurns: number;
-    startedAt: number;
-    finished: boolean;
-  };
+  goalRun?: LiveGoalRun;
 };
 
 // Wider than busyBotId (setup and queued responders too), so polling clients never mistake a handoff for completion.
@@ -3715,65 +3708,11 @@ function activeGroupSpeaker(groupId: string): { botId: string; name: string; col
   return undefined;
 }
 
-type GroupGoalCoordinatorTurn = {
-  token: symbol;
-  turnId?: string;
-  assistantItems: string[];
-  /** A timed-out provider may still emit: keep swallowing until its real completion arrives. */
-  discard: boolean;
-  cleanupTimer?: ReturnType<typeof setTimeout>;
-};
-const groupGoalCoordinatorTurns = new Map<string, Set<GroupGoalCoordinatorTurn>>();
-const GROUP_GOAL_COORDINATOR_GUARD_MS = 5 * 60_000;
-
-function addGroupGoalCoordinatorTurn(threadId: string, turn: GroupGoalCoordinatorTurn): void {
-  const turns = groupGoalCoordinatorTurns.get(threadId) ?? new Set<GroupGoalCoordinatorTurn>();
-  turns.add(turn);
-  groupGoalCoordinatorTurns.set(threadId, turns);
-}
-
-function removeGroupGoalCoordinatorTurn(threadId: string, turn: GroupGoalCoordinatorTurn): void {
-  if (turn.cleanupTimer) clearTimeout(turn.cleanupTimer);
-  const turns = groupGoalCoordinatorTurns.get(threadId);
-  turns?.delete(turn);
-  if (turns?.size === 0) groupGoalCoordinatorTurns.delete(threadId);
-}
-
-function hasUnboundDiscardedGroupGoalTurn(threadId: string): boolean {
-  return [...(groupGoalCoordinatorTurns.get(threadId) ?? [])]
-    .some((turn) => turn.discard && !turn.turnId);
-}
-
-/** Per provider turn, never per room thread; most adapters emit turn.started before sendTurn resolves. */
-function groupGoalCoordinatorTurnForEvent(event: RuntimeEvent): GroupGoalCoordinatorTurn | undefined {
-  const turns = groupGoalCoordinatorTurns.get(event.threadId);
-  if (!turns?.size) return undefined;
-  const candidates = [...turns];
-  if (event.turnId) {
-    const exact = candidates.find((turn) => turn.turnId === event.turnId);
-    if (exact) return exact;
-    // Until an interrupted handshake returns its own id, no new id can be attributed safely.
-    const unboundDiscarded = candidates.filter((turn) => turn.discard && !turn.turnId);
-    if (unboundDiscarded.length > 0) {
-      // More than one unbound candidate is genuinely ambiguous and stays gated.
-      if (candidates.length === 1) {
-        unboundDiscarded[0]!.turnId = event.turnId;
-        // Tombstone at once so no later event of this abandoned turn can settle a replacement.
-        retireProviderTurn(event.turnId);
-        return unboundDiscarded[0];
-      }
-      return undefined;
-    }
-    const pending = candidates.findLast((turn) => !turn.turnId && !turn.discard);
-    if (pending && !pending.turnId) {
-      pending.turnId = event.turnId;
-      return pending;
-    }
-    return undefined;
-  }
-  // An event without a turn id fails closed for private text.
-  return candidates.length === 1 ? candidates[0] : undefined;
-}
+const goalTurns = createGoalTurns({ retireProviderTurn });
+const goalCards = createGoalCards({ store, routines: () => routines, notify, routineSourceOwner, routineSourceThread });
+const oneOnOneGoals = createOneOnOneGoals({
+  store, cards: goalCards, turns: goalTurns, canStart: canAdmitDirectTurn, startTurn, isUnattended,
+});
 
 function groupIsWorking(group: GroupRecord): boolean {
   return Boolean(group.busyBotId) || Boolean(groupTurnOperations.get(group.id)?.size);
@@ -3959,7 +3898,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
 
 // Load coordination state before registering store listeners or recovering routines: recovery can emit room changes synchronously.
 const groupQueues = new Map<string, Promise<void>>();
-const { roomRootProblem, roomHandoffProblem, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store });
+const { roomRootProblem, roomHandoffProblem, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store, privateTo: (threadId) => teamHost.privateTo(threadId) });
 const roomJobs = createRoomJobs({ store, coordinator: { all: () => coordinator.all() }, cfg, laneRoomThread,
   operations: groupId => groupTurnOperations.get(groupId) ?? [], speakerOf: threadId => groupSpeakers.get(threadId)?.botId });
 
@@ -4415,89 +4354,14 @@ function finishGroupGoalRun(
   status: Exclude<GroupGoalRunStatus, "working">,
   detail: string,
 ): void {
-  const run = operation.goalRun;
-  if (!run || run.finished) return;
-  run.finished = true;
-  const finishedAt = Date.now();
-  const safeDetail = redactSecretsInText(detail.trim()).slice(0, 500);
-  const card: GroupGoalRunCardData = {
-    runId: run.runId,
-    goal: redactSecretsInText(run.goal),
-    status,
-    coordinatorBotId: run.coordinatorBotId,
-    coordinatorName: redactSecretsInText(run.coordinatorName),
-    turnCount: run.turnCount,
-    maxTurns: run.maxTurns,
-    detail: safeDetail,
-    startedAt: run.startedAt,
-    finishedAt,
-  };
-  const routineRun = routines?.finishGoalRun(run.runId, status, safeDetail);
-  // A scheduled team goal that stops to ask must never be filed as a quiet completion.
-  if (routineRun?.status === "waiting") {
-    const coordinator = store.bot(routineRun.botId);
-    if (coordinator) {
-      const notificationBot = routineSourceOwner(routineRun)?.bot ?? coordinator;
-      notify(buildNotification(
-        "question",
-        notificationBot,
-        routineSourceThread(routineRun) ?? routineRun.threadId ?? operation.threadId,
-        safeDetail || `${routineRun.routineName} needs your input`,
-        { avatarUrl: notificationBot.avatarUrl },
-      ));
-    }
-  }
-  if (routineRun?.status === "completed") {
-    const coordinator = store.bot(routineRun.botId);
-    if (coordinator) {
-      const notificationBot = routineSourceOwner(routineRun)?.bot ?? coordinator;
-      notify(buildNotification(
-        "done",
-        notificationBot,
-        routineSourceThread(routineRun) ?? routineRun.threadId ?? operation.threadId,
-        safeDetail || routineRun.routineName,
-        { avatarUrl: notificationBot.avatarUrl },
-      ));
-    }
-  }
-  const group = store.group(groupId);
-  const ownsThread = group?.dm
-    ? group.threadId === operation.threadId
-    : Boolean(group && store.groupTaskByThread(group.id, operation.threadId));
-  if (!ownsThread) return;
-  const fallbackState = status === "completed"
-    ? "completed"
-    : status === "needs-input"
-      ? "needs your input"
-      : status === "limit-reached"
-        ? "reached its limit"
-        : status;
-  store.patchMessage(operation.threadId, run.cardMessageId, {
-    text: `Goal ${fallbackState}: ${card.detail || card.goal}`,
-    goalRun: card,
+  goalCards.finish(operation.threadId, operation.goalRun, status, detail, () => {
+    const group = store.group(groupId);
+    return group?.dm ? group.threadId === operation.threadId : Boolean(group && store.groupTaskByThread(group.id, operation.threadId));
   });
 }
 
 function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: string): void {
-  const run = operation.goalRun;
-  if (!run || run.finished) return;
-  const safeDetail = redactSecretsInText(detail.trim()).slice(0, 500);
-  const current = store.messagesFor(operation.threadId).find((message) => message.id === run.cardMessageId);
-  if (current?.goalRun?.status === "working" && current.goalRun.detail === safeDetail) return;
-  store.patchMessage(operation.threadId, run.cardMessageId, {
-    text: `Goal in progress: ${safeDetail || redactSecretsInText(run.goal)}`,
-    goalRun: {
-      runId: run.runId,
-      goal: redactSecretsInText(run.goal),
-      status: "working",
-      coordinatorBotId: run.coordinatorBotId,
-      coordinatorName: redactSecretsInText(run.coordinatorName),
-      turnCount: run.turnCount,
-      maxTurns: run.maxTurns,
-      ...(safeDetail ? { detail: safeDetail } : {}),
-      startedAt: run.startedAt,
-    },
-  });
+  goalCards.progress(operation.threadId, operation.goalRun, detail);
 }
 
 type GroupMemberBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
@@ -5300,9 +5164,7 @@ const turnContext = new Map<string, { tokens?: number; window?: number }>();
 
 const TURN_STALL_MS = Math.max(60_000, stallLimitMs(process.env.OMB_TURN_STALL_MS, 20 * 60_000));
 const TOOL_STALL_MS = Math.max(TURN_STALL_MS, stallLimitMs(process.env.OMB_TOOL_STALL_MS, 2 * 60 * 60_000));
-const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAIT_MAX_MS) || 30 * 60_000);
-const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
 const roomStallCompletions = new RoomTurnStallRegistry();
 const turnStops = new TurnStops();
 function stoppedTurnText(threadId: string, turnId: string | undefined, cause?: string, stopReason?: string | null): string {
@@ -5354,7 +5216,7 @@ const watchdog = new TurnWatchdog({
         retireProviderTurn(stalledProviderTurn.turnId);
       }
       // A goal coordinator can stall before its provider turn id is known: keep ownership until the guard binds or expires.
-      if (hasUnboundDiscardedGroupGoalTurn(turn.threadId)) {
+      if (goalTurns.hasUnboundDiscarded(turn.threadId)) {
         const retry = setTimeout(releaseOwnership, 1_000);
         retry.unref?.();
         return;
@@ -5641,7 +5503,7 @@ bus.subscribe((event: RuntimeEvent) => {
     const room = store.groupByThread(event.threadId);
     if (room) {
       if (!roomMemoryCaptureEnabled(cfg) || isInternalTurn(event.threadId) || routines?.runForThread(event.threadId)
-        || groupGoalCoordinatorTurns.get(event.threadId)?.size) return;
+        || goalTurns.count(event.threadId)) return;
       const reply = store.activePath(event.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
       const member = reply?.from ? store.bot(reply.from.botId) : undefined;
       if (!roomCaptureAllowed(room, member) || isUnattended(member.id, event.threadId)) return;
@@ -6641,14 +6503,13 @@ bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "turn.completed" && !store.botByThread(event.threadId)) {
     releaseLocalVmThread(event.threadId);
   }
-  const coordinatorTurnsForThread = groupGoalCoordinatorTurns.get(event.threadId);
-  const ambiguousCoordinatorText = !event.turnId && (coordinatorTurnsForThread?.size ?? 0) > 1;
-  const goalCoordinatorTurn = groupGoalCoordinatorTurnForEvent(event);
+  const ambiguousCoordinatorText = !event.turnId && goalTurns.count(event.threadId) > 1;
+  const goalCoordinatorTurn = goalTurns.forEvent(event);
   const completedTurnId = event.type === "turn.completed"
     ? groupGoalCompletionTurnId(event.turnId, goalCoordinatorTurn?.turnId)
     : event.turnId;
   if (goalCoordinatorTurn?.discard && retiredProviderTurns.has(event.turnId)) {
-    removeGroupGoalCoordinatorTurn(event.threadId, goalCoordinatorTurn);
+    goalTurns.remove(event.threadId, goalCoordinatorTurn);
     return;
   }
   // Buffer the whole provider turn: a model can split the private envelope across items, so item-by-item sanitizing would leak it.
@@ -6675,7 +6536,7 @@ bus.subscribe((event: RuntimeEvent) => {
     ? parseGroupGoalDecision(goalCoordinatorTurn.assistantItems.join("\n")).visibleText
     : "";
   if (goalCoordinatorTurn && event.type === "turn.completed") {
-    removeGroupGoalCoordinatorTurn(event.threadId, goalCoordinatorTurn);
+    goalTurns.remove(event.threadId, goalCoordinatorTurn);
   }
   if (coordinatorVisibleText) {
     const publicAssistantEvent: RuntimeEvent = {
@@ -7542,7 +7403,7 @@ function drainQueuedSendsNow() {
   drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended, head) =>
     new Promise<void>((resolve, reject) => {
       void startTurn(botId, prompt, {
-        threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve,
+        threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve, allowRoomTurnElsewhere: !head.peerAsk,
         trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}),
       }).catch((err) => {
         const why = err instanceof Error ? err.message : String(err);
@@ -7558,16 +7419,16 @@ function drainQueuedSendsNow() {
       }).catch(reject);
     }),
     // Provider completion can precede its dispatch promise: keep the queue until that exact handshake releases its claim.
-    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
+    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId, head.peerAsk ? undefined : threadId) || roomTurnHolds(activeGroupTurnForBot(botId), threadId, !head.peerAsk)
       || directRootQueued(threadId) || (!head.peerAsk?.incident && parksBehindCoordination(botId, threadId)),
   );
 }
 
 async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }) {
   const decision = admit("direct", {}, {
-    atCapacity: botAtThreadCapacity(botId),
+    atCapacity: botAtThreadCapacity(botId, threadId),
     threadBusy: threadBusy(botId, threadId),
-    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+    groupTurn: roomTurnHolds(activeGroupTurnForBot(botId), threadId, true),
     parksBehindCoordination: parksBehindCoordination(botId, threadId),
   });
   if (decision.action === "queue") {
@@ -7585,7 +7446,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, allowRoomTurnElsewhere: true });
   return { ok: true as const, threadId, message };
 }
 
@@ -7942,8 +7803,7 @@ async function startTurn(
     computerSelectionContinuation?: boolean;
     replyTo?: ReplyTarget;
     sendId?: string;
-    via?: "call";
-    callId?: string;
+    via?: "call"; callId?: string;
     relayed?: boolean;
     dataContext?: DataContext;
     app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
@@ -7952,7 +7812,10 @@ async function startTurn(
     automaticRecoveryAttempted?: boolean;
     automaticRecoveryIndex?: number;
     onTurnSettled?: () => void;
+    /** The turn's outcome, for a caller that runs it outside any coordinated work. */
+    onSettled?: (outcome: HostTurnResult) => void;
     coordination?: { id: string; resumed: boolean; settle: (outcome: HostTurnResult) => void };
+    /** A person's own send: it may run beside a room turn on another thread. */ allowRoomTurnElsewhere?: boolean;
   },
 ) {
   workspaceMaintenance.assertAvailable(); moveFreeze.assertTurns();
@@ -7994,10 +7857,10 @@ async function startTurn(
     computerSkipped ??= changing;
   }
   if (threadBusy(botId, threadId)) throw Object.assign(new Error("this thread is already working — interrupt it first"), { status: 409, code: "thread_busy" });
-  if (activeGroupTurnForBot(botId)) {
+  if (roomTurnHolds(activeGroupTurnForBot(botId), threadId, opts?.allowRoomTurnElsewhere === true)) {
     throw Object.assign(new Error("the bot is already working in a channel — wait for it to finish"), { status: 409, code: "thread_busy" });
   }
-  if (botAtThreadCapacity(botId)) {
+  if (botAtThreadCapacity(botId, threadId)) {
     throw Object.assign(new Error(`this bot has reached its limit of ${maxConcurrentBotThreads(cfg)} parallel threads — wait for one to finish`), { status: 409, code: "thread_limit" });
   }
   // Revoke what a previous turn left behind before minting this turn's integrations.
@@ -8026,7 +7889,7 @@ async function startTurn(
   }
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
-  const providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
+  let providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
   const turnImages = usesNativeImageInput ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;
   if (commsDepth > 0) markInternalTurn(threadId);
@@ -8097,7 +7960,7 @@ async function startTurn(
     queueMicrotask(drainQueuedSends);
     return userMessage;
   }
-  if (route.quickModel && !opts?.cardContinuation && userMessage.quickModel !== route.quickModel) userMessage = store.patchMessage(threadId, userMessage.id, { quickModel: route.quickModel }) ?? userMessage;
+  const setupLine = takeSetupRequest(store, { botId: bot.id, threadId, line: userMessage, person: personLine, editedFrom: opts?.editedMessageId, mounted: instance.adapter.capabilities.agentsMcp === true }); if (setupLine) { userMessage = setupLine; providerText = setupTurnText(setupLine, usesNativeImageInput); } if (route.quickModel && !opts?.cardContinuation && userMessage.quickModel !== route.quickModel) userMessage = store.patchMessage(threadId, userMessage.id, { quickModel: route.quickModel }) ?? userMessage;
   const recoveryUserMessageId = opts?.coordination
     ? store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id
     : userMessage.id;
@@ -8142,7 +8005,8 @@ async function startTurn(
   // An unknown control-plane wake must never acquire authority by guessing the latest user as its origin.
   const pendingSource = requestMessageId ?? store.activePath(threadId).findLast(message => message.role === "user")?.id;
   if (pendingSource) store.patchMessage(threadId, pendingSource, { requestPending: true });
-  if (opts?.coordination) directCoordinationSettlers.set(dispatchClaimId, { nodeId: opts.coordination.id, settle: opts.coordination.settle });
+  const settleOutcome = opts?.coordination?.settle ?? opts?.onSettled;
+  if (settleOutcome) directCoordinationSettlers.set(dispatchClaimId, { nodeId: opts?.coordination?.id ?? dispatchClaimId, settle: settleOutcome });
   directFollowupSettlers.set(dispatchClaimId, { threadId, settle: opts?.onTurnSettled });
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" });
   directTurnBots.set(threadId, bot);
@@ -8666,7 +8530,7 @@ async function startTurn(
       const coordinationPrompt = chiefLevel(bot)
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), chiefEscalationsEnabled(cfg))
         : integrations.agents && sectionPeers.length > 0
-          ? peerRosterSystemPrompt(sectionPeers)
+          ? peerRosterSystemPrompt(sectionPeers, bot)
           : "";
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + THREADS_PROMPT + WIDGET_PROMPT : "";
       const routinePrompt = integrations.agents ? TRIGGER_PROMPT : "";
@@ -8755,7 +8619,7 @@ async function startTurn(
       const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
         { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) },
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, {
-          skills: skillAuthoring,
+          skills: skillAuthoring, chief: Boolean((liveBot ?? bot).chiefOfStaff),
           cwd: liveBot?.cwd ?? bot.cwd,
           connectedApps: setupConnectedApps(bot, instance.adapter.capabilities.composioMcp === true, Boolean(integrations.composio)),
         }) },
@@ -8972,7 +8836,7 @@ async function startTurn(
             store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
               name: e instanceof TurnUsageLimitRefusedError ? `recovery: ${failoverLine(engineName(instanceId), engineName(target.instanceId), e.resetsAt)}` : `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} ${e instanceof TurnAuthenticationRefusedError ? "is signed out" : "could not start"}. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
             } });
-            if (opts?.coordination) directCoordinationSettlers.delete(dispatchClaimId);
+            if (opts?.coordination || opts?.onSettled) directCoordinationSettlers.delete(dispatchClaimId);
             else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
             await startTurn(bot.id, text, { ...opts, threadId, userMessage, editedMessageId: undefined,
               automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1 });
@@ -9020,10 +8884,10 @@ function routineSourceOwner(run: Pick<RoutineRun, "botId" | "sourceThreadId" | "
   // Validate before messagesFor(): Store lazily opens transcript storage, so an orphan id would recreate a deleted conversation.
   const bot = store.bot(run.botId);
   if (!bot) return null;
-  // Stamped from the confirmed request, never calendar input; recheck sections, since either bot may have moved since.
+  // Stamped from the confirmed request, never calendar input; recheck authority, since either bot may have moved since.
   const sourceBot = store.botByThread(threadId);
   if (sourceBot && !sourceBot.hidden && !store.taskByThread(sourceBot.id, threadId)?.routineRunId &&
-    (sourceBot.id === bot.id || canReachPeer(sourceBot, bot))) {
+    (sourceBot.id === bot.id || canManage(sourceBot, bot))) {
     return { bot: sourceBot, group: undefined, threadId };
   }
   const group = store.groupByThread(threadId);
@@ -9086,10 +8950,16 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
 }
 
 async function interruptRoutineGroupGoal(
-  groupId: string,
+  groupId: string | undefined,
   threadId: string,
   outcome?: { status: "stopped" | "limit-reached"; detail: string },
 ): Promise<void> {
+  if (!groupId) {
+    oneOnOneGoals.stop(threadId, outcome);
+    const owner = store.botByThread(threadId);
+    if (owner) await interruptDirectThread(owner.id, threadId);
+    return;
+  }
   const speaker = groupSpeakers.get(threadId);
   const bot = speaker ? store.bot(speaker.botId) : undefined;
   cancelGroupTurnOperations(groupId, threadId, outcome);
@@ -9160,6 +9030,7 @@ routines = new RoutineManager({
   routineTurn: (threadId) => directRequestOwners.get(threadId)?.automation !== undefined,
   botState: unattendedDispatchState,
   goalState: (groupId, coordinatorBotId) => {
+    if (!groupId) return unattendedDispatchState(coordinatorBotId);
     const group = store.group(groupId);
     const coordinator = store.bot(coordinatorBotId);
     if (
@@ -9209,6 +9080,10 @@ routines = new RoutineManager({
     await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
   },
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
+    if (!groupId) {
+      oneOnOneGoals.start(coordinatorBotId, threadId, prompt, { runId });
+      return;
+    }
     startGroupTurn(groupId, prompt, undefined, undefined, "goal", undefined, {
       threadId,
       goalCoordinatorBotId: coordinatorBotId,
@@ -9364,8 +9239,8 @@ const routineRequests = new RoutineRequestService({
     const proposer = store.bot(proposerBotId);
     const targetBot = store.bot(target.botId);
     if (!targetBot) return `@${target.name} no longer exists, so this routine request cannot be confirmed for it`;
-    if (!proposer || !canReachPeer(proposer, targetBot)) {
-      return `@${target.name} is no longer in this section, so this routine request cannot be confirmed for it`;
+    if (!proposer || !canManage(proposer, targetBot)) {
+      return `@${target.name} is no longer in this department, so this routine request cannot be confirmed for it`;
     }
     return null;
   },
@@ -9547,7 +9422,7 @@ const chiefPeerTargetRule = (noun: string) => (proposerBotId: string, targetBotI
   const target = store.bot(targetBotId);
   if (!target) return "that bot no longer exists";
   if (!proposer || !chiefLevel(proposer)) return "only a section's Chief of Staff can change another bot's " + noun;
-  if (!canReachPeer(proposer, target)) return "that bot is not in a team this Chief is allowed to manage";
+  if (!canManage(proposer, target)) return "that bot is not in a department this Chief manages";
   return null;
 };
 const validateModelProposal = (selection: ModelSelection, current?: BotRecord): string | null => {
@@ -9621,7 +9496,7 @@ const modelRequests = new ModelRequestService({
 });
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
-  store, teams: teamSetupTeams, canAccessTeam, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
+  store, teams: teamSetupTeams, hasTeamAuthority, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
   autoApply: appliesDirectly,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
   ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
@@ -9876,7 +9751,7 @@ const webhooks = new WebhookManager({
     store.patchTask(botId, threadId, { unread: true });
   },
   resolvePostThread: (trigger, forceNew) => {
-    if (!forceNew && trigger.resultsThreadId) return trigger.resultsThreadId;
+    if (!forceNew && trigger.resultsThreadId && store.taskByThread(trigger.botId, trigger.resultsThreadId)) return trigger.resultsThreadId;
     return store.createTask(trigger.botId, "Updates", false)?.threadId;
   }, ...createWebhookRoomPost({ store, cfg, roomTalks }) });
 const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" });
@@ -9939,17 +9814,7 @@ function reconcileParkedRoots(): void {
 }
 const MAX_GROUP_HOPS = 1;
 
-type GroupMemberTurnOutcome =
-  | "settled"
-  | "provider_failed"
-  | "dispatch_failed"
-  | "spend_capped"
-  | "stalled"
-  | "timed_out"
-  | "cancelled"
-  | "busy"
-  | "parked"
-  | "unavailable";
+type GroupMemberTurnOutcome = GoalStepOutcome;
 type GroupTurnOrchestration = {
   roomHandoffId?: string;
   resumed?: boolean;
@@ -10842,7 +10707,7 @@ async function runClaimedGroupMemberTurn(
     // turn.completed is retired above and cannot release ownership: give the interrupt a short grace, then clean up like the watchdog.
     const releaseOwnership = () => {
       if (turnResourceOwners.get(threadId)?.generation !== resourceOwner.generation) return;
-      if (hasUnboundDiscardedGroupGoalTurn(threadId)) {
+      if (goalTurns.hasUnboundDiscarded(threadId)) {
         const retry = setTimeout(releaseOwnership, 1_000);
         retry.unref?.();
         return;
@@ -11047,7 +10912,6 @@ async function runGroupGoalStep(args: {
   if (!run || args.operation.cancelled || run.turnCount >= run.maxTurns) {
     return { ran: false, replyText: "" };
   }
-  let retriedTransient = false;
   for (;;) {
     const availability = await waitForGroupMemberBot(args.bot, args.operation, (detail) => {
       updateGroupGoalRunProgress(args.operation, `${detail} This goal will continue when they are available.`);
@@ -11069,10 +10933,7 @@ async function runGroupGoalStep(args: {
 
     const result: GroupTurnOrchestration["result"] = {};
     let claimed = false;
-    const coordinatorTurn: GroupGoalCoordinatorTurn | undefined = args.coordinator
-      ? { token: Symbol("goal-coordinator-turn"), assistantItems: [], discard: false }
-      : undefined;
-    if (coordinatorTurn) addGroupGoalCoordinatorTurn(args.threadId, coordinatorTurn);
+    const coordinatorTurn = args.coordinator ? goalTurns.begin(args.threadId) : undefined;
     try {
       const ran = await runGroupMemberTurn(
         args.groupId,
@@ -11108,21 +10969,6 @@ async function runGroupGoalStep(args: {
       );
       // Busy here is a lost claim race, so retry in-step; a parked member is deliberately not retried.
       if (result.outcome === "busy") continue;
-      const outcome = result.outcome;
-      // spend_capped is deliberately absent: a cap refusal is deterministic.
-      const transient =
-        outcome === "provider_failed" ||
-        outcome === "dispatch_failed" ||
-        outcome === "stalled" ||
-        outcome === "timed_out";
-      if (transient && !retriedTransient) {
-        retriedTransient = true;
-        updateGroupGoalRunProgress(
-          args.operation,
-          `${args.bot.name}'s turn did not settle (${outcome.replace("_", " ")}) — retrying once.`,
-        );
-        continue;
-      }
       return {
         ran,
         replyText: result.replyText ?? "",
@@ -11132,20 +10978,7 @@ async function runGroupGoalStep(args: {
     } finally {
         // An idle waiter must never redirect the bot's Stop button away from unrelated direct work.
       args.operation.botIds.delete(args.bot.id);
-      if (coordinatorTurn && groupGoalCoordinatorTurns.get(args.threadId)?.has(coordinatorTurn)) {
-        if (result.outcome === "timed_out" || result.outcome === "stalled") {
-          // interruptTurn is async: keep a discard-only guard so a late private envelope never reaches the room; the token check keeps an old timer off a newer turn.
-          coordinatorTurn.discard = true;
-          coordinatorTurn.assistantItems = [];
-          const cleanupTimer = setTimeout(() => {
-            removeGroupGoalCoordinatorTurn(args.threadId, coordinatorTurn);
-          }, GROUP_GOAL_COORDINATOR_GUARD_MS);
-          cleanupTimer.unref?.();
-          coordinatorTurn.cleanupTimer = cleanupTimer;
-        } else {
-          removeGroupGoalCoordinatorTurn(args.threadId, coordinatorTurn);
-        }
-      }
+      if (coordinatorTurn) goalTurns.end(args.threadId, coordinatorTurn, result.outcome);
     }
   }
 }
@@ -11160,193 +10993,22 @@ async function runGroupGoalOperation(args: {
   const run = args.operation.goalRun;
   if (!run) return;
   const skillAuthoringClaim = { claimed: false };
-  const assignmentCounts = new Map<string, number>();
-  const goalMembers: GoalRunMember[] = args.members.map((member) => ({
-    id: member.id,
-    name: member.name,
-    hidden: member.hidden,
-    chiefOfStaff: member.chiefOfStaff,
-  }));
-
-  let coordinatorNote: string | undefined;
-  let waitExhaustions = 0;
-  while (!args.operation.cancelled && run.turnCount < run.maxTurns) {
-    const coordinatorTurn = run.turnCount + 1;
-    const note = coordinatorNote;
-    coordinatorNote = undefined;
-    const coordinatorResult = await runGroupGoalStep({
-      ...args,
-      bot: args.coordinator,
-      skillAuthoringClaim,
-      coordinator: true,
-      instructions: groupGoalCoordinatorInstructions({
-        goal: run.goal,
-        members: goalMembers,
-        turn: coordinatorTurn,
-        maxTurns: run.maxTurns,
-        remainingTurns: run.maxTurns - coordinatorTurn,
-        note,
-      }),
-    });
-    if (args.operation.cancelled) return;
-    if (coordinatorResult.outcome === "unavailable") {
-      finishGroupGoalRun(args.groupId, args.operation, "blocked", `${args.coordinator.name} is not available.`);
-      return;
-    }
-    if (coordinatorResult.outcome === "spend_capped") {
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "blocked",
-        coordinatorResult.stopReason ?? `${args.coordinator.name} hit the workspace spend cap.`,
-      );
-      return;
-    }
-    if (coordinatorResult.outcome === "busy") {
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "blocked",
-        `${coordinatorResult.stopReason ?? `${args.coordinator.name} stayed busy`} — send the goal again when they are free.`,
-      );
-      return;
-    }
-    if (coordinatorResult.outcome === "parked") {
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "blocked",
-        `${coordinatorResult.stopReason ?? `${args.coordinator.name} parked waiting for the computer`} — send the goal again when the computer is free.`,
-      );
-      return;
-    }
-    if (!coordinatorResult.ran || coordinatorResult.outcome !== "settled") {
-      const reason = coordinatorResult.stopReason?.trim().slice(0, 120);
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "failed",
-        `${args.coordinator.name} could not complete the coordination step${reason ? ` — ${reason}` : ""}.`,
-      );
-      return;
-    }
-
-    const decision = parseGroupGoalDecision(coordinatorResult.replyText).decision;
-    if (!decision) {
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "blocked",
-        `${args.coordinator.name} did not provide a valid next-step decision.`,
-      );
-      return;
-    }
-    if (decision.status !== "continue") {
-      finishGroupGoalRun(args.groupId, args.operation, decision.status, decision.detail);
-      return;
-    }
-    if (run.turnCount >= run.maxTurns) break;
-
-    const worker = resolveGroupGoalMember(decision.next, goalMembers);
-    if (!worker) {
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "blocked",
-        `${args.coordinator.name} selected a teammate who is not an active member of this channel.`,
-      );
-      return;
-    }
-    const workerBot = store.bot(worker.id);
-    if (!workerBot || workerBot.hidden) {
-      finishGroupGoalRun(args.groupId, args.operation, "blocked", `${worker.name} is not available.`);
-      return;
-    }
-    const assignmentKey = groupGoalAssignmentKey(worker.id, decision.instruction);
-    const repeated = (assignmentCounts.get(assignmentKey) ?? 0) + 1;
-    assignmentCounts.set(assignmentKey, repeated);
-    if (repeated >= 3) {
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "blocked",
-        `The team repeated the same assignment three times without resolving the goal.`,
-      );
-      return;
-    }
-
-    const workerTurn = run.turnCount + 1;
-    const workerResult = await runGroupGoalStep({
-      ...args,
-      bot: workerBot,
-      skillAuthoringClaim,
-      coordinator: false,
-      instructions: groupGoalWorkerInstructions({
-        goal: run.goal,
-        coordinatorName: args.coordinator.name,
-        assignment: decision.instruction,
-        turn: workerTurn,
-        maxTurns: run.maxTurns,
-      }),
-    });
-    if (args.operation.cancelled) return;
-    if (workerResult.outcome === "unavailable") {
-      finishGroupGoalRun(args.groupId, args.operation, "blocked", `${workerBot.name} is not available.`);
-      return;
-    }
-    if (workerResult.outcome === "spend_capped") {
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "blocked",
-        workerResult.stopReason ?? `${workerBot.name} hit the workspace spend cap.`,
-      );
-      return;
-    }
-    if (workerResult.outcome === "busy" || workerResult.outcome === "parked") {
-      waitExhaustions += 1;
-      if (waitExhaustions >= GROUP_GOAL_MAX_WAIT_EXHAUSTIONS) {
-        finishGroupGoalRun(
-          args.groupId,
-          args.operation,
-          "blocked",
-          `Teammates stayed busy past the wait limit ${waitExhaustions} times — try again when the team is free.`,
-        );
-        return;
-      }
-      const reason = workerResult.stopReason?.trim().slice(0, 120) ?? `${workerBot.name} stayed busy`;
-      store.appendMessage(args.threadId, {
-        role: "bot",
-        kind: "activity",
-        from: { botId: args.coordinator.id, name: args.coordinator.name, color: args.coordinator.color },
-        tool: { name: `${reason} — asking ${args.coordinator.name} to reassign`, ok: false },
-      });
-      updateGroupGoalRunProgress(args.operation, `${reason}. ${args.coordinator.name} is reassigning.`);
-      coordinatorNote =
-        `${reason} and could not take the assignment "${decision.instruction.slice(0, 160)}". ` +
-        "Reassign it to another available member, do it yourself if you can, or report blocked.";
-      continue;
-    }
-    if (!workerResult.ran || workerResult.outcome !== "settled" || !workerResult.replyText.trim()) {
-      const reason = workerResult.stopReason?.trim().slice(0, 120);
-      finishGroupGoalRun(
-        args.groupId,
-        args.operation,
-        "failed",
-        `${workerBot.name} could not return a result to ${args.coordinator.name}${reason ? ` — ${reason}` : ""}.`,
-      );
-      return;
-    }
-  }
-
-  if (!args.operation.cancelled && !run.finished) {
-    finishGroupGoalRun(
-      args.groupId,
-      args.operation,
-      "limit-reached",
-      `Paused at the ${run.maxTurns}-turn safety limit. Send the goal again to continue with a fresh bounded run.`,
-    );
-  }
+  await runGoalRun({
+    run,
+    coordinator: args.coordinator,
+    members: args.members,
+    cancelled: () => args.operation.cancelled,
+    current: (botId) => store.bot(botId) ?? undefined,
+    step: (bot, coordinator, instructions) => runGroupGoalStep({ ...args, bot, skillAuthoringClaim, coordinator, instructions }),
+    finish: (status, detail) => finishGroupGoalRun(args.groupId, args.operation, status, detail),
+    progress: (detail) => updateGroupGoalRunProgress(args.operation, detail),
+    note: (text) => store.appendMessage(args.threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: args.coordinator.id, name: args.coordinator.name, color: args.coordinator.color },
+      tool: { name: text, ok: false },
+    }),
+  });
 }
 
 type StartGroupTurnOptions = {
@@ -11529,37 +11191,7 @@ function startGroupTurn(
     operation.queuedQueueIds = queuedGroup.map((item) => item.id);
   }
   if (goalCoordinator) {
-    const runId = options.goalRunId?.trim() || `goal-${Date.now().toString(36)}-${randomUUID()}`;
-    const startedAt = Date.now();
-    const detail = `${goalCoordinator.name} is coordinating this goal.`;
-    const card = store.appendMessage(threadId, {
-      role: "bot",
-      kind: "goal.run",
-      text: `Goal in progress: ${detail}`,
-      from: { botId: goalCoordinator.id, name: goalCoordinator.name, color: goalCoordinator.color },
-      goalRun: {
-        runId,
-        goal: text,
-        status: "working",
-        coordinatorBotId: goalCoordinator.id,
-        coordinatorName: goalCoordinator.name,
-        turnCount: 0,
-        maxTurns: GROUP_GOAL_MAX_TURNS,
-        detail,
-        startedAt,
-      },
-    });
-    operation.goalRun = {
-      runId,
-      cardMessageId: card.id,
-      goal: text,
-      coordinatorBotId: goalCoordinator.id,
-      coordinatorName: goalCoordinator.name,
-      turnCount: 0,
-      maxTurns: GROUP_GOAL_MAX_TURNS,
-      startedAt,
-      finished: false,
-    };
+    operation.goalRun = goalCards.start(threadId, goalCoordinator, text, options.goalRunId?.trim() || `goal-${Date.now().toString(36)}-${randomUUID()}`);
   }
   const prev = groupQueues.get(threadId) ?? Promise.resolve();
   const next = prev.then(async () => {
@@ -11796,20 +11428,18 @@ function lastHumanRoomMessageAt(group: GroupRecord): number | undefined {
   return undefined;
 }
 
-/** Refuses cross-section rooms outright, so a tool is never the way one section speaks to another; membership comes from the record, never a tool argument. */
+/** Membership comes from the record, never a tool argument. */
 function roomPostEligibility(
   bot: BotRecord,
-  group: GroupRecord,
+  group: GroupRecord, fromThreadId: string,
 ): { ok: true } | { ok: false; status: number; error: string } {
-  const verdict = roomTalks(bot, group);
+  const verdict = roomTalks(bot, group, fromThreadId);
   if (verdict.ok) return verdict;
   if (verdict.problem === "dm") {
     return { ok: false, status: 400, error: "that is a one-to-one bot channel, not a room — use coordinate_bots to reach a single bot" };
   }
   if (verdict.problem === "not-member") return { ok: false, status: 403, error: "you are not a member of that room" };
-  if (verdict.problem === "outsider") {
-    return { ok: false, status: 403, error: `that room includes @${verdict.name}, who is outside your section — tell the user what you wanted to post there instead` };
-  }
+  if (verdict.problem === "private") return { ok: false, status: 403, error: PRIVATE_CHAT_ROOM_WRITE };
   // A bot must never settle whether a room's unfinished setup still counts as pending.
   return { ok: false, status: 409, error: "that room is still being set up — it cannot receive messages yet" };
 }
@@ -12956,6 +12586,7 @@ ROUTES.push(createBotMessageRoutes({
   resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
   deliverLateQuestionAnswer, interruptDirectThread, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, answeredIn: automationReports.answeredIn, pressRecords: proactive.brief.pressRecords, serverPress: proactive.brief.serverPress,
+  goals: oneOnOneGoals,
   relayedReaction: (threadId, messageId, person, emoji) => void store.setReaction(threadId, messageId, relayedPersonKey(person),
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
@@ -13042,7 +12673,7 @@ ROUTES.push(createBotMemoryRoutes({
     broadcast({ kind: "config", ...configStatus() });
   },
 }));
-const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin") ? { person: actorKey(auth), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); teamOwners.backfill(teamMoveIn.list()); } ROUTES.push(createDeciderRoutes({ decider, extractor, config: () => cfg }), createTtsRoutes({ config: () => cfg }), createHelperSuggestionRoutes({ notNow: proactive.suggestionNotNow }), createNotificationRoutes(undefined, threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), automations: { routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager }, connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(teamOwners.asks ? { asks: teamOwners.asks } : {}), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }));
+const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin") ? { person: actorKey(auth), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); teamOwners.backfill(teamMoveIn.list()); } ROUTES.push(createDeciderRoutes({ decider, extractor, config: () => cfg }), createTtsRoutes({ config: () => cfg }), createHelperSuggestionRoutes({ notNow: proactive.suggestionNotNow }), createSetupRequestRoutes({ store, language: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, sendRefusal: cloudGuestSendRefusal, presser: (auth) => setupPresser(sharedMembership(), auth, messageSender(auth)), canSetUp: (botId, threadId) => registry.get(store.projectBotForTask(botId, threadId)?.modelSelection.instanceId ?? "")?.adapter.capabilities.agentsMcp === true }), createNotificationRoutes(undefined, threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), automations: { routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager }, connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(teamOwners.asks ? { asks: teamOwners.asks } : {}), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }));
 if (CLOUD_TEAM) teamHost.adoptServerProfile(sessions.list().flatMap((session) => session.email ? [session.email] : []));
 ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot }), createPresenceRoutes({ isOwner: ownerOrAdmin, active: (source, zone, language) => proactive.brief.active(source, zone, language), ...(teamOwners.presence ? { member: teamOwners.presence } : {}) }), createMeRoutes({ team: CLOUD_TEAM, session: (auth) => (auth.kind === "session" ? auth.session : null), profile: teamHost.memberProfile, save: teamHost.saveMemberProfile, seed: teamHost.seedMemberProfile, seeded: teamHost.seededFields, changed: () => broadcast({ kind: "config", ...configStatus() }) }), createTeamPhoneRoutes({ team: CLOUD_TEAM, sessions, publicBase: (req, auth) => publicUrl() ?? (auth.kind === "session" ? requestOrigin(req) : null) }),
   createTeamConnectionRoutes({ host: teamConnections, cfg: () => cfg, composio, publicOrigin: CLOUD_HOME?.publicOrigin ?? null, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), createSignInCardRoutes({ settle: settleSignIn, saveLogin: (botId, threadId, messageId, body, auth) => CLOUD_TEAM && !auth.scopes.includes("admin") ? Promise.resolve({ status: 403 as const, body: { error: memberLoginRefusal(CLOUD_TEAM) } }) : saveLoginFromCard(botId, threadId, messageId, body), saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));
@@ -13847,7 +13478,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
-      const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await internalToolRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody, folders: botFolders }) !== PASS) return; if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (!source.group && bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
+      const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await internalToolRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody, folders: botFolders }) !== PASS) return; const pagesCall = new AbortController(); res.once("close", () => { if (!res.writableEnded) pagesCall.abort(); }); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: pagesCall.signal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (!source.group && bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
       };
@@ -14185,7 +13816,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const unpostable: Array<{ name: string; reason: string }> = [];
         for (const group of store.groups) {
           if (group.dm || !group.memberIds.includes(from.id)) continue;
-          const eligibility = roomPostEligibility(from, group);
+          const eligibility = roomPostEligibility(from, group, fromThreadId);
           if (!eligibility.ok) {
             unpostable.push({ name: group.name, reason: eligibility.error });
             continue;
@@ -14576,7 +14207,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const destination = groupId ? store.group(groupId) : undefined;
         if (groupId && !destination) return refuse(404, "No such room; use list_room_targets.");
         const fresh = !destination && call.thread === "new";
-        const folder = inMyFolderCwd(call.inMyFolder, fresh, store.taskByThread(internalSender.id, address.threadId)?.cwd, DATA_DIR);
+        const folder = inMyFolderCwd(call.inMyFolder, !destination, store.taskByThread(internalSender.id, address.threadId)?.cwd, DATA_DIR);
         if (folder.error) return refuse(400, folder.error);
         if (fresh && !EXTERNAL && internalCapability.openedThreads >= MAX_THREADS_OPENED_PER_TURN) {
           return refuse(429, `You have already opened ${MAX_THREADS_OPENED_PER_TURN} threads this turn, which is the limit. Do not retry — finish your turn and tell the person which threads you still wanted to open, so they can open them or ask you again.`);
@@ -14642,7 +14273,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               const opened = { botId: internalSender.id, name: internalSender.name, threadId: address.threadId, at: Date.now() };
               const task = continued ?? (fresh
                 ? store.createTask(target.botId, call.title ?? (call.message.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${internalSender.name}`), false, call.projectId, opened, undefined, undefined, folder.cwd)
-                : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }));
+                : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }, undefined, undefined, folder.cwd));
               if (!task) throw new Error("The recipient no longer exists");
               target.threadId = task.threadId;
               if (!continued) createdThread = task.threadId;
@@ -14725,7 +14356,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
           // Only this conversation's own tree; a row of another conversation is refused.
         const owned = (a: Row) => coordinator.node(a.rootId)?.threadId === fromThreadId;
-        const reachable = (a: Row) => { const target = store.bot(a.assignee.botId); return !target || target.id === internalSender.id || canReachPeer(internalSender, target); };
+        const reachable = (a: Row) => { const target = store.bot(a.assignee.botId); return !target || target.id === internalSender.id || canReach(internalSender, target); };
         if (!id) {
           const outstanding = coordinator.outstandingFor(fromThreadId).flatMap(n => { const row = coordinator.status(n.id)?.assignment; return row && reachable(row) ? [shape(row)] : []; });
           return json(res, 200, { outstanding });
@@ -14771,7 +14402,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           thread: z.enum(["standing", "new"]).default("standing"), title: z.string().trim().max(80).refine(fitsOnOneLine).optional(),
           reply: z.enum(["resume", "none"]).default("resume"),
           consult: z.boolean().default(false),
-          inMyFolder: z.boolean().default(false),
+          inMyFolder: z.boolean().optional(),
           done_when: z.string().trim().max(1000).optional(),
         }).safeParse(await readInternalBody());
         if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds and a message of 1-4000 characters; thread is standing or new, title one line of at most 80 characters, reply is resume or none, consult is a boolean, done_when at most 1000 characters." });
@@ -14808,7 +14439,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const note = typeof body.note === "string" ? body.note.trim() : "";
         const target = store.bot(botId);
         if (!target || target.id === from.id) return json(res, 404, { error: "no such teammate" });
-        if (target.hidden || !inScope(from, target) || !peerAllowed(from, target)) {
+        if (!canManage(from, target)) {
           return json(res, 403, { error: "that bot is not on this Chief's team — call list_bots for the ones you can reach" });
         }
         if (store.groupByThread(threadId)) return json(res, 400, { error: "that is a room thread — use coordinate_bots in the room instead" });
@@ -14870,7 +14501,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (room.id === owner.group?.id) {
           return json(res, 409, { error: "you are already speaking in that room — say it in your reply instead" });
         }
-        const eligibility = roomPostEligibility(from, room);
+        const eligibility = roomPostEligibility(from, room, fromThreadId);
         if (!eligibility.ok) return json(res, eligibility.status, { error: eligibility.error });
         // The budget is read BEFORE any approval card and CHARGED only on the path that actually appends.
         const askBudget = (bot: BotRecord, group: GroupRecord) => {
@@ -14908,7 +14539,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const freshFrom = store.bot(internalSender.id);
           const freshRoom = store.group(groupId);
           if (!freshFrom || !freshRoom) return json(res, 404, { error: "that bot or room no longer exists" });
-          const stillEligible = roomPostEligibility(freshFrom, freshRoom);
+          const stillEligible = roomPostEligibility(freshFrom, freshRoom, fromThreadId);
           if (!stillEligible.ok) return json(res, stillEligible.status, { error: stillEligible.error });
           poster = freshFrom;
           room = freshRoom;
@@ -15149,11 +14780,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (peerReviewRequired(chief, internalCapability.threadId)) {
           return json(res, 403, { error: "peer approval is required; ask the user to make this room change" });
         }
-        // Section labels are a permission boundary: a Chief may not recruit excluded peers or acquire a foreign transcript.
+        // A Chief gathers only bots it can reach; which department a room is filed in is the person's choice.
         const allowedIds = new Set([chief.id, ...reachablePeers(store.bots, chief).map((bot) => bot.id)]);
         const allowedRoster = (ids: string[]) => ids.includes(chief.id) && ids.every((id) => allowedIds.has(id));
         if (body.section !== undefined && (typeof body.section !== "string" || sectionKey(body.section) !== sectionKey(chief.section))) {
-          return json(res, 403, { error: "rooms must stay in your own section; ask the user to move them" });
+          return json(res, 403, { error: "rooms stay in your own department; ask the person to move them" });
         }
         if (path === "/api/internal/create-room") {
           if ((internalCapability.createdRooms ?? 0) >= 4) {
@@ -15167,7 +14798,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!parsed.success) return json(res, 400, { error: "provide a room name, memberIds, and optional bulletin (at most 12000 characters)" });
           const memberIds = [...new Set([chief.id, ...parsed.data.memberIds])];
           if (!allowedRoster(memberIds)) {
-            return json(res, 403, { error: "include yourself and only active, allowed peers from your section" });
+            return json(res, 403, { error: "include yourself and only active bots you can reach (list_bots)" });
           }
           const group = createChannel({
             name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section,
@@ -15188,7 +14819,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "provide roomId and a supported room action; section moves are user-only" });
         const room = store.group(parsed.data.roomId);
         if (!room || room.dm || sectionKey(room.section) !== sectionKey(chief.section) || !allowedRoster(room.memberIds)) {
-          return json(res, 403, { error: "you can only manage rooms you belong to with allowed peers in your own section" });
+          return json(res, 403, { error: "you can only manage rooms you belong to in your own department, whose members you can all reach" });
         }
         const { action, memberIds, name, bulletin } = parsed.data;
         const patch: Record<string, unknown> = {};
@@ -15200,7 +14831,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           patch.bulletin = redactSecretsInText(bulletin);
         } else {
           if (!memberIds || memberIds.some((id) => !allowedIds.has(id))) {
-            return json(res, 403, { error: "memberIds must name only yourself or active, allowed peers in your section" });
+            return json(res, 403, { error: "memberIds must name only yourself or active bots you can reach (list_bots)" });
           }
           const next = action === "add_members" ? [...new Set([...room.memberIds, ...memberIds])]
             : action === "remove_members" ? room.memberIds.filter((id) => !memberIds.includes(id)) : memberIds;
@@ -15517,7 +15148,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
         }
         const scopedLine = teamConnections.connectRefusal(internalCapability, slugs); if (scopedLine) return json(res, 409, { error: scopedLine });
-        await composio.useRequestedAuthConfigs(cfg, items);
+        const authConfigNote = await composio.prepareConnectionAuthConfigs(cfg, items);
         const connectionState: Record<string, { connected?: boolean }> = await composio.connectionStatus(cfg, slugs).catch(() => ({}));
         requireActiveInternalCapability();
         const messageIds: string[] = [];
@@ -15554,7 +15185,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           messageIds.push(message.id);
         }
         maybeResumeConnectors(threadId, resumeKey);
-        return json(res, 200, { messageIds });
+        return json(res, 200, { messageIds, ...(authConfigNote ? { authConfigNote } : {}) });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
     }
