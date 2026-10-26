@@ -48,6 +48,7 @@ import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
 import { botShowsUnread } from "@/lib/bot-unread";
+import { shownChatIsUnread } from "@/lib/shown-chat-unread";
 import { firstUnreadMessageId, threadOpensUnread, threadReadCursor } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
 import { parseComputerHelp } from "@/lib/computer-control";
@@ -3037,6 +3038,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [state.hydrated, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
 
   useEffect(() => {
+    const readShownChat = () => {
+      const { selectedId } = stateRef.current;
+      if (selectedId && shownChatIsUnread(stateRef.current)) dispatch({ type: "select", id: selectedId });
+    };
+    window.addEventListener("focus", readShownChat);
+    return () => window.removeEventListener("focus", readShownChat);
+  }, [dispatch]);
+
+  useEffect(() => {
     let alive = true;
     type PeripheralKey = "instances" | "config" | "routines" | "webhooks" | "notifications";
     type PeripheralPart = {
@@ -3259,7 +3269,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const selected = stateRef.current.bots.find((candidate) => candidate.id === bot.id);
           const shown = selected?.switchingTo ?? selected?.threadId;
           const selectedTask = bot.tasks?.find((task) => task.threadId === shown);
-          if (bot.id === stateRef.current.selectedId && stateRef.current.activeView === "chat" &&
+          if (bot.id === stateRef.current.selectedId && stateRef.current.activeView === "chat" && document.hasFocus() &&
               (selectedTask?.unread || (!bot.tasks && bot.unread))) {
             if (selectedTask) selectedTask.unread = false;
             bot.unread = botShowsUnread(bot);
@@ -3273,7 +3283,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         case "group": {
           const group = frame.group as Partial<Group> & { id: string };
-          if (group.unread && group.id === stateRef.current.selectedId) {
+          if (group.unread && group.id === stateRef.current.selectedId && document.hasFocus()) {
             group.unread = false;
             fetch(`/api/groups/${group.id}/read`, { method: "POST" }).catch(() => {});
           }
