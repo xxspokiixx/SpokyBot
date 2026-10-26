@@ -190,6 +190,18 @@ describe("publishing a page", () => {
     expect(f.service.minted).toEqual([]);
   });
 
+  it("publishes one page when the same folder is published twice at once", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const outcomes = await Promise.all([f.publish({ path: "site" }), f.publish({ path: "site", threadId: "thread-2" })]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([200, 200]);
+    expect(f.service.pages.size).toBe(1);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+    expect(f.pages.store.list()).toHaveLength(1);
+    expect(f.pages.store.list()[0]!.cards).toHaveLength(2);
+  });
+
   it("says plainly when publishing can't be reached", async () => {
     const f = setup();
     signIn();

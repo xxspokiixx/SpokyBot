@@ -43,6 +43,17 @@ export function createPagePublisher(deps: {
 }) {
   const { client, store } = deps;
 
+  // One publish at a time per bot and source, so two at once can't both find no page and each create one.
+  const queues = new Map<string, Promise<unknown>>();
+  const serially = <T>(key: string, work: () => Promise<T>): Promise<T> => {
+    const previous = queues.get(key) ?? Promise.resolve();
+    const run = previous.then(work, work);
+    const settled = run.catch(() => undefined);
+    queues.set(key, settled);
+    void settled.then(() => { if (queues.get(key) === settled) queues.delete(key); });
+    return run;
+  };
+
   const markUnpublished = (pageId: string, usage: PageUsage | null): PublishedPageCard | null => {
     const record = store.forget(pageId);
     if (!record) return null;
@@ -75,7 +86,11 @@ export function createPagePublisher(deps: {
 
   };
 
-  async function publishBundle(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post">, bundle: PageBundle): Promise<PageOutcome> {
+  function publishBundle(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post">, bundle: PageBundle): Promise<PageOutcome> {
+    return serially(JSON.stringify([input.botId, bundle.source]), () => publishNow(input, bundle));
+  }
+
+  async function publishNow(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post">, bundle: PageBundle): Promise<PageOutcome> {
     const title = pageTitle(input.title);
     if (!title) return TITLE_REQUIRED;
     const remembered = input.pageId ? store.get(input.pageId) : store.fromSource(input.botId, bundle.source);
