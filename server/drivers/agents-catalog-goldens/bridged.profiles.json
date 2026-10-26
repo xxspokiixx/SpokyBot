@@ -432,8 +432,8 @@
     ]
   },
   "skills+shared+voice+escalations+x+team": {
-    "bytes": 17238,
-    "sha256": "fb20b66c7b31637241d3d7802b68f2811f5c4593bdbd522b22c69ebbda149ea4",
+    "bytes": 17216,
+    "sha256": "a1253df20bb4d762d2fef950376cd2ae50ac611e3850b924799ec3aa51b867fa",
     "tools": [
       "tool_result_read",
       "list_room_targets",
