@@ -21,7 +21,7 @@ describe("ToolActivity", () => {
   it("distinguishes pending, failed and unrecorded output", () => {
     const render = (ok?: boolean, live = false) => renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Read", ok }, live }));
     expect(render(undefined, true)).toContain("Waiting for the tool to finish");
-    expect(render()).toContain("Result/status unrecorded and unverified.");
+    expect(render()).toContain("No result");
     expect(render()).not.toContain("Waiting for the tool to finish");
     expect(render(false)).toContain("Failed");
     expect(render(false)).toContain("No output was recorded");
@@ -31,7 +31,7 @@ describe("ToolActivity", () => {
     try {
       setLocale("es");
       const html = renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Read" } }));
-      expect(html).toContain("Resultado/estado no registrado y no verificado.");
+      expect(html).toContain("Sin resultado");
     } finally {
       setLocale("en");
     }

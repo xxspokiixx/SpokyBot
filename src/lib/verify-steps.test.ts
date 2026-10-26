@@ -241,7 +241,7 @@ describe("runSummary", () => {
   it("counts the steps first, then only the non-zero verified, failed and running counts", () => {
     const steps = runSteps([claude(DOCTOR, true), claude(DOCTOR, true), codex(SEND, false), acp(PRESS), claude(PUSH, true)]);
     expect(runSummary(steps)).toEqual({
-      total: 5, verified: 4, passed: 3, failed: 1, running: 0, unverified: 1, dryRuns: 0, label: "5 steps · 4 verified · 1 failed · 1 result/status unrecorded and unverified",
+      total: 5, verified: 4, passed: 3, failed: 1, running: 0, unverified: 1, dryRuns: 0, label: "5 steps · 4 verified · 1 failed · 1 with no result",
     });
     expect(runSummary(steps.slice(0, 1)).label).toBe("1 step · 1 verified");
     expect(runSummary(steps.slice(4)).label).toBe("1 step");
@@ -251,7 +251,7 @@ describe("runSummary", () => {
   it("counts a settled dry run as neither passed nor failed", () => {
     const steps = runSteps([claude(`${DOCTOR} --dry-run`, true), claude(`${SEND} --dry-run`, false), claude(`${PRESS} --dry-run`)]);
     expect(runSummary(steps)).toEqual({
-      total: 3, verified: 3, passed: 0, failed: 0, running: 0, unverified: 1, dryRuns: 2, label: "3 steps · 3 verified · 1 result/status unrecorded and unverified · 2 dry runs",
+      total: 3, verified: 3, passed: 0, failed: 0, running: 0, unverified: 1, dryRuns: 2, label: "3 steps · 3 verified · 1 with no result · 2 dry runs",
     });
     expect(runSummary(steps.slice(0, 1)).label).toBe("1 step · 1 verified · 1 dry run");
   });
@@ -259,9 +259,9 @@ describe("runSummary", () => {
     const steps = runSteps([claude(DOCTOR, true), acp(PRESS)]);
     try {
       setLocale("es");
-      expect(runSummary(steps).label).toBe("2 pasos · 2 verificados · 1 resultado/estado no registrado y no verificado");
+      expect(runSummary(steps).label).toBe("2 pasos · 2 verificados · 1 sin resultado");
       setLocale("ja");
-      expect(runSummary(steps).label).toBe("2 ステップ · 2 件検証済み · 1 件結果/ステータス未記録・未検証");
+      expect(runSummary(steps).label).toBe("2 ステップ · 2 件検証済み · 1 件結果なし");
     } finally {
       setLocale("en");
     }

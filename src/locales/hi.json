@@ -2327,7 +2327,7 @@
   "voice.library": "ElevenLabs वॉइस लाइब्रेरी",
   "voice.libraryHint": "किसी एक को चुनने पर वह आपकी आवाजों में जुड़ जाती है।",
   "voice.adding": "जोड़ी जा रही है…",
-  "toolDetail.unverified": "परिणाम/स्थिति दर्ज नहीं और असत्यापित।",
-  "inspector.run.unverified": "परिणाम/स्थिति दर्ज नहीं और असत्यापित।",
-  "chat.verify.unverified": "{count} परिणाम/स्थिति दर्ज नहीं और असत्यापित"
+  "toolDetail.unverified": "कोई परिणाम नहीं",
+  "inspector.run.unverified": "कोई परिणाम नहीं",
+  "chat.verify.unverified": "{count} बिना परिणाम"
 }

@@ -2345,7 +2345,7 @@
   "voice.library": "ElevenLabs-Stimmenbibliothek",
   "voice.libraryHint": "Wenn du eine auswählst, wird sie deinen Stimmen hinzugefügt.",
   "voice.adding": "Wird hinzugefügt…",
-  "toolDetail.unverified": "Ergebnis/Status nicht erfasst und nicht überprüft.",
-  "inspector.run.unverified": "Ergebnis/Status nicht erfasst und nicht überprüft.",
-  "chat.verify.unverified": "{count} Ergebnis/Status nicht erfasst und nicht überprüft"
+  "toolDetail.unverified": "Kein Ergebnis",
+  "inspector.run.unverified": "Kein Ergebnis",
+  "chat.verify.unverified": "{count} ohne Ergebnis"
 }

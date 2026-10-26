@@ -2327,7 +2327,7 @@
   "voice.library": "Bibliothèque de voix ElevenLabs",
   "voice.libraryHint": "En choisir une l'ajoute à vos voix.",
   "voice.adding": "Ajout en cours…",
-  "toolDetail.unverified": "Résultat/état non enregistré et non vérifié.",
-  "inspector.run.unverified": "Résultat/état non enregistré et non vérifié.",
-  "chat.verify.unverified": "{count} résultat/état non enregistré et non vérifié"
+  "toolDetail.unverified": "Aucun résultat",
+  "inspector.run.unverified": "Aucun résultat",
+  "chat.verify.unverified": "{count} sans résultat"
 }

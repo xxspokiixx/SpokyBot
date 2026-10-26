@@ -23,7 +23,7 @@ describe("Run log", () => {
     expect(html).toContain("pnpm control:omb doctor");
     expect(html).toContain("Completed");
     expect(html).toContain("Failed");
-    expect(html).toContain("Result/status unrecorded and unverified.");
+    expect(html).toContain("No result");
     expect(html).not.toContain("animate-spin");
     expect(html).toContain("Commands may be shortened");
     expect(html).toContain('aria-label="Copy redacted run log"');
@@ -39,7 +39,7 @@ describe("Run log", () => {
     try {
       setLocale("es");
       const html = render(timelineEvents([{ id: "c", at: 3, role: "bot", kind: "activity", tool: { name: "Read" } }]));
-      expect(html).toContain("Resultado/estado no registrado y no verificado.");
+      expect(html).toContain("Sin resultado");
     } finally {
       setLocale("en");
     }
