@@ -135,6 +135,9 @@ test("nothing is run for a file or checksum that cannot be trusted", async () =>
 
 // ---- the script itself, in a real shell --------------------------------
 
+// The root script only ever runs on Linux, and the stand-in apt-get uses GNU coreutils (stat -c, find, sha512sum).
+const linuxOnly = { skip: process.platform !== "linux" && "the root script runs only on Linux" };
+
 function runScript(file, expected, { aptBody } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-script-"));
   const bin = join(dir, "bin");
@@ -163,7 +166,7 @@ function runScript(file, expected, { aptBody } = {}) {
   };
 }
 
-test("root installs its own verified copy, not the file in the user's cache", () => {
+test("root installs its own verified copy, not the file in the user's cache", linuxOnly, () => {
   const f = fixture();
   const run = runScript(f.file, hex("deb bytes"));
   try {
@@ -182,7 +185,7 @@ test("root installs its own verified copy, not the file in the user's cache", ()
   }
 });
 
-test("a file swapped after the download is refused before apt-get runs", () => {
+test("a file swapped after the download is refused before apt-get runs", linuxOnly, () => {
   const f = fixture();
   writeFileSync(f.file, "swapped for something else");
   const run = runScript(f.file, hex("deb bytes"));
@@ -197,7 +200,7 @@ test("a file swapped after the download is refused before apt-get runs", () => {
   }
 });
 
-test("a failing apt-get fails the script and still cleans up", () => {
+test("a failing apt-get fails the script and still cleans up", linuxOnly, () => {
   const f = fixture();
   const run = runScript(f.file, hex("deb bytes"), { aptBody: "#!/bin/sh\necho 'E: broken dependencies' >&2\nexit 100\n" });
   try {
