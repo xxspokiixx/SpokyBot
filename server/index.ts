@@ -2355,7 +2355,8 @@ function parksBehindCoordination(botId: string, threadId: string): boolean {
   return (store.projectBotForTask(botId, threadId) ?? store.bot(botId))?.parkDirectMessages === true;
 }
 
-function botAtThreadCapacity(botId: string): boolean {
+function botAtThreadCapacity(botId: string, personThreadId?: string): boolean {
+  if (personThreadId !== undefined && personThreadId === botMainThread(botId)) return false;
   // threadBusy, not the stored flag: a reservation holds its slot after an early completion clears the flag.
   return store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
 }
@@ -7558,14 +7559,14 @@ function drainQueuedSendsNow() {
       }).catch(reject);
     }),
     // Provider completion can precede its dispatch promise: keep the queue until that exact handshake releases its claim.
-    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
+    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId, head.peerAsk ? undefined : threadId) || Boolean(activeGroupTurnForBot(botId))
       || directRootQueued(threadId) || (!head.peerAsk?.incident && parksBehindCoordination(botId, threadId)),
   );
 }
 
 async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }) {
   const decision = admit("direct", {}, {
-    atCapacity: botAtThreadCapacity(botId),
+    atCapacity: botAtThreadCapacity(botId, threadId),
     threadBusy: threadBusy(botId, threadId),
     groupTurn: Boolean(activeGroupTurnForBot(botId)),
     parksBehindCoordination: parksBehindCoordination(botId, threadId),
@@ -7997,7 +7998,7 @@ async function startTurn(
   if (activeGroupTurnForBot(botId)) {
     throw Object.assign(new Error("the bot is already working in a channel — wait for it to finish"), { status: 409, code: "thread_busy" });
   }
-  if (botAtThreadCapacity(botId)) {
+  if (botAtThreadCapacity(botId, threadId)) {
     throw Object.assign(new Error(`this bot has reached its limit of ${maxConcurrentBotThreads(cfg)} parallel threads — wait for one to finish`), { status: 409, code: "thread_limit" });
   }
   // Revoke what a previous turn left behind before minting this turn's integrations.
