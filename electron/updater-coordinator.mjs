@@ -56,15 +56,10 @@ export function createUpdaterCoordinator(
     const shown = manual || updateErrorNeedsPerson(error);
     actionOwnsState = shown;
     if (error instanceof Error) routedErrors.add(error);
-    // A quiet attempt to replace the staged update fails back to it; the person never asked for the newer one.
-    if (!manual && !nativeStagingStarted && staged && downloadOperation?.replacing) {
-      downloadOperation.failed = true;
-      clearTimeout(downloadOperation.timer);
-      if (checkOperation) checkOperation.failed = true;
-      actionOwnsState = true;
-      setState({ percent: undefined, ...staged.patch });
-      return;
-    }
+    // A failed replacement cannot fall back to the staged update: electron-updater empties its pending cache before
+    // downloading a newer file (DownloadedUpdateHelper), so the old one is gone. It is handled like any other failure;
+    // a quiet one goes idle and the next hourly check downloads the newest release again.
+    if (downloadOperation?.replacing) downloadedFiles = null;
     staged = null;
     if (downloadOperation) {
       downloadOperation.failed = true;

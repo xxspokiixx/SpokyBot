@@ -244,8 +244,9 @@ it("My Cloud's page hears \"Restart to update\" once the sign-in it loaded befor
   expect(() => handlers.get("update:get-state")(cloud.event)).toThrow(/only available/);
   expect(cloud.webContents.send).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
-  // The staged 2.0.0 is still offered, so the hourly check looks again (quietly) for something newer.
-  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+  // The staged 2.0.0 is still offered, so the hourly check looks again (quietly) for something newer; macOS stages
+  // natively and is not re-checked.
+  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(process.platform === "darwin" ? 1 : 2);
   expect(cloud.webContents.send).not.toHaveBeenCalled();
 
   rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });

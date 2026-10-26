@@ -103,7 +103,10 @@ test("an older or equal feed version never replaces the staged update", async ()
   for (const version of ["2.0.0", "1.9.9", "2.0.0-beta.1", undefined]) {
     const h = harness();
     await downloadInto(h);
-    newerFeed(h, version);
+    h.updater.checkForUpdates = async () => {
+      h.updater.emit("checking-for-update");
+      h.updater.emit("update-available", { version });
+    };
     h.updater.downloadUpdate = () => assert.fail("nothing newer to download");
     const staged = h.getState();
     await h.coordinator.check();
@@ -112,7 +115,7 @@ test("an older or equal feed version never replaces the staged update", async ()
   }
 });
 
-test("a quiet check failing, or its replacement download failing, leaves the staged update as it was", async () => {
+test("a quiet check failing leaves the staged update as it was", async () => {
   for (const needsPerson of [false, true]) {
     const h = harness();
     await downloadInto(h);
@@ -120,23 +123,38 @@ test("a quiet check failing, or its replacement download failing, leaves the sta
     h.updater.checkForUpdates = () => Promise.reject(new Error(needsPerson ? "no space left on device" : "offline"));
     await h.coordinator.check();
     assert.deepEqual(h.getState(), staged);
-    h.updater.checkForUpdates = async () => {
-      h.updater.emit("update-available", { version: "2.1.0" });
-    };
+    // the staged update is still installable
+    h.updater.quitAndInstall = () => {};
+    h.coordinator.install();
+    assert.equal(h.getState().status, "installing");
+  }
+});
+
+// electron-updater empties its pending cache before it downloads a newer file, so the staged one is gone by then.
+test("a failed replacement download drops the staged update, and a later check downloads the newest again", async () => {
+  for (const needsPerson of [false, true]) {
+    const h = harness();
+    await downloadInto(h);
+    newerFeed(h);
     h.updater.downloadUpdate = async () => {
       h.updater.emit("download-progress", { percent: 40 });
       throw new Error(needsPerson ? "no space left on device" : "connection reset");
     };
     await h.coordinator.check();
     await settle();
+    // no "ready" card for a file that no longer exists
+    assert.equal(h.getState().status, needsPerson ? "error" : "idle");
+    if (needsPerson) assert.match(h.getState().message, /disk space/);
+
+    h.updater.downloadUpdate = async () => {
+      h.updater.emit("update-downloaded", { version: "2.1.0" });
+      return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
+    };
+    // quietly on the next hourly check; after a shown error, from the card's Retry
+    await h.coordinator.check(needsPerson);
+    await settle();
     assert.equal(h.getState().status, "downloaded");
-    assert.equal(h.getState().version, "2.0.0");
-    assert.equal(h.getState().percent, undefined);
-    // the staged update is still installable
-    h.updater.checkForUpdates = async () => {};
-    h.updater.quitAndInstall = () => {};
-    h.coordinator.install();
-    assert.equal(h.getState().status, "installing");
+    assert.equal(h.getState().version, "2.1.0");
   }
 });
 
