@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
+import { BOT_PROFILE_PATCH_FIELDS } from "./bot-profile.ts";
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
 import { denyReason as companionDenial, isCompanionNotice } from "../companion/src/routes.ts";
 
@@ -406,6 +407,24 @@ export function clientBotPatchViolation(body: unknown, ownMausBot = false): stri
   if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
   for (const key of Object.keys(body)) if (!CLIENT_BOT_PATCH_FIELDS.has(key) && !(ownMausBot && key === "name")) return key;
   return null;
+}
+
+/** All a paired device or a Team Cloud move-in may give a bot it makes or brings in: who the bot is, how it looks, its
+ * own playbooks, projects and library skills, and which of this place's models it runs on. Everything else (what it may
+ * do and reach, where it runs, its department, whom it answers to or directs, whether it is the MausBot or a package's
+ * bot) only an admin on the host sets. */
+const BOT_PROFILE_SETTINGS: ReadonlySet<string> = new Set([
+  ...CLIENT_BOT_PATCH_FIELDS, ...BOT_PROFILE_PATCH_FIELDS, "hidden",
+  "modelSelection", "requireAvailableModel", "fallback", "projects", "playbooks", "assignedSkills",
+]);
+
+/** The first field of `fields` beyond a bot's profile; null when there is none. */
+export function adminOnlyBotSetting(fields: Record<string, unknown>): string | null {
+  return Object.keys(fields).find((key) => !BOT_PROFILE_SETTINGS.has(key)) ?? null;
+}
+
+export function botProfileSettings(fields: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).filter(([key]) => BOT_PROFILE_SETTINGS.has(key)));
 }
 
 /** Same for a room: name and reading state, never its folder or who answers. */

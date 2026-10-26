@@ -8,6 +8,8 @@ import {
   BROWSER_SIGN_IN,
   clearSessionCookie,
   fromBrowser,
+  adminOnlyBotSetting,
+  botProfileSettings,
   clientBotPatchViolation,
   clientGroupPatchViolation,
   ipcPeer,
@@ -175,6 +177,16 @@ describe("scopes", () => {
     expect(clientGroupPatchViolation({ name: "Ops", unread: false, turnTimeoutMinutes: 30 })).toBeNull();
     expect(clientGroupPatchViolation({ cwd: "/tmp" })).toBe("cwd");
     expect(clientGroupPatchViolation({ memberIds: [] })).toBe("memberIds");
+  });
+
+  it("lets a bot's maker without the admin scope say who it is and how it looks, never what it may do or whom it directs", () => {
+    const profile = { name: "Scout", title: "Trips", soul: "Plans trips.", color: "teal", avatarCrop: "square", voice: "alloy", modelSelection: { instanceId: "claude", model: "m" } };
+    expect(adminOnlyBotSetting(profile)).toBeNull();
+    for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "chiefOfStaff", "managedSections", "computer", "cwd", "peers", "approvePeerComms",
+      "mcpServers", "browserProfile", "toolScope", "composio", "browser", "section", "visibility", "reportsTo", "preset", "defaultBot", "installedPackage"]) {
+      expect(adminOnlyBotSetting({ ...profile, [field]: true }), field).toBe(field);
+      expect(botProfileSettings({ ...profile, [field]: true }), field).toEqual(profile);
+    }
   });
 });
 
