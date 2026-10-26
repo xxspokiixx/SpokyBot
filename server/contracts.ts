@@ -143,6 +143,8 @@ export interface SendTurnInput {
   integrations?: {
     /** A harness-owned stdio bridge to Composio, so connection requests become trusted chat cards. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
+    /** The same bridge to a Team Cloud member's own apps, only in that member's own turns. */
+    composioOwn?: { command: string; args: string[]; env: Record<string, string> };
     /** Stdio connection to a computer MCP server. `scope` is set only for the host desktop, so host-only approval rules never apply elsewhere. */
     localComputer?: {
       command: string;
@@ -164,6 +166,8 @@ export interface SendTurnInput {
     data?: { command: string; args: string[]; env: Record<string, string> };
     /** The HighLevel CRM tools' MCP proxy: the harness holds the tokens and the per-bot verdict. */
     highlevel?: { command: string; args: string[]; env: Record<string, string> };
+    /** The paired phone's app tools' MCP proxy: the harness holds the jobs and the per-bot verdict. */
+    device?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb daemon tools; `url` is the dweb HTTP base. */
     dweb?: { url: string };
     /** The user's MCP servers, mounted without any pre-allow; a driver skips a kind it cannot speak. */
@@ -223,6 +227,8 @@ export interface ProviderAdapter {
     dataMcp?: boolean;
     /** The driver can mount the HighLevel CRM tools MCP. */
     highlevelMcp?: boolean;
+    /** The driver can mount the phone apps MCP. */
+    deviceMcp?: boolean;
     /** The engine accepts images in the prompt (gates composer paste). */
     images?: boolean;
     /** sendTurn consumes `images` as structured input, so dispatch strips the attachment path from `text`. */
@@ -414,6 +420,16 @@ export interface TextGenerationOptions {
   model?: string;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
+  /** For a bot's own engine whose driver picks a small model of its own. */
+  fallback?: SmallModelFallback;
+}
+
+export interface SmallModelFallback {
+  /** The bot's own model on this instance: used instead of a small model the sign-in cannot use, and once more when the provider refuses the small one. */
+  model?: string;
+  /** Small models this instance refused before: never picked. */
+  refused: ReadonlySet<string>;
+  onRefused: (model: string) => void;
 }
 
 export interface ProviderInstance {
@@ -422,6 +438,8 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message and background text then stay on the bot's own model. */
+  readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
   /** Set while the last run's catalog is still refreshing; a turn awaits it, listen does not. */

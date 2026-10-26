@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Menu } from "lucide-react";
+import { ChevronLeft, Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { addBot } from "@/lib/add-bot";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
+import { MausBotWelcome } from "@/components/MausBotWelcome";
 import { CloudTimeZoneSync } from "@/components/CloudTimeZone";
 import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
@@ -19,7 +20,7 @@ import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQue
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import {
   ActivityPanel, BotSettingsDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
-  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TodayPage, TriggersPage,
+  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
@@ -30,6 +31,7 @@ import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
+import { useTeamPeopleLoader } from "@/state/team-people";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -51,11 +53,14 @@ import { botShowsUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
+import { usePresence } from "@/hooks/use-presence";
 import { ChatNotice } from "@/components/ChatErrorBanner";
+import { loadingLine } from "@/lib/app-loading";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   useTeamChats(state.config);
+  useTeamPeopleLoader(state.config, state.bots.map((bot) => `${bot.id}:${bot.reportsTo ?? ""}:${bot.activity ?? ""}:${(bot.tasks ?? []).filter((task) => task.activity === "waiting-on-you").length}`).join("|"));
   const showThreads = useShowThreads();
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
@@ -101,9 +106,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     const request = takeConnectRequest(window.location.href);
     if (!request) return;
     window.history.replaceState(null, "", request.rest);
-    dispatch({ type: "togglePlugins", open: true, surface: request.surface });
+    dispatch("section" in request ? { type: "toggleAppSettings", open: true, section: request.section } : { type: "togglePlugins", open: true, surface: request.surface });
   }, [dispatch]);
   useExternalChatLinks(state, dispatch);
+  usePresence(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const language = effectiveLanguage(useLanguageChoice(), state.config?.language);
   const [, setLocaleEpoch] = useState(0);
@@ -116,6 +122,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const previousViewRef = useRef(state.activeView);
   const calendarOriginRef = useRef<"chat" | "team-map">("chat");
+  const loading = loadingLine({ connected: state.connected, hydrated: state.hydrated === true, developer: import.meta.env.DEV });
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
@@ -283,9 +290,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-label="Open bot list"
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
-        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
+        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card max-md:p-0 max-md:text-ink md:hidden"
       >
-        <Menu size={18} />
+        <Menu size={18} className="max-md:hidden" />
+        <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block" />
       </button>}
       {drawerOpen && !calendarFocus && (
         <div
@@ -306,7 +314,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <TeamMapPage />
       ) : state.activeView === "files" ? (
         <FilesView />
-      ) : state.activeView === "today" ? <TodayPage /> : state.activeView === "routines" ? (
+      ) : state.activeView === "routines" ? (
         <TriggersPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
         <LocalVmWorkspace
@@ -328,14 +336,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+        <main data-app-loading={loading.text} className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
           <WindowDragStrip />
           <div className="w-full max-w-md"><ChatNotice notice={state.notice} /></div>
-          <Loader2 size={20} className="animate-spin" />
-          <div className="text-[14px]">
-            {state.connected ? t("app.loading.noBots") : t("app.loading.connecting")}
-          </div>
-          {!state.connected && (
+          {loading.busy && <Loader2 size={20} className="animate-spin" />}
+          <div className="text-[14px]">{t(loading.text)}</div>
+          {loading.command && (
             <div className="text-[12px]">
             {t("app.loading.startServer")} <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
             </div>
@@ -406,6 +412,7 @@ function Application() {
           <Shell viewer={viewer} />
         </ThreadRefsProvider>
         <WelcomeGate viewer={viewer} />
+        <MausBotWelcome viewer={viewer} />
         <CloudTimeZoneSync viewer={viewer} />
         <GuidedTour />
         <LiveCallHost />

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
-import { canAccessTeam } from "./peer-roster.ts";
+import { hasTeamAuthority } from "./peer-roster.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { DirectApply } from "./direct-apply.ts";
@@ -47,7 +47,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const targetBusy = vi.fn((id: string, _sourceThreadId?: string) => Boolean(store.bot(id)?.busy));
   const validateChange = vi.fn();
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
-  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, canAccessTeam,
+  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority,
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, autoApply, validateChange,
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
@@ -69,7 +69,7 @@ describe("reviewed Chief team setup", () => {
     const before = structuredClone(h.store.bots);
     const request = h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }]);
     expect(request.detail).toContain("Chief of Staff: No → Yes");
-    expect(request.detail).toContain("May coordinate and configure bots in this team");
+    expect(request.detail).toContain("May coordinate and configure bots in this department");
     expect(h.store.bots).toEqual(before);
     expect((await h.resolve(request.requestId, "deny"))?.result.state).toBe("denied");
     expect(h.store.bots).toEqual(before);
@@ -104,7 +104,7 @@ describe("reviewed Chief team setup", () => {
       { action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } },
       { action: "update", botId: h.chief.id, fields: { chiefOfStaff: false } },
     ]);
-    expect(replace.detail).toContain("Additional managed-team access is removed");
+    expect(replace.detail).toContain("Access to additional departments is removed");
     expect((await h.resolve(replace.requestId))?.result.state).toBe("applied");
     expect(h.chief.chiefOfStaff).toBe(false);
     expect(h.peer.chiefOfStaff).toBe(true);
@@ -137,7 +137,7 @@ describe("reviewed Chief team setup", () => {
   it("does not advertise new team access for a Chief being demoted in the same plan", () => {
     const h = harness();
     const card = h.propose([specialist("Mira", "Research"), { action: "update", botId: h.chief.id, fields: { chiefOfStaff: false } }], ["Research"]);
-    expect(card.detail).toContain('Create teams: "Research"');
+    expect(card.detail).toContain('Create departments: "Research"');
     expect(card.detail).not.toContain("Authorize @Clive");
   });
   it("shows what stays owner-owned after creation on create cards, and keeps update cards lean", () => {
@@ -187,7 +187,7 @@ describe("reviewed Chief team setup", () => {
   it("reviews Research, Engineering and Growth with multiple providers and explicit new-team access", async () => {
     const h = harness();
     const request = h.propose([specialist("Mira", "Research"), specialist("Patch", "Engineering", { instanceId: "codex", model: "gpt-fixture" }), specialist("Quill", "Growth")], ["Research", "Growth"]);
-    expect(request.detail).toContain('Create teams: "Research", "Growth"');
+    expect(request.detail).toContain('Create departments: "Research", "Growth"');
     expect(request.detail).toContain("Authorize @Clive");
     expect(h.store.bots).toHaveLength(2);
     expect((await h.resolve(request.requestId))?.result.bots).toHaveLength(3);
@@ -317,7 +317,7 @@ describe("reviewed Chief team setup", () => {
       title: "Research lead", section: "Engineering", modelSelection: { instanceId: "codex", model: "gpt-fixture" },
     } }]);
     expect(card.detail).toContain('Title: "Researcher" → "Research lead"');
-    expect(card.detail).toContain('Section: "Work" → "Engineering"');
+    expect(card.detail).toContain('Department: "Work" → "Engineering"');
     expect(card.detail).toContain("Default AI and model: claude/sonnet (no variant) → codex/gpt-fixture (no variant)");
   });
   it("shows the model variant on the current selection and its absence on the proposed one", () => {
@@ -571,5 +571,41 @@ describe("team setup below Full access", () => {
     expect(h.store.bot(h.peer.id)).toBeUndefined();
     expect(h.messages[0].card?.teamSetupRequest?.undo).toBeUndefined();
     expect(await undo(h, response.requestId)).toMatchObject({ state: "invalid", status: 409 });
+  });
+});
+
+describe("MausBot's Chief-level team setup", () => {
+  const plan = (operations: unknown[]) => ({ reason: "Requested specialist setup", operations, newTeams: [] });
+
+  it("lets the person's MausBot add a specialist like a Chief, without making it the Chief", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: {} });
+    const request = h.service.propose({ botId: maus.id, threadId: maus.threadId, plan: plan([specialist("Scout", "Work")]) });
+    expect(request.detail).toContain("Scout");
+    expect(maus.chiefOfStaff).toBeUndefined();
+    expect(h.chief.chiefOfStaff).toBe(true);
+  });
+
+  it("never lets MausBot change who the Chief is", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: {} });
+    for (const target of [maus.id, h.peer.id, h.chief.id]) {
+      expect(() => h.service.propose({ botId: maus.id, threadId: maus.threadId,
+        plan: plan([{ action: "update", botId: target, fields: { chiefOfStaff: target !== h.chief.id } }]) })).toThrow(/Only the Chief of Staff changes who the Chief is/);
+    }
+  });
+
+  it("refuses a Team Cloud User's MausBot, which holds no more than its member", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: { person: "user@example.com" } });
+    expect(() => h.service.propose({ botId: maus.id, threadId: maus.threadId, plan: plan([specialist("Scout", "Work")]) }))
+      .toThrow(/Only an active Chief of Staff can propose team setup/);
+  });
+
+  it("never lets a Chief delete MausBot", () => {
+    const h = harness();
+    const maus = h.bot("Maus", { defaultBot: {} });
+    expect(() => h.service.proposeDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: maus.id, reason: "remove" }))
+      .toThrow(/Maus can't be deleted or archived/);
   });
 });

@@ -10,7 +10,8 @@ import { withTourFinished } from "@/lib/guided-tour";
 import { setLocale } from "@/lib/i18n";
 import { EMPTY_ONBOARDING, LOCAL_VIEWER, type WelcomeViewer } from "@/lib/onboarding";
 import { setPendingIntent } from "@/lib/cloud-intent";
-import { registerDesktopPrefs } from "../../electron/desktop-prefs.mjs";
+import { createDesktopPrefs, registerDesktopPrefs } from "../../electron/desktop-prefs.mjs";
+import { createUpdatesConsent, registerUpdatesConsent } from "../../electron/updates-consent.mjs";
 
 const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default" }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
@@ -351,6 +352,28 @@ describe("the Product Hunt launch card", () => {
     expect(vi.mocked(track)).toHaveBeenCalledWith("product_hunt_card", { action: "not_now" });
     expect(storage.get(PRODUCT_HUNT_NOTICE)).toBe("1");
     expect(await launch()).not.toContain(PH);
+  });
+
+  it("never while the bots move to My Cloud, nor in the first minutes after; the star and the Cloud offers wait too", async () => {
+    fresh(); returning(); storage.delete(STAR_NOTICE);
+    const line = (move: unknown) => desk.handlers.set("cloud-send:notice", () => ({ ready: true, bots: [], move }));
+    for (const move of [{ phase: "copy", chats: { done: 1, total: 5 } }, { phase: "wait" }, { phase: "finishing" }, { phase: "copy", failing: { error: null } }, { phase: "home-again" }]) {
+      line(move);
+      const html = await launch();
+      expect(html, JSON.stringify(move)).not.toContain(PH); expect(html, JSON.stringify(move)).not.toContain(STAR);
+    }
+    line({ phase: "done", at: NOW - 60_000, phone: false, held: [] });
+    expect(await launch(), "a minute after: still quiet").not.toContain(PH);
+    line(undefined);
+    expect(await settle(), "the done line closed a minute after: still quiet").not.toContain(PH);
+    line({ phase: "done", at: NOW - 6 * 60_000, phone: false, held: [] });
+    expect(await launch(), "some minutes after: the card shows").toContain(PH);
+    line(undefined);
+    expect(await launch(), "no move at all").toContain(PH);
+    desk.handlers.set("cloud-send:notice", () => { throw new Error("cloud-send:notice is only available in this app's window"); });
+    expect(await launch(), "a page main tells nothing").toContain(PH);
+    desk.handlers.set("cloud-send:notice", () => new Promise(() => {}));
+    expect(await launch(), "until main says whether a move goes, nothing shows").not.toContain(PH);
   });
 
   it("never on a branded build or an organization's desktop, never after the launch window, never over setup or an update", async () => {
@@ -726,5 +749,91 @@ describe("the Cloud Pro popup after the update", () => {
     expect(seenOnDesktop()).toEqual([]);
     offer = TRIAL_OFFER;
     expect(await launch()).toContain(POPUP);
+  });
+});
+
+describe("the product-updates question after the update", () => {
+  const QUESTION = "Get MausBot updates?", POPUP = "MausBot Cloud Pro";
+  const RECEIPT = "R".repeat(43);
+  let saved: unknown;
+  let accountAnswer: { status: string; textVersion: string } | null;
+  let client: Record<string, ReturnType<typeof vi.fn>>;
+  /** Main's own consent for this desktop, behind its real IPC: the real record and logic, a fake Cloud client. */
+  const wireConsent = () => {
+    const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = JSON.parse(JSON.stringify(value)); } });
+    const consent = createUpdatesConsent({ prefs, account: () => client as never, available: async () => true, now: () => now });
+    registerUpdatesConsent({ ipcMain: { handle: (channel, handler) => void desk.handlers.set(channel, handler as Handler) }, page: event => (event as { page: Page }).page, consent });
+  };
+  const answer = () => (saved as { updatesConsent?: { status: string } } | null)?.updatesConsent ?? null;
+  const type = (value: string) => { const input = tree().find(node => node.type === "input" && node.props.type === "email")!; expect(input).toBeTruthy(); input.props.onChange({ target: { value } }); };
+
+  beforeEach(() => {
+    saved = null; accountAnswer = null;
+    client = { state: vi.fn(() => account), updatesConsent: vi.fn(async () => ({ cloudContractVersion: 1, consent: accountAnswer })),
+      recordUpdatesConsent: vi.fn(async (status: string, textVersion: string) => { accountAnswer = { status, textVersion }; }),
+      updatesConsentByEmail: vi.fn(async () => RECEIPT), withdrawUpdatesConsent: vi.fn(async () => {}) };
+    wireConsent();
+  });
+
+  it("comes after the Cloud Pro popup, never with it, and right after it closes; No thanks is kept and it is never asked again", async () => {
+    desk.saved = null; storage.delete(CLOUD_PRO_UPDATE_NOTICE);
+    const first = await launch();
+    expect(first).toContain(POPUP); expect(first).not.toContain(QUESTION);
+    press("Not now"); await flush();
+    const next = render();
+    expect(next).toContain(QUESTION); expect(next).not.toContain(POPUP);
+    for (const text of ["about new features and tips, about twice a month. You can unsubscribe any time.", "Your email", "Yes, send me updates", "No thanks"])
+      expect(next).toContain(text);
+    for (const part of ['role="dialog"', 'aria-modal="true"', 'aria-labelledby="updates-consent-title"', 'type="email"', 'value=""']) expect(next).toContain(part);
+    expect(next).not.toContain('type="checkbox"');
+    press("No thanks"); await flush();
+    expect(render()).toBe("");
+    expect(answer()).toMatchObject({ status: "declined" });
+    expect(client.updatesConsentByEmail).not.toHaveBeenCalled();
+    expect(await launch()).not.toContain(QUESTION);
+    wireConsent();
+    expect(await launch(), "a restart reads it from the desktop's file").not.toContain(QUESTION);
+  });
+
+  it("never during onboarding, the tour or Settings; it shows once they are done, before the other cards", async () => {
+    returning();
+    f.state.welcomeOpen = true; expect(await launch()).toBe("");
+    f.state.welcomeOpen = false; f.state.appSettingsOpen = true; expect(await launch()).toBe("");
+    f.state.appSettingsOpen = false;
+    const html = await launch();
+    expect(html).toContain(QUESTION); expect(html).not.toContain(STAR);
+  });
+
+  it("signed out: an optional email; Yes sends it with no account and keeps the receipt. Signed in: one tap, on the account", async () => {
+    await launch(); expect(await settle()).toContain(QUESTION);
+    type("not-an-email"); press("Yes, send me updates"); await flush();
+    expect(render()).toContain("Enter a valid email address.");
+    expect(client.updatesConsentByEmail).not.toHaveBeenCalled();
+    type("person@example.test"); press("Yes, send me updates");
+    for (let i = 0; i < 5; i++) await flush();
+    expect(client.updatesConsentByEmail).toHaveBeenCalledWith(expect.objectContaining({ email: "person@example.test", textVersion: "2026-10-23" }));
+    expect(answer()).toMatchObject({ status: "opted_in", email: "person@example.test", receipt: RECEIPT });
+    expect(render()).toBe("");
+
+    saved = null; account = free; wireConsent();
+    await launch(); const signedIn = await settle();
+    expect(signedIn).toContain(QUESTION); expect(signedIn).not.toContain('type="email"');
+    press("Yes, send me updates");
+    for (let i = 0; i < 5; i++) await flush();
+    expect(client.recordUpdatesConsent).toHaveBeenCalledWith("opted_in", "2026-10-23");
+    expect(answer()).toMatchObject({ status: "opted_in", account: "a" });
+    expect(await launch()).not.toContain(QUESTION);
+  });
+
+  it("not on a branded build, a saved server's page, or in a remote client's window; My Cloud's own page asks too", async () => {
+    f.brand = "file"; expect(await launch()).not.toContain(QUESTION);
+    f.brand = "default";
+    viewer = { hosted: true, canSave: true }; showWindow(VPS); expect(await launch()).not.toContain(QUESTION);
+    showWindow(LOCAL_ORIGIN); viewer = LOCAL_VIEWER; (window.ogb as Record<string, any>).remoteClient.active = true;
+    expect(await launch()).not.toContain(QUESTION);
+    snapshot = { status: "none" }; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
+    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD);
+    expect(await launch()).toContain(QUESTION);
+    expect(answer()).toBeNull();
   });
 });

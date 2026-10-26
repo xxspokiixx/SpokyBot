@@ -19,8 +19,11 @@ import type { AppTriggerManager } from "./app-triggers.ts";
 import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
+import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
+import { watchAsMade } from "./host/default-watch.ts";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
+import { withCheckFields } from "./routine-load.ts";
 import type { Routine, RoutineManager, RoutineRun } from "./routines.ts";
 import type { RouteContext } from "./routes/table.ts";
 import { installLibrarySkill, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillReviewState, updateLibrarySkill, type SkillLibraryEntry } from "./skill-library.ts";
@@ -33,7 +36,7 @@ const SHARED_ROOT = "/omb-data";
 const FINISHED = new Set(["completed", "failed", "cancelled", "missed"]);
 const KIND_BODY_MAX = 8 * 1024 * 1024;
 const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity",
-  "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt"] as const;
+  "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt", "checks", "access", "deliver"] as const;
 const CALL_FIELDS = ["name", "description", "botIds", "schedule", "durationMinutes", "attachments", "roomId", "createdAt"] as const;
 const WEBHOOK_FIELDS = ["name", "prompt", "botId", "runOn", "delivery", "groupId", "eventTypes", "maxPendingRuns", "resultsThreadId", "createdAt"] as const;
 const APP_EVENT_FIELDS = ["name", "prompt", "botId", "runOn", "app", "event", "accountId", "config", "filter", "sourceThreadId"] as const;
@@ -43,7 +46,7 @@ export const MOVE_BOT_FIELDS: readonly string[] = Object.values(MOVE_BOT_PARTS).
 
 export interface MoveKindsDeps {
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "group" | "patchBot" | "setChiefOfStaff" | "appendMessage">;
+  store: Pick<Store, "bots" | "bot" | "group" | "patchBot" | "setChiefOfStaff" | "appendMessage" | "messagesFor">;
   routines(): Pick<RoutineManager, "listRoutines" | "listRuns" | "adopt"> | null;
   calls(): Pick<CalendarCallManager, "list" | "adopt"> | null;
   webhooks(): Pick<WebhookManager, "list" | "adopt"> | null;
@@ -171,6 +174,11 @@ export function moveItems(deps: MoveKindsDeps, bots: ReadonlySet<string>, only?:
   return items;
 }
 
+/** The bot has a routine here the person set up or changed: a move counts it as in use, so the routine goes with it. */
+export function automatedBot(deps: Pick<MoveKindsDeps, "routines">, botId: string): boolean {
+  return (deps.routines()?.listRoutines() ?? []).some((routine) => routine.botId === botId && !watchAsMade(routine));
+}
+
 /** Each automation here and whether it is on, for the switch that turns on there what was on here; `bot`: that bot's
  * routines only. */
 export function automationSwitches(deps: MoveKindsDeps, bot?: string): Array<{ key: string; on: boolean }> {
@@ -199,14 +207,15 @@ function parseKey(key: string | null): { kind: Kind; id: string } | null {
   return (kind === "imported-skill" || kind === "library-skill") && !isSkillName(match[2]!) ? null : { kind, id: match[2]! };
 }
 
-/** One item's whole record on this server, for a move to carry; null when it is not here. */
-export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { record: unknown; runs?: RoutineRun[] } | null {
+/** One item's whole record on this server, for a move to carry; null when it is not here. A routine's `changedAt` says
+ * when it last changed here, for a move to keep the side that changed it last. */
+export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { record: unknown; runs?: RoutineRun[]; changedAt?: number } | null {
   if (kind === "bot") { const bot = deps.store.bot(id); return bot ? { record: pick(bot, MOVE_BOT_FIELDS) } : null; }
   if (kind === "routine") {
     const routines = deps.routines();
     const routine = routines?.listRoutines().find((candidate) => candidate.id === id);
     // Its switch goes along for the switch that turns on there what was on here; My Cloud takes it switched off.
-    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS), enabled: routine.enabled }, runs: finishedRuns(routines!, id) } : null;
+    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS), enabled: routine.enabled }, runs: finishedRuns(routines!, id), changedAt: routine.updatedAt } : null;
   }
   if (kind === "call") { const call = deps.calls()?.list().find((candidate) => candidate.id === id); return call ? { record: call } : null; }
   if (kind === "webhook") { const webhook = deps.webhooks()?.list().find((candidate) => candidate.id === id); return webhook ? { record: webhook } : null; }
@@ -239,6 +248,9 @@ const botFieldsSchema = z.object({
   playbooks: z.array(playbookSchema).max(50).nullable().optional(),
   installedPackage: z.record(z.string(), z.unknown()).nullable().optional(),
   assignedSkills: z.array(z.string().max(64)).max(200).nullable().optional(),
+  defaultBot: z.object({ person: z.string().max(320).optional() }).strict().nullable().optional(),
+  sidebarHidden: z.boolean().nullable().optional(),
+  welcomed: z.boolean().nullable().optional(),
 }).strict();
 const skillFileSchema = z.object({ path: z.string().max(400).refine(validRelative), content: z.string().max(512 * 1024), executable: z.boolean() });
 const importedSkillSchema = z.object({ name: z.string().refine(isSkillName), skillMd: z.string().max(512 * 1024), files: z.array(skillFileSchema).max(200),
@@ -260,6 +272,8 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
   const set = <K extends keyof BotRecord>(key: K, value: BotRecord[K] | undefined) => { if (Object.hasOwn(fields, key)) patch[key] = value as BotRecord[K]; };
   set("hidden", fields.hidden ?? undefined);
   set("pinned", fields.pinned ?? undefined);
+  set("sidebarHidden", fields.sidebarHidden ?? undefined);
+  set("welcomed", fields.welcomed ?? undefined);
   set("managedSections", fields.managedSections ? [...new Set(fields.managedSections.filter(Boolean))] : undefined);
   set("fallback", fields.fallback ? fields.fallback.filter((entry) => deps.instanceExists(entry.instanceId)) : undefined);
   if (fields.projects) {
@@ -280,6 +294,8 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
+  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id);
+  retireUnusedStarter(deps.store, deps.dataDir);
 }
 
 /** A routine as it arrives: off unless My Cloud switched it on, with its finished runs My Cloud lacks. */
@@ -287,9 +303,9 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
   const routines = deps.routines() ?? refuse(503, "My Cloud's routines are not ready yet.");
   const parsed = routineSchema.safeParse(raw);
   if (!parsed.success) refuse(400, "send the routine as this computer holds it");
-  const routine = rebased({ id: parsed.data!.id, ...pick(parsed.data!, ROUTINE_FIELDS) }, from, deps.dataDir) as unknown as Routine;
+  const routine = withCheckFields(rebased({ id: parsed.data!.id, ...pick(parsed.data!, ROUTINE_FIELDS) }, from, deps.dataDir) as unknown as Routine);
   if (!deps.store.bot(routine.botId)) refuse(409, "This routine's bot is not on My Cloud yet.");
-  if (routine.target === "room-goal" && (!routine.groupId || !deps.store.group(routine.groupId))) refuse(409, "This routine's room is not on My Cloud yet.");
+  if (routine.target === "room-goal" && routine.groupId && !deps.store.group(routine.groupId)) refuse(409, "This routine's room is not on My Cloud yet.");
   const arriving = (Array.isArray(runs) ? runs : []).flatMap((run) => {
     const checked = runSchema.safeParse(run);
     return checked.success && checked.data.routineId === routine.id && FINISHED.has(checked.data.status) ? [rebased(checked.data, from, deps.dataDir) as unknown as RoutineRun] : [];

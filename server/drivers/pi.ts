@@ -46,7 +46,7 @@ import {
 import { appendNative } from "./native.ts";
 import { allowsTool, canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
 import { appMountFor, customServerGate, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
-import { remoteMcpSpec } from "../mcp-http.ts";
+import { remoteMcpSpec } from "../mcp-http.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
@@ -99,7 +99,7 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
   const parsed = parseToolScope(turn.toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const servers: Record<string, unknown> = {};
-  if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio };
+  if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio }; if (turn.integrations?.composioOwn) servers[OWN_APPS_SERVER] = { ...turn.integrations.composioOwn };
   if (turn.integrations?.localComputer) {
     const local = turn.integrations.localComputer;
     servers.computer = {
@@ -120,7 +120,7 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
     };
   }
   if (turn.integrations?.browser) servers.browser = { ...turn.integrations.browser };
-  for (const name of ["data", "highlevel"] as const) if (turn.integrations?.[name]) servers[name] = { ...turn.integrations[name] };
+  for (const name of ["data", "highlevel", "device"] as const) if (turn.integrations?.[name]) servers[name] = { ...turn.integrations[name] };
   for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) servers[name] = { ...server, scope: "custom" };
   for (const [name, server] of Object.entries(servers)) {
     if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
@@ -844,20 +844,16 @@ export const PiDriver: ProviderDriver<PiConfig> = {
                 }
                 else send({ type: "extension_ui_response", id: reqId, confirmed: true });
               });
-              timer = setTimeout(() => {
-                if (timer) askTimers.delete(timer);
-                if (!pending.delete(reqId)) return;
-                send({ type: "extension_ui_response", id: reqId, cancelled: true });
-                emit({
-                  ...base(threadId, turnId),
-                  requestId: reqId,
-                  type: "request.resolved",
-                  behavior: "deny",
-                  source: "timeout",
-                });
-              }, 15 * 60_000);
-              askTimers.add(timer);
-              timer.unref?.();
+              if (!isQuestion) {
+                timer = setTimeout(() => {
+                  if (timer) askTimers.delete(timer);
+                  if (!pending.delete(reqId)) return;
+                  send({ type: "extension_ui_response", id: reqId, cancelled: true });
+                  emit({ ...base(threadId, turnId), requestId: reqId, type: "request.resolved", behavior: "deny", source: "timeout" });
+                }, 15 * 60_000);
+                askTimers.add(timer);
+                timer.unref?.();
+              }
               emit({
                 ...base(threadId, turnId),
                 requestId: reqId,
@@ -1103,7 +1099,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           phoneMcp: true,
           customMcp: true,
           browserMcp: true,
-          dataMcp: true, highlevelMcp: true,
+          dataMcp: true, highlevelMcp: true, deviceMcp: true,
           localComputerMcp: true,
           images: true,
           nativeImageInput: true,

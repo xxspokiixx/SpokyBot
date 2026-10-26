@@ -4,6 +4,7 @@
 // mcp__notion__notion-create-pages); built-in tools and the app's own
 // coordination tools are not outcomes and classify as nothing.
 import { connectorCallsIn, isOutboundTool } from "./outbound.ts";
+import { isConnectedAppsServer } from "./own-apps.ts";
 
 export const OUTCOME_CATEGORIES = ["emailRead", "draft", "emailSent", "message", "doc", "report", "lead", "other"] as const;
 export type OutcomeCategory = (typeof OUTCOME_CATEGORIES)[number];
@@ -52,7 +53,7 @@ const LEAD_NOUNS = new Set([
 const LEAD_VERBS = new Set(["CREATE", "ADD", "UPDATE", "UPSERT", "ENRICH", "SEARCH", "FIND", "LOOKUP", "MATCH", "DISCOVER"]);
 
 /** The app's own MCP servers: coordination, computers and the permission bridge, never a business outcome. */
-const OWN_SERVERS = new Set(["agents", "computer", "localComputer", "phone", "browser", "dweb", "ogb"]);
+const OWN_SERVERS = new Set(["agents", "computer", "localComputer", "phone", "device", "browser", "dweb", "ogb"]);
 const COMPOSIO_META = new Set(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS", "COMPOSIO_MANAGE_CONNECTIONS", "COMPOSIO_WAIT_FOR_CONNECTIONS", "COMPOSIO_CHECK_ACTIVE_CONNECTION", "COMPOSIO_INITIATE_CONNECTION"]);
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
 const APP_TOOL = /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/;
@@ -67,7 +68,7 @@ export function appTool(name: string): AppTool | null {
   if (name.startsWith("mcp__")) {
     const [, server = "", ...rest] = name.split("__");
     const action = rest.join("__");
-    if (server === "composio" || server === "highlevel") return appTool(action);
+    if (isConnectedAppsServer(server) || server === "highlevel") return appTool(action);
     if (OWN_SERVERS.has(server) || !action) return null;
     const app = words(server.replace(/^claude_ai_/, "")).join("");
     const tokens = words(action);

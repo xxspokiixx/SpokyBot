@@ -12,13 +12,17 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
-import { movesThreadToTop } from "../../shared/wire";
+import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
+import { reorderStable } from "../../shared/bot-order";
+import { withOneChief } from "../../shared/bot-owner";
 import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-surface";
 import type { NotificationLogEntry } from "../../shared/notification";
-import { reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
+import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
+import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
+import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -62,6 +66,7 @@ import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { useChatErrorClear } from "./chat-error";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 import { trimRoutineRuns } from "./routine-runs";
+import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } from "./queue-receipts";
 
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
@@ -76,6 +81,7 @@ export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "w
   answered?: string;
   answeredText?: string;
   answeredBy?: CardAnswerer;
+  pendingAnswer?: string;
   dismissed?: boolean;
   requestId?: string;
   tool?: string;
@@ -128,7 +134,7 @@ export interface SecretRequestCardData {
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "routedBy" | "quickModel" | "automation" | "publishedPage"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "sender" | "setupSuggestion" | "helperIntro"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -182,6 +188,7 @@ export interface Group extends Pick<WireGroup, "memberContext" | "queue"> {
   memberIds: string[];
   defaultResponder: GroupDefaultResponder;
   bulletin: string;
+  description?: string;
   unread: boolean;
   lastReadMessageId?: string;
   createdAt: number;
@@ -280,7 +287,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot {
+export interface Bot extends DefaultBotFields {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -326,11 +333,12 @@ export interface Bot {
   pinnedMessageId?: string;
   chiefOfStaff?: boolean;
   managedSections?: string[];
+  createdBy?: string; reportsTo?: string;
   approvePeerComms?: boolean;
   peers?: string[];
   composio?: boolean;
   connectorTools?: Record<string, ConnectorToolGrant>;
-  connectorScopes?: { apps: Record<string, "read" | "write"> };
+  connectorScopes?: { apps: Record<string, "read" | "write"> }; phoneApps?: import("../../shared/phone-apps").PhoneApps;
   outbound?: { policy: "ask" | "allow"; dailyCap: number };
   fallback?: Array<{ instanceId: string; model: string }>;
   browser?: boolean;
@@ -433,7 +441,7 @@ export type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicyS
 // A section left out here is wiped from state.config whenever a config frame lands.
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "cerebras" | "groq" | "meta" | "xResearch" | "treg" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
+  "xai" | "mistral" | "cerebras" | "groq" | "meta" | "deepseek" | "xResearch" | "treg" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "helpers" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -441,7 +449,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     xai: frame.xai,
     mistral: frame.mistral,
     cerebras: frame.cerebras,
-    groq: frame.groq,
+    groq: frame.groq, deepseek: frame.deepseek,
     meta: frame.meta, xResearch: frame.xResearch, treg: frame.treg,
     anthropic: frame.anthropic,
     openai: frame.openai,
@@ -459,7 +467,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     localVm: frame.localVm,
     opencodeGo: frame.opencodeGo,
     tts: frame.tts,
-    decider: frame.decider,
+    decider: frame.decider, helpers: frame.helpers,
     imageGen: frame.imageGen,
     live: frame.live,
     profile: frame.profile,
@@ -520,8 +528,8 @@ export interface InstanceInfo {
     computerMcp?: boolean;
     agentsMcp?: boolean;
     composioMcp?: boolean;
-    /** the engine can mount the native HighLevel tools (a connected app without Composio) */
-    highlevelMcp?: boolean;
+    /** the engine can mount the native HighLevel tools (a connected app without Composio), the paired phone's app tools and the Data tools */
+    highlevelMcp?: boolean; deviceMcp?: boolean; dataMcp?: boolean;
     browserMcp?: boolean;
     images?: boolean;
     effortLevels?: readonly EffortLevel[];
@@ -598,7 +606,7 @@ export interface AppState {
   liveCallVersion: number;
   liveCallLookupSeq: number;
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines" | "files" | "today";
+  activeView: "chat" | "team-map" | "routines" | "files";
   /** Folders a finished move left on this computer, for Files to offer sharing. */
   filesSuggest: string[] | null;
   routines: Routine[];
@@ -661,70 +669,6 @@ export interface AppState {
   transcriptGeneration: Record<string, number>;
 }
 
-const MAX_CONSUMED_QUEUE_IDS = 64;
-
-function rememberConsumedQueueId(
-  consumed: AppState["consumedQueueIds"],
-  queueId: string,
-): AppState["consumedQueueIds"] {
-  const next = { ...consumed, [queueId]: true as const };
-  const overflow = Object.keys(next).length - MAX_CONSUMED_QUEUE_IDS;
-  if (overflow > 0) {
-    for (const id of Object.keys(next).slice(0, overflow)) delete next[id];
-  }
-  return next;
-}
-
-interface QueueReceiptSnapshot {
-  messages?: Message[];
-}
-
-/** Leaves a tombstone so a slower POST continuation cannot add a drained chip back. */
-function reconcileSnapshotQueues(
-  state: AppState,
-  conversations: QueueReceiptSnapshot[],
-): AppState {
-  const landed: Array<{ queueId: string; at: number }> = [];
-  for (const conversation of conversations) {
-    for (const message of conversation.messages ?? []) {
-      if (message.queueId) landed.push({ queueId: message.queueId, at: message.at });
-    }
-  }
-  if (landed.length === 0) return state;
-
-  const landedIds = new Set(landed.map((entry) => entry.queueId));
-  const pendingQueued: AppState["pendingQueued"] = {};
-  for (const [threadId, entries] of Object.entries(state.pendingQueued)) {
-    const waiting = entries.filter((entry) => !landedIds.has(entry.queueId));
-    if (waiting.length > 0) pendingQueued[threadId] = waiting;
-  }
-
-  let consumedQueueIds: AppState["consumedQueueIds"] = {};
-  landed.sort((left, right) => left.at - right.at);
-  for (const entry of landed) {
-    consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
-  }
-  // Live receipts are newer than any loaded history; never evict them for a late POST.
-  for (const queueId of Object.keys(state.consumedQueueIds)) {
-    consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, queueId);
-  }
-  return { ...state, pendingQueued, consumedQueueIds };
-}
-
-function replaceBotQueues(state: AppState, queues: AppState["pendingQueued"]): AppState {
-  const groupThreads = new Set(state.groups.flatMap((group) => [group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]));
-  const liveIds = new Set(Object.values(queues).flatMap((entries) => entries.map((entry) => entry.queueId)));
-  const pendingQueued = { ...queues };
-  let consumedQueueIds = state.consumedQueueIds;
-  for (const [threadId, entries] of Object.entries(state.pendingQueued)) {
-    if (groupThreads.has(threadId)) pendingQueued[threadId] = entries;
-    else for (const entry of entries) {
-      if (!liveIds.has(entry.queueId)) consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
-    }
-  }
-  return { ...state, pendingQueued, consumedQueueIds };
-}
-
 export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
 
 export type Action =
@@ -739,9 +683,10 @@ export type Action =
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "sections"; sections: string[] }
+  | { type: "botsOrdered"; botIds: string[] }
   | { type: "sectionDeleted"; section: string; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
-  | { type: "showTeamMap" } | { type: "showToday" }
+  | { type: "showTeamMap" }
   | { type: "showFiles"; suggest?: string[] }
   | { type: "showChat" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
@@ -764,6 +709,12 @@ export type Action =
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "markAllRoutineRunsSeen" }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
+  | {
+      type: "groupSnapshot";
+      group: Partial<Group> & { id: string };
+      since: AppState["transcriptGeneration"];
+      heldAtStart: readonly Message[];
+    }
   | { type: "groupDeleted"; groupId: string }
   | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
   | {
@@ -779,7 +730,7 @@ export type Action =
   | {
       type: "patchGroup";
       groupId: string;
-      patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "defaultResponder" | "pinnedMessageId" | "section">>;
+      patch: Partial<Pick<Group, "name" | "bulletin" | "description" | "memberIds" | "defaultResponder" | "pinnedMessageId" | "section">>;
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "newGroupTask"; groupId: string }
@@ -804,7 +755,7 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
-      dataContext?: import("../../shared/data-context").DataContext;
+      dataContext?: import("../../shared/data-context").DataContext; pointed?: import("../../shared/app-frame/point").PointedElement[]; mode?: "chat" | "goal";
       onError?: () => void;
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
@@ -819,6 +770,7 @@ export type Action =
   | { type: "loadOlderMessages"; threadId: string }
   | { type: "olderMessages"; threadId: string; generation: number; messages: Message[]; hasMore: boolean }
   | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
+  | { type: "answerCardFailed"; botId: string; messageId: string; answer: string; groupId?: string }
   | { type: "dismissCard"; botId: string; messageId: string; threadId?: string; groupId?: string }
   | {
       type: "decideRequest";
@@ -973,28 +925,6 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
   return quiz ? patchCard(state, botId, quiz.id, { dismissed: true }) : state;
 }
 
-const optimisticMessageId = (sendId: string): string => `optimistic-${sendId}`;
-
-function optimisticUserMessage(
-  text: string,
-  sendId: string,
-  replyToId?: string,
-  parentId?: string | null,
-  channelMode?: "chat" | "goal",
-): Message {
-  return {
-    id: optimisticMessageId(sendId),
-    role: "user",
-    kind: "text",
-    text,
-    at: Date.now(),
-    parentId: parentId ?? null,
-    replyToId,
-    sendId,
-    channelMode,
-  };
-}
-
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -1008,6 +938,7 @@ export function reducer(state: AppState, action: Action): AppState {
         : action.type === "messageAdded" ? bumpThreadUpdatedAt(buffered, action.threadId, action.message.at) : buffered;
     }
   }
+  if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
     case "hydrate": {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
@@ -1023,7 +954,10 @@ export function reducer(state: AppState, action: Action): AppState {
         }),
         groups: action.groups.map((group) => {
           const previous = state.groups.find((candidate) => candidate.id === group.id);
-          return previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
+          const merged = previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
+          // The wire carries an explicitly-cleared description as null; client state keeps it absent.
+          if (merged.description === null) merged.description = undefined;
+          return merged;
         }),
         sections: action.sections ?? [],
         computerControl: action.computerControl,
@@ -1072,6 +1006,11 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "sections":
       return { ...state, sections: action.sections };
+    case "botsOrdered": {
+      // The server's fleet order (PUT /api/bots/order): a stable partial reorder, so the sidebar shows what a phone just did.
+      const bots = reorderStable(state.bots, action.botIds);
+      return bots.every((bot, index) => bot === state.bots[index]) ? state : { ...state, bots };
+    }
     case "botQueues":
       return reconcileSnapshotQueues(replaceBotQueues(state, action.queues), [...state.bots, ...state.groups]);
     case "showRoutines":
@@ -1090,10 +1029,10 @@ export function reducer(state: AppState, action: Action): AppState {
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
     case "showTeamMap":
-    case "showFiles": case "showToday":
+    case "showFiles":
       return {
         ...state,
-        activeView: action.type === "showFiles" ? "files" : action.type === "showToday" ? "today" : "team-map",
+        activeView: action.type === "showFiles" ? "files" : "team-map",
         filesSuggest: action.type === "showFiles" && action.suggest?.length ? action.suggest : null,
         settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false, pluginsOpen: false,
       };
@@ -1149,20 +1088,11 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "groupPatched": {
       const fenced = action.group.messages ? bumpTranscriptGeneration(state, action.group.threadId) : state;
-      const exists = fenced.groups.some((g) => g.id === action.group.id);
-      const groups = exists
-        ? fenced.groups.map((g) => (g.id === action.group.id ? {
-            ...g, ...action.group,
-            section: typeof action.group.threadId === "string" || Object.hasOwn(action.group, "section") ? action.group.section : g.section,
-            tasks: action.group.tasks ? mergeTaskStamps(g.tasks, action.group.tasks) : g.tasks,
-            turnTimeoutMinutes: Object.hasOwn(action.group, "turnTimeoutMinutes")
-              ? (action.group.turnTimeoutMinutes ?? undefined)
-              : g.turnTimeoutMinutes,
-            messages: action.group.messages ?? g.messages,
-            hasMore: action.group.messages ? Boolean(action.group.hasMore) : g.hasMore,
-          } : g))
-        : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...fenced.groups];
-      return { ...fenced, groups };
+      return { ...fenced, groups: patchedGroups(state.groups, action.group) };
+    }
+    case "groupSnapshot": {
+      const group = snapshotPatch(state, action);
+      return group ? reducer(state, { type: "groupPatched", group }) : state;
     }
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
@@ -1214,17 +1144,34 @@ export function reducer(state: AppState, action: Action): AppState {
       );
     }
     case "answerCard": {
-      if (action.groupId) return patchGroupCard(state, action.groupId, action.messageId, { answered: action.answer });
+      if (action.groupId) {
+        const card = state.groups.find((group) => group.id === action.groupId)?.messages.find((message) => message.id === action.messageId)?.card;
+        return patchGroupCard(state, action.groupId, action.messageId, {
+          answered: action.answer,
+          ...(card?.requestId ? { pendingAnswer: action.answer } : {}),
+        });
+      }
       const bot = state.bots.find((candidate) => candidate.id === action.botId);
       const card = bot?.messages.find((message) => message.id === action.messageId)?.card;
       return withMascotMotion(
         patchCard(state, action.botId, action.messageId, {
           answered: action.answer,
-          ...(card?.requestId ? {} : { dismissed: true }),
+          ...(card?.requestId ? { pendingAnswer: action.answer } : { dismissed: true }),
         }),
         action.botId,
         "working",
       );
+    }
+    case "answerCardFailed": {
+      const host = action.groupId
+        ? state.groups.find((group) => group.id === action.groupId)
+        : state.bots.find((bot) => bot.id === action.botId);
+      const card = host?.messages.find((message) => message.id === action.messageId)?.card;
+      if (card?.pendingAnswer !== action.answer) return state;
+      const reopened = { answered: undefined, pendingAnswer: undefined };
+      return action.groupId
+        ? patchGroupCard(state, action.groupId, action.messageId, reopened)
+        : patchCard(state, action.botId, action.messageId, reopened);
     }
     case "dismissCard":
       if (action.groupId) return patchGroupCard(state, action.groupId, action.messageId, { dismissed: true });
@@ -1276,16 +1223,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const motioned = kind ? withMascotMotion(state, action.bot.id, kind) : state;
       const animated = action.bot.busy === false && before?.busy && motioned.computerStarts[action.bot.id]
         ? reducer(motioned, { type: "computerStart", botId: action.bot.id, start: null }) : motioned;
-      const next = action.bot.chiefOfStaff
-        ? {
-            ...animated,
-            bots: animated.bots.map((b) =>
-              b.id === action.bot.id || (b.section?.trim() || "") !== (action.bot.section?.trim() || "")
-                ? b
-                : { ...b, chiefOfStaff: false },
-            ),
-          }
-        : animated;
+      const next = action.bot.chiefOfStaff ? { ...animated, bots: withOneChief(animated.bots, action.bot) } : animated;
       const switchedThread =
         typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId &&
         !action.bot.tasks?.some((task) => task.threadId === before.threadId);
@@ -1297,7 +1235,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if ((switchedThread || (before.awaitingThreadSnapshot && action.bot.threadId === before.threadId)) &&
           Array.isArray(action.bot.messages)) {
         // The slim deletion broadcast can beat the full snapshot; later duplicate snapshots must not overwrite newer messages.
-        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, toolScope: action.bot.toolScope, managedSections: action.bot.managedSections, messages: action.bot.messages, browserProfile: action.bot.browserProfile, vpsAlias: action.bot.vpsAlias } });
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, toolScope: action.bot.toolScope, managedSections: action.bot.managedSections, messages: action.bot.messages, browserProfile: action.bot.browserProfile, vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps } });
       }
       const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
@@ -1310,7 +1248,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computer: action.bot.computer,
         toolScope: action.bot.toolScope,
         section: action.bot.section, managedSections: action.bot.managedSections,
-        vpsAlias: action.bot.vpsAlias,
+        vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps,
         tasks: action.bot.tasks ? mergeTaskStamps(b.tasks, action.bot.tasks) : b.tasks,
         // Old approvals must never be sent to the replacement thread while its transcript loads.
         messages: switchedThread ? [] : b.messages,
@@ -1640,11 +1578,6 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "toggleNotificationsPinned":
       return { ...state, notificationsPinned: action.pinned ?? !state.notificationsPinned };
-    case "notificationsHydrated":
-    case "notificationReceived":
-    case "notificationRead":
-    case "notificationsMarkAllRead":
-      return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
     case "toggleAppSettings": {
       const open = action.open ?? !state.appSettingsOpen;
       return {
@@ -1695,27 +1628,17 @@ export function reducer(state: AppState, action: Action): AppState {
         ? withMascotMotion(state, action.botId, "customize")
         : state;
       const target = animated.bots.find((bot) => bot.id === action.botId);
-      const chiefSection = (action.patch.section ?? target?.section)?.trim() || "";
-      const next = action.patch.chiefOfStaff
-        ? {
-            ...animated,
-            bots: animated.bots.map((b) =>
-              b.id === action.botId || (b.section?.trim() || "") !== chiefSection
-                ? b
-                : { ...b, chiefOfStaff: false },
-            ),
-          }
-        : animated;
+      const next = action.patch.chiefOfStaff ? { ...animated, bots: withOneChief(animated.bots, { ...target, ...action.patch, id: action.botId }) } : animated;
       const {
         acknowledgeLocalAuto: _localAck,
         applyToAllThreads: _allThreads,
         keepThreadModels: _keepThreadModels, threadId: _threadId,
         computer,
         connectorTools,
-        connectorScopes,
+        connectorScopes, phoneApps, peers,
         ...rest
       } = action.patch;
-      const botPatch: Partial<Bot> = { ...rest };
+      const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(peers !== undefined && { peers: peers ?? undefined }) };
       if (computer === null) botPatch.computer = undefined;
       else if (computer !== undefined) botPatch.computer = computer;
       if (connectorTools === null) botPatch.connectorTools = undefined;
@@ -2314,6 +2237,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const dispatch = useMemo(() => {
     const navigation = new Map<string, number>();
     let selectionRevision = 0;
+    const roomAnswer = roomAnswers(() => stateRef.current, rawDispatch);
     const olderPagesInFlight = new Set<string>();
     let creatingBot = false;
     const showError = (e: unknown) => {
@@ -2419,7 +2343,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showToday"].includes(action.type)) selectionRevision++;
+      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles"].includes(action.type)) selectionRevision++;
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
@@ -2612,7 +2536,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}) }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}), ...(action.mode === "goal" ? { mode: "goal" } : {}) }),
               }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
@@ -2741,7 +2665,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 body: JSON.stringify({ text: action.answer, threadId: action.threadId }),
               });
             })
-            .catch(showError);
+            .catch((error) => {
+              if (card?.requestId && host) {
+                rawDispatch({ type: "answerCardFailed", botId: action.botId, messageId: action.messageId, answer: action.answer, groupId: action.groupId });
+              }
+              showError(error);
+            });
           break;
         }
         case "dismissCard": {
@@ -3037,12 +2966,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "newGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks`, { method: "POST", body: "{}" })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, true))
             .catch(showError);
           break;
         case "switchGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST" })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, true))
             .catch(showError);
           break;
         case "renameGroupTask":
@@ -3065,7 +2994,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "deleteGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "DELETE" })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, false))
             .catch(showError);
           break;
         case "setGroupHold":
@@ -3073,7 +3002,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             method: "POST",
             body: JSON.stringify({ botId: action.botId, held: action.held }),
           })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, false))
             .catch(showError);
           break;
         case "interruptGroup":
@@ -3289,6 +3218,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "sections":
           rawDispatch({ type: "sections", sections: frame.sections });
           break;
+        case "bots.order":
+          rawDispatch({ type: "botsOrdered", botIds: frame.botIds });
+          break;
         case "bot.queued":
           rawDispatch({ type: "botQueues", queues: frame.queues });
           break;
@@ -3356,6 +3288,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             visibleNotificationThread(stateRef.current),
           );
           rawDispatch({ type: "notificationReceived", entry: frame.notification });
+          break;
+        case "notifications.read":
+          bumpPeripheralVersion("notifications");
+          rawDispatch({ type: "notificationsRead", ids: frame.ids });
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });

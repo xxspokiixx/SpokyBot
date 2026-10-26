@@ -67,27 +67,27 @@ const FULL = "skills+shared+voice+escalations+x";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 61223,
-  "voice": 61964,
-  "shared": 63156,
-  "shared+voice": 63897,
-  "skills": 64042,
-  "skills+voice": 64783,
-  "skills+shared": 65975,
-  "skills+shared+voice": 66716,
-  "non-chief": 51374,
-  "voice+non-chief": 52115,
-  "shared+non-chief": 53307,
-  "shared+voice+non-chief": 54048,
-  "skills+non-chief": 54193,
-  "skills+voice+non-chief": 54934,
-  "skills+shared+non-chief": 56126,
-  "skills+shared+voice+non-chief": 56867,
-  "skills+shared+voice+cloud-home": 65771,
-  "skills+shared+voice+non-chief+cloud-home": 55922,
-  "default+legacy-switches": 61223,
-  "skills+shared+voice+escalations": 67576,
-  "skills+shared+voice+escalations+x": 72214,
+  "default": 61361,
+  "voice": 62102,
+  "shared": 63294,
+  "shared+voice": 64035,
+  "skills": 64180,
+  "skills+voice": 64921,
+  "skills+shared": 66113,
+  "skills+shared+voice": 66854,
+  "non-chief": 51512,
+  "voice+non-chief": 52253,
+  "shared+non-chief": 53445,
+  "shared+voice+non-chief": 54186,
+  "skills+non-chief": 54331,
+  "skills+voice+non-chief": 55072,
+  "skills+shared+non-chief": 56264,
+  "skills+shared+voice+non-chief": 57005,
+  "skills+shared+voice+cloud-home": 65909,
+  "skills+shared+voice+non-chief+cloud-home": 56060,
+  "default+legacy-switches": 61361,
+  "skills+shared+voice+escalations": 67714,
+  "skills+shared+voice+escalations+x": 72352,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -192,7 +192,7 @@ describe("agents proxy tools/list golden", () => {
       for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools.has(alias), `${name}: ${alias}`).toBe(false);
       expect(JSON.stringify([...tools.values()])).not.toMatch(/Deprecated alias|works for this release/);
       const coordinate = tools.get("coordinate_bots")!.inputSchema.properties;
-      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "in_my_folder", "reply", "consult", "done_when"]);
+      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
       expect(coordinate.thread!.enum).toEqual(["standing", "new"]);
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);
       expect(Object.keys(tools.get("assignment_status")!.inputSchema.properties)).toEqual(["id", "wait_ms"]);

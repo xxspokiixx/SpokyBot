@@ -271,7 +271,7 @@ export function phoneMenuItems({
     ...destinations.map((destination) => ({
       key: destination.id === "cloud" ? "connect-phone-cloud" : "connect-phone",
       label: t("sidebar.menu.connectPhone"),
-      subtitle: t(destination.subtitleKey),
+      subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
       ...(destination.noteKey ? { note: t(destination.noteKey) } : {}),
       icon: <Smartphone size={18} />,
       trailing:
@@ -338,7 +338,8 @@ export function profileMenuItems({
   ];
 }
 
-export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnly?: boolean; rail?: boolean } = {}) {
+/** `circle` is the phone's round avatar button at the top of the bot list. */
+export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = false }: { iconOnly?: boolean; rail?: boolean; circle?: boolean } = {}) {
   const { state, dispatch } = useStore();
   const phone = useSidebarPhoneStatus();
   const connectPhone = useConnectPhoneEntry(state.config?.cloudHome === true);
@@ -385,7 +386,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
       <SidebarPopoverMenu
         items={items}
         ariaLabel={name}
-        triggerClassName={iconOnly ? "shrink-0 rounded-xl" : "w-full"}
+        triggerClassName={iconOnly ? cn("shrink-0", circle ? "rounded-full" : "rounded-xl") : "w-full"}
         triggerTitle={iconOnly ? name : undefined}
         renderTrigger={({ open }) => iconOnly ? (
           <span
@@ -393,10 +394,11 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
             className={cn(
               "relative flex items-center justify-center rounded-xl transition-colors",
               rail ? "size-10" : "size-[46px]",
+              circle && "size-10 rounded-full border border-hairline bg-card",
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={rail ? 30 : 28} />
+            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} />
             {noteworthy && (
               <span
                 aria-hidden
@@ -438,7 +440,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
         onClose={() => setPhoneAppOpen(false)}
         connect={destinations.map((destination) => ({
           key: destination.id,
-          subtitle: t(destination.subtitleKey),
+          subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
           onSelect: () => connectTo(destination),
         }))}
       />

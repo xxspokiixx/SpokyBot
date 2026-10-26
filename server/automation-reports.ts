@@ -2,7 +2,8 @@
 // fresh session; when it ends with something to say, its last reply lands in that chat as one bot message named after
 // the automation, and a run with nothing to tell writes nothing. A card a run waits on is copied there, and answering
 // the copy answers the run. Nothing is written into a chat while a turn runs or settles in it: a line waits for the
-// next flush, which the server runs whenever it releases what was queued behind a turn, ahead of that queue.
+// next flush, which the server runs whenever it releases what was queued behind a turn, ahead of that queue. A routine
+// that delivers to the brief posts no line: its answer goes to the brief, which reads it as a small JSON result.
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
@@ -25,16 +26,25 @@ export function readRunReply(text: string, attached = false): RunReply {
   return { quiet: false, text: [...lines.slice(0, at), lines[at]!.replace(NEEDS_INPUT, ""), ...lines.slice(at + 1)].join("\n").trim(), question };
 }
 
-function localTime(at: number): string {
-  const format = (timeZone: string) => new Intl.DateTimeFormat("en-CA", {
-    timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).format(at).replace(",", "");
+function inHostZone(at: number, locale: string, options: Intl.DateTimeFormatOptions): string {
+  const format = (timeZone: string) => new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(at);
   try { return format(hostTimeZone()); } catch { return format("UTC"); }
+}
+
+const localTime = (at: number) =>
+  inHostZone(at, "en-CA", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).replace(",", "");
+
+// ICU 72+ puts a narrow no-break space (U+202F) before AM/PM.
+const clockTime = (at: number) => inHostZone(at, "en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).replace(/\s/g, " ");
+
+/** The line a run with nothing new posts when the automation's line before it in the chat said a run failed. */
+export function recoveredText(name: string, at: number): string {
+  return `Recovered: ${name} finished OK at ${clockTime(at)}`;
 }
 
 /** How the chat's own session reads an automation's line: as its own report, named and dated. */
 export function automationContextText(line: AutomationLine, at: number, text: string): string {
-  const what = line.failed ? "could not finish" : line.needsYou ? "asked" : "reported";
+  const what = line.failed ? "could not finish" : line.needsYou ? "asked" : line.recovered ? "recovered" : "reported";
   return `[Your automation ${JSON.stringify(line.name)} ${what} at ${localTime(at)}:]\n${text}`;
 }
 
@@ -74,6 +84,8 @@ export interface AutomationReportDeps {
   /** After a line this conversation's session did not write: it marks the chat unread and reaches the next turn. */
   wrote(bot: BotRecord, threadId: string): void;
   notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string): void;
+  /** A run that delivers to the brief completed: its answer is the brief's to read. */
+  brief?(run: RoutineRun, turnId?: string): void;
 }
 
 export function createAutomationReports(deps: AutomationReportDeps) {
@@ -88,7 +100,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     return bot && task && !task.routineRunId ? { bot, threadId: task.threadId } : null;
   };
 
-  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "copyOf">): AutomationLine => ({
+  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "recovered" | "copyOf">): AutomationLine => ({
     routineId: run.routineId, runId: run.id, name: run.routineName, trigger: run.eventSource ?? run.triggerSource ?? (run.manual ? "manual" : "schedule"),
     executionThreadId: run.threadId!, scheduledFor: run.scheduledFor, ...extra,
   });
@@ -101,6 +113,18 @@ export function createAutomationReports(deps: AutomationReportDeps) {
   };
 
   const read = (message: Message | undefined) => readRunReply(message?.text ?? "", Boolean(message?.attachments?.length));
+
+  /** The automation's line before this run's in the chat, written or still waiting ahead of it, says a run failed. */
+  const lastSaidFailed = (run: RoutineRun, threadId: string): boolean => {
+    let queued: Waiting | undefined;
+    for (const [key, line] of waiting) {
+      if (key === run.id) break;
+      if (line.kind !== "card" && line.run.routineId === run.routineId && destination(line.run)?.threadId === threadId) queued = line;
+    }
+    if (queued) return queued.kind === "failure";
+    const newest = store.messagesFor(threadId).findLast((message) => message.automation?.routineId === run.routineId && !message.automation.copyOf);
+    return newest?.automation?.failed === true;
+  };
 
   const copyOf = (run: RoutineRun, threadId: string, originalId: string) =>
     store.messagesFor(threadId).find((message) => message.automation?.runId === run.id && message.automation.copyOf === originalId);
@@ -136,20 +160,22 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       return true;
     }
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
-    const reply: RunReply = line.kind === "reply" ? read(source)
+    const said: RunReply = line.kind === "reply" ? read(source)
       : { quiet: false, text: line.detail ? `This run didn't finish: ${line.detail}` : "This run didn't finish." };
-    if (reply.quiet) {
+    const recovered = said.quiet && lastSaidFailed(run, target.threadId);
+    if (said.quiet && !recovered) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
       return true;
     }
+    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now()) } : said;
     const posted = store.appendMessage(target.threadId, {
       role: "bot", kind: "text", text: reply.text,
-      ...(source?.attachments?.length ? { attachments: source.attachments } : {}),
-      automation: lineOf(run, line.kind === "failure" ? { failed: true } : reply.question ? { needsYou: true } : {}),
+      ...(source?.attachments?.length && !recovered ? { attachments: source.attachments } : {}),
+      automation: lineOf(run, line.kind === "failure" ? { failed: true } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
     });
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);
-    if (line.kind === "reply") deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
+    if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
     return true;
   };
 
@@ -205,16 +231,18 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     /** A run's turn ended: once the run is complete, its reply becomes one line in the chat it reports to, or nothing. */
     runSettled(run: RoutineRun, turnId?: string): void {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
+      if (run.deliver === "brief") return deps.brief?.(run, turnId);
       const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
       const reply = read(said);
       const bot = store.bot(run.botId);
-      if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
-      else if (destination(run)) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });
+      const target = destination(run);
+      if (target && (!reply.quiet || lastSaidFailed(run, target.threadId))) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });
+      else if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
       else if (bot) deps.notify("done", bot, run.threadId, reply.text);
     },
     /** A run failed in a way the person is told about: one line says so where its reports go. */
     runFailed(run: RoutineRun, detail: string): void {
-      if (run.target === "bot" && run.status === "failed" && run.threadId && destination(run)) hold(run.id, { kind: "failure", run, detail });
+      if (run.target === "bot" && run.status === "failed" && run.deliver !== "brief" && run.threadId && destination(run)) hold(run.id, { kind: "failure", run, detail });
     },
     /** This run's result, questions and failure come to its bot's chat as lines of their own. */
     speaksFor(run: RoutineRun): boolean {
@@ -223,7 +251,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     /** This conversation is a run's own, and only its last reply reaches the chat the run reports to. */
     reportsElsewhere(threadId: string): boolean {
       const run = deps.routines()?.runForThread(threadId);
-      return run?.target === "bot" && destination(run) !== null;
+      return run?.target === "bot" && run.deliver !== "brief" && destination(run) !== null;
     },
     /** Where an answer to this card goes: a copy of a run's card answers it in the run's own conversation. */
     answeredIn(threadId: string, requestId: string): string {

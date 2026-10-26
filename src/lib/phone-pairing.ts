@@ -1,4 +1,5 @@
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
+import { teamPlan } from "../../electron/cloud-team-plan.mjs";
 import type { LocaleKey } from "@/locales";
 import { cloudPlanView } from "./cloud-plan";
 import type { Action } from "@/state/store";
@@ -32,6 +33,8 @@ export interface PhonePairingAccess {
 export interface ConnectPhoneEntry {
   target: PhonePairingTarget;
   subtitleKey: LocaleKey;
+  /** A Team Cloud's name: everyone in the team opens it on their own phone. */
+  team?: string;
 }
 
 const SUBTITLE: Record<PhonePairingTarget, LocaleKey> = {
@@ -41,6 +44,8 @@ const SUBTITLE: Record<PhonePairingTarget, LocaleKey> = {
 };
 
 export function connectPhoneEntry(target: PhonePairingTarget, access: PhonePairingAccess | null): ConnectPhoneEntry | null {
+  const team = access?.session?.kind === "session" ? access.session.team?.name : undefined;
+  if (team) return { target, subtitleKey: "sidebar.menu.connectPhone.team", team };
   if (target !== "computer" && !(access && access.pairingCodes && isOwnerOrAdmin(access.session))) return null;
   return { target, subtitleKey: SUBTITLE[target] };
 }
@@ -48,7 +53,7 @@ export function connectPhoneEntry(target: PhonePairingTarget, access: PhonePairi
 export type CloudPhoneDestination = "ready" | "not-ready" | null;
 
 export function cloudPhoneDestination(account: CloudAccountState | null | undefined): CloudPhoneDestination {
-  if (cloudPlanView(account).kind !== "paid") return null;
+  if (cloudPlanView(account).kind !== "paid" || teamPlan(account)) return null;
   return account?.status === "connected" && account.machine?.status === "ready" ? "ready" : "not-ready";
 }
 

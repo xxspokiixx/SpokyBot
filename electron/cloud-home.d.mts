@@ -18,8 +18,10 @@ export interface CloudMachine {
   power?: import("./cloud-power.mjs").CloudPower;
   /** The Admin lets this account's computer move to it now (its `moves` gate). */
   moves?: true;
-  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. */
-  hold?: { until: number };
+  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. `homecoming`: the one
+   * computer its things come home to (its installation id and name), among those whose move is done; every other computer
+   * keeps its own copy. Absent while none can be chosen: every computer comes home. */
+  hold?: { until: number; homecoming?: { installationId: string; name: string } };
 }
 /** A payment received but not yet linked to this account: nobody pays twice. */
 export interface CloudPurchase { state: "confirming" | "held"; tier?: string; paidAt?: number }
@@ -55,6 +57,17 @@ export interface CloudTrial {
 }
 /** The trial's AI credit, in US dollars. */
 export interface CloudCredit { grantedUsd: number; remainingUsd: number; state: "active" | "used_up" }
+/** One allowance of the plan: `used` of `max` this month in its own unit (hours, characters, calls, US dollars; GB for
+ * `storage`, the one that isn't monthly). `usedUp`: none left, whichever limit was reached. */
+export type CloudUsageKind = "computerHours" | "voice" | "decisions" | "x" | "research" | "storage";
+export interface CloudUsageMeter { kind: CloudUsageKind; used: number; max: number; usedUp?: true }
+/** The plan's allowances and their use (the session's `cloud.usage`): display only. `resetsAt`: when the monthly ones start
+ * over; `trialEndsAt`: a free trial's share until its first payment; `upgrades`: the bigger plans the app can move to
+ * itself now, cheapest first (empty: none, so Upgrade opens the Cloud page). */
+export interface CloudUsage {
+  tier: string; resetsAt: number; trialEndsAt?: number; meters: CloudUsageMeter[];
+  upgrades: { tier: "starter" | "personal" | "pro" | "max"; amount: number }[];
+}
 /** What a plan includes, as the Admin's catalog says. */
 export interface CloudPlanAllowances {
   cpus: number; memoryMb: number;
@@ -98,6 +111,7 @@ export declare const CLOUD_MACHINE_STATUSES: readonly CloudMachineStatus[];
 export declare const CLOUD_MACHINE_CONNECTABLE: readonly CloudMachineStatus[];
 export declare const CLOUD_SETUP_STEPS: readonly CloudSetupStep[];
 export declare const CLOUD_UNREACHABLE_CAUSES: readonly CloudUnreachableCause[];
+export declare const INSTALLATION_ID: RegExp;
 export declare function parseCloudPower(input: unknown): import("./cloud-power.mjs").CloudPower | null;
 export declare function parseCloudSummary(input: unknown): CloudMachine | null;
 export type CloudTeamRole = "owner" | "admin" | "member";
@@ -112,10 +126,15 @@ export declare function parseCloudPurchase(input: unknown): CloudPurchase | null
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];
 export declare function parseCloudTrial(input: unknown): CloudTrial | null;
 export declare function parseCloudCredit(input: unknown): CloudCredit | null;
+export declare const CLOUD_USAGE_KINDS: readonly CloudUsageKind[];
+export declare function parseCloudUsage(input: unknown): CloudUsage | null;
 export declare function parseCloudOffer(input: unknown): CloudOffer | null;
 export declare function parsePublicOffer(config: unknown): CloudOffer | null;
 export declare function withoutTrial(offer: CloudOffer | null): CloudOffer | null;
 export declare function cloudPlanDisk(state: unknown): CloudPlanDisk | null;
+export declare function readyCloudOrigin(state: unknown): string | null;
+export declare function machineSetup(machine: CloudMachine | null | undefined): { step?: CloudSetupStep; slow?: true } | null;
+export declare function cloudSetupOf(state: unknown): { step?: CloudSetupStep; slow?: true } | null;
 export declare function rememberedCloudHome(previous: RememberedCloudHome | null, state: unknown): RememberedCloudHome | null;
 export declare function signInCloudSession(input: {
   origin: string | null; mine: string | null; pair: () => Promise<{ origin: string; code: string }>;

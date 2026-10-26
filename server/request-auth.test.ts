@@ -100,7 +100,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/messages"], ["POST", "/api/bots/x/respond"], ["POST", "/api/threads/t/respond"],
       ["POST", "/api/threads/t/undo"], ["POST", "/api/bots/x/compact"], ["POST", "/api/bots/x/tasks/t/title"],
       ["PATCH", "/api/bots/x/cards/m"], ["POST", "/api/groups/g/messages"], ["PATCH", "/api/groups/g"],
-      ["PATCH", "/api/bots/x"], ["PATCH", "/api/bots/x/profile"], ["POST", "/api/attachments"],
+      ["PATCH", "/api/bots/x"], ["PATCH", "/api/bots/x/profile"], ["POST", "/api/attachments"], ["PUT", "/api/bots/order"],
       ["GET", "/api/attachments/a.png"], ["POST", "/api/routines"], ["POST", "/api/routines/r/run"],
       ["POST", "/api/routine-runs/seen-all"],
       ["GET", "/api/bots"], ["GET", "/api/threads/t/messages"], ["GET", "/api/search"], ["GET", "/api/events"],
@@ -137,6 +137,18 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/apps/m/rpc/extra"], ["DELETE", "/api/bots/x/apps/m/context"],
       ["PATCH", "/api/logins/1password/vaults/v1"], ["GET", "/api/bots/x/sign-in-cards/m/done"],
       ["GET", "/api/bots/x/queue/q/steer"], ["POST", "/api/bots/x/queue/q/steer/more"], ["POST", "/api/groups/g/queue/q/steer/more"],
+      ["POST", "/api/tts/voices/add"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
+  it("lets a Team Cloud member reach only their own connections; who connects what stays an admin's", () => {
+    for (const [method, path] of [
+      ["GET", "/api/team/my-connections"], ["POST", "/api/team/my-connections/apps/gmail/connect"], ["DELETE", "/api/team/my-connections/apps/gmail"],
+      ["POST", "/api/team/my-connections/mcp/mail/sign-in"], ["PUT", "/api/team/my-connections/mcp/mail/key"], ["DELETE", "/api/team/my-connections/mcp/mail"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
+    for (const [method, path] of [
+      ["PUT", "/api/team/connection-scopes"], ["GET", "/api/team/my-connections/mcp/mail/key"], ["POST", "/api/team/my-connections/apps/gmail"],
+      ["POST", "/api/connectors/gmail/authorize"], ["POST", "/api/mcp/servers/mail/sign-in"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
@@ -198,6 +210,12 @@ describe("resolveRequestAuth", () => {
       ["GET", "/api/events"], ["PATCH", "/api/bots/b/profile"],
       ["GET", "/api/bots/b/browser/live"], ["POST", "/api/bots/b/browser/action"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
+    expect(check("GET", "/api/phones/self/jobs").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    const plain = resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" }, "GET"), {
+      sessions, cookieName, streamPath: "/api/events", url: new URL("/api/phones/self/jobs", "http://localhost"),
+      loopbackMutationToken: "desktop-secret", companionMutationToken: "relay-secret",
+    });
+    expect(plain.auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
     for (const [method, path] of [
       ["POST", "/api/bots/b/browser/live"], ["GET", "/api/bots/b/browser/action"],
       ["POST", "/api/bots/b/browser/restart"],

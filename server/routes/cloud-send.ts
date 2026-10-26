@@ -2,16 +2,16 @@
 // /api/cloud-send/chats/*: its chats, by row (server/cloud-send-chats.ts); GET /api/cloud-send/manifest: all a move
 // carries, to check it by (server/cloud-send-manifest.ts); on a Cloud home, POST /api/cloud-send/verify-secrets: the
 // credentials' fingerprints (server/cloud-send-verify.ts); a move's own kinds, memory and bot files
-// (server/cloud-send-kinds.ts, cloud-send-memory.ts, cloud-send-files.ts), and what My Cloud keeps once a move is done
-// (server/cloud-send-arrived.ts). Admin scope (request-auth's default): the owner's app reads them on this computer and
-// on their own Cloud.
+// (server/cloud-send-kinds.ts, cloud-send-memory.ts, cloud-send-files.ts), and what My Cloud keeps once a move is done and
+// what this computer says once the bots came home (server/cloud-send-arrived.ts). Admin scope (request-auth's default):
+// the owner's app reads them on this computer and on their own Cloud.
 import { z } from "zod";
 
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import { readAttachment } from "../attachments.ts";
-import { arrivedRoute } from "../cloud-send-arrived.ts";
+import { arrivedRoute, automationsOffRoute, homeRoute } from "../cloud-send-arrived.ts";
 import { moveFilesRoute } from "../cloud-send-files.ts";
-import { moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
+import { automatedBot, moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
 import { cloudSendManifest } from "../cloud-send-manifest.ts";
 import { moveMemoryRoute, type MoveMemoryDeps } from "../cloud-send-memory.ts";
 import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send.ts";
@@ -19,6 +19,7 @@ import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chat
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
 import type { LoginStore } from "../login-store.ts";
+import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord } from "../store.ts";
@@ -36,6 +37,8 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   connectionFingerprints?(nonce: string): Record<string, string>;
   /** What only a move carries: automations, skill extras and bot fields, memory, and bot files. */
   move?: MoveKindsDeps & Omit<MoveMemoryDeps, "bot" | "owner">;
+  /** This server's automations, which a Cloud home stops for a computer whose bots go home to it. */
+  automations?: MoveAutomations;
   /** A team's server: nothing of one person's computer moves in, and every send or move route answers this but to a
    * sign-in that moves one bot in (`scope`). */
   refusal?: string;
@@ -52,6 +55,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       return !tail.hasMore && tail.messages.length === 1 && tail.messages[0]!.role === "bot" && Boolean(tail.messages[0]!.text?.includes(name));
     },
     inRoom: (botId) => (deps.chats?.store.groups ?? []).some((group) => !group.dm && group.memberIds.includes(botId)),
+    automated: (botId) => Boolean(deps.move && automatedBot(deps.move, botId)),
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),
@@ -75,6 +79,8 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
     if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx)) return;
     if (move && deps.cloudHome && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner }, ctx)) return;
+    if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx)) return;
+    if (move && !deps.cloudHome && await homeRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks }, ctx)) return;
     if (path === "/api/cloud-send/manifest") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       if (!deps.chats) return json(res, 404, { error: "not found" });

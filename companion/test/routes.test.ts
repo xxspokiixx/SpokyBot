@@ -28,6 +28,9 @@ describe("what the app may do", () => {
   // Every request the phone apps make: if one fails, a phone screen is broken.
   const calls: Array<[string, string]> = [
     ["GET", "/api/health"],
+    ["PUT", "/api/phones/self"],
+    ["GET", "/api/phones/self/jobs"],
+    ["POST", "/api/phones/self/jobs/j1/result"],
     ["GET", "/api/config"],
     ["GET", "/api/events"],
     ["GET", "/api/instances"],
@@ -38,6 +41,7 @@ describe("what the app may do", () => {
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
     ["PATCH", "/api/bots/bot_123"],
+    ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
@@ -129,6 +133,11 @@ describe("what the app may do", () => {
 });
 
 describe("what it may not", () => {
+  it("does not list phones to a phone", () => {
+    expect(ask("GET", "/api/phones")?.status).toBe(404);
+    expect(ask("DELETE", "/api/phones/companion%3Ad1")?.status).toBe(404);
+  });
+
   it("refuses host configuration, and says where it happens", () => {
     for (const [method, path] of [
       ["PUT", "/api/config"],

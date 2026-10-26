@@ -10,7 +10,7 @@ its database, its settings, other bots' folders and other turns' processes are n
 | Inside the box | What it is |
 |---|---|
 | `/usr`, `/etc`, `/opt`, the server's own code folder, read-only | The image: engine CLIs, node, python, git, the bots' browser |
-| `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`) |
+| `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`). On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
 | the data folder (`~/.openmausbot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
 | put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills |
 | put back: this turn's permission socket and the files its command line names (MCP config, system prompt), read-only | What the driver made for this one process |
@@ -60,7 +60,9 @@ checks it guards.
   stay in the environment until the credential broker (T0b) replaces them with per-turn tokens.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged
   spawn service (T0c notes).
-- The bots' browser engine (agent-browser) is not boxed yet; its Chrome goes through its own gate.
+- On a Team Cloud each Chrome of the bots' browsers runs in a box of its own (`BotBox.browserBox`, written into the
+  launcher agent-browser runs, see [team-cloud.md](team-cloud.md)); the agent-browser daemon is not boxed, and on a My
+  Cloud no browser is.
 
 ## The credential broker
 
