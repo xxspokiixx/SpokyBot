@@ -560,6 +560,10 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       }
       await closeHost(state);
       const host = await startHost(museServeArgs(turn.approvalMode), cwd, key, servers.length > 0, "bot");
+      if (state.active?.turnId !== turnId) {
+        await host.close().catch(() => {});
+        throw new Error("Muse Code was stopped while it was starting.");
+      }
       state.host = host;
       attach(state, host);
       if (servers.length && !host.grantedMcp) {

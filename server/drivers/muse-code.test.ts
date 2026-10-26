@@ -247,5 +247,23 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
         await instance.dispose();
       }
     }, 20_000);
+
+    it("ends a host that finishes starting after Stop", async () => {
+      const { cli } = fakeMuse();
+      vi.stubEnv("FAKE_MUSE_INIT_DELAY_MS", "500");
+      const spawned = vi.spyOn(procs, "spawnCli");
+      const instance = await MuseCodeDriver.create({ instanceId: "museCode", displayName: "Muse Code", enabled: true,
+        environment: {}, config: MuseCodeDriver.decodeConfig({ cli }) });
+      await instance.adapter.sendTurn({ threadId: "t-early", text: "hi", cwd: root });
+      await vi.waitFor(() => expect(spawned.mock.calls.some((call) => call[3] === "bot")).toBe(true));
+      const engine: ReturnType<typeof procs.spawnCli> = spawned.mock.results[spawned.mock.calls.findIndex((call) => call[3] === "bot")]!.value;
+      try {
+        await instance.adapter.interruptTurn("t-early");
+        await instance.dispose();
+        await vi.waitFor(() => expect(engine.exitCode !== null || engine.signalCode !== null).toBe(true), { timeout: 5_000 });
+      } finally {
+        engine.kill("SIGKILL");
+      }
+    }, 20_000);
   });
 });
