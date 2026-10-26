@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { enqueue, runHourly, WAKE_EVERY_MS } from "./app-events";
+import { enqueue, MAX_WEBHOOK_BODY, runHourly, WAKE_EVERY_MS } from "./app-events";
 import { DAY_MS, QUEUE_MAX_BYTES } from "./common";
 import {
   brokerHarness,
@@ -12,6 +12,7 @@ import {
   GMAIL_TYPE,
   message,
   STATS_TOKEN,
+  streamedBody,
   WEBHOOK_SECRET,
   type Installation,
 } from "./test-harness";
@@ -136,12 +137,65 @@ describe("Composio webhook signature", () => {
     expect(response.status).toBe(401);
   });
 
+  it("reads none of a streamed delivery without the signature headers", async () => {
+    const stream = streamedBody(64 * 1024, 64);
+    const response = await h.fetch("/v1/composio/webhook", stream.init);
+    expect(response.status).toBe(401);
+    expect(stream.read.bytes).toBe(0);
+  });
+
+  it("stops reading a streamed delivery without a Content-Length once it passes 1 MB", async () => {
+    const stream = streamedBody(64 * 1024, 64);
+    const headers = { "webhook-id": "msg_big", "webhook-timestamp": String(Math.floor(Date.now() / 1000)), "webhook-signature": "v1,AAAA" };
+    const response = await h.fetch("/v1/composio/webhook", { ...stream.init, headers });
+    expect(response.status).toBe(413);
+    expect(stream.read.cancelled).toBe(true);
+    expect(stream.read.bytes).toBeLessThanOrEqual(MAX_WEBHOOK_BODY + 2 * 64 * 1024);
+  });
+
+  it("checks the timestamp again once a slow body has arrived", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { owner, triggerId } = await withTrigger();
+    const id = "msg_slow";
+    const raw = JSON.stringify({ ...message(triggerId, owner.userId), id });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        vi.setSystemTime(Date.now() + 360_000);
+        controller.enqueue(new TextEncoder().encode(raw));
+        controller.close();
+      },
+    }, { highWaterMark: 0 });
+    const response = await h.fetch("/v1/composio/webhook", {
+      method: "POST",
+      body,
+      duplex: "half",
+      headers: { "webhook-id": id, "webhook-timestamp": String(timestamp), "webhook-signature": `v1,${composioSignature(WEBHOOK_SECRET, id, timestamp, raw)}` },
+    } as RequestInit);
+    expect(response.status).toBe(401);
+    expect(h.queued()).toEqual([]);
+  });
+
   it("answers 503 until the owner sets COMPOSIO_WEBHOOK_SECRET, and 413 past 1 MB", async () => {
     const { owner, triggerId } = await withTrigger();
     expect((await h.deliver(message(triggerId, owner.userId), { tamper: (body) => body.padEnd(1024 * 1024 + 1, " ") })).status).toBe(413);
     h.env.COMPOSIO_WEBHOOK_SECRET = undefined;
     expect((await h.deliver(message(triggerId, owner.userId))).status).toBe(503);
     expect(h.queued()).toEqual([]);
+  });
+});
+
+describe("streamed request bodies", () => {
+  it("stops reading an installation's oversized MCP or JSON body once it passes the limit", async () => {
+    const owner = await h.install();
+    for (const [path, method] of [["/v1/mcp", "POST"], ["/v1/triggers", "POST"], ["/v1/triggers/ti_1", "PATCH"], ["/v1/installation/cloud", "PUT"]]) {
+      const stream = streamedBody(64 * 1024, 64);
+      const response = await h.call(owner, path, { ...stream.init, method });
+      expect(response.status, path).toBe(413);
+      expect(stream.read.cancelled, path).toBe(true);
+      expect(stream.read.bytes, path).toBeLessThan(64 * 64 * 1024);
+    }
+    expect(h.composio.callsTo("/")).toEqual([]);
   });
 });
 

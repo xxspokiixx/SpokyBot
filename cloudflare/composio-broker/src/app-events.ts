@@ -8,6 +8,7 @@ import {
   json,
   QUEUE_MAX_BYTES,
   QUEUE_MAX_EVENTS,
+  readBoundedBody,
   readJsonBody,
   sha256,
   utcDay,
@@ -83,7 +84,7 @@ function base64Url(bytes: ArrayBuffer) {
 /** Composio V3 deliveries (Standard Webhooks headers): the HMAC-SHA256 key is the secret's UTF-8 bytes as Composio
  *  shows it, the signed text is `${webhook-id}.${webhook-timestamp}.${body}`, and `webhook-signature` holds one or
  *  more space-separated `v1,<base64>` values. */
-export async function verifyComposioSignature(headers: Headers, raw: string, secret: string, nowMs: number) {
+function signatureHeaders(headers: Headers, nowMs: number) {
   const id = headers.get("webhook-id");
   const timestamp = headers.get("webhook-timestamp");
   const signatures = headers.get("webhook-signature");
@@ -91,6 +92,14 @@ export async function verifyComposioSignature(headers: Headers, raw: string, sec
   if (!/^\d{1,12}$/.test(timestamp) || Math.abs(nowMs / 1000 - Number(timestamp)) > SIGNATURE_TOLERANCE_S) {
     return { ok: false as const, error: "stale or invalid webhook-timestamp" };
   }
+  return { ok: true as const, id, timestamp, signatures };
+}
+
+async function verifyComposioSignature(
+  { id, timestamp, signatures }: { id: string; timestamp: string; signatures: string },
+  raw: string,
+  secret: string,
+) {
   const key = await hmacKey(secret);
   const signed = utf8(`${id}.${timestamp}.${raw}`);
   for (const part of signatures.split(" ")) {
@@ -325,19 +334,25 @@ async function routeEnvelope(env: Env, envelope: Envelope, now: number, backgrou
   console.log(JSON.stringify({ message: "composio event type ignored", type: envelope.type }));
 }
 
+function rejectWebhook(error: string) {
+  console.warn(JSON.stringify({ message: "composio webhook rejected", why: error }));
+  return json({ error }, 401);
+}
+
 /** POST /v1/composio/webhook: the one subscription of the managed Composio project. */
 export async function composioWebhook(request: Request, env: Env, ctx?: Pick<ExecutionContext, "waitUntil">) {
   const secret = env.COMPOSIO_WEBHOOK_SECRET;
   if (!secret) return json({ error: "app events are not configured" }, 503);
-  if (Number(request.headers.get("content-length") ?? "0") > MAX_WEBHOOK_BODY) return json({ error: "event is too large" }, 413);
-  const raw = await request.text();
-  if (utf8(raw).byteLength > MAX_WEBHOOK_BODY) return json({ error: "event is too large" }, 413);
+  const early = signatureHeaders(request.headers, Date.now());
+  if (!early.ok) return rejectWebhook(early.error);
+  const body = await readBoundedBody(request, MAX_WEBHOOK_BODY);
+  if (!body) return json({ error: "event is too large" }, 413);
   const now = Date.now();
-  const verdict = await verifyComposioSignature(request.headers, raw, secret, now);
-  if (!verdict.ok) {
-    console.warn(JSON.stringify({ message: "composio webhook rejected", why: verdict.error }));
-    return json({ error: verdict.error }, 401);
-  }
+  const signed = signatureHeaders(request.headers, now);
+  if (!signed.ok) return rejectWebhook(signed.error);
+  const raw = new TextDecoder().decode(body);
+  const verdict = await verifyComposioSignature(signed, raw, secret);
+  if (!verdict.ok) return rejectWebhook(verdict.error);
   let envelope: Envelope;
   try {
     envelope = envelopeSchema.parse(JSON.parse(raw));
