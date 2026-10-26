@@ -166,6 +166,11 @@ a stable mobile label while its icon shows success or failure; a persistent
 live region exposes the feedback to assistive technology. Keyboard focus has
 an outline.
 
+A hosted Linux runner has no mouse, so its headless Chrome reports no hover.
+The recipe starts Chrome with a fine, hovering pointer and runs the desktop
+pass before touch emulation starts: once touch emulation is switched on or
+off, Chrome goes back to the host's own pointer.
+
 This is mobile web renderer coverage in an isolated Chromium profile. It does
 not verify the separately maintained native iOS or Android clients, physical
 devices, or Safari. Clipboard permissions are confined to the fixture origin;

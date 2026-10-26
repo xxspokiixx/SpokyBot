@@ -85,7 +85,11 @@ async function connect(url: string) {
     preview = await mountPreview(fixture, { entry: "/scripts/testing/threads-preview.tsx", route: "/__mobile-blocks.html", title: "Isolated mobile code blocks", logLevel: "warn" });
     const profile = join(fixture.info.dataDir, "chrome");
     mkdirSync(profile, { recursive: true });
-    chrome = spawn(tools.chrome, ["--headless=new", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--password-store=basic", "--use-mock-keychain", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], {
+    // A hosted Linux runner has no mouse, so headless Chrome there reports no hover and no pointer. These settings give
+    // the page a fine, hovering pointer on every host. Any touch-emulation call, even one that turns it off, swaps in the
+    // host's own pointer again, so the desktop pass below runs before touch emulation is ever touched.
+    const mouse = "--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2";
+    chrome = spawn(tools.chrome, ["--headless=new", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--password-store=basic", "--use-mock-keychain", mouse, "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], {
       env: { PATH: process.env.PATH, HOME: fixture.info.dataDir, USERPROFILE: fixture.info.dataDir, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) }, stdio: "ignore",
     });
     const portFile = join(profile, "DevToolsActivePort");
@@ -109,8 +113,7 @@ async function connect(url: string) {
     };
     await request("Page.enable");
     await request("Runtime.enable");
-    await request("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
-    await request("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await request("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.request("Browser.grantPermissions", { origin: new URL(preview.previewUrl).origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
     await request("Page.navigate", { url: preview.previewUrl });
     await expect.poll(() => evaluate(`Boolean(document.querySelector('textarea[aria-label="Message Pepper"]'))`), { timeout: 120_000 }).toBe(true);
@@ -144,8 +147,8 @@ async function connect(url: string) {
         await request("Input.dispatchMouseEvent", { type: "mouseReleased", x: position!.x, y: position!.y, button: "left", clickCount: 1 });
       }
     };
-    for (const [width, height, touch] of [[390, 844, true], [320, 740, true], [844, 390, true], [1100, 900, false]] as const) {
-      await request("Emulation.setTouchEmulationEnabled", { enabled: touch, maxTouchPoints: 1 });
+    for (const [width, height, touch] of [[1100, 900, false], [390, 844, true], [320, 740, true], [844, 390, true]] as const) {
+      if (touch) await request("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
       await request("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: touch });
       await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       await expect.poll(() => evaluate(`(async () => {
