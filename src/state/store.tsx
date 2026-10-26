@@ -54,12 +54,11 @@ import { firstUnreadMessageId, threadOpensUnread, threadReadCursor } from "@/lib
 import type { ComputerStart } from "@/lib/computer-start";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
-import { currentCall } from "@/lib/call";
 import { readLastConversation, rememberConversation } from "@/lib/last-conversation";
 import { readLastBotSection, rememberBotSection } from "@/lib/last-bot-section";
 import { showNotification } from "@/lib/notify";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { speaker } from "@/lib/tts";
+import { speechOwner, spokenReplyStream } from "@/lib/spoken-reply-stream";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
@@ -3234,16 +3233,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            const owner = stateRef.current.bots.find((b) => b.threadId === frame.threadId || b.tasks?.some((task) => task.threadId === frame.threadId));
-            const live = stateRef.current.liveCall;
-            const onLiveCall = Boolean(live && live.status !== "ended" && live.botId === owner?.id);
-            if (owner?.speakReplies && currentCall() === null && !onLiveCall && frame.message.text?.trim()) {
-              void speaker.speak(frame.message.text, {
-                botId: owner.id,
-                messageId: frame.message.id,
-                voiceId: owner.voice,
-              });
-            }
+            const owner = speechOwner(stateRef.current, frame.threadId);
+            spokenReplyStream.completeBotText(frame.threadId, frame.message.turnId, frame.message.text ?? "", owner, frame.message.id);
           }
           break;
         }
@@ -3315,6 +3306,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "webhookDeleted", webhookId: frame.webhookId });
           break;
         case "runtime": {
+          spokenReplyStream.onRuntimeEvent(frame.event, speechOwner(stateRef.current, frame.event.threadId));
           const action = runtimeFrameAction(frame.event);
           if (action) rawDispatch(action);
           break;
@@ -3347,7 +3339,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "live.call": {
           const framed = liveCallFromFrame(frame);
           // Rendered at once: the next bot frame decides auto-speak from stateRef.
-          if (framed) flushSync(() => rawDispatch({ type: "liveCall", call: framed.call }));
+          if (framed) {
+            spokenReplyStream.onLiveCall(framed.call);
+            flushSync(() => rawDispatch({ type: "liveCall", call: framed.call }));
+          }
           break;
         }
         case "config":
