@@ -603,6 +603,17 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
       expect(readFileSync(join(folder, ENGINE, "bin", ".old-mine"), "utf8")).toBe("mine");
     });
 
+    it.skipIf(process.getuid?.() === 0)("leaves a copy whose bin/ it can't read off PATH at start-up, and never stops the server", async () => {
+      const release = await served("raw");
+      await install(release);
+      chmodSync(binDir(), 0o000);
+      try {
+        expect(() => registerStandaloneBinDirs(base, [release])).not.toThrow();
+      } finally {
+        chmodSync(binDir(), 0o755);
+      }
+    });
+
     it("never removes a folder from bin/, only plain files", async () => {
       mkdirSync(join(binDir(), "projects"), { recursive: true });
       writeFileSync(join(binDir(), "projects", "plan.md"), "mine");

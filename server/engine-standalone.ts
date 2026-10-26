@@ -293,11 +293,16 @@ export function registerStandaloneBinDirs(baseDir = DATA_DIR, releases: readonly
     if (!ENGINE_NAME.test(release.engine)) continue;
     const engineDir = standaloneEngineDir(release.engine, baseDir);
     if (!realDirectory(engineDir)) continue;
-    sweepLeftovers(engineDir);
-    const current = verifiedCurrent(engineDir, release);
-    if (!current) continue;
-    activeVersions.add(join(engineDir, current.version));
-    registerFallbackPathDir(current.binDir);
+    // At boot: a folder that can't be read leaves this copy off PATH, never stops the server.
+    try {
+      sweepLeftovers(engineDir);
+      const current = verifiedCurrent(engineDir, release);
+      if (!current) continue;
+      activeVersions.add(join(engineDir, current.version));
+      registerFallbackPathDir(current.binDir);
+    } catch (error) {
+      warn(release, error);
+    }
   }
 }
 
