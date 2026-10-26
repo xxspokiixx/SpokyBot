@@ -722,7 +722,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             }
             if (toolFailed) {
               // A person's "no" is never answered with another attempt; a failure may first get the configured corrective rounds.
-              if (!denials.length && correctiveRounds < (turn.toolErrorCorrectiveRounds ?? 0)) {
+              if (!denials.length && !turnEntry.ending && correctiveRounds < (turn.toolErrorCorrectiveRounds ?? 0)) {
                 correctiveRounds += 1;
                 messages.push({ role: "user", content: CORRECTIVE_ROUND });
                 continue;
@@ -731,9 +731,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               throw new ChatProtocolError("One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.");
             }
             if (options.nudgeAnnouncedAction && tools.definitions.length && announcesAction(completion.text)) {
-              if (nudges >= MAX_ANNOUNCEMENT_NUDGES) {
+              if (nudges >= MAX_ANNOUNCEMENT_NUDGES || turnEntry.ending) {
                 stopReason = "incomplete_action";
-                throw new ChatProtocolError(`Stopped after ${MAX_ANNOUNCEMENT_NUDGES} announcement nudges without a verified final answer. Earlier operations may have taken effect; inspect their state and continue only the remaining work.`);
+                throw new ChatProtocolError(`Stopped after ${turnEntry.ending ? `${MAX_CHAT_ROUNDS} steps` : `${MAX_ANNOUNCEMENT_NUDGES} announcement nudges`} without a verified final answer. Earlier operations may have taken effect; inspect their state and continue only the remaining work.`);
               }
               if (callsAtNudge === seenCalls.size) {
                 stopReason = "incomplete_action";

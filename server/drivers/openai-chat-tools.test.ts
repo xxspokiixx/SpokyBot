@@ -1217,6 +1217,18 @@ describe("structured tool execution boundaries", () => {
     expect(f.requests).toHaveLength(64);
   });
 
+  it.each([
+    ["a failed tool call", "audit_fail", "The operation is complete.", "tool_error"],
+    ["an announced action", "audit_write", "I'll write the next receipt.", "incomplete_action"],
+  ])("ends on %s in the last allowed step without asking for another step", async (_, lastTool, text, stopReason) => {
+    const f = await fixture((_body, response, round) => round < 64
+      ? sse(response, [chunk({ tool_calls: [toolCall(round === 63 ? lastTool : "audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : answer(response, text));
+    await f.start({ approvalMode: "full", toolErrorCorrectiveRounds: 1 });
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason });
+    expect(f.requests).toHaveLength(64);
+  });
+
   it("stops at 200 tool calls in one turn without running the batch that crosses it", async () => {
     const f = await fixture((_body, response, round) => sse(response, [chunk({
       tool_calls: Array.from({ length: 25 }, (_, index) => ({
