@@ -2370,7 +2370,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -7756,7 +7760,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -10109,7 +10117,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -12462,7 +12474,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -18811,7 +18827,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -24898,7 +24918,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -28130,7 +28154,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -32382,7 +32410,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -35212,7 +35244,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -40080,7 +40116,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -44948,7 +44988,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -51191,7 +51235,11 @@
       "needsYou.message": "8d95f1beda392bcbc5313526da2811b585963e4390b89e017c8bb63a5f7d009d",
       "relay.told": "63e980e8d2b333f48aa186a9c8ca2bbf81550e6fd530a324b75a8e7eb37ac78a",
       "relay.toldHint": "de7d19e139c3fbb262cfa3af9bf44ae9174ede043fa250d52617671188b883ba",
-      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26"
+      "chat.activity.messagePerson": "6c11b4a74ed3ef985e592e79cbd723b2d9178608b02bf9cd434ba43a05921d26",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     }
   }
 }
