@@ -3446,6 +3446,8 @@
   "skills.library.noVersion": "無版本",
   "skills.library.importedAt": "匯入於 {date}",
   "skills.library.notAssigned": "未指派給任何機器人。",
+  "skills.library.everyBot": "所有機器人",
+  "skills.library.everyBotHint": "讓現有和日後建立的所有機器人都能使用此技能。",
   "skills.library.assignLabel": "指派給機器人",
   "skills.library.assignPickBot": "選擇機器人…",
   "skills.library.assign": "指派",

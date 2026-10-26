@@ -3962,6 +3962,8 @@
   "skills.library.noVersion": "Không có phiên bản",
   "skills.library.importedAt": "Đã nhập {date}",
   "skills.library.notAssigned": "Chưa được chỉ định cho bot nào.",
+  "skills.library.everyBot": "Mọi bot",
+  "skills.library.everyBotHint": "Cho mọi bot hiện có và bot tạo sau này dùng kỹ năng này.",
   "skills.library.assignLabel": "Chỉ định cho bot",
   "skills.library.assignPickBot": "Chọn một bot…",
   "skills.library.assign": "Chỉ định",

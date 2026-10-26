@@ -1857,6 +1857,8 @@
   "remote.signInAccess.note": "Les changements s’appliquent immédiatement. Retirer quelqu’un bloque les nouvelles connexions ; ses appareils déjà connectés le restent jusqu’à ce que vous les déconnectiez ci-dessus.",
   "remote.signInAccess.error": "Enregistrement impossible : {error}",
   "botAccess.mcpDisabled": "Désactivé dans Apps → MCP servers — testez-le et activez-le d’abord là-bas.",
+  "skills.library.everyBot": "Tous les bots",
+  "skills.library.everyBotHint": "Rendre cette compétence disponible pour tous les bots, actuels et futurs.",
   "canvas.botComputer": "Bureau de {name}",
   "canvas.teamComputer": "Bureau du département {team} : {name}",
   "canvas.assignComputer": "Attribuer un bureau à {team}",

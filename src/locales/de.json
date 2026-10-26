@@ -1864,6 +1864,8 @@
   "remote.signInAccess.note": "Änderungen gelten sofort. Wer entfernt wird, kann sich nicht neu anmelden; bestehende Geräte bleiben angemeldet, bis du sie oben abmeldest.",
   "remote.signInAccess.error": "Konnte nicht speichern: {error}",
   "botAccess.mcpDisabled": "Unter Apps → MCP servers ausgeschaltet – teste es zuerst dort und schalte es ein.",
+  "skills.library.everyBot": "Jeder Bot",
+  "skills.library.everyBotHint": "Diesen Skill jedem jetzigen und künftigen Bot geben.",
   "canvas.botComputer": "Desktop für {name}",
   "canvas.teamComputer": "Desktop für Abteilung {team}: {name}",
   "canvas.assignComputer": "Einen Desktop {team} zuweisen",

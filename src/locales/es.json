@@ -4460,6 +4460,8 @@
   "skills.library.noVersion": "Sin versión",
   "skills.library.importedAt": "Importada: {date}",
   "skills.library.notAssigned": "No está asignada a ningún bot.",
+  "skills.library.everyBot": "Todos los bots",
+  "skills.library.everyBotHint": "Pon esta habilidad a disposición de todos los bots, actuales y futuros.",
   "skills.library.assignLabel": "Asignar a un bot",
   "skills.library.assignPickBot": "Elige un bot…",
   "skills.library.assign": "Asignar",

@@ -3962,6 +3962,8 @@
   "skills.library.noVersion": "Sürüm yok",
   "skills.library.importedAt": "İçe aktarılma: {date}",
   "skills.library.notAssigned": "Hiçbir bota atanmadı.",
+  "skills.library.everyBot": "Her bot",
+  "skills.library.everyBotHint": "Bu beceriyi şimdiki ve gelecekteki her bota açın.",
   "skills.library.assignLabel": "Bota ata",
   "skills.library.assignPickBot": "Bir bot seçin…",
   "skills.library.assign": "Ata",
