@@ -962,6 +962,26 @@ describe("main's Use my Mac popup, once the moment is right", () => {
     expect(asked).toEqual(["en"]);
   });
 
+  it("on a new install it waits for the first reply and MausBot's card, skips the launches they or the welcome used, and claims the next", async () => {
+    f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    await launch();
+    expect(asked, "the first chat, before its first reply").toEqual([]);
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    await launch();
+    expect(asked, "MausBot's card is due").toEqual([]);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    await launch();
+    expect(asked, "the launch MausBot's card opened").toEqual([]);
+    session.clear(); markWelcomeFinished();
+    await launch();
+    expect(asked, "the launch the welcome finished in").toEqual([]);
+    session.clear();
+    await launch();
+    expect(asked).toEqual(["en"]);
+    expect(launchDialogShown()).toBe("notices");
+  });
+
   it("My Cloud's own page in this app asks too", async () => {
     snapshot = { status: "none" }; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
     f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD); wireLending();
