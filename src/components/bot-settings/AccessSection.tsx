@@ -12,8 +12,8 @@ import { placeFacts, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
-import { ConfirmDialog } from "../ConfirmDialog";
 import { Switch } from "../SettingsPrimitives";
+import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
 import { ToolSelectionCard } from "./ToolSelectionCard";
 import { useCloudPlan } from "../ProIntroduction";
@@ -34,17 +34,12 @@ import type { useBotSettingsDerived } from "./useBotSettingsDerived";
  * Claude keeps sessions per project folder, so the server pins each task's folder on its first turn. PATCHed directly,
  * not via updateBot: the server validates the path, and a rejected folder must not stick in local state.
  */
-export function WorkingFolder({ bot }: { bot: Bot }) {
+export function useWorkingFolder(bot: Pick<Bot, "id" | "cwd">) {
   const { request: api } = useBotEditor();
-  const { capabilities } = useDesktopCapabilities();
-  const home = capabilities.host.homeDir;
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const canPick = Boolean(window.ogb?.pickFolder);
-  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
-  const pinned = task?.cwd;
-  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd;
 
   const save = async (cwd: string | null) => {
     setSaving(true);
@@ -62,6 +57,16 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
     const chosen = await window.ogb?.pickFolder?.(bot.cwd);
     if (chosen) void save(chosen);
   };
+  return { draft, setDraft, error, saving, canPick, save, pick };
+}
+
+export function WorkingFolder({ bot }: { bot: Bot }) {
+  const { capabilities } = useDesktopCapabilities();
+  const home = capabilities.host.homeDir;
+  const { draft, setDraft, error, saving, canPick, save, pick } = useWorkingFolder(bot);
+  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
+  const pinned = task?.cwd;
+  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd;
 
   return (
     <div className="rounded-xl bg-card p-4">
@@ -239,10 +244,6 @@ function ConnectorToolsGrants({
   const [tools, setTools] = useState<Record<string, ToolListing[]> | null>(null);
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [lastExplicit, setLastExplicit] = useState<Record<string, string[]>>({});
-  /**
-   * The first grant creates the grants record, which limits every other connected app to no tools: confirm it first.
-   */
-  const [confirmFirstGrant, setConfirmFirstGrant] = useState<{ slug: string; tools: "*" | string[] } | null>(null);
 
   useEffect(() => {
     if (!openSlug || tools || toolsError) return;
@@ -267,7 +268,7 @@ function ConnectorToolsGrants({
   };
 
   const apply = (slug: string, next: { tools: "*" | string[] } | null) => {
-    const value = withServiceGrant(record, slug, next);
+    const value = withServiceGrant(record, slug, next, slugs);
     if (value === undefined) return;
     patch({ connectorTools: value });
   };
@@ -280,18 +281,10 @@ function ConnectorToolsGrants({
       return;
     }
     setLastExplicit((prev) => ({ ...prev, [slug]: next }));
-    if (!recordExists) {
-      setConfirmFirstGrant({ slug, tools: next });
-      return;
-    }
     apply(slug, { tools: next });
   };
 
   const allForService = (slug: string) => {
-    if (!recordExists) {
-      setConfirmFirstGrant({ slug, tools: "*" });
-      return;
-    }
     const selected = selectedFor(slug);
     if (selected.length) setLastExplicit((prev) => ({ ...prev, [slug]: selected }));
     apply(slug, { tools: "*" });
@@ -384,11 +377,6 @@ function ConnectorToolsGrants({
                           </button>
                         )}
                       </div>
-                      {!recordExists && (
-                        <div className="mt-2 text-[11px] leading-relaxed text-ink-secondary">
-                          {t("botAccess.grants.firstGrantWarning")}
-                        </div>
-                      )}
                       {toolsError ? (
                         <div className="mt-2 text-[11.5px] text-ink-secondary">
                           {t("botAccess.grants.loadError")}{" "}
@@ -421,10 +409,6 @@ function ConnectorToolsGrants({
                                   onClick={() => {
                                     const next = [...new Set([...selected, ...names])];
                                     setLastExplicit((prev) => ({ ...prev, [slug]: next }));
-                                    if (!recordExists) {
-                                      setConfirmFirstGrant({ slug, tools: next });
-                                      return;
-                                    }
                                     apply(slug, { tools: next });
                                   }}
                                   className="rounded-full bg-control px-2.5 py-1 text-[11px] text-ink hover:bg-raised-hover"
@@ -478,19 +462,6 @@ function ConnectorToolsGrants({
           );
         })}
       </div>
-      <ConfirmDialog
-        open={confirmFirstGrant !== null}
-        title={t("botAccess.grants.firstGrantTitle", { service: confirmFirstGrant?.slug ?? "" })}
-        body={t("botAccess.grants.firstGrantBody", { service: confirmFirstGrant?.slug ?? "" })}
-        confirmLabel={t("botAccess.grants.saveGrant")}
-        onCancel={() => setConfirmFirstGrant(null)}
-        onConfirm={() => {
-          const pending = confirmFirstGrant;
-          setConfirmFirstGrant(null);
-          if (!pending) return;
-          apply(pending.slug, { tools: pending.tools });
-        }}
-      />
     </div>
   );
 }
@@ -552,8 +523,73 @@ export function cloudPreferenceShown(bot: Pick<Bot, "computer">, config: { cloud
   return (!bot.computer || bot.computer === "cloud") && !config?.cloudHome;
 }
 
+/**
+ * A bot's own VPS server. PATCHed directly, not via updateBot: the server refuses
+ * a move while the bot's computer still lives on the old host.
+ */
+export function VpsAliasField({ bot }: { bot: Bot }) {
+  const { request: api } = useBotEditor();
+  const { state } = useStore();
+  const defaultAlias = state.config?.vps?.sshAlias ?? "";
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Set when the old server could not be reached: the move went ahead, and this says what may be left there.
+  const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = async (alias: string | null) => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const saved = await api<{ notice?: string }>(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ vpsAlias: alias }) });
+      setNotice(saved?.notice ?? null);
+      setDraft(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const value = draft ?? bot.vpsAlias ?? "";
+  return (
+    <div className="mt-3 rounded-lg bg-inset p-3">
+      <div className="text-[13px] text-ink">{t("botAccess.cloud.server")}</div>
+      <div className="mt-0.5 text-[11.5px] text-ink-secondary">
+        {defaultAlias
+          ? t("botAccess.cloud.serverDefault", { alias: defaultAlias })
+          : t("botAccess.cloud.serverNoDefault")}
+      </div>
+      <form
+        className="mt-2 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save(value.trim() || null);
+        }}
+      >
+        <input
+          className={cn(inputCls, "font-mono text-[12.5px]")}
+          placeholder={defaultAlias || t("botAccess.cloud.serverPlaceholder")}
+          value={value}
+          aria-label={t("botAccess.cloud.server")}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <button
+          type="submit"
+          disabled={saving || draft === null}
+          className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+        >
+          {t("botAccess.cloud.serverSave")}
+        </button>
+      </form>
+      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+      {notice && <div role="status" className="mt-2 break-words text-[12px] text-ink-secondary">{notice}</div>}
+    </div>
+  );
+}
+
 export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"] }) {
   const { state } = useStore();
+  const { draft } = useBotEditor();
   if (!cloudPreferenceShown(bot, state.config)) return null;
   return (
     <>
@@ -567,6 +603,8 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
         value={bot.cloudBackend ?? "box"}
         onChange={(backend) => patch({ cloudBackend: backend })}
       />
+      {/* A saved bot only: a new bot starts on the default server, and new-bot defaults never name one. */}
+      {bot.cloudBackend === "vps" && !draft && <VpsAliasField bot={bot} />}
       {!bot.computer && bot.cloudBackend === "vps" && (
         <div className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-inset px-3 py-2.5">
           <div className="min-w-0">
@@ -586,7 +624,7 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
   );
 }
 
-export type AccessPart = "worksOn" | "folder" | "apps" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
+export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
 
 export function AccessSection({
   bot,
@@ -705,6 +743,7 @@ export function AccessSection({
         )}
       </div>}
 
+      {shows("phone") && <PhoneAppsCard bot={bot} patch={patch} />}
       {shows("mcp") && <McpServersCard bot={bot} patch={patch} />}
       {shows("tools") && <ToolSelectionCard key={bot.id} bot={bot} engineKind={derived.engine?.driverKind} />}
 

@@ -7,6 +7,9 @@ import { t } from "@/lib/i18n";
 
 export const SIMPLE_TOP_BUTTON = "flex size-[30px] shrink-0 items-center justify-center rounded-full bg-raised/50 text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
+/** The round control at either end of the phone bot list's top row. */
+export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-center rounded-full border border-hairline bg-card text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+
 export const SIMPLE_RAIL_BUTTON = "flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised/60 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 /** The small bump on the sidebar's right edge that collapses it to the rail and back (Simple mode).
@@ -20,12 +23,14 @@ export function SidebarEdgeToggle({ collapsed, onToggle, style, anchorRef }: {
   style?: CSSProperties;
   anchorRef?: RefObject<HTMLElement | null>;
 }) {
-  const [edge, setEdge] = useState<number | null>(null);
+  const [edge, setEdge] = useState<{ left: number; top: number } | null>(null);
   // A passive effect, not a layout one: React attaches the parent <aside>'s ref after its children's layout effects run.
+  // Its top too: a strip above the app (an update, My Cloud asleep, things arriving on My Cloud) moves the sidebar down,
+  // and the bump with it, so it never sits on the strip's words.
   useEffect(() => {
     const anchor = anchorRef?.current;
     if (!anchor) return;
-    const measure = () => setEdge(Math.round(anchor.getBoundingClientRect().right));
+    const measure = () => { const rect = anchor.getBoundingClientRect(); setEdge({ left: Math.round(rect.right), top: Math.round(rect.top) }); };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(anchor);
@@ -45,7 +50,7 @@ export function SidebarEdgeToggle({ collapsed, onToggle, style, anchorRef }: {
       aria-label={t(collapsed ? "sidebar.density.expand" : "sidebar.density.collapseAria")}
       aria-expanded={!collapsed}
       title={t(collapsed ? "sidebar.density.expand" : "sidebar.density.collapse")}
-      style={pinned ? { ...style, left: edge } : style}
+      style={pinned ? { ...style, left: edge.left, top: edge.top + 7 } : style}
       className={cn(
         pinned ? "fixed" : "absolute -right-[14px]",
         "top-[7px] z-30 hidden h-8 w-[14px] items-center justify-center rounded-r-[4px] border border-l-0 border-hairline/50 bg-panel text-ink-tertiary shadow-[1px_0_2px_rgb(0_0_0/0.06)] hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus md:flex",

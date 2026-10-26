@@ -217,6 +217,7 @@ export interface FollowupPayload {
   mode?: "chat" | "goal";
   via?: "api" | "call";
   callId?: string;
+  fromApp?: Message["fromApp"];
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
   origin?: WorkOrigin;
@@ -325,12 +326,14 @@ export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT): Notificat
   return rows.map(rowToNotificationLogEntry);
 }
 
-export function markNotificationLogRead(id: string): void {
-  db().prepare("UPDATE notification_log SET read = 1 WHERE id = ?").run(id);
+export function markNotificationLogRead(ids: readonly string[]): void {
+  db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
 }
 
-export function markAllNotificationLogRead(): void {
-  db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0").run();
+/** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
+export function markThreadNotificationLogRead(threadId: string): string[] {
+  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 RETURNING id").all(threadId) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
 }
 
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
@@ -546,7 +549,7 @@ export function attentionRows(since: number): AttentionRow[] {
   return db().prepare(
     `${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND at >= ? ` +
     "AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
-    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 " +
+    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL " +
     `UNION ALL ${columns} FROM messages INDEXED BY messages_failed_at WHERE ${FAILED_CALL} AND at >= ? AND json_extract(json, '$.tool.ok') = 0 ` +
     `UNION ALL ${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'digest' AND at >= ? ` +
     "AND json_extract(json, '$.turnSucceeded') = 1 ORDER BY at",
@@ -583,6 +586,27 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
         "ON CONFLICT(thread_id) DO UPDATE SET active_leaf_id = excluded.active_leaf_id",
     )
     .run(threadId, leafId);
+}
+
+/** Each conversation's newest stored row, by its row number, and how many rows it has: what Send to My Cloud compares with what it sent. */
+export function threadHeads(): Map<string, { last: number; lastId: string; rows: number }> {
+  const rows = db().prepare("SELECT m.thread_id AS threadId, m.rowid AS last, m.id AS lastId, h.rows AS rows FROM messages m " +
+    "JOIN (SELECT thread_id, MAX(rowid) AS head, COUNT(*) AS rows FROM messages GROUP BY thread_id) h ON m.rowid = h.head").all() as Array<{ threadId: string; last: number; lastId: string; rows: number }>;
+  return new Map(rows.map((row) => [row.threadId, { last: Number(row.last), lastId: row.lastId, rows: Number(row.rows) }]));
+}
+
+/** A conversation's rows numbered past `after`, oldest first, each with its stored size: `limit` of them, or all up to `through`. */
+export function threadRowsFrom(threadId: string, after: number, upTo: { limit: number } | { through: number }): Array<{ at: number; bytes: number; message: Message }> {
+  const rows = ("limit" in upTo
+    ? db().prepare("SELECT rowid AS at, json FROM messages WHERE thread_id = ? AND rowid > ? ORDER BY rowid LIMIT ?").all(threadId, after, upTo.limit)
+    : db().prepare("SELECT rowid AS at, json FROM messages WHERE thread_id = ? AND rowid > ? AND rowid <= ? ORDER BY rowid").all(threadId, after, upTo.through)) as Array<{ at: number; json: string }>;
+  return rows.map((row) => ({ at: Number(row.at), bytes: Buffer.byteLength(row.json, "utf8"), message: rowToMessage(row) }));
+}
+
+/** Each of a conversation's stored rows by id, with its row number. */
+export function threadRowNumbers(threadId: string): Map<string, number> {
+  const rows = db().prepare("SELECT rowid AS at, id FROM messages WHERE thread_id = ?").all(threadId) as Array<{ at: number; id: string }>;
+  return new Map(rows.map((row) => [row.id, Number(row.at)]));
 }
 
 /** The time on a conversation's last stored row, without reading the conversation. */
@@ -645,6 +669,11 @@ export function optionCardsForTools(tools: readonly string[]): Array<{ threadId:
     .prepare(`SELECT thread_id, id FROM messages WHERE kind = 'options' AND json_extract(json, '$.card.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY rowid`)
     .all(...tools) as Array<{ thread_id: string; id: string }>;
   return rows.map((row) => ({ threadId: row.thread_id, messageId: row.id }));
+}
+
+export function appDocRefs(): string[] {
+  const rows = db().prepare("SELECT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app' UNION SELECT h.value FROM messages m, json_each(m.json, '$.app.history') h WHERE m.kind = 'app'").all() as Array<{ doc: unknown }>;
+  return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 
 export function threadsReferencing(fragment: string): string[] {

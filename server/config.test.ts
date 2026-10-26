@@ -26,7 +26,6 @@ import { cacheUntilConfigChanges,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
-  routinesInConversationEnabled,
   saveConfig,
   skillAuthoringEnabled,
   sharedComputersEnabled,
@@ -42,6 +41,7 @@ import { cacheUntilConfigChanges,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
+  PROVIDER_CREDENTIAL_ENV,
   mergeOpenCodeProviderKeys,
   openCodeProviderKeys,
   OPENCODE_PROVIDER_KEY_LIMIT,
@@ -127,11 +127,11 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
-  it("defaults to three parallel threads and validates a configurable maximum of ten", () => {
+  it("defaults to three parallel threads and validates a configurable maximum of sixteen", () => {
     expect(maxConcurrentBotThreads({})).toBe(3);
-    expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 10 } })).toEqual({ threads: { maxConcurrentPerBot: 10 } });
+    expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 16 } })).toEqual({ threads: { maxConcurrentPerBot: 16 } });
     expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
-    for (const value of [0, -1, 11, 1.5, "10", null]) {
+    for (const value of [0, -1, 17, 1.5, "10", null]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: value } })).toThrow("threads.maxConcurrentPerBot");
     }
   });
@@ -625,12 +625,10 @@ describe("configuration boundaries", () => {
     );
   });
 
-  it("keeps routine runs in a hidden thread unless the conversation option is on", () => {
-    expect(routinesInConversationEnabled({})).toBe(false);
-    expect(parseConfigPatch({ features: { routinesInConversation: true } })).toEqual({
-      features: { routinesInConversation: true },
+  it("drops the retired routines-in-conversation switch instead of refusing the config", () => {
+    expect(parseConfigPatch({ features: { routinesInConversation: true, showToolCalls: true } })).toEqual({
+      features: { showToolCalls: true },
     });
-    expect(routinesInConversationEnabled({ features: { routinesInConversation: true } })).toBe(true);
   });
 
   it("keeps tool-call chips off by default and accepts an explicit opt-in", () => {
@@ -810,6 +808,29 @@ describe("default fleet", () => {
     expect(map.metaOwn.environment).toEqual({ META_API_KEY: "meta-own" });
     expect(cfg.instances).not.toHaveProperty("meta");
     expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("meta");
+  });
+
+  it("adds DeepSeek Harness to product fleets and hands its key only to that engine", () => {
+    const cfg: AppConfig = { deepseek: { key: "ds-workspace" }, instances: {
+      codex: { driver: "codex" },
+      kimi: { driver: "kimiAgent" },
+      deepseekOwn: { driver: "deepseekAgent", environment: { DEEPSEEK_API_KEY: "ds-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.deepseek).toEqual({ driver: "deepseekAgent", environment: { DEEPSEEK_API_KEY: "ds-workspace" } });
+    expect(map.codex.environment).toEqual({});
+    expect(map.kimi.environment).toEqual({});
+    expect(map.deepseekOwn.environment).toEqual({ DEEPSEEK_API_KEY: "ds-own" });
+    expect(cfg.instances).not.toHaveProperty("deepseek");
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("deepseek");
+  });
+
+  it("accepts clearing a DeepSeek key and removes it from child environments", () => {
+    expect(parseConfigPatch({ deepseek: { key: "" } })).toEqual({ deepseek: { key: "" } });
+    const env = { OMB_DEEPSEEK_API_KEY: "ds-fixture", DEEPSEEK_API_KEY: "ds-ambient", KEEP: "yes" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ DEEPSEEK_API_KEY: "ds-ambient", KEEP: "yes" });
+    expect(PROVIDER_CREDENTIAL_ENV).toContain("DEEPSEEK_API_KEY");
   });
 
   it("accepts clearing a Meta key and removes it from child environments", () => {
@@ -1294,9 +1315,12 @@ describe("credential env narrowing", () => {
     expect(own.claude.environment).toEqual({});
     for (const anthropic of [{ key: "SECRET-ANT" }, { key: "SECRET-ANT", everyClaudeBot: true }]) {
       const every = instanceConfigs({ anthropic });
-      expect(every.claude.environment).toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
-      expect(every.claudeApi.environment).toEqual({});
+      expect(every.claude.environment, "a plain Claude bot runs on the key").toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
+      expect(every.claudeApi.environment, "a bot already set to Claude (API key) keeps running on it").toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
     }
+    const routed = instanceConfigs({ anthropic: { key: "SECRET-ANT", url: "https://gateway.example.test", everyClaudeBot: true } });
+    expect(routed.claudeApi.environment).toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT", ANTHROPIC_BASE_URL: "https://gateway.example.test" });
+    expect(instanceConfigs({ anthropic: { everyClaudeBot: true } }).claudeApi.environment, "no key, nothing injected").toEqual({});
   });
 
   it("keeps the built-in routing of a provider instance in a saved fleet", () => {
@@ -1754,6 +1778,17 @@ describe("credential env preference", () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
+  it("saves and clears the built-in DeepSeek key without changing an operator's DEEPSEEK_API_KEY", () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "ds-operator");
+    try {
+      syncCredentialEnv({ deepseek: { key: "ds-workspace" } });
+      expect(loadConfig().deepseek?.key).toBe("ds-workspace");
+      syncCredentialEnv({ deepseek: { key: "" } });
+      expect(loadConfig().deepseek?.key).toBeUndefined();
+      expect(process.env.DEEPSEEK_API_KEY).toBe("ds-operator");
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("saves and clears the built-in Meta key without changing a Muse Code META_API_KEY", () => {
     vi.stubEnv("META_API_KEY", "meta-operator");
     try {
@@ -1932,7 +1967,7 @@ describe("changedInstanceIds", () => {
     expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral"]);
     expect(reloaded({ openaiCompat: { key: "c2", url: "https://compat.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ openaiCompat: { key: "c1", url: "https://other.example/v1" } }, saved)).toEqual(["openaiCompat"]);
-    expect(reloaded({ anthropic: { key: "a" } }, saved)).toEqual(["claude"]);
+    expect(reloaded({ anthropic: { key: "a" } }, saved), "Claude (API key) runs on the key too").toEqual(["claude", "claudeApi"]);
   });
   it("replaces nothing for sections no driver reads", () => {
     expect(reloaded({ onboarding: { hintsSeen: ["tour.composer"] } })).toEqual([]);

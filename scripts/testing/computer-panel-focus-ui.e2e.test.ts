@@ -60,7 +60,7 @@ if (!enabled) console.info("skipping computer panel focus UI e2e: set OMB_UI_E2E
     await expect.poll(() => evaluate("document.activeElement.getAttribute('data-tour')"), { timeout: 5_000 }).toBe("computer");
 
     // A pointer click carries no keyboard intent: the panel must not take focus.
-    await ui("click", "--name", "Bot's computer");
+    await ui("click", "--name", "Bot's screen");
     await expect.poll(panelOpen, { timeout: 15_000 }).toBe(true);
     await expect.poll(() => evaluate("document.activeElement.getAttribute('data-tour')"), { timeout: 5_000 }).toBe("computer");
     expect(await entryFocus()).toMatchObject({ tab: false, close: false });

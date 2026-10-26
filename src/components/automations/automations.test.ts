@@ -179,7 +179,7 @@ describe("the Automations list switch", () => {
   ])("turns %s automation off and back on, showing each answer at once", async (_kind, name, id, path, body, answer) => {
     mountPage();
     // Only the switch's writes answer; the page's own reads (its app events) get an empty answer.
-    fixture.api.mockImplementation(async (_path: unknown, init: unknown) => init ? answer(JSON.parse((init as { body: string }).body).enabled) : {});
+    fixture.api.mockImplementation(async (_path: unknown, init: unknown) => (init as { body?: string } | undefined)?.body ? answer(JSON.parse((init as { body: string }).body).enabled) : {});
     expect(toggle(name).getAttribute("aria-checked")).toBe("true");
     flushSync(() => toggle(name).click());
     await vi.waitFor(() => expect(toggle(name).getAttribute("aria-checked")).toBe("false"));
@@ -189,7 +189,7 @@ describe("the Automations list switch", () => {
     flushSync(() => toggle(name).click());
     await vi.waitFor(() => expect(toggle(name).getAttribute("aria-checked")).toBe("true"));
     expect(row(id).dataset.automationStatus).toBe("working");
-    const writes = fixture.api.mock.calls.filter(([, init]) => init);
+    const writes = fixture.api.mock.calls.filter(([, init]) => (init as { body?: string } | undefined)?.body);
     expect(writes.map(([calledPath, init]) => [calledPath, JSON.parse((init as { body: string }).body)])).toEqual([[path, body(false)], [path, body(true)]]);
   });
 
@@ -200,6 +200,14 @@ describe("the Automations list switch", () => {
     flushSync(() => toggle("Morning summary").click());
     await vi.waitFor(() => expect(row("routine-1").querySelector("[role=alert]")?.textContent).toBe("The assigned bot no longer exists"));
     expect(toggle("Morning summary").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("labels each automation by its name, with what it does beneath, and by what it does when it has no name", () => {
+    fixture.state.routines = [routine, { ...routine, id: "unnamed", name: " " }];
+    mountPage();
+    expect(row("routine-1").querySelector("button")!.textContent).toBe("Morning summary");
+    expect(row("routine-1").textContent).toContain("sends you a summary of your inbox");
+    expect(row("unnamed").querySelector("button")!.textContent).toContain("sends you a summary of your inbox");
   });
 
   it("offers no switch for a one-time automation that already happened, and lists no automation whose bot is gone", () => {
