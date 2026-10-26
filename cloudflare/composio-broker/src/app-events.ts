@@ -31,7 +31,6 @@ export const WAKE_EVERY_MS = 60_000;
 const WAKE_TIMEOUT_MS = 20_000;
 const POLL_LEASE_MARGIN_MS = 5_000;
 const COUNT_RETENTION_DAYS = 90;
-const SWEEP_INSTALLATIONS = 10;
 const SWEEP_CALL_BUDGET = 40;
 const POLLER_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const CLOUD_GRANT = /^v1\.([A-Za-z0-9][A-Za-z0-9_-]{2,127})\.([A-Za-z0-9_-]{43})$/;
@@ -414,16 +413,23 @@ async function ackThrough(env: Env, installationId: string, after: number, now: 
   if (acked.meta.changes) await dayCount(env, utcDay(now), installationId, "delivered", acked.meta.changes).run();
 }
 
-/** Re-enables at Composio what the 14-day sweep disabled, on the installation's first poll back. A failure here is
- *  caught by the server's reconciliation, which sees `enabled` beside a disabled remote. */
+/** Re-enables at Composio what the 14-day sweep disabled, on the installation's first polls back, up to one sweep
+ *  run's worth per poll. A failure here is caught by the server's reconciliation, which sees `enabled` beside a
+ *  disabled remote. */
 async function resumeSweptTriggers(env: Env, installationId: string) {
   await env.DB.prepare("UPDATE installations SET triggers_swept_at = NULL WHERE id = ?").bind(installationId).run();
   const { results } = await env.DB.prepare(
-    "SELECT composio_trigger_id FROM trigger_bindings WHERE installation_id = ? AND disabled_at IS NULL LIMIT ?",
-  ).bind(installationId, SWEEP_CALL_BUDGET).all<{ composio_trigger_id: string }>();
+    "SELECT composio_trigger_id, disabled_at FROM trigger_bindings WHERE installation_id = ? AND swept_at IS NOT NULL ORDER BY composio_trigger_id LIMIT ?",
+  ).bind(installationId, SWEEP_CALL_BUDGET).all<{ composio_trigger_id: string; disabled_at: number | null }>();
   for (const row of results) {
+    await env.DB.prepare("UPDATE trigger_bindings SET swept_at = NULL WHERE installation_id = ? AND composio_trigger_id = ?")
+      .bind(installationId, row.composio_trigger_id).run();
+    if (row.disabled_at !== null) continue;
     const result = await setRemoteEnabled(env, row.composio_trigger_id, true);
     if (result !== "done") console.warn(JSON.stringify({ message: "re-enabling a swept trigger failed", installationId, triggerId: row.composio_trigger_id }));
+  }
+  if (results.length === SWEEP_CALL_BUDGET) {
+    await env.DB.prepare("UPDATE installations SET triggers_swept_at = ? WHERE id = ?").bind(Date.now(), installationId).run();
   }
 }
 
@@ -511,45 +517,28 @@ async function expireEvents(env: Env, now: number) {
 }
 
 /** Disables at Composio the triggers of installations that have not polled for 14 days, so deliveries nobody reads
- *  stop costing events. Bindings keep the server's wish; its next poll re-enables them. */
+ *  stop costing events. Bindings keep the server's wish; its next poll re-enables them. Each run handles the next
+ *  bindings not yet swept, so an installation with more of them than one run may disable is finished over several. */
 async function sweepIdleInstallations(env: Env, now: number) {
   const { results } = await env.DB.prepare(
     `SELECT b.installation_id, b.composio_trigger_id,
        (SELECT COUNT(*) FROM trigger_bindings o
         WHERE o.composio_trigger_id = b.composio_trigger_id AND o.installation_id != b.installation_id AND o.disabled_at IS NULL) AS shared
-     FROM trigger_bindings b
-     WHERE b.disabled_at IS NULL AND b.installation_id IN (
-       SELECT i.id FROM installations i
-       WHERE i.triggers_swept_at IS NULL
-         AND EXISTS (SELECT 1 FROM trigger_bindings e WHERE e.installation_id = i.id AND e.disabled_at IS NULL)
-         AND COALESCE(i.events_polled_at, (SELECT MAX(c.created_at) FROM trigger_bindings c WHERE c.installation_id = i.id)) < ?1
-       ORDER BY i.id LIMIT ?2)
-     ORDER BY b.installation_id, b.composio_trigger_id`,
-  ).bind(now - SWEEP_AFTER_MS, SWEEP_INSTALLATIONS).all<{ installation_id: string; composio_trigger_id: string; shared: number }>();
-  const byInstallation = new Map<string, { triggerId: string; shared: number }[]>();
-  for (const row of results) {
-    const list = byInstallation.get(row.installation_id) ?? [];
-    list.push({ triggerId: row.composio_trigger_id, shared: row.shared });
-    byInstallation.set(row.installation_id, list);
-  }
-  let calls = 0;
-  for (const [installationId, triggers] of byInstallation) {
-    let complete = true;
-    for (const { triggerId, shared } of triggers) {
-      if (shared) continue;
-      if (calls >= SWEEP_CALL_BUDGET) {
-        complete = false;
-        break;
-      }
-      calls += 1;
-      const result = await setRemoteEnabled(env, triggerId, false);
-      if (typeof result === "object") {
-        complete = false;
-        console.warn(JSON.stringify({ message: "disabling an idle installation's trigger failed", installationId, triggerId }));
-      }
+     FROM trigger_bindings b JOIN installations i ON i.id = b.installation_id
+     WHERE b.disabled_at IS NULL AND b.swept_at IS NULL
+       AND COALESCE(i.events_polled_at, (SELECT MAX(c.created_at) FROM trigger_bindings c WHERE c.installation_id = i.id)) < ?1
+     ORDER BY b.installation_id, b.composio_trigger_id LIMIT ?2`,
+  ).bind(now - SWEEP_AFTER_MS, SWEEP_CALL_BUDGET).all<{ installation_id: string; composio_trigger_id: string; shared: number }>();
+  for (const { installation_id: installationId, composio_trigger_id: triggerId, shared } of results) {
+    if (!shared && typeof await setRemoteEnabled(env, triggerId, false) === "object") {
+      console.warn(JSON.stringify({ message: "disabling an idle installation's trigger failed", installationId, triggerId }));
+      continue;
     }
-    if (complete) await env.DB.prepare("UPDATE installations SET triggers_swept_at = ? WHERE id = ?").bind(now, installationId).run();
-    if (calls >= SWEEP_CALL_BUDGET) break;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE trigger_bindings SET swept_at = ?1 WHERE installation_id = ?2 AND composio_trigger_id = ?3")
+        .bind(now, installationId, triggerId),
+      env.DB.prepare("UPDATE installations SET triggers_swept_at = ?1 WHERE id = ?2").bind(now, installationId),
+    ]);
   }
 }
 

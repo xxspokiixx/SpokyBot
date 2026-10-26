@@ -519,6 +519,37 @@ describe("hourly job", () => {
     expect(h.d1.rows("SELECT triggers_swept_at FROM installations WHERE id = ?", idle.owner.id)).toEqual([{ triggers_swept_at: null }]);
   });
 
+  it("sweeps an installation with more triggers than one run may disable over several runs, then the next one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.parse("2026-10-01T12:00:00Z");
+    vi.setSystemTime(start);
+    const big = await h.install();
+    const bigAccount = h.account(big);
+    const bigTriggers: string[] = [];
+    for (let index = 0; index < 45; index += 1) {
+      const { response, body } = await h.createTrigger(big, bigAccount, { query: `subject:order-${index}` });
+      expect(response.status).toBe(201);
+      bigTriggers.push(body.triggerId);
+    }
+    const small = await withTrigger({ query: "label:inbox" });
+    const changes = (status: string) => h.composio.callsTo("/trigger_instances/manage/")
+      .filter((call) => call.method === "PATCH" && call.body?.status === status).map((call) => call.path.split("/").at(-1)!);
+
+    for (let hour = 1; hour <= 3; hour += 1) await runHourly(h.env as never, start + 14 * DAY_MS + hour * 60 * 60_000);
+    expect(changes("disable").sort()).toEqual([...bigTriggers, small.triggerId].sort());
+    expect([...h.composio.instances.values()].filter((instance) => !instance.disabled_at)).toEqual([]);
+    expect(h.d1.rows("SELECT disabled_at FROM trigger_bindings WHERE disabled_at IS NOT NULL")).toEqual([]);
+
+    vi.setSystemTime(start + 15 * DAY_MS);
+    await pollBody(big);
+    await Promise.all(h.background);
+    await pollBody(big);
+    await Promise.all(h.background);
+    expect(changes("enable").sort()).toEqual([...bigTriggers].sort());
+    expect(bigTriggers.filter((id) => h.composio.instances.get(id)?.disabled_at)).toEqual([]);
+    expect(h.composio.instances.get(small.triggerId)?.disabled_at).not.toBeNull();
+  });
+
   it("keeps daily counts for 90 days", async () => {
     h.d1.db.exec("INSERT INTO app_event_days (day, installation_id, queued) VALUES ('2026-07-01', 'x', 1), ('2026-09-30', 'x', 1)");
     await runHourly(h.env as never, Date.parse("2026-10-17T12:00:00Z"));
@@ -599,7 +630,7 @@ describe("trigger bindings", () => {
   it("changes a shared instance at Composio only for the last binding", async () => {
     const { owner, triggerId } = await withTrigger();
     const other = await h.install();
-    h.d1.db.prepare("INSERT INTO trigger_bindings VALUES (?, ?, 'gmail', ?, 'ca_x', 1, NULL)").run(other.id, triggerId, GMAIL_TYPE.slug);
+    h.d1.db.prepare("INSERT INTO trigger_bindings VALUES (?, ?, 'gmail', ?, 'ca_x', 1, NULL, NULL)").run(other.id, triggerId, GMAIL_TYPE.slug);
     await h.call(owner, `/v1/triggers/${triggerId}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) });
     expect(h.composio.callsTo("/trigger_instances/manage/").map((call) => call.body?.status)).toEqual(["enable"]);
     expect(h.composio.instances.get(triggerId)?.disabled_at).toBeNull();
@@ -908,6 +939,18 @@ describe("deploy order", () => {
     expect(h.queued(owner.id)).toHaveLength(1);
     expect(admin).toEqual([]);
     expect(vi.mocked(console.warn).mock.calls.some(([line]) => String(line).includes("cloud wake failed"))).toBe(true);
+  });
+
+  it("still answers polls and expires events on a database without migration 0005", async () => {
+    h = brokerHarness({ migrations: 4 });
+    vi.stubGlobal("fetch", h.composio.fetchImpl);
+    const { owner, triggerId } = await withTrigger();
+    await h.deliver(message(triggerId, owner.userId));
+    h.d1.db.prepare("UPDATE installations SET triggers_swept_at = 1 WHERE id = ?").run(owner.id);
+    expect((await h.poll(owner)).status).toBe(200);
+    await Promise.allSettled(h.background);
+    await expect(runHourly(h.env as never, Date.now() + 15 * DAY_MS)).rejects.toThrow(/swept_at/);
+    expect(h.queued()).toEqual([]);
   });
 
   it("keeps the existing routes working on a database that has not run migration 0002", async () => {
