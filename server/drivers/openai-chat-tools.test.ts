@@ -883,6 +883,21 @@ describe("structured tool execution boundaries", () => {
   });
 
   it.each([
+    ["a steer", "The receipt is stored."],
+    ["an announcement nudge", "I'll write the receipt now."],
+  ])("keeps reasoning_content on an answer resent after %s", async (kind, text) => {
+    const first = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => round === 1 ? first.resolve(response) : answer(response));
+    await f.start({ approvalMode: "full" });
+    const response = await first.promise;
+    if (kind === "a steer") await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("steered");
+    sse(response, [chunk({ reasoning: "Synthetic reasoning." }), chunk({ content: text }, "stop")]);
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[1].messages.find((message) => message.role === "assistant"))
+      .toMatchObject({ content: text, reasoning_content: "Synthetic reasoning." });
+  });
+
+  it.each([
     { scenario: "only a DONE marker", body: "data: [DONE]\n\n" },
     { scenario: "an invalid frame before DONE", body: "data: {invalid\n\ndata: [DONE]\n\n" },
     { scenario: "a frame without a completion choice", body: "data: {}\n\ndata: [DONE]\n\n" },
