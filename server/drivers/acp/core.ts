@@ -63,7 +63,7 @@ import type { AcpAskFinish, AcpSession, AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
-import { engineFailureKind, engineFailureMessage } from "../engine-errors.ts";
+import { engineFailureKind, engineFailureMessage, stopCause } from "../engine-errors.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
 import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
@@ -1552,7 +1552,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ? result.error
                 : typeof result?.message === "string" && result.message
                   ? result.message
-                  : `Model turn failed: ${reason ?? "unknown error"}`;
+                  : stopCause(reason, support.displayName) ?? `${support.displayName} stopped without saying why.`;
               emit({
                 ...base(threadId, turnId),
                 type: "runtime.error",
