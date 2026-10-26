@@ -2555,7 +2555,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("scopes Chief room management to its section, allowed peers and explicit room fields", async () => {
+  it("scopes Chief room management to its own department, its peers list and explicit room fields", async () => {
     const section = `Chief rooms ${Date.now()}`;
     const bots = await Promise.all(["Chief", "Peer", "Second", "Excluded", "Foreign"].map(async (name, index) => {
       const created = await api("POST", "/api/bots", { name, section: index === 4 ? `${section} foreign` : section });
@@ -8937,12 +8937,13 @@ describe("harness HTTP API", () => {
         chiefOfStaff: true,
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       })).status).toBe(200);
-      const roster = "Current Roster end department:\n- No other visible bots are available yet.";
+      const roster = "Current Roster end department (your team):\n- No other visible bots are available yet.";
 
       const sections = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text: string }>;
       const team = sections.find((section) => section.id === "coordination")?.text ?? "";
       expect(team).toContain("the Chief of Staff for the Roster end department: their one point of contact.");
-      expect(team.endsWith(roster)).toBe(true);
+      expect(team).toContain(roster);
+      expect(team.split("\n").at(-1)).toMatch(/^- /);
 
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
@@ -10872,7 +10873,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("acts on a teammate's trigger at once, and only while that teammate is in the section", async () => {
+  it("acts on a teammate's trigger at once, and only while that teammate is in its department", async () => {
     const chief = (await api("POST", "/api/bots", { name: "Acting chief" })).body.bot;
     let teammateId = "";
     let outsiderId = "";
@@ -10917,7 +10918,7 @@ describe("harness HTTP API", () => {
         forBotId: outsider.id,
       });
       expect(outOfSection.status).toBe(403);
-      expect(z.object({ error: z.string() }).parse(await outOfSection.json()).error).toMatch(/different section/);
+      expect(z.object({ error: z.string() }).parse(await outOfSection.json()).error).toMatch(/set up by bots in its own department or by its Chief/);
 
       const unknown = await post({
         fromBotId: chief.id,
