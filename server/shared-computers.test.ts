@@ -256,6 +256,7 @@ describe("server-side scope check (audit M1)", () => {
     const refusal = sharedComputerScopeRefusal({ ...lent, name: "Ubuntu NUC", platform: "linux" }, { action: "run_command" });
     expect(refusal).toContain("Ubuntu NUC");
     expect(refusal).toContain("Settings \u2192 MausBot Cloud \u2192 Terminal");
+    expect(refusal).not.toContain("This computer \u2192");
     expect(refusal).toMatch(/only the person can/i);
     expect(sharedComputerScopeRefusal({ ...lent, terminal: true }, { action: "run_command" })).toBeNull();
   });

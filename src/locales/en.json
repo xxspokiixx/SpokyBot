@@ -869,7 +869,6 @@
   "lending.cloudSide.internet": "internet connection",
   "lending.cloudSide.internetAway": "While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own connection and may turn your bots away.",
   "lending.cloudSide.terminal": "terminal",
-  "lending.cloudSide.terminalOff": "Terminal is off on {name}, so Cloud bots cannot run commands there. To allow it, open OpenMausBot on {name} and turn on Terminal under Server → This computer → Settings → MausBot Cloud → Terminal.",
   "lending.cloudSide.lastUsed": "Last used {when}",
   "lending.cloudSide.neverUsed": "Not used yet",
   "lending.cloudSide.error": "Could not check the computers shared with the Cloud.",

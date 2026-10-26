@@ -39,7 +39,6 @@ export function lentComputerLines(computer: KnownLentComputer, now = Date.now())
   const away = computer.lent && !computer.online && computer.scopes.internet === true;
   return [state, ...(computer.lent && what.length ? [t("lending.cloudSide.lends", { what: what.join(", ") })] : []),
     ...(away ? [t("lending.cloudSide.internetAway")] : []),
-    ...(computer.lent && !computer.scopes.terminal ? [t("lending.cloudSide.terminalOff", { name: computer.name })] : []),
     computer.lastUsedAt ? t("lending.cloudSide.lastUsed", { when: localizedRelativeTime(computer.lastUsedAt, activeLocale(), now) }) : t("lending.cloudSide.neverUsed")];
 }
 
