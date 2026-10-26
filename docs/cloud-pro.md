@@ -578,12 +578,13 @@ frames the web UI: the desktop app shows it in its own window.
 The Cloud is home: bots and chats live there. The person's Mac or PC is a computer
 the Cloud can borrow while it is awake: its folders, its screen and apps, and its
 home internet connection. The switch reads **Let my bots use this Mac** on a Mac,
-**this PC** on Windows and **this computer** on Linux. Lending is off until the
-person turns it on (or until the move to My Cloud turns it on with the default
-grant below), and it exists only between their own desktop app and their own Cloud
-home. Other users (desktop only, self-hosted, hosted team workspaces) keep
-computer sharing exactly as before: off unless a maintainer sets
-`features.sharedComputers` by hand.
+**this PC** on Windows and **this computer** on Linux. The internet connection is
+lent by default (see "The internet connection by default" below); folders, apps
+and screen and the terminal stay off until the person turns them on (or until the
+move to My Cloud lends the default grant below). Lending exists only between their
+own desktop app and their own Cloud home, never a Team Cloud. Other users (desktop
+only, self-hosted, hosted team workspaces) keep computer sharing exactly as before:
+off unless a maintainer sets `features.sharedComputers` by hand.
 
 ### What the person sees
 
@@ -675,6 +676,39 @@ connection shows **Shares: internet connection, …**, and while it is away
 **While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own
 connection and may turn your bots away.**
 
+**The internet connection by default.** A desktop app signed in to the
+person's own My Cloud lends it this computer's internet connection by itself, on
+macOS, Windows and Linux: no popup, no click, and no OS permission, since it is
+only outbound connections the computer checks itself. Main decides from the
+grant it kept for My Cloud's saved entry (`internetByDefault` in
+`electron/computer-sharing.mjs`), each time the Cloud sign-in changes and at
+startup, and only while the sign-in is verified for that exact machine:
+
+- **No grant yet** (never decided): a new grant with the internet connection
+  only, no folders, no apps and screen, no terminal.
+- **A grant from before the internet connection could be chosen** (no
+  `internet` field): it lends the internet connection too; the grant itself,
+  its folders, screen and terminal, stay as they are.
+- **The internet connection unticked** (`internet: false`): it stays off.
+- **Lending the person turned off** (`stopped.reason "you"`, or an Off kept from
+  before the reason was): everything stays off, across restarts too.
+- **A sign-out, another account or a new machine stopped it**: the person never
+  chose that, so a grant of the internet connection alone comes back by itself
+  once signed in to My Cloud again. A grant that lent more (folders, apps and
+  screen, the terminal) stays off as before, its choices kept, so the switch
+  lends all of it again in one click.
+- **A Team Cloud**: nothing. Lending is personal; it follows only the person's
+  own My Cloud from the verified sign-in, and a Team Cloud refuses it anyway.
+
+The default calls nothing itself: the grant reaches My Cloud the way any grant
+does, so a sleeping Cloud is never woken for it, and once awake it registers with
+`internet: true` and opens the device link, again after an app restart, a Cloud
+restart (it registers again) or a wake from sleep. The **Internet connection**
+box under **Choose what's lent** shows it ticked, and the line under the switch
+reads **Internet connection: on** (**connecting…** until the link opens). The
+menu-bar item reads **Your bots can use this Mac's internet connection** while
+that is all that is lent; like any lending, it also opens the app at login.
+
 **The default grant at the move.** The move to My Cloud turns lending on by
 itself (`installCloudLending(...).lendByDefault({ projects })`): the internet
 connection, Desktop, Documents and Downloads read only, each moved bot's own
@@ -683,7 +717,8 @@ computer control already works here for this computer's own bots (on macOS:
 Accessibility and Screen Recording already granted, read from computer
 control's running state, never by asking macOS). It adds to what is lent
 already, never takes away, and never undoes the person's own Off: lending they
-turned off (`stopped.reason "you"`) stays off, across restarts too.
+turned off (`stopped.reason "you"`) stays off, across restarts too, and so does
+an internet connection they unticked.
 
 **Use my Mac** (`electron/use-my-computer.mjs`). When the move leaves this
 computer not fully lent (apps and screen still off because macOS hasn't granted

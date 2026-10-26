@@ -132,6 +132,19 @@ test("the move's default grant: the usual folders read only, each project folder
     [["Desktop", true], ["Documents", false], ["Downloads", false]]);
 });
 
+test("the move's default keeps an internet connection the person unticked off; Use my Mac turns it on with the rest", async () => {
+  const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
+  const unticked = setup({ enabled: true, kept: { folders: plans, screen: false, internet: false } });
+  assert.equal((await unticked.lending.lendByDefault({ projects: [] })).internet, false);
+  assert.equal(unticked.calls.at(-1)[1].internet, false);
+  assert.equal((await unticked.lending.lendByDefault({ asked: true })).internet, true, "the person pressed Use my Mac: every part");
+  const internetOnly = setup({ enabled: true, kept: { folders: [], screen: false, internet: true } });
+  assert.deepEqual(internetOnly.calls, []);
+  await internetOnly.lending.lendByDefault({ projects: [] });
+  assert.deepEqual(internetOnly.calls, [["save", { folders: usual, screen: false, internet: true }]], "the move adds the usual folders to the internet connection lent by default");
+  assert.equal(defaultGrant({ kept: { internet: false }, usual, projects: [] }).internet, false);
+});
+
 test("Use my Mac lends apps and screen on top of what is lent, once computer control works; never while lending is off", async () => {
   const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: true }];
   const lent = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true } });
