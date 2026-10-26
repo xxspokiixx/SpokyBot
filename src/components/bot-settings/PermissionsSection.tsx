@@ -70,7 +70,7 @@ export function PermissionsSection({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-medium text-ink">{t("permissions.chief.title")}</div>
-            <div className="text-[11.5px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
+            <div className="text-[12px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
           </div>
           <Switch
             checked={Boolean(bot.chiefOfStaff)}
