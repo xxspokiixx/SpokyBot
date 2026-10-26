@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,6 +15,14 @@ import { WebhookManager } from "./webhooks.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 
 let dir: string;
+const rawStatus = (baseUrl: string, path: string, method = "GET") => new Promise<number>((resolve, reject) => {
+  const sent = request(baseUrl, { path, method }, (response) => {
+    response.resume();
+    resolve(response.statusCode ?? 0);
+  });
+  sent.on("error", reject);
+  sent.end();
+});
 let ingress: WebhookIngress;
 let endpointId: string;
 let secret: string;
@@ -194,6 +203,30 @@ describe("webhook-only ingress", () => {
     });
     expect(oversized.status).toBe(413);
     expect(manager.listAttempts().filter((attempt) => attempt.webhookId === manager.list().find((webhook) => webhook.endpointId === endpointId)?.id && attempt.outcome === "rejected").length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("malformed requests", () => {
+  it("answers a request target that is not a URL with 400 and keeps serving", async () => {
+    expect(await rawStatus(ingress.baseUrl, "//[")).toBe(400);
+    expect(await rawStatus(ingress.baseUrl, "//[", "POST")).toBe(400);
+    expect((await fetch(`${ingress.baseUrl}/health`)).status).toBe(200);
+  });
+
+  it("answers 500 when the handler itself fails instead of rejecting into the process", async () => {
+    const failing = {
+      authorize: () => true,
+      receive: async () => { throw Object.assign(new Error("bad payload"), { status: 400 }); },
+      recordRejected: () => { throw new Error("disk full"); },
+    } as unknown as WebhookManager;
+    const receiver = await listenWebhookIngress(failing, { port: 0 });
+    try {
+      const response = await fetch(`${receiver.baseUrl}/hooks/wh_failing`, { method: "POST", body: "{}" });
+      expect(response.status).toBe(500);
+      expect((await fetch(`${receiver.baseUrl}/health`)).status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve) => receiver.server.close(() => resolve()));
+    }
   });
 });
 
