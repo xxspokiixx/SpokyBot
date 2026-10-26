@@ -50,7 +50,6 @@ import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { shownChatIsUnread } from "@/lib/shown-chat-unread";
 import { firstUnreadMessageId, threadOpensUnread, threadReadCursor } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
 import { parseComputerHelp } from "@/lib/computer-control";
@@ -3035,15 +3034,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
     if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) openBot(dispatch, bot, showThreads);
   }, [state.hydrated, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
-
-  useEffect(() => {
-    const readShownChat = () => {
-      const { selectedId } = stateRef.current;
-      if (selectedId && shownChatIsUnread(stateRef.current)) dispatch({ type: "select", id: selectedId });
-    };
-    window.addEventListener("focus", readShownChat);
-    return () => window.removeEventListener("focus", readShownChat);
-  }, [dispatch]);
 
   useEffect(() => {
     let alive = true;
