@@ -2356,9 +2356,8 @@ function parksBehindCoordination(botId: string, threadId: string): boolean {
 }
 
 function botAtThreadCapacity(botId: string, personThreadId?: string): boolean {
-  if (personThreadId !== undefined && personThreadId === botMainThread(botId)) return false;
-  // threadBusy, not the stored flag: a reservation holds its slot after an early completion clears the flag.
-  return store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
+  // The person's main chat is never at capacity. threadBusy, not the stored flag: a reservation holds its slot after an early completion clears the flag.
+  return (!personThreadId || personThreadId !== botMainThread(botId)) && store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
 }
 
 function hasDirectDispatch(botId: string): boolean {
