@@ -64,8 +64,6 @@ export interface AdmissionState {
   threadBusy?: boolean;
   atCapacity?: boolean;
   groupTurn?: boolean;
-  /** Set with groupTurn when the room turn is on another thread: a person's 1:1 thread keeps its own slot. */
-  groupTurnElsewhere?: boolean;
   parksBehindCoordination?: boolean;
   roomWorking?: boolean;
   threadWorking?: boolean;
@@ -83,6 +81,12 @@ function imagesBlockSteer(message: AdmissionMessage): boolean {
   return message.carriesImages === true && message.engineCanSteerImages !== true;
 }
 
+/** Whether a live room turn holds this work back. A person's own send (sent now, or queued earlier) waits only for a
+ * room turn on its own thread; every other kind of work waits for any room turn of the bot. */
+export function roomTurnHolds(roomTurn: { threadId: string } | null | undefined, threadId: string, personSend: boolean): boolean {
+  return Boolean(roomTurn) && (!personSend || roomTurn!.threadId === threadId);
+}
+
 export function admit(
   surface: AdmissionSurface,
   message: AdmissionMessage = {},
@@ -95,11 +99,10 @@ export function admit(
       return { action: "steer" };
     }
     case "direct": {
-      // A room turn on another thread holds no slot here; it still fills the bot's capacity, and the same thread still waits.
-      const roomTurnHere = state.groupTurn === true && state.groupTurnElsewhere !== true;
-      if (state.atCapacity || state.threadBusy || roomTurnHere || state.parksBehindCoordination) {
+      // groupTurn here is roomTurnHolds(): a room turn on another thread does not hold a person's own thread.
+      if (state.atCapacity || state.threadBusy || state.groupTurn || state.parksBehindCoordination) {
         // Capacity outranks a room turn in the receipt because the person can fix it.
-        const reason = state.atCapacity ? "capacity" : roomTurnHere ? "group-turn" : undefined;
+        const reason = state.atCapacity ? "capacity" : state.groupTurn ? "group-turn" : undefined;
         return { action: "queue", reason };
       }
       return { action: "start" };
