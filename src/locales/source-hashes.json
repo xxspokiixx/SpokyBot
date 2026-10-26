@@ -2356,7 +2356,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -7728,7 +7734,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -10067,7 +10079,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -12406,7 +12424,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -18742,7 +18766,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -24815,7 +24845,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -28033,7 +28069,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -32271,7 +32313,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -35087,7 +35135,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -39941,7 +39995,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -44795,7 +44855,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -51025,7 +51091,13 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "engineSetup.usingAppCopy": "16f5bc54e394dc41fbe6560330f79d3eab3b13ddde171bc763f39ea32e6c14d1",
+      "engineSetup.usingAppCopyDismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
+      "engineSetup.appCopy.title": "aa3c05b81a41d7c17aa0b5e56ae5161bc4fcb9ed60d6d22a4edf0ab798061023",
+      "engineSetup.appCopy.description": "c7b7cb1a27d4a3ac004ce4b6c36d68f17c0fae9c1ad3ed035a23c44f9aa7b691",
+      "engineSetup.appCopy.remote": "e108c143fed37c47cefed5797e8e049acd2a85b0e5242a0ea60bcd5bae284bdf",
+      "engineSetup.standaloneDownloadNote": "f699a11af4ef3b9091360a0a83c191c34ed696f4f25d7fb49304590342a8a358"
     }
   }
 }
