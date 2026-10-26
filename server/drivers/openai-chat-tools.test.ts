@@ -1204,6 +1204,19 @@ describe("structured tool execution boundaries", () => {
     })]);
   });
 
+  it("answers in the last allowed step and leaves a message steered during it for the next turn", async () => {
+    const last = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => round < 64
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : last.resolve(response));
+    await f.start({ approvalMode: "full" });
+    const response = await last.promise;
+    await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("refused");
+    answer(response);
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(64);
+  });
+
   it("stops at 200 tool calls in one turn without running the batch that crosses it", async () => {
     const f = await fixture((_body, response, round) => sse(response, [chunk({
       tool_calls: Array.from({ length: 25 }, (_, index) => ({
