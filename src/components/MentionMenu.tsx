@@ -50,6 +50,7 @@ export function MentionMenu({ listRef, motion, choices, highlight, everyoneCount
                 bot={choice.bot}
                 state={normalizeState(choice.bot.mascotExpression) ?? "happy"}
                 size={24}
+                animated={i === highlight}
               />
             ) : (
               <span className="flex size-6 items-center justify-center rounded-full bg-raised text-ink-secondary">

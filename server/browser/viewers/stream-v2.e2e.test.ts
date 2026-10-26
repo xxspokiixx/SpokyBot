@@ -51,6 +51,7 @@ suite("the v2 stream on real Chrome", () => {
   let origin = "";
   let target: BrowserTarget;
   let sessions = 0;
+  const clients = new Set<Client>();
 
   beforeAll(async () => {
     fx = await FixtureServer.start();
@@ -69,6 +70,7 @@ suite("the v2 stream on real Chrome", () => {
         answerFileChooser: (_browser, owner, chooser, paths) => real.service.answerFileChooser(target.session, owner, chooser, paths),
         download: (_browser, id) => real.service.download(target.session, id),
       },
+      audience: () => "team",
       browser: async (botId) => ({ botId, session: target.session, spec: { command: "omb-cdp", args: [target.key], env: {} } }),
       authorize: async () => null,
       current: () => true,
@@ -85,6 +87,8 @@ suite("the v2 stream on real Chrome", () => {
   }, hostTimeout(240_000));
 
   afterAll(async () => {
+    // A test that failed midway leaves its socket open, and the server's close waits for every upgraded socket.
+    for (const client of clients) await client.close();
     await new Promise<void>((resolve) => { if (!server) resolve(); else { server.close(() => resolve()); server.closeAllConnections(); } });
     await real?.close();
     await fx?.close();
@@ -93,7 +97,7 @@ suite("the v2 stream on real Chrome", () => {
   async function opened(path: string, html: string): Promise<BrowserTarget> {
     target = { session: `stream-${++sessions}`, key: `bot:stream-${sessions}` };
     const result = await real.call(target, "agent_browser_open", { url: fx.page(path, html) });
-    expect(result.isError).toBeUndefined();
+    expect(result.isError, real.text(result)).toBeUndefined();
     return target;
   }
 
@@ -122,6 +126,7 @@ suite("the v2 stream on real Chrome", () => {
       socket.send("{\"type\":\"ack\"}");
       client.frames.push(jpegSize(Buffer.from(event.data as ArrayBuffer)));
     });
+    clients.add(client);
     return new Promise((resolve, reject) => {
       socket.addEventListener("open", () => resolve(client));
       socket.addEventListener("error", () => reject(new Error("the stream did not open")));
@@ -296,6 +301,35 @@ suite("the v2 stream on real Chrome", () => {
     client.send({ type: "key", action: "up", key: "c", code: "KeyC", keyCode: 67, modifiers: COPY_MODIFIER });
     const copied = await client.next<{ text: string }>("clipboard");
     expect(copied.text.trim()).toBe("copy these words");
+    await client.close();
+  }, hostTimeout(90_000));
+  it("keeps the panel's socket through an idle close and starts nothing by itself; the person's wake or the bot's next call shows the browser again", async () => {
+    await opened("/still", STILL);
+    const client = await connect("width=1200&height=800&maxWidth=2400&maxHeight=1600");
+    await until(() => client.frames.length, (count) => count > 0);
+    const asleep = async () => {
+      const after = client.messages.length;
+      await sleep(60);
+      expect(await real.service.closeIdle(50)).toContain(target.key);
+      await client.next("asleep", after);
+      await sleep(1_000);
+      expect(client.socket.readyState).toBe(WebSocket.OPEN);
+      expect(real.service.profiles().find((profile) => profile.key === target.key)?.run).toBeNull();
+    };
+    const shown = async (wake: () => Promise<unknown>) => {
+      const after = client.messages.length;
+      const frames = client.frames.length;
+      await wake();
+      await client.next("awake", after);
+      await until(() => client.frames.length, (count) => count > frames);
+    };
+    await asleep();
+    await shown(async () => client.send({ type: "wake" }));
+    await asleep();
+    await shown(async () => {
+      const result = await real.call(target, "agent_browser_get_url");
+      expect(result.isError, real.text(result)).toBeUndefined();
+    });
     await client.close();
   }, hostTimeout(90_000));
 });

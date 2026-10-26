@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
-import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Trash2, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
 import { MAUS_COLORS, type MausColor } from "@/lib/mascot";
 import { Switch } from "../SettingsPrimitives";
 
@@ -38,12 +37,12 @@ export function Card({ label, action, anchor, children }: { label?: ReactNode; a
   return (
     <section data-panel-card={anchor}>
       {label ? <CardLabel action={action}>{label}</CardLabel> : <div className="h-3.5" />}
-      <div className="divide-y divide-ink/[0.05] overflow-hidden rounded-[14px] border border-ink/[0.04] bg-ink/[0.03]">{children}</div>
+      <div className="divide-y divide-ink/[0.05] overflow-hidden rounded-[14px] border border-ink/[0.04] bg-ink/[0.03] max-md:rounded-[20px] max-md:border-hairline max-md:bg-card">{children}</div>
     </section>
   );
 }
 
-function RowText({ title, hint }: { title: ReactNode; hint?: ReactNode }) {
+export function RowText({ title, hint }: { title: ReactNode; hint?: ReactNode }) {
   return (
     <div className="min-w-0 flex-1">
       <div className={titleCls}>{title}</div>
@@ -54,7 +53,7 @@ function RowText({ title, hint }: { title: ReactNode; hint?: ReactNode }) {
 
 function RowIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary" aria-hidden="true">
+    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary max-md:size-8 max-md:rounded-full" aria-hidden="true">
       <Icon size={15} />
     </span>
   );
@@ -221,11 +220,80 @@ export function SegmentedRow<V extends string>({ title, hint, footer, ...segment
   );
 }
 
-export function SoonBadge() {
+export function TrashButton({ label, onClick, disabled, ...rest }: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  "data-panel-action"?: string;
+}) {
   return (
-    <span className="shrink-0 rounded-full bg-control px-2 py-px text-[10.5px] font-medium text-ink-secondary">
-      {t("botSettings.simple.soon")}
-    </span>
+    <button
+      type="button"
+      {...rest}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-tertiary hover:bg-ink/[0.05] hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <Trash2 size={14} aria-hidden="true" />
+    </button>
+  );
+}
+
+export function RadioRow({ title, hint, checked, onClick, disabled, ...rest }: {
+  title: ReactNode;
+  hint?: ReactNode;
+  checked: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  "data-panel-choice"?: string;
+}) {
+  return (
+    <button
+      type="button"
+      {...rest}
+      role="radio"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-not-allowed disabled:opacity-50")}
+    >
+      <RowText title={title} hint={hint} />
+      <span className="flex w-4 shrink-0 text-ink">{checked && <Check size={16} aria-hidden="true" />}</span>
+    </button>
+  );
+}
+
+export function TextRow({ value, placeholder, label, action, disabled, onChange, onSubmit, ...rest }: {
+  value: string;
+  placeholder: string;
+  label: string;
+  action: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  "data-panel-form"?: string;
+}) {
+  return (
+    <form
+      {...rest}
+      className={rowCls}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (value.trim() && !disabled) onSubmit();
+      }}
+    >
+      <input
+        value={value}
+        placeholder={placeholder}
+        aria-label={label}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent-border disabled:opacity-50"
+      />
+      <button type="submit" disabled={disabled || !value.trim()} className={buttonCls}>{action}</button>
+    </form>
   );
 }
 

@@ -19,7 +19,7 @@ const sentences: BotOverview = {
     soulLead: "Always cite primary sources and separate fact from inference.",
   },
   does: ["Daily at 9:00 AM: Morning brief. Next run 9:00 AM."],
-  reaches: ["Works in its private workspace.", "Has the built-in browser."],
+  reaches: ["Works in its own private folder.", "Has the built-in browser."],
   wont: [
     "Won't run commands without asking you first.",
     "Won't contact other bots without asking.",
@@ -53,6 +53,15 @@ describe("OverviewSection", () => {
     expect(markup).not.toContain("Finish setting up");
     expect(markup).not.toContain("1 of 3 done");
     expect(markup).not.toContain(">Identity</span>");
+  });
+
+  it("says in its own words that a bot can reach every bot, and whose departments a Chief is in charge of", () => {
+    const markup = render(createElement(OverviewSection, {
+      overview: { ...sentences, reaches: ["Can talk to all 7 other bots, in any department.", "Also in charge of these departments: Dev, Sales."] },
+      prompt: null, onOpen: vi.fn(),
+    }));
+    expect(markup).toContain("Can talk to all 7 other bots, in any department.");
+    expect(markup).toContain("Also in charge of these departments: Dev, Sales.");
   });
 
   it("shows Loading… before the overview arrives", () => {

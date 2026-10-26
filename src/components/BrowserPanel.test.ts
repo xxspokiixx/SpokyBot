@@ -145,6 +145,21 @@ describe("the browser panel's connection", () => {
     expect(host.textContent).not.toContain("Starting the browser…");
   });
 
+  it("says the browser closed after it sat unused, opens it again only when asked, and shows it once it runs", async () => {
+    const socket = await streaming("unclaimed");
+    await act(async () => socket.message({ type: "asleep" }));
+    await flush();
+    expect(host.textContent).toContain(t("browser.panel.asleep"));
+    expect(socket.sent).not.toContainEqual({ type: "wake" });
+    await act(async () => button(t("browser.panel.wake")).click());
+    expect(socket.sent).toContainEqual({ type: "wake" });
+    expect(button(t("browser.panel.waking")).disabled).toBe(true);
+    await act(async () => socket.message({ type: "awake" }));
+    await flush();
+    expect(host.textContent).not.toContain(t("browser.panel.asleep"));
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
   it("shows the tab's address and enables history from what the stream says", async () => {
     const socket = await streaming();
     expect((host.querySelector<HTMLInputElement>('input[aria-label="Browser address"]')!).value).toBe("https://example.com/");
@@ -153,6 +168,39 @@ describe("the browser panel's connection", () => {
     expect((host.querySelector<HTMLInputElement>('input[aria-label="Browser address"]')!).value).toBe("https://example.com/two");
     expect(button("Back").disabled).toBe(false);
     expect(button("Forward").disabled).toBe(true);
+  });
+});
+
+describe("while nobody can see the panel", () => {
+  it("stops the stream while the page is hidden and reopens it when the page is back", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const socket = await streaming("unclaimed");
+    await act(async () => {
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(socket.readyState).toBe(3);
+    expect(FakeSocket.instances).toEqual([socket]);
+    await act(async () => {
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(FakeSocket.instances).toHaveLength(2);
+    expect(FakeSocket.instances[1]).not.toBe(socket);
+  });
+
+  it("keeps streaming for the viewer the page left holding the browser", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const socket = await streaming("you");
+    await act(async () => {
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(FakeSocket.instances).toEqual([socket]);
+    expect(socket.readyState).not.toBe(3);
   });
 });
 
@@ -171,6 +219,22 @@ describe("a v1 live view whose stream dropped", () => {
     expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
     await emit("ready", { viewerId: "new-viewer" });
     expect(host.textContent).not.toContain("Browser disconnected");
+  });
+
+  it("says the browser closed after it sat unused, and opens a new view only when asked", async () => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
+    await render();
+    await emit("ready", { viewerId: "old-viewer" });
+    await emit("error", { retryable: false, asleep: true, message: "This browser closed after it sat unused, to save memory." });
+    await flush();
+    expect(host.textContent).toContain(t("browser.panel.asleep"));
+    expect(host.textContent).not.toContain("Browser disconnected");
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(FixtureEventSource.instances).toHaveLength(1);
+    await act(async () => button(t("browser.panel.wake")).click());
+    await flush();
+    expect(FixtureEventSource.instances).toHaveLength(2);
+    expect(host.textContent).not.toContain(t("browser.panel.asleep"));
   });
 
   it("comes back when the window is focused after its retries ran out", async () => {
@@ -308,6 +372,42 @@ describe("what the person does in the panel", () => {
     await act(async () => socket.control("you"));
     await flush();
     expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
+  });
+});
+
+describe("a published page's Open", () => {
+  const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+  const show = (page: { url: string; nonce: number }) => act(async () => root.render(createElement(LiveBrowser, { bot, page })));
+
+  it("opens the page in a new tab, once, taking the browser first, so the bot's own tab stays as it was", async () => {
+    const socket = await streaming("agent");
+    await show({ url: PAGE, nonce: 1 });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "tabNew", url: PAGE });
+    await show({ url: PAGE, nonce: 1 });
+    await flush();
+    expect(socket.sent.filter((message) => message.type === "tabNew")).toHaveLength(1);
+    await show({ url: PAGE, nonce: 2 });
+    await flush();
+    expect(socket.sent.filter((message) => message.type === "tabNew")).toHaveLength(2);
+  });
+
+  it("waits for the view to connect, and wakes a browser that sat unused before opening the page", async () => {
+    await render({ page: { url: PAGE, nonce: 1 } });
+    const socket = FakeSocket.instances.at(-1)!;
+    expect(socket.sent).toEqual([]);
+    await act(async () => { socket.open(); socket.control("unclaimed"); socket.message({ type: "asleep" }); });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => socket.message({ type: "awake" }));
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }, { type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "tabNew", url: PAGE });
   });
 });
 

@@ -149,9 +149,8 @@ describe("Automations page", () => {
     expect(html).toContain("Sign in</button>");
   });
 
-  it("opens one simple panel from a sentence", () => {
-    const sentence = [...buttons(page()).keys()].find((label) => label.startsWith("Every day at 6:30"))!;
-    click(buttons(page()).get(sentence));
+  it("opens one simple panel from its name", () => {
+    click(buttons(page()).get("Morning brief"));
     expect(page().find(named("AutomationPanel"))!.props.automation).toMatchObject({ id: routine.id, kind: "schedule" });
   });
 
@@ -232,7 +231,7 @@ describe("routine drawer", () => {
   });
 
   it("describes the Boat runner in plain words", () => {
-    expect(details(routineItem({ ...routine, runOn: "cloud" })).html).toContain("Cloud computer");
+    expect(details(routineItem({ ...routine, runOn: "cloud" })).html).toContain("Cloud desktop");
   });
 
   it("Run now and Pause send the same requests as before", () => {
@@ -271,7 +270,7 @@ describe("routine editor", () => {
     seed: { kind: "routine", at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: routineToEdit },
     bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn(),
   }));
-  const hidden = ['<select aria-label="Repeat"', "Routine safety limit", "Runs the whole job on the bot&#x27;s cloud computer", "Add attachment", "Post results to", "Routine type"];
+  const hidden = ['<select aria-label="Repeat"', "Routine safety limit", "Runs the whole job on the bot&#x27;s cloud desktop", "Add attachment", "Post results to", "Routine type"];
 
   it("keeps Simple mode to the basics with everything else behind More options", () => {
     const html = editor();
@@ -305,6 +304,22 @@ describe("routine editor", () => {
     expect(editor(routine)).toMatch(/<input type="checkbox" aria-label="Remember the last run"(?![^>]*checked)[^>]*>/);
     expect(editor({ ...routine, continuity: true })).toMatch(/<input type="checkbox" aria-label="Remember the last run"[^>]*checked[^>]*>/);
     expect(editor(routine)).toContain("Each run starts with the previous run&#x27;s report");
+  });
+
+  it("schedules a goal in the bot's own chat when no group is chosen", () => {
+    const ownGoal: Routine = { ...routine, id: "own-goal", name: "Ship the fix", target: "room-goal", groupId: undefined, resultsThreadId: undefined };
+    const html = editor(ownGoal);
+    expect(html).toContain("Where it runs");
+    expect(html).toMatch(/<option value="" selected="">Just the bot, in its own chat<\/option>/);
+    expect(html).toContain("The bot works on the goal in its own chat until it is done.");
+    expect(html).toContain("Runner");
+    expect(html).not.toContain("Create a group from the sidebar first");
+
+    fixture.values = [];
+    const props = { seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: ownGoal }, bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn() };
+    click(buttons(capture(() => EventEditor(props))).get("Save"));
+    const [, init] = fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }];
+    expect(JSON.parse(init.body)).toMatchObject({ target: "room-goal", botId: bot.id, groupId: null });
   });
 
   it("hides Remember the last run for a one-time routine", () => {
@@ -365,7 +380,7 @@ describe("routine editor", () => {
   it("leaves the Advanced editor as it was", () => {
     fixture.advanced = true;
     const html = editor();
-    for (const text of ['placeholder="Add title"', '<select aria-label="Repeat"', "Assign a bot", "Runs the whole job on the bot&#x27;s cloud computer", "Post results to", "Routine type", "New event"]) {
+    for (const text of ['placeholder="Add title"', '<select aria-label="Repeat"', "Assign a bot", "Runs the whole job on the bot&#x27;s cloud desktop", "Post results to", "Routine type", "New event"]) {
       expect(html, text).toContain(text);
     }
     expect(html).not.toContain("More options");

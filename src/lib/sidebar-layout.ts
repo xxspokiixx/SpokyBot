@@ -1,5 +1,7 @@
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 import type { ConnectorCardData } from "../../shared/wire";
+import type { DefaultBotFields } from "../../shared/default-bot";
+import { hiddenFromSidebar } from "./default-bot";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
@@ -26,7 +28,7 @@ const GOAL_RUN_PREVIEW_LABEL = {
   failed: "Failed",
 } satisfies Record<GroupGoalRunCardData["status"], string>;
 
-export type SidebarBot = {
+export type SidebarBot = DefaultBotFields & {
   id: string;
   chiefOfStaff?: boolean;
   section?: string;
@@ -103,9 +105,15 @@ export function pinnedCircleThreadListVisible(
   return circles && density !== "icons" && pinnedCount > 0;
 }
 
-export function partitionSidebarBots<T extends SidebarBot>(bots: T[]) {
-  const visible = bots.filter((bot) => !bot.hidden);
-  const pinnedBots = visible.filter((bot) => Boolean(bot.pinned));
+export function partitionSidebarBots<T extends SidebarBot>(
+  bots: T[],
+  options?: { universalPins?: boolean; viewerEmail?: string | null; welcoming?: string | null },
+) {
+  const universalPins = options?.universalPins === true;
+  const visible = bots.filter((bot) => !bot.hidden && !hiddenFromSidebar(bot, options?.viewerEmail) && bot.id !== options?.welcoming);
+  // The pin flag is the server's, the same on every client. Only the main Chief keeps its own top slot when pins are
+  // not universal (a device's layout choice); a pinned Chief of a group is listed with the other pinned bots.
+  const pinnedBots = visible.filter((bot) => Boolean(bot.pinned) && (universalPins || !bot.chiefOfStaff || Boolean(bot.section)));
   const pinnedIds = new Set(pinnedBots.map((bot) => bot.id));
   const unsectionedChief = visible.find((bot) => bot.chiefOfStaff && !bot.section && !pinnedIds.has(bot.id)) ?? null;
   const sectionChiefs = visible.filter((bot) => bot.chiefOfStaff && Boolean(bot.section) && !pinnedIds.has(bot.id));

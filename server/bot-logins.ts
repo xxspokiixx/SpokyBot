@@ -1,6 +1,6 @@
 import { loginPageCheck, loginPlace, loginSite, type LoginPlace } from "../shared/logins.ts";
 import type { FillCandidate } from "./login-fill.ts";
-import { receiveLoginHandoff, type LoginHandoffResult } from "./login-handoff.ts";
+import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
 import type { LoginStore } from "./login-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
@@ -51,9 +51,9 @@ export class BotLogins {
     this.onePassword = onePassword;
   }
 
-  /** The desktop main process's private ask for one login, for "Also use on My Cloud" (login-handoff.ts). */
-  receiveHandoff(message: unknown, post: (reply: LoginHandoffResult) => boolean): boolean {
-    return receiveLoginHandoff(message, this.store, post);
+  /** The desktop main process's private ask for one login, for Send to My Cloud, or for a connection a move carries. */
+  receiveHandoff(message: unknown, post: (reply: LoginHandoffResult) => boolean, connections?: (what: ConnectionHandoffWhat) => Promise<ConnectionHandoffAnswer>): boolean {
+    return receiveLoginHandoff(message, this.store, post, () => this.onePassword.status().error, connections);
   }
 
   /** Where each login the bot may use fills, with its username. */

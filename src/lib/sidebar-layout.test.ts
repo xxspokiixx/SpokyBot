@@ -62,6 +62,21 @@ describe("sidebar virtual sections", () => {
     expect(bot.section).toBe("Work");
   });
 
+  it("lists every bucket in the order the bots arrive, never by name", () => {
+    // The server owns this order (PUT /api/bots/order); a reorder made on a phone must show up here unchanged.
+    const parts = partitionSidebarBots([
+      { id: "zed", name: "Zed", pinned: true },
+      { id: "yak", name: "Yak", section: "Work" },
+      { id: "xon", name: "Xon" },
+      { id: "amy", name: "Amy", pinned: true },
+      { id: "bob", name: "Bob", section: "Work" },
+      { id: "cat", name: "Cat" },
+    ]);
+    expect(parts.pinnedBots.map((bot) => bot.id)).toEqual(["zed", "amy"]);
+    expect(parts.sectionedBots.map((bot) => bot.id)).toEqual(["yak", "bob"]);
+    expect(parts.unsectionedBots.map((bot) => bot.id)).toEqual(["xon", "cat"]);
+  });
+
   it("shows DMs in Bot Chats without rewriting their comms context", () => {
     const dm = { id: "dm", dm: true, section: "Work" };
     const namedBotChats = { id: "named", section: "Bot Chats" };
@@ -85,13 +100,13 @@ describe("sidebar virtual sections", () => {
     expect(parts.pinnedBots).toEqual([]);
   });
 
-  it("lists pinned bots from every group, including their chiefs", () => {
+  it("lifts pinned bots from every group, the main Chief too, when pins are universal", () => {
     const workChief = { id: "work-chief", chiefOfStaff: true, section: "Work", pinned: true };
     const home = { id: "home", section: "Home", pinned: true };
     const looseChief = { id: "loose", chiefOfStaff: true, pinned: true };
     const stay = { id: "stay", section: "Work" };
     const hidden = { id: "hidden", section: "Home", pinned: true, hidden: true };
-    const parts = partitionSidebarBots([workChief, home, looseChief, stay, hidden]);
+    const parts = partitionSidebarBots([workChief, home, looseChief, stay, hidden], { universalPins: true });
     expect(parts.pinnedBots.map((bot) => bot.id)).toEqual(["work-chief", "home", "loose"]);
     expect(parts.sectionChiefs).toEqual([]);
     expect(parts.unsectionedChief).toBeNull();
@@ -100,24 +115,24 @@ describe("sidebar virtual sections", () => {
     expect(home.section).toBe("Home");
   });
 
-  it("shows the same pinned bots on every client: the list depends only on the server pin flag", () => {
-    const parts = partitionSidebarBots([
+  it("lists a group's pinned Chief with the pinned bots on every client; the main Chief keeps its own top slot", () => {
+    const bots = [
       { id: "work-chief", chiefOfStaff: true, section: "Work", pinned: true },
       { id: "home-chief", chiefOfStaff: true, section: "Home", pinned: true },
-      { id: "loose-chief", chiefOfStaff: true, pinned: true },
+      { id: "main-chief", chiefOfStaff: true, pinned: true },
       { id: "plain-pinned", pinned: true },
       { id: "unpinned-chief", chiefOfStaff: true, section: "Work" },
       { id: "member", section: "Work" },
-    ]);
-    expect(parts.pinnedBots.map((bot) => bot.id)).toEqual([
-      "work-chief",
-      "home-chief",
-      "loose-chief",
-      "plain-pinned",
-    ]);
-    expect(parts.sectionChiefs.map((bot) => bot.id)).toEqual(["unpinned-chief"]);
-    expect(parts.unsectionedChief).toBeNull();
-    expect(parts.sectionedBots.map((bot) => bot.id)).toEqual(["member"]);
+    ];
+    const local = partitionSidebarBots(bots);
+    expect(local.pinnedBots.map((bot) => bot.id)).toEqual(["work-chief", "home-chief", "plain-pinned"]);
+    expect(local.unsectionedChief?.id).toBe("main-chief");
+    expect(local.sectionChiefs.map((bot) => bot.id)).toEqual(["unpinned-chief"]);
+    expect(local.sectionedBots.map((bot) => bot.id)).toEqual(["member"]);
+    const universal = partitionSidebarBots(bots, { universalPins: true });
+    expect(universal.pinnedBots.map((bot) => bot.id)).toEqual(["work-chief", "home-chief", "main-chief", "plain-pinned"]);
+    expect(universal.unsectionedChief).toBeNull();
+    expect(universal.sectionChiefs.map((bot) => bot.id)).toEqual(["unpinned-chief"]);
   });
 
   it("shows pinned-circle thread rows only while the circle grid is showing", () => {
