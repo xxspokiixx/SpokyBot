@@ -62,6 +62,7 @@ function profiles(): Record<string, Record<string, string>> {
   all["skills+shared+voice+escalations"] = { ...all["skills+shared+voice"]!, OMB_ESCALATIONS: "1" };
   all["skills+shared+voice+escalations+x"] = { ...all["skills+shared+voice+escalations"]!, OMB_X_RESEARCH: "1" };
   all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" };
+  for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
   return all;
 }
 
@@ -97,6 +98,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+escalations": 16822,
   "skills+shared+voice+escalations+x": 16916,
   "default+legacy-switches": 15996,
+  "default+mausbot": 16284,
+  "skills+shared+voice+mausbot": 17163,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };

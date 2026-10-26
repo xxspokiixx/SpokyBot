@@ -110,13 +110,13 @@ describe("who may", () => {
     expect(rows[0]!.read).toBe(false);
   });
 
-  it("annotates the two list tools read-only and the writers not", () => {
+  it("annotates the list read-only and the marker not", () => {
     const hints = MAUSBOT_TOOL_DEFINITIONS.map((tool) => [tool.name, (tool as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint ?? false]);
-    expect(hints).toEqual([["list_app_settings", true], ["set_app_setting", false], ["list_unread_notifications", true], ["mark_notifications_read", false]]);
+    expect(hints).toEqual([["list_unread_notifications", true], ["mark_notifications_read", false]]);
   });
 
   it("is mounted for the MausBot profile and flat", () => {
-    expect([...MAUSBOT_TOOL_NAMES]).toEqual(expect.arrayContaining(["list_unread_notifications", "mark_notifications_read"]));
+    expect([...MAUSBOT_TOOL_NAMES]).toEqual(["list_unread_notifications", "mark_notifications_read"]);
     expect(MAUSBOT_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([...MAUSBOT_TOOL_NAMES]);
     expect(JSON.stringify(MAUSBOT_TOOL_DEFINITIONS)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)"/);
   });

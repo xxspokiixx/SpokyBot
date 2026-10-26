@@ -53,6 +53,8 @@ function profiles(): Record<string, Profile> {
   all["default+legacy-switches"] = {
     env: { ...all.default!.env, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" },
   };
+  // The person's MausBot holds a Chief's powers and adds its notification pair; MAUSBOT_ADDS bounds what that costs.
+  for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { env: { ...all[name]!.env, OMB_MAUSBOT: "1" } };
   return all;
 }
 
@@ -61,6 +63,9 @@ const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", 
 const CHIEF_TARGET_TOOLS = ["propose_profile", "propose_model"];
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const TEAMWORK_TOOLS = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
+const MAUSBOT_TOOLS = ["list_unread_notifications", "mark_notifications_read"];
+/** MausBot's tools may make its list at most this much longer than the same Chief's without them. */
+const MAUSBOT_ADDS = 0.02;
 const RESEARCH_TOOLS = ["x_search", "x_user_posts", "x_post", "x_profile", "research_search", "research_endpoint", "research_call"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
 const FULL = "skills+shared+voice+escalations+x";
@@ -86,6 +91,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+cloud-home": 65909,
   "skills+shared+voice+non-chief+cloud-home": 56060,
   "default+legacy-switches": 61361,
+  "default+mausbot": 62838,
+  "skills+shared+voice+mausbot": 68402,
   "skills+shared+voice+escalations": 67714,
   "skills+shared+voice+escalations+x": 72352,
 };
@@ -179,6 +186,7 @@ describe("agents proxy tools/list golden", () => {
       for (const tool of toolsOf(wires[name]!)) {
         if (profile.env.OMB_CLOUD_HOME === "1" && tool.name === "select_computer") continue;
         if (profile.env.OMB_CHIEF_OF_STAFF === "0" && CHIEF_TARGET_TOOLS.includes(tool.name)) continue;
+        if (profile.env.OMB_MAUSBOT === "1" && MAUSBOT_TOOLS.includes(tool.name)) continue;
         expect(JSON.stringify(tool), `${name}: ${tool.name}`).toBe(full.get(tool.name));
       }
     }
@@ -346,6 +354,14 @@ describe("agents proxy tools/list wire size", () => {
     ];
     console.log(lines.join("\n"));
     expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it.each(Object.keys(PROFILES).filter((name) => name.endsWith("+mausbot")))("%s adds at most 2% to the same Chief's list", (name) => {
+    const without = name.slice(0, -"+mausbot".length);
+    const tools = toolsOf(wires[name]!).map((tool) => tool.name);
+    expect(tools.slice(-MAUSBOT_TOOLS.length)).toEqual(MAUSBOT_TOOLS);
+    expect(tools.slice(0, -MAUSBOT_TOOLS.length)).toEqual(toolsOf(wires[without]!).map((tool) => tool.name));
+    expect(bytes(wires[name]!)).toBeLessThanOrEqual(Math.floor(bytes(wires[without]!) * (1 + MAUSBOT_ADDS)));
   });
 
   it.each(Object.keys(PROFILES))("%s stays within 2% of its budget baseline", (name) => {

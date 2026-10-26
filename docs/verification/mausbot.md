@@ -23,30 +23,20 @@ pnpm exec vitest run server/default-bot.test.ts server/default-bot.e2e.test.ts \
 - `server/default-bot.e2e.test.ts`: on a real fixture server, `DELETE
   /api/bots/:id` answers 409, the switch hides and shows it, and a MausBot that
   is not the Chief creates a bot with `create_bot`.
-- `server/mausbot-settings.test.ts` and the second case of
-  `server/default-bot.e2e.test.ts`: MausBot alone gets `list_app_settings` and
-  `set_app_setting`; they change only "Show MausBot in the sidebar" and "Tool
-  calls", say what changed and how to undo it, and refuse every other name
-  (language, theme, keys, approval levels and the rest stay in Settings).
-  Hiding MausBot from the sidebar changes nothing on the first call: it returns
-  what will happen and where to undo it, and applies only when called again with
-  `confirm: true` after the person said yes; turning it back on never asks.
-  A workspace-wide setting is refused on a team (an Owner's or Admin's MausBot
-  included): the person changes it in Settings. A failed save is reported, not
-  swallowed. `server/drivers/agents-mausbot-tools.test.ts` pins the four tools'
-  flat schemas. The four tools are listed last, so under a model's tool-count
-  limit they are the first to be left out (the server still answers a call to
-  one); `OMB_MAUSBOT` is documented in `server/drivers/agents-proxy.ts`.
-- `server/mausbot-notifications.test.ts`: `list_unread_notifications` returns the
-  unread feed (bounded, trimmed) with a lean per item; `mark_notifications_read`
-  marks only finished work and notices (`done`, `delegation-settled`), leaves
+- `server/mausbot-notifications.test.ts`, `server/drivers/agents-mausbot-tools.test.ts`
+  and the second case of `server/default-bot.e2e.test.ts`: MausBot alone gets
+  `list_unread_notifications` and `mark_notifications_read`, listed last.
+  The list returns the unread feed (bounded, trimmed) with a lean per item;
+  marking read takes only finished work (`done`, `delegation-settled`), leaves
   questions, approvals, failures, deferred runs (`routine-deferred`, which the
   app routes as an ask), sign-ins, money, mentions and unrecognised kinds
   unread, has no mark-all, and says what it marked and what it left. A `done`
-  item is the bot's final reply and may end in a question: the tool text says
+  item is the bot's final reply and may end in a question: the list's text says
   such an item is the person's, to be marked read only if they said so.
-  Personal installs only (refused on any team server); no other bot may call it.
-  The two `list_*` tools are annotated read-only like the other reviewed reads.
+  Personal installs only (refused on any team server); no other bot may call
+  them. The list is annotated read-only like the other reviewed reads.
+  `server/drivers/agents-catalog-wire.test.ts` budgets the `+mausbot` profiles,
+  each within 2% of the same Chief's list without them.
 - `server/team-setup-requests.test.ts` ("MausBot's Chief-level team setup"):
   it adds specialists like a Chief but never changes who the Chief is.
 - `src/components/MausBotWelcome.test.ts` and `src/lib/default-bot.test.ts`:

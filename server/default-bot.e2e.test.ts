@@ -80,7 +80,7 @@ it("makes MausBot a new install's first bot, never deleted, hidden by its switch
   }
 }, 120_000);
 
-it("lets MausBot list and change the allowlisted settings, refuses the rest, and gives no other bot the tools", async () => {
+it("lets MausBot read the unread notifications and mark finished work read, and gives no other bot the tools", async () => {
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
   const api = async (path: string) => (await (await fetch(`${fixture.info.url}${path}`, { signal: AbortSignal.timeout(10_000) })).json()) as any;
   const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
@@ -97,34 +97,6 @@ it("lets MausBot list and change the allowlisted settings, refuses the rest, and
     const agents = await launch(maus.id);
     expect(agents.env.OMB_MAUSBOT).toBe("1");
 
-    const listed = await callTool(agents, "list_app_settings", {});
-    expect(listed.result?.isError, text(listed)).toBeFalsy();
-    expect(text(listed)).toContain('"name":"show_tool_calls","title":"Tool calls","value":"off"');
-
-    const changed = await callTool(agents, "set_app_setting", { setting: "show_tool_calls", value: "on" });
-    expect(changed.result?.isError, text(changed)).toBeFalsy();
-    expect(text(changed)).toContain('Changed "Tool calls" (Settings → Appearance) from off to on. To undo, ask me to set show_tool_calls back to off');
-    expect((await api("/api/config")).features.showToolCalls).toBe(true);
-
-    const asked = await callTool(agents, "set_app_setting", { setting: "mausbot_in_sidebar", value: "off" });
-    expect(text(asked)).toContain("Nothing changed yet. This will hide");
-    expect(((await api("/api/bots")).bots as any[]).find((bot) => bot.id === maus.id).sidebarHidden).toBeFalsy();
-    const hidden = await callTool(agents, "set_app_setting", { setting: "mausbot_in_sidebar", value: "off", confirm: true });
-    expect(hidden.result?.isError, text(hidden)).toBeFalsy();
-    expect(((await api("/api/bots")).bots as any[]).find((bot) => bot.id === maus.id).sidebarHidden).toBe(true);
-
-    const refused = await callTool(agents, "set_app_setting", { setting: "anthropic_key", value: "on" });
-    expect(refused.result?.isError).toBe(true);
-    expect(text(refused)).toContain("I can change: mausbot_in_sidebar, show_tool_calls.");
-    expect((await api("/api/config")).features.showToolCalls).toBe(true);
-
-    const { bot: clive } = await control(["new-bot", "--name", "Clive"]);
-    const other = await launch(clive.id);
-    expect(other.env.OMB_MAUSBOT).toBe("0");
-    const denied = await callTool(other, "set_app_setting", { setting: "show_tool_calls", value: "off" });
-    expect(denied.result?.isError ?? true).toBe(true);
-    expect((await api("/api/config")).features.showToolCalls).toBe(true);
-
     const unread = await callTool(agents, "list_unread_notifications", {});
     expect(unread.result?.isError, text(unread)).toBeFalsy();
     expect(text(unread)).toContain('"notifications":[');
@@ -133,7 +105,12 @@ it("lets MausBot list and change the allowlisted settings, refuses the rest, and
     expect(text(marked)).toContain("Marked none read.");
     expect(text(marked)).toContain("no-such-notification: not an unread notification");
     expect((await callTool(agents, "mark_notifications_read", { ids: "all" })).result?.isError).toBe(true);
+
+    const { bot: clive } = await control(["new-bot", "--name", "Clive"]);
+    const other = await launch(clive.id);
+    expect(other.env.OMB_MAUSBOT).toBe("0");
     expect((await callTool(other, "list_unread_notifications", {})).result?.isError ?? true).toBe(true);
+    expect((await callTool(other, "mark_notifications_read", { ids: ["no-such-notification"] })).result?.isError ?? true).toBe(true);
     await control(["interrupt", "--bot", maus.id]);
     await control(["interrupt", "--bot", clive.id]);
   } finally {
