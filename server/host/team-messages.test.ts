@@ -103,7 +103,7 @@ describe("message_person", () => {
     expect(JSON.stringify(f.lines("made-1"))).not.toContain("salary");
     expect(f.lines("ada-private").at(-1)).toMatchObject({ kind: "activity", tool: { name: "Told Bob Stone", ok: true, output: "The launch moved to Friday." }, relay: { kind: "told", email: BOB.email } });
     expect(f.notified).toEqual([expect.objectContaining({ kind: "mention", threadId: "made-1", forPerson: key(BOB.email), title: "Message from Ada via Scout" })]);
-    expect(f.team.needsYou(session(BOB.email))).toEqual([expect.objectContaining({ kind: "message", threadId: "made-1", from: "Ada", text: "The launch moved to Friday." })]);
+    expect(f.team.needsYou(session(BOB.email))).toEqual([expect.objectContaining({ kind: "message", threadId: "made-1", from: "Ada", fromEmail: ADA.email, text: "The launch moved to Friday." })]);
     expect(f.team.needsYou(session(ADA.email))).toEqual([]);
     expect(f.team.needsYou(session(OLIVE.email))).toEqual([]);
     expect(f.unread).toContain("made-1");
@@ -179,7 +179,7 @@ describe("a teammate's @mention", () => {
     expect(f.notified.map((one) => [one.forPerson, one.title])).toEqual([
       [key(BOB.email), "Ada mentioned you in Scout"], [key(OLIVE.email), "Ada mentioned you in Scout"],
     ]);
-    expect(f.team.needsYou(session(BOB.email))).toEqual([expect.objectContaining({ kind: "message", messageId: line.id, from: "Ada" })]);
+    expect(f.team.needsYou(session(BOB.email))).toEqual([expect.objectContaining({ kind: "message", messageId: line.id, from: "Ada", fromEmail: ADA.email })]);
     expect(f.team.needsYou(session(ADA.email))).toEqual([]);
     f.team.seen(session(BOB.email), "scout-main");
     expect(f.team.needsYou(session(BOB.email))).toEqual([]);
@@ -202,6 +202,9 @@ describe("a teammate's @mention", () => {
     f.store.patchMessage("scout-main", reply.id, { turnTerminal: true, turnSucceeded: true });
     f.store.patchMessage("scout-main", reply.id, { reactions: [] });
     expect(f.notified.map((one) => [one.forPerson, one.title])).toEqual([[key(BOB.email), "Scout mentioned you"], [key(OLIVE.email), "Scout mentioned you"]]);
+    const fromScout = f.team.needsYou(session(BOB.email));
+    expect(fromScout).toEqual([expect.objectContaining({ kind: "message", from: "Scout" })]);
+    expect(fromScout[0], "a bot has no teammate's face").not.toHaveProperty("fromEmail");
 
     f.notified.length = 0;
     f.team.pass("scout", "scout-main", "Bob", "here is the link");

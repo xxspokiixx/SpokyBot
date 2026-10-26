@@ -42,7 +42,7 @@ const messages = async (token: string, threadId: string) => {
 };
 const tasks = async (token: string) => ((await team.as(token, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks?: Task[] }>)
   .find((bot) => bot.id === scout.id)?.tasks ?? [];
-const needsYou = async (token: string) => (await team.as(token, "GET", "/api/needs-you")).body.items as Array<{ kind: string; threadId: string; messageId?: string; from?: string; text?: string }>;
+const needsYou = async (token: string) => (await team.as(token, "GET", "/api/needs-you")).body.items as Array<{ kind: string; threadId: string; messageId?: string; from?: string; fromEmail?: string; text?: string }>;
 const feed = async (token: string) => (await team.as(token, "GET", "/api/notifications")).body.notifications as Array<{ kind: string; threadId: string; title: string; forPerson?: string }>;
 const idle = async () => ((await team.as(olive, "GET", "/api/bots")).body.bots as Array<{ busy?: boolean; activity?: string }>).every((bot) => !bot.busy && bot.activity !== "working");
 
@@ -143,7 +143,7 @@ it("passes Ada's message to Bob in a new private conversation of his own, and no
 
   // Only Bob: his Needs you, his notification; no one else's, the Owner's included.
   await until(async () => (await needsYou(bob)).some((item) => item.kind === "message" && item.threadId === bobThread));
-  expect((await needsYou(bob)).find((item) => item.threadId === bobThread)).toMatchObject({ from: "Ada", text: "The launch moved to Friday." });
+  expect((await needsYou(bob)).find((item) => item.threadId === bobThread)).toMatchObject({ from: "Ada", fromEmail: ADA.email, text: "The launch moved to Friday." });
   for (const token of [ada, olive]) expect((await needsYou(token)).filter((item) => item.kind === "message")).toEqual([]);
   for (const token of [ada, olive]) expect((await feed(token)).filter((entry) => entry.threadId === bobThread)).toEqual([]);
   await until(() => notifiedIn(bobs, bobThread).length === 1);
@@ -178,7 +178,7 @@ it("brings Bob's answer back into Ada's own conversation, where only Ada reads i
   expect(JSON.stringify(adasRows)).not.toContain("job hunting");
   expect((await messages(bob, bobThread)).rows.some((row) => row.relay?.kind === "told" && row.relay.email === ADA.email)).toBe(true);
   await until(async () => (await needsYou(ada)).some((item) => item.kind === "message" && item.threadId === adaThread));
-  expect((await needsYou(ada)).find((item) => item.threadId === adaThread)).toMatchObject({ from: "Bob", messageId: reply!.id });
+  expect((await needsYou(ada)).find((item) => item.threadId === adaThread)).toMatchObject({ from: "Bob", fromEmail: BOB.email, messageId: reply!.id });
   await until(() => notifiedIn(adas, adaThread).length === 1);
   expect(notifiedIn(olives, adaThread)).toEqual([]);
   expect((await messages(ada, bobThread)).status).toBe(404);
