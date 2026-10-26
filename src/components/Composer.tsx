@@ -65,7 +65,7 @@ import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, openTa
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
-import { ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu"; import { BotGoalLine } from "./BotGoalChip"; import { runGoalCommand } from "@/lib/bot-goal";
+import { ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ComposerReplyStrip } from "./ReplyQuote";
 import { escapeCancelsReply } from "@/lib/replies";
@@ -301,11 +301,11 @@ export function Composer({
           )?.capabilities?.agentsMcp,
       );
     const available: ComposerSlashCommand[] = [];
-    if (!group?.dm) available.push({
+    if (group && !group.dm) available.push({
       kind: "command",
       id: "goal",
       label: "/goal",
-      description: t(group ? "composer.command.goalDesc" : "composer.command.goalBotDesc"),
+      description: t("composer.command.goalDesc"),
     });
     if (
       skillAuthoringEnabled(state.config) &&
@@ -388,7 +388,7 @@ export function Composer({
   const pickCommand = (command: ComposerSlashCommand | undefined) => {
     if (!slash || !command) return;
     const replacement = command.kind === "skill" ? `${command.label} `
-      : command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : command.id === "goal" && !group ? "/goal " : "";
+      : command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
     const next = replaceComposerSlashTrigger(text, slash, replacement);
     editText(next.text);
     setCaret(next.caret);
@@ -563,7 +563,6 @@ export function Composer({
   };
   const send = () => {
     if (locked || attachmentPending) return;
-    if (!group && bot && runGoalCommand(text, { botId: bot.id, threadId, goal: bot.tasks?.find((task) => task.threadId === threadId)?.goal }, dispatch)) { setText(""); return; }
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
       !imageTargetsSupport(effectiveText, effectiveChannelMode)
@@ -609,7 +608,8 @@ export function Composer({
       });
       directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && !canSteer);
     }
-    setText(""); setAttachments([]);
+    setText("");
+    setAttachments([]);
     onConsumeReply?.();
     if (group) setChannelMode("chat");
   };
@@ -770,7 +770,7 @@ export function Composer({
           onNotice={setAttachmentNotice}
           onPendingChange={(pending) => changeDraftAttachmentPending(draftId, pending)}
           uploadImage={uploadImage}
-        /><BotGoalLine bot={group ? undefined : bot} threadId={threadId} dispatch={dispatch} />
+        />
         <QueuedComposerMessages
           items={queuedMessages}
           onSteer={canSteerQueued ? steerQueued : undefined}
