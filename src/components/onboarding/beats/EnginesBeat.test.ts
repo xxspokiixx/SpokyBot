@@ -8,10 +8,11 @@ import type { InstanceInfo } from "@/state/store";
 
 const f = vi.hoisted(() => ({
   instances: [] as InstanceInfo[], dispatch: vi.fn(), row: null as null | { bridge: unknown; onOpenSettings: () => void },
-  check: (): Promise<object> => Promise.resolve({ ok: true }), checks: [] as string[],
+  check: (): Promise<object> => Promise.resolve({ ok: true }), checks: [] as string[], fail: false,
 }));
 vi.mock("@/state/store", () => ({
   api: async (path: string) => {
+    if (f.fail) { f.fail = false; throw new Error("503"); }
     if (!path.endsWith("/check")) return { instances: f.instances };
     f.checks.push(path);
     return f.check();
@@ -51,6 +52,7 @@ beforeEach(() => {
   f.instances = [engine("grok", "grokAgent", "Grok", false), engine("claude", "claudeAgent", "Claude", false), engine("codex", "codex", "Codex", false)];
   f.dispatch.mockReset();
   f.row = null;
+  f.fail = false;
   vi.stubGlobal("ogb", undefined);
   host = document.createElement("div");
   document.body.append(host);
@@ -63,6 +65,24 @@ afterEach(async () => {
 });
 
 describe("the welcome's Connect an AI step", () => {
+  it("says when it could not check the AIs, keeps what it already lists, and checks again", async () => {
+    // Was a step of scripts/verify-onboarding-ui.ts, whose fixture no longer reaches this step (its AI already works).
+    await show();
+    await otherWays();
+    const listed = () => [...host.querySelectorAll("[aria-expanded]")].map((node) => node.textContent);
+    const before = listed();
+    const checkAgain = async () => {
+      const button = [...host.querySelectorAll("button")].find((node) => node.textContent === "Check again")!;
+      await act(async () => { button.click(); });
+    };
+    f.fail = true;
+    await checkAgain();
+    expect(text()).toContain("Couldn't check your AI connections");
+    expect(listed()).toEqual(before);
+    await checkAgain();
+    expect(text()).not.toContain("Couldn't check your AI connections");
+  });
+
   it("leads with one recommended way and folds every other way, with no status list and no engine talk", async () => {
     await show();
     expect([...host.querySelectorAll("[data-engine-setup]")].map((node) => node.getAttribute("data-engine-setup"))).toEqual(["claude"]);

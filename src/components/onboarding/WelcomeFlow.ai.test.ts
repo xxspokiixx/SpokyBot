@@ -38,7 +38,7 @@ const chief: Bot = {
 };
 let host: HTMLDivElement, root: Root;
 const text = () => host.textContent ?? "";
-const flow = (extra: Record<string, unknown> = {}) => createElement(WelcomeFlow, { bot: chief, onDone: vi.fn(), reel: false, dictation: false, cloudOffer: null, setupImport: null, ...extra });
+const flow = (extra: Record<string, unknown> = {}) => createElement(WelcomeFlow, { onDone: vi.fn(), dictation: false, cloudOffer: null, setupImport: null, ...extra });
 const show = async (extra: Record<string, unknown> = {}) => { await act(async () => { root.render(flow(extra)); }); };
 const press = async (label: string) => {
   const button = [...host.querySelectorAll("button")].find((node) => node.textContent === label)!;
@@ -59,33 +59,34 @@ afterEach(async () => {
   host.remove();
 });
 
-it("asks for no AI when one already works, and goes from hello to the next step", async () => {
+it("asks for no AI when one already works: the greeting is the whole welcome, and it ends in the chat", async () => {
   f.state.instances = [claude(true)];
-  await show();
+  const onDone = vi.fn();
+  await show({ onDone });
   // One tiny test message first: the step is left out once Claude answered it.
   expect(f.checks).toEqual(["/api/instances/claude/check"]);
-  expect(text()).toContain("Step 1 of 3");
+  expect(text()).not.toContain("Step 1 of");
   await press("Maybe later");
   expect(text()).not.toContain("Connect an AI");
-  expect(text()).toContain("Step 2 of 3");
+  expect(onDone).toHaveBeenCalledOnce();
 });
 
 it("asks to connect an AI when none works, and keeps the step once it is shown, even after one connects", async () => {
   await show();
-  expect(text()).toContain("Step 1 of 4");
+  expect(text()).toContain("Step 1 of 2");
   await press("Maybe later");
   expect(text()).toContain("Connect an AI");
   expect(host.querySelector('[data-engine-setup="claude"]')).not.toBeNull();
   f.state = { ...f.state, instances: [claude(true)] };
   await show();
   expect(text()).toContain("Connected · Claude");
-  expect(text()).toContain("Step 2 of 4");
+  expect(text()).toContain("Step 2 of 2");
 });
 
 it("still asks for the person's own AI when only OpenCode's free model works, and says it is there as a backup", async () => {
   f.state.instances = [freeOpenCode, claude(false)];
   await show();
-  expect(text()).toContain("Step 1 of 4");
+  expect(text()).toContain("Step 1 of 2");
   await press("Maybe later");
   expect(text()).toContain("Connect an AI");
   expect(text()).toContain("OpenCode's free model is ready as a backup");
@@ -97,27 +98,27 @@ it("still asks for the person's own AI when only OpenCode's free model works, an
 it("leaves the step out for a real AI that answered its test, and keeps it for one that didn't", async () => {
   f.state.instances = [freeOpenCode, claude(true, "passed")];
   await show();
-  expect(text()).toContain("Step 1 of 3");
+  expect(text()).not.toContain("Step 1 of");
   expect(f.checks).toEqual([]);
   f.state.instances = [freeOpenCode, claude(true, "failed")];
   await act(async () => root.unmount());
   root = createRoot(host);
   await show();
-  expect(text()).toContain("Step 1 of 4");
+  expect(text()).toContain("Step 1 of 2");
 });
 
-it("introduces the Chief as the person's assistant on the last step", async () => {
-  f.state.instances = [claude(true)];
-  await show({ initialBeat: "bot" });
-  expect(text()).toContain("Meet your assistant");
-  expect(text()).toContain("brings in specialists when a job needs them");
-  await show({ initialBeat: "bot", bot: { ...chief, chiefOfStaff: false } });
-  expect(text()).toContain("Meet your first bot");
+it("has no step about the first bot: Continue on the last step lands in the chat", async () => {
+  const onDone = vi.fn();
+  await show({ onDone, initialBeat: "engines" });
+  expect(text()).toContain("Step 2 of 2");
+  await press("Continue");
+  expect(onDone).toHaveBeenCalledOnce();
+  expect(text()).not.toContain("Meet your");
 });
 
 it("doesn't count an AI that offers no model yet, such as OpenCode still listing its models", async () => {
   f.state.instances = [{ ...freeOpenCode, snapshot: { state: "available", authenticated: true }, models: { default: "", options: [] }, aiTest: undefined }, claude(false)];
   await show();
-  expect(text()).toContain("Step 1 of 4");
+  expect(text()).toContain("Step 1 of 2");
   expect(f.checks).toEqual([]);
 });
