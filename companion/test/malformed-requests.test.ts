@@ -1,7 +1,7 @@
 import { createServer, request, type Server } from "node:http";
 import { once } from "node:events";
 import { createConnection } from "node:net";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createProxyHandler } from "../src/proxy.ts";
 
 const servers: Server[] = [];
@@ -93,4 +93,28 @@ it("refuses pairing credentials and device names that are not plain values", asy
   expect(await pair({ code: "123456", deviceName: "Phone" })).toBe(401);
   expect(await pair({ code: 123456 })).toBe(401);
   expect(redeemed).toEqual([["123456", "Phone"], ["123456", undefined]]);
+});
+
+it("answers 500 and logs the cause when pairing itself fails", async () => {
+  const proxy = createProxyHandler({
+    harnessPort: 9,
+    authenticate: () => null,
+    redeem: () => {
+      throw new Error("registry broke");
+    },
+    serverName: () => "Fixture",
+  });
+  const port = await listen(createServer(proxy));
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "123456" }),
+    });
+    expect(response.status).toBe(500);
+    expect(logged).toHaveBeenCalledWith("companion: pairing failed", expect.objectContaining({ message: "registry broke" }));
+  } finally {
+    logged.mockRestore();
+  }
 });

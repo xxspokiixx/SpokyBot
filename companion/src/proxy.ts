@@ -347,7 +347,10 @@ export function createProxyHandler(options: ProxyOptions) {
           return sendJson(res, 201, response);
         },
         (error: Error) => sendJson(res, 400, { error: error.message }),
-      ).catch(() => sendJson(res, 500, { error: "could not complete the pairing" }));
+      ).catch((error: unknown) => {
+        console.error("companion: pairing failed", error);
+        sendJson(res, 500, { error: "could not complete the pairing" });
+      });
       return;
     }
 

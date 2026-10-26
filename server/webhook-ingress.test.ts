@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   advertisedWebhookBase,
@@ -220,11 +220,14 @@ describe("malformed requests", () => {
       recordRejected: () => { throw new Error("disk full"); },
     } as unknown as WebhookManager;
     const receiver = await listenWebhookIngress(failing, { port: 0 });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const response = await fetch(`${receiver.baseUrl}/hooks/wh_failing`, { method: "POST", body: "{}" });
       expect(response.status).toBe(500);
+      expect(logged).toHaveBeenCalledWith("webhooks: receiver failed", expect.objectContaining({ message: "disk full" }));
       expect((await fetch(`${receiver.baseUrl}/health`)).status).toBe(200);
     } finally {
+      logged.mockRestore();
       await new Promise<void>((resolve) => receiver.server.close(() => resolve()));
     }
   });

@@ -172,7 +172,8 @@ export async function listenWebhookIngress(
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
   const handle = createWebhookIngressHandler(manager, options.claimRequest);
   const server = createServer((req, res) => {
-    handle(req, res).catch(() => {
+    handle(req, res).catch((error: unknown) => {
+      console.error("webhooks: receiver failed", error);
       if (res.headersSent) res.destroy();
       else json(res, 500, { error: "Webhook receiver failed" });
     });
