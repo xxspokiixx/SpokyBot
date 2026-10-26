@@ -154,6 +154,13 @@ describe("the profile shown for a signed-in session", () => {
     expect(profileForSession(owner, { kind: "loopback" })).toBe(owner);
   });
 
+  it("keeps the configured profile for an admin session, with or without an email, and on a Team Cloud", () => {
+    expect(profileForSession(owner, { kind: "session", id: "s", label: "Owner's browser", scopes: ["admin", "client"], expiresAt: 1 })).toBe(owner);
+    expect(profileForSession(owner, { ...ada, scopes: ["admin", "client"] })).toBe(owner);
+    const member = { name: "Ada", email: "ada@example.test" };
+    expect(profileForSession(member, { ...ada, team: { id: "team-1", name: "Shared Team", role: "member" } })).toBe(member);
+  });
+
   it("does not show the configured owner for email-less paired sessions", () => {
     const sessions: SessionState[] = [
       { kind: "session", id: "s", label: "Ada's iPad", scopes: ["client"], expiresAt: 1 },

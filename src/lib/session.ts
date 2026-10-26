@@ -17,9 +17,12 @@ export type SessionState =
 
 type SessionProfile = { name?: string; email?: string; avatarUrl?: string };
 
+/** The sidebar's "you". The configured profile is the owner's: an admin (the owner on a My Cloud) keeps it, and a Team
+ * Cloud already sends each person their own. Anyone else sees their own email, never the owner's name or picture. */
 export function profileForSession(profile: SessionProfile | undefined, sessionState: SessionState | null): SessionProfile | undefined {
   if (!sessionState) return undefined;
   if (sessionState.kind !== "session") return sessionState.kind === "loopback" ? profile : undefined;
+  if (sessionState.team || sessionState.scopes.includes("admin")) return profile;
   const email = sessionState.email;
   if (!email?.trim()) return undefined;
   return profile?.email?.trim().toLowerCase() === email.trim().toLowerCase() ? profile : { email };
