@@ -194,6 +194,15 @@ export function isSameOrigin(req: IncomingMessage): boolean {
   return own !== null && origin.trim().toLowerCase() === own;
 }
 
+/** The desktop window's session adds the owner header to every request for this server, whichever page in it asks, and
+ * a saved server can be opened in that window at another loopback origin. So a browser's header counts only on a
+ * same-origin request or the window's own navigation; any other page there is a different site. */
+export function fromOwnPage(req: IncomingMessage): boolean {
+  if (!fromBrowser(req)) return true;
+  const site = headerValue(req.headers["sec-fetch-site"])?.trim().toLowerCase();
+  return isSameOrigin(req) && (site === undefined || site === "same-origin" || site === "none");
+}
+
 /** Unlike isSameOrigin, a request with neither Origin nor Sec-Fetch-Site fails. */
 export function provesSameOrigin(req: IncomingMessage): boolean {
   if (headerValue(req.headers.origin)) return isSameOrigin(req);
@@ -525,7 +534,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
     }
     const desktopOwner = options.loopbackMutationToken !== undefined &&
-      secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken);
+      secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken) && fromOwnPage(req);
     if (fromBrowser(req) && !desktopOwner && !options.trustLocalBrowser) return deny(401, BROWSER_SIGN_IN);
     if (options.loopbackMutationToken !== undefined && mutatingPublicRoute(method, path) && !desktopOwner) {
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");

@@ -709,6 +709,23 @@ describe("a browser on this machine is not the owner", () => {
     expect(check(relay, "/api/bots/b/messages", "POST", desktop).auth?.kind).toBe("loopback");
   });
 
+  it("does not lend the owner header to another page in the desktop window's session", () => {
+    const desktop = { desktopToken: "owner-token-123" };
+    const owner = { "x-openmausbot-desktop-owner": "owner-token-123" };
+    const savedServer = { host: "127.0.0.1:8799", origin: "http://localhost:8080", "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "empty" };
+    const otherPort = { ...savedServer, origin: "http://127.0.0.1:3000", "sec-fetch-site": "same-site" };
+    const { origin: _origin, ...imageTag } = { ...savedServer, "sec-fetch-dest": "image" };
+    for (const headers of [savedServer, otherPort, imageTag, { ...socket, ...owner }]) {
+      for (const [method, path] of [["POST", "/api/routines"], ["PATCH", "/api/bots/bot-1"], ["PUT", "/api/config"], ["GET", "/api/bots"]]) {
+        const refused = check({ ...headers, ...owner }, path, method, desktop);
+        expect(refused.auth, `${method} ${path} ${JSON.stringify(headers)}`).toBeNull();
+        expect(refused.status).toBe(401);
+      }
+    }
+    expect(check({ ...navigation, ...owner }, "/api/bots", "GET", desktop).auth?.kind).toBe("loopback");
+    expect(check({ ...ownUi, ...owner }, "/api/config", "PUT", desktop).auth?.kind).toBe("loopback");
+  });
+
   it("still admits a browser that signed in", () => {
     const { code } = sessions.openPairing({ scopes: ["admin", "client"] });
     const paired = sessions.exchange({ code, label: "This browser", source: "127.0.0.1" });
