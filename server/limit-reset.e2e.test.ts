@@ -20,6 +20,8 @@ interface Fixture {
   control: (...args: string[]) => Promise<any>;
   /** The fake Claude refuses every turn until this reset (epoch seconds); `lift()` ends the limit. */
   limit: (resetsAt: number) => void;
+  /** The fake Claude refuses every turn with exactly this rate_limit_info until `lift()`. */
+  refuse: (info: Record<string, unknown>) => void;
   lift: () => void;
   claudePrompts: () => unknown[];
   dataDir: string;
@@ -77,9 +79,15 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
       const { instances } = await api("GET", "/api/instances") as { instances: any[] };
       return instances.find((instance) => instance.instanceId === "codex")?.models.options.some((option: any) => option.id === codex.model);
     }, { timeout: 20_000 }).toBe(true);
+    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn
+    // of its own on Claude, whose prompts these tests count. Stepped down, only the conversations under test run.
+    const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; chiefOfStaff?: boolean }> };
+    const starter = bots.find((bot) => bot.chiefOfStaff)!;
+    await api("PATCH", `/api/bots/${starter.id}`, { chiefOfStaff: false });
     await check({
       api, control, dataDir, evidence,
       limit: (resetsAt) => writeFileSync(limitedFile, JSON.stringify({ status: "rejected", rateLimitType: "five_hour", resetsAt })),
+      refuse: (info) => writeFileSync(limitedFile, JSON.stringify(info)),
       lift: () => rmSync(limitedFile, { force: true }),
       claudePrompts: () => jsonLines(promptsFile),
     });
@@ -189,4 +197,45 @@ it("never moves to another sign-in of the same engine; the stopped turn offers C
       expect(claudePrompts()).toHaveLength(1);
       expect((await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
     });
+}, 120_000);
+
+it("a model out of extra-usage credits moves that turn to the backup, but never holds the engine", async () => {
+  await withLimitFixture({ recovery: { enabled: true, backup: codex } }, async ({ api, control, refuse, lift, claudePrompts, evidence }) => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 11 * 86_400;
+    refuse({ status: "rejected", resetsAt, overageDisabledReason: "out_of_credits", isUsingOverage: false, errorCode: "credits_required" });
+    const { bot } = await control("new-bot", "--name", "Hazel");
+    const threadId = bot.activeTaskId;
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Remind me to commit");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+    expect(claudePrompts()).toHaveLength(1);
+    expect((await api("GET", "/api/limit-resets")).engines).not.toContainEqual(expect.objectContaining({ engine: "claude", blocked: true }));
+
+    lift();
+    const { task: other } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Another thing" });
+    await control("send", "--bot", bot.id, "--task", other.threadId, "--text", "And check today's commits");
+    expect((await control("wait", "--bot", bot.id, "--task", other.threadId, "--timeout", "30")).status).toBe("settled");
+    expect(claudePrompts()).toHaveLength(2);
+    const reply = (await messagesOf(api, other.threadId)).findLast((message) => message.role === "bot" && message.kind === "text");
+    expect(reply).toMatchObject({ text: "hello from fake claude" });
+    evidence.push({ reply });
+  });
+}, 120_000);
+
+it("a turn that works on the engine afterwards ends a refusal's hold long before its reset", async () => {
+  await withLimitFixture({}, async ({ api, control, limit, lift, evidence }) => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 11 * 86_400;
+    limit(resetsAt);
+    const { bot } = await control("new-bot", "--name", "Scout");
+    const threadId = bot.activeTaskId;
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Write the report");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
+    expect((await api("GET", "/api/limit-resets")).engines).toContainEqual(expect.objectContaining({ engine: "claude", blocked: true, resetsAt: resetsAt * 1000 }));
+
+    lift();
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Continue");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+    const after = await api("GET", "/api/limit-resets");
+    expect(after.engines).not.toContainEqual(expect.objectContaining({ engine: "claude", blocked: true }));
+    evidence.push({ after });
+  });
 }, 120_000);

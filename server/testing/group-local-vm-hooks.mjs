@@ -4,6 +4,7 @@ import { registerHooks } from 'node:module';
 const state = process.env.OMB_TEST_VM_STATE;
 if (!state) throw new Error('An explicit isolated VM state file is required');
 const actual = new URL('../container-computer.ts?actual', import.meta.url).href;
+const atomic = new URL('../atomic.ts', import.meta.url).href;
 const mock = new URL('./group-local-vm-mock.mjs', import.meta.url).href;
 const profilesMock = new URL('./group-local-vm-profiles-mock.mjs', import.meta.url).href;
 registerHooks({
@@ -15,13 +16,14 @@ registerHooks({
   load(url, context, nextLoad) {
     // Sign-in rescue: recorded in the state file, in order with the container actions, instead of running docker cp.
     if (url === profilesMock) return { format: 'module', shortCircuit: true, source: `
-      import { readFileSync, writeFileSync } from 'node:fs';
+      import { readFileSync } from 'node:fs';
+      import { writeFileAtomic } from ${JSON.stringify(atomic)};
       const file = ${JSON.stringify(state)};
       export async function rescueFirefoxProfile(_runtime, target) {
         const state = JSON.parse(readFileSync(file, 'utf8'));
         if (state.failRescue) throw new Error("could not copy the desktop's Firefox profile: fixture refused");
         state.actions = [...(state.actions ?? []), { action: 'rescue', target: target.key }];
-        writeFileSync(file, JSON.stringify(state));
+        writeFileAtomic(file, JSON.stringify(state), { durable: false });
         return 'rescued';
       }
       export async function keepFirefoxProfileBeforeRemove(target, status, stop) {
@@ -34,6 +36,7 @@ registerHooks({
       export * from ${JSON.stringify(actual)};
       import { SHARED_LOCAL_VM_TARGET } from ${JSON.stringify(actual)};
       import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+      import { writeFileAtomic } from ${JSON.stringify(atomic)};
       const file = ${JSON.stringify(state)};
       const read = () => JSON.parse(readFileSync(file, 'utf8'));
       export async function containerRuntimeStatus() { return { runtime: 'podman', daemonUp: true }; }
@@ -67,7 +70,7 @@ registerHooks({
           const state = read();
           state.imageMissing = false;
           state.actions = [...(state.actions ?? []), { action, target: target.key }];
-          writeFileSync(file, JSON.stringify(state));
+          writeFileAtomic(file, JSON.stringify(state), { durable: false });
           return containerComputerStatus(_run, _platform, target);
         }
         const state = read();
@@ -86,7 +89,7 @@ registerHooks({
           state.outdated = (state.outdated ?? []).filter(key => key !== target.key);
         }
         state.actions = [...(state.actions ?? []), { action, target: target.key }];
-        writeFileSync(file, JSON.stringify(state));
+        writeFileAtomic(file, JSON.stringify(state), { durable: false });
         return containerComputerStatus(_run, _platform, target);
       }
     ` };
@@ -107,7 +110,7 @@ registerHooks({
     if (url.endsWith('/turn-watchdog.ts')) {
       return { ...result, source: `import { readFileSync as readVmWatch } from 'node:fs';\n` +
         String(result.source).replace('this.opts = opts;', 'this.opts = { ...opts, checkMs: 30 };')
-          .replace('at - turn.lastEventAt < this.opts.stallMs', `at - turn.lastEventAt < (JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stall ? 0 : JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stallThread === turn.threadId ? 100 : this.opts.stallMs)`) };
+          .replace('at - turn.lastEventAt < silentMs', `at - turn.lastEventAt < (JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stall ? 0 : JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stallThread === turn.threadId ? 100 : silentMs)`) };
     }
     if (url.endsWith('/turn-dispatch-guard.ts')) {
       // wedgeClear parks a room turn inside waitForClear; the clearwait marker proves it got there.

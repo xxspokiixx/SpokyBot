@@ -50,5 +50,5 @@ it("on My Cloud's page (no desktop bridge) offers no buttons that do nothing, an
   (window as { ogb?: unknown }).ogb = { platform: "win32" };
   await render();
   expect(host.querySelectorAll("button")).toHaveLength(0);
-  expect(host.querySelector("[data-logs-help]")!.textContent).toContain("MausBot Cloud support can read My Cloud's.");
+  expect(host.querySelector("[data-logs-help]")!.textContent).toContain("MausBot Cloud support can read the Cloud's.");
 });

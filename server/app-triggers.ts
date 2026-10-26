@@ -142,6 +142,8 @@ export interface AppTriggerInput {
   runOn?: RoutineRunOn;
   enabled?: boolean;
   sourceThreadId?: string;
+  /** Another server's automation, made here under its own id. */
+  id?: string;
 }
 
 export interface AppTriggerPatch {
@@ -273,7 +275,7 @@ export class AppTriggerManager {
     if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use list_triggers to review it, then change that one instead.`, 409);
     const now = this.now();
     const trigger: StoredTrigger = {
-      id: randomUUID(), name, prompt, botId: input.botId, runOn: input.runOn ?? "maus", enabled: input.enabled ?? true,
+      id: input.id ?? randomUUID(), name, prompt, botId: input.botId, runOn: input.runOn ?? "maus", enabled: input.enabled ?? true,
       app, appName: appLabel(app), event: type.slug, eventName: type.name || type.slug, delivery: type.type === "poll" ? "poll" : "instant",
       accountId: account.id, ...(account.alias ? { accountLabel: account.alias } : {}), config, ...(filter ? { filter } : {}),
       remote: { state: "pending" }, ...(input.sourceThreadId ? { sourceThreadId: input.sourceThreadId } : {}),
@@ -282,6 +284,7 @@ export class AppTriggerManager {
     await this.exclusive(async () => {
       try {
         await this.bind(trigger);
+        if (!trigger.enabled) await this.applyEnabled(trigger.remote.triggerId);
       } catch (error) {
         // Composio refused this config: nothing to save. Anything else is retried by reconciliation.
         if (error instanceof BrokerError && !error.transient && error.status !== 403) throw new AppTriggerError(error.message, 400);
@@ -293,6 +296,17 @@ export class AppTriggerManager {
     this.emitTrigger(trigger);
     this.wake();
     return publicTrigger(trigger);
+  }
+
+  /** Another server's automation under its own id, against the same connected account: a new one starts switched off;
+   * one already here keeps its switch and takes the rest. */
+  async adopt(record: AppTrigger): Promise<AppTrigger> {
+    const config = Object.fromEntries(Object.entries(record.config).filter(([key, value]) => value !== undefined && !(record.app === GMAIL_APP && key === "query")));
+    if (this.triggers.some((candidate) => candidate.id === record.id)) {
+      return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config }))!;
+    }
+    return this.create({ id: record.id, botId: record.botId, name: record.name, prompt: record.prompt, app: record.app, event: record.event, account: record.accountId,
+      ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}) });
   }
 
   async update(id: string, patch: AppTriggerPatch): Promise<AppTrigger | null> {

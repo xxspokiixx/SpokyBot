@@ -2,8 +2,9 @@
 // side, names this server's connections (never a secret) with the engines it runs and the programs it has. On a Cloud
 // home: POST /api/cloud-connections/connected-apps makes this Cloud act as the computer's connected-apps account (a
 // one-time code from OpenMausBot's service, or the person's own Composio project); PUT
-// /api/cloud-connections/mcp/<name>/sign-in and PUT /api/cloud-connections/highlevel take a sign-in that moved. Admin
-// scope (request-auth's default): only the owner's app reaches them.
+// /api/cloud-connections/mcp/<name>/sign-in and PUT /api/cloud-connections/highlevel take a sign-in that moved; PUT
+// /api/cloud-connections/held-keys keeps a trial's moved keys unused while its Claude credit lasts. Admin scope
+// (request-auth's default): only the owner's app reaches them.
 import { z } from "zod";
 
 import type { ConnectionListing } from "../cloud-connections.ts";
@@ -36,6 +37,8 @@ export type Adopted = { ok: true; outcome: "adopted" | "kept" } | { ok: false; s
 export interface CloudConnectionRouteDeps {
   /** Only a Cloud home takes connections. */
   cloudHome: boolean;
+  /** A Team Cloud: a person's own connections (a share, a sign-in, HighLevel) are refused with one plain line. */
+  personalRefusal?: (what: string) => string | null;
   list(): Promise<ConnectionsAnswer>;
   adoptShare(code: string): Promise<ShareOutcome>;
   adoptOwn(apiKey: string, userId: string): Promise<ShareOutcome>;
@@ -44,6 +47,8 @@ export interface CloudConnectionRouteDeps {
   /** `replaces`: the digest of the sign-in this computer moved here before, which a newer one may replace. */
   adoptSignIn(name: string, record: McpOAuthRecord, replaces: string | null): Adopted;
   adoptHighLevel(connection: HighLevelConnection, replaces: string | null): Adopted;
+  /** Keeps the keys of these engines unused while a trial's Claude credit lasts; false when they run now. */
+  holdKeys?(engines: string[]): boolean;
 }
 
 export function createCloudConnectionRoutes(deps: CloudConnectionRouteDeps): RouteHandler {
@@ -55,10 +60,18 @@ export function createCloudConnectionRoutes(deps: CloudConnectionRouteDeps): Rou
       return json(res, 200, await deps.list());
     }
     if (!deps.cloudHome) return json(res, 404, { error: "not found" });
+    if (path === "/api/cloud-connections/held-keys") {
+      if (method !== "PUT") return json(res, 405, { error: "method not allowed" });
+      const asked = z.object({ for: z.array(z.string().regex(/^[\w.:-]{1,128}$/u)).max(20) }).safeParse(await readBody(req, 4096));
+      if (!asked.success) return json(res, 400, { error: "send { for }: the engines a key runs" });
+      return json(res, 200, { held: deps.holdKeys?.(asked.data.for) ?? false });
+    }
     const signIn = SIGN_IN.exec(path);
     if (path !== "/api/cloud-connections/connected-apps" && path !== "/api/cloud-connections/highlevel" && !signIn) return json(res, 404, { error: "not found" });
     if (method !== (path === "/api/cloud-connections/connected-apps" ? "POST" : "PUT")) return json(res, 405, { error: "method not allowed" });
     if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
+    const refused = deps.personalRefusal?.(signIn ? signIn[1]! : path === "/api/cloud-connections/highlevel" ? "HighLevel" : "these apps");
+    if (refused) { req.resume(); return json(res, 403, { error: refused }); }
     const body = await readBody(req, 64 * 1024);
     const replaces = url.searchParams.get("replaces");
     if (replaces !== null && !DIGEST.test(replaces)) return json(res, 400, { error: "replaces is a sign-in's digest" });

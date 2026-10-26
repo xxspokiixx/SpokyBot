@@ -9,10 +9,14 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
+import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
+import type { BoxRequest } from "./bot-box/plan.ts";
 import { engineMemory } from "./engine-memory.ts";
+import { engineHomes } from "./engine-homes/engine-homes.ts";
+import type { HomedSpawn } from "./engine-homes/layout.ts";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
 import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
 
@@ -71,20 +75,51 @@ function rememberEngineSession(child: ChildProcess): void {
  * `openmausbot`: everything else (logins, probes, the browser engine itself). */
 export type CliOwner = "bot" | "openmausbot";
 
+/** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more
+ * paths or the host's network, and `false` keeps a spawn out of it. */
+export interface BoxSpawnOptions {
+  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "allowEnv">;
+  /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
+  engineHome?: boolean;
+}
+export type CliSpawnOptions = SpawnOptions & BoxSpawnOptions;
+
+/** The box for this spawn, or null when it runs as is. A spawn in an engine home has that home in place of HOME. */
+export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner: CliOwner, homed: HomedSpawn | null = null): WrappedSpawn | null {
+  if (opts.box === false || (owner !== "bot" && !opts.box)) return null;
+  const request = typeof opts.box === "object" ? opts.box : {};
+  const home = homed ? { home: homed.home, shared: homed.shared } : {};
+  return botBox.wrap({ command: resolved.command, args: resolved.args, cwd: typeof opts.cwd === "string" ? opts.cwd : undefined, env: opts.env ?? process.env, ...request, ...home });
+}
+
 export function spawnCli(
   cli: string,
   args: string[],
-  opts: SpawnOptions,
+  opts: CliSpawnOptions,
   owner: CliOwner = "openmausbot",
 ): ChildProcessByStdio<Writable, Readable, Readable> {
   const resolved = resolveCli(cli, args);
   assertSafeCliArgv(resolved);
-  const start = () => spawn(resolved.command, resolved.args, {
-    ...opts,
+  const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
+  const options: CliSpawnOptions = homed ? { ...opts, env: homed.env } : opts;
+  const boxed = boxedSpawn(resolved, options, owner, homed);
+  const { box: _box, engineHome: _engineHome, ...spawnOpts } = options;
+  // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
+  const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
+  const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
+    ...spawnOpts,
+    ...(boxed ? { env: boxed.env, stdio } : {}),
     // POSIX: own group so kill(-pid) reaps child MCP servers; Windows: taskkill /T does it.
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
-  const child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  try {
+    child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
+  } finally {
+    for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
+  }
+  // The broker token minted for this process dies with it.
+  if (boxed?.token) child.once("exit", boxed.release);
   if (process.platform !== "win32") cliGroups.add(child);
   if (process.platform !== "win32" && owner === "bot") {
     rememberEngineSession(child);
@@ -122,6 +157,19 @@ export function execCli(
     escalate = setTimeout(() => void killCliTree(child, 0), opts.timeout + EXEC_KILL_GRACE_MS);
     escalate.unref?.();
   }
+}
+
+/** Concurrent probes on a busy machine can outlast the timeout, so a CLI that answered before keeps its last version. */
+export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
+  let last: string | null = null;
+  return (err, stdout) => {
+    const version = err ? "" : stdout.trim();
+    if (version) return { version: (last = version) };
+    const failure = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
+    const timedOut = failure?.killed === true && typeof failure.code !== "string";
+    if (timedOut && last) return { version: last };
+    return { reason: timedOut ? `\`${cli}\` took longer than 8 seconds to answer --version. The machine may be busy; check again.` : `\`${cli}\` CLI not found` };
+  };
 }
 
 /** Node reports a missing cwd as the CLI's own ENOENT, so pass `cwd` to tell a moved folder from a missing CLI. */

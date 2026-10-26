@@ -271,7 +271,7 @@ describe("cloud computer inventory UI", () => {
 
     expect(markup).toContain("Research");
     expect(markup).toContain("Owned by this bot");
-    expect(markup).toContain("Orphaned computer");
+    expect(markup).toContain("Left-behind desktop");
     expect(markup).toContain("Its bot no longer exists");
     expect(markup).toContain("Running");
     expect(markup).toContain("Sleeping");
@@ -283,7 +283,7 @@ describe("cloud computer inventory UI", () => {
     const markup = renderCard({ instances: [{ ...ownedCloudComputer, inUse: true }] });
 
     expect(markup).toContain("In use");
-    expect(markup).toContain("Stop this bot&#x27;s work before changing its computer.");
+    expect(markup).toContain("Stop this bot&#x27;s work before changing its desktop.");
     expect(markup.match(/disabled=""/g)).toHaveLength(2);
   });
 
@@ -296,18 +296,18 @@ describe("cloud computer inventory UI", () => {
   it("keeps disconnected, unavailable, and empty states distinct", () => {
     const disconnected = renderCard({ configured: false });
     expect(disconnected).toContain("Boat is not connected");
-    expect(disconnected).not.toContain("No OpenMaus-managed cloud computers found");
+    expect(disconnected).not.toContain("No cloud desktops found");
 
     const unavailable = renderCard({ unavailableReason: "boat.dev is unavailable" });
     expect(unavailable).toContain("boat.dev is unavailable");
-    expect(unavailable).not.toContain("No OpenMaus-managed cloud computers found");
+    expect(unavailable).not.toContain("No cloud desktops found");
 
     const endpointFailure = renderCard({ configured: null, unavailableReason: "Computer inventory could not load" });
     expect(endpointFailure).toContain("Computer inventory could not load");
     expect(endpointFailure).not.toContain("Boat is not connected");
 
     const empty = renderCard();
-    expect(empty).toContain("No OpenMaus-managed cloud computers found");
+    expect(empty).toContain("No cloud desktops found");
   });
 
   it("uses honest state labels", () => {
@@ -560,13 +560,13 @@ describe("Settings → Computers on an OMB Cloud home", () => {
   const cards = () => [...renderToStaticMarkup(createElement(LocalComputerSection)).matchAll(/<div class="text-\[15px\] font-medium text-ink">([^<]+)<\/div>/g)].map((match) => match[1]);
 
   it("sets up a Local VM on a desktop or self-hosted server", () => {
-    expect(cards()).toEqual(expect.arrayContaining(["Cloud computers", "Local VM", "Setup"]));
+    expect(cards()).toEqual(expect.arrayContaining(["Cloud desktops", "Local VM", "Setup"]));
   });
 
   it("shows no Local VM, and no steps to install one, where it cannot exist", () => {
     storeFixture.config = { cloudHome: true };
     const titles = cards();
-    expect(titles).toContain("Cloud computers");
+    expect(titles).toContain("Cloud desktops");
     expect(titles).not.toContain("Local VM");
     expect(titles).not.toContain("Setup");
   });

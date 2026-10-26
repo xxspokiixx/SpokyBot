@@ -29,6 +29,9 @@
 //   FAKE_CLAUDE_REPLIES  JSON array of replies (string, or string[] for several items) used in order
 //   FAKE_CLAUDE_REPLY_STATE  counter file keeping FAKE_CLAUDE_REPLIES in order across processes
 //   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?}] each turn calls before its reply (unset: one Bash call)
+//   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none
+//   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
+//     text_delta chunks of `chars` chars every `ms` ms before its assistant message
 //   FAKE_CLAUDE_USES_CLOUD_COMPUTER  1: first take one screenshot through the `computer` MCP server
 //   FAKE_CLAUDE_CONNECT_APPS  toolkits (gmail,slack): first call COMPOSIO_MANAGE_CONNECTIONS via `composio`
 //   FAKE_CLAUDE_HOOKS  1: run the --settings hooks like the CLI (PostToolUse per tool_result, PostToolUseFailure for
@@ -54,15 +57,32 @@
 //   FAKE_CLAUDE_EXIT_DELAY_MS  ms to keep running after SIGTERM, like a slow taskkill on Windows
 //   FAKE_CLAUDE_PROBE_LOG  path: each snapshot probe appends `<version|help|auth> <pid>`
 //   FAKE_CLAUDE_HOLD_VERSION / _HELP / _AUTH  path: that snapshot probe answers only once it exists
+//   FAKE_CLAUDE_MODE=slow-write: says it will build the page, then streams a Write of index.html as partial
+//     input_json_delta frames (2.1.306 with --include-partial-messages) before its tool_use, runs it and replies.
+//     FAKE_CLAUDE_WRITE_BYTES (default 16384) is the file's size, sent 512 bytes every FAKE_CLAUDE_WRITE_STEP_MS
+//     (default 100); FAKE_CLAUDE_WRITE_HOLD  path: the call's input stays open once written until it exists
+//   FAKE_CLAUDE_HOME_FILES  1: keep the CLI's own files in <CLAUDE_CONFIG_DIR or ~/.claude> as 2.1.294 does: a turn is
+//     signed out without .credentials.json's claudeAiOauth.accessToken, refreshes an expired one (a temp file renamed over
+//     it, written in place where the rename is refused), appends each prompt to projects/<cwd slug>/<session>.jsonl,
+//     and --resume answers "No conversation found" without that file; the dump's signedInAs is the token used
+//   FAKE_CLAUDE_RUN_BASH  1: a scripted Bash call without `output` runs its command (sh -c, in the CLI's folder and
+//     environment); FAKE_CLAUDE_SHELL_LOG  path: each such call appends {command, output}
 // total_cost_usd and modelUsage are running totals (0.01 per result), as the real CLI reports them.
 import { splitLaunchNote } from "./launch-note.ts";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
+const streamCadence = (() => {
+  const raw = process.env.FAKE_CLAUDE_STREAM_CADENCE;
+  if (!raw) return null;
+  const [chars, ms] = raw.split(":");
+  const parsed = { chars: Number(chars), ms: Number(ms) };
+  return Number.isSafeInteger(parsed.chars) && parsed.chars > 0 && Number.isSafeInteger(parsed.ms) && parsed.ms >= 0 ? parsed : null;
+})();
 
 // Concurrent turns share a capture path: publish whole JSON in one rename.
 const writeDumpAtomic = (path: string, contents: string): void => {
@@ -115,8 +135,7 @@ const scriptedReplies = (() => {
   }
 })();
 type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown; server?: string };
-const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
-  const raw = process.env.FAKE_CLAUDE_TOOL_CALLS;
+const parseToolCalls = (raw: string | undefined): ScriptedToolCall[] | null => {
   if (raw === undefined) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -134,10 +153,19 @@ const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
   } catch {
     return null;
   }
-})();
+};
+const scriptedToolCallsAtStart = parseToolCalls(process.env.FAKE_CLAUDE_TOOL_CALLS);
+const turnToolCalls = (): ScriptedToolCall[] | null => {
+  const file = process.env.FAKE_CLAUDE_TOOL_CALLS_FILE;
+  if (!file) return scriptedToolCallsAtStart;
+  try { return parseToolCalls(readFileSync(file, "utf8")) ?? []; } catch { return []; }
+};
 let toolUseCount = 0;
 let scriptedReplyIndex = 0;
 const nextScriptedReply = (): string[] => {
+  // A test that wants one long reply puts it in this file for as long as it wants it, read again each turn.
+  const replyFile = process.env.FAKE_CLAUDE_REPLY_FILE;
+  if (replyFile && existsSync(replyFile)) return [readFileSync(replyFile, "utf8")];
   const stateFile = process.env.FAKE_CLAUDE_REPLY_STATE;
   let index = scriptedReplyIndex;
   if (stateFile) {
@@ -150,6 +178,30 @@ const nextScriptedReply = (): string[] => {
   }
   const reply = scriptedReplies[index] ?? "hello from fake claude";
   return Array.isArray(reply) ? reply : [reply];
+};
+
+// FAKE_CLAUDE_MARKER_REPLIES: path of {"marker": "reply"}: a prompt whose
+// text contains a marker answers with that marker's reply, whatever process
+// or replay delivers it. The voice-latency harness routes replies this way
+// because the driver replays a user message over several CLI launches.
+const markerReplies = (() => {
+  const path = process.env.FAKE_CLAUDE_MARKER_REPLIES;
+  if (!path) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const entries = Object.entries(parsed as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string");
+    return entries.length ? entries : null;
+  } catch {
+    return null;
+  }
+})();
+const replyForPrompt = (prompt: JsonValue): string[] | null => {
+  if (!markerReplies) return null;
+  const text = steeredText(prompt);
+  const hit = markerReplies.find(([marker]) => marker !== "" && text.includes(marker));
+  return hit ? [hit[1]] : null;
 };
 
 const argv = process.argv.slice(2);
@@ -574,6 +626,35 @@ const volatileNoteIn = (prompt: JsonValue): string | null => {
   return parsed ? (JSON.parse(`"${parsed[1]}"`) as string) : null;
 };
 
+const claudeFolder = () => process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME || homedir(), ".claude");
+const transcriptFile = () => join(claudeFolder(), "projects", process.cwd().replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
+/** The access token this turn signs in with, refreshed first when expired; null when signed out. */
+const homeSignIn = (): string | null => {
+  const file = join(claudeFolder(), ".credentials.json");
+  let oauth: { accessToken?: unknown; expiresAt?: unknown; [key: string]: unknown } | undefined;
+  try { oauth = JSON.parse(readFileSync(file, "utf8")).claudeAiOauth; } catch { return null; }
+  if (!oauth || typeof oauth.accessToken !== "string" || !oauth.accessToken) return null;
+  if (typeof oauth.expiresAt !== "number" || oauth.expiresAt > Date.now()) return oauth.accessToken;
+  const refreshed = { ...oauth, accessToken: `${oauth.accessToken}+`, expiresAt: Date.now() + 3_600_000 };
+  const text = JSON.stringify({ claudeAiOauth: refreshed });
+  const temporary = join(dirname(file), `.credentials.json.${process.pid}.tmp`);
+  writeFileSync(temporary, text, { mode: 0o600 });
+  try {
+    renameSync(temporary, file);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    if (!["EXDEV", "EPERM", "EEXIST", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    writeFileSync(file, text);
+  }
+  return refreshed.accessToken;
+};
+const runBash = (command: string): { ok: boolean; content: string } => {
+  const ran = spawnSync("/bin/sh", ["-c", command], { encoding: "utf8", timeout: 30_000 });
+  const output = `${ran.stdout ?? ""}${ran.stderr ?? ""}`;
+  if (process.env.FAKE_CLAUDE_SHELL_LOG) appendFileSync(process.env.FAKE_CLAUDE_SHELL_LOG, `${JSON.stringify({ command, output })}\n`);
+  return { ok: ran.status === 0, content: output };
+};
+
 const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
   lateContinuation = late;
@@ -582,6 +663,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
   // FAKE_CLAUDE_PROMPTS: every prompt this process receives, one JSON line each.
   if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
   volatileNote = volatileNoteIn(prompt) ?? volatileNote;
+  const homeFiles = process.env.FAKE_CLAUDE_HOME_FILES === "1";
+  const signedInAs = homeFiles ? homeSignIn() : undefined;
   if (!late && process.env.FAKE_CLAUDE_DUMP) {
     launchFiles ??= readLaunchFiles();
     // systemPrompt: what the model is instructed with, the system prompt file plus the
@@ -589,7 +672,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     const systemPrompt = volatileNote && typeof launchFiles.systemPrompt === "string" ? `${launchFiles.systemPrompt}\n\n${volatileNote}` : launchFiles.systemPrompt;
     writeDumpAtomic(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, ...launchFiles, systemPrompt, systemPromptFile: launchFiles.systemPrompt }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, ...launchFiles, systemPrompt, systemPromptFile: launchFiles.systemPrompt, ...(homeFiles ? { signedInAs } : {}) }, null, 2),
     );
   }
 
@@ -608,6 +691,19 @@ const playTurn = (prompt: JsonValue, late = false) => {
   if (mode === "dead-session" && argv.includes("--resume")) {
     process.stderr.write(`fake-claude: No conversation found with session ID: ${argAfter("--resume")}\n`);
     process.exit(1);
+  }
+  if (homeFiles && !late) {
+    if (argv.includes("--resume") && turnsPlayed === 0 && !existsSync(transcriptFile())) {
+      out({
+        type: "result", subtype: "error_during_execution", duration_ms: 0, is_error: true, num_turns: 0, stop_reason: null,
+        session_id: sessionId, total_cost_usd: 0, errors: [`No conversation found with session ID: ${sessionId}`],
+      });
+      turnRunning = false;
+      finishIfDone();
+      return;
+    }
+    mkdirSync(dirname(transcriptFile()), { recursive: true });
+    appendFileSync(transcriptFile(), `${JSON.stringify({ type: "user", sessionId, message: promptText(prompt) })}\n`);
   }
   if ((mode === "stale-session" && argv.includes("--resume")) || mode === "error-result") {
     out({
@@ -723,7 +819,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
 
   // A signed-out CLI's frames, as Claude Code 2.1.296 sends them: only the frame's own error fields mark the failure.
-  if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0) {
+  if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0 || signedInAs === null) {
     if (process.env.FAKE_CLAUDE_AUTH_AFTER_WORK === "1") out({
       type: "assistant", message: { model: "claude-fixture", content: [{ type: "tool_use", id: "before-sign-out", name: "Bash", input: { command: "pwd" } }] },
     });
@@ -762,7 +858,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
   if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
-  let replyParts = nextScriptedReply();
+  let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();
   const defaultToolId = `tu-${process.pid}-${++toolUseCount}`;
   if (process.env.FAKE_CLAUDE_TURN_STATE) {
     let n = 0;
@@ -779,39 +875,6 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
   const cacheRead = Number(process.env.FAKE_CLAUDE_CACHE_READ_TOKENS);
   const usage = { input_tokens: 10, cache_read_input_tokens: Number.isSafeInteger(cacheRead) && cacheRead > 0 ? cacheRead : 2, output_tokens: 5 };
-  if (scriptedToolCalls) {
-    const failureContext: string[] = [];
-    for (const call of scriptedToolCalls) {
-      const id = call.id ?? `tu-${process.pid}-${++toolUseCount}`;
-      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
-      const reply = call.server ? mcpToolCall(call.server, call.name, call.input)
-        : { ok: call.ok, content: call.output };
-      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !reply.ok, content: reply.content }] } });
-      if (!reply.ok) {
-        // Claude Code 2.1.296 runs only PostToolUseFailure for a failed call, with the result text as `error`.
-        const printed = runHooks("PostToolUseFailure", { tool_name: call.name, tool_input: call.input, error: reply.content, tool_use_id: id });
-        try {
-          const context = JSON.parse(printed)?.hookSpecificOutput?.additionalContext;
-          if (typeof context === "string" && context) failureContext.push(context);
-        } catch {}
-      } else {
-        runHooks("PostToolUse", { tool_name: call.name, tool_input: call.input, tool_response: reply.content, tool_use_id: id });
-      }
-    }
-    if (failureContext.length) replyParts = [`${failureContext.join("\n")}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
-    for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
-  } else {
-    replyParts.forEach((text, index) => {
-      const content: Array<
-        { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-      > = [{ type: "text", text }];
-      if (index === replyParts.length - 1) content.push({ type: "tool_use", id: defaultToolId, name: "Bash", input: { command: "echo hi" } });
-      out({ type: "assistant", message: { content, usage } });
-    });
-    out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: defaultToolId, is_error: false, content: [{ type: "text", text: "hi" }] }] } });
-    runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
-  }
-
   const finish = () => {
     replaySteered();
     runHooks("Stop", { stop_hook_active: false });
@@ -835,6 +898,113 @@ const playTurn = (prompt: JsonValue, late = false) => {
     turnRunning = false;
     finishIfDone();
   };
+
+  if (mode === "slow-write") {
+    const total = Number(process.env.FAKE_CLAUDE_WRITE_BYTES) || 16_384;
+    const stepMs = Number(process.env.FAKE_CLAUDE_WRITE_STEP_MS) || 100;
+    const id = `toolu-write-${process.pid}-${++toolUseCount}`;
+    const filePath = join(process.cwd(), "index.html");
+    const content = `<!doctype html>\n<title>Dashboard</title>\n${"<div class=\"card\">sales</div>\n".repeat(Math.ceil(total / 32))}`.slice(0, total);
+    const event = (e: unknown) => out({ type: "stream_event", event: e, parent_tool_use_id: null, session_id: "fake-session" });
+    out({ type: "assistant", message: { id: "msg-intro", content: [{ type: "text", text: "I'll build the dashboard now." }], usage } });
+    event({ type: "message_start", message: { id: "msg-write", usage } });
+    event({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id, name: "Write", input: {} } });
+    const head = `{"file_path": ${JSON.stringify(filePath)}, "content": "`;
+    const body = JSON.stringify(content).slice(1, -1);
+    event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: head } });
+    let at = 0;
+    const closeCall = () => {
+      event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "\"}" } });
+      event({ type: "content_block_stop", index: 0 });
+      out({ type: "assistant", message: { id: "msg-write", content: [{ type: "tool_use", id, name: "Write", input: { file_path: filePath, content } }], usage } });
+      event({ type: "message_stop" });
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: `File created successfully at: ${filePath}` }] } });
+      out({ type: "assistant", message: { content: [{ type: "text", text: "Done: index.html is ready." }], usage } });
+      finish();
+    };
+    const step = () => {
+      if (at < body.length) {
+        event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: body.slice(at, at + 512) } });
+        at += 512;
+        setTimeout(step, stepMs);
+        return;
+      }
+      const hold = process.env.FAKE_CLAUDE_WRITE_HOLD;
+      if (!hold) return closeCall();
+      const poll = setInterval(() => {
+        if (!existsSync(hold)) return;
+        clearInterval(poll);
+        closeCall();
+      }, 50);
+    };
+    setTimeout(step, stepMs);
+    return;
+  }
+
+  if (streamCadence && mode === "happy") {
+    // Deterministic delta replay for the voice-latency harness: stream each
+    // scripted reply part as fixed-size text_delta chunks at a fixed interval,
+    // then the assistant message (the driver dedups the streamed text).
+    const emitPart = (part: number) => {
+      const text = replyParts[part] ?? "";
+      let at = 0;
+      const step = () => {
+        const chunk = text.slice(at, at + streamCadence.chars);
+        at += streamCadence.chars;
+        if (chunk) out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: chunk } } });
+        if (at < text.length) {
+          setTimeout(step, streamCadence.ms);
+        } else {
+          out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
+          if (part + 1 < replyParts.length) setTimeout(() => emitPart(part + 1), streamCadence.ms);
+          else setTimeout(() => finish(), 0);
+        }
+      };
+      step();
+    };
+    emitPart(0);
+    return;
+  }
+  const scriptedToolCalls = turnToolCalls();
+  if (scriptedToolCalls) {
+    const failureContext: string[] = [];
+    for (const call of scriptedToolCalls) {
+      const id = call.id ?? `tu-${process.pid}-${++toolUseCount}`;
+      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
+      const reply = call.server ? mcpToolCall(call.server, call.name, call.input)
+        : call.name === "Bash" && call.output === undefined && process.env.FAKE_CLAUDE_RUN_BASH === "1" ? runBash(String((call.input as { command?: unknown } | undefined)?.command ?? ""))
+        : { ok: call.ok, content: call.output };
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !reply.ok, content: reply.content }] } });
+      if (!reply.ok) {
+        // Claude Code 2.1.296 runs only PostToolUseFailure for a failed call, with the result text as `error`.
+        const printed = runHooks("PostToolUseFailure", { tool_name: call.name, tool_input: call.input, error: reply.content, tool_use_id: id });
+        try {
+          const context = JSON.parse(printed)?.hookSpecificOutput?.additionalContext;
+          if (typeof context === "string" && context) failureContext.push(context);
+        } catch {}
+      } else {
+        runHooks("PostToolUse", { tool_name: call.name, tool_input: call.input, tool_response: reply.content, tool_use_id: id });
+      }
+    }
+    if (failureContext.length) replyParts = [`${failureContext.join("\n")}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
+    for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
+  } else {
+    replyParts.forEach((text, index) => {
+      const content: Array<
+        { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+      > = [{ type: "text", text }];
+      if (index === replyParts.length - 1) content.push({ type: "tool_use", id: defaultToolId, name: "Bash", input: { command: "echo hi" } });
+      out({ type: "assistant", message: { content, usage } });
+    });
+    if (mode === "tool-heartbeat") {
+      // Claude Code 2.1.306 sends this every 30 s while a tool runs.
+      out({ type: "tool_progress", tool_use_id: `${defaultToolId}-heartbeat-0`, tool_name: "Bash",
+        parent_tool_use_id: defaultToolId, elapsed_time_seconds: 30, heartbeat: true });
+    }
+    out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: defaultToolId, is_error: false, content: [{ type: "text", text: "hi" }] }] } });
+    runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
+  }
+
   if (mode === "background-result") {
     // Claude emits a synthetic result when a background task finishes; it does not complete the turn.
     out({ type: "result", origin: { kind: "task-notification" }, is_error: false, total_cost_usd: 99 });

@@ -14,8 +14,9 @@ passphrase, and never runs an agent remotely.
   a ready container by default; an off-by-default **Start VPS automatically** switch lets that bot prepare
   or wake its managed container when needed. Scheduled and manually triggered routine runs always start it,
   and never fall back to this computer's own desktop when the VPS cannot be reached.
-- Interactive **Take control** locally or from a paired desktop client. The host binds noVNC only to a random
-  `127.0.0.1` port, closes the tunnel with the viewer, and never publishes VNC on the VPS. A paired client
+- Interactive **Take control** locally or from a paired desktop client: the Computer panel's picture becomes the
+  live desktop. The host binds noVNC only to a random `127.0.0.1` port, closes the tunnel soon after you hand control
+  back, and never publishes VNC on the VPS. A paired client
   receives a short-lived, device-scoped relay through managed HTTPS or Tailscale only after **Cloud desktop
   access** is enabled for that device on the host.
 

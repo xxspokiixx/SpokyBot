@@ -313,6 +313,19 @@ export class BrowserService {
     }
   }
 
+  runs(session: string): boolean {
+    const profile = this.#bySession(session);
+    return Boolean(profile && (profile.run || profile.starting));
+  }
+
+  /** Closes a session's browser now unless a call, an agent or a person is using it. */
+  async closeUnused(session: string): Promise<boolean> {
+    const profile = this.#bySession(session);
+    if (!profile || !this.#unused(profile, 0)) return false;
+    await this.#stop(profile, { kind: "idle", pages: [] });
+    return true;
+  }
+
   /** Every running browser no one has used for `idleMs` closes, watched or not; its bot hears why on its next call. */
   async closeIdle(idleMs = this.#options.idleMs()): Promise<string[]> {
     const closed: string[] = [];

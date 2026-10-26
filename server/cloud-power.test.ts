@@ -86,6 +86,8 @@ describe("the home's idle verdict", () => {
     expect(h.power.begin("/api/sync/changes")).toBeTypeOf("function");
     h.power.begin("/api/events");
     h.power.begin("/api/shared-computers/abc/poll");
+    // A lent computer's device link stays open by design, like its poll: it never keeps the home awake.
+    h.power.begin("/api/shared-computers/abc/link");
     expect(h.power.report().busy).toEqual(["maintenance"]);
     done(); done();
     expect(h.power.report().busy).toEqual(["recent-work"]);
@@ -235,5 +237,22 @@ describe("the Admin's signed power routes", () => {
     const url = new URL(CLOUD_POWER_PATH, "http://localhost");
     const req = Object.assign(new PassThrough(), { method: "GET", url: CLOUD_POWER_PATH, headers: {}, socket: { remoteAddress: "127.0.0.1" } }) as unknown as IncomingMessage;
     expect(await handle({ req, res: {} as ServerResponse, url, path: url.pathname, method: "GET" })).toBe(false);
+  });
+});
+
+describe("a Team Cloud", () => {
+  it("never sleeps: the Admin's sleep request is refused as busy with the team, however idle it is", () => {
+    let clock = START;
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-cloud-power-team-"));
+    dirs.push(dataDir);
+    const power = createCloudPower({ dataDir, team: true, now: () => clock, broadcast: () => {}, probes: {
+      turn: () => false, run: () => false, liveCall: () => false, computer: () => false, maintenance: () => false, nextDueAt: () => null,
+    } });
+    powers.push(power);
+    for (let left = CLOUD_IDLE_AWAKE_MS; left > 0; left -= 5_000) { clock += 5_000; power.tick(); }
+    expect(power.report()).toMatchObject({ idle: true, busy: [] });
+    expect(power.prepareSleep()).toEqual({ ok: false, busy: ["team"] });
+    expect(power.sleeping()).toBe(false);
+    expect(existsSync(join(dataDir, "cloud-sleep.json"))).toBe(false);
   });
 });
