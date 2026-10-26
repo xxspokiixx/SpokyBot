@@ -1676,6 +1676,7 @@
   "chat.previousVersion": "Versão anterior",
   "chat.nextVersion": "Próxima versão",
   "chat.openConversationWith": "Abrir a conversa com {name}",
+  "chat.handoffDoneWhen": "Concluído quando: {criteria}",
   "chat.openThread": "Abrir #{title}",
   "chat.openThreadOn": "Abrir #{title} em {name}",
   "chat.botScreen": "Tela do bot",

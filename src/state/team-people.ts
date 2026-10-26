@@ -8,7 +8,8 @@ import { api } from "./api";
 import { teamOfConfig } from "./team-chats";
 import { readSessionState } from "@/lib/session";
 
-export interface TeamPerson { email: string; name: string; role: string; you?: true }
+/** `pictureUrl`: their picture, served to the team's members only; absent when they have none. */
+export interface TeamPerson { email: string; name: string; role: string; you?: true; pictureUrl?: string }
 export interface TeamPeople { people: TeamPerson[]; me: TeamPerson | null; admin: boolean; needsYou: NeedsYouItem[] }
 
 let snapshot: TeamPeople | null = null;
@@ -37,6 +38,11 @@ export function useTeammates(): { people: TeamPerson[]; peers: Array<{ name: str
       .flatMap((person) => person.names.map((name) => ({ name, person: true as const })));
     return { people: everyone.filter((person) => !person.you), peers };
   }, [team?.people]);
+}
+
+/** A person's picture: theirs as given, else the team's for that address (a person a message names). */
+export function pictureOf(person: Pick<TeamPerson, "email" | "pictureUrl">, team: Pick<TeamPeople, "people"> | null): string | undefined {
+  return person.pictureUrl ?? team?.people.find((known) => known.email === person.email)?.pictureUrl;
 }
 
 /** The person a bot reports to, as the picker names them; null for a bot nobody owns. */
@@ -85,6 +91,17 @@ export function needsYouVersion(bots: readonly VersionedBot[], groups: ReadonlyA
   return `${bots.map(bot).join("|")}|${groups.filter((group) => group.unread).length}|${notifications.length}:${notifications.filter((entry) => !entry.read).length}`;
 }
 
+let peopleTimer: ReturnType<typeof setTimeout> | null = null;
+/** Someone's name or picture may have changed (every config frame follows a profile save): the people catch up
+ * shortly, once. */
+function refreshPeople(): void {
+  if (!snapshot || peopleTimer) return;
+  peopleTimer = setTimeout(() => {
+    peopleTimer = null;
+    void loadPeople().then((people) => { if (snapshot) publish({ ...snapshot, ...people }); }).catch(() => {});
+  }, 800);
+}
+
 /** Keeps the people and this person's Needs you in step with the page's server; nothing off a team. */
 export function useTeamPeopleLoader(config: unknown, botsVersion: unknown) {
   const teamId = teamOfConfig(config)?.id ?? null;
@@ -97,6 +114,7 @@ export function useTeamPeopleLoader(config: unknown, botsVersion: unknown) {
     return () => { alive = false; };
   }, [teamId]);
   useEffect(() => { if (teamId) refreshNeedsYou(); }, [teamId, botsVersion]);
+  useEffect(() => { if (teamId) refreshPeople(); }, [teamId, config]);
 }
 
 /** After an owner changed here: the people list stays, Needs you catches up. */

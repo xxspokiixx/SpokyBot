@@ -34,6 +34,11 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   and picture of that computer's own Settings → Profile fill what the person's team profile lacks (`PUT /api/me` with
   `fillEmpty: true`, the picture uploaded first as their own attachment): each field once (`GET /api/me` lists the
   `seeded` ones), never over what they set on the team and never again after they clear it there. Nothing else goes up.
+  **A teammate's name and picture are visible to everyone in the team, like any team app. About you and everything
+  else stay private.** Wherever the app shows a person (the Reports to picker, the owner's face on a bot's row, the Team
+  map's "Who reports to whom", a card's "Asking Ada", the @ list, a "Told Bob" chip, a Needs you line from them) it shows
+  their picture, or their initial when they have none; the picture is served to the team's signed-in members only
+  (below), never off the team.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
   person's own* (below): then every member connects their own, and only their own private chats use it. A person's
@@ -274,11 +279,13 @@ reports to `createdBy`, the member who created it or moved it in (a bot a Chief 
 made before owners were recorded have none until someone picks one, and their asks go to the Admins. The sidebar shows
 the owner's face at the end of each bot's row and "→ Ada" beside a department whose bots all report to Ada. The Team map's
 "Who reports to whom" (also "See who reports to whom" in a department's menu) shows each person with their Chief and
-the bots that report to them by department; dragging a bot onto a person changes its owner.
+the bots that report to them by department; dragging a bot onto a person changes its owner. Each face is the person's
+picture from their team profile, or their initial when they have none.
 
 | Route | Who | What |
 |---|---|---|
-| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?}` |
+| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?}` |
+| `GET /api/team/people/<person>/picture?v=<version>` | the team's members | that member's picture (`<person>` is their person key). `pictureUrl` names it, and its `v` changes whenever they change it; it is revalidated on every use (`private, no-cache` with an ETag). A session that isn't a member of this team gets 403, anything off a team or not a current member's picture 404 |
 | `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
 | `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set owner for all bots…" on a department |
 | `GET /api/needs-you` | any member | what bots ask of this person now, and the tags and passed messages waiting for them |
@@ -319,13 +326,13 @@ People are taggable and reachable the way bots are, with one mechanism (`server/
 is tagged by their whole name, and by their first name when no other teammate shares it. A bot's name of the same length
 wins.
 
-- **@people.** The composer's @ list offers the teammates (everyone but you) after the bots, with their initial and a
-  "Person" tag; a sent tag renders like a mention. Their picture is not shown: it is their own upload, which only they
-  may read.
+- **@people.** The composer's @ list offers the teammates (everyone but you) after the bots, with their picture (their
+  initial when they have none) and a "Person" tag; a sent tag renders like a mention.
 - **A tag notifies that person only.** When a person's line, or a bot's settled reply, tags @Bob in a conversation Bob
   can see (a bot's main chat, a group chat he sees), Bob gets a `mention` notification carrying `forPerson` (his person
   key), which reaches nobody else, an admin included (`ask-routing.ts`, live, replayed and in the feed), and a Needs
-  you line (`kind: "message"`, `GET /api/needs-you` and `/api/today`) that opens that message. It goes when he opens the
+  you line (`kind: "message"`, `GET /api/needs-you` and `/api/today`, with `fromEmail` and their face when a teammate
+  rather than a bot sent it) that opens that message. It goes when he opens the
   conversation or writes in it, or after a week. A tag of someone who cannot see the conversation notifies nobody, and
   a writer never tags themselves.
 - **"Tell Bob that…": `message_person { to, message }`**, an agents tool mounted only on a Team Cloud

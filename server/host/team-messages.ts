@@ -41,7 +41,7 @@ const id = z.string().min(1).max(200);
 const person = z.string().regex(/^p_[\w-]{22}$/u);
 const name = z.string().max(200);
 const relaySchema = z.object({ threadId: id, botId: id, originThreadId: id, from: person.nullable(), fromName: name, to: person, at: z.number() });
-const waitingSchema = z.object({ id, person, botId: id, threadId: id, messageId: id.optional(), from: name, text: z.string().max(400), at: z.number() });
+const waitingSchema = z.object({ id, person, botId: id, threadId: id, messageId: id.optional(), from: name, fromEmail: z.string().max(320).optional(), text: z.string().max(400), at: z.number() });
 const fileSchema = z.object({ version: z.literal(1), relays: z.array(relaySchema).max(MAX_RELAYS), waiting: z.array(waitingSchema).max(MAX_WAITING) });
 const bodySchema = z.object({ to: z.string().trim().min(1).max(254), message: z.string().trim().min(1).max(MESSAGE_PERSON_MAX) }).strict();
 
@@ -170,7 +170,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
   const toldThisTurn = new Map<string, Set<string>>();
 
   /** One notification and one Needs you line for one person, opening `messageId`. */
-  function tell(to: Person, input: { where: Where; threadId: string; messageId?: string; title: string; from: string; text: string }) {
+  function tell(to: Person, input: { where: Where; threadId: string; messageId?: string; title: string; from: string; fromPerson?: Person; text: string }) {
     const { bot, group } = input.where;
     deps.notify({
       kind: "mention", botId: bot.id, botName: bot.name, threadId: input.threadId, title: input.title, body: oneLine(input.text, 200),
@@ -178,7 +178,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     });
     waiting = [...waiting.filter((item) => !(item.person === to.key && item.threadId === input.threadId)), {
       id: randomUUID(), person: to.key, botId: bot.id, threadId: input.threadId, ...(input.messageId ? { messageId: input.messageId } : {}),
-      from: input.from.slice(0, 200), text: oneLine(input.text, 300), at: now(),
+      from: input.from.slice(0, 200), ...(input.fromPerson ? { fromEmail: input.fromPerson.email } : {}), text: oneLine(input.text, 300), at: now(),
     }];
     save();
   }
@@ -200,7 +200,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       ...(back.group ? { from: from(at.bot) } : {}),
     });
     markUnread(at.bot.id, origin, back.group);
-    tell(to, { where: back, threadId: origin, messageId: posted.id, title: `${replier.name} replied via ${at.bot.name}`, from: replier.name, text: message });
+    tell(to, { where: back, threadId: origin, messageId: posted.id, title: `${replier.name} replied via ${at.bot.name}`, from: replier.name, fromPerson: replier, text: message });
     chip(threadId, at, to, message);
     return { status: 200, text: `Passed back to ${to.name} in the conversation they asked from; they were notified.` };
   }
@@ -209,7 +209,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     const posted = store.appendMessage(threadId, { role: "bot", kind: "text", text: `@${to.name} ${message}`, ...(at.group ? { from: from(at.bot) } : {}) });
     markUnread(at.bot.id, threadId, at.group);
     tell(to, { where: at, threadId, messageId: posted.id, title: asker ? `Message from ${asker.name} via ${at.bot.name}` : `${at.bot.name} mentioned you`,
-      from: asker?.name ?? at.bot.name, text: message });
+      from: asker?.name ?? at.bot.name, fromPerson: asker, text: message });
     toldThisTurn.set(threadId, (toldThisTurn.get(threadId) ?? new Set<string>()).add(to.key));
     return { status: 200, text: `${to.name} can see this conversation, so your message is posted here tagging them, and they were notified. Don't repeat it.` };
   }
@@ -232,7 +232,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       ? { role: "bot", kind: "text", text: `${asker.name} asked me to pass this on: ${message}`, relay: { kind: "from", email: asker.email, name: asker.name } }
       : { role: "bot", kind: "text", text: `A message for you from ${sender}: ${message}` });
     store.patchTask(bot.id, target, { unread: true });
-    tell(to, { where: { bot }, threadId: target, messageId: posted.id, title: `Message from ${sender} via ${bot.name}`, from: sender, text: message });
+    tell(to, { where: { bot }, threadId: target, messageId: posted.id, title: `Message from ${sender} via ${bot.name}`, from: sender, fromPerson: asker, text: message });
     chip(threadId, at, to, message);
     return {
       status: 200,
@@ -291,7 +291,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     for (const hit of teammateMentions(line.text, mentionable(), botNames())) {
       const to = byKey(hit.key);
       if (!to || to.key === writer?.key || !deps.sees(to).thread(threadId)) continue;
-      tell(to, { where: at, threadId, messageId: line.id, title: `${writerName} mentioned you in ${place}`, from: writerName, text: hit.excerpt });
+      tell(to, { where: at, threadId, messageId: line.id, title: `${writerName} mentioned you in ${place}`, from: writerName, fromPerson: writer, text: hit.excerpt });
     }
   }
 
@@ -371,7 +371,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return waiting.filter((item) => item.person === me.key && now() - item.at < WAITING_MS && view.thread(item.threadId))
         .sort((a, b) => b.at - a.at)
         .map((item) => ({ kind: "message", id: item.id, at: item.at, botId: item.botId, threadId: item.threadId,
-          ...(item.messageId ? { messageId: item.messageId } : {}), from: item.from, text: item.text }));
+          ...(item.messageId ? { messageId: item.messageId } : {}), from: item.from, ...(item.fromEmail ? { fromEmail: item.fromEmail } : {}), text: item.text }));
     },
     /** The person opened this conversation: what waited there for them is done. */
     seen(auth: RequestAuth, threadId: string): void {

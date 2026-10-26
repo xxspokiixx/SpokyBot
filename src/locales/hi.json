@@ -590,6 +590,7 @@
   "chat.previousVersion": "पिछला संस्करण",
   "chat.nextVersion": "अगला संस्करण",
   "chat.openConversationWith": "{name} के साथ बातचीत खोलें",
+  "chat.handoffDoneWhen": "पूरा तब माना जाएगा जब: {criteria}",
   "chat.botScreen": "बॉट की स्क्रीन",
   "chat.digestChip": "{tools} टूल कॉल किए · {files} फ़ाइलें बदलीं",
   "chat.digestChipNoFiles": "{tools} टूल कॉल किए",

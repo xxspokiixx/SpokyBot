@@ -873,6 +873,7 @@
   "chat.previousVersion": "上一个版本",
   "chat.nextVersion": "下一个版本",
   "chat.openConversationWith": "打开与 {name} 的对话",
+  "chat.handoffDoneWhen": "完成标准：{criteria}",
   "chat.openThread": "打开 #{title}",
   "chat.openThreadOn": "在 {name} 上打开 #{title}",
   "chat.botScreen": "机器人的屏幕",
