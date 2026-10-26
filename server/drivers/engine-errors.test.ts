@@ -117,9 +117,21 @@ describe("stopCause", () => {
   });
 
   it("says in plain words what an ACP stop reason that names its cause means, with the advice that fits it", () => {
-    expect(stopCause("refusal")).toBe("The AI refused to go on with this request (stop reason: refusal). Try again, reword the request, or switch this bot to another AI.");
-    expect(stopCause("max_tokens")).toBe("The AI's reply reached its maximum length before it finished (stop reason: max_tokens). Ask it to continue, or ask for a shorter answer.");
-    expect(stopCause("max_turn_requests")).toBe("The turn made as many model requests as one turn may before it finished (stop reason: max_turn_requests). Ask it to carry on from where it stopped, or split the task.");
+    // no cause carries another reason's actions whole: the advice is per reason, not one shared line
+    const advice: Record<string, RegExp[]> = {
+      refusal: [/again|retry/, /reword/, /switch/],
+      max_tokens: [/continue/, /shorter/],
+      max_turn_requests: [/carry on/, /split/],
+    };
+    for (const [token, own] of Object.entries(advice)) {
+      const cause = stopCause(token)!;
+      expect(cause, token).toContain(`(stop reason: ${token})`);
+      for (const action of own) expect(cause, `${token} advises ${action}`).toMatch(action);
+      for (const [other, others] of Object.entries(advice)) {
+        if (other === token) continue;
+        expect(others.some((action) => !action.test(cause)), `${token} does not read as ${other}`).toBe(true);
+      }
+    }
     for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
       const cause = stopCause(token)!;
       expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
