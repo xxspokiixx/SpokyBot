@@ -892,6 +892,14 @@ function withPatchedCard(messages: Message[], messageId: string, patch: Partial<
   return messages.map((m) => (m.id === messageId && m.card ? { ...m, card: { ...m.card, ...patch } } : m));
 }
 
+/** A room frame's fields that describe the room as a whole, not the thread the server has open. */
+function roomFieldsOnly({
+  threadId: _threadId, pinnedCwd: _pinnedCwd, pinnedMessageId: _pinnedMessageId, usage: _usage,
+  memberContext: _memberContext, busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...room
+}: Partial<Group> & { id: string }): Partial<Group> & { id: string } {
+  return { ...room, section: room.section };
+}
+
 function patchCard(state: AppState, botId: string, messageId: string, patch: Partial<OptionCardData>): AppState {
   return updateBot(state, botId, (b) => ({ ...b, messages: withPatchedCard(b.messages, messageId, patch) }));
 }
@@ -1101,23 +1109,27 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, webhookAttempts: attempts.slice(-2_000) };
     }
     case "groupPatched": {
-      const fenced = action.group.messages ? bumpTranscriptGeneration(state, action.group.threadId) : state;
-      const exists = fenced.groups.some((g) => g.id === action.group.id);
-      const groups = exists
-        ? fenced.groups.map((g) => (g.id === action.group.id ? {
-            ...g, ...action.group,
-            section: typeof action.group.threadId === "string" || Object.hasOwn(action.group, "section") ? action.group.section : g.section,
-            description: Object.hasOwn(action.group, "description")
-              ? (action.group.description ?? undefined)
+      const shown = state.groups.find((g) => g.id === action.group.id);
+      // The server sends a transcript whenever a room changes thread, so a frame naming another thread without one is stale.
+      const patch = shown && !action.group.messages && typeof action.group.threadId === "string" && action.group.threadId !== shown.threadId
+        ? roomFieldsOnly(action.group)
+        : action.group;
+      const fenced = patch.messages ? bumpTranscriptGeneration(state, patch.threadId) : state;
+      const groups = shown
+        ? fenced.groups.map((g) => (g.id === patch.id ? {
+            ...g, ...patch,
+            section: typeof patch.threadId === "string" || Object.hasOwn(patch, "section") ? patch.section : g.section,
+            description: Object.hasOwn(patch, "description")
+              ? (patch.description ?? undefined)
               : g.description,
-            tasks: action.group.tasks ? mergeTaskStamps(g.tasks, action.group.tasks) : g.tasks,
-            turnTimeoutMinutes: Object.hasOwn(action.group, "turnTimeoutMinutes")
-              ? (action.group.turnTimeoutMinutes ?? undefined)
+            tasks: patch.tasks ? mergeTaskStamps(g.tasks, patch.tasks) : g.tasks,
+            turnTimeoutMinutes: Object.hasOwn(patch, "turnTimeoutMinutes")
+              ? (patch.turnTimeoutMinutes ?? undefined)
               : g.turnTimeoutMinutes,
-            messages: action.group.messages ?? g.messages,
-            hasMore: action.group.messages ? Boolean(action.group.hasMore) : g.hasMore,
+            messages: patch.messages ?? g.messages,
+            hasMore: patch.messages ? Boolean(patch.hasMore) : g.hasMore,
           } : g))
-        : [{ ...(action.group.description === null ? { ...action.group, description: undefined } : action.group) as Group, messages: action.group.messages ?? [] }, ...fenced.groups];
+        : [{ ...(patch.description === null ? { ...patch, description: undefined } : patch) as Group, messages: patch.messages ?? [] }, ...fenced.groups];
       return { ...fenced, groups };
     }
     case "groupDeleted": {
@@ -2263,6 +2275,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const dispatch = useMemo(() => {
     const navigation = new Map<string, number>();
     let selectionRevision = 0;
+    const roomNavigation = new Map<string, number>();
+    const roomAnswer = (groupId: string, navigates: boolean) => {
+      const revision = (roomNavigation.get(groupId) ?? 0) + (navigates ? 1 : 0);
+      roomNavigation.set(groupId, revision);
+      return (r: { group?: Partial<Group> & { id: string } } | undefined) => {
+        if (r?.group && roomNavigation.get(groupId) === revision) dispatch({ type: "groupPatched", group: r.group });
+      };
+    };
     const olderPagesInFlight = new Set<string>();
     let creatingBot = false;
     const showError = (e: unknown) => {
@@ -2991,12 +3011,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "newGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks`, { method: "POST", body: "{}" })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, true))
             .catch(showError);
           break;
         case "switchGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST" })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, true))
             .catch(showError);
           break;
         case "renameGroupTask":
@@ -3019,7 +3039,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "deleteGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "DELETE" })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, false))
             .catch(showError);
           break;
         case "setGroupHold":
@@ -3027,7 +3047,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             method: "POST",
             body: JSON.stringify({ botId: action.botId, held: action.held }),
           })
-            .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
+            .then(roomAnswer(action.groupId, false))
             .catch(showError);
           break;
         case "interruptGroup":
