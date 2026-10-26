@@ -2326,5 +2326,7 @@
   "voice.yourVoices": "आपकी आवाजें",
   "voice.library": "ElevenLabs वॉइस लाइब्रेरी",
   "voice.libraryHint": "किसी एक को चुनने पर वह आपकी आवाजों में जुड़ जाती है।",
-  "voice.adding": "जोड़ी जा रही है…"
+  "voice.adding": "जोड़ी जा रही है…",
+  "computer.simple.usingNow": "अभी: {place}",
+  "automations.run.stoppedBecause": "रोका गया: {reason}"
 }

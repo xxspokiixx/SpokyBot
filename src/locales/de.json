@@ -2344,5 +2344,7 @@
   "voice.yourVoices": "Deine Stimmen",
   "voice.library": "ElevenLabs-Stimmenbibliothek",
   "voice.libraryHint": "Wenn du eine auswählst, wird sie deinen Stimmen hinzugefügt.",
-  "voice.adding": "Wird hinzugefügt…"
+  "voice.adding": "Wird hinzugefügt…",
+  "computer.simple.usingNow": "Gerade: {place}",
+  "automations.run.stoppedBecause": "Gestoppt: {reason}"
 }

@@ -3205,5 +3205,7 @@
   "voice.yourVoices": "你的语音",
   "voice.library": "ElevenLabs 语音库",
   "voice.libraryHint": "选择后会添加到你的语音中。",
-  "voice.adding": "正在添加…"
+  "voice.adding": "正在添加…",
+  "computer.simple.usingNow": "当前：{place}",
+  "automations.run.stoppedBecause": "已停止：{reason}"
 }

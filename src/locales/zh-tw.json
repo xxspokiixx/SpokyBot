@@ -2996,6 +2996,7 @@
   "computer.files.recent": "在這段對話中變更的檔案",
   "computer.files.empty": "{name} 在這段對話中建立或變更的檔案會顯示在這裡。",
   "computer.simple.whereWorks": "{name} 的執行位置",
+  "computer.simple.usingNow": "目前：{place}",
   "computer.simple.dest.thisMac": "這台 Mac",
   "computer.simple.dest.thisPc": "這台 PC",
   "computer.simple.needsSetup": "{name} 的桌面需要先完成一個設定步驟。",
@@ -4225,5 +4226,6 @@
   "voice.yourVoices": "你的語音",
   "voice.library": "ElevenLabs 語音庫",
   "voice.libraryHint": "選擇後會加入你的語音。",
-  "voice.adding": "正在加入…"
+  "voice.adding": "正在加入…",
+  "automations.run.stoppedBecause": "已停止：{reason}"
 }

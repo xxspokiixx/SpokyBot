@@ -2803,5 +2803,7 @@
   "voice.yourVoices": "Ваші голоси",
   "voice.library": "Бібліотека голосів ElevenLabs",
   "voice.libraryHint": "Вибраний голос буде додано до ваших голосів.",
-  "voice.adding": "Додавання…"
+  "voice.adding": "Додавання…",
+  "computer.simple.usingNow": "Зараз: {place}",
+  "automations.run.stoppedBecause": "Зупинено: {reason}"
 }
