@@ -35,6 +35,7 @@ const MUSE_CONTEXT_WINDOW = 1_048_576;
 const RE_ANCHOR_TURNS = 8;
 const STARTUP_TIMEOUT_MS = 30_000;
 const MODEL_LIST_TIMEOUT_MS = 20_000;
+const INTERRUPT_CONFIRM_MS = 5_000;
 const SHUTDOWN_DRAIN_MS = 10_000;
 const SHUTDOWN_KILL_GRACE_MS = 2_000;
 const MAX_TOOL_OUTPUT = 4_000;
@@ -198,6 +199,8 @@ interface ActiveTurn {
   items: Map<string, MuseItem>;
   streamed: Map<string, string>;
   finished: boolean;
+  /** Set once Stop ends the host: a later Stop waits for the same shutdown. */
+  stopping?: Promise<void>;
   receipt?: { key: string; receipt: PromptSplitReceipt };
 }
 
@@ -530,6 +533,12 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       await host?.close().catch(() => {});
     };
 
+    /** Muse goes on working until it confirms the interrupt; a turn it does not confirm stops only with its host. */
+    const endUnconfirmed = (state: ThreadState, active: ActiveTurn): Promise<void> => {
+      if (active.finished || state.active !== active) return Promise.resolve();
+      return active.stopping ??= closeHost(state).then(() => finishTurn(state, active, { ok: false, stopReason: "interrupted" }));
+    };
+
     const ensureSession = async (state: ThreadState, turn: SendTurnInput, turnId: string): Promise<{ text: string; rebuilt: boolean; started: boolean }> => {
       const cwd = turn.cwd ?? process.cwd();
       const servers = turnStdioMcpServers(turn);
@@ -655,11 +664,15 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         const state = threads.get(threadId);
         const active = state?.active;
         if (!state || !active || active.finished) return;
+        if (active.stopping) return active.stopping;
         if (state.host && state.sessionId && active.nativeTurnId) {
           try {
             await state.host.connection.command("turn/interrupt", { sessionId: state.sessionId, turnId: active.nativeTurnId });
-            return; // turn/completed (cancelled) settles it
-          } catch {}
+          } catch {
+            return endUnconfirmed(state, active);
+          }
+          setTimeout(() => void endUnconfirmed(state, active), INTERRUPT_CONFIRM_MS).unref?.();
+          return; // turn/completed (cancelled) settles it
         }
         finishTurn(state, active, { ok: false, stopReason: "interrupted" });
       },
@@ -718,6 +731,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       hasSession: (threadId) => Boolean(threads.get(threadId)?.sessionId),
       async stopAll() {
         await Promise.all([...threads.values()].map(async (state) => {
+          await state.active?.stopping;
           if (state.active) finishTurn(state, state.active, { ok: false, stopReason: "interrupted" });
           await closeHost(state);
         }));
