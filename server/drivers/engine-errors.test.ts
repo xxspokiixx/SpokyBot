@@ -116,12 +116,12 @@ describe("stopCause", () => {
     expect(stopCause(null)).toBeUndefined();
   });
 
-  it("says in plain words what an ACP stop reason that names its cause means, and what to do", () => {
-    expect(stopCause("refusal")).toMatch(/^The AI refused\b/);
+  it("says in plain words what an ACP stop reason that names its cause means, with the advice that fits it", () => {
+    expect(stopCause("refusal")).toBe("The AI refused to go on with this request (stop reason: refusal). Try again, reword the request, or switch this bot to another AI.");
+    expect(stopCause("max_tokens")).toBe("The AI's reply reached its maximum length before it finished (stop reason: max_tokens). Ask it to continue, or ask for a shorter answer.");
+    expect(stopCause("max_turn_requests")).toBe("The turn made as many model requests as one turn may before it finished (stop reason: max_turn_requests). Ask it to carry on from where it stopped, or split the task.");
     for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
       const cause = stopCause(token)!;
-      expect(cause).toContain(`(stop reason: ${token})`);
-      expect(cause).not.toContain("without saying why");
       expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
       expect(engineFailureKind(cause)).toBeNull();
     }

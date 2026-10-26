@@ -116,11 +116,20 @@ export function plainFailureMessage(provider: string, text: string): string {
   return kind === "credits" || kind === "tool_schema" || kind === "tool_count" ? engineFailureMessage(provider, text, { kind })! : text;
 }
 
-/** ACP's StopReason values (protocol v1) that do say why a turn ended early. */
-const STOP_REASON_WORDS: Record<string, string> = {
-  refusal: "The AI refused to go on with this request",
-  max_tokens: "The AI's reply reached its maximum length before it finished",
-  max_turn_requests: "The turn made as many model requests as one turn may before it finished",
+/** ACP's StopReason values (protocol v1) that do say why a turn ended early; each carries the advice that fits it. */
+const STOP_REASON_WORDS: Record<string, { words: string; hint: string }> = {
+  refusal: {
+    words: "The AI refused to go on with this request",
+    hint: "Try again, reword the request, or switch this bot to another AI.",
+  },
+  max_tokens: {
+    words: "The AI's reply reached its maximum length before it finished",
+    hint: "Ask it to continue, or ask for a shorter answer.",
+  },
+  max_turn_requests: {
+    words: "The turn made as many model requests as one turn may before it finished",
+    hint: "Ask it to carry on from where it stopped, or split the task.",
+  },
 };
 
 /** A failed turn's stop reason as its cause: a bare provider token ("stop_sequence", "rpc_error") is never the whole
@@ -128,7 +137,7 @@ const STOP_REASON_WORDS: Record<string, string> = {
 export function stopCause(stopReason: string | null | undefined): string | undefined {
   const reason = stopReason?.trim();
   if (!reason) return undefined;
-  const words = Object.hasOwn(STOP_REASON_WORDS, reason) ? STOP_REASON_WORDS[reason] : undefined;
-  if (words) return `${words} (stop reason: ${reason}). Try again, reword the request, or switch this bot to another AI.`;
+  const entry = Object.hasOwn(STOP_REASON_WORDS, reason) ? STOP_REASON_WORDS[reason] : undefined;
+  if (entry) return `${entry.words} (stop reason: ${reason}). ${entry.hint}`;
   return /^[a-z][a-z0-9_]*$/i.test(reason) ? `The engine stopped without saying why (stop reason: ${reason}).` : reason;
 }
