@@ -50,7 +50,8 @@ const AFTER_RESET_MS = 60_000;
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 /** startTurn's codes for a bot or thread that is busy for now. */
 const BUSY_CODES = new Set(["thread_busy", "thread_limit", "workspace_busy", "settling"]);
-/** Stop reasons of a turn someone ended on purpose (Stop, a typed "stop"), or the AI declined: a second start would undo or repeat it. */
+/** Stop reasons of a turn someone ended on purpose (Stop, a typed "stop", a settings change that cut it short), or the AI
+ * declined: a second start would undo or repeat it. */
 const NOT_RETRIED_STOPS = new Set(["cancelled", "interrupted", "refusal"]);
 /** What the provider answered for a reason a second start would meet again. */
 const REFUSED_KINDS = new Set(["refused", "tool_schema", "tool_count"]);

@@ -107,9 +107,9 @@ describe("classifyRoutineFailure", () => {
     // Any other failure gets one retry...
     [CRASH, {}, { kind: "retry", cause: "failed" }],
     ["The bot did not complete this run", {}, { kind: "retry", cause: "failed" }],
-    ["Provider settings changed while this thread was running", {}, { kind: "retry", cause: "failed" }],
     // ...except a stop someone pressed or typed, a refusal and a spent cap.
     [CRASH, { stopReason: "interrupted" }, { kind: "final" }],
+    ["Provider settings changed while this thread was running", { stopReason: "interrupted" }, { kind: "final" }],
     ["The engine stopped without saying why (stop reason: refusal).", { stopReason: "refusal" }, { kind: "final" }],
     ["The model refused the request (HTTP 400): unsupported model", {}, { kind: "final" }],
     [CAPPED, {}, { kind: "final" }],
