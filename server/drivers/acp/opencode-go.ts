@@ -259,12 +259,14 @@ function discoveryDirectory(): Promise<string> {
   return discoveryFolder;
 }
 
+const UNANSWERED = Symbol("unanswered");
+
 function answerWithin(answer: Promise<unknown>, ms: number): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     answer.catch(() => null),
     new Promise((resolve) => {
-      timer = setTimeout(() => resolve(null), ms);
+      timer = setTimeout(() => resolve(UNANSWERED), ms);
     }),
   ]).finally(() => clearTimeout(timer));
 }
@@ -293,6 +295,7 @@ export async function surveyOpenCodeEfforts(
       request("session/set_config_option", { sessionId, configId: "model", value: id }),
       remaining,
     );
+    if (selected === UNANSWERED) break;
     if (acpModelOption(selected, "model")?.currentValue !== id) continue;
     efforts.set(id, acpVariantOption(selected)?.options ?? []);
   }
