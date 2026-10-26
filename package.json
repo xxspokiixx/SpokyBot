@@ -137,7 +137,7 @@
     "vega-themes": "3.0.0",
     "ws": "8.22.0",
     "yaml": "^2.9.0",
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@modelcontextprotocol/ext-apps": "2.0.3",
