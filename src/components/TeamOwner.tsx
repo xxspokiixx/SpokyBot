@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import { useHeldMenuMotion } from "./MenuMotion";
 
 export type OwnerPickerTarget = { botIds: string[]; title: string; current: string | null; x: number; y: number };
@@ -136,6 +136,13 @@ export function departmentOwner(bots: readonly Bot[], team: ReturnType<typeof us
   return first && owners.every((owner) => owner?.email === first.email) ? first : null;
 }
 
+/** A tag or passed message is done once its person opens it, even in a shared chat someone else already read. */
+function readConversation(groups: ReadonlyArray<{ id: string; threadId: string; tasks?: ReadonlyArray<{ threadId: string }> }>, botId: string, threadId: string) {
+  const group = groups.find((one) => one.threadId === threadId || one.tasks?.some((task) => task.threadId === threadId));
+  void (group ? api(`/api/groups/${group.id}/read`, { method: "POST" }) : api(`/api/bots/${botId}/read`, { method: "POST", body: JSON.stringify({ threadId }) }))
+    .then(() => refreshNeedsYou()).catch(() => {});
+}
+
 /** On a Team Cloud: what the bots ask of this person, newest first, each one opening its conversation. */
 export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
   const team = useTeamPeople();
@@ -164,10 +171,16 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
         <div role="menu" aria-label={t("needsYou.title")} className="absolute left-2 right-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60">
           {items.map((item) => {
             const botId = "botId" in item ? item.botId : item.botIds[0]!;
-            const title = item.kind === "question" ? t("needsYou.asking", { bot: botName(botId) }) : t("needsYou.fix", { bot: botName(botId) });
+            const title = item.kind === "message" ? t("needsYou.message", { name: item.from })
+              : item.kind === "question" ? t("needsYou.asking", { bot: botName(botId) }) : t("needsYou.fix", { bot: botName(botId) });
             const text = "text" in item ? item.text : "";
             return <button key={`${item.kind}:${item.id}`} type="button" role="menuitem"
-              onClick={() => { setOpen(false); if (item.threadId) openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads); }}
+              onClick={() => {
+                setOpen(false);
+                if (!item.threadId) return;
+                openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads);
+                if (item.kind === "message") readConversation(state.groups, botId, item.threadId);
+              }}
               className="flex w-full flex-col items-start px-3.5 py-2 text-left hover:bg-raised/70">
               <span className="w-full truncate text-[13px] text-ink">{title}</span>
               {text && <span className="w-full truncate text-[12px] text-ink-secondary">{text}</span>}

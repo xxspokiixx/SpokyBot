@@ -1,7 +1,8 @@
 // A Team Cloud's people, for "Reports to": who a bot can report to, which of them is this person, and whether this
 // person may change who a bot reports to (an Admin, or the member it reports to now). Null off a team.
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { botOwner, nameFromEmail } from "../../shared/bot-owner";
+import { mentionablePeople } from "../../shared/person-mention";
 import type { NeedsYouItem } from "../../shared/today";
 import { api } from "./api";
 import { teamOfConfig } from "./team-chats";
@@ -24,6 +25,18 @@ export function useTeamPeople(): TeamPeople | null {
     listeners.add(listener);
     return () => listeners.delete(listener);
   }, () => snapshot, () => snapshot);
+}
+
+/** On a Team Cloud: the teammates the @ list offers (everyone but this person) and each name that tags someone on the
+ * team, this person included. */
+export function useTeammates(): { people: TeamPerson[]; peers: Array<{ name: string; person: true }> } {
+  const team = useTeamPeople();
+  return useMemo(() => {
+    const everyone = team?.people ?? [];
+    const peers = mentionablePeople(everyone.map((person) => ({ key: person.email, name: person.name })))
+      .flatMap((person) => person.names.map((name) => ({ name, person: true as const })));
+    return { people: everyone.filter((person) => !person.you), peers };
+  }, [team?.people]);
 }
 
 /** The person a bot reports to, as the picker names them; null for a bot nobody owns. */
@@ -62,6 +75,14 @@ export function refreshNeedsYou(): void {
     refreshTimer = null;
     void loadNeedsYou().then((needsYou) => { if (snapshot) publish({ ...snapshot, needsYou }); }).catch(() => {});
   }, 800);
+}
+
+type VersionedBot = { id: string; reportsTo?: string; activity?: string; tasks?: ReadonlyArray<{ activity?: string; unread?: boolean }> };
+/** Changes whenever something may have reached or left this person's Needs you: an owner, a bot's work, a conversation
+ * read or not, a notification. */
+export function needsYouVersion(bots: readonly VersionedBot[], groups: ReadonlyArray<{ unread?: boolean }>, notifications: ReadonlyArray<{ read: boolean }>): string {
+  const bot = (one: VersionedBot) => `${one.id}:${one.reportsTo ?? ""}:${one.activity ?? ""}:${(one.tasks ?? []).filter((task) => task.activity === "waiting-on-you").length}:${(one.tasks ?? []).filter((task) => task.unread).length}`;
+  return `${bots.map(bot).join("|")}|${groups.filter((group) => group.unread).length}|${notifications.length}:${notifications.filter((entry) => !entry.read).length}`;
 }
 
 /** Keeps the people and this person's Needs you in step with the page's server; nothing off a team. */
