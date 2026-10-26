@@ -142,6 +142,7 @@ type Token = { kind: "word" | "ident" | "punct" | "block"; text: string; raw: st
 function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
   const tokens: Token[] = [];
   let statements = 1;
+  let ended = false;
   let depth = 0;
   let i = 0;
   const n = sql.length;
@@ -149,24 +150,24 @@ function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
   while (i < n) {
     const ch = sql[i]!;
     const next = sql[i + 1];
-    if (ch === "-" && next === "-") { const end = sql.indexOf("\n", i); i = end === -1 ? n : end + 1; continue; }
-    if (ch === "/" && next === "*") { const end = sql.indexOf("*/", i + 2); if (end === -1) throw fail("invalid_input", "Unterminated comment."); i = end + 2; continue; }
+    if (ch === "-" && next === "-") { const end = sql.slice(i).search(/[\n\r]/); i = end === -1 ? n : i + end + 1; continue; }
+    if (ch === "/" && next === "*") { i = blockCommentEnd(sql, i); continue; }
+    if (ch === ";") { ended = true; i++; continue; }
+    if (ended && /\S/.test(ch)) { statements++; ended = false; }
     if (ch === "'") {
-      let j = i + 1;
-      for (;;) {
-        const q = sql.indexOf("'", j);
-        if (q === -1) throw fail("invalid_input", "Unterminated string literal.");
-        if (sql[q + 1] === "'") { j = q + 2; continue; }
-        j = q + 1; break;
-      }
       push("word", "'…'");
-      i = j; continue;
+      i = stringEnd(sql, i); continue;
     }
-    if (ch === "$" && next === "$") {
-      const end = sql.indexOf("$$", i + 2);
-      if (end === -1) throw fail("invalid_input", "Unterminated dollar-quoted string.");
-      push("word", "'…'");
-      i = end + 2; continue;
+    if (ch === "$") {
+      const delimiter = /\$(?:[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/y;
+      delimiter.lastIndex = i;
+      const open = delimiter.exec(sql)?.[0];
+      if (open) {
+        const end = sql.indexOf(open, i + open.length);
+        if (end === -1) throw fail("invalid_input", "Unterminated dollar-quoted string.");
+        push("word", "'…'");
+        i = end + open.length; continue;
+      }
     }
     if (ch === '"') {
       let j = i + 1;
@@ -181,10 +182,6 @@ function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
     }
     if (ch === "(") { push("block", "(…)"); depth++; i++; continue; }
     if (ch === ")") { depth = Math.max(0, depth - 1); i++; continue; }
-    if (ch === ";") {
-      if (depth === 0 && /\S/.test(sql.slice(i + 1).replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, "").replace(/[;\s]+$/, ""))) statements++;
-      i++; continue;
-    }
     if (/[A-Za-z_]/.test(ch)) {
       let j = i + 1;
       while (j < n && /[A-Za-z0-9_$.]/.test(sql[j]!)) j++;
@@ -195,6 +192,40 @@ function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
     i++;
   }
   return { tokens, statements };
+}
+
+/** DuckDB 1.5 nests block comments: `/* a /* b *\/ c *\/` is one comment. */
+function blockCommentEnd(sql: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < sql.length - 1;) {
+    if (sql[i] === "/" && sql[i + 1] === "*") { depth++; i += 2; continue; }
+    if (sql[i] === "*" && sql[i + 1] === "/") { depth--; i += 2; if (!depth) return i; continue; }
+    i++;
+  }
+  throw fail("invalid_input", "Unterminated comment.");
+}
+
+/**
+ * DuckDB 1.5 reads backslash escapes in E'…' unless the E ends an identifier. After a digit the E may
+ * end a number (`1E'…'`), so a literal the two readings end in different places is refused.
+ */
+function stringEnd(sql: string, quote: number): number {
+  if (!/[eE]/.test(sql[quote - 1] ?? "")) return literalEnd(sql, quote, false);
+  const before = sql[quote - 2] ?? "";
+  if (!/[0-9]/.test(before)) return literalEnd(sql, quote, !/[A-Za-z_$\u0080-\uffff]/.test(before));
+  const end = literalEnd(sql, quote, false);
+  if (end !== literalEnd(sql, quote, true)) throw fail("invalid_input", "Put a space before E'…' so the string reads one way.");
+  return end;
+}
+
+function literalEnd(sql: string, quote: number, escapes: boolean): number {
+  for (let j = quote + 1; j < sql.length; j++) {
+    if (escapes && sql[j] === "\\") { j++; continue; }
+    if (sql[j] !== "'") continue;
+    if (sql[j + 1] !== "'") return j + 1;
+    j++;
+  }
+  throw fail("invalid_input", "Unterminated string literal.");
 }
 
 const READ_VERBS = new Set(["SELECT", "WITH", "FROM", "PIVOT", "UNPIVOT", "VALUES", "SUMMARIZE", "DESCRIBE", "EXPLAIN", "SHOW"]);

@@ -79,8 +79,13 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
     const refused = await call("data_sql", { sql: "DELETE FROM sales" });
     expect(refused.isError).toBe(true);
     expect(refused.data.code).toBe("write_refused");
-    const explained = await call("data_sql", { sql: "EXPLAIN ANALYZE WITH x AS (SELECT 1) DELETE FROM sales" });
-    expect(explained.data.code).toBe("write_refused");
+    for (const sql of [
+      "EXPLAIN ANALYZE WITH x AS (SELECT 1) DELETE FROM sales",
+      "EXPLAIN ANALYZE /* outer /* inner */ SELECT */ DELETE FROM sales",
+      "EXPLAIN ANALYZE WITH x AS (SELECT E'\\') SELECT 1 --') DELETE FROM sales",
+      "EXPLAIN ANALYZE WITH x AS (SELECT $a$ ) SELECT 1 -- $a$) DELETE FROM sales",
+      "SHOW TABLES; --x\rDELETE FROM sales",
+    ]) expect((await call("data_sql", { sql })).data.code, sql).toMatch(/^(write_refused|invalid_input)$/);
     expect((await call("data_sql", { sql: "SELECT count(*) AS n FROM sales" })).data.rows).toEqual([["300"]]);
     const broken = await call("data_sql", { sql: "SELECT nope FROM sales" });
     expect(broken.isError).toBe(true);
