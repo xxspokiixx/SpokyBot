@@ -1909,6 +1909,7 @@
   "chat.activity.whosAround": "Sprawdzanie, kto jest dostępny",
   "chat.activity.rooms": "Sprawdzanie grup",
   "chat.activity.postRoom": "Publikowanie w grupie",
+  "chat.activity.messagePerson": "Przekazuje wiadomość",
   "chat.activity.handoff": "Przekazywanie zadania",
   "chat.activity.askTeammate": "Pytanie do członka zespołu",
   "chat.activity.reply": "Pisanie odpowiedzi",
@@ -1969,6 +1970,7 @@
   "composer.commands.title": "Polecenia",
   "composer.mention.aria": "Oznacz bota",
   "composer.mention.agent": "Agent",
+  "composer.mention.person": "Osoba",
   "composer.mention.channel": "Czat grupowy",
   "composer.mention.everyoneOne": "1 bot w tym czacie",
   "composer.mention.everyoneMany": "Boty w tym czacie: {count}",
@@ -6233,5 +6235,8 @@
   "voice.yourVoices": "Twoje głosy",
   "voice.library": "Biblioteka głosów ElevenLabs",
   "voice.libraryHint": "Wybrany głos zostanie dodany do twoich głosów.",
-  "voice.adding": "Dodawanie…"
+  "voice.adding": "Dodawanie…",
+  "needsYou.message": "Wiadomość od: {name}",
+  "relay.told": "Przekazano: {name}",
+  "relay.toldHint": "Ta wiadomość trafiła do: {name}"
 }
