@@ -323,5 +323,5 @@ test("My Cloud's page asks main to lend Apps and screen only from the person's c
   // A bot's Use my Mac link only opens main's own popup, and only from the person's click.
   await assert.rejects(unclicked.bridge.cloudLending.offer(), /Press Use my Mac/);
   await clicked.bridge.cloudLending.offer();
-  assert.deepEqual([...unclicked.invoked, ...clicked.invoked].filter(([channel]) => channel === "cloud-lending:offer"), [["cloud-lending:offer"]]);
+  assert.deepEqual([...unclicked.invoked, ...clicked.invoked].filter(([channel]) => channel === "cloud-lending:offer"), [["cloud-lending:offer", ""]]);
 });
