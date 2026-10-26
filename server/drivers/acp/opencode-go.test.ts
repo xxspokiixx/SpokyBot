@@ -682,14 +682,33 @@ describe("OpenCode effort survey", () => {
   });
 
   it("stops at its time budget with what it has, even when OpenCode never answers", async () => {
+    const asked: string[] = [];
     const started = Date.now();
     const found = await surveyOpenCodeEfforts(async (_method, params) => {
       const value = (params as { value: string }).value;
+      asked.push(value);
       if (value === "opencode/stuck") return new Promise(() => {});
       return selected(value, ["high"]);
     }, session(["opencode/quick", "opencode/stuck", "opencode/never-asked"]), 200);
     expect(Date.now() - started).toBeLessThan(2_000);
+    expect(asked).toEqual(["opencode/quick", "opencode/stuck"]);
     expect([...found.keys()]).toEqual(["opencode/quick"]);
+  });
+
+  it("asks nothing more once the budget is spent, however fast OpenCode answers", async () => {
+    const blockFor = (ms: number) => {
+      const until = Date.now() + ms;
+      while (Date.now() < until);
+    };
+    const asked: string[] = [];
+    const found = await surveyOpenCodeEfforts((_method, params) => {
+      const value = (params as { value: string }).value;
+      asked.push(value);
+      if (value === "opencode/slow") blockFor(120);
+      return Promise.resolve(selected(value, ["high"]));
+    }, session(["opencode/slow", "opencode/next"]), 100);
+    expect(asked).toEqual(["opencode/slow"]);
+    expect([...found.keys()]).toEqual(["opencode/slow"]);
   });
 
   it("asks nothing without a session id", async () => {
