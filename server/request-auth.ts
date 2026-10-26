@@ -449,6 +449,8 @@ function mutatingPublicRoute(method: string, path: string): boolean {
   ) return true;
   // Hands out a desktop's VNC password and control.
   if (path.startsWith("/api/desktop-viewer/")) return true;
+  // Hand out a stored secret to a loopback reader: a webhook's address, a Local VM's viewer password.
+  if (upper === "GET" && (/^\/api\/webhooks\/[\w-]+\/address$/.test(path) || /^\/api\/(?:bots\/[\w-]+\/)?local-computer$/.test(path))) return true;
   // Drives a bot's browser: a WebSocket upgrade is a GET, but what it carries is input.
   if (/^\/api\/bots\/[\w-]+\/browser\/stream$/.test(path)) return true;
   if (["GET", "HEAD", "OPTIONS"].includes(upper)) return false;
@@ -492,7 +494,8 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     if (via === "cookie" && !isSameOrigin(req)) return deny(403, "forbidden: cross-origin request");
     // A browser sign-in's session is its cookie, never a bearer token.
     if (via === "bearer" && session.cookieOnly) return deny(401, "unauthorized: this session belongs to a browser; sign in with a pairing code");
-    if (via === "cookie" && session.cookieOnly && !["GET", "HEAD", "OPTIONS"].includes(method) && !provesSameOrigin(req)) {
+    if (via === "cookie" && session.cookieOnly && (!["GET", "HEAD", "OPTIONS"].includes(method) || mutatingPublicRoute(method, path)) &&
+      !provesSameOrigin(req)) {
       return deny(403, "forbidden: this browser's session makes changes only from its own page");
     }
     const narrowed = options.restricted?.(session, method, path, options.url) ?? null;
