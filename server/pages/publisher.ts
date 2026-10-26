@@ -1,7 +1,7 @@
 import { PAGE_ID, type PublishedPageCard } from "../../shared/published-page.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
 import { PageBundleError, pageSource, readPageBundle, type PageBundle } from "./bundle.ts";
-import type { PagesClient, PagesFailure, PageUsage } from "./client.ts";
+import type { PagesCall, PagesClient, PagesFailure, PageUsage } from "./client.ts";
 import type { PublishedPagesStore } from "./store.ts";
 
 /** What a publish or unpublish comes to: the sentence for the bot (or the person's card), and whether it failed. */
@@ -19,6 +19,8 @@ export interface PublishInput {
   /** Puts a card in the conversation the tool was called from; its message id, or null when the turn has ended. A live
    * card comes with the files published, so it can show the page itself. */
   post: (text: string, card: PublishedPageCard, bundle?: PageBundle) => string | null;
+  /** The bot's tool call: nothing is sent to the pages service once its turn has ended or its request is gone. */
+  call?: PagesCall;
 }
 
 const TITLE_MAX = 200;
@@ -86,20 +88,20 @@ export function createPagePublisher(deps: {
 
   };
 
-  function publishBundle(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post">, bundle: PageBundle): Promise<PageOutcome> {
+  function publishBundle(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call">, bundle: PageBundle): Promise<PageOutcome> {
     return serially(JSON.stringify([input.botId, bundle.source]), () => publishNow(input, bundle));
   }
 
-  async function publishNow(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post">, bundle: PageBundle): Promise<PageOutcome> {
+  async function publishNow(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call">, bundle: PageBundle): Promise<PageOutcome> {
     const title = pageTitle(input.title);
     if (!title) return TITLE_REQUIRED;
     const remembered = input.pageId ? store.get(input.pageId) : store.fromSource(input.botId, bundle.source);
     const target = input.pageId ?? remembered?.pageId;
-    let result = await client.publish({ title, files: bundle.files, ...(target ? { pageId: target } : {}) });
+    let result = await client.publish({ title, files: bundle.files, ...(target ? { pageId: target } : {}) }, input.call);
     // The page this folder was published to before is gone (unpublished, or taken down): it gets a new link.
     if (!result.ok && result.reason === "gone" && !input.pageId && target) {
       store.forget(target);
-      result = await client.publish({ title, files: bundle.files });
+      result = await client.publish({ title, files: bundle.files }, input.call);
     }
     if (!result.ok) {
       if (result.reason === "limit") {
@@ -129,7 +131,7 @@ export function createPagePublisher(deps: {
     ...pages,
 
     /** Takes a page down, by its id or the file or folder it came from (with the bot's folders). */
-    async unpublish(input: { pageId?: string; path?: string; botId?: string; roots?: readonly string[] }): Promise<PageOutcome> {
+    async unpublish(input: { pageId?: string; path?: string; botId?: string; roots?: readonly string[]; call?: PagesCall }): Promise<PageOutcome> {
       let pageId = input.pageId;
       if (pageId !== undefined && !PAGE_ID.test(pageId)) return { status: 400, text: "page_id must be the id of a page you published, from its link." };
       if (!pageId && input.path && input.botId && input.roots) {
@@ -142,7 +144,7 @@ export function createPagePublisher(deps: {
       }
       if (!pageId) return { status: 400, text: "Pass the page_id of the page to unpublish, or the path it was published from." };
       const title = store.get(pageId)?.title;
-      const result = await client.unpublish(pageId);
+      const result = await client.unpublish(pageId, input.call);
       if (!result.ok && result.reason !== "gone") return { status: failureStatus[result.reason], text: result.message };
       const card = markUnpublished(pageId, result.ok ? result.usage : null)
         ?? { state: "unpublished" as const, title: title ?? pageId, pageId, ...(result.ok && result.usage ? { usage: result.usage } : {}) };
