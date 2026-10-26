@@ -671,6 +671,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
       "chat.digestChip": "ad86499681697a20ad1ef231f73865c883a1a2079da31606bb8871c074e3001f",
       "chat.digestChipNoFiles": "5c4ec742a7bd7cb059e357f7dff625518f76fa67de813f3b80a7abf57875a25d",
@@ -2398,7 +2399,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -4013,6 +4018,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -7805,7 +7811,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -8396,6 +8406,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
       "chat.digestChip": "ad86499681697a20ad1ef231f73865c883a1a2079da31606bb8871c074e3001f",
       "chat.digestChipNoFiles": "5c4ec742a7bd7cb059e357f7dff625518f76fa67de813f3b80a7abf57875a25d",
@@ -10186,7 +10197,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -10777,6 +10792,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
       "chat.digestChip": "ad86499681697a20ad1ef231f73865c883a1a2079da31606bb8871c074e3001f",
       "chat.digestChipNoFiles": "5c4ec742a7bd7cb059e357f7dff625518f76fa67de813f3b80a7abf57875a25d",
@@ -12567,7 +12583,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -14376,6 +14396,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -18937,7 +18958,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -20614,6 +20639,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -25045,7 +25071,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -25919,6 +25949,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -28299,7 +28330,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -29499,6 +29534,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -32572,7 +32608,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -33300,6 +33340,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -35426,7 +35467,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36847,6 +36892,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -40315,7 +40361,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -41736,6 +41786,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -45204,7 +45255,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -46975,6 +47030,7 @@
       "chat.previousVersion": "21d886b74bc1abe15deaec9a336f2bf5ca155decfd461ee97d0bde343d3583ac",
       "chat.nextVersion": "0671058c0f46bec7e39c26eccfd979d19ecd4035cc281e33919d31a35b2ac6d6",
       "chat.openConversationWith": "01746ba3e7fc4a7ed3c4d314b51be35730eecabedfe8c57995c2d977ecce0ed3",
+      "chat.handoffDoneWhen": "9e77a7a2bed65bb321324d43b901b1530a5e1114cc054c30f4175fe4a6257e37",
       "chat.openThread": "3dcd204fa977c5fd8f43e22d2a88fbca18c23ec3248f0cc54501feb7c558459f",
       "chat.openThreadOn": "a22a6c35f089dd610ecce0c71a20a625ad09f36b9f2c41c6e9b1634d11a06e68",
       "chat.botScreen": "b2a337a7572ffe825e1a4524f47331d314bcb650140c1c1c5ac9059b1b079740",
@@ -51468,7 +51524,11 @@
       "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
       "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
       "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
-      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e",
+      "onboarding.introName": "496a42ca2e6a7a52c46ee70d9e2720e8553a04a27e835f6333c4b997a9ea7242",
+      "onboarding.saving": "23e39291d6135814ed7c936e278974544b0df5fbf0eb0427b6700979b7472a93",
+      "onboarding.skipSetup": "59e693cdbc2cf6901f63d51b0a3f341cacd4ddeb2cdbc0a9604fd26436d11398",
+      "settings.welcome.subtitleShort": "9cfd783884fb23a6821ffc62342143863878581e4598e1d299a7550f3692d300"
     }
   }
 }
