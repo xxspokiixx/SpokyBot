@@ -223,9 +223,9 @@ describe("bounded scheduled overlap and run health", () => {
     expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + 10 * 60_000);
   });
 
-  it("keeps a run queued on its task when the write that starts it fails, and starts it there at the next tick", async () => {
+  it.each(["bot", "room-goal"] as const)("keeps a %s run queued on its task when the write that starts it fails, and starts it there at the next tick", async (target) => {
     const h = harness(start);
-    h.manager.create(input());
+    h.manager.create(target === "bot" ? input() : { ...input(), target, botId: "chief-1", groupId: "room-1" });
     const manager = h.manager as unknown as { save(): void };
     const write = manager.save.bind(h.manager);
     let saves = 0;
@@ -235,14 +235,15 @@ describe("bounded scheduled overlap and run health", () => {
     });
     h.setNow(start + 5 * 60_000);
     await expect(h.manager.tick()).rejects.toThrow("fixture disk full");
-    expect(h.manager.listRuns()).toEqual([expect.objectContaining({ status: "queued", threadId: "thread-1" })]);
+    const thread = target === "bot" ? "thread-1" : "goal-thread-1";
+    expect(h.manager.listRuns()).toEqual([expect.objectContaining({ status: "queued", threadId: thread })]);
     expect(h.manager.listRuns()[0].startedAt).toBeUndefined();
-    expect(h.started).toEqual([]);
+    expect([...h.started, ...h.startedGoals]).toEqual([]);
 
     await h.manager.tick();
-    expect(h.taskTitles).toHaveLength(1);
-    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
-    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: "thread-1" });
+    expect(h.taskTitles.length + h.goalTasks.length).toBe(1);
+    expect([...h.started, ...h.startedGoals].map((turn) => turn.threadId)).toEqual([thread]);
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: thread });
   });
 
   it("lets different scheduled routines on the same bot run independently", async () => {
