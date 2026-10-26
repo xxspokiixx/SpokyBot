@@ -102,6 +102,7 @@ input.on("line", (line) => {
   if (method === "turn/interrupt" && FAKE_MUSE_INTERRUPT === "refuse") {
     return send({ id, error: { code: -32000, message: "interrupt refused", data: { kind: "invalidState" } } });
   }
+  if (method === "turn/interrupt" && FAKE_MUSE_INTERRUPT === "silent") return;
   send({ id, result: { commandId: params.commandId } });
   if (method !== "turn/start" || FAKE_MUSE_TURN === "hang") return;
   const { sessionId, commandId: turnId } = params;
@@ -161,7 +162,7 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
   }, 20_000);
 
   describe("Stop", () => {
-    const runningTurn = async (interrupt: "ack" | "refuse") => {
+    const runningTurn = async (interrupt: "ack" | "refuse" | "silent") => {
       const { cli } = fakeMuse();
       vi.stubEnv("FAKE_MUSE_TURN", "hang");
       vi.stubEnv("FAKE_MUSE_INTERRUPT", interrupt);
@@ -230,6 +231,17 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
         await instance.adapter.interruptTurn("t-stop");
         expect(settled.completed).toBeUndefined();
         await vi.waitFor(() => expect(settled.completed).toMatchObject({ ok: false, stopReason: "interrupted" }), { timeout: 8_000 });
+        expect(settled.hostExited).toBe(true);
+      } finally {
+        await instance.dispose();
+      }
+    }, 20_000);
+
+    it("ends the host when Muse never answers the interrupt", async () => {
+      const { instance, settled } = await runningTurn("silent");
+      try {
+        await instance.adapter.interruptTurn("t-stop");
+        expect(settled.completed).toMatchObject({ ok: false, stopReason: "interrupted" });
         expect(settled.hostExited).toBe(true);
       } finally {
         await instance.dispose();

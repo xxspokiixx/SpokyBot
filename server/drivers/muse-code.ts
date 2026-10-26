@@ -666,12 +666,16 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         if (!state || !active || active.finished) return;
         if (active.stopping) return active.stopping;
         if (state.host && state.sessionId && active.nativeTurnId) {
+          const unconfirmed = new Promise((resolve) => setTimeout(resolve, INTERRUPT_CONFIRM_MS).unref?.())
+            .then(() => endUnconfirmed(state, active));
           try {
-            await state.host.connection.command("turn/interrupt", { sessionId: state.sessionId, turnId: active.nativeTurnId });
+            await Promise.race([
+              state.host.connection.command("turn/interrupt", { sessionId: state.sessionId, turnId: active.nativeTurnId }),
+              unconfirmed,
+            ]);
           } catch {
             return endUnconfirmed(state, active);
           }
-          setTimeout(() => void endUnconfirmed(state, active), INTERRUPT_CONFIRM_MS).unref?.();
           return; // turn/completed (cancelled) settles it
         }
         finishTurn(state, active, { ok: false, stopReason: "interrupted" });
