@@ -182,9 +182,9 @@ function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
     }
     if (ch === "(") { push("block", "(…)"); depth++; i++; continue; }
     if (ch === ")") { depth = Math.max(0, depth - 1); i++; continue; }
-    if (/[A-Za-z_]/.test(ch)) {
+    if (/[A-Za-z_\u0080-\uffff]/.test(ch)) {
       let j = i + 1;
-      while (j < n && /[A-Za-z0-9_$.]/.test(sql[j]!)) j++;
+      while (j < n && /[A-Za-z0-9_$.\u0080-\uffff]/.test(sql[j]!)) j++;
       push("word", sql.slice(i, j), sql.slice(i, j).toUpperCase());
       i = j; continue;
     }
@@ -218,12 +218,17 @@ function stringEnd(sql: string, quote: number): number {
   return end;
 }
 
+/** DuckDB 1.5 joins 'a' and 'b' separated by a line break into one literal that keeps the first one's escapes. */
+const STRING_CONTINUES = /[ \t\f]*(?:--[^\n\r]*)?[\n\r](?:[ \t\n\r\f]|--[^\n\r]*[\n\r])*'/y;
+
 function literalEnd(sql: string, quote: number, escapes: boolean): number {
   for (let j = quote + 1; j < sql.length; j++) {
     if (escapes && sql[j] === "\\") { j++; continue; }
     if (sql[j] !== "'") continue;
-    if (sql[j + 1] !== "'") return j + 1;
-    j++;
+    if (sql[j + 1] === "'") { j++; continue; }
+    STRING_CONTINUES.lastIndex = j + 1;
+    if (!STRING_CONTINUES.test(sql)) return j + 1;
+    j = STRING_CONTINUES.lastIndex - 1;
   }
   throw fail("invalid_input", "Unterminated string literal.");
 }
@@ -237,7 +242,11 @@ export type SqlClass =
   | { kind: "refused"; verb: string };
 
 /** Judged by the verb (and the verb after a CTE list), so a `WITH … DELETE` never passes as a read. */
+/** DuckDB 1.5 parses a failed statement again with these spaces removed, so the second reading splits tokens the first one joined. */
+const REPARSED_SPACES = /[\u00a0\u2000-\u200b\u202f\u205f\u2060\u3000\ufeff]/;
+
 export function classifySql(sql: string): SqlClass {
+  if (REPARSED_SPACES.test(sql)) throw fail("invalid_input", "Replace non-ASCII spaces with plain spaces.", { hint: "In a string, write chr(160) and similar instead." });
   const { tokens, statements } = topLevelTokens(sql);
   if (statements > 1) throw fail("invalid_input", "One statement per call.", { hint: "Send each statement in its own data_sql call." });
   if (!tokens.length || tokens[0]!.kind !== "word") throw fail("invalid_input", "The statement is empty.");

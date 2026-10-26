@@ -115,6 +115,8 @@ describe("the statement gate", () => {
     ["SELECT E'it\\'s; DROP' AS s, 'a\\' AS plain", { kind: "read", materialisable: true }],
     ["SELECT 1 /* a /* ; b */ DELETE */ AS x", { kind: "read", materialisable: true }],
     ["SELECT 1; -- end\r", { kind: "read", materialisable: true }],
+    ["SELECT 1 AS α$a$, 'é' AS e", { kind: "read", materialisable: true }],
+    ["SELECT E'\\''\n'\\'', 'a' -- c\r\n  'b'", { kind: "read", materialisable: true }],
     ["CREATE TABLE x AS SELECT 1", { kind: "create", target: "x" }],
     ["CREATE OR REPLACE TABLE s.x AS SELECT 1", { kind: "create", target: "s.x" }],
     ["create or replace view \"My View\" as select 1", { kind: "create", target: "\"My View\"" }],
@@ -135,6 +137,8 @@ describe("the statement gate", () => {
     "EXPLAIN ANALYZE /* outer /* inner */ SELECT */ DELETE FROM t",
     "EXPLAIN ANALYZE WITH x AS (SELECT E'\\') SELECT 1 --') DELETE FROM t",
     "EXPLAIN ANALYZE WITH x AS (SELECT $a$ ) SELECT 1 -- $a$) DELETE FROM t",
+    "EXPLAIN ANALYZE WITH x AS (SELECT 1 AS α$a$ ) DELETE FROM t -- $a$) SELECT 1",
+    "EXPLAIN ANALYZE WITH x AS (SELECT E'\\''\n'\\') SELECT 1 --') DELETE FROM t",
     "BEGIN", "EXPORT DATABASE 'd'", "TRUNCATE t",
   ])("refuses %s", (sql) => {
     expect(classifySql(sql).kind).toBe("refused");
@@ -153,6 +157,10 @@ describe("the statement gate", () => {
     expect(await failure(Promise.resolve().then(() => classifySql("SELECT $a$ x $b$")))).toMatchObject({ code: "invalid_input", message: "Unterminated dollar-quoted string." });
     expect(await failure(Promise.resolve().then(() => classifySql("SELECT 1E'\\' --'")))).toMatchObject({ code: "invalid_input", message: "Put a space before E'…' so the string reads one way." });
     expect(classifySql("SELECT 1E'a'")).toEqual({ kind: "read", materialisable: true });
+    for (const space of ["\u00a0", "\u200b", "\u3000", "\ufeff"]) {
+      expect(await failure(Promise.resolve().then(() => classifySql(`EXPLAIN ANALYZE WITH x AS (SELECT 1 AS ${space}$a$ ) SELECT 1 1 -- $a$) DELETE FROM t`))))
+        .toMatchObject({ code: "invalid_input", message: "Replace non-ASCII spaces with plain spaces." });
+    }
   });
 });
 
