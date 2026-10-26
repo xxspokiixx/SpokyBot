@@ -134,16 +134,9 @@ const USER_COLLAPSE_LINES = 8;
 export const SIMPLE_BUBBLE = "rounded-[23px] font-normal";
 
 interface ChatRows {
-  botId: string;
-  threadId: string;
-  botName: string;
-  voiceId?: string;
-  tts: ConfigStatus["tts"];
-  localVoice: boolean;
-  busy: boolean;
-  liveTools: ReadonlySet<string>;
-  hasMore: boolean;
-  bots: readonly Bot[];
+  botId: string; threadId: string; botName: string; voiceId?: string;
+  tts: ConfigStatus["tts"]; localVoice: boolean; busy: boolean; liveTools: ReadonlySet<string>;
+  hasMore: boolean; bots: readonly Bot[];
   mentionPeers: readonly Bot[]; mentionPerson: { profileName?: string };
   /** On a Team Cloud, the viewer's person key: another person's line carries their name. */
   speakerViewer?: string | null;

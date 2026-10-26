@@ -78,6 +78,7 @@ import { useCaptionChrome } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { liveToolIds } from "@/lib/tool-liveness";
+import { roomNeedsSetup } from "@/lib/room-setup";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
@@ -573,13 +574,6 @@ export function DefaultResponderSelect({ group, members }: { group: Group; membe
   );
 }
 
-type RoomSetupFields = {
-  setupPending?: boolean;
-  setupRequired?: boolean;
-  setupState?: "required" | "completed" | "skipped";
-  setupCompletedAt?: number | string | null;
-  setupSkippedAt?: number | string | null;
-};
 
 type RoomResponderMode = "lead" | "everyone" | "mentions" | "auto";
 
@@ -587,26 +581,6 @@ function setupResponderMode(responder: GroupDefaultResponder): RoomResponderMode
   return responder.kind === "member" ? "lead" : responder.kind;
 }
 
-function roomNeedsSetup(group: Group): boolean {
-  if (group.dm || group.messages.length > 0) return false;
-  // SAFETY: setup fields are additive server metadata; the existing Group shape remains valid when absent.
-  const marker = group as Group & RoomSetupFields;
-  const hasSetupMarker =
-    Object.prototype.hasOwnProperty.call(marker, "setupCompletedAt") ||
-    Object.prototype.hasOwnProperty.call(marker, "setupSkippedAt");
-  if (!hasSetupMarker) return false;
-  if (
-    marker.setupPending === false ||
-    marker.setupRequired === false ||
-    marker.setupState === "completed" ||
-    marker.setupState === "skipped" ||
-    marker.setupCompletedAt != null ||
-    marker.setupSkippedAt != null
-  ) {
-    return false;
-  }
-  return true;
-}
 
 function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
