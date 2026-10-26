@@ -35,7 +35,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
   let goalTask = 0;
   const started: Array<{ botId: string; threadId: string; prompt: string }> = [];
   const startedGoals: Array<{
-    groupId: string;
+    groupId: string | undefined;
     threadId: string;
     prompt: string;
     coordinatorBotId: string;
@@ -48,7 +48,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
   const goalTasks: Array<{ groupId: string; title: string }> = [];
   const interruptedTurns: Array<{ botId: string; threadId: string }> = [];
   const interruptedGoals: Array<{
-    groupId: string;
+    groupId: string | undefined;
     threadId: string;
     outcome?: { status: "stopped" | "limit-reached"; detail: string };
   }> = [];
@@ -2345,6 +2345,31 @@ describe("RoutineManager", () => {
     expect(h.taskTitles).toEqual([]);
   });
 
+  it("runs a goal with no room in a new chat of its lead's, and stops it as a goal", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Own goal",
+      prompt: "Get the tests passing",
+      target: "room-goal",
+      botId: "chief-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+    });
+    expect(routine.groupId).toBeUndefined();
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+
+    const run = h.manager.listRuns()[0]!;
+    expect(h.goalTasks).toEqual([]);
+    expect(h.taskTitles).toEqual(["Own goal · Aug 17, 8:01 AM"]);
+    expect(h.started).toEqual([]);
+    expect(h.startedGoals[0]).toMatchObject({ groupId: undefined, threadId: "thread-1", prompt: "Get the tests passing", coordinatorBotId: "chief-1", runId: run.id });
+    expect(run).toMatchObject({ status: "running", target: "room-goal", threadId: "thread-1" });
+
+    await h.manager.cancelRun(run.id);
+    expect(h.interruptedGoals).toEqual([{ groupId: undefined, threadId: "thread-1" }]);
+    expect(h.interruptedTurns).toEqual([]);
+  });
+
   it("fails a queued room goal when its room or coordinator disappears", async () => {
     const h = harness();
     h.setGoal("busy");
@@ -2622,7 +2647,9 @@ describe("RoutineManager", () => {
     })).toThrow(/do not support attachments/i);
 
     const routine = h.manager.create(base);
-    expect(() => h.manager.update(routine.id, { groupId: null })).toThrow(/choose a room/i);
+    const ownChat = h.manager.update(routine.id, { groupId: null });
+    expect(ownChat).toMatchObject({ target: "room-goal", botId: "chief-1" });
+    expect(ownChat?.groupId).toBeUndefined();
     const botRoutine = h.manager.update(routine.id, { target: "bot", groupId: null });
     expect(botRoutine).toMatchObject({ target: "bot", botId: "chief-1" });
     expect(botRoutine?.groupId).toBeUndefined();
