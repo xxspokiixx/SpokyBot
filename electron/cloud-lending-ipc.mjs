@@ -1,6 +1,6 @@
 // "Let my bots use this Mac" (this PC, this computer): main's IPC for it. This computer's Settings may choose folders,
 // the screen and the internet connection; My Cloud's own page in this app (verified as the person's Cloud) gets the same
-// one switch, Apps and screen, and what is lent, so nobody has to leave My Cloud to change it. Turned on with nothing
+// one switch, Apps and screen, the terminal, and what is lent, so nobody has to leave My Cloud to change it. Turned on with nothing
 // chosen, it lends the internet connection and the usual folders, read only.
 
 import { randomUUID } from "node:crypto";
@@ -72,6 +72,7 @@ export function pageLending(snapshot) {
     screen: on && state.screen === true,
     screenAvailable: snapshot?.screenAvailable === true,
     internet: on && state.internet === true,
+    terminal: on && state.terminal === true,
     ...(on && state.link ? { link: state.link } : {}),
   };
 }
@@ -115,15 +116,16 @@ async function editableFolders(paths, validate) {
 }
 
 /** The default grant, on top of what was lent before: the usual folders read only, each project folder with editing,
- * the internet connection, and apps and screen when they were lent before or computer control already works here for
- * this computer's own bots (`screenReady`: macOS granted Accessibility and Screen Recording). */
+ * the internet connection unless it was unticked (`kept.internet: false`), and apps and screen when they were lent
+ * before or computer control already works here for this computer's own bots (`screenReady`: macOS granted
+ * Accessibility and Screen Recording). */
 export function defaultGrant({ kept, usual, projects, screenAvailable, screenReady }) {
   const byPath = new Map();
   for (const folder of [...(kept?.folders ?? []), ...usual, ...projects]) {
     const known = byPath.get(folder.path);
     byPath.set(folder.path, known ? { ...known, write: known.write || folder.write } : folder);
   }
-  return { folders: [...byPath.values()].slice(0, 20), screen: screenAvailable === true && (kept?.screen === true || screenReady === true), internet: true };
+  return { folders: [...byPath.values()].slice(0, 20), screen: screenAvailable === true && (kept?.screen === true || screenReady === true), internet: kept?.internet !== false };
 }
 
 /**
@@ -139,24 +141,29 @@ export function defaultGrant({ kept, usual, projects, screenAvailable, screenRea
  *   defaults: () => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
  *   validate: (folders: unknown[]) => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
  *   confirmScreen: () => Promise<boolean>,
+ *   confirmTerminal: () => Promise<boolean>,
  * }} deps `cloudPage` lets only My Cloud's verified page through; turning lending or Apps and screen on from it still
  * takes a real click (the preload bridge's rule). Security: Apps and screen lets bots act as the person, and a page
- * served by the Cloud must never grant that alone, so main also asks in a dialog of its own (`confirmScreen`).
+ * served by the Cloud must never grant that alone, so main also asks in a dialog of its own (`confirmScreen`). The
+ * terminal runs any command as the person, so the same holds for it: from My Cloud's page it takes a real click and a Yes
+ * in main's own dialog (`confirmTerminal`).
  * `screenReady` in a snapshot: computer control works here for this computer's own bots, read from its running state,
  * never by asking macOS.
  */
-export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen }) {
+export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen, confirmTerminal }) {
   const env = () => {
     const current = environment();
     if (!current) throw new Error("Open My Cloud first.");
     return current;
   };
+  /** A terminal lent now stays lent when something else changes; one that is off is never turned on here. */
+  const keptTerminal = (kept) => (kept?.enabled === true && kept.terminal === true ? { terminal: true } : {});
   /** What was chosen (an off switch keeps its choice), without folders that are gone since; else the internet connection
    * and the usual folders. The internet connection alone is a choice too. */
   const choice = async (input) => {
     const folders = Array.isArray(input?.folders) && input.folders.length ? await existingFolders(input.folders, validate) : [];
-    // The terminal is chosen only here, from this computer's own Settings (`lending:save` is local-only); it is never
-    // carried over from a saved grant, filled in by default, or set from My Cloud's page.
+    // The terminal is chosen only by name: from this computer's own Settings (`lending:save` is local-only), or by
+    // `lendTerminal` after main's own dialog. It is never filled in by default or carried over once lending is off.
     const terminal = input?.terminal === true;
     if (folders.length || input?.screen === true || input?.internet === true || terminal) return { folders, screen: input?.screen === true, internet: input?.internet === true, ...(terminal ? { terminal: true } : {}) };
     return { folders: await defaults(), screen: false, internet: true };
@@ -183,9 +190,24 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     const kept = current.state;
     if (!kept?.enabled || (kept.screen === true) === (on === true)) return pageLending(current);
     if (on === true && (!current.screenAvailable || !(await confirmScreen()))) return pageLending(current);
-    await save(env(), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true }));
+    await save(env(), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true, ...keptTerminal(kept) }));
     return pageLending(await snapshot());
   })));
+  /** The terminal on or off on top of what is lent. Turning it on asks first; a Yes never starts lending that was
+   * stopped while the question was open. */
+  const lendTerminal = async (on) => {
+    const before = await snapshot();
+    if (!before.available || !before.state?.enabled || (before.state.terminal === true) === (on === true)) return pageLending(before);
+    if (on === true && !(await confirmTerminal())) return pageLending(before);
+    const current = await snapshot();
+    const kept = current.state;
+    if (!current.available || !kept?.enabled) return pageLending(current);
+    const screen = kept.screen === true && current.screenAvailable === true, internet = kept.internet === true;
+    if (on !== true && !kept.folders?.length && !screen && !internet) { stop(); return pageLending(await snapshot()); }
+    await save(env(), await choice({ folders: kept.folders, screen, internet, ...(on === true ? { terminal: true } : {}) }));
+    return pageLending(await snapshot());
+  };
+  ipcMain.handle("cloud-lending:terminal", cloudPage("cloud-lending:terminal", plainly(async (_event, on) => lendTerminal(on === true))));
   const ownOff = (state) => !state?.enabled && state?.stopped?.reason === "you";
   return {
     /** What is lent, as My Cloud's page sees it, whether computer control works here, and whether the person turned
@@ -195,14 +217,15 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
       return { ...pageLending(current), screenReady: current.screenReady === true, ownOff: ownOff(current.state) };
     },
     /** At the move to My Cloud, and when the person chooses Use my Mac (`asked`): lends the default grant (defaultGrant)
-     * on top of what is lent. Without `asked` the person's own Off is never undone: lending they turned off stays off.
-     * Answers the page's view, or null when it stayed off. */
+     * on top of what is lent. Without `asked` the person's own Off is never undone: lending they turned off stays off,
+     * and so does an internet connection they unticked. Answers the page's view, or null when it stayed off. */
     async lendByDefault({ projects = [], asked = false } = {}) {
       const current = await snapshot();
       const kept = current.state;
       if (!current.available || (!asked && ownOff(kept))) return null;
       const lentBefore = kept?.folders?.length ? await existingFolders(kept.folders, validate) : [];
-      const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true }, usual: await defaults(), projects: await editableFolders(projects, validate),
+      const internet = asked || kept?.enabled !== true || kept.internet === true;
+      const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true, internet }, usual: await defaults(), projects: await editableFolders(projects, validate),
         screenAvailable: current.screenAvailable, screenReady: current.screenReady });
       await save(env(), grant);
       return pageLending(await snapshot());
@@ -214,8 +237,9 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
       const kept = current.state;
       if (!current.available || !kept?.enabled || current.screenAvailable !== true) return null;
       if (kept.screen === true) return pageLending(current);
-      await save(env(), await choice({ folders: kept.folders, screen: true, internet: kept.internet === true }));
+      await save(env(), await choice({ folders: kept.folders, screen: true, internet: kept.internet === true, ...keptTerminal(kept) }));
       return pageLending(await snapshot());
     },
+    lendTerminal,
   };
 }
