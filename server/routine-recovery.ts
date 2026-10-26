@@ -16,7 +16,7 @@ export type RoutineOwnerCause = "signed_out" | "credits" | "usage_limit" | "setu
 /** What is known about a failure besides its words: a cause the server words itself, and the engine's own flags. */
 export interface RoutineFailureFacts {
   /** stalled: the turn watchdog stopped it; cap: a spend or turn cap (or the repeat guard) ended it; refused: the server
-   * would not start it. */
+   * would not start it, or its start failed before the turn began (judged by its words, never retried as a crash). */
   cause?: "stalled" | "busy" | "cap" | "refused";
   stopReason?: string | null;
   setup?: boolean;
@@ -50,9 +50,10 @@ const AFTER_RESET_MS = 60_000;
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 /** startTurn's codes for a bot or thread that is busy for now. */
 const BUSY_CODES = new Set(["thread_busy", "thread_limit", "workspace_busy", "settling"]);
-/** Stop reasons of a turn someone ended on purpose (Stop, a typed "stop", a settings change that cut it short), or the AI
- * declined: a second start would undo or repeat it. */
-const NOT_RETRIED_STOPS = new Set(["cancelled", "interrupted", "refusal"]);
+/** Stop reasons of a turn someone ended on purpose (Stop, a typed "stop", a settings change that cut it short), the AI
+ * declined, or a tool call the person denied or that failed after its corrective rounds: a second start would undo or
+ * repeat it. */
+const NOT_RETRIED_STOPS = new Set(["cancelled", "interrupted", "refusal", "tool_error"]);
 /** What the provider answered for a reason a second start would meet again. */
 const REFUSED_KINDS = new Set(["refused", "tool_schema", "tool_count"]);
 const OWNER_CAUSES = new Set<RoutineOwnerCause>(["signed_out", "credits", "usage_limit", "setup"]);
@@ -76,7 +77,7 @@ const FIRST_START: Record<RoutineRetryCause, string> = {
  * stop someone pressed or typed, a refusal, and a spent cap. Routine runs and teammate threads both judge by this. */
 export function classifyRoutineFailure(failure: string, facts: RoutineFailureFacts = {}): RoutineFailureClass {
   if (facts.cause === "busy") return { kind: "busy" };
-  if (facts.cause === "stalled" || facts.cause === "cap" || facts.cause === "refused") return { kind: "final" };
+  if (facts.cause === "stalled" || facts.cause === "cap") return { kind: "final" };
   if (facts.stopReason && NOT_RETRIED_STOPS.has(facts.stopReason)) return { kind: "final" };
   if (classifyContinuable(facts.stopReason, failure) === "cap") return { kind: "final" };
   if (facts.stalled) return { kind: "retry", cause: "stalled" };
@@ -91,8 +92,8 @@ export function classifyRoutineFailure(failure: string, facts: RoutineFailureFac
   if (facts.setup || facts.stopReason === "update_required" || facts.stopReason === "setup_required") return { kind: "owner", cause: "setup" };
   if (engine === "rate_limit" || reason === "rate_limited") return { kind: "retry", cause: "rate_limited" };
   if (engine === "overloaded" || engine === "server" || transient) return { kind: "retry", cause: "provider" };
-  // A failure nothing above names (a crash, an exit before the result): one more start. A named refusal never.
-  return reason === "unknown" && !(engine && REFUSED_KINDS.has(engine)) ? { kind: "retry", cause: "failed" } : { kind: "final" };
+  // A failure nothing above names (a crash, an exit before the result): one more start. A refused start or a named refusal never.
+  return reason === "unknown" && facts.cause !== "refused" && !(engine && REFUSED_KINDS.has(engine)) ? { kind: "retry", cause: "failed" } : { kind: "final" };
 }
 
 /** Why startTurn would not start a run: busy for now, the workspace spend cap, or any other refusal. A start that threw
@@ -105,8 +106,8 @@ export function dispatchRefusal(error: unknown): RoutineFailureFacts {
 }
 
 /** Whether OpenMausBot runs a failed teammate thread once more by itself before its Chief hears of it. */
-export function retriesTeammateThread(failure: string, stopReason?: string | null): boolean {
-  return classifyRoutineFailure(failure, { stopReason }).kind === "retry";
+export function retriesTeammateThread(failure: string, facts: RoutineFailureFacts = {}): boolean {
+  return classifyRoutineFailure(failure, facts).kind === "retry";
 }
 
 export function engineFacts({ setup, stalled, trialCredit, limitResetsAt }: RuntimeEvent & { type: "runtime.error" }): RoutineFailureFacts {

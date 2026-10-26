@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
+import type { RoutineFailureFacts } from "../routine-recovery.ts";
 import { createChiefNotices, type ChiefNoticeDeps } from "./chief-notices.ts";
 
 function fixture(over: Partial<ChiefNoticeDeps> = {}) {
@@ -64,6 +66,7 @@ describe("why a Chief's retry of a teammate's thread is refused", () => {
 });
 
 const CRASH = "claude exited 3 before result: fake-claude: simulated crash before result";
+const DENIED = "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.";
 const RETRIED = "OpenMausBot already retried this run once by itself; the failure above is how that retry ended.";
 
 describe("OpenMausBot's one automatic retry of a teammate's failed thread", () => {
@@ -92,10 +95,13 @@ describe("OpenMausBot's one automatic retry of a teammate's failed thread", () =
     expect(f.turnsOf("chief")[0]!.text).not.toContain(RETRIED);
   });
 
-  it.each<[string, { detail: string; stopReason?: string }]>([
-    ["a Stop someone pressed or typed", { detail: CRASH, stopReason: "interrupted" }],
-    ["an AI that declined", { detail: "The engine stopped without saying why (stop reason: refusal).", stopReason: "refusal" }],
+  it.each<[string, { detail: string; facts?: RoutineFailureFacts }]>([
+    ["a Stop someone pressed or typed", { detail: CRASH, facts: { stopReason: "interrupted" } }],
+    ["a Stop the engine reported as an error", { detail: "session closed", facts: { stopReason: "cancelled" } }],
+    ["an AI that declined", { detail: "The engine stopped without saying why (stop reason: refusal).", facts: { stopReason: "refusal" } }],
+    ["a tool call the person denied", { detail: DENIED, facts: { stopReason: "tool_error" } }],
     ["a signed-out AI", { detail: "Not logged in · Please run /login" }],
+    ["a used-up trial credit", { detail: TRIAL_CREDIT_REFUSED.used_up, facts: { setup: true, trialCredit: "used_up" } }],
     ["a turn cap", { detail: "Stopped after 40 tool calls without a final answer" }],
   ])("never retries a run ended by %s: the Chief hears at once", (_what, failure) => {
     const f = fixture();

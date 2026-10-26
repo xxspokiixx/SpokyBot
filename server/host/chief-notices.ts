@@ -9,7 +9,7 @@ import { buildNotification, type Notification } from "../notify.ts";
 import { quoteInNote } from "../peer-provenance.ts";
 import { peerName } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
-import { retriesTeammateThread } from "../routine-recovery.ts";
+import { retriesTeammateThread, type RoutineFailureFacts } from "../routine-recovery.ts";
 import { queueSteeredMessage } from "../steer-queue.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 
@@ -150,9 +150,9 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   }
 
   /** A failed teammate run gets one retry from OpenMausBot before its Chief hears; the Chief then hears how that retry ended.
-   * Never retried: a stall the turn watchdog stopped (kind "stalled"), a stop, a refusal or a cap (retriesTeammateThread),
-   * a run that answered a retry, and a thread whose asks are not the Chief's person's. */
-  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; stopReason?: string | null }): void {
+   * Never retried: a stall the turn watchdog stopped (kind "stalled"), a stop, a refusal or a cap (retriesTeammateThread,
+   * from the failure's words and `facts`), a run that answered a retry, and a thread whose asks are not the Chief's person's. */
+  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; facts?: RoutineFailureFacts }): void {
     const { bot, threadId } = input;
     if (deps.quietThread?.(bot.id, threadId)) return;
     const task = store.taskByThread(bot.id, threadId);
@@ -175,10 +175,10 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       chip: incidentChip(incident), text: incidentText(incident, count, retry),
       alreadyNotified: input.kind === "could-not-start" || input.kind === "routine-failed",
     });
+    if (!chief || group || !reachesChief(chief, bot, threadId)) return report();
     const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";
     if (answered.startsWith(AUTO_RETRY_LEAD)) return report({ retried: true });
-    if (input.kind !== "failed" || answered.startsWith(RETRY_LEAD) || !chief || group || !count.mayRetry || !reachesChief(chief, bot, threadId) ||
-      !retriesTeammateThread(input.detail, input.stopReason)) return report();
+    if (input.kind !== "failed" || answered.startsWith(RETRY_LEAD) || !count.mayRetry || !retriesTeammateThread(input.detail, input.facts)) return report();
     const failedAt = Date.now();
     schedule(() => {
       if (!store.bot(bot.id) || !store.taskByThread(bot.id, threadId)) return;

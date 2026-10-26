@@ -25,6 +25,8 @@ const SIGN_IN_ACTION = "This bot's AI is signed out. Sign in again in Settings â
 const BUSY = "this thread is already working â€” interrupt it first";
 const CRASH = "claude exited 3 before result: fake-claude: simulated crash before result";
 const CAPPED = "Stopped after 40 tool calls without a final answer";
+const DENIED = "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.";
+const NO_HOURS = "This month's cloud desktop hours are used up. See your plan on the Plan page.";
 type EventBody = RuntimeEvent extends infer E ? E extends RuntimeEvent ? Omit<E, "eventId" | "provider" | "threadId" | "createdAt"> : never : never;
 
 function harness(extra: Partial<RoutineManagerOptions> = {}) {
@@ -117,6 +119,12 @@ describe("classifyRoutineFailure", () => {
     ["The bot repeated the same call 6 times, so it was stopped", { cause: "cap" }, { kind: "final" }],
     ["this workspace has reached its monthly spend limit of $20.00", { cause: "cap" }, { kind: "final" }],
     ["The routine was deleted before it could start", { cause: "refused" }, { kind: "final" }],
+    [DENIED, { stopReason: "tool_error" }, { kind: "final" }],
+    // A start that failed before its turn began is judged by its words, and never retried as a crash.
+    [NO_HOURS, { cause: "refused" }, { kind: "final" }],
+    [CRASH, { cause: "refused" }, { kind: "final" }],
+    [SIGNED_OUT, { cause: "refused" }, { kind: "owner", cause: "signed_out" }],
+    ["xAI hit a rate limit (HTTP 429). Wait a minute, then run it again.", { cause: "refused" }, { kind: "retry", cause: "rate_limited" }],
   ])("%s", (failure, facts, verdict) => {
     expect(classifyRoutineFailure(failure, facts)).toEqual(verdict);
   });
@@ -230,6 +238,7 @@ describe("an unattended run that fails for a passing reason", () => {
     ["a turn cap", (h) => h.fail("thread-1", CAPPED)],
     ["the repeat guard", (h) => h.manager.failThread("thread-1", "The bot repeated the same call 6 times, so it was stopped", { cause: "cap" })],
     ["an AI that declined", (h) => h.fail("thread-1", "I can't help with that.", { stopReason: "refusal" })],
+    ["a tool call the person denied", (h) => h.fail("thread-1", DENIED, { stopReason: "tool_error" })],
   ])("never retries a run ended by %s", async (_what, end) => {
     const h = harness();
     const run = await h.start(h.routine().id);
@@ -238,6 +247,17 @@ describe("an unattended run that fails for a passing reason", () => {
     expect(h.run(run.id).retried).toBeUndefined();
     await h.advance(MINUTE);
     expect(h.started).toHaveLength(1);
+  });
+
+  it("never retries a run whose start failed before its turn began", async () => {
+    const dispatchErrors: Array<(message: string) => void> = [];
+    const h = harness({ startTurn: async (_botId, _threadId, _prompt, _runOn, _trigger, onDispatchError) => { dispatchErrors.push(onDispatchError); } });
+    const run = await h.start(h.routine().id);
+    dispatchErrors[0]!(NO_HOURS);
+    expect(h.run(run.id)).toMatchObject({ status: "failed", error: NO_HOURS });
+    expect(h.run(run.id).retried).toBeUndefined();
+    await h.advance(MINUTE);
+    expect(dispatchErrors).toHaveLength(1);
   });
 
   it("never retries a run the spend cap kept from starting", async () => {

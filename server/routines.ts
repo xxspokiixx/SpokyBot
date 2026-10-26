@@ -1171,7 +1171,7 @@ export class RoutineManager {
               prompt,
               run.botId,
               run.id,
-              (message) => this.failThread(task.threadId, message),
+              (message) => this.failThread(task.threadId, message, { cause: "refused" }),
             );
           } else {
             await this.options.startTurn(
@@ -1180,7 +1180,7 @@ export class RoutineManager {
               composeExecutionPrompt({ name: run.routineName, trigger: triggerSource, runOn: run.runOn ?? "maus" }, prompt, run.attachments, continuityCarry(run, this.routines, this.runs), run.retried),
               run.runOn ?? "maus",
               triggerSource,
-              (message) => this.failThread(task.threadId, message),
+              (message) => this.failThread(task.threadId, message, { cause: "refused" }),
             );
           }
         } catch (error) {
