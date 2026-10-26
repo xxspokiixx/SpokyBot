@@ -71,8 +71,8 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
           <Sparkles size={14} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13.5px] font-semibold text-ink">{title}</div>
-          <div className="mt-0.5 text-[12.5px] text-ink-secondary" title={subtitle}>
+          <div className="text-[14px] font-semibold text-ink">{title}</div>
+          <div className="mt-0.5 text-[13px] text-ink-secondary" title={subtitle}>
             {subtitle}
           </div>
         </div>
@@ -88,7 +88,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
       </div>
 
       {s.status === "handed-off" && s.command && (
-        <code className="mt-2.5 block overflow-x-auto rounded-lg bg-control px-2 py-1.5 font-mono text-[11.5px] whitespace-pre text-ink-secondary">
+        <code className="mt-2.5 block overflow-x-auto rounded-lg bg-control px-2 py-1.5 font-mono text-[12px] whitespace-pre text-ink-secondary">
           {s.command}
         </code>
       )}
