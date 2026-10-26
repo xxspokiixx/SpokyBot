@@ -130,7 +130,7 @@ import { createSkillReview, turnToolSteps } from "./skill-review.ts";
 import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
-import { canAccessTeam, canReachPeer, inScope, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -299,7 +299,7 @@ import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
-import { createRoomAccess } from "./host/room-access.ts";
+import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
@@ -3082,7 +3082,7 @@ function previewSystemPrompt(bot: BotRecord) {
   const coordination = chiefLevel(bot)
     ? chiefOfStaffSystemPrompt(bot.id, store.bots, true, chiefEscalationsEnabled(cfg))
     : peers.length > 0
-      ? peerRosterSystemPrompt(peers)
+      ? peerRosterSystemPrompt(peers, bot)
       : "";
   const agentsMounted = caps?.agentsMcp === true;
   const previewPlan = resolveSurface({
@@ -3898,7 +3898,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
 
 // Load coordination state before registering store listeners or recovering routines: recovery can emit room changes synchronously.
 const groupQueues = new Map<string, Promise<void>>();
-const { roomRootProblem, roomHandoffProblem, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store });
+const { roomRootProblem, roomHandoffProblem, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store, privateTo: (threadId) => teamHost.privateTo(threadId) });
 const roomJobs = createRoomJobs({ store, coordinator: { all: () => coordinator.all() }, cfg, laneRoomThread,
   operations: groupId => groupTurnOperations.get(groupId) ?? [], speakerOf: threadId => groupSpeakers.get(threadId)?.botId });
 
@@ -8530,7 +8530,7 @@ async function startTurn(
       const coordinationPrompt = chiefLevel(bot)
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), chiefEscalationsEnabled(cfg))
         : integrations.agents && sectionPeers.length > 0
-          ? peerRosterSystemPrompt(sectionPeers)
+          ? peerRosterSystemPrompt(sectionPeers, bot)
           : "";
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + THREADS_PROMPT + WIDGET_PROMPT : "";
       const routinePrompt = integrations.agents ? TRIGGER_PROMPT : "";
@@ -8884,10 +8884,10 @@ function routineSourceOwner(run: Pick<RoutineRun, "botId" | "sourceThreadId" | "
   // Validate before messagesFor(): Store lazily opens transcript storage, so an orphan id would recreate a deleted conversation.
   const bot = store.bot(run.botId);
   if (!bot) return null;
-  // Stamped from the confirmed request, never calendar input; recheck sections, since either bot may have moved since.
+  // Stamped from the confirmed request, never calendar input; recheck authority, since either bot may have moved since.
   const sourceBot = store.botByThread(threadId);
   if (sourceBot && !sourceBot.hidden && !store.taskByThread(sourceBot.id, threadId)?.routineRunId &&
-    (sourceBot.id === bot.id || canReachPeer(sourceBot, bot))) {
+    (sourceBot.id === bot.id || canManage(sourceBot, bot))) {
     return { bot: sourceBot, group: undefined, threadId };
   }
   const group = store.groupByThread(threadId);
@@ -9239,8 +9239,8 @@ const routineRequests = new RoutineRequestService({
     const proposer = store.bot(proposerBotId);
     const targetBot = store.bot(target.botId);
     if (!targetBot) return `@${target.name} no longer exists, so this routine request cannot be confirmed for it`;
-    if (!proposer || !canReachPeer(proposer, targetBot)) {
-      return `@${target.name} is no longer in this section, so this routine request cannot be confirmed for it`;
+    if (!proposer || !canManage(proposer, targetBot)) {
+      return `@${target.name} is no longer in this department, so this routine request cannot be confirmed for it`;
     }
     return null;
   },
@@ -9422,7 +9422,7 @@ const chiefPeerTargetRule = (noun: string) => (proposerBotId: string, targetBotI
   const target = store.bot(targetBotId);
   if (!target) return "that bot no longer exists";
   if (!proposer || !chiefLevel(proposer)) return "only a section's Chief of Staff can change another bot's " + noun;
-  if (!canReachPeer(proposer, target)) return "that bot is not in a team this Chief is allowed to manage";
+  if (!canManage(proposer, target)) return "that bot is not in a department this Chief manages";
   return null;
 };
 const validateModelProposal = (selection: ModelSelection, current?: BotRecord): string | null => {
@@ -9496,7 +9496,7 @@ const modelRequests = new ModelRequestService({
 });
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
-  store, teams: teamSetupTeams, canAccessTeam, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
+  store, teams: teamSetupTeams, hasTeamAuthority, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
   autoApply: appliesDirectly,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
   ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
@@ -11428,20 +11428,18 @@ function lastHumanRoomMessageAt(group: GroupRecord): number | undefined {
   return undefined;
 }
 
-/** Refuses cross-section rooms outright, so a tool is never the way one section speaks to another; membership comes from the record, never a tool argument. */
+/** Membership comes from the record, never a tool argument. */
 function roomPostEligibility(
   bot: BotRecord,
-  group: GroupRecord,
+  group: GroupRecord, fromThreadId: string,
 ): { ok: true } | { ok: false; status: number; error: string } {
-  const verdict = roomTalks(bot, group);
+  const verdict = roomTalks(bot, group, fromThreadId);
   if (verdict.ok) return verdict;
   if (verdict.problem === "dm") {
     return { ok: false, status: 400, error: "that is a one-to-one bot channel, not a room — use coordinate_bots to reach a single bot" };
   }
   if (verdict.problem === "not-member") return { ok: false, status: 403, error: "you are not a member of that room" };
-  if (verdict.problem === "outsider") {
-    return { ok: false, status: 403, error: `that room includes @${verdict.name}, who is outside your section — tell the user what you wanted to post there instead` };
-  }
+  if (verdict.problem === "private") return { ok: false, status: 403, error: PRIVATE_CHAT_ROOM_WRITE };
   // A bot must never settle whether a room's unfinished setup still counts as pending.
   return { ok: false, status: 409, error: "that room is still being set up — it cannot receive messages yet" };
 }
@@ -13818,7 +13816,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const unpostable: Array<{ name: string; reason: string }> = [];
         for (const group of store.groups) {
           if (group.dm || !group.memberIds.includes(from.id)) continue;
-          const eligibility = roomPostEligibility(from, group);
+          const eligibility = roomPostEligibility(from, group, fromThreadId);
           if (!eligibility.ok) {
             unpostable.push({ name: group.name, reason: eligibility.error });
             continue;
@@ -14358,7 +14356,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
           // Only this conversation's own tree; a row of another conversation is refused.
         const owned = (a: Row) => coordinator.node(a.rootId)?.threadId === fromThreadId;
-        const reachable = (a: Row) => { const target = store.bot(a.assignee.botId); return !target || target.id === internalSender.id || canReachPeer(internalSender, target); };
+        const reachable = (a: Row) => { const target = store.bot(a.assignee.botId); return !target || target.id === internalSender.id || canReach(internalSender, target); };
         if (!id) {
           const outstanding = coordinator.outstandingFor(fromThreadId).flatMap(n => { const row = coordinator.status(n.id)?.assignment; return row && reachable(row) ? [shape(row)] : []; });
           return json(res, 200, { outstanding });
@@ -14441,7 +14439,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const note = typeof body.note === "string" ? body.note.trim() : "";
         const target = store.bot(botId);
         if (!target || target.id === from.id) return json(res, 404, { error: "no such teammate" });
-        if (target.hidden || !inScope(from, target) || !peerAllowed(from, target)) {
+        if (!canManage(from, target)) {
           return json(res, 403, { error: "that bot is not on this Chief's team — call list_bots for the ones you can reach" });
         }
         if (store.groupByThread(threadId)) return json(res, 400, { error: "that is a room thread — use coordinate_bots in the room instead" });
@@ -14503,7 +14501,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (room.id === owner.group?.id) {
           return json(res, 409, { error: "you are already speaking in that room — say it in your reply instead" });
         }
-        const eligibility = roomPostEligibility(from, room);
+        const eligibility = roomPostEligibility(from, room, fromThreadId);
         if (!eligibility.ok) return json(res, eligibility.status, { error: eligibility.error });
         // The budget is read BEFORE any approval card and CHARGED only on the path that actually appends.
         const askBudget = (bot: BotRecord, group: GroupRecord) => {
@@ -14541,7 +14539,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const freshFrom = store.bot(internalSender.id);
           const freshRoom = store.group(groupId);
           if (!freshFrom || !freshRoom) return json(res, 404, { error: "that bot or room no longer exists" });
-          const stillEligible = roomPostEligibility(freshFrom, freshRoom);
+          const stillEligible = roomPostEligibility(freshFrom, freshRoom, fromThreadId);
           if (!stillEligible.ok) return json(res, stillEligible.status, { error: stillEligible.error });
           poster = freshFrom;
           room = freshRoom;
@@ -14782,11 +14780,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (peerReviewRequired(chief, internalCapability.threadId)) {
           return json(res, 403, { error: "peer approval is required; ask the user to make this room change" });
         }
-        // Section labels are a permission boundary: a Chief may not recruit excluded peers or acquire a foreign transcript.
+        // A Chief gathers only bots it can reach; which department a room is filed in is the person's choice.
         const allowedIds = new Set([chief.id, ...reachablePeers(store.bots, chief).map((bot) => bot.id)]);
         const allowedRoster = (ids: string[]) => ids.includes(chief.id) && ids.every((id) => allowedIds.has(id));
         if (body.section !== undefined && (typeof body.section !== "string" || sectionKey(body.section) !== sectionKey(chief.section))) {
-          return json(res, 403, { error: "rooms must stay in your own section; ask the user to move them" });
+          return json(res, 403, { error: "rooms stay in your own department; ask the person to move them" });
         }
         if (path === "/api/internal/create-room") {
           if ((internalCapability.createdRooms ?? 0) >= 4) {
@@ -14800,7 +14798,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!parsed.success) return json(res, 400, { error: "provide a room name, memberIds, and optional bulletin (at most 12000 characters)" });
           const memberIds = [...new Set([chief.id, ...parsed.data.memberIds])];
           if (!allowedRoster(memberIds)) {
-            return json(res, 403, { error: "include yourself and only active, allowed peers from your section" });
+            return json(res, 403, { error: "include yourself and only active bots you can reach (list_bots)" });
           }
           const group = createChannel({
             name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section,
@@ -14821,7 +14819,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "provide roomId and a supported room action; section moves are user-only" });
         const room = store.group(parsed.data.roomId);
         if (!room || room.dm || sectionKey(room.section) !== sectionKey(chief.section) || !allowedRoster(room.memberIds)) {
-          return json(res, 403, { error: "you can only manage rooms you belong to with allowed peers in your own section" });
+          return json(res, 403, { error: "you can only manage rooms you belong to in your own department, whose members you can all reach" });
         }
         const { action, memberIds, name, bulletin } = parsed.data;
         const patch: Record<string, unknown> = {};
@@ -14833,7 +14831,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           patch.bulletin = redactSecretsInText(bulletin);
         } else {
           if (!memberIds || memberIds.some((id) => !allowedIds.has(id))) {
-            return json(res, 403, { error: "memberIds must name only yourself or active, allowed peers in your section" });
+            return json(res, 403, { error: "memberIds must name only yourself or active bots you can reach (list_bots)" });
           }
           const next = action === "add_members" ? [...new Set([...room.memberIds, ...memberIds])]
             : action === "remove_members" ? room.memberIds.filter((id) => !memberIds.includes(id)) : memberIds;
