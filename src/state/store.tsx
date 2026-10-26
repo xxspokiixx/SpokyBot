@@ -707,6 +707,12 @@ export type Action =
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "markAllRoutineRunsSeen" }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
+  | {
+      type: "groupSnapshot";
+      group: Partial<Group> & { id: string };
+      since: AppState["transcriptGeneration"];
+      heldAtStart: readonly Message[];
+    }
   | { type: "groupDeleted"; groupId: string }
   | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
   | {
@@ -947,6 +953,23 @@ function optimisticUserMessage(
   };
 }
 
+function foldSnapshotOntoStreamed(
+  current: readonly Message[],
+  heldAtStart: ReadonlySet<Message>,
+  snapshot: readonly Message[],
+): Message[] {
+  const snapshotIds = new Set(snapshot.map((message) => message.id));
+  const confirmedSends = new Set(snapshot.flatMap((message) => (message.sendId ? [message.sendId] : [])));
+  const streamed = new Map(current.filter((message) => !heldAtStart.has(message)).map((message) => [message.id, message]));
+  const firstShared = current.findIndex((message) => snapshotIds.has(message.id));
+  const tail = current.filter((message, index) => {
+    if (snapshotIds.has(message.id)) return false;
+    if (message.sendId && message.id === optimisticMessageId(message.sendId)) return !confirmedSends.has(message.sendId);
+    return index >= firstShared && streamed.has(message.id);
+  });
+  return [...snapshot.map((message) => streamed.get(message.id) ?? message), ...tail];
+}
+
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -1131,6 +1154,18 @@ export function reducer(state: AppState, action: Action): AppState {
           } : g))
         : [{ ...(patch.description === null ? { ...patch, description: undefined } : patch) as Group, messages: patch.messages ?? [] }, ...fenced.groups];
       return { ...fenced, groups };
+    }
+    case "groupSnapshot": {
+      const { group } = action;
+      if (group.messages && group.threadId) {
+        if ((state.transcriptGeneration[group.threadId] ?? 0) !== (action.since[group.threadId] ?? 0)) return state;
+        const shown = state.groups.find((g) => g.id === group.id);
+        if (shown?.threadId === group.threadId) {
+          const messages = foldSnapshotOntoStreamed(shown.messages, new Set(action.heldAtStart), group.messages);
+          return reducer(state, { type: "groupPatched", group: { ...group, messages } });
+        }
+      }
+      return reducer(state, { type: "groupPatched", group });
     }
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
@@ -2279,8 +2314,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const roomAnswer = (groupId: string, navigates: boolean) => {
       const revision = (roomNavigation.get(groupId) ?? 0) + (navigates ? 1 : 0);
       roomNavigation.set(groupId, revision);
+      const { transcriptGeneration: since, groups } = stateRef.current;
+      const heldAtStart = groups.find((group) => group.id === groupId)?.messages ?? [];
       return (r: { group?: Partial<Group> & { id: string } } | undefined) => {
-        if (r?.group && roomNavigation.get(groupId) === revision) dispatch({ type: "groupPatched", group: r.group });
+        if (r?.group && roomNavigation.get(groupId) === revision) rawDispatch({ type: "groupSnapshot", group: r.group, since, heldAtStart });
       };
     };
     const olderPagesInFlight = new Set<string>();
