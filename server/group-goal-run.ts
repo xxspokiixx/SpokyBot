@@ -106,6 +106,7 @@ export function resolveGroupGoalMember(reference: string, members: GoalRunMember
   return nameMatches.length === 1 ? nameMatches[0]! : null;
 }
 
+/** `solo` is a room of one: the lead does the work in its own turns, and "continue" names itself for its next turn. */
 export function groupGoalCoordinatorInstructions(args: {
   goal: string;
   members: GoalRunMember[];
@@ -113,21 +114,27 @@ export function groupGoalCoordinatorInstructions(args: {
   maxTurns: number;
   remainingTurns: number;
   note?: string;
+  solo?: boolean;
 }): string {
-  const roster = args.members
-    .filter((member) => !member.hidden)
+  const active = args.members.filter((member) => !member.hidden);
+  const roster = active
     .map((member) => `${member.name} (${member.id})`)
     .join(", ");
+  const self = args.solo ? active[0] : undefined;
   return [
-    "You are the lead coordinator for a bounded team goal run.",
+    self ? "You are working alone toward a bounded goal." : "You are the lead coordinator for a bounded team goal run.",
     `Goal: ${args.goal}`,
-    `Available room members: ${roster}.`,
-    `This is team turn ${args.turn} of ${args.maxTurns}; ${args.remainingTurns} turn(s) remain after this one.`,
+    ...(self ? [] : [`Available room members: ${roster}.`]),
+    `This is ${self ? "" : "team "}turn ${args.turn} of ${args.maxTurns}; ${args.remainingTurns} turn(s) remain after this one.`,
     ...(args.note ? [`Harness note: ${args.note}`] : []),
-    "Use the conversation as the progress ledger. Decide whether the goal is genuinely complete, needs the human, is blocked, or needs one named teammate next.",
+    self
+      ? "Use the conversation as the progress ledger. Do the next concrete piece of work now, then decide whether the goal is genuinely complete, needs the human, is blocked, or needs another turn."
+      : "Use the conversation as the progress ledger. Decide whether the goal is genuinely complete, needs the human, is blocked, or needs one named teammate next.",
     "Do not continue merely to generate discussion. Do not claim completion unless the requested deliverable or answer is present in the conversation.",
     "Write a brief human-facing update or final answer, then end with exactly one private control envelope on its own line.",
-    `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"Exact member id from the roster","instruction":"Concrete next assignment","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`,
+    self
+      ? `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"${self.id}","instruction":"Your next step","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`
+      : `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"Exact member id from the roster","instruction":"Concrete next assignment","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`,
     `Or use status "completed", "needs-input", or "blocked" with a non-empty "detail" and omit next/instruction.`,
     "Never mention, quote, or explain the control envelope in your human-facing text.",
   ].join("\n");
@@ -179,6 +186,7 @@ export interface GoalRunDeps<Bot extends GoalRunMember> {
   run: { goal: string; turnCount: number; maxTurns: number; finished: boolean };
   coordinator: Bot;
   members: readonly Bot[];
+  solo?: boolean;
   cancelled(): boolean;
   /** The member as the store has it now. */
   current(botId: string): Bot | undefined;
@@ -200,7 +208,7 @@ async function stepOnceRetried<Bot extends GoalRunMember>(deps: GoalRunDeps<Bot>
   return deps.step(bot, coordinator, instructions);
 }
 
-/** The goal run loop: the lead decides, one named member works, until the lead reports an outcome or the turns run out. */
+/** The goal run loop, the same for a room and a one-on-one chat (a room of one). */
 export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bot>): Promise<void> {
   const { run, coordinator } = deps;
   const assignmentCounts = new Map<string, number>();
@@ -224,6 +232,7 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
       maxTurns: run.maxTurns,
       remainingTurns: run.maxTurns - coordinatorTurn,
       note,
+      solo: deps.solo,
     }));
     if (deps.cancelled()) return;
     if (coordinatorResult.outcome === "unavailable") {
@@ -278,6 +287,10 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
     if (repeated >= 3) {
       deps.finish("blocked", `The team repeated the same assignment three times without resolving the goal.`);
       return;
+    }
+    if (deps.solo && workerBot.id === coordinator.id) {
+      coordinatorNote = `Your next step: ${decision.instruction}`;
+      continue;
     }
 
     const workerTurn = run.turnCount + 1;

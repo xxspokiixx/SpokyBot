@@ -218,7 +218,7 @@ export interface RoutineManagerOptions {
   /** Every payload must be `{ kind, … }`: the server numbers and replays frames by it. */
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
-  goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
+  goalState?: (groupId: string | undefined, coordinatorBotId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, run?: RoutineRun) => { threadId: string } | null;
   joinConversation?: (run: RoutineRun) => string | null;
   createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
@@ -236,7 +236,7 @@ export interface RoutineManagerOptions {
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
   startGoal?: (
-    groupId: string,
+    groupId: string | undefined,
     threadId: string,
     prompt: string,
     coordinatorBotId: string,
@@ -245,7 +245,7 @@ export interface RoutineManagerOptions {
   ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string) => Promise<void>;
   interruptGoal?: (
-    groupId: string,
+    groupId: string | undefined,
     threadId: string,
     outcome?: { status: "stopped" | "limit-reached"; detail: string },
   ) => Promise<void>;
@@ -694,7 +694,7 @@ export class RoutineManager {
       run.finishedAt = this.now();
       run.error = "The assigned bot was deleted";
       this.emitRun(run);
-      if (run.threadId && run.target === "room-goal" && run.groupId) void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
+      if (run.threadId && run.target === "room-goal") void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
       else if (run.threadId) void this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
     }
     const kept = this.runs.filter((run) => run.botId !== botId);
@@ -857,7 +857,7 @@ export class RoutineManager {
     this.save();
     this.emitRun(run);
     if (run.threadId) {
-      if (run.target === "room-goal" && run.groupId) {
+      if (run.target === "room-goal") {
         await this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
       } else {
         await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
@@ -1140,7 +1140,7 @@ export class RoutineManager {
           : run.target === "room-goal"
           ? run.groupId
             ? this.options.createGoalTask?.(run.groupId, title) ?? null
-            : null
+            : this.options.createTask(run.botId, title, run)
           : this.options.createTask(run.botId, title, run);
         if (!task) {
           this.failRun(run, run.target === "room-goal"
@@ -1161,7 +1161,7 @@ export class RoutineManager {
           }
           const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
           if (run.target === "room-goal") {
-            if (!run.groupId || !this.options.startGoal) {
+            if (!this.options.startGoal) {
               this.failThread(task.threadId, "Room goal routines are unavailable");
               continue;
             }
@@ -1361,7 +1361,7 @@ export class RoutineManager {
     if (run.target === "room-goal") run.goalStatus = status;
     this.failRun(run, detail);
     if (!run.threadId) return;
-    if (run.target === "room-goal" && run.groupId) await this.options.interruptGoal?.(run.groupId, run.threadId, { status, detail }).catch(() => {});
+    if (run.target === "room-goal") await this.options.interruptGoal?.(run.groupId, run.threadId, { status, detail }).catch(() => {});
     else await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
   }
 
@@ -1392,7 +1392,7 @@ export class RoutineManager {
 
   private targetState(target: Pick<RoutineRun, "target" | "groupId" | "botId">): "ready" | "busy" | "missing" {
     if (target.target === "room-goal") {
-      if (!target.groupId || !this.options.goalState) return "missing";
+      if (!this.options.goalState) return "missing";
       return this.options.goalState(target.groupId, target.botId);
     }
     return this.options.botState(target.botId);

@@ -237,6 +237,7 @@ import {
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { createGoalTurns } from "./host/goal-turns.ts";
 import { createGoalCards, type LiveGoalRun } from "./host/goal-cards.ts";
+import { createOneOnOneGoals } from "./host/one-on-one-goals.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
@@ -2947,7 +2948,10 @@ const store = new Store(
   (instanceId) => registry.cliTarget(instanceId)?.driverKind,
   () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
 );
-const { stopThreadForPerson, stopOnTypedCommand, noteTeammatesLeftRunning } = createPersonStop({ store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended });
+const { stopThreadForPerson, stopOnTypedCommand, noteTeammatesLeftRunning } = createPersonStop({
+  store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended,
+  stopGoal: (threadId) => oneOnOneGoals.stop(threadId),
+});
 const creditMoves = cloudCredit && createCreditMoves({ credit: cloudCredit, store, context: selectionContext, threadBusy, saveDefault: saveNewBotModel,
   defaults: () => [cfg.defaultModelSelection, cfg.newBotDefaults?.profile.modelSelection], engineName: id => registry.get(id)?.displayName ?? id,
   log: line => console.warn(line) });
@@ -3706,6 +3710,9 @@ function activeGroupSpeaker(groupId: string): { botId: string; name: string; col
 
 const goalTurns = createGoalTurns({ retireProviderTurn });
 const goalCards = createGoalCards({ store, routines: () => routines, notify, routineSourceOwner, routineSourceThread });
+const oneOnOneGoals = createOneOnOneGoals({
+  store, cards: goalCards, turns: goalTurns, canStart: canAdmitDirectTurn, startTurn, isUnattended,
+});
 
 function groupIsWorking(group: GroupRecord): boolean {
   return Boolean(group.busyBotId) || Boolean(groupTurnOperations.get(group.id)?.size);
@@ -7806,6 +7813,8 @@ async function startTurn(
     automaticRecoveryAttempted?: boolean;
     automaticRecoveryIndex?: number;
     onTurnSettled?: () => void;
+    /** The turn's outcome, for a caller that runs it outside any coordinated work. */
+    onSettled?: (outcome: HostTurnResult) => void;
     coordination?: { id: string; resumed: boolean; settle: (outcome: HostTurnResult) => void };
   },
 ) {
@@ -7996,7 +8005,8 @@ async function startTurn(
   // An unknown control-plane wake must never acquire authority by guessing the latest user as its origin.
   const pendingSource = requestMessageId ?? store.activePath(threadId).findLast(message => message.role === "user")?.id;
   if (pendingSource) store.patchMessage(threadId, pendingSource, { requestPending: true });
-  if (opts?.coordination) directCoordinationSettlers.set(dispatchClaimId, { nodeId: opts.coordination.id, settle: opts.coordination.settle });
+  const settleOutcome = opts?.coordination?.settle ?? opts?.onSettled;
+  if (settleOutcome) directCoordinationSettlers.set(dispatchClaimId, { nodeId: opts?.coordination?.id ?? dispatchClaimId, settle: settleOutcome });
   directFollowupSettlers.set(dispatchClaimId, { threadId, settle: opts?.onTurnSettled });
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" });
   directTurnBots.set(threadId, bot);
@@ -8826,7 +8836,7 @@ async function startTurn(
             store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
               name: e instanceof TurnUsageLimitRefusedError ? `recovery: ${failoverLine(engineName(instanceId), engineName(target.instanceId), e.resetsAt)}` : `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} ${e instanceof TurnAuthenticationRefusedError ? "is signed out" : "could not start"}. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
             } });
-            if (opts?.coordination) directCoordinationSettlers.delete(dispatchClaimId);
+            if (opts?.coordination || opts?.onSettled) directCoordinationSettlers.delete(dispatchClaimId);
             else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
             await startTurn(bot.id, text, { ...opts, threadId, userMessage, editedMessageId: undefined,
               automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1 });
@@ -8940,10 +8950,16 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
 }
 
 async function interruptRoutineGroupGoal(
-  groupId: string,
+  groupId: string | undefined,
   threadId: string,
   outcome?: { status: "stopped" | "limit-reached"; detail: string },
 ): Promise<void> {
+  if (!groupId) {
+    oneOnOneGoals.stop(threadId, outcome);
+    const owner = store.botByThread(threadId);
+    if (owner) await interruptDirectThread(owner.id, threadId);
+    return;
+  }
   const speaker = groupSpeakers.get(threadId);
   const bot = speaker ? store.bot(speaker.botId) : undefined;
   cancelGroupTurnOperations(groupId, threadId, outcome);
@@ -9014,6 +9030,7 @@ routines = new RoutineManager({
   routineTurn: (threadId) => directRequestOwners.get(threadId)?.automation !== undefined,
   botState: unattendedDispatchState,
   goalState: (groupId, coordinatorBotId) => {
+    if (!groupId) return unattendedDispatchState(coordinatorBotId);
     const group = store.group(groupId);
     const coordinator = store.bot(coordinatorBotId);
     if (
@@ -9063,6 +9080,10 @@ routines = new RoutineManager({
     await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
   },
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
+    if (!groupId) {
+      oneOnOneGoals.start(coordinatorBotId, threadId, prompt, { runId });
+      return;
+    }
     startGroupTurn(groupId, prompt, undefined, undefined, "goal", undefined, {
       threadId,
       goalCoordinatorBotId: coordinatorBotId,
@@ -12567,6 +12588,7 @@ ROUTES.push(createBotMessageRoutes({
   resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
   deliverLateQuestionAnswer, interruptDirectThread, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, answeredIn: automationReports.answeredIn, pressRecords: proactive.brief.pressRecords, serverPress: proactive.brief.serverPress,
+  goals: oneOnOneGoals,
   relayedReaction: (threadId, messageId, person, emoji) => void store.setReaction(threadId, messageId, relayedPersonKey(person),
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
