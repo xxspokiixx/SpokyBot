@@ -747,3 +747,29 @@ test("a manual retry after the notice clears it and checks again", async () => {
 
   assert.equal(getState().status, "idle");
 });
+
+test("after the notice, the hourly check keeps going: reaching the feed clears it, and a release found is downloaded", async () => {
+  const h = harness();
+  h.updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  for (let i = 0; i < 3; i++) await h.coordinator.check();
+  assert.equal(h.getState().status, "error");
+
+  // a quiet hourly check that reaches the feed clears the notice by itself
+  let checks = 0;
+  h.updater.checkForUpdates = async () => {
+    checks += 1;
+    h.updater.emit("checking-for-update");
+    h.updater.emit("update-not-available");
+  };
+  await h.coordinator.check();
+  assert.equal(checks, 1);
+  assert.equal(h.getState().status, "idle");
+
+  // and once the notice is back, a release found by an hourly check still downloads
+  h.updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  for (let i = 0; i < 3; i++) await h.coordinator.check();
+  assert.equal(h.getState().status, "error");
+  await downloadInto(h);
+  assert.equal(h.getState().status, "downloaded");
+  assert.equal(h.getState().version, "2.0.0");
+});

@@ -58,7 +58,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
     if (!shown) {
       quietFailures += 1;
       if (quietFailures >= QUIET_FAILURES_BEFORE_NOTICE) {
-        actionOwnsState = true;
+        // The notice does not own the state: hourly checks go on, and the first one that reaches the feed clears it.
         setState({ status: "error", message: `Couldn't check for updates. ${updateErrorMessage(error)}` });
         return;
       }
