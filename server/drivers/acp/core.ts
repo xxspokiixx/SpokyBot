@@ -1552,7 +1552,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ? result.error
                 : typeof result?.message === "string" && result.message
                   ? result.message
-                  : stopCause(reason) ?? "The engine stopped without saying why.";
+                  : stopCause(reason, support.displayName) ?? `${support.displayName} stopped without saying why.`;
               emit({
                 ...base(threadId, turnId),
                 type: "runtime.error",

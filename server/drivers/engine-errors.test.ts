@@ -139,4 +139,18 @@ describe("stopCause", () => {
     }
     expect(stopCause("constructor")).toBe("The engine stopped without saying why (stop reason: constructor).");
   });
+
+  it("names the AI when the caller knows it, and still classifies like the bare token", () => {
+    expect(stopCause("refusal")).toMatch(/^The AI refused\b/);
+    expect(stopCause("refusal", "Gemini")).toMatch(/^Gemini refused to go on with this request \(stop reason: refusal\)\./);
+    expect(stopCause("max_tokens", "OpenCode")).toMatch(/^OpenCode's reply reached its maximum length/);
+    expect(stopCause("refusal", "  ")).toMatch(/^The AI refused\b/);
+    for (const provider of ["Gemini", "Qwen", "OpenCode", "Cursor", "Grok", "DeepSeek", "Cline"]) {
+      for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
+        const cause = stopCause(token, provider)!;
+        expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
+        expect(engineFailureKind(cause)).toBeNull();
+      }
+    }
+  });
 });

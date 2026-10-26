@@ -1021,7 +1021,7 @@ describe("ACP turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-refusal", text: "go" });
     expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "refusal" });
     const error = recorder.events.find((e) => e.type === "runtime.error") as { message: string } | undefined;
-    expect(error?.message).toContain("The AI refused to go on with this request (stop reason: refusal).");
+    expect(error?.message).toContain("Grok refused to go on with this request (stop reason: refusal).");
   });
 
   it("fails a max_tokens turn in plain words that advise continuing", async () => {
@@ -1030,7 +1030,7 @@ describe("ACP turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-max-tokens", text: "go" });
     expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "max_tokens" });
     const error = recorder.events.find((e) => e.type === "runtime.error") as { message: string } | undefined;
-    expect(error?.message).toContain("The AI's reply reached its maximum length before it finished (stop reason: max_tokens). Ask it to continue, or ask for a shorter answer.");
+    expect(error?.message).toContain("Grok's reply reached its maximum length before it finished (stop reason: max_tokens). Ask it to continue, or ask for a shorter answer.");
   });
 
   it("folds opencode cache reads into input and names them", async () => {
