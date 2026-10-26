@@ -231,6 +231,13 @@ describe("CI concurrency", () => {
     }
   });
 
+  it("pins every external action to a full commit SHA", () => {
+    const uses = (Object.values(workflow.jobs) as { steps?: { uses?: string }[] }[])
+      .flatMap((job) => job.steps ?? []).flatMap((step) => (step.uses && !step.uses.startsWith("./") ? [step.uses] : []));
+    expect(uses.length).toBeGreaterThan(0);
+    for (const action of uses) expect(action).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
+  });
+
   it("keeps the redundant Windows workflow available only for manual debugging", () => {
     const smoke = parse(readFileSync(new URL("../.github/workflows/shared-terminal-smoke.yml", import.meta.url), "utf8"));
     expect(smoke.on).toEqual({ workflow_dispatch: null });
