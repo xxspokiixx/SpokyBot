@@ -10,7 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
-import { openStartupModelCatalog, writeStartupModelCache } from "../../startup-model-catalog.ts";
+import { openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
@@ -24,7 +24,8 @@ import {
   type LogSignal, type ProcessSample, type QuietState,
 } from "./quiet-status.ts";
 import { readSessionReport } from "./session-reports.ts";
-import { acpVariantOption, offeredModels } from "./config-options.ts";
+import { offeredModels } from "./config-options.ts";
+import { SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
 import { versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts";
 
 export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
@@ -57,7 +58,8 @@ import { acpSessionOperationKey, acpShellRequest, answersAlone, permissionLaunch
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
-import { AcpHost, type AcpLink } from "./host.ts";
+import { AcpHost } from "./host.ts";
+import type { AcpAskFinish, AcpSession, AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
@@ -81,60 +83,6 @@ export interface AcpConfig {
   workspace?: string;
 }
 
-type AcpAskFinish = (
-  behavior: string,
-  source?: "user" | "timeout" | "system",
-  message?: string,
-  always?: boolean,
-) => RequestOutcome;
-
-interface AcpTurn {
-  turnId: string;
-  turn: SendTurnInput;
-  turnConfig: AcpConfig;
-  controlsHost: boolean;
-  state: {
-    settled: boolean; promptSent: boolean; text: string; textMessageId: string | null; producedItem: boolean; startupActivity: boolean; stopped: boolean;
-    usagePeak: number | null;
-    usageLast: number | null;
-    usageCompacted: boolean;
-  };
-  acknowledge: () => void;
-  asks: Map<string, AcpAskFinish>;
-  /** Tool calls started and not yet finished: a tool such as `sleep` sends nothing while it runs. */
-  runningTools: Set<string>;
-  unkeyedToolIds: string[];
-  endedToolIds: Set<string>;
-  interruptTimer: ReturnType<typeof setTimeout> | null;
-  stopQuietWatch: (() => void) | null;
-  flushAssistantText: () => void;
-  receiveModelVariants: (result: any) => void;
-}
-
-interface AcpSession {
-  child: ReturnType<typeof spawnCli>;
-  host: AcpHost;
-  acp: AcpLink;
-  launch: { command: string; args?: string[] };
-  env: Record<string, string | undefined>;
-  cwd: string;
-  contractKey: string;
-  /** mcpServers the native session was built with. They ride session/new and session/load, not argv,
-   *  and bearer tokens rotate every turn, so a change re-establishes the session on the same child. */
-  sessionKey: string | null;
-  sessionId: string | null;
-  sessionConfigResult: any;
-  initResult: any;
-  authenticated: boolean;
-  idleTimer: ReturnType<typeof setTimeout> | null;
-  closing: boolean;
-  dead: boolean;
-  readonly stderr: string;
-  current: AcpTurn | null;
-  fallbackNotice?: string;
-  launchModel?: string;
-}
-
 /** Per-CLI specifics plugged into the shared ACP runtime. */
 export interface AcpSupport {
   questionRequests?: Readonly<Record<string, AcpQuestionRequest>>;
@@ -147,7 +95,7 @@ export interface AcpSupport {
   displayName: string;
   /** Omit for subscription CLIs. Custom-only CLIs have no first-party cloud catalog. */
   access?: "subscription" | "custom";
-  models: { default: string; options: Array<{ id: string; label: string }> };
+  models: ModelCatalog;
   /** Effort levels the CLI accepts, ascending; omit when it has none. Static because describe()
    * runs before any session exists. */
   effortLevels?: readonly EffortLevel[];
@@ -184,7 +132,7 @@ export interface AcpSupport {
   credentialEnv?: readonly string[];
   /** Select the model through a session config option instead of argv (opencode's ACP subcommand
    *  takes no -m). The agent must confirm it before the prompt. */
-  selectModel?: { configId: string };
+  selectModel?: AcpModelSelection;
   /** With `selectModel`: the model a turn runs when it asked for none or for one this session does
    * not offer; null keeps the strict behaviour. */
   fallbackModel?(sessionConfig: unknown, catalogDefault: string): string | null;
@@ -395,7 +343,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         support.transformEnv?.(env, activeConfig, instanceId, input.environment);
         return env;
       };
-      let models = support.models;
+      let models = support.resolveModels && support.resolveModelsOnCreate === false
+        ? readStartupModelCache(instanceId) ?? support.models : support.models;
       let accountModels: ReadonlySet<string> | null = null;
       const refreshModels = async () => {
         if (!support.resolveModels) return;
@@ -464,7 +413,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           host.retired += 1;
           recycleWhenIdle(host);
           if (sessionId && host.initResult?.agentCapabilities?.sessionCapabilities?.close) {
-            void host.request(null, "session/close", { sessionId }, 30_000).catch(() => undefined);
+            session.closeConfirmed = host.request(null, "session/close", { sessionId }, why === "cancel-timeout" ? 5_000 : 30_000).then(() => true, () => false);
           }
           return;
         }
@@ -479,6 +428,28 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             void killCliTree(session.child);
           }, 5_000);
           kill.unref?.();
+        }
+      };
+      // A session that ignores session/cancel goes on working. In a shared process only a confirmed session/close or the
+      // end of the process stops it, and ending the process ends the other sessions' turns too.
+      const endUncancelled = async (threadId: string, session: AcpSession): Promise<void> => {
+        const { host } = session;
+        closeSession(threadId, "cancel-timeout");
+        if (host.key === null || (host.links.size && await session.closeConfirmed)) return;
+        for (const link of host.links) {
+          const other = sessions.get(link.threadId);
+          if (other?.host !== host) continue;
+          const running = other.current;
+          closeSession(link.threadId, "cancel-timeout");
+          if (running) {
+            emit({ ...base(link.threadId, running.turnId), type: "runtime.error",
+              message: `${support.displayName} was restarted because a session sharing its process ignored Stop` });
+            settle(link.threadId, other, false, "exit_before_result");
+          }
+        }
+        if (!await killCliTree(host.child) && session.current) {
+          emit({ ...base(threadId, session.current.turnId), type: "runtime.error",
+            message: `${support.displayName} ignored Stop and its process could not be ended` });
         }
       };
       // A shared process holding closed sessions gives their memory back only by exiting: once none of its sessions has
@@ -1038,13 +1009,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           error: (e) => {
             session.dead = true;
             const current = session.current;
-            if (!current) return;
+            if (!current || current.state.cancelling) return;
             emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command, cwd) });
             settle(threadId, session, false, "spawn_error");
           },
           exit: (code) => {
             session.dead = true;
             const current = session.current;
+            if (current?.state.cancelling) return;
             if (current) {
               emit({
                 ...base(threadId, current.turnId),
@@ -1187,7 +1159,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -1200,36 +1172,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let staleProcess = false;
       // Still set if configuring throws: the pooled session may keep an earlier turn's looser mode.
         let approvalUnconfirmed = false;
-        const modelOf = (result: any): string | null => {
-          const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
-            (entry: any) => entry?.id === (support.selectModel?.configId ?? "model"),
-          );
-          return typeof option?.currentValue === "string" ? option.currentValue : null;
-        };
-        const receiveModelVariants = (result: any) => {
-          session.sessionConfigResult = result;
-          if (!support.modelVariants) return;
-          const nativeModel = modelOf(result) ?? cliTurn.model;
-          if (!nativeModel) return;
-          const option = acpVariantOption(result);
-          emit({
-            ...base(threadId, turnId),
-            type: "session.model-variants",
-            model: nativeModel === cliTurn.model ? (reportedModel ?? nativeModel) : nativeModel,
-            variants: {
-              options: option?.options ?? [],
-              ...(option?.currentValue !== undefined ? { currentValue: option.currentValue } : {}),
-            },
-          });
-        };
-        const requestedVariantOption = () => {
-          if (!support.modelVariants) throw new Error(`${support.displayName} does not support model variants`);
-          const option = acpVariantOption(session.sessionConfigResult);
-          if (!option || !option.options.some((entry) => entry.id === variant)) {
-            throw new Error(`${support.displayName} does not advertise variant ${variant} for this model`);
-          }
-          return option;
-        };
+        const modelControls = new SessionModelControls({
+          selection: support.selectModel, variants: support.modelVariants === true, displayName: support.displayName,
+          model: () => cliTurn.model, reportedModel: () => reportedModel,
+          state: () => session.sessionConfigResult, store: (result) => { session.sessionConfigResult = result; },
+          report: (model, variants) => emit({ ...base(threadId, turnId), type: "session.model-variants", model, variants }),
+        });
+        const receiveModelVariants = (result: any, replace = false) => modelControls.receive(result, replace);
+        const requestedVariantOption = () => modelControls.variant(variant);
 
         const flushAssistantText = () => {
           const raw = state.text;
@@ -1262,8 +1212,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
             if (current.interruptTimer) clearTimeout(current.interruptTimer);
             current.interruptTimer = setTimeout(() => {
-              closeSession(threadId, "cancel-timeout");
-              settle(threadId, session, true, "cancelled");
+              state.cancelling = true;
+              void endUncancelled(threadId, session).then(() => settle(threadId, session, true, "cancelled"));
             }, 5_000);
             current.interruptTimer.unref?.();
           } else {
@@ -1356,7 +1306,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                         loaded = true;
                         session.sessionId = cursor;
                         session.sessionKey = sessionKey;
-                        receiveModelVariants(result);
+                        receiveModelVariants(result, true);
                       }
                     },
                   );
@@ -1395,7 +1345,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
-                receiveModelVariants(result);
+                receiveModelVariants(result, true);
               });
               break;
             }
@@ -1418,7 +1368,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             try {
               if (support.selectModel) {
                 const { configId } = support.selectModel;
-                selectedModel = modelOf(session.sessionConfigResult);
+                selectedModel = modelControls.modelOf(session.sessionConfigResult);
                 const wanted = cliTurn.model;
                 const offered = offeredModels(session.sessionConfigResult, configId);
                 if (support.sessionModelEnv && !session.launchModel && offered.length) accountModels = new Set(offered);
@@ -1445,20 +1395,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     variant = undefined;
                   }
                 }
-                if (cliTurn.model && cliTurn.model !== selectedModel) {
-                  await request(
-                    "session/set_config_option",
-                    { sessionId, configId, value: cliTurn.model },
-                    INIT_TIMEOUT,
-                    receiveModelVariants,
-                  );
-                  selectedModel = modelOf(session.sessionConfigResult);
-                  if (selectedModel !== cliTurn.model) {
-                    throw new Error(
-                      `${DRIVER_KIND} did not switch to ${cliTurn.model} (still ${selectedModel ?? "unknown"})`,
-                    );
-                  }
-                }
+                selectedModel = await modelControls.select(request, sessionId, INIT_TIMEOUT);
               }
 
               if (support.configureSession) {
@@ -1540,7 +1477,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
               : [];
-            if (support.modelVariants && cliTurn.model && modelOf(session.sessionConfigResult) !== cliTurn.model) {
+            if (support.modelVariants && cliTurn.model && !modelControls.usesAgentDefault() && modelControls.modelOf(session.sessionConfigResult) !== cliTurn.model) {
               throw new Error(`${support.displayName} changed model before the prompt`);
             }
             if (variant !== undefined && requestedVariantOption().currentValue !== variant) {
@@ -1627,7 +1564,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (pendingSplitReceipt && state.promptSent && state.usageCompacted) {
               deletePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key);
             }
-            if (!state.settled) {
+            if (!state.settled && !state.cancelling) {
               const untouched = retryOf === undefined && !state.producedItem && !state.text && !current.runningTools.size && !asks.size && !state.stopped && !session.closing;
               if (untouched && retryUnderToolLimit(e, { key: toolLimitKey, model: resolvedModel, engine: DRIVER_KIND, retry: () => {
                 state.settled = true; session.current = null; active.delete(threadId); current.stopQuietWatch?.();
@@ -1789,7 +1726,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             computerMcp: true,
             composioMcp: true,
             browserMcp: true,
-            dataMcp: true, highlevelMcp: true,
+            dataMcp: true, highlevelMcp: true, deviceMcp: true,
             images: support.images !== false,
             nativeImageInput: support.images === true,
             effortLevels: support.effortLevels,
