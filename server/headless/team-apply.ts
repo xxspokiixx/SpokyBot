@@ -278,7 +278,7 @@ export async function reconcile(client: HeadlessClient, file: TeamFile, options:
       continue;
     }
     if (bot?.chiefOfStaff === true && sameSet(bot.managedSections ?? [], managed)) continue;
-    if (!created.has(key(desired.name))) note(`bot "${desired.name}": Chief of Staff of ${desired.team ?? "General"}${managed.length ? `, also working with ${managed.join(", ")}` : ""}`, "changed");
+    if (!created.has(key(desired.name))) note(`bot "${desired.name}": Chief of Staff of ${desired.team ?? "General"}${managed.length ? `, also in charge of ${managed.join(", ")}` : ""}`, "changed");
     if (options.apply) await write(`/api/bots/${enc(bot!.id)}`, { method: "PATCH", body: JSON.stringify({ chiefOfStaff: true, managedSections: managed, acknowledgePeerScope: true }) });
   }
 

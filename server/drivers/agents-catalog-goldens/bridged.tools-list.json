@@ -30,7 +30,7 @@
     },
     {
       "name": "list_room_targets",
-      "description": "Discover actual OpenMausBot teammates and rooms in your allowed teams. Works in a normal bot conversation too; no room is required. Returns bot and room IDs, roles and working folders, never other conversations' history. Use these bots, not native coding helpers with similar names, when the user asks their team to work together.",
+      "description": "Discover actual OpenMausBot teammates you can reach, in every department, and rooms. Works in a normal bot conversation too; no room is required. Returns bot and room IDs, roles and working folders, never other conversations' history. Use these bots, not native coding helpers with similar names, when the user asks their team to work together.",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -116,7 +116,7 @@
     },
     {
       "name": "list_bots",
-      "description": "List the other bots (agents) you may contact in your own team and any additional teams the owner has explicitly allowed you to coordinate, with their team, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
+      "description": "List every other bot (agent) you can contact, in every department, with its department, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
       "inputSchema": {
         "type": "object",
         "properties": {}
