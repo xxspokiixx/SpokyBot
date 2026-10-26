@@ -15,6 +15,8 @@ export interface PersonStopDeps {
   clearUnattended(threadId: string): void;
   /** Remembers that the person stopped the turn running in this thread, so it ends as their stop. */
   markStopped(threadId: string): void;
+  /** Ends a goal running in this one-on-one chat, so the interrupted turn is its last. */
+  stopGoal(threadId: string): void;
 }
 
 export interface TypedStop {
@@ -41,6 +43,7 @@ export function createPersonStop(deps: PersonStopDeps) {
     }
     deps.handoffs().stoppedByPerson(threadId);
     deps.markStopped(threadId);
+    deps.stopGoal(threadId);
     await deps.interruptDirectThread(botId, threadId);
   }
 
