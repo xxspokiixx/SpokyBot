@@ -1181,6 +1181,7 @@
   "chat.previousVersion": "上一個版本",
   "chat.nextVersion": "下一個版本",
   "chat.openConversationWith": "開啟與 {name} 的對話",
+  "chat.handoffDoneWhen": "完成標準：{criteria}",
   "chat.openThread": "開啟 #{title}",
   "chat.openThreadOn": "在 {name} 上開啟 #{title}",
   "chat.botScreen": "機器人的畫面",

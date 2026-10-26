@@ -709,6 +709,7 @@
   "chat.previousVersion": "Попередня версія",
   "chat.nextVersion": "Наступна версія",
   "chat.openConversationWith": "Відкрити розмову з {name}",
+  "chat.handoffDoneWhen": "Готово, коли: {criteria}",
   "chat.openThread": "Відкрити #{title}",
   "chat.openThreadOn": "Відкрити #{title} у {name}",
   "chat.botScreen": "Екран бота",

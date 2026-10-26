@@ -1752,6 +1752,7 @@
   "chat.previousVersion": "Poprzednia wersja",
   "chat.nextVersion": "Następna wersja",
   "chat.openConversationWith": "Otwórz rozmowę: {name}",
+  "chat.handoffDoneWhen": "Gotowe, gdy: {criteria}",
   "chat.openThread": "Otwórz #{title}",
   "chat.openThreadOn": "Otwórz #{title}: {name}",
   "chat.botScreen": "Ekran bota",

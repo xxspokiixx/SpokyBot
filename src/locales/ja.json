@@ -1790,6 +1790,7 @@
   "chat.previousVersion": "前のバージョン",
   "chat.nextVersion": "次のバージョン",
   "chat.openConversationWith": "{name} との会話を開く",
+  "chat.handoffDoneWhen": "完了の条件: {criteria}",
   "chat.openThread": "#{title} を開く",
   "chat.openThreadOn": "{name} の #{title} を開く",
   "chat.botScreen": "ボットの画面",

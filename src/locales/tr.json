@@ -1402,6 +1402,7 @@
   "chat.previousVersion": "Önceki sürüm",
   "chat.nextVersion": "Sonraki sürüm",
   "chat.openConversationWith": "{name} ile olan sohbeti aç",
+  "chat.handoffDoneWhen": "Şu olunca tamam: {criteria}",
   "chat.openThread": "#{title} konusunu aç",
   "chat.openThreadOn": "{name} üzerinde #{title} konusunu aç",
   "chat.botScreen": "Botun ekranı",

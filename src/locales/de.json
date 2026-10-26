@@ -653,6 +653,7 @@
   "chat.previousVersion": "Vorherige Version",
   "chat.nextVersion": "Nächste Version",
   "chat.openConversationWith": "Unterhaltung mit {name} öffnen",
+  "chat.handoffDoneWhen": "Fertig, wenn: {criteria}",
   "chat.botScreen": "Bildschirm des Bots",
   "chat.digestChip": "{tools} Werkzeugaufrufe · {files} Dateien geändert",
   "chat.digestChipNoFiles": "{tools} Werkzeugaufrufe",

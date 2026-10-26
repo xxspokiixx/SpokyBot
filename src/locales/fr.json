@@ -572,6 +572,7 @@
   "chat.previousVersion": "Version précédente",
   "chat.nextVersion": "Version suivante",
   "chat.openConversationWith": "Ouvrir la conversation avec {name}",
+  "chat.handoffDoneWhen": "Terminé quand : {criteria}",
   "chat.botScreen": "Écran du bot",
   "chat.digestChip": "{tools} appels d'outils · {files} fichiers modifiés",
   "chat.digestChipNoFiles": "{tools} appels d'outils",

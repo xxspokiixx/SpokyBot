@@ -1402,6 +1402,7 @@
   "chat.previousVersion": "Phiên bản trước",
   "chat.nextVersion": "Phiên bản tiếp theo",
   "chat.openConversationWith": "Mở cuộc trò chuyện với {name}",
+  "chat.handoffDoneWhen": "Xong khi: {criteria}",
   "chat.openThread": "Mở #{title}",
   "chat.openThreadOn": "Mở #{title} trên {name}",
   "chat.botScreen": "Màn hình của bot",
