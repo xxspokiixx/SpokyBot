@@ -427,8 +427,9 @@ describe("the model picker in Simple mode", () => {
     }));
   });
 
-  it.each([false, null])("keeps a Cloud guest's model and effort changes thread-only while owner status is %s", (ownerOrAdmin) => {
-    fixture.cloudHome = true;
+  it.each([[true, false], [true, null], [false, false], [false, null]] as const)(
+    "keeps a guest's model and effort changes thread-only (Cloud: %s, owner status: %s)", (cloudHome, ownerOrAdmin) => {
+    fixture.cloudHome = cloudHome;
     fixture.ownerOrAdmin = ownerOrAdmin;
     const opened = open(bot());
     pane(opened)!.props.onPick("claude-sonnet-5-5");
@@ -763,6 +764,26 @@ describe("the model picker in Simple mode", () => {
     expect(bottom.indexOf(">Reasoning</span>")).toBeLessThan(bottom.indexOf("<select"));
     expect(bottom).not.toContain(">Quick</button>");
     expect(bottom).not.toContain("How hard should");
+  });
+
+  it("offers an OpenCode Copilot model's efforts from its catalog, and nothing for a model without them", () => {
+    // The catalog OpenCode 2.1.4 gave for a Copilot GPT model with an effort list, and for one without.
+    const variants = ["Low", "Medium", "High", "Xhigh", "Default"].map((label) => ({ id: label.toLowerCase(), label }));
+    fixture.instances = [{
+      ...engine("opencodeGo", "opencodeGo", "OpenCode", "api", [
+        { id: "github-copilot/gpt-5.3-codex", label: "Github Copilot · GPT-5.3 Codex", variants },
+        { id: "github-copilot/gemini-3.8-flash", label: "Github Copilot · Gemini 3.8 Flash" },
+      ]),
+      capabilities: { modelVariants: true },
+    }];
+    const band = (model: string) => region(menu(open(bot(undefined, "opencodeGo", model)).html), "data-simple-effort-band");
+    const offered = band("github-copilot/gpt-5.3-codex");
+    expect([...offered.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((match) => match[1]))
+      .toEqual(["Use session setting", "Low", "Medium", "High", "Xhigh", "OpenCode default"]);
+    fixture.values = [];
+    const plain = band("github-copilot/gemini-3.8-flash");
+    expect(plain).toContain("data-simple-effort-band");
+    expect(plain).not.toContain("<select");
   });
 
   it("leaves Advanced mode on the full picker", () => {
