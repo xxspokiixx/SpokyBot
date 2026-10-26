@@ -174,6 +174,7 @@ const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
 // The ak_good project's own auth configs (a Xero OAuth app), and the auth_configs each new Session named.
 let connectorAuthConfigs: Array<{ id: string; status: string; is_composio_managed: boolean; toolkit: { slug: string } }> = [];
 const connectorSessionAuthConfigs: Array<Record<string, string> | undefined> = [];
+const connectorAuthConfigEdits: Array<{ id: string; body: unknown }> = [];
 const connectorRelayCalls: Array<{ transportSessionId: string; body: any }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
@@ -886,6 +887,11 @@ beforeAll(async () => {
     }
     if (req.url?.startsWith("/api/v3.1/auth_configs") && req.headers["x-api-key"] === "ak_good") {
       const id = req.url.match(/^\/api\/v3\.1\/auth_configs\/([\w-]+)/)?.[1];
+      if (req.method === "PATCH" && id) {
+        let raw = "";
+        for await (const chunk of req) raw += chunk;
+        connectorAuthConfigEdits.push({ id, body: JSON.parse(raw) });
+      }
       const found = id ? connectorAuthConfigs.find((config) => config.id === id) : undefined;
       res.writeHead(id && !found ? 404 : 200, { "content-type": "application/json" });
       return res.end(JSON.stringify(id ? found ?? { error: { message: "Auth config not found" } } : { items: connectorAuthConfigs }));
@@ -907,7 +913,7 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ redirect_url: "https://connect.composio.dev/fixture-only" }));
       }
-      if (req.method === "POST") connectorSessionAuthConfigs.push(body.auth_configs);
+      if (req.method === "POST" || req.method === "PATCH") connectorSessionAuthConfigs.push(body.auth_configs);
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_config_test",
@@ -11531,6 +11537,8 @@ describe("harness HTTP API", () => {
 
       const requested = await request("ac_xero_e2e");
       expect(requested.status).toBe(200);
+      expect(requested.body.authConfigNote).toBe("xero connects with the person's own Composio auth config ac_xero_e2e, the one asked for.");
+      expect(connectorAuthConfigEdits).toEqual([{ id: "ac_xero_e2e", body: { type: "custom", is_enabled_for_tool_router: true } }]);
       const authorized = await api("POST", `/api/bots/${bot.id}/connector-cards/${requested.body.messageIds[0]}/authorize`, { threadId: bot.threadId });
       expect(authorized.status).toBe(200);
       expect(connectorLinkRequests.at(-1)).toEqual({ toolkit: "xero" });

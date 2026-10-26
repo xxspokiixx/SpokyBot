@@ -15148,7 +15148,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
         }
         const scopedLine = teamConnections.connectRefusal(internalCapability, slugs); if (scopedLine) return json(res, 409, { error: scopedLine });
-        await composio.useRequestedAuthConfigs(cfg, items);
+        const authConfigNote = await composio.prepareConnectionAuthConfigs(cfg, items);
         const connectionState: Record<string, { connected?: boolean }> = await composio.connectionStatus(cfg, slugs).catch(() => ({}));
         requireActiveInternalCapability();
         const messageIds: string[] = [];
@@ -15185,7 +15185,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           messageIds.push(message.id);
         }
         maybeResumeConnectors(threadId, resumeKey);
-        return json(res, 200, { messageIds });
+        return json(res, 200, { messageIds, ...(authConfigNote ? { authConfigNote } : {}) });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
     }
