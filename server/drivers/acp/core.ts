@@ -99,6 +99,8 @@ interface AcpTurn {
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
+    /** Stop went unanswered: only the cancel timeout settles the turn, once its session is closed or its process gone. */
+    cancelling: boolean;
   };
   acknowledge: () => void;
   asks: Map<string, AcpAskFinish>;
@@ -129,6 +131,8 @@ interface AcpSession {
   authenticated: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
   closing: boolean;
+  /** Set when a shared process's session closes through `session/close`: true once the agent confirms it. */
+  closeConfirmed?: Promise<boolean>;
   dead: boolean;
   readonly stderr: string;
   current: AcpTurn | null;
@@ -466,7 +470,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           host.retired += 1;
           recycleWhenIdle(host);
           if (sessionId && host.initResult?.agentCapabilities?.sessionCapabilities?.close) {
-            void host.request(null, "session/close", { sessionId }, 30_000).catch(() => undefined);
+            session.closeConfirmed = host.request(null, "session/close", { sessionId }, why === "cancel-timeout" ? 5_000 : 30_000).then(() => true, () => false);
           }
           return;
         }
@@ -481,6 +485,28 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             void killCliTree(session.child);
           }, 5_000);
           kill.unref?.();
+        }
+      };
+      // A session that ignores session/cancel goes on working. In a shared process only a confirmed session/close or the
+      // end of the process stops it, and ending the process ends the other sessions' turns too.
+      const endUncancelled = async (threadId: string, session: AcpSession): Promise<void> => {
+        const { host } = session;
+        closeSession(threadId, "cancel-timeout");
+        if (host.key === null || (host.links.size && await session.closeConfirmed)) return;
+        for (const link of host.links) {
+          const other = sessions.get(link.threadId);
+          if (other?.host !== host) continue;
+          const running = other.current;
+          closeSession(link.threadId, "cancel-timeout");
+          if (running) {
+            emit({ ...base(link.threadId, running.turnId), type: "runtime.error",
+              message: `${support.displayName} was restarted because a session sharing its process ignored Stop` });
+            settle(link.threadId, other, false, "exit_before_result");
+          }
+        }
+        if (!await killCliTree(host.child) && session.current) {
+          emit({ ...base(threadId, session.current.turnId), type: "runtime.error",
+            message: `${support.displayName} ignored Stop and its process could not be ended` });
         }
       };
       // A shared process holding closed sessions gives their memory back only by exiting: once none of its sessions has
@@ -1040,13 +1066,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           error: (e) => {
             session.dead = true;
             const current = session.current;
-            if (!current) return;
+            if (!current || current.state.cancelling) return;
             emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command, cwd) });
             settle(threadId, session, false, "spawn_error");
           },
           exit: (code) => {
             session.dead = true;
             const current = session.current;
+            if (current?.state.cancelling) return;
             if (current) {
               emit({
                 ...base(threadId, current.turnId),
@@ -1189,7 +1216,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -1242,8 +1269,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
             if (current.interruptTimer) clearTimeout(current.interruptTimer);
             current.interruptTimer = setTimeout(() => {
-              closeSession(threadId, "cancel-timeout");
-              settle(threadId, session, true, "cancelled");
+              state.cancelling = true;
+              void endUncancelled(threadId, session).then(() => settle(threadId, session, true, "cancelled"));
             }, 5_000);
             current.interruptTimer.unref?.();
           } else {
@@ -1594,7 +1621,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (pendingSplitReceipt && state.promptSent && state.usageCompacted) {
               deletePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key);
             }
-            if (!state.settled) {
+            if (!state.settled && !state.cancelling) {
               const untouched = retryOf === undefined && !state.producedItem && !state.text && !current.runningTools.size && !asks.size && !state.stopped && !session.closing;
               if (untouched && retryUnderToolLimit(e, { key: toolLimitKey, model: resolvedModel, engine: DRIVER_KIND, retry: () => {
                 state.settled = true; session.current = null; active.delete(threadId); current.stopQuietWatch?.();
