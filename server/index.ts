@@ -247,7 +247,6 @@ import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine }
 import { chiefEscalationsEnabled, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
-import { RETRY_BLOCKED } from "./incidents.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
 import { personOf, promptWithReply, replyTargetIn, speakerOf, transcriptText, type PersonName, type ReplyTarget } from "./replies.ts";
@@ -7342,9 +7341,10 @@ function runtimeWorkPending(threadId: string): boolean {
         && coordinator.children(root.id).some(child => child.reply !== "none" && child.createdAt >= (root.startedAt ?? 0)))));
 }
 
-const { reportIncident, reportEscalation, incidentRefused, incidentLastAt } = createChiefNotices({
+const { reportIncident, reportEscalation, incidentRefused, retryRefusal } = createChiefNotices({
   store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId),
-  assignerOf: (threadId) => coordinator.assignerOf(threadId),
+  assignerOf: (threadId) => coordinator.assignerOf(threadId), retryPolicy: () => cfg.retryOnFailure,
+  threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
   escalationsEnabled: () => chiefEscalationsEnabled(cfg), ...(teamOwners.noticeRouting ? { routing: teamOwners.noticeRouting } : {}),
 });
@@ -9151,7 +9151,7 @@ const limitFailovers = new LimitFailovers({ file: join(DATA_DIR, "limit-failover
 const automationDestinations = createAutomationDestinations({ store, mainThread: botMainThread, runs: () => routines?.listRuns() ?? [],
   cloud: CLOUD_HOME ? { owner: CLOUD_OWNER_KEY!, opener: routineOpener, reportFromOthers: cloudReportFromOthers, opened: (threadId, person) => threadStarters.set(threadId, person) } : null });
 routines = new RoutineManager({
-  emit: broadcast, limitResetAt: (engine) => limitClock.resetAt(engine), checks: proactive.checks,
+  emit: broadcast, limitResetAt: (engine) => limitClock.resetAt(engine), checks: proactive.checks, retryPolicy: () => cfg.retryOnFailure,
   limitBackup: (botId) => cfg.automaticRecovery?.enabled === true && Boolean(store.bot(botId)?.fallback?.length || cfg.automaticRecovery.backup),
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
@@ -14814,13 +14814,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (store.groupByThread(threadId)) return json(res, 400, { error: "that is a room thread — use coordinate_bots in the room instead" });
         const task = store.taskByThread(target.id, threadId);
         if (!task || (CLOUD_TEAM && !teamHost.readableFrom(fromThreadId)(threadId))) return json(res, 404, { error: "no such thread on that bot" });
-        const blocked = threadBusy(target.id, threadId) ? (settlingTurns.has(threadId) ? "settling" : "running") : queuedThreadPosition(target.id, threadId) !== null ? "queued" : null;
-        if (blocked) return json(res, 409, { error: RETRY_BLOCKED[blocked] });
-        // A thread that finished a run since it was last reported has nothing to resume: resuming would redo finished work.
-        const reportedAt = incidentLastAt(threadId);
-        if (reportedAt !== undefined && store.activePath(threadId).some(line => line.turnSucceeded === true && line.at > reportedAt)) {
-          return json(res, 409, { error: "that thread has finished a run since it was reported — there is nothing to retry; read what it did before deciding anything else" });
-        }
+        const refused = retryRefusal(target.id, threadId);
+        if (refused) return json(res, 409, { error: refused });
         requireActiveInternalCapability();
         const unattended = isUnattended(from.id, fromThreadId);
         const text = `[Retry requested by ${peerName(from.name)}, your Chief of Staff, after this thread's last run stopped.${note ? ` Note from ${peerName(from.name)}: ${quoteInNote(note, 300)}` : ""} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`;
