@@ -7,7 +7,8 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import type { NeedsYouItem } from "../../shared/today";
 import { useHeldMenuMotion } from "./MenuMotion";
 
 export type OwnerPickerTarget = { botIds: string[]; title: string; current: string | null; x: number; y: number };
@@ -32,7 +33,14 @@ const initial = (person: TeamPerson) => person.name.trim().charAt(0).toUpperCase
 const HUES = ["bg-[#5B8DEF]", "bg-[#E0745B]", "bg-[#4FAF7F]", "bg-[#B26BD9]", "bg-[#D9A23B]", "bg-[#3BA7B8]"];
 const hueOf = (email: string) => HUES[[...email].reduce((sum, char) => sum + char.charCodeAt(0), 0) % HUES.length];
 
+/** A teammate's picture, or their initial when they have none or it fails to load. */
 export function PersonFace({ person, size = 18 }: { person: TeamPerson; size?: number }) {
+  const picture = pictureOf(person, useTeamPeople());
+  const [failed, setFailed] = useState<string | null>(null);
+  if (picture && failed !== picture) {
+    return <img src={picture} alt="" aria-hidden="true" draggable={false} data-person-picture={person.email} onError={() => setFailed(picture)}
+      style={{ width: size, height: size }} className="inline-block shrink-0 rounded-full bg-raised object-cover" />;
+  }
   return <span aria-hidden="true" style={{ width: size, height: size, fontSize: Math.round(size * 0.55) }}
     className={cn("inline-flex shrink-0 items-center justify-center rounded-full font-semibold leading-none text-white", hueOf(person.email))}>{initial(person)}</span>;
 }
@@ -143,6 +151,13 @@ function readConversation(groups: ReadonlyArray<{ id: string; threadId: string; 
     .then(() => refreshNeedsYou()).catch(() => {});
 }
 
+/** A Needs you line's title, after the face of the teammate it is from. */
+export function NeedsYouTitle({ item, title }: { item: NeedsYouItem; title: string }) {
+  const from = item.kind === "message" && item.fromEmail ? { email: item.fromEmail, name: item.from, role: "member" } : null;
+  if (!from) return <span className="w-full truncate text-[13px] text-ink">{title}</span>;
+  return <span className="flex w-full min-w-0 items-center gap-1.5 text-[13px] text-ink"><PersonFace person={from} size={16} /><span className="min-w-0 truncate">{title}</span></span>;
+}
+
 /** On a Team Cloud: what the bots ask of this person, newest first, each one opening its conversation. */
 export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
   const team = useTeamPeople();
@@ -182,7 +197,7 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
                 if (item.kind === "message") readConversation(state.groups, botId, item.threadId);
               }}
               className="flex w-full flex-col items-start px-3.5 py-2 text-left hover:bg-raised/70">
-              <span className="w-full truncate text-[13px] text-ink">{title}</span>
+              <NeedsYouTitle item={item} title={title} />
               {text && <span className="w-full truncate text-[12px] text-ink-secondary">{text}</span>}
             </button>;
           })}
