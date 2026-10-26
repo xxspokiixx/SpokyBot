@@ -2326,5 +2326,7 @@
   "voice.yourVoices": "Vos voix",
   "voice.library": "Bibliothèque de voix ElevenLabs",
   "voice.libraryHint": "En choisir une l'ajoute à vos voix.",
-  "voice.adding": "Ajout en cours…"
+  "voice.adding": "Ajout en cours…",
+  "computer.simple.usingNow": "En ce moment : {place}",
+  "automations.run.stoppedBecause": "Arrêtée : {reason}"
 }

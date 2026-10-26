@@ -3484,6 +3484,7 @@
   "computer.files.notShared": "Chưa chia sẻ",
   "computer.files.notSharedHint": "Yêu cầu bot chia sẻ liên kết tệp trong cuộc trò chuyện này để lưu một bản sao.",
   "computer.simple.whereWorks": "Nơi {name} làm việc",
+  "computer.simple.usingNow": "Hiện tại: {place}",
   "computer.simple.dest.thisMac": "Máy Mac này",
   "computer.simple.dest.thisPc": "Máy tính này",
   "computer.simple.needsSetup": "Desktop của {name} cần một bước thiết lập trước.",
@@ -4841,5 +4842,6 @@
   "voice.yourVoices": "Giọng nói của bạn",
   "voice.library": "Thư viện giọng nói ElevenLabs",
   "voice.libraryHint": "Khi bạn chọn một giọng, giọng đó sẽ được thêm vào giọng nói của bạn.",
-  "voice.adding": "Đang thêm…"
+  "voice.adding": "Đang thêm…",
+  "automations.run.stoppedBecause": "Đã dừng: {reason}"
 }

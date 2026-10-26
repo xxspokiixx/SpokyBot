@@ -3484,6 +3484,7 @@
   "computer.files.notShared": "Paylaşılmadı",
   "computer.files.notSharedHint": "Bir kopyasını kaydetmek için bottan bu sohbette bir dosya bağlantısı paylaşmasını isteyin.",
   "computer.simple.whereWorks": "{name} nerede çalışır",
+  "computer.simple.usingNow": "Şu anda: {place}",
   "computer.simple.dest.thisMac": "Bu Mac",
   "computer.simple.dest.thisPc": "Bu PC",
   "computer.simple.needsSetup": "{name} adlı botun masaüstü için önce bir kurulum adımı gereklidir.",
@@ -4841,5 +4842,6 @@
   "voice.yourVoices": "Sesleriniz",
   "voice.library": "ElevenLabs Ses Kitaplığı",
   "voice.libraryHint": "Birini seçtiğinizde seslerinize eklenir.",
-  "voice.adding": "Ekleniyor…"
+  "voice.adding": "Ekleniyor…",
+  "automations.run.stoppedBecause": "Durduruldu: {reason}"
 }
