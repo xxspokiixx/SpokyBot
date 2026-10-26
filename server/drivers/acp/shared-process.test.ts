@@ -303,6 +303,24 @@ describe("ACP threads sharing one agent process", () => {
       expect((await stopped).done).toMatchObject({ ok: true, stopReason: "cancelled" });
       expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
     });
+
+    it("fails the turn when Stop could not end the process", async () => {
+      const f = await fixture({ shareProcess: false }, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1" });
+      const stopped = f.run("thread-a", { text: "HANG" });
+      await promptsSent(f, 1);
+      const [child] = f.spawned;
+      const kill = procs.killCliTree;
+      let refused = false;
+      vi.spyOn(procs, "killCliTree").mockImplementation(async (target, timeout) => {
+        if (target !== child || refused) return kill(target, timeout);
+        refused = true;
+        return false;
+      });
+      await f.instance.adapter.interruptTurn("thread-a");
+      const { done, events } = await stopped;
+      expect(done).toMatchObject({ ok: false });
+      expect(events.some((event) => event.type === "runtime.error" && /could not be ended/.test(event.message))).toBe(true);
+    });
   });
 
   it("asks for admission before it starts a process or adds a session, never for a thread already running", async () => {
