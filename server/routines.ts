@@ -751,7 +751,7 @@ export class RoutineManager {
     }, () => this.discardResultsThreads(allocations));
     if (routine.resultsThreadId !== previousDestination) this.emitRoutine(routine);
     this.emitRun(run);
-    queueMicrotask(() => void this.tick());
+    queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
   }
 
@@ -823,7 +823,7 @@ export class RoutineManager {
       throw error;
     }
     this.emitRun(run);
-    queueMicrotask(() => void this.tick());
+    queueMicrotask(() => this.tickInBackground());
   }
 
   activeWebhookRunCount(webhookId: string): number {
@@ -863,7 +863,7 @@ export class RoutineManager {
         await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
       }
     }
-    queueMicrotask(() => void this.tick());
+    queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
   }
 
@@ -946,12 +946,13 @@ export class RoutineManager {
   }
 
   get isTicking(): boolean { return this.ticking; }
+  private tickInBackground(): void { this.tick().catch((error) => console.error("routines: a scheduler pass failed", error)); }
 
   start() {
     if (this.timer) return;
     if (!this.startupRunsQueued) this.startupRunsQueued = this.queueStartupRuns();
-    void this.tick();
-    this.timer = setInterval(() => void this.tick(), 10_000);
+    this.tickInBackground();
+    this.timer = setInterval(() => this.tickInBackground(), 10_000);
     this.timer.unref?.();
   }
 
@@ -1013,15 +1014,16 @@ export class RoutineManager {
           activeMs(run, now) < run.timeoutMinutes * 60_000) continue;
         await this.stopRun(run, `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`, "limit-reached");
       }
-      const dueRoutines = this.routines.filter((routine) => routine.enabled && this.targetState(routine) !== "missing" && (!routine.checks
+      const isDue = (routine: Routine) => routine.enabled && this.targetState(routine) !== "missing" && (!routine.checks
         ? routine.nextRunAt != null && routine.nextRunAt <= now
-        : now >= this.bootedAt + CHECK_BOOT_HOLD_MS && [routine.nextRunAt, routine.wakeAt].some((at) => at != null && at <= now)));
+        : now >= this.bootedAt + CHECK_BOOT_HOLD_MS && [routine.nextRunAt, routine.wakeAt].some((at) => at != null && at <= now));
       // An unanswered wait gives way to its routine's next occurrence, which would otherwise be skipped behind it.
-      for (const routine of dueRoutines) {
+      for (const routine of this.routines.filter(isDue)) {
         if (routine.checks || runsOnce(routine.schedule) || now - routine.nextRunAt! > CATCH_UP_MS) continue;
         const stale = this.runs.filter((run) => run.routineId === routine.id && supersededBy(routine.nextRunAt!, run, this.options.handedOffWorkLive));
         for (const run of stale) await this.cancelRun(run.id, ROUTINE_SUPERSEDED);
       }
+      const dueRoutines = this.routines.filter(isDue);
       const scheduledRuns: RoutineRun[] = [];
       const allocations: ResultsThreadAllocation[] = [];
       const checks: Array<{ id: string; hold?: CheckHold }> = [];
@@ -1148,10 +1150,8 @@ export class RoutineManager {
             : "Could not create a task for this run");
           continue;
         }
-        run.threadId = task.threadId;
-        run.startedAt = startedAt;
-        run.status = "running";
-        this.save();
+        Object.assign(run, { threadId: task.threadId, startedAt, status: "running" } satisfies Partial<RoutineRun>);
+        try { this.save(); } catch (error) { Object.assign(run, { status: "queued", startedAt: undefined } satisfies Partial<RoutineRun>); throw error; }
         this.emitRun(run);
         try {
           const prompt = run.prompt ?? this.routines.find((r) => r.id === run.routineId)?.prompt;
@@ -1229,12 +1229,12 @@ export class RoutineManager {
       }, () => this.discardResultsThreads(allocations));
     } catch (error) {
       if (result.run) hook.release(result.run.key);
-      throw error;
+      return console.error(`routines: could not save the checks of ${routineId}`, error);
     }
     this.emitRoutine(current);
     if (queued && !result.run && result.trouble) this.failRun(queued, result.trouble);
     else if (run ?? queued) this.emitRun((run ?? queued)!);
-    if (run) queueMicrotask(() => void this.tick());
+    if (run) queueMicrotask(() => this.tickInBackground());
   }
 
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
@@ -1288,7 +1288,7 @@ export class RoutineManager {
     }
     this.save();
     this.emitRun(run);
-    if (event.type === "turn.completed") queueMicrotask(() => void this.tick());
+    if (event.type === "turn.completed") queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
   }
 
@@ -1314,7 +1314,7 @@ export class RoutineManager {
       this.emitRun(run);
       if (recovery.alert) this.options.onRunDeferred?.(cloneRun(run), recovery.alert);
     }
-    queueMicrotask(() => void this.tick());
+    queueMicrotask(() => this.tickInBackground());
   }
 
   finishGoalRun(runId: string, status: GroupGoalRunStatus, detail: string): RoutineRun | null {
@@ -1346,7 +1346,7 @@ export class RoutineManager {
       this.save();
       this.emitRun(run);
     }
-    queueMicrotask(() => void this.tick());
+    queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
   }
 
