@@ -21,6 +21,8 @@ import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeed
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
+import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
+import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -898,14 +900,6 @@ function withPatchedCard(messages: Message[], messageId: string, patch: Partial<
   return messages.map((m) => (m.id === messageId && m.card ? { ...m, card: { ...m.card, ...patch } } : m));
 }
 
-/** A room frame's fields that describe the room as a whole, not the thread the server has open. */
-function roomFieldsOnly({
-  threadId: _threadId, pinnedCwd: _pinnedCwd, pinnedMessageId: _pinnedMessageId, usage: _usage,
-  memberContext: _memberContext, busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...room
-}: Partial<Group> & { id: string }): Partial<Group> & { id: string } {
-  return { ...room, section: room.section };
-}
-
 function patchCard(state: AppState, botId: string, messageId: string, patch: Partial<OptionCardData>): AppState {
   return updateBot(state, botId, (b) => ({ ...b, messages: withPatchedCard(b.messages, messageId, patch) }));
 }
@@ -929,45 +923,6 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const quiz = bot ? openOnboardingCard(bot) : undefined;
   return quiz ? patchCard(state, botId, quiz.id, { dismissed: true }) : state;
-}
-
-const optimisticMessageId = (sendId: string): string => `optimistic-${sendId}`;
-
-function optimisticUserMessage(
-  text: string,
-  sendId: string,
-  replyToId?: string,
-  parentId?: string | null,
-  channelMode?: "chat" | "goal",
-): Message {
-  return {
-    id: optimisticMessageId(sendId),
-    role: "user",
-    kind: "text",
-    text,
-    at: Date.now(),
-    parentId: parentId ?? null,
-    replyToId,
-    sendId,
-    channelMode,
-  };
-}
-
-function foldSnapshotOntoStreamed(
-  current: readonly Message[],
-  heldAtStart: ReadonlySet<Message>,
-  snapshot: readonly Message[],
-): Message[] {
-  const snapshotIds = new Set(snapshot.map((message) => message.id));
-  const confirmedSends = new Set(snapshot.flatMap((message) => (message.sendId ? [message.sendId] : [])));
-  const streamed = new Map(current.filter((message) => !heldAtStart.has(message)).map((message) => [message.id, message]));
-  const firstShared = current.findIndex((message) => snapshotIds.has(message.id));
-  const tail = current.filter((message, index) => {
-    if (snapshotIds.has(message.id)) return false;
-    if (message.sendId && message.id === optimisticMessageId(message.sendId)) return !confirmedSends.has(message.sendId);
-    return index >= firstShared && streamed.has(message.id);
-  });
-  return [...snapshot.map((message) => streamed.get(message.id) ?? message), ...tail];
 }
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
@@ -1132,40 +1087,12 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, webhookAttempts: attempts.slice(-2_000) };
     }
     case "groupPatched": {
-      const shown = state.groups.find((g) => g.id === action.group.id);
-      // The server sends a transcript whenever a room changes thread, so a frame naming another thread without one is stale.
-      const patch = shown && !action.group.messages && typeof action.group.threadId === "string" && action.group.threadId !== shown.threadId
-        ? roomFieldsOnly(action.group)
-        : action.group;
-      const fenced = patch.messages ? bumpTranscriptGeneration(state, patch.threadId) : state;
-      const groups = shown
-        ? fenced.groups.map((g) => (g.id === patch.id ? {
-            ...g, ...patch,
-            section: typeof patch.threadId === "string" || Object.hasOwn(patch, "section") ? patch.section : g.section,
-            description: Object.hasOwn(patch, "description")
-              ? (patch.description ?? undefined)
-              : g.description,
-            tasks: patch.tasks ? mergeTaskStamps(g.tasks, patch.tasks) : g.tasks,
-            turnTimeoutMinutes: Object.hasOwn(patch, "turnTimeoutMinutes")
-              ? (patch.turnTimeoutMinutes ?? undefined)
-              : g.turnTimeoutMinutes,
-            messages: patch.messages ?? g.messages,
-            hasMore: patch.messages ? Boolean(patch.hasMore) : g.hasMore,
-          } : g))
-        : [{ ...(patch.description === null ? { ...patch, description: undefined } : patch) as Group, messages: patch.messages ?? [] }, ...fenced.groups];
-      return { ...fenced, groups };
+      const fenced = action.group.messages ? bumpTranscriptGeneration(state, action.group.threadId) : state;
+      return { ...fenced, groups: patchedGroups(state.groups, action.group) };
     }
     case "groupSnapshot": {
-      const { group } = action;
-      if (group.messages && group.threadId) {
-        if ((state.transcriptGeneration[group.threadId] ?? 0) !== (action.since[group.threadId] ?? 0)) return state;
-        const shown = state.groups.find((g) => g.id === group.id);
-        if (shown?.threadId === group.threadId) {
-          const messages = foldSnapshotOntoStreamed(shown.messages, new Set(action.heldAtStart), group.messages);
-          return reducer(state, { type: "groupPatched", group: { ...group, messages } });
-        }
-      }
-      return reducer(state, { type: "groupPatched", group });
+      const group = snapshotPatch(state, action);
+      return group ? reducer(state, { type: "groupPatched", group }) : state;
     }
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
@@ -2310,16 +2237,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const dispatch = useMemo(() => {
     const navigation = new Map<string, number>();
     let selectionRevision = 0;
-    const roomNavigation = new Map<string, number>();
-    const roomAnswer = (groupId: string, navigates: boolean) => {
-      const revision = (roomNavigation.get(groupId) ?? 0) + (navigates ? 1 : 0);
-      roomNavigation.set(groupId, revision);
-      const { transcriptGeneration: since, groups } = stateRef.current;
-      const heldAtStart = groups.find((group) => group.id === groupId)?.messages ?? [];
-      return (r: { group?: Partial<Group> & { id: string } } | undefined) => {
-        if (r?.group && roomNavigation.get(groupId) === revision) rawDispatch({ type: "groupSnapshot", group: r.group, since, heldAtStart });
-      };
-    };
+    const roomAnswer = roomAnswers(() => stateRef.current, rawDispatch);
     const olderPagesInFlight = new Set<string>();
     let creatingBot = false;
     const showError = (e: unknown) => {
