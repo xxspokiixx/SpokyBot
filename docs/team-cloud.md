@@ -11,7 +11,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   wherever a server names itself. Owners and Admins get everything an admin session can do (Super admin and Admin in the
   app); a Member (User) chats with the team's bots, uses rooms and makes routines, and changes no bot's setup, connects
   no app and makes no webhook.
-- **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. "New conversation"
+- **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. Teammates are
+  in the @ list too, and a bot can pass a message to one of them (below, "Telling a teammate"). "New conversation"
   is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in
   lists, counts, unread marks, searches, files, notifications, streams, a bot's tools or another bot. A group chat is
   seen by whoever sees it. Every private chat says so in its header, *"Private · only you"*, and the first one on a
@@ -280,7 +281,7 @@ the bots that report to them by department; dragging a bot onto a person changes
 | `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?}` |
 | `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
 | `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set owner for all bots…" on a department |
-| `GET /api/needs-you` | any member | what bots ask of this person now |
+| `GET /api/needs-you` | any member | what bots ask of this person now, and the tags and passed messages waiting for them |
 
 **Routing** (`server/ask-routing.ts`). A bot's ask is a question or approval card, a sign-in, a failure, or a routine's
 result. In a member's private chat it is that member's alone: never the owner's, never an Admin's. Anywhere else (the
@@ -310,6 +311,46 @@ or posts in one.
 
 On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
 Every bot still reaches every bot there.
+
+## Telling a teammate
+
+People are taggable and reachable the way bots are, with one mechanism (`server/host/team-messages.ts`, the names in
+`shared/person-mention.ts`). The people are the team's people (`GET /api/team/people`, the ones who left excluded); each
+is tagged by their whole name, and by their first name when no other teammate shares it. A bot's name of the same length
+wins.
+
+- **@people.** The composer's @ list offers the teammates (everyone but you) after the bots, with their initial and a
+  "Person" tag; a sent tag renders like a mention. Their picture is not shown: it is their own upload, which only they
+  may read.
+- **A tag notifies that person only.** When a person's line, or a bot's settled reply, tags @Bob in a conversation Bob
+  can see (a bot's main chat, a group chat he sees), Bob gets a `mention` notification carrying `forPerson` (his person
+  key), which reaches nobody else, an admin included (`ask-routing.ts`, live, replayed and in the feed), and a Needs
+  you line (`kind: "message"`, `GET /api/needs-you` and `/api/today`) that opens that message. It goes when he opens the
+  conversation or writes in it, or after a week. A tag of someone who cannot see the conversation notifies nobody, and
+  a writer never tags themselves.
+- **"Tell Bob that…": `message_person { to, message }`**, an agents tool mounted only on a Team Cloud
+  (`OMB_TEAM_PEOPLE`). `to` is a name or an address. One rule decides where the message goes:
+  1. This conversation was itself made to pass a message, and `to` is who asked: the answer goes back into the
+     conversation they asked from, as a bot line "Bob replied: …" (`relay.kind: "reply"`), with a notification and a
+     Needs you line for them.
+  2. Otherwise, if Bob can see this conversation: it is posted here as "@Bob …" and he is notified (as a tag).
+  3. Otherwise: a new private conversation between Bob and this same bot (`member:<Bob>`), titled "From Ada", whose
+     first line is "Ada asked me to pass this on: …" (`relay.kind: "from"`), unread, with a notification and a Needs you
+     line. A second message from the same conversation to the same person lands in that conversation again. The asker
+     is the conversation's own person in a private chat, else whoever wrote in it last.
+  In cases 1 and 3 the asking conversation shows a "Told Bob" chip (`relay.kind: "told"`) with what was passed.
+- **What travels.** Only the message text. The delivered conversation remembers where it came from
+  (`team-messages.json`: thread, origin thread, who asked, for whom; no words), so its turns are told who asked and to
+  pass the answer back with `message_person` to them; they read only that conversation, and the turn in the asking
+  conversation reads only its own. Nothing widens what either turn may read.
+- **Refused, in words a bot repeats:** someone who left ("Carl has left Acme…"), nobody of that name (the people are
+  listed), two of that name, the person the bot is already talking with, a person who cannot use this bot, and more
+  than 10 passes an hour from one conversation.
+- **Bot prompt.** On a team a turn with the agents tools is told the team's people (names and admin roles; not the
+  person it talks with) and that "tell Bob …" or "@Bob …" in a private chat is a request to pass it on.
+
+On a My Cloud and on a desktop there are no team people: the @ list shows bots, `@you` and the profile name tag the one
+person as before, and `message_person` does not exist.
 
 ## What is not closed here
 
