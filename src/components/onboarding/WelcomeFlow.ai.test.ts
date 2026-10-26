@@ -45,8 +45,20 @@ const press = async (label: string) => {
   await act(async () => { button.click(); });
 };
 
+// A fresh store per test: on Node 24 happy-dom's storage outlives a test, so a step one test reached would open the next.
+const memoryStorage = () => {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, String(value)),
+    removeItem: (key: string) => void values.delete(key),
+    clear: () => values.clear(),
+  };
+};
 beforeEach(() => {
   setLocale("en");
+  vi.stubGlobal("localStorage", memoryStorage());
+  vi.stubGlobal("sessionStorage", memoryStorage());
   f.checks = [];
   f.check = { ok: true };
   f.state = { instances: [claude(false)], config: {}, cloudAdd: null, bots: [chief] };
@@ -57,6 +69,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  vi.unstubAllGlobals();
 });
 
 it("asks for no AI when one already works: the greeting is the whole welcome, and it ends in the chat", async () => {
