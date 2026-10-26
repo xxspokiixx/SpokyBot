@@ -111,4 +111,15 @@ describe("the process sweep", () => {
     release();
     expect((await sweep({ root, registry, list: async () => [] })).temporaryRemoved).toEqual([temporary]);
   });
+
+  it("leaves the folder of a registered Chrome that started after the process list was read", async () => {
+    const root = scratch();
+    const temporary = join(root, "temp", "just-started");
+    mkdirSync(temporary, { recursive: true });
+    const registry = new ProcessRegistry(root);
+    registry.add({ pid: 4242, startTime: null, userDataDir: temporary, ownerPid: process.pid, launchedAt: new Date().toISOString() });
+    const report = await sweep({ root, registry, list: async () => [], alive: () => true });
+    expect(report.temporaryRemoved).toEqual([]);
+    expect(existsSync(temporary)).toBe(true);
+  });
 });
