@@ -13262,7 +13262,7 @@ describe("message pages", () => {
     expect(response.headers.get("content-disposition")).toBe("inline");
     expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-    expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(await response.text()).toBe("png preview bytes");
 
     expect((await fetch(
@@ -13271,6 +13271,19 @@ describe("message pages", () => {
     expect((await fetch(
       `${BASE}/api/threads/${threadId}/messages/prose-file-message/file?preview=1&ref=0`,
     )).status).toBe(400);
+
+    const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const paired = await fetch(`${BASE}/api/auth/pair`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }),
+    });
+    const asChatOnly = { authorization: `Bearer ${((await paired.json()) as any).token as string}` };
+    const preview = await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file?preview=1&ref=0`, { headers: asChatOnly });
+    expect(preview.status).toBe(200);
+    expect(await preview.text()).toBe("png preview bytes");
+    expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-file-message/file?preview=1&ref=0`, { headers: asChatOnly })).status).toBe(400);
+    expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file?preview=1`, { headers: asChatOnly })).status).toBe(400);
+    expect((await fetch(`${BASE}/api/threads/${threadId}/messages/no-such-message/file?preview=1&ref=0`, { headers: asChatOnly })).status).toBe(404);
+    expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file`, { headers: asChatOnly })).status).toBe(404);
   });
 
   it("shows the copy a bot delivered of an outside picture, and says why one it never delivered is refused", async () => {
