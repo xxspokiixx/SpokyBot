@@ -1256,7 +1256,7 @@ describe("OpenCode without Node.js", () => {
 
 describe.skipIf(process.platform === "win32")("which OpenCode runs", () => {
   async function runTurn(scratch: string, log: string, withOwnCopy: boolean) {
-    const original = process.env.PATH;
+    const original = process.env.PATH, sealed = process.env.OMB_TEST_SEALED_PATH;
     const dump = join(scratch, "env.json");
     const copy = (folder: string, label: string) => {
       mkdirSync(folder, { recursive: true });
@@ -1267,7 +1267,9 @@ describe.skipIf(process.platform === "win32")("which OpenCode runs", () => {
     // A copy npm put in the app's folder before OpenCode had its own build, and the app's own build.
     copy(enginesBinDir(), "npm");
     copy(join(standaloneEngineDir("opencode"), "bin"), "standalone");
-    process.env.PATH = withOwnCopy ? `${own}${delimiter}${original}` : original;
+    // Only these copies and node: a real OpenCode on this computer (Homebrew, npm) must never answer the test's turn.
+    process.env.OMB_TEST_SEALED_PATH = "1";
+    process.env.PATH = withOwnCopy ? `${own}${delimiter}${dirname(process.execPath)}` : dirname(process.execPath);
     resetPathCacheForTests();
     registerPathDir(enginesBinDir());
     registerFallbackPathDir(join(standaloneEngineDir("opencode"), "bin"));
@@ -1286,6 +1288,8 @@ describe.skipIf(process.platform === "win32")("which OpenCode runs", () => {
       recorder.stop();
       await instance.dispose();
       process.env.PATH = original;
+      if (sealed === undefined) delete process.env.OMB_TEST_SEALED_PATH;
+      else process.env.OMB_TEST_SEALED_PATH = sealed;
       resetPathCacheForTests();
     }
   }
