@@ -160,7 +160,7 @@
           },
           "in_my_folder": {
             "type": "boolean",
-            "description": "Outside a room, threads you open start in your project folder unless false."
+            "description": "Default true."
           },
           "reply": {
             "type": "string",
