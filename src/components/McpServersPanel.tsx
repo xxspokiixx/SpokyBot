@@ -16,7 +16,7 @@ import {
 
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { updateMcpServers } from "@/lib/mcp-servers";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
@@ -38,6 +38,9 @@ export interface ProbeResult {
   total?: number;
   error?: string;
   auth?: "required";
+  /** `keys`: the server refused the headers it was sent; `unreachable` and `timeout` may pass on a second try. */
+  reason?: "keys" | "unreachable" | "timeout";
+  status?: number;
 }
 
 async function toolsCheck(
@@ -49,7 +52,7 @@ async function toolsCheck(
     return await request(`/api/mcp/servers/${encodeURIComponent(name)}/test`, { method: "POST", signal });
   } catch (cause) {
     if (signal?.aborted) throw cause;
-    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause), reason: "unreachable" };
   }
 }
 
@@ -62,6 +65,14 @@ export async function signedInToolsCheck(
   if (tested.ok) return tested;
   const reason = (tested.error ?? "").trim();
   return { ...tested, error: t("whop.testFailed", { reason: reason && !/[.!?]$/.test(reason) ? `${reason}.` : reason }) };
+}
+
+/** Security: names the headers, never their values. */
+function failureReason(server: McpServerListing, result: ProbeResult): string {
+  if (result.reason !== "keys" || !isRemoteMcpListing(server)) return result.error ?? "";
+  const reason = result.status ? `HTTP ${result.status}` : "unauthorized";
+  if (!server.headerKeys.length) return t("mcp.check.keysNeeded", { reason });
+  return t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) });
 }
 
 function connectedLabel(result: ProbeResult): string {
@@ -93,6 +104,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
   const [callbackUrl, setCallbackUrl] = useState("");
   const [callbackError, setCallbackError] = useState<string | null>(null);
   const [completingSignIn, setCompletingSignIn] = useState(false);
+  const [fixingKeys, setFixingKeys] = useState(false);
   const loadGeneration = useRef(0);
   const mounted = useRef(true);
   const whopServer = servers?.find((server) => isRemoteMcpListing(server) && isWhopServer(server));
@@ -135,7 +147,13 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     return () => { mounted.current = false; loadGeneration.current += 1; };
   }, [load, refreshKey]);
 
-  const closeEditor = () => setEditing(null);
+  const closeEditor = () => { setEditing(null); setFixingKeys(false); };
+  const openEditor = (name: string | "new", keys = false) => {
+    setEditing(name);
+    setFixingKeys(keys);
+    setError(null);
+    setNotice(null);
+  };
 
   /** Tests a server and turns it on when it answers; what it said stays on its row. */
   const connect = async (name: string): Promise<ProbeResult> => {
@@ -462,11 +480,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
               type="button"
               disabled={busy !== null || (restricted && !policy?.mcp.allowlist.length)}
               title={restricted && policy ? t("policy.managedBy", { organization: policy.organizationName }) : undefined}
-              onClick={() => {
-                setEditing("new");
-                setError(null);
-                setNotice(null);
-              }}
+              onClick={() => openEditor("new")}
               className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40"
             >
               <Plus size={14} /> {t(embedded ? "apps.mcp.add" : "mcp.addServer")}
@@ -476,7 +490,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
 
         {restricted && policy && <p role="status" className="mt-3 text-[13px] leading-relaxed text-ink-secondary">{t("policy.mcpRestricted", { organization: policy.organizationName })}</p>}
         {(editing === "new" || editingServer) && (
-          <McpServerEditor key={editing} server={editingServer} taken={(servers ?? []).map((server) => server.name)} team={Boolean(store.config?.team)}
+          <McpServerEditor key={`${editing}${fixingKeys ? ":keys" : ""}`} server={editingServer} fixKeys={fixingKeys} taken={(servers ?? []).map((server) => server.name)} team={Boolean(store.config?.team)}
             busy={busy !== null} onCancel={closeEditor} onSubmit={(items) => void (editing === "new" ? addServers(items) : saveEdit(items))} />
         )}
         {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key, error.params)}</div>}
@@ -544,7 +558,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                       <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void test(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
                         {busy === `test:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />} {t("mcp.test")}
                       </button>
-                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => { setEditing(server.name); setError(null); setNotice(null); }} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.editAria", { name: server.name })}><Pencil size={14} /></button>
+                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => openEditor(server.name)} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.editAria", { name: server.name })}><Pencil size={14} /></button>
                       <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={t("mcp.removeAria", { name: server.name })}><Trash2 size={14} /></button>
                       <span className="ml-1 flex items-center">
                         {busy === `toggle:${server.name}` && <Loader2 size={13} className="mr-1.5 animate-spin text-ink-secondary" />}
@@ -576,11 +590,14 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                         <span className="flex items-start gap-2"><CheckCircle2 size={14} className="mt-px shrink-0" /> {connectedLabel(result)}</span>
                       ) : (
                         <>
-                          <span className="min-w-0 flex-1">{t(server.enabled ? "mcp.check.failed" : "mcp.check.failedOff", { reason: result.error ?? "" })}</span>
-                          <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void connect(server.name)}
-                            className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 font-medium text-ink hover:bg-raised-hover disabled:opacity-40">
-                            {t("mcp.check.tryAgain")}
-                          </button>
+                          <span className="min-w-0 flex-1">{t(server.enabled ? "mcp.check.failed" : "mcp.check.failedOff", { reason: failureReason(server, result) })}</span>
+                          {(result.reason === "keys" && isRemoteMcpListing(server)) || result.reason === "unreachable" || result.reason === "timeout" ? (
+                            <button type="button" disabled={busy !== null || signingIn !== null}
+                              onClick={() => result.reason === "keys" ? openEditor(server.name, true) : void connect(server.name)}
+                              className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 font-medium text-ink hover:bg-raised-hover disabled:opacity-40">
+                              {t(result.reason === "keys" ? "mcp.check.fixKeys" : "mcp.check.tryAgain")}
+                            </button>
+                          ) : null}
                         </>
                       )}
                     </div>

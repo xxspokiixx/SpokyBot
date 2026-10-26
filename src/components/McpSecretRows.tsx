@@ -12,13 +12,14 @@ export function gapHint(gap: PastedGap): string {
 
 const INPUT = "w-full min-w-0 rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 font-mono text-[12px] text-ink outline-none focus:border-accent";
 
-/** Name and value rows. Values are typed like passwords and never shown back; `gapsOnly` shows just the values a paste
- * couldn't give, under their names. */
-export function McpSecretRows({ kind, rows, onChange, gapsOnly = false }: {
+/** Name and value rows. Values are typed like passwords and never shown back. `valuesOf` shows only values, under their
+ * names: the ones a paste couldn't give, or every named one. */
+export function McpSecretRows({ kind, rows, onChange, valuesOf, placeholder }: {
   kind: "header" | "env";
   rows: SecretRow[];
   onChange: (rows: SecretRow[]) => void;
-  gapsOnly?: boolean;
+  valuesOf?: "gaps" | "named";
+  placeholder?: string;
 }) {
   const update = (id: number, patch: Partial<SecretRow>) => onChange(rows.map((row) => row.id === id ? { ...row, ...patch } : row));
   const separator = kind === "header" ? ":" : "=";
@@ -31,14 +32,14 @@ export function McpSecretRows({ kind, rows, onChange, gapsOnly = false }: {
   };
   const valueInput = (row: SecretRow) => (
     <input type="password" aria-label={row.name.trim() || t("mcp.row.value")} value={row.value} autoComplete="new-password" spellCheck={false}
-      placeholder={row.saved ? t("mcp.oauth.secretSaved") : t("mcp.row.value")}
+      placeholder={placeholder ?? (row.saved ? t("mcp.oauth.secretSaved") : t("mcp.row.value"))}
       onChange={(event) => update(row.id, { value: event.target.value })} className={INPUT} />
   );
   return (
     <div className="space-y-2">
-      {(gapsOnly ? rows.filter((row) => row.gap) : rows).map((row) => (
+      {rows.filter((row) => valuesOf === "gaps" ? row.gap : valuesOf === "named" ? row.name.trim() : true).map((row) => (
         <div key={row.id}>
-          {gapsOnly ? (
+          {valuesOf ? (
             <label className="block">
               <span className="mb-1.5 block font-mono text-[12px] font-medium text-ink-secondary">{row.name}</span>
               {valueInput(row)}
@@ -60,7 +61,7 @@ export function McpSecretRows({ kind, rows, onChange, gapsOnly = false }: {
           {row.gap && !row.value.trim() && <p className="mt-1 text-[11px] leading-relaxed text-warning">{gapHint(row.gap)}</p>}
         </div>
       ))}
-      {!gapsOnly && (
+      {!valuesOf && (
         <button type="button" onClick={() => onChange([...rows, secretRow()])} className="inline-flex items-center gap-1 rounded-lg px-1 py-1 text-[12px] font-medium text-accent hover:underline">
           <Plus size={13} /> {t("mcp.row.add")}
         </button>

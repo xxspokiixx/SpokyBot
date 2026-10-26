@@ -25,9 +25,11 @@ function where(draft: McpDraft): string {
   try { return new URL(draft.url).host; } catch { return draft.url; }
 }
 
-/** Add: one box for a link, a setup command or a config block, and the form only for what it couldn't fill. Edit: the form. */
-export function McpServerEditor({ server, taken, team, busy, onCancel, onSubmit }: {
+/** Add: one box for a link, a setup command or a config block, and the form only for what it couldn't fill. Edit: the
+ * form, or with `fixKeys` only the header values, typed again. */
+export function McpServerEditor({ server, fixKeys = false, taken, team, busy, onCancel, onSubmit }: {
   server?: McpServerListing;
+  fixKeys?: boolean;
   taken: readonly string[];
   team: boolean;
   busy: boolean;
@@ -38,7 +40,8 @@ export function McpServerEditor({ server, taken, team, busy, onCancel, onSubmit 
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<McpDraft[]>(() => server ? [draftFor(server)] : []);
   const [pasteError, setPasteError] = useState<McpPasteError | null>(null);
-  const [details, setDetails] = useState(!adding);
+  const keysOnly = fixKeys && server !== undefined && isRemoteMcpListing(server);
+  const [details, setDetails] = useState(!adding && !keysOnly);
   const [onlyMe, setOnlyMe] = useState(false);
   const [error, setError] = useState<McpMessage | null>(null);
   const draft = drafts.length === 1 ? drafts[0]! : null;
@@ -71,7 +74,15 @@ export function McpServerEditor({ server, taken, team, busy, onCancel, onSubmit 
 
   return (
     <div data-mcp-editor className="mt-4 rounded-2xl border border-hairline/60 bg-card p-4 sm:p-5">
-      <div className="text-[14px] font-medium text-ink">{adding ? t("mcp.editorNew") : t("mcp.editorEdit", { name: server.name })}</div>
+      <div className="text-[14px] font-medium text-ink">{adding ? t("mcp.editorNew") : t(keysOnly ? "mcp.fixKeys.title" : "mcp.editorEdit", { name: server.name })}</div>
+      {keysOnly && draft && !details && (
+        <div className="mt-3 space-y-3">
+          <p className="text-[12px] leading-relaxed text-ink-secondary">{t("mcp.fixKeys.hint")}</p>
+          {draft.headers.some((row) => row.name.trim())
+            ? <McpSecretRows kind="header" valuesOf="named" placeholder={t("mcp.fixKeys.placeholder")} rows={draft.headers} onChange={(headers) => setDraft((current) => ({ ...current, headers }))} />
+            : <McpSecretRows kind="header" rows={draft.headers} onChange={(headers) => setDraft((current) => ({ ...current, headers }))} />}
+        </div>
+      )}
       {adding && (
         <label className="mt-3 block">
           <span className="text-[13px] text-ink">{t("mcp.paste.prompt")}</span>
@@ -98,13 +109,13 @@ export function McpServerEditor({ server, taken, team, busy, onCancel, onSubmit 
                   <span className="mt-1 block text-[11px] text-warning">{t("mcp.paste.urlMissing")}</span>
                 </label>
               )}
-              <McpSecretRows kind="header" gapsOnly rows={each.headers} onChange={(headers) => setDrafts((current) => current.map((other, at) => at === index ? { ...other, headers } : other))} />
-              <McpSecretRows kind="env" gapsOnly rows={each.env} onChange={(env) => setDrafts((current) => current.map((other, at) => at === index ? { ...other, env } : other))} />
+              <McpSecretRows kind="header" valuesOf="gaps" rows={each.headers} onChange={(headers) => setDrafts((current) => current.map((other, at) => at === index ? { ...other, headers } : other))} />
+              <McpSecretRows kind="env" valuesOf="gaps" rows={each.env} onChange={(env) => setDrafts((current) => current.map((other, at) => at === index ? { ...other, env } : other))} />
             </div>
           ))}
         </div>
       )}
-      {adding && drafts.length <= 1 && (
+      {(adding || keysOnly) && drafts.length <= 1 && (
         <button type="button" aria-expanded={details} onClick={() => { setDetails(!details); if (!drafts.length) setDrafts([emptyDraft()]); }}
           className="mt-3 inline-flex items-center gap-1 text-[12px] font-medium text-ink-secondary hover:text-ink">
           {details ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {t("mcp.details")}

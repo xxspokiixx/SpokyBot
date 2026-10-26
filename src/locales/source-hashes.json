@@ -2392,7 +2392,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -7793,7 +7799,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -10168,7 +10180,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -12543,7 +12561,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -18907,7 +18931,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -25009,7 +25039,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -28257,7 +28293,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -32524,7 +32566,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -35372,7 +35420,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -40255,7 +40309,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -45138,7 +45198,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -51396,7 +51462,13 @@
       "mcp.team.everyone": "e7970763f0defd89a49c19f0f5105b7fc75178f736414b7ccbf59029e1278631",
       "mcp.team.onlyMe": "16716a6b9eaae7930d4cc7101d726cf83ddd12e8f2666915111033518f83a2a4",
       "mcp.team.onlyMeOn": "7e6d41f7ca85f489bc2259fa5b1fe3d43c42ffea32ee9b6e1c0b10164667cb12",
-      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6"
+      "mcp.auth.loadingTools": "d272a0a9dd3c87ebbdca917034c40c166dab3d00996eb7d92b6b435e3e9f59c6",
+      "mcp.check.keysRefused": "9f9f4112190de5ad7ebe9df1856985955ef6c18b683a7466fd9c1e8dc930ee48",
+      "mcp.check.keysNeeded": "aff74788ea59fc2b382a81798d61c69716176e7fd70e219305a72ce00040e543",
+      "mcp.check.fixKeys": "523c5b1b62e454258ef588ee0f05f1b8c60cab7288c89570c8186fed5f31d9b8",
+      "mcp.fixKeys.title": "db8e0790eef77c7aa69ecb14c31d9bbbd8f1dca8571e05d752d632c526862945",
+      "mcp.fixKeys.hint": "374216e1e4a509d796ad11e6dc0a2b28e568dbc7351d6f7eb9e1a60f2130f6e0",
+      "mcp.fixKeys.placeholder": "8601d2f49d57ca5fc02019c531cdb28d17381b659a8d79a9d180fb7a3bc7dd1e"
     }
   }
 }

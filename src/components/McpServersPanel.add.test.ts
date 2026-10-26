@@ -109,19 +109,72 @@ describe("Adding an MCP server from one paste box", () => {
     expect(calls("PUT")).toEqual([]);
   });
 
-  it("leaves a server that doesn't answer off, says why, and turns it on from Try again", async () => {
-    fixture.test = { ok: false, error: "The server answered HTTP 403. Check the address and headers." };
+  it("leaves a server it can't reach off, says why, and turns it on from Try again", async () => {
+    fixture.test = { ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" };
     await click("Add server");
     await type("textarea[aria-label='Server link or setup command']", "https://mcp.acme.example/mcp");
     await click("Add");
     expect(calls("POST", "/api/mcp/servers")[0]?.body).toEqual({ name: "acme", type: "http", url: "https://mcp.acme.example/mcp", headers: {} });
     expect(calls("PATCH")).toEqual([]);
-    expect(host.textContent).toContain("Couldn't connect, so it stays off. The server answered HTTP 403. Check the address and headers.");
+    expect(host.textContent).toContain("Couldn't connect, so it stays off. Could not reach this address. Check the URL and your network.");
+    expect(button("Fix the keys")).toBeUndefined();
 
     fixture.test = { ok: true, tools: [{ name: "search" }] };
     await click("Try again");
     expect(calls("PATCH", "/api/mcp/servers/acme")).toEqual([{ url: "/api/mcp/servers/acme", body: { enabled: true } }]);
     expect(host.textContent).toContain("Connected: 1 tool");
+  });
+
+  it("says which keys a gateway refused, by name only, and Fix the keys asks for just those values and tests again", async () => {
+    fixture.test = { ok: false, error: "The server didn't accept the keys (HTTP 403). Check the header values.", reason: "keys", status: 403 };
+    await click("Add server");
+    await type("textarea[aria-label='Server link or setup command']", GATEWAY);
+    await type("input[aria-label='CF-Access-Client-Id']", ID);
+    await type("input[aria-label='CF-Access-Client-Secret']", "wrong-secret-value");
+    await click("Add");
+    expect(host.textContent).toContain(
+      "Couldn't connect, so it stays off. The server didn't accept the keys (HTTP 403). Check the values of CF-Access-Client-Id and CF-Access-Client-Secret.");
+    expect(button("Try again")).toBeUndefined();
+    expect(host.innerHTML).not.toContain("wrong-secret-value");
+    expect(host.innerHTML).not.toContain(ID);
+
+    await click("Fix the keys");
+    const editor = host.querySelector("[data-mcp-editor]")!;
+    expect(editor.textContent).toContain("Fix the keys for my-mcp");
+    expect([...editor.querySelectorAll("input")].map((input) => [input.getAttribute("aria-label"), input.type, input.value, input.placeholder])).toEqual([
+      ["CF-Access-Client-Id", "password", "", "Paste the new value"],
+      ["CF-Access-Client-Secret", "password", "", "Paste the new value"],
+    ]);
+    expect(editor.querySelector("textarea")).toBeNull();
+
+    fixture.test = { ok: true, tools: [{ name: "a" }], total: 12 };
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "PUT" ? { servers: fixture.servers } : previous(path, init));
+    await type("input[aria-label='CF-Access-Client-Secret']", SECRET);
+    await click("Save");
+    expect(calls("PUT", "/api/mcp/servers/my-mcp")[0]?.body).toEqual({
+      type: "http", url: "https://mcp.example.com/route", headers: { "CF-Access-Client-Id": true, "CF-Access-Client-Secret": SECRET }, enabled: false,
+    });
+    expect(calls("POST", "/api/mcp/servers/my-mcp/test")).toHaveLength(2);
+    expect(calls("PATCH", "/api/mcp/servers/my-mcp")).toEqual([{ url: "/api/mcp/servers/my-mcp", body: { enabled: true } }]);
+    expect(host.textContent).toContain("Connected: 12 tools");
+  });
+
+  it("offers a key row to a server that refused without one, and no button for an error a retry can't fix", async () => {
+    fixture.test = { ok: false, error: "The server didn't accept the keys (HTTP 401). Check the header values.", reason: "keys", status: 401 };
+    await click("Add server");
+    await type("textarea[aria-label='Server link or setup command']", "https://mcp.acme.example/mcp");
+    await click("Add");
+    expect(host.textContent).toContain("The server didn't let it in (HTTP 401). It probably needs a key: add it with Fix the keys.");
+    await click("Fix the keys");
+    expect([...host.querySelectorAll("[data-mcp-editor] input")].map((input) => input.getAttribute("aria-label"))).toEqual(["Header name", "Value"]);
+    await click("Cancel");
+
+    fixture.test = { ok: false, error: "The server did not return a valid MCP tools list." };
+    await click("Test");
+    expect(host.textContent).toContain("Couldn't connect, so it stays off. The server did not return a valid MCP tools list.");
+    expect(button("Try again")).toBeUndefined();
+    expect(button("Fix the keys")).toBeUndefined();
   });
 
   it("says plainly when the paste isn't a server, and keeps Add off", async () => {

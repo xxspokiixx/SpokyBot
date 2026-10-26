@@ -75,7 +75,7 @@ describe("remote MCP servers through the broker", () => {
       expect(JSON.stringify(out)).not.toContain(id);
       expect(JSON.stringify(out)).not.toContain(secret);
 
-      expect(await probeMcpServer({ ...custom.orders, headers: {}, enabled: true })).toEqual({ ok: false, error: "The server answered HTTP 403. Check the address and headers." });
+      expect(await probeMcpServer({ ...custom.orders, headers: {}, enabled: true })).toMatchObject({ ok: false, reason: "keys", status: 403 });
       expect(await probeMcpServer({ ...orders, enabled: true })).toMatchObject({ ok: true, tools: [{ name: "lookup_order" }] });
       const client = new RemoteMcpClient({ ...orders, headers: { "CF-Access-Client-Secret": "the engine's own guess" } });
       const signal = AbortSignal.timeout(10_000);
