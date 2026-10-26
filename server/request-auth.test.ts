@@ -8,6 +8,8 @@ import {
   BROWSER_SIGN_IN,
   clearSessionCookie,
   fromBrowser,
+  adminOnlyBotSetting,
+  botProfileSettings,
   clientBotPatchViolation,
   clientGroupPatchViolation,
   ipcPeer,
@@ -175,6 +177,16 @@ describe("scopes", () => {
     expect(clientGroupPatchViolation({ name: "Ops", unread: false, turnTimeoutMinutes: 30 })).toBeNull();
     expect(clientGroupPatchViolation({ cwd: "/tmp" })).toBe("cwd");
     expect(clientGroupPatchViolation({ memberIds: [] })).toBe("memberIds");
+  });
+
+  it("lets a bot's maker without the admin scope say who it is and how it looks, never what it may do or whom it directs", () => {
+    const profile = { name: "Scout", title: "Trips", soul: "Plans trips.", color: "teal", avatarCrop: "square", voice: "alloy", modelSelection: { instanceId: "claude", model: "m" } };
+    expect(adminOnlyBotSetting(profile)).toBeNull();
+    for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "chiefOfStaff", "managedSections", "computer", "cwd", "peers", "approvePeerComms",
+      "mcpServers", "browserProfile", "toolScope", "composio", "browser", "section", "visibility", "reportsTo", "preset", "defaultBot", "installedPackage"]) {
+      expect(adminOnlyBotSetting({ ...profile, [field]: true }), field).toBe(field);
+      expect(botProfileSettings({ ...profile, [field]: true }), field).toEqual(profile);
+    }
   });
 });
 
@@ -707,6 +719,23 @@ describe("a browser on this machine is not the owner", () => {
     expect(check({ host: "127.0.0.1:8799" }, "/api/bots", "GET", desktop).auth?.kind).toBe("loopback");
     const relay = { host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1", "x-openmausbot-companion-auth": "relay-secret" };
     expect(check(relay, "/api/bots/b/messages", "POST", desktop).auth?.kind).toBe("loopback");
+  });
+
+  it("does not lend the owner header to another page in the desktop window's session", () => {
+    const desktop = { desktopToken: "owner-token-123" };
+    const owner = { "x-openmausbot-desktop-owner": "owner-token-123" };
+    const savedServer = { host: "127.0.0.1:8799", origin: "http://localhost:8080", "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "empty" };
+    const otherPort = { ...savedServer, origin: "http://127.0.0.1:3000", "sec-fetch-site": "same-site" };
+    const { origin: _origin, ...imageTag } = { ...savedServer, "sec-fetch-dest": "image" };
+    for (const headers of [savedServer, otherPort, imageTag, { ...socket, ...owner }]) {
+      for (const [method, path] of [["POST", "/api/routines"], ["PATCH", "/api/bots/bot-1"], ["PUT", "/api/config"], ["GET", "/api/bots"]]) {
+        const refused = check({ ...headers, ...owner }, path, method, desktop);
+        expect(refused.auth, `${method} ${path} ${JSON.stringify(headers)}`).toBeNull();
+        expect(refused.status).toBe(401);
+      }
+    }
+    expect(check({ ...navigation, ...owner }, "/api/bots", "GET", desktop).auth?.kind).toBe("loopback");
+    expect(check({ ...ownUi, ...owner }, "/api/config", "PUT", desktop).auth?.kind).toBe("loopback");
   });
 
   it("still admits a browser that signed in", () => {
