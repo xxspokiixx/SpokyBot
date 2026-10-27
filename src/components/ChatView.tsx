@@ -122,7 +122,7 @@ import { EmptyChat } from "./ChatEmptyState";
 import { PinnedBanner } from "./ChatPinnedBanner";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
-import { isFormattedReply } from "@/lib/formatted-reply";
+import { formattedReplyWidth, isFormattedReply } from "@/lib/formatted-reply";
 import { otherSpeaker } from "@/lib/own-profile";
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
@@ -497,7 +497,7 @@ const Bubble = memo(function Bubble({
                 : user
                   ? cn("bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink", bubbleStyle && "user-bubble-colored", simple && cn(SIMPLE_BUBBLE, bubbleStyle && "antialiased"))
                   : formatted
-                    ? "w-full max-w-[min(var(--chat-prose-max),var(--chat-card-pct))] px-1 text-ink"
+                    ? cn(formattedReplyWidth(text), "px-1 text-ink")
                     : cn("bg-card px-4 py-2.5 text-ink", simple && SIMPLE_BUBBLE),
           )}
           style={user && !webhookView && !attachmentsOnly ? bubbleStyle : undefined}

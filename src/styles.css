@@ -964,6 +964,11 @@
   src: local("Noto Sans Hebrew"), local("Arial Hebrew"), local("SF Hebrew");
   unicode-range: U+0590-05FF, U+FB1D-FB4F;
 }
+/* A reply with a table is as wide as the message; its prose keeps the reading width. */
+.chat-wide .chat-md > :not(.chat-table) {
+  max-width: var(--chat-prose-max);
+}
+
 .chat-text,
 .chat-md {
   line-height: 1.75;
