@@ -100,14 +100,14 @@ import { roomSpeakerIds, roomThreadSpeakerId, roomThreadWorking } from "@/lib/ro
 import { RoomQueueList, RoutedByLine, roomMemberQueueTitle } from "./RoomQueueList";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { Select } from "./Select";
-import { HandoffChip } from "./HandoffReply";
+import { HandoffChip } from "./HandoffReply"; import { TeammateChip } from "./TeammateChip"; import { useTeammates } from "@/state/team-people";
 import { RoomWorkingFolder, RoomWorkingFolderChip } from "./RoomWorkingFolder";
 
 export function RoomToolChip({ message, roomId, live = false }: { message: Message; roomId?: string; live?: boolean }) {
   const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
-  if (message.threadRef) return <ThreadChip message={message} />;
+  if (message.threadRef) return <ThreadChip message={message} />; if (message.relay) return <TeammateChip message={message} />;
   if (failedTurnCause(tool.name) !== null) {
     return <FailedTurnRow tool={tool} engine={botEngine(state.bots.find((b) => b.id === message.from?.botId), state.instances)} botId={message.from?.botId} />;
   }
@@ -177,7 +177,7 @@ function RoomTextMessage({
   useEffect(() => { if (focusedSearch && collapsible) setExpanded(true); }, [focusedSearch, collapsible, focus?.nonce]);
   const simple = !useAdvancedMode();
   const speakerBot = members.find((member) => member.id === m.from?.botId);
-  const botText = rawText;
+  const botText = rawText; const teammates = useTeammates(); const peers = useMemo(() => [...members, ...teammates.peers], [members, teammates]);
   const pin = roomPin(group, m, dispatch);
   const botMenu = useBotMessageMenu({
     text: botText,
@@ -240,7 +240,7 @@ function RoomTextMessage({
                 data-citation-owner={group.id}
                 data-citation-thread={group.threadId}
               >
-                <ThreadRefText text={display} peers={members} everyone={!group.dm} />
+                <ThreadRefText text={display} peers={peers} everyone={!group.dm} />
               </div>
               {cited && <SentCitations
                 citations={cited.citations}
@@ -277,7 +277,7 @@ function RoomTextMessage({
               {viewRaw && botText ? (
                 <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><RawMarkdownView text={botText} /></div>
               ) : botText ? (
-                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={members} everyone={!group.dm} mentionPerson={{ profileName: state.config?.profile?.name }} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} /></div>
+                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={peers} everyone={!group.dm} mentionPerson={{ profileName: state.config?.profile?.name }} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} /></div>
               ) : null}
               {replyGroup && <AttachmentGallery images={replyGroup.images} files={replyGroup.files} message={{ threadId: group.threadId, messageId: m.id }} eager={eager} beneath />}
             </MessageBoundary>
