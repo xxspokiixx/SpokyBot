@@ -24,7 +24,8 @@ import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 import { freePortBlock, withFreeSignInPort } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
-import { STARTER_COLORS, STARTER_SHAPES } from "./bot-look.ts";
+import { STARTER_COLORS } from "./bot-look.ts";
+import { DEFAULT_MASCOT_BODY } from "../shared/mascot-bodies.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 import { computerPrompt, SIGN_IN_PROMPT } from "./system-prompt.ts";
@@ -7746,7 +7747,7 @@ describe("harness HTTP API", () => {
       const plain = (await api("POST", "/api/bots", { name: "Wren", useDefaults: false })).body.bot;
       await api("DELETE", `/api/bots/${plain.id}`);
       const fresh = (await stream.until((frame) => frame.kind === "bot" && frame.bot?.id === plain.id)).bot;
-      expect(STARTER_SHAPES).toContain(fresh.mascotBody);
+      expect(fresh.mascotBody).toBe(DEFAULT_MASCOT_BODY);
       expect(STARTER_COLORS).toContain(fresh.color);
     } finally {
       stream.close();
