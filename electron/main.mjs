@@ -1354,7 +1354,7 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
     show: false,
     title,
     icon: APP_ICON,
-    backgroundColor: "#070707",
+    backgroundColor: "#121212",
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
@@ -2070,7 +2070,7 @@ function createWindow({ deferNavigation = false } = {}) {
     minHeight: MIN_BOUNDS.height,
     show: !waitsForSkinSync && !startupScreen,
     icon: APP_ICON,
-    backgroundColor: "#070707",
+    backgroundColor: "#121212",
     autoHideMenuBar: process.platform !== "darwin",
     ...windowChromeOptions(process.platform),
     webPreferences: {
