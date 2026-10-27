@@ -61,8 +61,11 @@ export function aboutMeLine(fact: { text: string; botName: string }, today: stri
   return `- ${today} · learned by ${fact.botName.replace(/·/g, "-").replace(/\s+/g, " ").trim().slice(0, 60)} · ${fact.text}`;
 }
 
+/** A line aboutMeLine wrote: learned from chats, not typed by the person. */
+export const LEARNED_LINE = /^\s*-\s*\d{4}-\d{2}-\d{2} · learned by [^·\n]* · /;
+
 function lineIdentity(line: string): string {
-  return factIdentity(line.replace(/^\s*-\s*\d{4}-\d{2}-\d{2} · learned by [^·\n]* · /, ""));
+  return factIdentity(line.replace(LEARNED_LINE, ""));
 }
 
 export function planLearned(from: { botId: string; botName: string }, texts: readonly string[], aboutMe: string, today: string, now = Date.now()): LearnedFact[] {
