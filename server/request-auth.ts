@@ -411,7 +411,7 @@ export function requiredScope(method: string, path: string, features: { sharedCo
 
 /** A client may change how a bot looks, never what it may do. */
 const CLIENT_BOT_PATCH_FIELDS = new Set([
-  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody",
+  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody", "mascotFaceColor",
   "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY", "sidebarHidden", "welcomed",
 ]);
 /** `ownMausBot`: the session's own MausBot on a Team Cloud, which its member may also rename. */
