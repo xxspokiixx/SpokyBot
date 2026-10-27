@@ -822,7 +822,7 @@
     },
     {
       "name": "manage_room",
-      "description": "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, for rooms in your own department, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between departments. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
+      "description": "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, for rooms in your own department, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between departments. coordinate_bots reaches bots outside the room directly. Follow the tool result under the effective access level; if the change is refused, report the blocker, without trying another route.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
