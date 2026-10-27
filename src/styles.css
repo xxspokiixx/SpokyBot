@@ -1002,49 +1002,6 @@
   background: color-mix(in srgb, var(--color-ink) 15%, transparent);
 }
 
-/* Simple Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the
-   page colour, with no shadow; every other skin keeps its glass. */
-[data-settings-look="simple"] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
-}
-:root[data-skin="midnight"] [data-settings-look="simple"] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 6%, transparent);
-}
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface {
-  background: var(--color-app);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
-  box-shadow: none;
-}
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-rail {
-  background: transparent;
-  border-right: 0.5px solid var(--settings-edge);
-}
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface .bg-card {
-  background-color: var(--color-menu);
-}
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .bg-inset {
-  background-color: transparent;
-  border-color: var(--settings-edge);
-}
-:root[data-skin="midnight"] [data-settings-look="simple"] > .glass-scrim {
-  background: rgb(0 0 0 / 0.7);
-}
-:root[data-skin="daylight"] [data-settings-look="simple"] > .glass-scrim {
-  background: rgb(0 0 0 / 0.5);
-}
-@media (min-width: 768px) {
-  .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {
-    padding: 48px 16px;
-  }
-  .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
-    width: min(900px, 100%);
-    height: min(700px, 100%);
-    border-radius: 12px;
-  }
-}
-
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
@@ -1469,6 +1426,49 @@ body {
   .glass-card {
     background: Canvas;
     border-color: CanvasText;
+  }
+}
+
+/* Simple Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the
+   page colour, with no shadow; every other skin keeps its glass. */
+[data-settings-look="simple"] {
+  --settings-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+:root[data-skin="midnight"] [data-settings-look="simple"] {
+  --settings-edge: color-mix(in srgb, var(--color-ink) 6%, transparent);
+}
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface {
+  background: var(--color-app);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  box-shadow: none;
+}
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-rail {
+  background: transparent;
+  border-right: 0.5px solid var(--settings-edge);
+}
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface .bg-card {
+  background-color: var(--color-menu);
+}
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .bg-inset {
+  background-color: transparent;
+  border-color: var(--settings-edge);
+}
+:root[data-skin="midnight"] [data-settings-look="simple"] > .glass-scrim {
+  background: rgb(0 0 0 / 0.7);
+}
+:root[data-skin="daylight"] [data-settings-look="simple"] > .glass-scrim {
+  background: rgb(0 0 0 / 0.5);
+}
+@media (min-width: 768px) {
+  .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {
+    padding: 48px 16px;
+  }
+  .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
+    width: min(900px, 100%);
+    height: min(700px, 100%);
+    border-radius: 12px;
   }
 }
 
@@ -2640,11 +2640,9 @@ button:disabled.bg-danger {
   }
 }
 
-
 ::highlight(omb-citation-source) {
   background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
-
 
 /* Wide-gamut displays. The sRGB values above stay the fallback.
    On Display P3 the same hue is a little more chromatic, with lightness
