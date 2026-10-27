@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkCatalogs,
   main,
+  recordSourceHashes,
   modelInvocation,
   normalizeLocaleCode,
   parseModelCatalog,
@@ -88,7 +89,7 @@ describe("locale draft validation", () => {
     expect(() => parseModelCatalog('Here you go:\n{"first":"Uno"}')).toThrow(/exactly one JSON object/i);
   });
 
-  it("detects missing acceptance records and English copy changes", () => {
+  it("treats a translation without a recorded hash as current and a changed English source as stale", () => {
     const source = { first: "One", second: "Two" };
     const translation = { first: "Uno" };
     const hashes = { first: sourceHash(source.first) };
@@ -101,9 +102,14 @@ describe("locale draft validation", () => {
       "first: English source changed; refresh the translation or remove it for English fallback",
     ]);
     expect(staleTranslationKeys(changedSource, translation, hashes)).toEqual(["first", "second"]);
-    expect(validateTranslationHashes(source, translation, {})).toEqual([
-      "first: translation has not been accepted against its English source",
-    ]);
+    expect(validateTranslationHashes(source, translation, {})).toEqual([]);
+    expect(staleTranslationKeys(source, translation, {})).toEqual(["second"]);
+  });
+
+  it("ignores hashes of keys removed from English or from the translation", () => {
+    const source = { first: "One" };
+    const hashes = { first: sourceHash("One"), gone: sourceHash("Gone"), untranslated: sourceHash("Later") };
+    expect(validateTranslationHashes(source, { first: "Uno" }, hashes)).toEqual([]);
   });
 
   it("builds an explicit no-tools restricted Claude invocation", () => {
@@ -142,5 +148,98 @@ describe("locale draft validation", () => {
   it("never generates or accepts the English source catalog", () => {
     expect(() => main(["en", "English", "--force"])).toThrow(/English is the source catalog/i);
     expect(() => main(["en", "--accept"])).toThrow(/English is the source catalog/i);
+  });
+});
+
+describe("locale catalogs on disk", () => {
+  function locales({ en, catalogs, hashes }) {
+    const directory = temporaryDirectory();
+    writeFileSync(join(directory, "en.json"), JSON.stringify(en));
+    for (const [code, catalog] of Object.entries(catalogs)) {
+      writeFileSync(join(directory, `${code}.json`), JSON.stringify(catalog));
+    }
+    writeFileSync(join(directory, "source-hashes.json"), `${JSON.stringify({ version: 1, locales: hashes }, null, 2)}\n`);
+    return directory;
+  }
+  const quietly = (run) => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      return run();
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+  };
+  const readHashes = (directory) => JSON.parse(readFileSync(join(directory, "source-hashes.json"), "utf8"));
+
+  it("passes --check for a new key translated without a hash", () => {
+    const directory = locales({
+      en: { first: "One", added: "New {name}" },
+      catalogs: { de: { first: "Eins", added: "Neu {name}" } },
+      hashes: { de: { first: sourceHash("One") } },
+    });
+    expect(() => quietly(() => checkCatalogs(directory))).not.toThrow();
+  });
+
+  it("passes --check with hashes left behind by removed keys and languages", () => {
+    const directory = locales({
+      en: { first: "One" },
+      catalogs: { de: { first: "Eins" } },
+      hashes: { de: { first: sourceHash("One"), removed: sourceHash("Removed") }, fr: { first: sourceHash("One") } },
+    });
+    expect(() => quietly(() => checkCatalogs(directory))).not.toThrow();
+  });
+
+  it("fails --check when the English source changed since its recorded hash", () => {
+    const directory = locales({
+      en: { first: "One, reworded" },
+      catalogs: { de: { first: "Eins" } },
+      hashes: { de: { first: sourceHash("One") } },
+    });
+    expect(() => quietly(() => checkCatalogs(directory))).toThrow(
+      "de.json: first: English source changed; refresh the translation or remove it for English fallback",
+    );
+  });
+
+  it("--record-hashes fills only missing hashes, keeps stale ones and drops removed keys", () => {
+    const staleHash = sourceHash("One");
+    const directory = locales({
+      en: { first: "One, reworded", second: "Two", added: "New", untranslated: "Later" },
+      catalogs: { de: { first: "Eins", second: "Zwei", added: "Neu" }, ja: { second: "二" } },
+      hashes: {
+        fr: { second: sourceHash("Two") },
+        de: { removed: sourceHash("Removed"), first: staleHash, untranslated: sourceHash("Later"), second: sourceHash("Two") },
+      },
+    });
+
+    quietly(() => recordSourceHashes(directory));
+
+    expect(readHashes(directory)).toEqual({
+      version: 1,
+      locales: {
+        de: { first: staleHash, second: sourceHash("Two"), added: sourceHash("New") },
+        ja: { second: sourceHash("Two") },
+      },
+    });
+    expect(Object.keys(readHashes(directory).locales.de)).toEqual(["first", "second", "added"]);
+    expect(readFileSync(join(directory, "source-hashes.json"), "utf8")).toBe(
+      `${JSON.stringify(readHashes(directory), null, 2)}\n`,
+    );
+    expect(() => quietly(() => checkCatalogs(directory))).toThrow("de.json: first: English source changed");
+
+    const recorded = readFileSync(join(directory, "source-hashes.json"), "utf8");
+    quietly(() => recordSourceHashes(directory));
+    expect(readFileSync(join(directory, "source-hashes.json"), "utf8")).toBe(recorded);
+  });
+
+  it("--record-hashes refuses to record an invalid catalog", () => {
+    const directory = locales({
+      en: { first: "Hello {name}" },
+      catalogs: { de: { first: "Hallo" } },
+      hashes: {},
+    });
+    expect(() => quietly(() => recordSourceHashes(directory))).toThrow(/placeholders must stay/);
+    expect(readHashes(directory)).toEqual({ version: 1, locales: {} });
   });
 });
