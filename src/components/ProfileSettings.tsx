@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { saveTeamProfile } from "@/lib/own-profile";
 import { IMAGE_MAX_BYTES, imageAttachmentFromFile, isImageFile } from "@/lib/composer-attachments";
 import type { LocaleKey } from "@/locales";
 import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
 import { AboutMeSettings } from "./AboutMeSettings";
+import { InitialsAvatar } from "./Avatar";
+import { profileInitials, profileLabel } from "./SidebarProfileMenu";
 
 const PHOTO_MIN_SIDE = 64;
 const PHOTO_MAX_SIDE = 8192;
@@ -193,6 +196,32 @@ export function ProfileFields() {
         className={inputClass}
       />
       <AboutMeSettings />
+    </div>
+  );
+}
+
+export function ProfileSummaryRow() {
+  const { state } = useStore();
+  const [editing, setEditing] = useState(false);
+  const profile = state.config?.profile;
+  const named = Boolean(profile?.name?.trim() || profile?.email?.trim());
+  const email = profile?.name?.trim() ? profile?.email?.trim() : "";
+  const fieldsId = useId();
+  return (
+    <div data-profile-summary="" className="px-3.5 py-4">
+      <div className="flex min-w-0 items-center gap-3">
+        <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={44} />
+        <div className="min-w-0 flex-1">
+          <div className={cn("truncate text-[14px] leading-5", named ? "text-ink" : "text-ink-secondary")}>{named ? profileLabel(profile) : t("settings.account.noName")}</div>
+          {email && <div className="truncate text-[14px] leading-5 text-ink-secondary">{email}</div>}
+        </div>
+        <button type="button" aria-expanded={editing} aria-controls={fieldsId} className="ui-button shrink-0" onClick={() => setEditing(!editing)}>
+          {editing ? t("common.done") : t("settings.account.edit")}
+        </button>
+      </div>
+      <div id={fieldsId} hidden={!editing} className="mt-4">
+        {editing && <ProfileFields />}
+      </div>
     </div>
   );
 }

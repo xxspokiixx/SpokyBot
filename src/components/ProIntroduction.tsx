@@ -5,6 +5,7 @@ import { useStore } from "@/state/store";
 import { buyOfferAllowed, cloudPlanLine, cloudPlanView, moneyBackLine, offerTrialDays, usd, type CloudPlanView } from "@/lib/cloud-plan";
 import { useCloudOffer } from "@/lib/use-cloud-offer";
 import { t } from "@/lib/i18n";
+import { SettingRow } from "./SettingsPrimitives";
 
 export function proOfferAvailable(account: CloudAccountState | null): boolean {
   return buyOfferAllowed(cloudPlanView(account));
@@ -63,4 +64,25 @@ export function ProSettingsCard() {
     </div>
     <button type="button" className="ui-button" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}>{t("pro.openCloudSettings")}</button>
   </section>;
+}
+
+export function CloudPlanRow() {
+  const { dispatch } = useStore();
+  const plan = useCloudPlan();
+  const offering = plan !== null && buyOfferAllowed(plan.view);
+  const offer = useCloudOffer(offering, plan?.account?.offer);
+  if (!plan) return null;
+  const line = offering ? t("pro.settingsSummary") : plan.view.kind === "reauth" ? t("pro.reauthShort") : cloudPlanLine(plan.view);
+  if (!line) return null;
+  return (
+    <SettingRow title={t("pro.name")} subtitle={line}>
+      {offering ? (
+        <button type="button" data-cloud-offer={offerTrialDays(offer) !== null ? "trial" : "plans"} className="ui-button ui-button-primary"
+          onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(offerTrialDays(offer) !== null ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
+      ) : (
+        <button type="button" data-cloud-plan={plan.view.kind} className="ui-button"
+          onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}>{t("settings.account.manage")}</button>
+      )}
+    </SettingRow>
+  );
 }

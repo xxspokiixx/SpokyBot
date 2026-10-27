@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
-import { SECTIONS, SIMPLE_HIDDEN_SECTIONS, SIMPLE_PAGES, SettingsModal, revealSettingsBlock } from "./SettingsModal";
+import { SECTIONS, SIMPLE_FOLDED, SIMPLE_HIDDEN_SECTIONS, SIMPLE_PAGES, SettingsModal, revealSettingsBlock } from "./SettingsModal";
 
 const fixture = vi.hoisted(() => ({
   section: "general" as AppSettingsSection,
@@ -14,6 +14,8 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
   ownerOrAdmin: null as boolean | null,
+  updater: null as import("@/lib/updater").UpdaterState | null,
+  serverUpdate: null as ReturnType<typeof import("./SidebarProfileMenu").useServerUpdateItem>,
 }));
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
@@ -66,6 +68,14 @@ vi.mock("./WorkspaceBackupSettings", () => ({ WorkspaceBackupSettings: marker("b
 vi.mock("./RoomTurnTimeoutSettings", () => ({ RoomTurnTimeoutSettings: () => null }));
 vi.mock("./CompanyBackupSettings", () => ({ CompanyBackupSettings: () => null }));
 vi.mock("./ImportSettings", () => ({ ImportSettings: marker("import") }));
+vi.mock("./SidebarProfileMenu", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./SidebarProfileMenu")>(),
+  useServerUpdateItem: () => fixture.serverUpdate,
+}));
+vi.mock("@/lib/updater", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/updater")>(),
+  useUpdaterState: () => fixture.updater,
+}));
 
 const desktop = { ogb: { environments: {}, organization: {}, cloudAccount: {} } };
 
@@ -76,6 +86,8 @@ beforeEach(() => {
   fixture.config = { features: { browser: false }, browserEngine: { kind: "bundled", installable: true }, composio: { mode: "self" } };
   fixture.switches = [];
   fixture.ownerOrAdmin = null;
+  fixture.updater = null;
+  fixture.serverUpdate = null;
   fixture.api.mockResolvedValue({});
   vi.stubGlobal("window", desktop);
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
@@ -92,17 +104,39 @@ const pages = (html: string) => [...html.matchAll(/data-settings-page="([^"]+)"/
 const currentPage = (html: string) => html.match(/data-settings-page="([^"]+)" aria-current="page"/)?.[1];
 const blocks = (html: string) => [...html.matchAll(/data-settings-block="([^"]+)"/g)].map((match) => match[1]);
 const markers = (html: string) => [...html.matchAll(/MARKER:([^;]+);/g)].map((match) => match[1]);
+const groupLabels = (html: string) => [...html.matchAll(/<h3 id="[^"]*" class="[^"]*">([^<]+)<\/h3>/g)].map((match) => match[1]);
+
+/** Where each folded region (`hidden`) starts and ends in the markup. */
+function foldedRanges(html: string): Array<[number, number]> {
+  return [...html.matchAll(/<div[^>]*\bhidden=""[^>]*>/g)].map((open) => {
+    const tags = /<\/?div\b[^>]*>/g;
+    tags.lastIndex = open.index! + open[0].length;
+    let depth = 1;
+    for (let tag = tags.exec(html); tag && depth > 0; tag = depth > 0 ? tags.exec(html) : null) depth += tag[0].startsWith("</") ? -1 : 1;
+    return [open.index!, tags.lastIndex];
+  });
+}
+const placement = (html: string, needle: string): "shown" | "folded" | "missing" => {
+  const at = html.indexOf(needle);
+  if (at < 0) return "missing";
+  return foldedRanges(html).some(([from, to]) => at > from && at < to) ? "folded" : "shown";
+};
+const open = (section: AppSettingsSection) => { fixture.section = section; return render(); };
 
 describe("Settings in Simple mode", () => {
-  it("draws at most six pages on the desktop, MausBot Cloud among them, and none of the Advanced-only ones", () => {
+  it("draws five pages on the desktop, General, AI, Computer, Usage & billing and Updates, and none of the Advanced-only ones", () => {
     const html = render();
-    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "cloud", "account"]);
-    expect(SIMPLE_PAGES.length).toBeLessThanOrEqual(6);
+    expect(pages(html)).toEqual(["general", "ai", "computer", "billing", "updates"]);
+    expect(SIMPLE_PAGES.map((page) => page.id)).toEqual(["general", "ai", "computer", "billing", "updates"]);
+    expect(html).toMatch(/General<\/span>[\s\S]*AI<\/span>[\s\S]*Computer<\/span>[\s\S]*Usage &amp; billing<\/span>[\s\S]*Updates<\/span>/);
     expect(html).not.toContain("data-settings-group=");
     expect(html).not.toContain("data-settings-section=");
+    expect(html).not.toMatch(/class="(?:[^"]*\s)?uppercase(?:\s[^"]*)?"/);
     for (const hidden of ["backups", "experimental", "workspaces", "skills"]) expect(html).not.toContain(`value="${hidden}"`);
     const picker = html.match(/<select aria-label="Settings"[\s\S]*?<\/select>/)![0];
-    expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "appearance", "ai", "computers", "cloud", "account"]);
+    expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "ai", "computer", "billing", "updates"]);
+    expect(html).toContain('data-settings-look="simple"');
+    expect(html).not.toContain("glass-surface");
   });
 
   it("files every Advanced page under one Simple page, or hides it", () => {
@@ -113,87 +147,152 @@ describe("Settings in Simple mode", () => {
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
-  it("keeps General as it is, Advanced mode switch first", () => {
+  it("lays General out as Account, Appearance, Notifications and System, then More settings, and ends on the Advanced mode switch", () => {
     const html = render();
     expect(currentPage(html)).toBe("general");
-    expect(html.indexOf('aria-label="Advanced mode"')).toBeGreaterThan(0);
-    expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
-    expect(blocks(html)).toEqual(["general"]);
+    expect(groupLabels(html).slice(0, 4)).toEqual(["Account", "Appearance", "Notifications", "System"]);
+    const at = (needle: string) => html.indexOf(needle);
+    expect(at("Add your name")).toBeLessThan(at('aria-label="App language"'));
+    expect(at('aria-label="App language"')).toBeLessThan(at("More settings"));
+    expect(at("More settings")).toBeLessThan(at('aria-label="Advanced mode"'));
+    expect([...html.matchAll(/<button[^>]*role="switch"[^>]*>/g)].at(-1)?.[0]).toContain('aria-label="Advanced mode"');
+    expect(html).toContain("Shows every control and builder tool. Nothing is deleted either way.");
+    expect(placement(html, 'aria-label="Advanced mode"')).toBe("shown");
+    expect(html).toMatch(/aria-expanded="false"[^>]*>More settings/);
   });
 
-  it("stacks Model providers and API keys on AI, each under its heading; Decision and extraction is Advanced only", () => {
+  it("keeps every setting Simple showed before, on its page or under More settings", () => {
+    const general = open("general");
+    for (const shown of [
+      "Add your name", 'aria-label="Color my messages with the bot&#x27;s color"', 'aria-label="App language"', 'aria-label="Send messages with"',
+      'aria-label="Notification sounds"', 'aria-label="Show the notification feed"', "Replay welcome tour", "Replay app tour", 'aria-label="Advanced mode"',
+    ]) expect(placement(general, shown), shown).toBe("shown");
+    for (const folded of [
+      "Midnight", 'aria-label="Interface font"', 'aria-label="Chat width"', 'aria-label="Choose sidebar density"', 'aria-label="Pinned bots as circles"',
+      'aria-label="Universal pins"', 'aria-label="Show tool calls in chat"', 'aria-label="Show the run card"', 'aria-label="Effort for new bots"',
+      "Defaults for new bots", "Group turns", "Maximum call length", "Maximum running threads per bot", "Use a backup model",
+      "Delete event logs of finished threads after", "MARKER:import;", "MARKER:organization;",
+    ]) expect(placement(general, folded), folded).toBe("folded");
+
+    const ai = open("engines");
+    expect(placement(ai, "MARKER:engines;")).toBe("shown");
+    expect(placement(ai, "MARKER:apiKey;")).toBe("folded");
+    expect(placement(ai, "More providers for OpenCode bots")).toBe("folded");
+
+    const computer = open("companion");
+    for (const shown of ["MARKER:companion;", "MARKER:desktopWorkspaces;", "MARKER:computer;", 'aria-label="Enable the built-in browser"', "Logins"]) {
+      expect(placement(computer, shown), shown).toBe("shown");
+    }
+
+    const billing = open("usage");
+    expect(placement(billing, "MARKER:cloudAccount;")).toBe("shown");
+    expect(placement(billing, "MARKER:usage;")).toBe("folded");
+
+    const updates = open("updates");
+    expect(placement(updates, 'aria-label="Send usage analytics"')).toBe("folded");
+    expect(placement(updates, "Diagnostics")).toBe("folded");
+  });
+
+  it("names this app and its version on Updates, with the update check", () => {
+    vi.stubGlobal("window", { ogb: { ...desktop.ogb, updater: { check: vi.fn(), install: vi.fn(), onState: vi.fn() } } });
+    fixture.updater = { status: "idle" };
+    const html = open("updates");
+    expect(html).toMatch(/>OpenMausBot [^<]+<\/div>/);
+    expect(placement(html, "Check for updates")).toBe("shown");
+    expect(placement(html, "You&#x27;re on the latest version we know of.")).toBe("shown");
+  });
+
+  it("checks the server's version from a browser", () => {
+    vi.stubGlobal("window", {});
+    const onSelect = vi.fn();
+    fixture.serverUpdate = { phase: "up-to-date", pending: false, label: "Up to date", item: { key: "update", label: "Up to date", subtitle: "v1.2.3", icon: null, disabled: false, onSelect } };
+    const html = open("updates");
+    expect(html).toMatch(/>OpenMausBot [^<]+<\/div>/);
+    expect(html).toContain("Up to date v1.2.3");
+    expect(placement(html, "Check for updates")).toBe("shown");
+  });
+
+  it("opens the fold that holds a linked setting: API keys, Import or Organization", () => {
+    expect(placement(open("connections"), "MARKER:apiKey;")).toBe("shown");
+    expect(placement(open("import"), "MARKER:import;")).toBe("shown");
+    expect(placement(open("organization"), "MARKER:organization;")).toBe("shown");
+    expect(placement(open("general"), "MARKER:import;")).toBe("folded");
+    expect(SIMPLE_FOLDED).toEqual({ import: "general-more", organization: "general-more", activity: "general-more", connections: "ai-other" });
+  });
+
+  it("shows the connected AI, then Other providers for keys", () => {
     fixture.section = "engines";
     const html = render();
     expect(currentPage(html)).toBe("ai");
     expect(blocks(html)).toEqual(["engines", "connections"]);
-    const headings = [...html.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["Model providers", "API keys"]);
     expect(markers(html).filter((name) => name === "engines" || name === "decisionModel")).toEqual(["engines"]);
-    expect(html).toContain("More providers for OpenCode bots");
+    expect(html).toMatch(/aria-expanded="false"[^>]*>Other providers/);
   });
 
-  it("stacks Remote access, Servers, Bot desktops, the built-in browser and Logins on Devices", () => {
+  it("stacks Remote access, Servers, Bot desktops, the built-in browser and Logins on Computer", () => {
     fixture.section = "companion";
     const html = render();
-    expect(currentPage(html)).toBe("computers");
+    expect(currentPage(html)).toBe("computer");
     expect(blocks(html)).toEqual(["companion", "desktopWorkspaces", "computer", "browser", "logins"]);
-    const headings = [...html.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["Remote access", "Servers", "Bot desktops", "Built-in browser", "Logins"]);
+    expect(groupLabels(html)).toEqual(["Remote access", "Servers", "Bot desktops", "Built-in browser"]);
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
-  it("gives MausBot Cloud its own page, and stacks Organization, Import and Usage on Account in the desktop app", () => {
+  it("leads Usage & billing with one usage block, then MausBot Cloud, and folds the rest under Details", () => {
     fixture.section = "cloudAccount";
-    let html = render();
-    expect(currentPage(html)).toBe("cloud");
-    expect(blocks(html)).toEqual(["cloudAccount"]);
-    fixture.section = "organization";
-    html = render();
-    expect(currentPage(html)).toBe("account");
-    expect(blocks(html)).toEqual(["organization", "import", "usage"]);
-    expect(markers(html)).toContain("import");
+    const html = render();
+    expect(currentPage(html)).toBe("billing");
+    expect(blocks(html)).toEqual(["usage", "cloudAccount"]);
+    expect(html.indexOf("MARKER:cloudAccount;")).toBeLessThan(html.indexOf(">Details"));
+    expect(placement(html, "MARKER:usage;")).toBe("folded");
   });
 
-  it("adds People and Activity to Account, above Usage, for a hosted workspace's admins in a browser", () => {
+  it("shows a hosted workspace's admins People on General, Activity under More settings, and the usage itself on Usage & billing", () => {
     vi.stubGlobal("window", {});
     fixture.ownerOrAdmin = true;
     fixture.section = "people";
     const html = render();
-    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
-    expect(blocks(html)).toEqual(["people", "activity", "usage"]);
-  });
-
-  it("keeps Account for Usage alone when nothing else on it is shown", () => {
-    vi.stubGlobal("window", {});
-    fixture.config = { ...fixture.config, cloudHome: true };
+    expect(pages(html)).toEqual(["general", "ai", "computer", "billing", "updates"]);
+    expect(currentPage(html)).toBe("general");
+    expect(placement(html, "MARKER:people;")).toBe("shown");
+    expect(placement(html, "MARKER:activity;")).toBe("folded");
     fixture.section = "usage";
-    const html = render();
-    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
-    expect(blocks(html)).toEqual(["usage"]);
+    const billing = render();
+    expect(placement(billing, "MARKER:usage;")).toBe("folded");
+    expect(billing).toMatch(/aria-expanded="false"[^>]*>Details/);
   });
 
-  it("keeps a paired remote client's reduced set: Appearance, and Devices with Remote access and Servers", () => {
+  it("keeps a paired remote client's reduced set: General for appearance, and Computer with Remote access and Servers", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, remoteClient: { active: true } } });
     fixture.section = "desktopWorkspaces";
     const html = render();
-    expect(pages(html)).toEqual(["appearance", "computers"]);
-    expect(currentPage(html)).toBe("computers");
+    expect(pages(html)).toEqual(["general", "computer"]);
+    expect(currentPage(html)).toBe("computer");
     expect(blocks(html)).toEqual(["companion", "desktopWorkspaces"]);
     expect(html).not.toContain('aria-label="Enable the built-in browser"');
+    fixture.section = "appearance";
+    const general = render();
+    expect(currentPage(general)).toBe("general");
+    expect(general).not.toContain("Add your name");
+    expect(general).toContain('aria-label="App language"');
+    expect(general).toContain('aria-label="Advanced mode"');
   });
 
   it.each<[AppSettingsSection, string]>([
     ["general", "general"],
-    ["appearance", "appearance"],
+    ["appearance", "general"],
+    ["import", "general"],
+    ["organization", "general"],
     ["engines", "ai"],
     ["connections", "ai"],
-    ["companion", "computers"],
-    ["remote", "computers"],
-    ["desktopWorkspaces", "computers"],
-    ["computer", "computers"],
-    ["cloudAccount", "cloud"],
-    ["organization", "account"],
-    ["import", "account"],
+    ["companion", "computer"],
+    ["remote", "computer"],
+    ["desktopWorkspaces", "computer"],
+    ["computer", "computer"],
+    ["logins", "computer"],
+    ["usage", "billing"],
+    ["cloudAccount", "billing"],
+    ["updates", "updates"],
   ])("lands a deep link to %s on %s", (section, page) => {
     fixture.section = section;
     const html = render();
@@ -209,7 +308,7 @@ describe("Settings in Simple mode", () => {
   ])("opens a hidden page (%s) for as long as it is the open one", (section, content) => {
     fixture.section = section;
     const html = render();
-    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "cloud", "account", section]);
+    expect(pages(html)).toEqual(["general", "ai", "computer", "billing", "updates", section]);
     expect(currentPage(html)).toBe(section);
     if (content === "skillAuthoring") expect(html).toContain("Bots may write their own skills");
     else expect(markers(html)).toContain(content);
@@ -225,6 +324,30 @@ describe("Settings in Simple mode", () => {
     revealSettingsBlock(scroller, "engines", 0);
     expect(scroller.scrollTop).toBe(0);
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Settings in Advanced mode", () => {
+  beforeEach(() => { fixture.advancedMode = true; });
+
+  it("keeps the grouped rail, the glass pop-up and General as it was, Advanced mode switch first", () => {
+    const html = render();
+    expect(html).toContain("glass-surface");
+    expect(html).not.toContain("data-settings-look");
+    expect(html).not.toContain("data-settings-page=");
+    expect([...html.matchAll(/data-settings-group="([^"]+)"/g)].map((match) => match[1])).toEqual(["you", "ai", "computers", "account"]);
+    expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
+    expect(html).toContain("Show every technical control on this device");
+    expect(html).not.toContain("More settings");
+    for (const kept of ["Group turns", 'aria-label="Effort for new bots"', 'aria-label="Send usage analytics"', "Diagnostics"]) {
+      expect(placement(html, kept), kept).toBe("shown");
+    }
+  });
+
+  it("treats a link to Updates as General", () => {
+    fixture.section = "updates";
+    const html = render();
+    expect(html).toContain('data-settings-section="general" aria-current="page"');
   });
 });
 

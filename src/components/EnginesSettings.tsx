@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Loader2, Plus, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
@@ -13,6 +13,7 @@ import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
+import { SettingsGroup } from "./SettingsPrimitives";
 
 interface ProbeResult {
   ok: boolean;
@@ -370,7 +371,45 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
   );
 }
 
-export function EnginesSettings() {
+// One parent for every card: a card that becomes ready moves up without remounting, so a sign-in in progress survives.
+function SimpleEngines({ rows, isReady, renderEngine }: {
+  rows: InstanceInfo[];
+  isReady: (instance: InstanceInfo) => boolean;
+  renderEngine: (instance: InstanceInfo) => ReactNode;
+}) {
+  const [adding, setAdding] = useState(false);
+  const connected = rows.filter(isReady);
+  const others = rows.filter((instance) => !isReady(instance));
+  const showOthers = connected.length === 0 || adding;
+  const card = (instance: InstanceInfo) => (
+    <div key={instance.instanceId} className={isReady(instance) ? "col-span-full" : "contents"}>{renderEngine(instance)}</div>
+  );
+  return (
+    <SettingsGroup label={t(connected.length ? "settings.ai.connected" : "settings.ai.connect")} actions={<RefreshEngines />}>
+      <div data-simple-engines="" className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] items-start gap-3">
+        {connected.map(card)}
+        {connected.length > 0 && others.length > 0 && (adding ? (
+          <div key="more" className="col-span-full mt-4 flex items-center justify-between gap-3 px-4">
+            <h4 className="text-[13px] text-ink-secondary">{t("settings.ai.moreProviders")}</h4>
+            <button type="button" onClick={() => setAdding(false)} className="cursor-pointer rounded-md text-[13px] text-ink-secondary hover:text-ink focus-visible:outline-2 focus-visible:outline-focus">
+              {t("settings.ai.hide")}
+            </button>
+          </div>
+        ) : (
+          <div key="more" className="col-span-full">
+            <button type="button" data-connect-another="" onClick={() => setAdding(true)} className="ui-button gap-1.5">
+              <Plus size={14} aria-hidden="true" />{t("settings.ai.connectAnother")}
+            </button>
+          </div>
+        ))}
+        {showOthers && others.map(card)}
+        {rows.length === 0 && <p key="none" className="col-span-full px-4 py-2 text-[13px] text-ink-secondary">{t("engines.none")}</p>}
+      </div>
+    </SettingsGroup>
+  );
+}
+
+export function EnginesSettings({ simple = false }: { simple?: boolean }) {
   const { state } = useStore();
   const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i));
   // A provider's accounts share one card, which takes the place of its first account.
@@ -384,6 +423,15 @@ export function EnginesSettings() {
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
+  const renderEngine = (instance: InstanceInfo) => {
+    const group = groupOf(instance);
+    return group
+      ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} />
+      : <EngineRow instance={instance} />;
+  };
+
+  if (simple) return <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} />;
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">
@@ -394,16 +442,7 @@ export function EnginesSettings() {
         </div>
         <RefreshEngines />
       </div>
-      <EngineSections
-        instances={rows}
-        isReady={(instance) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); }}
-        renderEngine={(instance) => {
-          const group = groupOf(instance);
-          return group
-            ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} />
-            : <EngineRow instance={instance} />;
-        }}
-      />
+      <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
       <CacheKeepWarmSettings />
     </div>
   );
