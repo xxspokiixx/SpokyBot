@@ -97,7 +97,7 @@ describe("MausBot, every person's helper", () => {
     const maus = boot(store)!;
     expect(store.bot(maus.id)?.chiefOfStaff).toBe(true);
     expect(briefChief(store)?.id).toBe(maus.id);
-    expect(intros(store, maus)[0]?.text).toContain("As your Chief of Staff, I also keep an eye on your day");
+    expect(intros(store, maus)[0]?.text).toContain("Hi! I'm MausBot, your Chief of Staff. Tell me anything you need.");
   });
 
   it("makes an adopted MausBot the Chief when its place has none left", () => {
@@ -117,7 +117,8 @@ describe("MausBot, every person's helper", () => {
     const maus = boot(store)!;
     expect(store.bot(maus.id)?.chiefOfStaff).toBeFalsy();
     expect(briefChief(store)?.id).toBe(maus.id);
-    expect(intros(store, maus)[0]?.text).toContain("I also keep an eye on your day and send you a short brief.");
+    expect(intros(store, maus)[0]?.text).toContain("your helper for everything here");
+    expect(intros(store, maus)[0]?.text).toContain("keep an eye on your day");
     expect(intros(store, maus)[0]?.text).not.toContain("Chief of Staff");
   });
 

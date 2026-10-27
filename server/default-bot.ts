@@ -34,12 +34,15 @@ export function ownsDefaultBot(bot: BotRecord | null | undefined, email: string 
 
 /** The English intro; clients that know `helperIntro` say it in the viewer's own language. */
 export function helperIntroMessage(bot: Pick<BotRecord, "name" | "chiefOfStaff">, team?: string | null): Omit<Message, "id" | "at"> {
-  const title = `Hi, I'm ${bot.name}, your helper for everything here.`;
+  const title = bot.chiefOfStaff ? `Hi! I'm ${bot.name}, your Chief of Staff.` : `Hi! I'm ${bot.name}, your helper for everything here.`;
   const subtitle = [
-    "I know this app inside out, so ask me how to do anything. I can set up new bots, apps and routines with you, and tell you what your bots are up to.",
-    bot.chiefOfStaff ? "As your Chief of Staff, I also keep an eye on your day and send you a short brief." : team ? "" : "I also keep an eye on your day and send you a short brief.",
+    bot.chiefOfStaff
+      ? "Tell me anything you need. I'll handle it or hand it to the right bot."
+      : team
+        ? "Ask me how to do anything here. I can set up bots, apps and routines with you."
+        : "Ask me how to do anything here. I can set up bots, apps and routines with you, and keep an eye on your day.",
     team ? `On ${team}, I'm here for you and look after your own bots.` : "",
-    "Try one of these, or just say what you need.",
+    "I'm taking a look around to see what I can pick up for you.",
   ].filter(Boolean).join(" ");
   return { role: "bot", kind: "options", text: `${title} ${subtitle}`, helperIntro: true, card: { title, subtitle, options: [...HELPER_ASKS], fixedOptions: true } };
 }

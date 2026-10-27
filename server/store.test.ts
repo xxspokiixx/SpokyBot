@@ -1581,7 +1581,7 @@ describe("Store", () => {
     const chief = store.bots[0]!;
     expect(chief).toMatchObject({ name: "MausBot", color: "chrome", chiefOfStaff: true, defaultBot: {} });
     expect(store.messagesFor(chief.threadId).map((message) => [message.kind, message.helperIntro, message.card?.options.length])).toEqual([["options", true, 4]]);
-    expect(store.messagesFor(chief.threadId)[0]!.text).toContain("Hi, I'm MausBot, your helper for everything here.");
+    expect(store.messagesFor(chief.threadId)[0]!.text).toContain("Hi! I'm MausBot, your Chief of Staff.");
     const later = Array.from({ length: 25 }, () => store.createBot());
     expect(later.map((bot) => bot.color)).not.toContain("silver");
     expect(later.map((bot) => bot.color)).not.toContain("chrome");

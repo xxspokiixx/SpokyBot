@@ -1,56 +1,47 @@
-import { AppWindow, Bot as BotIcon, Cloud, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
+import { AppWindow, Bot as BotIcon, Cloud, Download, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
 
 import { t } from "@/lib/i18n";
-import { setupSteps, type SetupStep } from "@/lib/default-bot";
+import type { SetupStep } from "@/lib/default-bot";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import type { LocaleKey } from "@/locales";
 import { useStore, type Action } from "@/state/store";
-import { engineReady } from "./EngineLibrary";
 
 const STEPS: Record<SetupStep, { label: LocaleKey; icon: LucideIcon }> = {
-  ai: { label: "helperIntro.step.ai", icon: Sparkles },
-  bots: { label: "helperIntro.step.bots", icon: BotIcon },
-  apps: { label: "helperIntro.step.apps", icon: AppWindow },
-  phone: { label: "helperIntro.step.phone", icon: Smartphone },
-  cloud: { label: "helperIntro.step.cloud", icon: Cloud },
+  ai: { label: "helperIntro.chip.ai", icon: Sparkles },
+  apps: { label: "helperIntro.chip.apps", icon: AppWindow },
+  bots: { label: "helperIntro.chip.bots", icon: BotIcon },
+  phone: { label: "helperIntro.chip.phone", icon: Smartphone },
+  cloud: { label: "helperIntro.chip.cloud", icon: Cloud },
+  import: { label: "helperIntro.chip.import", icon: Download },
 };
 
 /** Each step opens the app's own flow for it. */
 export function setupAction(step: SetupStep): Action {
   switch (step) {
     case "ai": return { type: "toggleAppSettings", open: true, section: "engines" };
-    case "bots": return { type: "newBot" };
     case "apps": return { type: "togglePlugins", open: true, surface: "apps" };
+    case "bots": return { type: "newBot" };
     case "phone": return phonePairingSettingsAction();
     case "cloud": return { type: "openCloudAdd", source: "app_onboarding" };
+    case "import": return { type: "toggleAppSettings", open: true, section: "import" };
   }
 }
 
-/** What is left to set up, under MausBot's intro on a new install. */
-export function HelperSetup() {
-  const { state, dispatch } = useStore();
-  const steps = setupSteps({
-    aiReady: state.instances.some(engineReady),
-    ownBots: state.bots.filter((bot) => !bot.hidden && !bot.defaultBot).length,
-    onCloud: state.config?.cloudHome === true,
-    team: Boolean(state.config?.team),
-    remote: typeof window !== "undefined" && window.ogb?.remoteClient?.active === true,
-  });
+/** What is still missing, as chips under MausBot's first look around. */
+export function HelperSetup({ steps }: { steps: readonly SetupStep[] }) {
+  const { dispatch } = useStore();
   if (!steps.length) return null;
   return (
-    <div role="group" aria-label={t("helperIntro.setup")} data-helper-setup="" className="flex max-w-full flex-col items-start gap-1.5">
-      <span className="text-[13px] text-ink-secondary">{t("helperIntro.setup")}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {steps.map((step) => {
-          const { label, icon: Icon } = STEPS[step];
-          return (
-            <button key={step} type="button" data-helper-step={step} onClick={() => dispatch(setupAction(step))}
-              className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-accent/20">
-              <Icon size={14} aria-hidden="true" className="text-accent" />{t(label)}
-            </button>
-          );
-        })}
-      </div>
+    <div role="group" aria-label={t("helperIntro.setup")} data-helper-setup="" className="animate-rise flex max-w-full flex-wrap gap-1.5 pt-1">
+      {steps.map((step) => {
+        const { label, icon: Icon } = STEPS[step];
+        return (
+          <button key={step} type="button" data-helper-step={step} onClick={() => dispatch(setupAction(step))}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-card px-3 text-[13px] text-ink transition-colors hover:bg-raised-hover">
+            <Icon size={14} aria-hidden="true" className="text-ink-secondary" />{t(label)}
+          </button>
+        );
+      })}
     </div>
   );
 }

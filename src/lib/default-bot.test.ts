@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hiddenFromSidebar, myDefaultBot, setupSteps, someoneElsesDefaultBot } from "./default-bot";
+import { chiefChoices, chiefFor, createChiefPatch, hiddenFromSidebar, myDefaultBot, setupSteps, someoneElsesDefaultBot } from "./default-bot";
 import { partitionSidebarBots } from "./sidebar-layout";
 import type { DefaultBotFields } from "../../shared/default-bot";
 
@@ -46,15 +46,46 @@ describe("MausBot's identity is its mark, never its name", () => {
 describe("what MausBot offers to set up", () => {
   const fresh = { aiReady: false, ownBots: 0, onCloud: false, team: false, remote: false };
 
-  it("on a fresh install, only the steps still to do", () => {
-    expect(setupSteps(fresh)).toEqual(["ai", "bots", "apps", "phone", "cloud"]);
-    expect(setupSteps({ ...fresh, aiReady: true })).toEqual(["bots", "apps", "phone"].concat("cloud"));
-    expect(setupSteps({ ...fresh, aiReady: true, onCloud: true })).toEqual(["bots", "apps", "phone"]);
+  it("on a fresh install, only what its look around found missing, an AI first", () => {
+    expect(setupSteps(fresh)).toEqual(["ai", "apps", "bots", "phone", "cloud"]);
+    expect(setupSteps({ ...fresh, aiReady: true, appsConnected: true })).toEqual(["bots", "phone", "cloud"]);
+    expect(setupSteps({ ...fresh, aiReady: true, phonePaired: true, onCloud: true })).toEqual(["apps", "bots"]);
+    expect(setupSteps({ ...fresh, aiReady: true, remote: true })).toEqual(["apps", "bots", "phone"]);
+  });
+
+  it("offers to bring in skills only where this computer has some", () => {
+    expect(setupSteps({ ...fresh, aiReady: true, importFound: true })).toEqual(["apps", "bots", "phone", "cloud", "import"]);
+    expect(setupSteps({ ...fresh, aiReady: true, importFound: false })).not.toContain("import");
   });
 
   it("never nags a person who is set up, nor a Team Cloud member", () => {
-    expect(setupSteps({ ...fresh, aiReady: true, ownBots: 3 })).toEqual([]);
+    expect(setupSteps({ ...fresh, aiReady: true, ownBots: 3, importFound: true })).toEqual([]);
     expect(setupSteps({ ...fresh, ownBots: 3 })).toEqual(["ai"]);
     expect(setupSteps({ ...fresh, team: true })).toEqual([]);
+  });
+});
+
+describe("who becomes the Chief of Staff on the first run", () => {
+  type Candidate = { id: string; defaultBot?: { person?: string }; chiefOfStaff?: boolean; section?: string; hidden?: boolean };
+  const maus: Candidate = { id: "maus", defaultBot: {}, chiefOfStaff: true };
+  const research: Candidate = { id: "research" };
+
+  it("finds the Chief in MausBot's own department, never a department's or a hidden one", () => {
+    expect(chiefFor([maus, research], maus)?.id).toBe("maus");
+    expect(chiefFor([{ ...maus, chiefOfStaff: false }, { ...research, chiefOfStaff: true }], maus)?.id).toBe("research");
+    expect(chiefFor([{ ...maus, chiefOfStaff: false }, { id: "sales", section: "Sales", chiefOfStaff: true }], maus)).toBeUndefined();
+    expect(chiefFor([{ ...maus, chiefOfStaff: false }, { id: "old", chiefOfStaff: true, hidden: true }], maus)).toBeUndefined();
+  });
+
+  it("offers the person's own bots there to choose from, never MausBot, a hidden bot or someone else's", () => {
+    const bots: Candidate[] = [maus, research, { id: "sales", section: "Sales" }, { id: "gone", hidden: true }, { id: "ada-maus", defaultBot: { person: "ada@example.com" } }];
+    expect(chiefChoices(bots, maus, null).map((bot) => bot.id)).toEqual(["research"]);
+    expect(chiefChoices([maus], maus, null)).toEqual([]);
+  });
+
+  it("Create makes MausBot the Chief only where there is none, and never takes the role from a Chief someone has", () => {
+    expect(createChiefPatch({ defaultBot: {} }, undefined)).toEqual({ welcomed: true, chiefOfStaff: true });
+    expect(createChiefPatch({ defaultBot: {} }, maus)).toEqual({ welcomed: true });
+    expect(createChiefPatch({ defaultBot: {}, sidebarHidden: true }, maus), "back in the sidebar").toEqual({ welcomed: true, sidebarHidden: false });
   });
 });

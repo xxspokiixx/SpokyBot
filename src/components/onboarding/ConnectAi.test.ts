@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ManagedDesktopBridge } from "../../../../electron/managed-desktop.mjs";
+import type { ManagedDesktopBridge } from "../../../electron/managed-desktop.mjs";
 import { setLocale } from "@/lib/i18n";
 import type { InstanceInfo } from "@/state/store";
 
@@ -24,9 +24,17 @@ vi.mock("@/components/EngineSetup", async () => {
   return { EngineSetup: ({ instance, intent, description }: { instance: InstanceInfo; intent: string; description?: string }) =>
     h("div", { "data-engine-setup": instance.instanceId, "data-intent": intent, "data-description": description }) };
 });
-// The row has its own tests; here only whether the step offers it.
-vi.mock("./OrganisationRow", () => ({ OrganisationRow: (props: NonNullable<typeof f.row>) => { f.row = props; return null; } }));
-const { EnginesBeat } = await import("./EnginesBeat");
+// The row has its own tests; here only whether the first screen offers it.
+vi.mock("./beats/OrganisationRow", () => ({ OrganisationRow: (props: NonNullable<typeof f.row>) => { f.row = props; return null; } }));
+const { ConnectAi } = await import("./ConnectAi");
+const { useWelcomeAi } = await import("./welcome-ai");
+const { useStore } = await import("@/state/store");
+
+/** As the first screen has it: the AI it stands on, tested once, handed to the block. */
+function FirstScreenAi({ hosted = false }: { hosted?: boolean }) {
+  const { state } = useStore();
+  return createElement(ConnectAi, { hosted, tested: useWelcomeAi(state.instances, !hosted) });
+}
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const engine = (instanceId: string, driverKind: string, displayName: string, ready: boolean): InstanceInfo => ({
@@ -34,11 +42,10 @@ const engine = (instanceId: string, driverKind: string, displayName: string, rea
   snapshot: { state: ready ? "available" : "unavailable", authenticated: ready }, models: { default: "m", options: [] },
 });
 const bridge = { onState: vi.fn(), state: vi.fn() } as unknown as ManagedDesktopBridge;
-const props = { onNext: vi.fn(), onSkip: vi.fn(), setMascot: vi.fn(), bump: vi.fn() };
 let host: HTMLDivElement, root: Root;
 const text = () => host.textContent ?? "";
-const show = async (extra: { hosted?: boolean; onOpenOrganisation?: () => void } = {}) => {
-  await act(async () => { root.render(createElement(EnginesBeat, { ...props, ...extra })); });
+const show = async (extra: { hosted?: boolean } = {}) => {
+  await act(async () => { root.render(createElement(FirstScreenAi, extra)); });
 };
 const otherWays = async () => {
   const toggle = [...host.querySelectorAll("button")].find((button) => button.textContent === "Other ways")!;
@@ -64,7 +71,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe("the welcome's Connect an AI step", () => {
+describe("connecting an AI on the first screen", () => {
   it("says when it could not check the AIs, keeps what it already lists, and checks again", async () => {
     // Was a step of scripts/verify-onboarding-ui.ts, whose fixture no longer reaches this step (its AI already works).
     await show();
@@ -132,6 +139,12 @@ describe("the welcome's Connect an AI step", () => {
     await show();
     expect(host.querySelector("[data-ai-connected]")?.textContent).toContain("Claude");
     expect(host.querySelector("[data-ai-recommended]")).toBeNull();
+    expect(text()).not.toContain("Other ways");
+  });
+
+  it("says the one thing to do first in a plain line", async () => {
+    await show();
+    expect(host.querySelector("h2")?.textContent).toBe("First, connect an AI to think with");
   });
 
   it("says Connected only after the AI answered a test message, and plainly while it checks", async () => {
@@ -215,10 +228,6 @@ describe("the welcome's Connect an AI step", () => {
     expect(f.row?.bridge).toBe(bridge);
     f.row!.onOpenSettings();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "organization" });
-    const resume = vi.fn();
-    await show({ onOpenOrganisation: resume });
-    f.row!.onOpenSettings();
-    expect(resume).toHaveBeenCalledOnce();
     delete window.ogb;
   });
 });

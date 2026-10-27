@@ -55,40 +55,48 @@ const holdConfigWrite = () => evaluate(`(() => {
 })()`);
 
 // The standard fixture suppresses onboarding. This opt-in entry skips that
-// suppression; only this fixture browser's localStorage is cleared.
+// suppression; only this fixture browser's localStorage is cleared. The name
+// is the one the person already gave (the welcome no longer asks for it).
+await evaluate("fetch('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profile:{name:'Onboarding fixture'}})}).then(r => r.ok)");
 await evaluate("localStorage.clear(); sessionStorage.clear(); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
-await textVisible("Your name");
+await textVisible("Meet OpenMausBot");
 await evaluate("document.documentElement.dataset.reducedMotion = 'true'; true");
 await screenshot("welcome");
-// The greeting asks for a name only; the email is asked once, by the separate product-updates question.
-assert.equal(await evaluate("document.querySelectorAll('.welcome-card input').length"), 1, "one field: the name");
-assert.equal(await evaluate("document.querySelectorAll('.welcome-card input[type=email]').length"), 0, "no email field");
-await type("Your name", "Onboarding fixture");
-// A reload in the middle of the welcome resumes with what was typed.
+// Two screens, no form: the first asks nothing and shows no steps, Back or Skip.
+assert.equal(await evaluate("document.querySelectorAll('[data-welcome] input').length"), 0, "no field on the first screen");
+for (const gone of ["Step 1", "Back", "Skip", "Your name"]) assert.equal((await snapshot()).includes(gone), false, gone);
+await click("Next");
+await textVisible("Introducing your Chief of Staff");
+// A reload on the second screen comes back to it.
 await evaluate("setTimeout(() => location.reload(), 0); true");
-await textVisible("Your name");
-await poll(() => evaluate("document.querySelector('.welcome-card input[type=text]')?.value"), "Onboarding fixture", "the name kept across a reload");
-console.log("PASS the greeting asks for a name only, and a reload keeps the step and the name");
+await textVisible("Introducing your Chief of Staff");
+await screenshot("chief");
+console.log("PASS the first run is two screens, and a reload keeps the second");
+
+// The completion write failing never keeps the person out of the chat.
 await evaluate(`(() => {
   const original = window.fetch.bind(window);
   window.fetch = (input, init) => {
     if (String(input) === '/api/config' && init?.method === 'PUT') {
       window.fetch = original;
-      return Promise.resolve(new Response(JSON.stringify({error:'Fixture profile rejected'}), {status:503}));
+      return Promise.resolve(new Response(JSON.stringify({error:'Fixture save rejected'}), {status:503}));
     }
     return original(input, init);
   };
   return true;
 })()`);
-await click("Continue");
-await textVisible("Couldn't save your details");
-assert.equal(await evaluate("document.querySelector('.welcome-card input[type=text]').value"), "Onboarding fixture");
-await click("Continue");
-// The fixture's Claude already works, so the greeting is the whole welcome: no Connect an AI, reel, phone or first-bot step.
-await poll(() => evaluate("document.querySelectorAll('.welcome-card').length"), 0, "the one-step welcome ends");
-assert.equal((await config()).profile.name, "Onboarding fixture");
+await click("Create Chief of Staff");
+await poll(() => evaluate("document.querySelectorAll('[data-welcome]').length"), 0, "Create lands in the chat");
+// The welcome lands in the chat with the Chief (the server's first bot): its first messages, no AI asked.
+const first = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.chiefOfStaff && !bot.hidden))");
+assert.ok(first?.name, "the Chief");
+assert.equal(first.welcomed, true, "MausBot is introduced, so its old first-launch card never comes");
+const composer = `Message ${first.name}`;
+await textVisible(composer);
+await textVisible(`Hi Onboarding! I'm ${first.name}, your Chief of Staff.`);
+await textVisible("I looked around.");
 assert.equal((await config()).profile.email, "", "the welcome saves no email");
-console.log("PASS profile failure preserves input; retry persists, then the welcome ends");
+console.log("PASS Create lands in the Chief's chat with its first messages, though the save failed");
 
 const starter = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.name === 'Pepper'))");
 assert.ok(starter?.modelSelection?.instanceId && starter.modelSelection.model, "starter has a model without opening the picker");
@@ -97,21 +105,24 @@ const selected = engines.find((engine: any) => engine.instanceId === starter.mod
 assert.equal(selected?.snapshot.state, "available", "starter uses an available provider");
 assert.notEqual(selected?.snapshot.authenticated, false, "starter uses a connected account");
 assert.equal(starter.modelSelection.model, selected.models.default);
-// The welcome lands in the chat with the Chief (the server's first bot).
-const first = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.chiefOfStaff && !bot.hidden))");
-assert.ok(first?.name, "the first bot");
-const composer = `Message ${first.name}`;
+// The failed save left the server's record empty: a browser without this one's local mark shows the welcome again,
+// and this time it is saved.
+await evaluate("localStorage.removeItem('omb-email-gate'); setTimeout(() => location.reload(), 0); true");
+await textVisible("Meet OpenMausBot");
+await click("Next");
+await click("Create Chief of Staff");
 await textVisible(composer);
 await poll(async () => Boolean((await config()).onboarding.completedAt), true, "welcome completion saved");
+assert.ok((await config()).onboarding.hintsSeen.includes("met-chief-v1"), "the first chat is marked to stay quiet");
 await delay(1500);
-assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0, "no app tour after the welcome");
+assert.equal(await evaluate("document.querySelectorAll('[data-welcome], [data-tour-card]').length"), 0, "no app tour after the welcome");
 await evaluate("setTimeout(() => location.reload(), 0); true");
 await textVisible(composer);
 await delay(1500);
-assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0, "no app tour after a reload");
+assert.equal(await evaluate("document.querySelectorAll('[data-welcome], [data-tour-card]').length"), 0, "no app tour after a reload");
 assert.equal((await config()).onboarding.hintsSeen.filter((id: string) => id.startsWith("tour.")).length, 0, "no tour step was shown");
 await screenshot("chat");
-console.log("PASS short welcome lands in the chat with the first bot; the app tour never starts by itself, nor after a reload");
+console.log("PASS the first run lands in the chat with the Chief; the app tour never starts by itself, nor after a reload");
 
 await type(composer, "FIRST_MESSAGE_AFTER_ONBOARDING_7J");
 await ui("press", "--keys", "Enter");
@@ -132,7 +143,7 @@ for (const step of TOUR_STEPS) {
 await poll(() => evaluate("document.querySelectorAll('[data-tour-card]').length"), 0, "tour closed");
 await evaluate("setTimeout(() => location.reload(), 0); true");
 await textVisible(composer);
-assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0);
+assert.equal(await evaluate("document.querySelectorAll('[data-welcome], [data-tour-card]').length"), 0);
 console.log("PASS full app tour from Settings, saved progress, reload stays dismissed");
 
 await openSettings();
@@ -149,10 +160,11 @@ console.log("PASS Settings replay and Skip queued behind slow Next");
 
 await openSettings();
 await click("Replay welcome tour");
-await textVisible("Your name");
+await textVisible("Meet OpenMausBot");
 await holdConfigWrite();
-await click("Skip setup");
-await poll(() => evaluate("document.querySelectorAll('.welcome-card').length"), 0, "slow completion cannot trap welcome");
+await click("Next");
+await click("Create Chief of Staff");
+await poll(() => evaluate("document.querySelectorAll('[data-welcome]').length"), 0, "slow completion cannot trap welcome");
 await evaluate("window.releaseWrite(); true");
 console.log("PASS welcome replay can close while persistence is pending");
 await poll(async () => Boolean((await config()).onboarding.completedAt), true, "welcome save completed");

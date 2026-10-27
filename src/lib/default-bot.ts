@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import { api } from "@/state/api";
+import { chiefScope, type OwnedBot } from "../../shared/bot-owner";
 import { defaultBotPerson, viewersDefaultBot, type DefaultBotFields } from "../../shared/default-bot";
 
 export { DEFAULT_BOT_NAME } from "../../shared/default-bot";
@@ -41,24 +42,61 @@ export function myDefaultBot<T extends DefaultBotFields>(bots: readonly T[], vie
   return viewer === undefined ? undefined : viewersDefaultBot(bots, viewer);
 }
 
-export type SetupStep = "ai" | "bots" | "apps" | "phone" | "cloud";
+type ChiefCandidate = DefaultBotFields & OwnedBot & { id: string; hidden?: boolean };
 
-/** What MausBot's intro offers to set up, each optional: only what is still to do, and on a place with bots of the
- * person's own only an AI, which nothing works without. On a Team Cloud the team's admins set those up. */
-export function setupSteps(input: { aiReady: boolean; ownBots: number; onCloud: boolean; team: boolean; remote: boolean }): SetupStep[] {
+/** The Chief of Staff in MausBot's scope (its department, or its person on a Team Cloud), if one is there to see. */
+export function chiefFor<T extends ChiefCandidate>(bots: readonly T[], maus: T | undefined): T | undefined {
+  const scope = chiefScope(maus ?? {});
+  return bots.find((bot) => bot.chiefOfStaff && !bot.hidden && chiefScope(bot) === scope);
+}
+
+/** The bots a person may make their Chief instead of MausBot: their own, in MausBot's scope, in their sidebar. */
+export function chiefChoices<T extends ChiefCandidate>(bots: readonly T[], maus: T | undefined, viewer: string | null | undefined): T[] {
+  const scope = chiefScope(maus ?? {});
+  return bots.filter((bot) => !bot.defaultBot && !bot.hidden && !hiddenFromSidebar(bot, viewer) && chiefScope(bot) === scope);
+}
+
+/** What Create saves on MausBot: seen, in the sidebar, and the Chief only where there is none, so a Chief someone
+ * already has is never replaced. */
+export function createChiefPatch(maus: DefaultBotFields, chief: { id: string } | undefined): { welcomed: true; sidebarHidden?: false; chiefOfStaff?: true } {
+  return { welcomed: true, ...(maus.sidebarHidden ? { sidebarHidden: false as const } : {}), ...(chief ? {} : { chiefOfStaff: true as const }) };
+}
+
+export type SetupStep = "ai" | "apps" | "bots" | "phone" | "cloud" | "import";
+
+export interface SetupFacts {
+  aiReady: boolean;
+  ownBots: number;
+  onCloud: boolean;
+  team: boolean;
+  remote: boolean;
+  /** Known to have a connected app or a paired phone; unknown counts as not yet. */
+  appsConnected?: boolean;
+  phonePaired?: boolean;
+  /** This computer has skills or MCP servers from another AI tool to bring in. */
+  importFound?: boolean;
+}
+
+/** What MausBot's first messages offer to set up: only what is still missing, and on a place with bots of the person's
+ * own only an AI, which nothing works without. On a Team Cloud the team's admins set those up. */
+export function setupSteps(input: SetupFacts): SetupStep[] {
   if (input.team) return [];
   const fresh = input.ownBots === 0;
   return [
     ...(input.aiReady ? [] : ["ai" as const]),
-    ...(fresh ? ["bots" as const, "apps" as const, "phone" as const] : []),
+    ...(fresh && !input.appsConnected ? ["apps" as const] : []),
+    ...(fresh ? ["bots" as const] : []),
+    ...(fresh && !input.phonePaired ? ["phone" as const] : []),
     ...(fresh && !input.onCloud && !input.remote ? ["cloud" as const] : []),
+    ...(fresh && input.importFound ? ["import" as const] : []),
   ];
 }
 
 let welcoming: string | null = null;
 const welcomingListeners = new Set<() => void>();
 
-/** The MausBot whose first-launch welcome is open: kept out of the sidebar until Add lands it there. */
+/** The MausBot being introduced (its first-launch card, or the first run's Chief screen): kept out of the sidebar and
+ * its chat says nothing yet, until it lands. */
 export function setWelcomingBot(id: string | null): void {
   if (welcoming === id) return;
   welcoming = id;
@@ -70,4 +108,15 @@ export function useWelcomingBot(): string | null {
     welcomingListeners.add(listener);
     return () => welcomingListeners.delete(listener);
   }, () => welcoming, () => null);
+}
+
+let staged: string | null = null;
+
+/** The bot whose first messages arrive one at a time, as a first run lands in its chat; null once they have. */
+export function stageIntro(botId: string | null): void {
+  staged = botId;
+}
+
+export function introStaged(botId: string): boolean {
+  return staged === botId;
 }
