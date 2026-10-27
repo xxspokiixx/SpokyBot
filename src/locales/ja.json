@@ -1819,6 +1819,8 @@
   "chat.handoffDoneWhen": "完了の条件: {criteria}",
   "chat.openThread": "#{title} を開く",
   "chat.openThreadOn": "{name} の #{title} を開く",
+  "chat.sentDirectly": "{name} はこのルームにいないため、直接送りました。",
+  "chat.sentDirectlyNotInRoom": "{name} は {room} にいないため、直接送りました。",
   "chat.botScreen": "ボットの画面",
   "chat.digestChip": "ツール呼び出し {tools} 回 · ファイル変更 {files} 件",
   "chat.digestChipNoFiles": "ツール呼び出し {tools} 回",

@@ -1431,6 +1431,8 @@
   "chat.handoffDoneWhen": "Şu olunca tamam: {criteria}",
   "chat.openThread": "#{title} konusunu aç",
   "chat.openThreadOn": "{name} üzerinde #{title} konusunu aç",
+  "chat.sentDirectly": "Doğrudan {name} adlı bota gönderildi: bu odada değil.",
+  "chat.sentDirectlyNotInRoom": "Doğrudan {name} adlı bota gönderildi: {room} odasında değil.",
   "chat.botScreen": "Botun ekranı",
   "chat.digestChip": "{tools} araç çağrısı yaptı · {files} dosya değiştirildi",
   "chat.digestChipNoFiles": "{tools} araç çağrısı yaptı",

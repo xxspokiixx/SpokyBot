@@ -1625,6 +1625,8 @@
   "chat.handoffDoneWhen": "Terminado cuando: {criteria}",
   "chat.openThread": "Abrir #{title}",
   "chat.openThreadOn": "Abrir #{title} en {name}",
+  "chat.sentDirectly": "Enviado directamente a {name}: no está en este grupo.",
+  "chat.sentDirectlyNotInRoom": "Enviado directamente a {name}: no está en {room}.",
   "chat.botScreen": "Pantalla del bot",
   "chat.digestChip": "Hizo {tools} llamadas a herramientas · {files} archivos cambiados",
   "chat.digestChipNoFiles": "Hizo {tools} llamadas a herramientas",

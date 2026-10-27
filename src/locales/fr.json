@@ -2353,6 +2353,8 @@
   "voice.adding": "Ajout en cours…",
   "computer.simple.usingNow": "En ce moment : {place}",
   "automations.run.stoppedBecause": "Arrêtée : {reason}",
+  "chat.sentDirectly": "Envoyé directement à {name} : ce bot n'est pas dans ce salon.",
+  "chat.sentDirectlyNotInRoom": "Envoyé directement à {name} : ce bot n'est pas dans {room}.",
   "mcp.paste.prompt": "Collez le lien du serveur, ou la commande d’installation qu’on vous a donnée",
   "mcp.paste.label": "Lien du serveur ou commande d’installation",
   "mcp.paste.foundOne": "Prêt à ajouter {name} ({where}).",

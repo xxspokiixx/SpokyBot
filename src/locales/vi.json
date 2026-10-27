@@ -1431,6 +1431,8 @@
   "chat.handoffDoneWhen": "Xong khi: {criteria}",
   "chat.openThread": "Mở #{title}",
   "chat.openThreadOn": "Mở #{title} trên {name}",
+  "chat.sentDirectly": "Đã gửi thẳng cho {name}: bot này không ở trong phòng này.",
+  "chat.sentDirectlyNotInRoom": "Đã gửi thẳng cho {name}: bot này không ở trong {room}.",
   "chat.botScreen": "Màn hình của bot",
   "chat.digestChip": "Đã thực hiện {tools} tool call · {files} tệp đã thay đổi",
   "chat.digestChipNoFiles": "Đã thực hiện {tools} tool call",

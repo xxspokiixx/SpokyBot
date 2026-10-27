@@ -1828,6 +1828,8 @@
   "chat.handoffDoneWhen": "Done when: {criteria}",
   "chat.openThread": "Open #{title}",
   "chat.openThreadOn": "Open #{title} on {name}",
+  "chat.sentDirectly": "Sent to {name} directly: it isn't in this room.",
+  "chat.sentDirectlyNotInRoom": "Sent to {name} directly: it isn't in {room}.",
   "chat.botScreen": "Bot's screen",
   "chat.digestChip": "Did {tools} tool calls · {files} files changed",
   "chat.digestChipNoFiles": "Did {tools} tool calls",

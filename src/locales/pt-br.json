@@ -1687,6 +1687,8 @@
   "chat.handoffDoneWhen": "Concluído quando: {criteria}",
   "chat.openThread": "Abrir #{title}",
   "chat.openThreadOn": "Abrir #{title} em {name}",
+  "chat.sentDirectly": "Enviado direto para {name}: não está neste grupo.",
+  "chat.sentDirectlyNotInRoom": "Enviado direto para {name}: não está em {room}.",
   "chat.botScreen": "Tela do bot",
   "chat.digestChip": "Fez {tools} chamadas de ferramenta · {files} arquivos alterados",
   "chat.digestChipNoFiles": "Fez {tools} chamadas de ferramenta",

@@ -1208,6 +1208,8 @@
   "chat.handoffDoneWhen": "完成標準：{criteria}",
   "chat.openThread": "開啟 #{title}",
   "chat.openThreadOn": "在 {name} 上開啟 #{title}",
+  "chat.sentDirectly": "已直接傳給 {name}：它不在這個聊天室。",
+  "chat.sentDirectlyNotInRoom": "已直接傳給 {name}：它不在「{room}」。",
   "chat.botScreen": "機器人的畫面",
   "chat.digestChip": "已呼叫 {tools} 個工具 · 變更 {files} 個檔案",
   "chat.digestChipNoFiles": "已呼叫 {tools} 個工具",

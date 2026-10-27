@@ -1778,6 +1778,8 @@
   "chat.handoffDoneWhen": "Gotowe, gdy: {criteria}",
   "chat.openThread": "Otwórz #{title}",
   "chat.openThreadOn": "Otwórz #{title}: {name}",
+  "chat.sentDirectly": "Wysłano bezpośrednio do bota {name}: nie ma go w tym pokoju.",
+  "chat.sentDirectlyNotInRoom": "Wysłano bezpośrednio do bota {name}: nie ma go w pokoju {room}.",
   "chat.botScreen": "Ekran bota",
   "chat.digestChip": "Wywołania narzędzi: {tools} · zmienione pliki: {files}",
   "chat.digestChipNoFiles": "Wywołania narzędzi: {tools}",

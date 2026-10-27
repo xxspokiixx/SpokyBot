@@ -2353,6 +2353,8 @@
   "voice.adding": "जोड़ी जा रही है…",
   "computer.simple.usingNow": "अभी: {place}",
   "automations.run.stoppedBecause": "रोका गया: {reason}",
+  "chat.sentDirectly": "सीधे {name} को भेजा: यह इस रूम में नहीं है।",
+  "chat.sentDirectlyNotInRoom": "सीधे {name} को भेजा: यह {room} में नहीं है।",
   "mcp.paste.prompt": "सर्वर का लिंक, या आपको मिली सेटअप कमांड यहाँ पेस्ट करें",
   "mcp.paste.label": "सर्वर लिंक या सेटअप कमांड",
   "mcp.paste.foundOne": "{name} जोड़ने के लिए तैयार ({where})।",

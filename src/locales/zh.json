@@ -882,6 +882,8 @@
   "chat.handoffDoneWhen": "完成标准：{criteria}",
   "chat.openThread": "打开 #{title}",
   "chat.openThreadOn": "在 {name} 上打开 #{title}",
+  "chat.sentDirectly": "已直接发给 {name}：它不在这个聊天室。",
+  "chat.sentDirectlyNotInRoom": "已直接发给 {name}：它不在“{room}”。",
   "chat.botScreen": "机器人的屏幕",
   "chat.digestChip": "已调用 {tools} 个工具 · 变更 {files} 个文件",
   "chat.digestChipNoFiles": "已调用 {tools} 个工具",

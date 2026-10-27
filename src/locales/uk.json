@@ -736,6 +736,8 @@
   "chat.handoffDoneWhen": "Готово, коли: {criteria}",
   "chat.openThread": "Відкрити #{title}",
   "chat.openThreadOn": "Відкрити #{title} у {name}",
+  "chat.sentDirectly": "Надіслано напряму боту {name}: його немає в цій кімнаті.",
+  "chat.sentDirectlyNotInRoom": "Надіслано напряму боту {name}: його немає в кімнаті {room}.",
   "chat.botScreen": "Екран бота",
   "chat.digestChip": "Викликів інструментів: {tools} · змінено файлів: {files}",
   "chat.digestChipNoFiles": "Викликів інструментів: {tools}",
