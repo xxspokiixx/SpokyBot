@@ -1,6 +1,7 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { lmStudioV1Catalog } from "./local-inject.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -53,12 +54,38 @@ export interface OpenAICompatConfig {
   managedModels?: string[];
 }
 
+function positiveTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+/** The window a /models row advertises: OpenRouter's context_length and top_provider.context_length, vLLM's
+ * max_model_len and the like. A serving provider may cap the usable window below the model's nominal one. */
+export function advertisedContextWindow(row: Record<string, unknown>): number | undefined {
+  const limits = ["context_length", "context_window", "max_model_len", "max_context_length", "contextWindow"].map((key) => positiveTokens(row[key]));
+  const provider = row.top_provider;
+  if (provider && typeof provider === "object") limits.push(positiveTokens((provider as Record<string, unknown>).context_length));
+  const valid = limits.filter((value): value is number => value !== undefined);
+  return valid.length ? Math.min(...valid) : undefined;
+}
+
 function isOpenRouterUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
     return host === "openrouter.ai" || host.endsWith(".openrouter.ai");
   } catch {
     return false;
+  }
+}
+
+function loopbackLmStudioV1Url(baseUrl: string): string | null {
+  try {
+    const url = new URL(baseUrl);
+    const host = url.hostname.toLowerCase();
+    if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") return null;
+    if (url.pathname.replace(/\/+$/, "") !== "/v1") return null;
+    return `${url.origin}/api/v1/models`;
+  } catch {
+    return null;
   }
 }
 
@@ -137,12 +164,42 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       if (config.managedModels) return;
       if (!apiKey) return;
       try {
+        const nativeUrl = loopbackLmStudioV1Url(config.url);
+        if (nativeUrl) {
+          try {
+            const native = await fetch(nativeUrl, {
+              headers: { authorization: `Bearer ${apiKey}` },
+              signal: AbortSignal.timeout(8_000),
+            });
+            if (native.ok) {
+              let parsed: ReturnType<typeof lmStudioV1Catalog> = null;
+              try {
+                parsed = lmStudioV1Catalog(await native.json());
+              } catch {
+                parsed = null;
+              }
+              if (parsed?.ids.length) {
+                const options = parsed.ids.map((id) => ({ id, label: id, custom: true as const }));
+                if (config.model && !options.some((model) => model.id === config.model)) {
+                  options.unshift({ id: config.model, label: config.model, custom: true });
+                }
+                catalog = {
+                  default: config.model ?? options[0]!.id,
+                  options,
+                };
+                return;
+              }
+            }
+          } catch {
+            // Native LM Studio catalog unavailable; try OpenAI-compatible /models below.
+          }
+        }
         const response = await fetch(`${config.url}/models`, {
           headers: { authorization: `Bearer ${apiKey}` },
           signal: AbortSignal.timeout(8_000),
         });
         if (!response.ok) return;
-        type Row = OpenRouterModelRow & { name?: unknown; created?: unknown };
+        type Row = OpenRouterModelRow & Record<string, unknown> & { name?: unknown; created?: unknown; owned_by?: unknown };
         const json = await response.json() as { data?: Row[] } | Row[];
         let rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
         // OpenAI lists its catalog unordered and mixed with non-chat models.
@@ -158,13 +215,30 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           if (!id || seen.has(id)) continue;
           seen.add(id);
           const label = typeof row.name === "string" && row.name.trim() ? row.name : id;
+          const contextWindow = advertisedContextWindow(row);
           options.push({
             id,
             label: openRouter ? freeLabel(label, row) : label,
+            ...(contextWindow ? { contextWindow } : {}),
             ...(config.catalog === "openai" ? {} : { custom: true }),
           });
         }
         if (!options.length) return;
+        // llama.cpp serves its configured slot size, which can be below the model's training window; never autoload.
+        for (const selected of rows.filter((row) => row.owned_by === "llamacpp" && typeof row.id === "string")) {
+          try {
+            const url = new URL(config.url);
+            url.pathname = url.pathname.replace(/\/v1\/?$/, "").replace(/\/$/, "") + "/props";
+            url.searchParams.set("model", String(selected.id));
+            url.searchParams.set("autoload", "false");
+            const props = await fetch(url, { redirect: "error", headers: { authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(3_000) });
+            if (!props.ok) continue;
+            const json = await props.json() as { default_generation_settings?: { n_ctx?: unknown } };
+            const window = positiveTokens(json.default_generation_settings?.n_ctx);
+            const option = options.find((option) => option.id === selected.id);
+            if (window && option) option.contextWindow = window;
+          } catch {}
+        }
         const freeTools = await freeTier() ? freeToolModels(rows) : [];
         const ordered = freeToolsFirst(options, freeTools);
         if (config.model && !ordered.some((model) => model.id === config.model)) {

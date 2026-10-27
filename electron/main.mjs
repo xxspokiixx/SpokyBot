@@ -12,7 +12,7 @@ import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { linuxDisablesGpu } from "./linux-gpu.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
-import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState } from "./updater.mjs";
+import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState, reopenedOutOfSight, quietSignals } from "./updater.mjs";
 import {
   appendDesktopCrashRecord,
   buildDiagnosticsReport,
@@ -98,7 +98,7 @@ import { createDesktopIncludedX } from "./included-x.mjs"; import { createDeskto
 import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
-import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin } from "./open-at-login.mjs";
+import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
 import { installOneHome } from "./one-home-main.mjs";
 import { installUseMyComputer } from "./use-my-computer.mjs";
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
@@ -1510,7 +1510,7 @@ function sharingController() {
     enabled: refreshSharedComputersAllowed,
     cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, power: cloudPower, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }),
     linkHeaders: async env => ({ cookie: (await session.defaultSession.cookies.get({ url: env.origin })).map(cookie => `${cookie.name}=${cookie.value}`).join("; ") }),
-    onChange: summary => { lendingIndicator().update({ lending: summary.lending.length > 0, internetOnly: summary.internetOnly, busy: Boolean(summary.busy && summary.lending.includes(summary.busy.env)) }); loginItem.follow(summary.lending.length > 0); },
+    onChange: summary => { lendingIndicator().update({ lending: summary.lending.length > 0, internetOnly: summary.internetOnly, terminal: summary.terminal, busy: Boolean(summary.busy && summary.lending.includes(summary.busy.env)) }); loginItem.follow(summary.lending.length > 0); },
     cuaConnection: () => cuaReady, screenLocked: () => powerMonitor.getSystemIdleState(1) === "locked",
     hostControl: async (id, signal) => {
       const lease = async action => {
@@ -1531,6 +1531,7 @@ function sharingController() {
 
 const lendingTarget = createLendingTarget({ account: () => cloudAccount, environments: () => environmentsState.environments });
 const loginItem = createOpenAtLogin({ app, file: path.join(app.getPath("userData"), "open-at-login.json"), home: os.homedir() });
+installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApplicationMenu });
 let hiddenStart = false;
 
 function stopLending() {
@@ -1555,9 +1556,9 @@ async function openLendingSettings() {
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
-    Tray, Menu, nativeImage, iconPath: APP_ICON,
-    onStop: stopLending,
+    Tray, Menu, nativeImage, iconPath: APP_ICON, onStop: stopLending,
     onOpen: () => void openLendingSettings().catch(error => slog(`lending settings: ${error?.message ?? error}`)),
+    onTerminal: on => useMyMac.lendTerminal(on).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
   });
   return lendingTray;
 }
@@ -1602,9 +1603,8 @@ function refreshApplicationMenu() {
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onOrganizationSignIn: () => queueOrganizationEntry("openmausbot://organization"),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
-      onOpenSettings: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
-      },
+      onOpenSettings: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings"); },
+      openAtLogin: loginItem.available() ? { checked: loginItem.chosen(), onToggle: on => { loginItem.choose(on); refreshApplicationMenu(); } } : null,
       ...cloudMenuOptions(),
       home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null,
     }),
@@ -2077,7 +2077,7 @@ function createWindow({ deferNavigation = false } = {}) {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
       additionalArguments: [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess),
-        ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : [])],
+        ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`],
     },
   });
   mainWindow = win; hiddenStart = false;
@@ -2939,7 +2939,7 @@ app.whenReady().then(async () => {
       slog(`system tray unavailable: ${error?.message ?? error}`);
     }
   }
-  hiddenStart = loginItem.startedHidden();
+  hiddenStart = loginItem.startedHidden() || reopenedOutOfSight();
   startupScreen = hiddenStart ? null : createStartupScreen({
     BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted,
     onQuit: () => app.quit(),
@@ -3187,7 +3187,7 @@ app.whenReady().then(async () => {
       return credentials;
     }).finally(syncManagedComposioCredentials);
   }
-  startUpdater();
+  startUpdater(quietSignals({ powerMonitor, window: () => mainWindow, lastInput: oneHome.lastInput, local: localServerRequest, place: () => homeWindow.placeOrigin(), cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => origin === homeWindow.cloudOrigin() && cloudPower.asleep(), busy: () => (oneHome.oneHome.busy() && "move") || (computerSharing?.busy() && "lending") || (companyBackupController || companyRestoreCommitting ? "backup" : null) }));
   refreshApplicationMenu();
   openWindowForLink = () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: homeWindow.current().kind !== "computer" });
