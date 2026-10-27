@@ -56,7 +56,7 @@ outputs the selected job ids; the gate wants each required job to have passed
 when it was selected and to have been skipped when it was not. Failures,
 cancellations, a missing or malformed selection and unexpected runs or skips
 fail the gate. Advisory jobs remain advisory. A new push to a PR cancels that
-PR's older run; main's runs are never cancelled.
+PR's older run; main's concurrency is unchanged (see Main and releases).
 
 The separate shared-terminal smoke workflow is manual-only: its tests already
 run in the Windows Vitest/Electron jobs.
