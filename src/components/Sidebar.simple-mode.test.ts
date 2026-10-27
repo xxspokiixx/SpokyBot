@@ -87,7 +87,7 @@ describe("bot-first sidebar", () => {
     { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
     { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[10px]", "pl-2", "pr-2", "md:h-[54px]"] },
     { advanced: false, enabled: false, density: "compact", size: 36, spacing: ["gap-2.5", "py-1.5", "pl-2", "pr-9"] },
-    { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[52px]", "justify-center"] },
+    { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[54px]", "justify-center"] },
   ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
     fixture.advanced = advanced;
     fixture.showThreads = enabled;
@@ -189,6 +189,16 @@ describe("bot-first sidebar", () => {
     expect(working).toContain("[--row:var(--color-panel)]");
   });
 
+  it("rings a focused Simple row or group chat inside its edge, where Advanced keeps its accent ring", () => {
+    fixture.showThreads = false;
+    const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    const simple = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] }))) + renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }));
+    expect(simple.match(/focus-visible:outline-2 focus-visible:-outline-offset-2! focus-visible:outline-focus/g)).toHaveLength(2);
+    expect(simple).not.toContain("focus-visible:ring-accent/60");
+    fixture.advanced = true;
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })))).toContain("outline-none focus-visible:ring-1 focus-visible:ring-accent/60");
+  });
+
   it("hides even the selected Simple row's actions until hover or focus, where Advanced keeps them shown", () => {
     fixture.showThreads = false;
     fixture.state = { ...fixture.state, selectedId: bot.id, activeView: "chat" };
@@ -242,7 +252,7 @@ describe("bot-first sidebar", () => {
 
   it.each([
     { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2", "rounded-[10px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
-    { advanced: false, density: "icons", face: 36, spacing: ["h-[52px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: false, density: "icons", face: 36, spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
     { advanced: true, density: "icons", face: 44, spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
     { advanced: true, density: "comfortable", face: 32, spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
     { advanced: false, density: "compact", face: 26, spacing: ["gap-1.5", "py-1", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },

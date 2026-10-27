@@ -207,6 +207,8 @@
   --chat-prose-max: 44rem;
   /* .chat-column: fills a narrow pane, then stops at this width and centers, so wider windows only grow the gutters. */
   --chat-column-max: 60rem;
+  /* Simple mode's menus; a phone rounds them like its sheets. */
+  --radius-menu: 14px;
 }
 :root[data-chat-width="wide"] {
   --chat-bubble-max: 64rem;
@@ -2775,6 +2777,7 @@ button:disabled.bg-danger {
     --radius-xl: 18px;
     --radius-2xl: 22px;
     --radius-3xl: 28px;
+    --radius-menu: 22px;
   }
   :is([data-skin="meadow"]) {
     --color-app: #f6f8f6;
@@ -2787,6 +2790,7 @@ button:disabled.bg-danger {
     --radius-xl: 18px;
     --radius-2xl: 22px;
     --radius-3xl: 28px;
+    --radius-menu: 22px;
   }
 }
 

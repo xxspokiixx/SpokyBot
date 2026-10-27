@@ -465,7 +465,7 @@ export function profileMenuItems({
       key: "shortcuts",
       label: t("sidebar.menu.shortcuts"),
       icon: <Keyboard size={18} />,
-      trailing: <ShortcutHint id="shortcuts-cheat-sheet" />,
+      ...(simple ? {} : { trailing: <ShortcutHint id="shortcuts-cheat-sheet" /> }),
       onSelect: onShortcuts,
     },
     { key: "about", label: t("sidebar.menu.about"), icon: <Info size={18} />, separatorBefore: true, onSelect: onAbout },
@@ -601,17 +601,17 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         ariaLabel={name}
         compact={simple}
         onOpenChange={simple ? setMenuOpen : undefined}
-        triggerClassName={iconOnly || simple ? cn("shrink-0", circle || (simple && !rail) ? "rounded-full" : "rounded-xl") : "w-full"}
+        triggerClassName={iconOnly || simple ? cn("shrink-0", circle || simple ? "rounded-full" : "rounded-xl") : "w-full"}
         triggerTitle={iconOnly || simple ? label : undefined}
         triggerLabel={label}
         triggerTour={account?.place.switchable ? "server-switcher" : undefined}
-        renderTrigger={({ open }) => simple && !rail ? (
+        renderTrigger={({ open }) => simple ? (
           <span
             ref={triggerRef}
             data-sidebar-account=""
             className={cn("relative flex size-9 items-center justify-center rounded-full ring-2 transition-shadow", open ? "ring-ink/15" : "ring-transparent hover:ring-ink/10")}
           >
-            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} className="ring-1 ring-inset ring-ink/[0.04]" />
             {(noteworthy || needsYou) && (
               <span
                 aria-hidden
@@ -632,7 +632,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} fallback={rail ? nameless : undefined} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} />
             {(noteworthy || needsYou) && (
               <span
                 aria-hidden

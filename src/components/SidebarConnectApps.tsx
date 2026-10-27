@@ -1,3 +1,4 @@
+import { Puzzle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
@@ -7,6 +8,7 @@ import { useStore } from "@/state/store";
 import { loadAppCards } from "./bot-settings/useBotApps";
 import { preloadConnectedApps, type ToolkitCard } from "./PluginsPanel";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
+import { SIMPLE_TOP_BUTTON } from "./SidebarSimpleTop";
 
 export type AppFace = Pick<ToolkitCard, "slug" | "label" | "logo" | "domain">;
 
@@ -46,7 +48,7 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
   const [failed, setFailed] = useState(0);
   const src = sources[failed];
   return (
-    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-white ring-[1.5px] ring-composer", className)}>
+    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white p-px ring-[1.5px] ring-composer", className)}>
       {src
         ? <img src={src} alt="" draggable={false} className="size-4 object-contain" onError={() => setFailed((count) => count + 1)} />
         : <span className="text-[10px] font-semibold leading-none text-neutral-700">{face.label.slice(0, 1).toUpperCase()}</span>}
@@ -54,22 +56,32 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
   );
 }
 
-export function SidebarConnectApps() {
+/** The outer logos fan out while the pill is hovered. */
+const FAN = ["motion-safe:group-hover/apps:-translate-x-[3px] motion-safe:group-hover/apps:-rotate-[8deg]", "", "motion-safe:group-hover/apps:translate-x-[3px] motion-safe:group-hover/apps:rotate-[8deg]"];
+
+/** `circle` is the collapsed rail's round button. */
+export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
   const { state, dispatch } = useStore();
   const faces = useAppFaces();
+  const label = t("sidebar.connectApps");
   return (
     <button
       type="button"
       data-tour="nav-apps"
       data-sidebar-nav="apps"
       aria-pressed={state.pluginsOpen}
+      aria-label={circle ? label : undefined}
+      title={circle ? label : undefined}
       onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      className={cn("flex h-[34px] min-w-0 flex-1 items-center justify-center gap-[9px] rounded-full px-3 text-[15px] leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
+      className={circle ? SIMPLE_TOP_BUTTON : cn("group/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full pl-4 pr-3 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
     >
-      <span className="min-w-0 truncate">{t("sidebar.connectApps")}</span>
-      <span aria-hidden="true" className="flex shrink-0 items-center">
-        {faces.map((face, index) => <AppFaceIcon key={face.slug} face={face} className={index > 0 ? "-ms-2" : undefined} />)}
-      </span>
+      {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
+        <span className="min-w-0 truncate">{label}</span>
+        <span aria-hidden="true" className="flex shrink-0 items-center">
+          {faces.map((face, index) => <AppFaceIcon key={face.slug} face={face}
+            className={cn(index > 0 && "-ms-1.5", faces.length > 1 && FAN[index === 0 ? 0 : index === faces.length - 1 ? 2 : 1], "motion-safe:transition-transform motion-safe:duration-150")} />)}
+        </span>
+      </>}
     </button>
   );
 }

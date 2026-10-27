@@ -25,10 +25,10 @@ function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archiv
   const place = useSimplePlace();
   const account = useSimpleAccount(place, owner, archived);
   return (
-    <div data-sidebar-footer="simple" className="pb-4 pl-4 pr-[17px] pt-2">
+    <div data-sidebar-footer="simple" className="px-4 pb-4 pt-2">
       <CloudUsageCard />
       <SidebarPlaceStatus place={place} className="mb-2 px-1" />
-      <div className="flex items-center gap-[9px] not-first:mt-2">
+      <div className="flex items-center gap-2 not-first:mt-2">
         <SidebarProfileMenu simple={account} />
         <SidebarConnectApps />
         <UpdateIndicator className="size-9" />

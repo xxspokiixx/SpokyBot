@@ -106,15 +106,15 @@ afterEach(() => {
 });
 
 describe("Simple-mode sidebar layout", () => {
-  it("lists the bots, then the group chats, with no headings, and labels only a person's own departments", () => {
+  it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with a count", () => {
     const { tree } = render();
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
     const lines = headers(tree);
-    expect(lines.map((header) => header.props.name)).toEqual(["Work"]);
-    expect(lines[0]!.props.line).toBe(true);
-    expect(lines[0]!.props.onDelete).toBeUndefined();
-    expect(lines[0]!.props.onMenu).toBeTypeOf("function");
+    expect(lines.map((header) => [header.props.name, header.props.line, header.props.count])).toEqual([["Group chats", true, 1], ["Work", true, 1]]);
+    expect(lines[0]!.props.onMenu).toBeUndefined();
+    expect(lines[1]!.props.onDelete).toBeUndefined();
+    expect(lines[1]!.props.onMenu).toBeTypeOf("function");
     expect(labelled(tree, "Add or remove bots in Work")).toBe(false);
     expect(tree.some((node) => node.type === SidebarTileGrid)).toBe(false);
   });
@@ -127,7 +127,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(grid.pinned.map((candidate) => candidate.id)).toEqual(["atlas", "dodo"]);
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["bea"]);
-    expect(headers(tree).map((header) => header.props.name)).toEqual(["Work"]);
+    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Work"]);
   });
 
   it("fades the list's edges, with the top buttons and the tiles fixed above it, and keeps Advanced's glass", () => {
@@ -157,10 +157,11 @@ describe("Simple-mode sidebar layout", () => {
     expect(headers(tree).map((header) => header.props.name)).toContain("Pinned");
   });
 
-  it("draws no divider and the Simple footer in Simple mode, and keeps Advanced's divider and footer", () => {
+  it("draws a faint edge and the Simple footer in Simple mode, and keeps Advanced's divider and footer", () => {
     const footer = (tree: ReactElement<Props>[]) => (tree.find((node) => node.type === SidebarFooter)!.props as Parameters<typeof SidebarFooter>[0]).simple;
     const simple = render();
-    expect(simple.root.props.className).not.toContain("border-r");
+    expect(simple.root.props.className).toContain("border-r border-ink/[0.04]");
+    expect(simple.root.props.className).not.toContain("border-hairline");
     expect(footer(simple.tree)).toBe(true);
     fixture.values = [];
     fixture.advanced = true;
@@ -172,7 +173,7 @@ describe("Simple-mode sidebar layout", () => {
   it("still offers Add bots under an empty team", () => {
     fixture.state = { ...fixture.state, sections: ["Work", "Empty"] };
     const { tree } = render();
-    expect(headers(tree).map((header) => header.props.name)).toEqual(["Work", "Empty"]);
+    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Work", "Empty"]);
     expect(labelled(tree, "Add bots to Empty")).toBe(true);
     expect(labelled(tree, "Add or remove bots in Work")).toBe(false);
   });
@@ -293,18 +294,19 @@ describe("Simple-mode sidebar layout", () => {
     expect(tree.some((node) => node.props["data-sidebar-top-buttons"] !== undefined)).toBe(false);
   });
 
-  it("puts search and the same + menu at the foot of the rail, and the edge bump expands it again", () => {
+  it("puts round search and the same + menu at the top of the rail, and the edge bump expands it again", () => {
     setSidebarDensity("icons");
-    const footer = () => render().tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0];
-    const plus = () => nodes(footer().plus).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
+    const top = () => render().tree.find((node) => node.props["data-sidebar-rail-top"] !== undefined)!;
+    const plus = () => nodes(top().props.children).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
+    expect(plus().props.className).toEqual(expect.stringContaining("size-9"));
     (plus().props.onClick as () => void)();
-    const menu = nodes(footer().plus).find((node) => /\bmin-w-\[200px\]/.test(node.props.className ?? ""))!;
-    expect(menu.props.className).toEqual(expect.stringContaining("bottom-0 left-full"));
-    expect(menu.props.className).toEqual(expect.stringContaining("rounded-[12px]"));
-    const item = (label: string) => nodes(footer().plus).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
+    const menu = nodes(top().props.children).find((node) => /\bmin-w-\[200px\]/.test(node.props.className ?? ""))!;
+    expect(menu.props.className).toEqual(expect.stringContaining("left-full top-0"));
+    expect(menu.props.className).toEqual(expect.stringContaining("rounded-[var(--radius-menu)]"));
+    const item = (label: string) => nodes(top().props.children).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
     expect(item("Create department"), "Simple mode never asks the person to design a department").toBeUndefined();
     expect(item("New chat"), "a new conversation starts from the bot panel").toBeUndefined();
-    expect(item("New Bot")).toBeDefined();
+    expect(item("New bot")).toBeDefined();
     expect(item("New group chat")).toBeDefined();
     expect(item("Templates")).toBeDefined();
     (render().tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0]).onToggle();
@@ -320,7 +322,7 @@ describe("Simple-mode sidebar layout", () => {
       const tree = render().tree;
       return (label: string) => tree.find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
     };
-    (openMenu()("New Bot")!.props.onClick as () => void)();
+    (openMenu()("New bot")!.props.onClick as () => void)();
     expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
     fixture.dispatch.mockClear();
     fixture.values = [];
@@ -332,10 +334,12 @@ describe("Simple-mode sidebar layout", () => {
     expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
   });
 
+  const railSearch = (tree: ReactElement<Props>[]) => tree.find((node) => node.type === "button" && node.props["aria-label"] === "Search bots and messages")!.props.onClick as () => void;
+
   it("opens the search pill from the rail's search button by expanding the sidebar", () => {
     setSidebarDensity("icons");
     expect(render().tree.some((node) => node.type === SidebarSearchPill)).toBe(false);
-    (render().tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0]).onSearch();
+    railSearch(render().tree)();
     const { tree } = render();
     expect(tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
     expect(tree.some((node) => node.type === SidebarSearchPill)).toBe(true);
@@ -344,9 +348,9 @@ describe("Simple-mode sidebar layout", () => {
   it("opens the command palette instead when a side panel holds the sidebar collapsed", () => {
     const opened = vi.fn();
     window.addEventListener("omb:open-command-palette", opened);
-    const footer = render(true).tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0];
+    const search = railSearch(render(true).tree);
     expect(render(true).tree.some((node) => node.type === SidebarEdgeToggle)).toBe(false);
-    footer.onSearch();
+    search();
     expect(opened).toHaveBeenCalledOnce();
     expect(render(true).tree.some((node) => node.type === SimpleRailFooter)).toBe(true);
   });
