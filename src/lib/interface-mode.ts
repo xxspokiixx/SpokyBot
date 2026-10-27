@@ -35,7 +35,13 @@ export function settleAdvancedModeDefault(): void {
   }
 }
 
+export function applyInterfaceMode(): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.interface = readAdvancedMode() ? "advanced" : "simple";
+}
+
 function notify() {
+  applyInterfaceMode();
   for (const listener of listeners) listener();
 }
 
