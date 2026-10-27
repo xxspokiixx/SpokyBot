@@ -702,6 +702,8 @@ export interface OptionCardData {
   /** The options are the whole answer: clients offer no free-text reply. */
   fixedOptions?: boolean;
   quotaSwitch?: QuotaSwitchCardData;
+  /** Asks before a bot uses the person's own computer; what its first call names, for the question in their language. */
+  yourComputer?: { app?: string; site?: string };
 }
 
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
