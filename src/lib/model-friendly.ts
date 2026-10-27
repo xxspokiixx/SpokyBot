@@ -14,6 +14,11 @@ export function modelBlurb(option: { id: string; label: string }): string | unde
   return match ? t(match[1]) : undefined;
 }
 
+export function displayModelLabel(label: string, provider: string, custom = false): string {
+  if (custom || !provider || /\d/.test(label) || label.toLowerCase().startsWith(provider.toLowerCase())) return label;
+  return `${provider} ${label}`;
+}
+
 export function shortModelLabel(label: string, family: string): string {
   const prefix = `${family} `;
   if (!family || label.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase()) return label;

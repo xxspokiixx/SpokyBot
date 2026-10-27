@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelBlurb, shortModelLabel } from "./model-friendly";
+import { displayModelLabel, modelBlurb, shortModelLabel } from "./model-friendly";
 
 describe("model blurbs", () => {
   it("describes the well-known Claude families", () => {
@@ -12,6 +12,23 @@ describe("model blurbs", () => {
     expect(modelBlurb({ id: "gpt-5-mini", label: "GPT-5 mini" })).toMatch(/light/);
     expect(modelBlurb({ id: "minimax-m2", label: "MiniMax M2" })).toBeUndefined();
     expect(modelBlurb({ id: "grok-4", label: "Grok 4" })).toBeUndefined();
+  });
+});
+
+describe("a model's name where no provider heading is beside it", () => {
+  it("puts the provider before a bare word, so the chip says what is running", () => {
+    expect(displayModelLabel("Auto", "Cursor")).toBe("Cursor Auto");
+    expect(displayModelLabel("Default", "OpenCode")).toBe("OpenCode Default");
+  });
+
+  it("keeps a name that already says it: the provider's own, a versioned one, a local one", () => {
+    expect(displayModelLabel("Claude Sonnet 5", "Claude")).toBe("Claude Sonnet 5");
+    expect(displayModelLabel("claude sonnet", "Claude")).toBe("claude sonnet");
+    expect(displayModelLabel("GPT-5.5", "OpenAI")).toBe("GPT-5.5");
+    expect(displayModelLabel("Opus 5.5", "Claude")).toBe("Opus 5.5");
+    expect(displayModelLabel("qwen3 (Ollama)", "Claude", true)).toBe("qwen3 (Ollama)");
+    expect(displayModelLabel("Llama", "pi", true)).toBe("Llama");
+    expect(displayModelLabel("Auto", "")).toBe("Auto");
   });
 });
 

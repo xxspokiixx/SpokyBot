@@ -155,6 +155,18 @@ describe("install from Settings on the server", () => {
     expect(markup).not.toContain("needs");
   });
 
+  it("keeps a quiet setup's probe reason behind Details, in plain grey, never as an alert", () => {
+    vi.stubGlobal("window", { ogb: { platform: "linux" } });
+    const reason = "`kimi` isn't installed, or isn't on this app's PATH.";
+    const engine = npmEngine({ state: "unavailable", reason });
+    const quiet = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine, quiet: true })));
+    expect(quiet).toMatch(/<details data-engine-setup-reason="true" class="[^"]*text-ink-tertiary"><summary[^>]*>Details<\/summary><p[^>]*>`kimi` isn&#x27;t installed/);
+    expect(quiet).not.toContain('role="alert"');
+    expect(quiet).not.toContain("text-danger");
+    expect(quiet).toContain("Install Kimi here");
+    expect(render(engine)).toMatch(/role="alert" class="[^"]*text-danger">`kimi` isn&#x27;t installed/);
+  });
+
   it("falls back to the terminal command when the server cannot install", () => {
     const markup = render(npmEngine({ state: "unavailable", reason: "`kimi` CLI not found" }, false));
     expect(markup).not.toContain("Install Kimi here");

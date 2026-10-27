@@ -6,9 +6,9 @@ import type { EffortLevel } from "../../shared/wire";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
-import { simpleModelMenu } from "@/lib/simple-model-menu";
+import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
-import { isTypeaheadKey, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
+import { isTypeaheadKey, TYPEAHEAD_RESET_MS, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
@@ -25,7 +25,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
 import { t } from "@/lib/i18n";
-import { COMPACT_CIRCLE, COMPACT_SQUARE } from "@/lib/compact-chip";
+import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { useAiSwitch } from "@/lib/ai-switch";
 import { usePickerPane } from "@/lib/model-picker-pane";
 import { threadsOnOwnModel } from "../../shared/thread-model";
@@ -312,12 +312,17 @@ export function ModelPicker({
       setPlacement((locked) => pickerPlacement(anchor, { width: popoverWidth, height: menu.offsetHeight }, viewport, locked ?? undefined,
         simpleView ? undefined : POPOVER_HEIGHT));
     };
+    const settled = (event: Event) => {
+      if (event.target instanceof Node && triggerRef.current && event.target.contains(triggerRef.current)) place();
+    };
     place();
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
+    window.addEventListener("animationend", settled, true);
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
+      window.removeEventListener("animationend", settled, true);
     };
   }, [open, popoverWidth, simpleView]);
 
@@ -465,11 +470,11 @@ export function ModelPicker({
     openFor(initial);
     focusOnPlace.current = "";
     setOpen(true);
-    if (!advanced) for (const instance of pickerInstances) if (instance.models.options.some((option) => option.custom)) lookForLocal(instance);
   };
 
   const openFull = (instance: InstanceInfo, keyboard: boolean) => {
     selectRail(instance);
+    setScope(simpleUpdatesBotDefault ? "bot" : "thread");
     focusOnPlace.current = keyboard ? "[data-model-back]" : MENU_ITSELF;
     setFullView(true);
   };
@@ -625,16 +630,19 @@ export function ModelPicker({
     const search = menu.querySelector<HTMLInputElement>("[data-menu-search]");
     if (target instanceof HTMLInputElement && target !== search) return;
     const rows = [...menu.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)")];
+    const below = search ? rows.filter((row) => search.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) : [];
+    const above = search ? rows.filter((row) => !below.includes(row)) : [];
     const goTo = (row: HTMLElement | undefined) => {
       handled();
       row?.focus({ preventScroll: true });
       row?.scrollIntoView?.({ block: "nearest" });
     };
     if (target === search) {
-      if (event.key === "ArrowDown") goTo(rows[0]);
+      if (event.key === "ArrowDown") goTo(below[0]);
+      else if (event.key === "ArrowUp" && above.length > 0) goTo(above.at(-1));
       else if (event.key === "Enter") {
         handled();
-        rows.find((row) => row.hasAttribute("aria-pressed") && !row.hasAttribute("data-follow-bot-model"))?.click();
+        if (query.trim()) rows.find((row) => row.hasAttribute("aria-pressed") && !row.hasAttribute("data-follow-bot-model"))?.click();
       }
       return;
     }
@@ -645,7 +653,7 @@ export function ModelPicker({
       target.click();
       return;
     }
-    if (event.key === "ArrowUp" && index === 0 && search) return goTo(search);
+    if (search && ((event.key === "ArrowUp" && target === below[0]) || (event.key === "ArrowDown" && target === above.at(-1)))) return goTo(search);
     const next = nextMenuIndex(event.key, index, rows.length);
     if (next !== null) return goTo(rows[next]);
     if (event.key === (rtl ? "ArrowLeft" : "ArrowRight") && index >= 0 && rows[index]!.matches(FORWARD_ROWS)) {
@@ -653,11 +661,13 @@ export function ModelPicker({
       rows[index]!.click();
       return;
     }
-    if (!isTypeaheadKey(event)) return;
+    const continuing = event.key === " " && typed.current !== null && event.timeStamp - typed.current.at < TYPEAHEAD_RESET_MS;
+    if (!isTypeaheadKey(event) && !continuing) return;
     if (search) {
       search.focus();
       return;
     }
+    if (continuing) handled();
     typed.current = typeaheadText(typed.current, event.key, event.timeStamp);
     const match = typeaheadMatch(rows.map((row) => row.textContent ?? ""), index, typed.current.text);
     if (match !== null) goTo(rows[match]);
@@ -679,7 +689,8 @@ export function ModelPicker({
   const summary = active
     ? `${active.displayName} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
-      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${t("model.effort.summary", { level: effortLabel(selection.effort) })}` : ""}`
+      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort
+        ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort) })}` : ""}`
     : selection.model;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
   const attentionLine = !advanced && attention ? `\n${attention}` : "";
@@ -752,18 +763,16 @@ export function ModelPicker({
       className={cn(
         "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent",
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
-        !contained && COMPACT_CIRCLE,
       )}
     >
-      <span className={cn("relative mr-1.5 flex shrink-0 group-disabled:opacity-50", !contained && "@max-4xl/chathead:mr-0")}>
+      <span className="relative mr-1.5 flex shrink-0 group-disabled:opacity-50">
         {active
           ? <InstanceProviderMark instance={active} size={14} subtle />
           : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
-      <span className={cn("max-w-[160px] truncate", !contained && "@max-4xl/chathead:sr-only")}>{modelLabel(active, selection.model)}</span>
-      <ChevronDown size={12} strokeWidth={2} aria-hidden="true"
-        className={cn("ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary", !contained && "@max-4xl/chathead:hidden")} />
+      <span className="max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
     </button>
   );
 
@@ -891,7 +900,7 @@ export function ModelPicker({
                 </div>
               ) : blocked ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-1">
-                  <EngineSetup instance={railInstance} intent={pane === "custom" ? "inject" : "cloud"} />
+                  <EngineSetup instance={railInstance} intent={pane === "custom" ? "inject" : "cloud"} quiet={!advanced} />
                   {railInstance.claudeAccount && needsSignIn(railInstance) && pane !== "custom" && (
                     <p className="mt-2 px-1.5 text-[12px] leading-4 text-ink-tertiary">
                       {railInstance.claudeAccount.signInShell === "powershell" && `${t("engines.account.powershell")} `}
@@ -1066,12 +1075,12 @@ export function ModelPicker({
           menu={simpleMenu}
           query={query}
           bot={profile}
-          botModel={{ label: modelLabel(botModelInstance, profile.modelSelection.model), title: botModelName }}
+          botModel={{ label: modelName(botModelInstance, profile.modelSelection.model), title: botModelName }}
           thinking={thinking}
           idPrefix={menuId}
           onQuery={setQuery}
           onPick={pick}
-          onPickCurrent={() => (active ? pick(active, selection.model) : close(true))}
+          onPickCurrent={() => close(true)}
           onFollowBot={pickBotModel}
           onToggle={(instance) => {
             const opening = !expanded.has(instance.instanceId);

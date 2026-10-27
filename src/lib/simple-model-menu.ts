@@ -3,7 +3,7 @@ import { needsCli, needsSignIn } from "@/components/EngineSetup";
 import { t } from "./i18n";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
 import { isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
-import { shortModelLabel } from "./model-friendly";
+import { displayModelLabel, shortModelLabel } from "./model-friendly";
 
 export type ModelOption = InstanceInfo["models"]["options"][number];
 
@@ -15,7 +15,6 @@ export interface MenuModelRow {
   option: ModelOption;
   label: string;
   route?: string;
-  botModel: boolean;
   current: boolean;
 }
 
@@ -45,6 +44,7 @@ export interface MenuGroup {
 export interface MenuCurrent {
   instance?: InstanceInfo;
   label: string;
+  title: string;
   meta?: string;
   warning: boolean;
   pending: boolean;
@@ -58,6 +58,7 @@ export interface SimpleMenu {
   query: string;
   results: number | null;
   empty: "loading" | "none" | null;
+  busy: boolean;
 }
 
 export interface SimpleMenuInput {
@@ -77,6 +78,12 @@ export function providerName(instance: InstanceInfo): string {
   if (family) return SIGN_IN_FAMILY_LABEL[family];
   if (instance.access !== "api") return instance.displayName;
   return instance.displayName.replace(/\s*\((?:API key|API)\)$/i, "") || instance.displayName;
+}
+
+export function modelName(instance: InstanceInfo | undefined, model: string): string {
+  const option = instance?.models.options.find((candidate) => candidate.id === model);
+  if (!instance || !option) return model;
+  return displayModelLabel(option.label, providerName(instance), option.custom);
 }
 
 export function repeatedModelLabels(options: readonly ModelOption[]): Set<string> {
@@ -112,7 +119,8 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const { instances, selection, bot, loading } = input;
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const option = active?.models.options.find((candidate) => candidate.id === selection.model);
-  const row = { instance: active, label: option?.label ?? selection.model, warning: false, pending: false };
+  const name = option?.label ?? selection.model;
+  const row = { instance: active, label: modelName(active, selection.model), title: active ? `${active.displayName} · ${name}` : name, warning: false, pending: false };
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
   if (active.policy) return { ...row, meta: t("policy.managedBy", { organization: active.policy.organizationName }), warning: true };
@@ -143,12 +151,11 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
     if (all.length === 0) return query ? null : signedOut ? { kind: "signIn" } : { kind: "empty", loading: input.refreshing === instance.instanceId };
     const currentId = instance.instanceId === selection.instanceId ? selection.model : undefined;
     const repeated = repeatedModelLabels(all);
-    const botModel = bot.follows !== undefined && bot.selection.instanceId === instance.instanceId ? bot.selection.model : undefined;
+    const botModel = bot.follows === false && bot.selection.instanceId === instance.instanceId ? bot.selection.model : undefined;
     const row = (option: ModelOption): MenuModelRow => ({
       option,
       label: shortModelLabel(option.label, provider),
       ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
-      botModel: option.id === botModel,
       current: option.id === currentId,
     });
     const mixed = own.length > 0 && own.length < all.length;
@@ -157,7 +164,7 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
       return rows.length === 0 ? null
         : { kind: "models", rows, total: all.length, toggle: null, localFrom: localFrom(rows, mixed), signInForOwn: false, probing: false };
     }
-    const others = all.filter((option) => option.id !== currentId);
+    const others = all.filter((option) => option.id !== currentId && option.id !== botModel);
     const suggested = suggestedModels(others, instance.models.default, undefined,
       currentId === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS);
     const rest = others.filter((option) => !suggested.includes(option));
@@ -186,5 +193,6 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
     query,
     results: query ? groups.reduce((sum, group) => sum + (group.body.kind === "models" ? group.body.rows.length : 0), 0) : null,
     empty: listed.length > 0 ? null : input.loading ? "loading" : "none",
+    busy: input.loading || input.refreshing != null,
   };
 }

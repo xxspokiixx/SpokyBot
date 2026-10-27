@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
+  advanced: false,
   instances: [] as InstanceInfo[],
+  bots: [] as Bot[],
   dispatch: vi.fn(),
   refreshModels: vi.fn(() => Promise.resolve()),
   refreshInstances: vi.fn(() => Promise.resolve()),
@@ -15,13 +17,13 @@ const fixture = vi.hoisted(() => ({
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
-    state: { instances: fixture.instances, bots: [], modelVariantSessions: {}, config: {} },
+    state: { instances: fixture.instances, bots: fixture.bots, modelVariantSessions: {}, config: {} },
     dispatch: fixture.dispatch,
     refreshInstances: fixture.refreshInstances,
     refreshModels: fixture.refreshModels,
   }),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: () => {} }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
@@ -43,6 +45,13 @@ const scout = (model = "claude-opus-5-5"): Bot => ({
   id: "scout", threadId: "thread-scout", name: "Scout", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "claude", model },
 });
+const numbered = (count: number): Option[] => Array.from({ length: count }, (_, index) => ({ id: `model-${index}`, label: `Model ${index}` }));
+/** The thread runs `threadModel` on its own; the bot's own model is `botModel`; `others` threads keep their own models too. */
+function ownModelThread(threadModel: string, botModel: string, others: Array<[string, string]> = []): Bot {
+  const own = (threadId: string, model: string) => ({ threadId, title: threadId, createdAt: 1, modelSelection: { instanceId: "claude", model }, followsBotModel: false });
+  fixture.bots = [{ ...scout(botModel), tasks: [own("thread-scout", threadModel), ...others.map(([threadId, model]) => own(threadId, model))] }];
+  return scout(threadModel);
+}
 
 let host: HTMLDivElement;
 let root: Root;
@@ -72,6 +81,8 @@ const openWith = async (key: "ArrowDown" | "click") => {
 };
 
 beforeEach(() => {
+  fixture.advanced = false;
+  fixture.bots = [];
   fixture.instances = [claude(three)];
   fixture.dispatch.mockReset();
   parentKey.mockReset();
@@ -110,6 +121,30 @@ describe("choosing a model with the keyboard", () => {
     expect(focused()).toBe(chip());
   });
 
+  it("closes on Enter right after opening, from the checked row it starts on, changing nothing", async () => {
+    render(ownModelThread("claude-sonnet-5-5", "claude-opus-5-5", [["kept", "claude-haiku-5-5"]]));
+    await openWith("ArrowDown");
+    expect(focused()?.hasAttribute("data-current-model")).toBe(true);
+    press("Enter");
+    await settle();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(menu()).toBeNull();
+    expect(focused()).toBe(chip());
+    expect(document.querySelector("[data-thread-models-notice]")).toBeNull();
+  });
+
+  it("keeps a Space inside a name being typed, instead of pressing the row it has reached", async () => {
+    render(scout("claude-sonnet-5-5"));
+    await openWith("click");
+    press("o");
+    expect(focused()?.textContent).toBe("Opus 5.5");
+    press("p");
+    expect(press(" ").defaultPrevented).toBe(true);
+    expect(focused()?.textContent).toBe("Opus 5.5");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(menu()).not.toBeNull();
+  });
+
   it("wraps around the rows, and jumps to a row by the letters typed", async () => {
     await openWith("click");
     press("ArrowUp");
@@ -137,11 +172,14 @@ describe("choosing a model with the keyboard", () => {
   });
 
   it("clears a search with Escape before closing, keeps every Escape from the panel around it, and returns focus to the chip", async () => {
-    fixture.instances = [claude(Array.from({ length: 14 }, (_, index) => ({ id: `model-${index}`, label: `Model ${index}` })))];
+    fixture.instances = [claude(numbered(14))];
     render(scout("model-0"));
     await openWith("click");
     const search = document.querySelector<HTMLInputElement>("[data-menu-search]")!;
     expect(focused()).toBe(search);
+    expect(press("Enter", search).defaultPrevented).toBe(true);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(menu()).not.toBeNull();
     type(search, "model 1");
     expect(document.querySelectorAll('[data-simple-provider] [data-menu-row]')).toHaveLength(5);
     press("Enter", search);
@@ -189,6 +227,33 @@ describe("choosing a model with the keyboard", () => {
   });
 });
 
+describe("the full picker's search and the rows around it", () => {
+  it("goes from the search to its first result and back, and up to the row above it, so Enter picks what was searched", async () => {
+    fixture.advanced = true;
+    fixture.instances = [claude(numbered(14))];
+    render(ownModelThread("model-1", "model-0"));
+    await openWith("click");
+    const search = document.querySelector<HTMLInputElement>("[data-menu-search]")!;
+    expect(focused()).toBe(search);
+    type(search, "model 5");
+    press("ArrowDown", search);
+    expect(focused()?.textContent).toContain("Model 5");
+    press("ArrowUp");
+    expect(focused()).toBe(search);
+    press("ArrowUp", search);
+    expect(focused()?.hasAttribute("data-follow-bot-model")).toBe(true);
+    press("ArrowDown");
+    expect(focused()).toBe(search);
+    press("ArrowDown", search);
+    press("Enter");
+    await settle();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: false,
+      selection: { instanceId: "claude", model: "model-5" },
+    });
+  });
+});
+
 describe("the floating menu and the pointer", () => {
   it("stays open for a click inside its portal and closes for one outside, without taking focus", async () => {
     await openWith("click");
@@ -203,6 +268,20 @@ describe("the floating menu and the pointer", () => {
     expect(menu()).toBeNull();
     expect(focused()).toBe(outside);
     outside.remove();
+  });
+
+  it("follows its chip to where it settles once the panel around it finishes sliding in", async () => {
+    let right = 980;
+    vi.spyOn(chip(), "getBoundingClientRect").mockImplementation(() =>
+      ({ left: right - 80, right, top: 40, bottom: 72, width: 80, height: 32, x: right - 80, y: 40, toJSON: () => ({}) }) as DOMRect);
+    await openWith("click");
+    expect(menu()!.style.left).toBe(`${980 - 300}px`);
+    right = 952;
+    flushSync(() => chip().parentElement!.dispatchEvent(new Event("animationend", { bubbles: true })));
+    expect(menu()!.style.left).toBe(`${952 - 300}px`);
+    right = 900;
+    flushSync(() => menu()!.dispatchEvent(new Event("animationend", { bubbles: true })));
+    expect(menu()!.style.left).toBe(`${952 - 300}px`);
   });
 
   it("moves the keyboard highlight to the row under the mouse once the keyboard is in the list", async () => {

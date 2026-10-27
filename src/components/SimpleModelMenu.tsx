@@ -38,7 +38,7 @@ export interface SimpleModelMenuProps extends SimpleMenuActions {
 const Gutter = ({ children }: { children?: ReactNode }) => <span className={MENU_GUTTER}>{children}</span>;
 const Forward = () => <ChevronRight size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />;
 
-function MenuModel({ instance, row, botName, onPick }: { instance: InstanceInfo; row: MenuModelRow; botName: string; onPick: SimpleMenuActions["onPick"] }) {
+function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
   return (
     <button
@@ -54,7 +54,6 @@ function MenuModel({ instance, row, botName, onPick }: { instance: InstanceInfo;
       <Gutter />
       <span className="min-w-0 flex-1 truncate">{row.label}</span>
       {row.route && <span data-simple-route className={MENU_META}>{row.route}</span>}
-      {row.botModel && <span data-bot-model className={MENU_META}>{t("model.simple.botsModel", { name: botName })}</span>}
       {row.current && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
     </button>
   );
@@ -89,8 +88,12 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
       ) : (
         <>
           <p className={cn(MENU_NOTE, "pl-8")}>{t("model.simple.noModels")}</p>
-          <button type="button" data-menu-row data-simple-refresh tabIndex={-1} onClick={() => props.onCheckAgain(instance)} className={MENU_ROW}>
-            <Gutter><RefreshCw size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /></Gutter>
+          <button type="button" data-menu-row data-simple-refresh tabIndex={-1} disabled={props.menu.busy} onClick={() => props.onCheckAgain(instance)} className={MENU_ROW}>
+            <Gutter>
+              {props.menu.busy
+                ? <Loader2 size={14} className="animate-spin text-ink-secondary" aria-hidden="true" />
+                : <RefreshCw size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" />}
+            </Gutter>
             <span className="min-w-0 flex-1 truncate">{t("common.checkAgain")}</span>
           </button>
         </>
@@ -101,7 +104,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
           {body.rows.map((row, index) => (
             <div key={row.option.id} className="contents">
               {index === body.localFrom && <div className={cn(MENU_LABEL, "pl-8 font-normal")}>{t("model.localModels")}</div>}
-              <MenuModel instance={instance} row={row} botName={props.bot.name} onPick={props.onPick} />
+              <MenuModel instance={instance} row={row} onPick={props.onPick} />
             </div>
           ))}
           {body.probing && (
@@ -118,7 +121,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
             </button>
           )}
           {body.toggle && (
-            <div className={cn(body.toggle === "less" && "sticky bottom-0 z-[1] -mx-1.5 bg-menu px-1.5 before:pointer-events-none before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-linear-to-t before:from-menu before:to-transparent")}>
+            <div className={cn(body.toggle === "less" && "sticky bottom-0 z-[1] -mx-1.5 bg-linear-to-b from-transparent to-menu to-[12px] px-1.5 pt-3")}>
               <button type="button" data-menu-row data-simple-show-all tabIndex={-1} aria-expanded={body.toggle === "less"}
                 onClick={() => props.onToggle(instance)} className={cn(MENU_ROW, "text-ink-secondary hover:text-ink focus:text-ink")}>
                 <Gutter />
@@ -143,33 +146,33 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
       <div className="flex h-6 items-end justify-between gap-2 px-2 pb-0.5">
         <span id={labelId} className="text-[12px] font-medium leading-4 text-ink-tertiary">{t("botSettings.simple.thinking")}</span>
         {(levels.current === undefined
-          ? <span className="text-[12px] leading-4 text-ink-tertiary">{t("model.effort.default")}</span>
+          ? <span title={t("model.simple.thinkingDefault")} className="text-[12px] leading-4 text-ink-tertiary">{t("model.effort.default")}</span>
           : (
-            <button type="button" data-simple-effort-default onClick={levels.onReset} title={t("model.effort.noLevel")}
+            <button type="button" data-simple-effort-default onClick={levels.onReset} title={t("model.simple.thinkingDefault")}
               className="-mr-1 rounded-[5px] px-1 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
               {t("model.simple.useDefault")}
             </button>
           ))}
       </div>
-      <div data-simple-effort role="group" aria-labelledby={labelId} className="grid gap-0.5 px-1 py-1"
+      <div data-simple-effort role="group" aria-labelledby={labelId} className="m-1 grid rounded-full bg-ink/[0.05] p-[3px]"
         style={{ gridTemplateColumns: `repeat(${levels.levels.length}, minmax(0, 1fr))` }}>
-          {levels.levels.map((level, index) => (
-            <button
-              key={level}
-              type="button"
-              data-effort-pill
-              aria-pressed={levels.current === level}
-              tabIndex={index === tabStop ? 0 : -1}
-              title={t("model.effort.ask", { level: effortLabel(level) })}
-              onClick={() => levels.onPick(level)}
-              className={cn(
-                "h-6 min-w-0 truncate rounded-full px-1 text-[12px] leading-4 hover:bg-ink/[0.05] hover:text-ink touch:h-8",
-                levels.current === level ? "bg-ink/[0.08] font-medium text-ink" : "text-ink-secondary",
-              )}
-            >
-              {effortLabel(level)}
-            </button>
-          ))}
+        {levels.levels.map((level, index) => (
+          <button
+            key={level}
+            type="button"
+            data-effort-pill
+            aria-pressed={levels.current === level}
+            tabIndex={index === tabStop ? 0 : -1}
+            title={t("model.simple.thinkingLevel", { level: effortLabel(level) })}
+            onClick={() => levels.onPick(level)}
+            className={cn(
+              "h-6 min-w-0 truncate rounded-full px-1 text-[12px] leading-4 transition-colors touch:h-8",
+              levels.current === level ? "bg-ink/[0.1] font-medium text-ink" : "text-ink-secondary hover:text-ink",
+            )}
+          >
+            {effortLabel(level)}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -202,61 +205,68 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
         </div>
       )}
 
-      <div data-simple-models className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1.5">
-        {current && (
-          <button
-            type="button"
-            data-menu-row
-            data-current-model
-            aria-pressed="true"
-            title={current.instance ? `${current.instance.displayName} · ${current.label}` : current.label}
-            onClick={props.onPickCurrent}
-            className={MENU_ROW}
-          >
-            <Gutter>
-              {current.instance
-                ? <InstanceProviderMark instance={current.instance} size={14} subtle />
-                : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
-            </Gutter>
-            <span className="min-w-0 flex-1 truncate">{current.label}</span>
-            {current.pending && <Loader2 size={14} className="shrink-0 animate-spin text-ink-tertiary" aria-hidden="true" />}
-            {current.meta && <span className={cn(MENU_META, current.warning && "text-warning")}>{current.meta}</span>}
-            <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />
-          </button>
-        )}
-        {menu.follow && (
-          <button type="button" data-menu-row data-follow-bot-model aria-pressed="false" tabIndex={-1} title={props.botModel.title}
-            onClick={props.onFollowBot} className={MENU_ROW}>
-            <Gutter><BotAvatar bot={props.bot} size={16} state="happy" animated={false} label="" /></Gutter>
-            <span className="min-w-0 flex-1 truncate">{t("model.useBotModel", { name: props.bot.name })}</span>
-            <span className={MENU_META}>{props.botModel.label}</span>
-          </button>
-        )}
-        {top && menu.groups.length > 0 && <div role="separator" className={MENU_SEPARATOR} />}
+      <div data-simple-models className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain",
+        menu.groups.some((group) => group.body.kind === "models" && group.body.toggle === "less") && "scroll-pt-8 scroll-pb-12")}>
+        <div className="flex flex-col gap-0.5 p-1.5">
+          {current && (
+            <button
+              type="button"
+              data-menu-row
+              data-current-model
+              aria-pressed="true"
+              title={current.title}
+              onClick={(event) => {
+                const setUp = current.warning && current.instance && !current.instance.policy ? current.instance : undefined;
+                if (setUp) props.onSetUp(setUp, event.detail === 0);
+                else props.onPickCurrent();
+              }}
+              className={MENU_ROW}
+            >
+              <Gutter>
+                {current.instance
+                  ? <InstanceProviderMark instance={current.instance} size={14} subtle />
+                  : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
+              </Gutter>
+              <span className="min-w-0 flex-1 truncate">{current.label}</span>
+              {current.pending && <Loader2 size={14} className="shrink-0 animate-spin text-ink-tertiary" aria-hidden="true" />}
+              {current.meta && <span className={cn(MENU_META, current.warning && "text-warning")}>{current.meta}</span>}
+              <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />
+            </button>
+          )}
+          {menu.follow && (
+            <button type="button" data-menu-row data-follow-bot-model aria-pressed="false" tabIndex={-1} title={props.botModel.title}
+              onClick={props.onFollowBot} className={MENU_ROW}>
+              <Gutter><BotAvatar bot={props.bot} size={16} state="happy" animated={false} label="" /></Gutter>
+              <span className="min-w-0 flex-1 truncate">{t("model.useBotModel", { name: props.bot.name })}</span>
+              <span className={MENU_META}>{props.botModel.label}</span>
+            </button>
+          )}
+          {top && menu.groups.length > 0 && <div role="separator" className={MENU_SEPARATOR} />}
 
-        {menu.groups.map((group, index) => {
-          const labelId = `${idPrefix}-group-${index}`;
-          const expanded = group.body.kind === "models" && group.body.toggle === "less";
-          return (
-            <div key={group.instance.instanceId} role="group" aria-labelledby={labelId} data-simple-provider={group.instance.instanceId}
-              className={cn("flex flex-col gap-0.5", index > 0 && "mt-1")}>
-              <div id={labelId} className={cn(MENU_LABEL, expanded && "sticky top-0 z-[1] -mx-1.5 bg-menu px-3.5")}>
-                <Gutter><InstanceProviderMark instance={group.instance} size={14} subtle /></Gutter>
-                <span className="min-w-0 truncate">{group.label}</span>
+          {menu.groups.map((group, index) => {
+            const labelId = `${idPrefix}-group-${index}`;
+            const expanded = group.body.kind === "models" && group.body.toggle === "less";
+            return (
+              <div key={group.instance.instanceId} role="group" aria-labelledby={labelId} data-simple-provider={group.instance.instanceId}
+                className={cn("flex flex-col gap-0.5", index > 0 && "mt-1")}>
+                <div id={labelId} className={cn(MENU_LABEL, expanded && "sticky top-0 z-[1] -mx-1.5 bg-menu px-3.5")}>
+                  <Gutter><InstanceProviderMark instance={group.instance} size={14} subtle /></Gutter>
+                  <span className="min-w-0 truncate">{group.label}</span>
+                </div>
+                <GroupBody group={group} props={props} />
               </div>
-              <GroupBody group={group} props={props} />
-            </div>
-          );
-        })}
+            );
+          })}
 
-        {menu.empty === "loading" && (
-          <div role="status" className={cn(MENU_LINE, "text-ink-tertiary")}>
-            <Gutter><Loader2 size={14} className="animate-spin" aria-hidden="true" /></Gutter>
-            <span className="min-w-0 flex-1 truncate">{t("model.simple.lookingModels")}</span>
-          </div>
-        )}
-        {menu.empty === "none" && <p className={cn(MENU_NOTE, !top && "pt-2")}>{t("model.noProviders")}</p>}
-        {menu.results === 0 && <p className={cn(MENU_NOTE, "py-2")}>{t("model.noMatch", { query: menu.query })}</p>}
+          {menu.empty === "loading" && (
+            <div role="status" className={cn(MENU_LINE, "text-ink-tertiary")}>
+              <Gutter><Loader2 size={14} className="animate-spin" aria-hidden="true" /></Gutter>
+              <span className="min-w-0 flex-1 truncate">{t("model.simple.lookingModels")}</span>
+            </div>
+          )}
+          {menu.empty === "none" && <p className={cn(MENU_NOTE, !top && "pt-2")}>{t("model.noProviders")}</p>}
+          {menu.results === 0 && <p className={cn(MENU_NOTE, "py-2")}>{t("model.noMatch", { query: menu.query })}</p>}
+        </div>
       </div>
 
       <div data-simple-effort-band className="flex shrink-0 flex-col gap-0.5 border-t-[0.5px] border-ink/10 p-1.5">

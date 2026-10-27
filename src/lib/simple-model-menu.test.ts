@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { InstanceInfo, ModelSelection } from "@/state/store";
-import { simpleModelMenu, SIMPLE_SEARCH_AFTER } from "./simple-model-menu";
+import { modelName, simpleModelMenu, SIMPLE_SEARCH_AFTER } from "./simple-model-menu";
 
 vi.hoisted(() => {
   vi.stubGlobal("window", {});
@@ -54,7 +54,7 @@ const body = (built: Menu, index = 0) => built.groups[index]!.body;
 describe("the Simple model menu", () => {
   it("puts the current model on top, then the rest of its provider under a heading, in short names", () => {
     const built = menu([claude()]);
-    expect(built.current).toMatchObject({ label: "Claude Sonnet 5", warning: false, pending: false });
+    expect(built.current).toMatchObject({ label: "Claude Sonnet 5", title: "Claude · Claude Sonnet 5", warning: false, pending: false });
     expect(built.current!.meta).toBeUndefined();
     expect(built.groups.map((group) => group.label)).toEqual(["Claude"]);
     expect(rows(built)).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
@@ -146,18 +146,47 @@ describe("the Simple model menu", () => {
     expect(body(menu([withLocal], { probing: new Set(["claude"]) }))).toMatchObject({ probing: false });
   });
 
-  it("tells same-named models apart by their route and tags the bot's own model", () => {
+  it("tells same-named models apart by their route", () => {
     const routes = engine("pi", "piAgent", "pi", "custom", [
       { id: "anthropic/sonnet", label: "Claude Sonnet 4.5", custom: true, provider: "anthropic" },
       { id: "bedrock/sonnet", label: "Claude Sonnet 4.5", custom: true, provider: "amazon-bedrock" },
       { id: "openai/gpt", label: "GPT-5.6", custom: true, provider: "openai" },
     ]);
-    const built = menu([claude(), routes], { bot: { name: "Pepper", selection: { instanceId: "pi", model: "openai/gpt" }, follows: false } });
-    const piRows = (built.groups[1]!.body as Extract<Menu["groups"][number]["body"], { kind: "models" }>).rows;
-    expect(piRows.map((row) => [row.label, row.route, row.botModel])).toEqual([
-      ["Claude Sonnet 4.5", "anthropic", false], ["Claude Sonnet 4.5", "amazon-bedrock", false], ["GPT-5.6", undefined, true],
+    const piRows = (menu([claude(), routes]).groups[1]!.body as Extract<Menu["groups"][number]["body"], { kind: "models" }>).rows;
+    expect(piRows.map((row) => [row.label, row.route])).toEqual([
+      ["Claude Sonnet 4.5", "anthropic"], ["Claude Sonnet 4.5", "amazon-bedrock"], ["GPT-5.6", undefined],
     ]);
-    expect(built.follow).toBe(true);
+  });
+
+  it("offers the bot's model to a thread on its own once, in the follow row, not again in its provider", () => {
+    const own = menu([claude(), codex], { bot: { name: "Pepper", selection: { instanceId: "codex", model: "gpt-5.6" }, follows: false } });
+    expect(own.follow).toBe(true);
+    expect(rows(own, 1)).toEqual(["GPT-5.6 mini", "GPT-5.5"]);
+    const onlyModel = menu([claude(), cursor], { bot: { name: "Pepper", selection: { instanceId: "cursor", model: "auto" }, follows: false } });
+    expect(onlyModel.groups.map((group) => group.label)).toEqual(["Claude"]);
+    expect(rows(menu([claude(), codex], { bot: { name: "Pepper", selection: { instanceId: "codex", model: "gpt-5.6" } } }), 1))
+      .toEqual(["GPT-5.6", "GPT-5.6 mini", "GPT-5.5"]);
+    const router = engine("router", "openai-compat", "OpenRouter", "api", [1, 2, 3, 4].map((index) => ({ id: `r-${index}`, label: `Router ${index}` })));
+    const searched = menu([claude(), codex, router], { query: "gpt-5.6", bot: { name: "Pepper", selection: { instanceId: "codex", model: "gpt-5.6" }, follows: false } });
+    expect(searched.follow).toBe(false);
+    expect(rows(searched)).toEqual(["GPT-5.6", "GPT-5.6 mini"]);
+  });
+
+  it("names a model the catalog calls by one bare word with its provider, wherever no heading is beside it", () => {
+    const auto = menu([claude(), cursor], { selection: { instanceId: "cursor", model: "auto" } });
+    expect(auto.current).toMatchObject({ label: "Cursor Auto", title: "Cursor · Auto" });
+    expect(modelName(cursor, "auto")).toBe("Cursor Auto");
+    expect(modelName(claude(), "sonnet-5")).toBe("Claude Sonnet 5");
+    expect(modelName(codex, "gpt-5.6")).toBe("GPT-5.6");
+    expect(modelName(pi, "llama")).toBe("Llama 4");
+    expect(modelName(undefined, "gone-model")).toBe("gone-model");
+    expect(modelName(cursor, "gone-model")).toBe("gone-model");
+  });
+
+  it("is busy while the menu reads its providers or one provider's models", () => {
+    expect(menu([claude()]).busy).toBe(false);
+    expect(menu([claude()], { loading: true }).busy).toBe(true);
+    expect(menu([claude()], { refreshing: "claude" }).busy).toBe(true);
   });
 
   it("says on the current model when the thread follows its bot, and offers no follow row then", () => {
