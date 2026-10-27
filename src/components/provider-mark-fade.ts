@@ -11,7 +11,8 @@ export function providerMarkTone(instance: Pick<InstanceInfo, "driverKind" | "ic
   return BRAND_DRIVERS.has(instance.driverKind) ? "brand" : "mono";
 }
 
+// A focused row lifts the mark like a hovered one. A touch screen has no hover, so it keeps the mark at rest.
 export const FADED_PROVIDER_MARK: Record<ProviderMarkTone, string> = {
-  brand: "opacity-60 group-hover:opacity-100",
-  mono: "[--color-ink:var(--color-ink-tertiary)] [--color-ink-secondary:var(--color-ink-tertiary)] group-hover:[--color-ink:inherit] group-hover:[--color-ink-secondary:inherit]",
+  brand: "opacity-60 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-60",
+  mono: "[--color-ink:var(--color-ink-tertiary)] [--color-ink-secondary:var(--color-ink-tertiary)] group-hover:[--color-ink:inherit] group-hover:[--color-ink-secondary:inherit] group-focus-within:[--color-ink:inherit] group-focus-within:[--color-ink-secondary:inherit]",
 };
