@@ -3519,7 +3519,6 @@
   "botPanel.apps.intro": "Switch on the apps {name} may use. Everything else stays off.",
   "botPanel.apps.connectAnother": "Connect another app",
   "botPanel.routinesOn": "{count} on",
-  "botPanel.routines.add": "Add a routine",
   "botPanel.routines.ask": "Or just ask {name} in chat: “every weekday at 8, send me a summary”.",
   "botPanel.memoryRow": "What it remembers",
   "botPanel.memory.note": "1 note",
