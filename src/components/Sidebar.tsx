@@ -108,7 +108,7 @@ import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, at
 import { SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
-import { AvatarActivityDot, PreviewDot, RowStatusText, rowSurface } from "./SidebarRowMarkers";
+import { AvatarActivityDot, RowDot, RowStatusText, rowSurface } from "./SidebarRowMarkers";
 
 
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
@@ -215,14 +215,15 @@ export function GroupListItem({
     >
       <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} />
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
-        <div className="flex items-baseline justify-between gap-2">
+        <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pr-7")}>
           <span className={cn("truncate text-[14px] text-ink", simpleRow ? "font-medium leading-5" : "font-semibold")}>{group.name}</span>
           {advanced && selected && last && !expanded && <span className="shrink-0 text-[10px] text-ink-secondary">{formatTime(last.at)}</span>}
           {!simpleRow && (expanded || (quiet && !groupStatus)) && group.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
+          {simpleRow && !expanded && group.unread && <RowDot />}
         </div>
         {!expanded && (!quiet || groupStatus) && <div className="flex items-center justify-between gap-2">
           <span className={cn("truncate text-ink-secondary", simpleRow ? "text-[13px] leading-[18px]" : "text-[11px]")}>{group.description || groupPreview(group, state.bots, state.instances, advanced)}</span>
-          {group.unread && (simpleRow ? <PreviewDot /> : <span className="size-2 shrink-0 rounded-full bg-accent" />)}
+          {!simpleRow && group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>}
         {simpleRow && <RowStatusText unread={group.unread} />}
       </div>
@@ -810,7 +811,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         )}
       </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
-        <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "group-hover:pr-7 group-focus-within:pr-7 max-md:pr-7 touch:pr-7")}>
+        <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pr-7")}>
           <span className={cn("flex min-w-0 grow items-center gap-1.5 truncate text-ink", simpleRow ? "text-[14px] font-medium leading-5" : "text-[15px] font-semibold leading-5")}>
             {!simpleList && bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
             <RenameTitle
@@ -856,6 +857,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           {simpleList && density === "compact" && <BotEngineMark bot={bot} instances={instances} className="self-center" />}
           {(expanded || (quiet && !statusLine)) && unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
           {!renaming && <span className="flex shrink-0 self-center"><OwnerFace bot={bot} /></span>}
+          {simpleRow && (unread || waiting) && <RowDot waiting={waiting} />}
         </div>
         {(!expanded || deleting) && (!quiet || statusLine) && <div className="flex items-center justify-between gap-2">
           {deleting ? (
@@ -879,7 +881,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           )}
           {!simpleList && density === "comfortable" && <span className="contents max-md:hidden"><BotModelMark bot={bot} instances={instances} /></span>}
           {simpleRow && <BotEngineMark bot={bot} instances={instances} className="ms-auto" />}
-          {simpleRow ? (unread || waiting) && <PreviewDot waiting={waiting} /> : unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
+          {!simpleRow && unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>}
         {simpleRow && <RowStatusText working={working} unread={unread} />}
       </div>

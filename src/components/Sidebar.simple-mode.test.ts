@@ -144,7 +144,7 @@ describe("bot-first sidebar", () => {
     expect(renderToStaticMarkup(createElement(BotListItem, rowProps(density)))).not.toContain('data-testid="bot-role"');
   });
 
-  it("ends a Simple row's preview line with its engine's mark, faded, before the unread dot, and keeps the line still on hover", () => {
+  it("ends a Simple row's preview line with its engine's faded mark, puts the unread dot at the name line's top right where ⋯ shows, and never moves the name", () => {
     fixture.showThreads = false;
     fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
     const candidate = { ...bot, tasks: [], projects: [], unread: true, messages: [{ id: "m", role: "bot", kind: "text", text: "Done.", at: 1 }] } as Bot;
@@ -153,13 +153,15 @@ describe("bot-first sidebar", () => {
     const markup = renderToStaticMarkup(createElement(Capture));
     const line = markup.slice(markup.indexOf(">Done.<"));
     expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge" role="img" aria-label="Model: [^"]+ \(Claude\)" class="[^"]*\bms-auto\b[^"]*"><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
-    expect(line.indexOf("data-provider-mark")).toBeLessThan(line.indexOf('data-testid="unread-dot"'));
-    expect(line).toMatch(/<span aria-hidden="true" data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/div><span class="sr-only">Unread<\/span>/);
+    expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge"[^>]*><span data-provider-mark="brand"[^>]*><svg[\s\S]*?<\/svg><\/span><\/span><\/div><span class="sr-only">Unread<\/span>/);
+    const name = markup.slice(markup.indexOf('class="flex items-baseline justify-between gap-2 pr-7"'), markup.indexOf(">Done.<"));
+    expect(name).toMatch(/<span aria-hidden="true" data-row-dot="" class="pointer-events-none absolute right-2 top-1 flex size-7 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden"><span data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/span>/);
+    expect(name).toContain('<span aria-hidden="true" title="Unread" class="size-2 shrink-0 rounded-full bg-accent hidden self-center max-md:block touch:block"></span>');
     expect(markup.match(/data-provider-mark=/g)).toHaveLength(1);
     expect(line.slice(0, line.indexOf("data-provider-mark"))).not.toContain("title=");
     expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
-    expect(markup).toContain("group-hover:pr-7");
-    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\btop-1\b[^"]*\btranslate-y-0\b/);
+    expect(markup).not.toContain("group-hover:pr-7");
+    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bright-2 top-1 translate-y-0\b/);
   });
 
   it("fades the collapsed rail's engine badge in Simple mode and leaves Advanced's at full strength", () => {
@@ -206,16 +208,18 @@ describe("bot-first sidebar", () => {
     const simple = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
     expect(simple).toContain("[--row:var(--color-raised)]");
     expect(simple).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-none opacity-0 group-hover:pointer-events-auto/);
-    expect(simple).toContain('class="flex items-baseline justify-between gap-2 group-hover:pr-7 group-focus-within:pr-7 max-md:pr-7 touch:pr-7"');
+    expect(simple).toContain('class="flex items-baseline justify-between gap-2 pr-7"');
     fixture.advanced = true;
     expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-auto opacity-100/);
   });
 
-  it("marks an unread Simple group chat with the one quiet dot at the end of its preview, said once for a screen reader", () => {
+  it("marks an unread Simple group chat with the same top-right dot as a bot row, said once for a screen reader", () => {
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: true, createdAt: 1 };
     const markup = renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }));
-    expect(markup.match(/rounded-full bg-accent/g)).toHaveLength(1);
-    expect(markup).toMatch(/data-testid="unread-dot"[^>]*><\/span><\/div><span class="sr-only">Unread<\/span>/);
+    const name = markup.slice(markup.indexOf('class="flex items-baseline justify-between gap-2 pr-7"'));
+    expect(name.indexOf('data-row-dot=""')).toBeLessThan(name.indexOf("</div>"));
+    expect(markup.match(/data-testid="unread-dot"/g)).toHaveLength(1);
+    expect(markup).toContain('<span class="sr-only">Unread</span>');
   });
 
   it("draws no engine mark for a bot with no AI yet, in a group chat, or in Advanced mode, where the full mark stays", () => {
