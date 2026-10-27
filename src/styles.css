@@ -1558,18 +1558,10 @@ body {
 .stagger > * {
   animation-delay: calc(var(--stagger, 40ms) * var(--i, 0));
 }
-/* The welcome tour morphs one card between beats with the View Transitions
-   API: the card, the mascot and the title keep their names, so the browser
-   moves and resizes them instead of cross-fading two cards. Everything
-   else cross-fades under the new beat, which rises in on its own. */
-.welcome-card { view-transition-name: welcome-card; }
-.welcome-maus { view-transition-name: welcome-maus; }
-.welcome-title { view-transition-name: welcome-title; }
-::view-transition-group(welcome-card),
-::view-transition-group(welcome-maus),
-::view-transition-group(welcome-title) {
-  animation-duration: 0.42s;
-  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+/* The first run's Chief screen dims the app as a sheet does: half in a light skin, deeper in a dark one. */
+.welcome-scrim { background: rgb(0 0 0 / 0.5); }
+@container style(--code-color-scheme: dark) {
+  .welcome-scrim { background: rgb(0 0 0 / 0.7); }
 }
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -1694,7 +1686,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 :root[data-reduced-motion="true"] .step-open,
 :root[data-reduced-motion="true"] .check-in,
 :root[data-reduced-motion="true"] .progress-fill,
-:root[data-reduced-motion="true"] .welcome-card * {
+:root[data-reduced-motion="true"] .welcome-screen * {
   animation: none !important;
   transition: none !important;
 }
