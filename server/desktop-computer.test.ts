@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -87,7 +87,8 @@ describe("this computer, only for the desktop app's own server", () => {
       }
     };
     walk(join(ROOT, "server"));
-    const uses = (needle: string) => sources.filter((path) => readFileSync(path, "utf8").includes(needle)).map((path) => relative(ROOT, path));
+    const uses = (needle: string) => sources.filter((path) => readFileSync(path, "utf8").includes(needle))
+      .map((path) => relative(ROOT, path).split(sep).join("/"));
     expect(uses("desktopComputer.receive(")).toEqual(["server/index.ts"]);
     const index = readFileSync(join(ROOT, "server/index.ts"), "utf8");
     const listener = index.slice(index.indexOf("utilityParentPort?.on(\"message\""), index.indexOf("const quickFallback"));
