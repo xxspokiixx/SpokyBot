@@ -6,7 +6,7 @@ import { MAUS_COLORS, type MausColor } from "@/lib/mascot";
 import { Switch } from "../SettingsPrimitives";
 
 export const rowCls = "flex min-h-[46px] items-center gap-2.5 px-3.5 py-[11px]";
-export const roundButtonCls = "flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink hover:bg-ink/[0.11] max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card";
+export const roundButtonCls = "flex size-[34px] shrink-0 items-center justify-center rounded-full bg-composer text-ink ring-[0.5px] ring-ink/10 transition-colors hover:bg-[color-mix(in_srgb,var(--color-composer)_92%,var(--color-ink))]";
 const titleCls = "text-[14px] font-medium text-ink";
 const hintCls = "mt-px text-[13px] leading-[1.35] text-ink-secondary";
 export const buttonCls =

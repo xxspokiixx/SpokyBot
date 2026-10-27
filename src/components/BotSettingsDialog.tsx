@@ -167,7 +167,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className={sidePanelCls(overlay)}
+        className={sidePanelCls(overlay, simpleView)}
       >
         {simpleView ? (
           <BotPanel

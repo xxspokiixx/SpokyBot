@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -127,5 +128,25 @@ describe("the scroll fade", () => {
     expect(html).toContain('<div data-glass-bar="top" class="glass-bar absolute inset-x-0 z-10 top-0">head</div>');
     expect(html).toContain('<div class="glass-scroller h-full overflow-y-auto"><div class="glass-scroller-content">rows</div></div>');
     expect(html).not.toContain("data-scroll-fade-edge");
+  });
+});
+
+describe("a fading bar", () => {
+  const css = readFileSync("src/styles.css", "utf8");
+  const rule = (selector: string) => css.match(new RegExp(`(?:^|\\n)${selector.replace(/[[\]().:"]/g, "\\$&")} \\{[^}]*\\}`))?.[0] ?? "";
+
+  it("marks itself, and a plain bar stays glass", () => {
+    const fading = renderToStaticMarkup(createElement(GlassBar, { edge: "top", fade: true, children: "x" }));
+    const glass = renderToStaticMarkup(createElement(GlassBar, { edge: "top", children: "x" }));
+    expect(fading).toContain('data-glass-fade=""');
+    expect(glass).not.toContain("data-glass-fade");
+  });
+
+  it("fades into the canvas with no tint or blur: hidden at the edge, full strength over its last 60px", () => {
+    const fade = rule('.glass-bar[data-glass-fade]::before');
+    expect(fade).toContain("linear-gradient(to bottom, var(--color-app), var(--color-app) calc(100% - var(--glass-fade)), transparent)");
+    expect(fade).toMatch(/[^-]backdrop-filter: none/);
+    expect(fade).toContain("mask-image: none");
+    expect(rule('.glass-bar[data-glass-fade]')).toContain("--glass-fade: 60px");
   });
 });

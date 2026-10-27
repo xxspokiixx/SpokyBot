@@ -85,12 +85,14 @@ export function GlassScrollFrame({ className, children, fade = false, ...rest }:
   );
 }
 
-export function GlassBar({ edge, className, children, ...rest }: HTMLAttributes<HTMLDivElement> & { edge: GlassEdge; children: ReactNode }) {
-  const fade = useContext(FadeFrame);
+/** `fade` trades the glass for a plain fade into the canvas: what scrolls under the bar melts away towards the edge. */
+export function GlassBar({ edge, fade, className, children, ...rest }: HTMLAttributes<HTMLDivElement> & { edge: GlassEdge; fade?: boolean; children: ReactNode }) {
+  const stacked = useContext(FadeFrame);
   return (
     <div
       data-glass-bar={edge}
-      className={cn(fade ? "relative z-10 shrink-0" : cn("glass-bar absolute inset-x-0 z-10", edge === "top" ? "top-0" : "bottom-0"), className)}
+      data-glass-fade={fade ? "" : undefined}
+      className={cn(stacked ? "relative z-10 shrink-0" : cn("glass-bar absolute inset-x-0 z-10", edge === "top" ? "top-0" : "bottom-0"), className)}
       {...rest}
     >
       {children}

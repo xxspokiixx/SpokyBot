@@ -4,12 +4,14 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Bot, BotSettingsSection } from "@/state/store";
-import { ChatMoreMenu } from "@/components/ChatMoreMenu";
+import { ChatShareMenu } from "@/components/ChatMoreMenu";
 import { useCaptionChrome } from "../DesktopCapabilities";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { AvatarEditorCard } from "./AvatarEditorCard";
-import { BotTab } from "./BotTab";
+import { BotConversations } from "./Conversations";
 import { ComputerTab } from "./ComputerTab";
+import { DetailsTab } from "./DetailsTab";
+import { LibraryTab } from "./LibraryTab";
 import { PANEL_TABS, PAGES, TAB_LABEL, type PanelTab, type PanelTarget, type SimplePageId } from "./page-registry";
 import { PageBody, pageSurfaceCls } from "./pages";
 import { linkTarget, usePanelLink, type PanelLink } from "./panel-link";
@@ -17,7 +19,7 @@ import { PanelHero } from "./PanelHero";
 import { PageHeader, roundButtonCls } from "./rows";
 
 function initialTarget(section: BotSettingsSection | null, link: PanelLink | null): PanelTarget {
-  return section ? linkTarget(section, link) : { tab: "bot" };
+  return section ? linkTarget(section, link) : { tab: "details" };
 }
 
 export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose }: {
@@ -96,8 +98,8 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKeyDown}>
-      <div {...dragProps} className={cn("flex h-[52px] shrink-0 items-center justify-end gap-2 px-3.5", headerClassName)}>
-        <ChatMoreMenu bot={bot} />
+      <div {...dragProps} className={cn("flex h-[50px] shrink-0 items-start justify-end gap-2.5 px-[13px] pt-[13px]", headerClassName)}>
+        <ChatShareMenu bot={bot} className={roundButtonCls} />
         <button type="button" onClick={onClose} aria-label={t("botSettings.simple.close")} className={roundButtonCls}>
           <X size={16} className="pointer-events-none" />
         </button>
@@ -106,7 +108,7 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
       <div ref={bodyRef} className="@container relative min-h-0 flex-1 overflow-y-auto px-5 pb-7">
         {page === null ? (
           <>
-            <div className="relative" ref={editorRef}>
+            <div className="relative mt-3.5" ref={editorRef}>
               <PanelHero
                 bot={bot}
                 activeState={derived.activeState}
@@ -121,7 +123,7 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
                 </>
               )}
             </div>
-            <div role="tablist" aria-label={t("botSettings.simple.tabs")} className="mt-4 flex justify-center gap-1">
+            <div role="tablist" aria-label={t("botSettings.simple.tabs")} className="-mx-3 mt-[15px] flex justify-center">
               {PANEL_TABS.map((id) => (
                 <button
                   key={id}
@@ -131,8 +133,8 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
                   data-panel-tab={id}
                   onClick={() => openTab(id)}
                   className={cn(
-                    "min-w-0 truncate rounded-full px-[13px] py-1.5 text-[14px] transition-colors @max-[20rem]:px-2 @max-[20rem]:text-[13px]",
-                    tab === id ? "bg-ink/[0.07] font-medium text-ink" : "text-ink-secondary hover:text-ink",
+                    "h-7 min-w-0 shrink truncate rounded-full px-[7px] text-[14px] transition-colors",
+                    tab === id ? "bg-ink/[0.06] text-ink" : "text-ink-secondary hover:text-ink",
                   )}
                 >
                   {t(TAB_LABEL[id])}
@@ -140,8 +142,8 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
               ))}
             </div>
             <div role="tabpanel">
-              {tab === "bot" && (
-                <BotTab
+              {tab === "details" && (
+                <DetailsTab
                   bot={bot}
                   derived={derived}
                   editingInstructions={editingInstructions}
@@ -149,6 +151,8 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
                   onOpen={openPage}
                 />
               )}
+              {tab === "conversations" && <BotConversations bot={bot} />}
+              {tab === "library" && <LibraryTab bot={bot} />}
               {tab === "computer" && <ComputerTab bot={bot} derived={derived} onOpen={openPage} />}
             </div>
           </>

@@ -1,5 +1,6 @@
 import { Children, isValidElement, useMemo, type ReactElement, type ReactNode } from "react";
-import { RichTable, type TableCell, type TableColumn } from "./RichTable";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { PLAIN_TABLE_MAX_ROWS, PlainTable, RichTable, type TableCell, type TableColumn } from "./RichTable";
 
 type Element = ReactElement<{ children?: ReactNode; align?: string; alt?: string }>;
 const elements = (children: ReactNode): Element[] => Children.toArray(children).filter(isValidElement) as Element[];
@@ -14,6 +15,7 @@ function plain(node: ReactNode): string {
 
 /** Security: keeps react-markdown's already-sanitized cell children; never renders model-authored raw HTML. */
 export function MarkdownTable({ children, direction }: { children?: ReactNode; direction?: "rtl" | "ltr" }) {
+  const advanced = useAdvancedMode();
   const data = useMemo(() => {
     const sections = elements(children);
     const head = sections.find((section) => section.type === "thead");
@@ -25,5 +27,5 @@ export function MarkdownTable({ children, direction }: { children?: ReactNode; d
     const rows = elements(body?.props.children).map((row) => elements(row.props.children).map(cell));
     return { columns, rows };
   }, [children]);
-  return <RichTable {...data} direction={direction} />;
+  return !advanced && data.rows.length <= PLAIN_TABLE_MAX_ROWS ? <PlainTable {...data} direction={direction} /> : <RichTable {...data} direction={direction} />;
 }

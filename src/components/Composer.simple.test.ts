@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Simple mode's composer: a round + holding attach, Finish together, the thread's approval level and the call mode,
-// and a round call button in the bot's colour. Advanced mode keeps its row of buttons.
+// Simple mode's composer: one pill with a round + (attach; in a room also Finish together), chips for a mode while it is
+// not the default, and one round button in the bot's colour that calls, sends or stops. Advanced keeps its row of buttons.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { MAUS_COLORS } from "@/lib/mascot";
-import { onCallStartRequest } from "@/lib/call-start-request";
 import { setCallMode } from "@/lib/call-mode";
 
 const fixture = vi.hoisted(() => ({
@@ -59,7 +58,8 @@ let root: Root;
 let container: HTMLDivElement;
 const render = (props: Parameters<typeof Composer>[0]) => flushSync(() => root.render(createElement(Composer, props)));
 const plus = () => container.querySelector<HTMLElement>("[data-composer-plus]")?.closest("button") ?? null;
-const menu = () => document.body.querySelector<HTMLElement>('[data-sidebar-popover-menu="anchored"]');
+const menu = () => document.body.querySelector<HTMLElement>("[data-composer-menu]");
+const popover = () => document.body.querySelector<HTMLElement>('[data-sidebar-popover-menu="anchored"]');
 const item = (key: string) => document.body.querySelector<HTMLButtonElement>(`[data-menu-key="${key}"]`);
 const click = (element: Element | null) => {
   if (!element) throw new Error("nothing to click");
@@ -93,24 +93,39 @@ afterEach(() => {
 });
 
 describe("the Simple composer in a bot chat", () => {
-  it("puts attach, work until done and the approval level behind a round +, and fills the call button with the bot's colour", () => {
+  it("is one pill: a round + that attaches, the field, and one round button in the bot's colour", () => {
     render({ bot });
     expect(plus()?.getAttribute("aria-label")).toBe("Add");
+    const pill = container.querySelector('[data-tour="composer"]')!.className.split(" ");
+    expect(pill).toEqual(expect.arrayContaining(["rounded-[22px]", "bg-composer", "p-2", "ring-[0.5px]"]));
+    expect(pill.some((name) => name.startsWith("shadow"))).toBe(false);
+    expect(container.querySelector("[data-composer-row]")!.className).not.toContain("flex-wrap");
+    expect(container.querySelector("[data-composer-plus]")!.className.split(" ")).toContain("size-7");
     expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();
-    expect(container.querySelector('[aria-label^="Ask for approval for"]')).toBeNull();
     expect(container.querySelector('[aria-label="Work until done"]')).toBeNull();
+    expect(container.querySelector("[data-approval-chip]")).toBeNull();
     expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer", fill: MAUS_COLORS.purple });
     openPlus();
-    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key")))
-      .toEqual(["attach", "goal", "approval", "call:turns", "call:live"]);
-    expect(menu()!.textContent).toContain("Work until done");
-    expect(menu()!.textContent).toContain("Before Atlas acts");
-    expect(menu()!.textContent).toContain("Call mode");
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach"]);
+    expect(menu()!.textContent).toBe("Attach files");
+    const row = menu()!.querySelector("[data-menu-key='attach']")!.className.split(" ");
+    expect(row).toEqual(expect.arrayContaining(["h-[34px]", "text-[15px]"]));
+    expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["rounded-[14px]", "w-[200px]"]));
   });
 
-  it("leaves the area behind and below the composer see-through, with no solid backdrop", () => {
+  it("rounds its corners in from 22 to 18 once the message takes a second line", () => {
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "one\ntwo", attachments: [] });
     render({ bot });
-    expect(container.querySelector("[data-composer-backdrop]")).toBeNull();
+    const pill = container.querySelector('[data-tour="composer"]')!;
+    expect(pill.hasAttribute("data-multiline")).toBe(true);
+    expect(pill.className.split(" ")).toContain("rounded-[18px]");
+  });
+
+  it("sets the composer on plain canvas from its top edge down, with no fade above it", () => {
+    render({ bot });
+    const backdrop = container.querySelector("[data-composer-backdrop]")!.className.split(" ");
+    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-left-5", "-right-5"]));
+    expect(backdrop.some((name) => /gradient|blur|^from-|^to-|^opacity/.test(name))).toBe(false);
   });
 
   it("attaches through the same file picker as the paperclip", () => {
@@ -122,41 +137,54 @@ describe("the Simple composer in a bot chat", () => {
     expect(plus()?.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("starts the call in the chosen mode through the call button, as its mode menu did", () => {
-    const started = vi.fn();
-    const stop = onCallStartRequest("atlas", started);
+  it("turns its round button into Send while there is text, in the bot's colour", () => {
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "hello", attachments: [] });
     render({ bot });
-    openPlus();
-    click(item("call:live"));
-    expect(started).toHaveBeenCalledExactlyOnceWith("live");
-    stop();
+    const send = container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!;
+    expect(send.className.split(" ")).toContain("size-7");
+    expect(send.style.backgroundColor).not.toBe("");
+    expect(fixture.call).toBeNull();
   });
 
-  it("offers no call while Live is the mode and its line is held on another device, as the hidden call button", () => {
-    const started = vi.fn();
-    const stop = onCallStartRequest("atlas", started);
-    setCallMode("live");
-    fixture.liveCall = { callId: "phone-call", botId: "atlas", threadId: "atlas-thread", client: "ios", voice: "marin", startedAt: 1, status: "live" };
-    render({ bot });
-    openPlus();
-    for (const key of ["call:turns", "call:live"]) {
-      expect(item(key)?.disabled, key).toBe(true);
-      click(item(key));
-    }
-    expect(started).not.toHaveBeenCalled();
-    stop();
+  it("turns its round button into Stop while the bot works, and keeps a quiet Stop beside Send while you type", () => {
+    const busy = { ...bot, busy: true };
+    render({ bot: busy });
+    const slot = container.querySelector<HTMLButtonElement>('[data-composer-stop="slot"]')!;
+    expect(slot.getAttribute("aria-label")).toBe("Stop this turn");
+    expect(slot.style.backgroundColor).not.toBe("");
+    expect(fixture.call).toBeNull();
+    click(slot);
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
+
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and also this", attachments: [] });
+    render({ bot: busy });
+    expect(container.querySelector('[data-composer-stop="beside"]')).not.toBeNull();
+    expect(container.querySelector('[data-composer-stop="slot"]')).toBeNull();
   });
 
-  it("changes this thread's approval level from the submenu", () => {
+  it("shows the approval level as a chip only while it is not the default, and changes this thread's level from it", () => {
     render({ bot });
-    openPlus();
-    click(item("approval"));
-    const submenu = document.body.querySelector<HTMLElement>("[data-sidebar-popover-submenu]")!;
-    expect(submenu.textContent).toContain("Command allowlist");
-    const ask = submenu.querySelector('[data-menu-key="approval:ask"]')!;
-    expect(ask.querySelector(".lucide-check")).not.toBeNull();
-    click(submenu.querySelector('[data-menu-key="approval:full"]'));
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "atlas", threadId: "atlas-thread", patch: { approvalMode: "full" } });
+    expect(container.querySelector("[data-approval-chip]")).toBeNull();
+    render({ bot: { ...bot, approvalMode: "full" } });
+    const chip = container.querySelector("[data-approval-chip]")!;
+    expect(chip.getAttribute("data-approval-chip")).toBe("full");
+    expect(chip.textContent).toBe("Full access");
+    click(chip.closest("button"));
+    const level = popover()!;
+    expect(level.textContent).toContain("Command allowlist");
+    expect(level.querySelector('[data-menu-key="approval:full"] .lucide-check')).not.toBeNull();
+    click(level.querySelector('[data-menu-key="approval:ask"]'));
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "atlas", threadId: "atlas-thread", patch: { approvalMode: "ask" } });
+  });
+
+  it("shows Work until done as a chip only while it is on, and turns it off from there", () => {
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "", attachments: [], channelMode: "goal" });
+    render({ bot });
+    const chip = container.querySelector<HTMLButtonElement>('[aria-label="Work until done"]')!;
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(chip.className.split(" ")).toContain("h-7");
+    click(chip);
+    expect(container.querySelector('[aria-label="Work until done"]')).toBeNull();
   });
 });
 
@@ -199,7 +227,7 @@ describe("the Advanced composer", () => {
     expect(container.querySelector('[aria-haspopup="menu"][aria-label$="for Claude"]')).not.toBeNull();
     expect(fixture.call).toMatchObject({ placement: "composer" });
     expect(fixture.call?.fill).toBeUndefined();
-    expect(container.querySelector("[data-composer-backdrop]")).not.toBeNull();
+    expect(container.querySelector("[data-composer-backdrop]")!.className.split(" ")).toContain("top-1/2");
   });
 
   it("keeps the room's Goal chip and its header call button", () => {
