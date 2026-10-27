@@ -571,6 +571,8 @@ export interface WireMessage extends HelperIntroField {
   routedBy?: { provider: "jev" | "workersai" | "openrouter"; probability: number };
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
+  /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
+  doneWhen?: string;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
    * Team incidents report or Team escalations notice about that bot's thread
@@ -593,6 +595,9 @@ export interface WireMessage extends HelperIntroField {
   relay?: { kind: "told" | "from" | "reply"; email: string; name: string };
   /** thread chips: "Opened thread #Title on @X". */
   threadRef?: { botId: string; threadId: string; title: string };
+  /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
+   * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
+  sentDirectly?: { name: string; room?: string };
   /** A page the bot published to a public link (publish_page), or why it couldn't. `text` carries the link too. */
   publishedPage?: PublishedPageCard;
   /** A published Data result, linked to its bot's main viewer. */

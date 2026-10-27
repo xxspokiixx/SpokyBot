@@ -286,14 +286,18 @@ describe("thread control placement", () => {
     fixture.advanced = true;
   });
 
-  it("gives the editor its own row above the controls", () => {
+  it("keeps the editor and its controls on one line, wrapping only in a narrow composer", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).toContain("@container/composer");
-    const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!;
-    expect(row[1].split(" ")).toContain("flex-wrap");
-    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!;
-    expect(editor[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "order-first", "basis-full"]));
-    expect(/<textarea[^>]*class="([^"]*)"/.exec(markup)![1].split(" ")).toContain("min-h-14");
+    const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(row).toContain("@max-[30rem]/composer:flex-wrap");
+    expect(row).not.toContain("flex-wrap");
+    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(editor).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "@max-[30rem]/composer:order-first", "@max-[30rem]/composer:basis-full"]));
+    expect(editor).not.toContain("basis-full");
+    const textarea = /<textarea[^>]*class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    expect(textarea).toContain("min-h-6");
+    expect(textarea).not.toContain("min-h-14");
   });
 
   it("keeps the composer inert until the deleted thread's replacement transcript arrives", () => {
@@ -544,9 +548,16 @@ describe("thread control placement", () => {
     expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("<textarea"));
     expect(markup).not.toContain('aria-label="Thread settings"');
     expect(fixture.model).toMatchObject({ threadId: "selected", bot: { busy: false, modelSelection: { model: "thread-model" } } });
-    expect(fixture.approval).toMatchObject({ approvalMode: "ask", disabled: false, trustedModesAvailable: false });
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: false, trustedModesAvailable: false });
     fixture.approval!.onSelect("auto");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
+  });
+
+  it("changes a working thread's level from the composer, saying the bot is working", () => {
+    renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) } }));
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: true });
+    fixture.approval!.onSelect("full");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "full" } });
   });
 
   it("keeps both controls hidden for remote clients", () => {
