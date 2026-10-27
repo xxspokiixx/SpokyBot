@@ -18,6 +18,8 @@ vi.mock("./bot-settings/useBotApps", () => ({ loadAppCards: async () => new Map(
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 vi.mock("./mascot-clock", () => ({ usePrefersReducedMotion: () => false }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => f.advanced }));
+const analytics = vi.hoisted(() => ({ track: vi.fn() }));
+vi.mock("@/lib/analytics", () => analytics);
 vi.mock("@/lib/setup-import", () => ({
   localSetupImport: () => f.local,
   setupImportApi: {},
@@ -151,6 +153,14 @@ describe("in the chat", () => {
     setWelcomingBot("maus");
     await show();
     expect(host.querySelector("[data-helper-intro]")).toBeNull();
+  });
+
+  it("counts Try Cloud as the first run's Cloud moment, then opens Add a Cloud", async () => {
+    analytics.track.mockReset();
+    await show();
+    await act(async () => { host.querySelector<HTMLElement>('[data-helper-step="cloud"]')!.click(); });
+    expect(analytics.track).toHaveBeenCalledWith("onboarding_cloud", { action: "start_trial" });
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_onboarding" });
   });
 
   it("opens the app's own flow for each chip", () => {

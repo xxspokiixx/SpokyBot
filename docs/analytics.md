@@ -134,12 +134,10 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser` |
 | `$identify` | PostHog's own event, sent before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud (not while the app has kept no analytics choice of its own and serves that page on a port other than its first), to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
-| `email_skipped` | You chose Maybe later on the first-run screen. A name you typed is kept in this computer's profile only | none |
-| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `engines`, `import`, `permissions`, `cloud`; `replay`: true/false |
-| `onboarding_completed` | The first-run tour ends | `reason`: `completed`, `skipped`; `at`: the step it ended on; `replay`: true/false |
-| `setup_import_applied` | You bring in the skills and MCP servers the first-run tour found from other AI tools on this computer | `skills`, `tools`: how many were added. Never their names or where they came from |
-| `setup_import_skipped` | You skip that step | `skills`, `tools`: how many it found |
-| `onboarding_cloud` | You answer the first-run tour's MausBot Cloud step | `action`: `start_trial` (Start free trial, or See plans when the offer has no trial), `not_now`; `trial`: true/false, with `start_trial`: the offer has a free trial |
+| `onboarding_step` | A first-run screen is shown | `step`: `meet`, `chief`; `replay`: true/false |
+| `onboarding_completed` | The first run ends in the chat | `reason`: `completed`; `at`: the screen it ended on; `replay`: true/false |
+| `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import | `skills`, `tools`: how many were added. Never their names or where they came from |
+| `onboarding_cloud` | You tap Try Cloud under MausBot's first messages, which opens Add a Cloud | `action`: `start_trial` |
 | `message_sent` | You send a message | To a bot: `driver`: engine; `queued`: true/false. To a room: `room`: true; `mode`: `chat`, `goal`; `queued`: true/false |
 | `call_started` | You start a call with a bot | `driver`: engine; `mode`: `turns`, `live` |
 | `group_call_started` | You start a call with a room | `memberCount`: count |

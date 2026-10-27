@@ -1,5 +1,6 @@
 import { AppWindow, Bot as BotIcon, Cloud, Download, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
 
+import { track } from "@/lib/analytics";
 import { t } from "@/lib/i18n";
 import type { SetupStep } from "@/lib/default-bot";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
@@ -36,7 +37,10 @@ export function HelperSetup({ steps }: { steps: readonly SetupStep[] }) {
       {steps.map((step) => {
         const { label, icon: Icon } = STEPS[step];
         return (
-          <button key={step} type="button" data-helper-step={step} onClick={() => dispatch(setupAction(step))}
+          <button key={step} type="button" data-helper-step={step} onClick={() => {
+            if (step === "cloud") track("onboarding_cloud", { action: "start_trial" });
+            dispatch(setupAction(step));
+          }}
             className="inline-flex h-8 items-center gap-1.5 rounded-full bg-card px-3 text-[13px] text-ink transition-colors hover:bg-raised-hover">
             <Icon size={14} aria-hidden="true" className="text-ink-secondary" />{t(label)}
           </button>
