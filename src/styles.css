@@ -979,6 +979,27 @@
   box-shadow: 0 10px 20px -3px rgb(28 28 28 / 0.1), 0 4px 6px -4px rgb(28 28 28 / 0.1);
 }
 
+/* Simple mode's primary action in Midnight and Daylight is a neutral pill: white on dark, black on light. Unlayered,
+   so it wins over the accent fill a call site may still carry. */
+:root[data-interface="simple"]:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary {
+  border-color: transparent;
+  background: var(--color-ink);
+  color: var(--color-app);
+}
+:root[data-interface="simple"]:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary:not(:disabled):is(:hover, :active) {
+  background: color-mix(in srgb, var(--color-ink) 88.5%, var(--color-app));
+  color: var(--color-app);
+  filter: none;
+}
+:root[data-interface="simple"]:is([data-skin="midnight"], [data-skin="daylight"]) .ui-button-primary:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-ink) 13%, transparent);
+  color: color-mix(in srgb, var(--color-ink) 30%, transparent);
+}
+:root[data-interface="simple"][data-skin="daylight"] .ui-button-primary:disabled {
+  background: color-mix(in srgb, var(--color-ink) 15%, transparent);
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
@@ -1168,6 +1189,17 @@ body {
     font-size: 12px;
     line-height: 1rem;
   }
+  /* Longhands only: the `font` shorthand would reset the family. */
+  .ui-button-pill {
+    border-radius: 9999px;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.25rem;
+  }
+  .ui-button-lg {
+    min-height: 2.25rem;
+    padding-inline: 1rem;
+  }
   .ui-button-primary {
     border-color: transparent;
     background: var(--color-accent);
@@ -1262,6 +1294,41 @@ body {
     cursor: not-allowed;
     opacity: 0.45;
   }
+  /* Simple mode's secondary action in Midnight and Daylight: a faint ink wash with a hairline of ink. Layered, so a
+     call site's own fill (an ink pill, a danger outline) still wins. */
+  :root[data-interface="simple"][data-skin="midnight"] .ui-button {
+    border-color: color-mix(in srgb, var(--color-ink) 10%, transparent);
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  }
+  :root[data-interface="simple"][data-skin="midnight"] .ui-button:enabled:is(:hover, :active) {
+    background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  }
+  :root[data-interface="simple"][data-skin="daylight"] .ui-button {
+    border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
+    background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  }
+  :root[data-interface="simple"][data-skin="daylight"] .ui-button:enabled:is(:hover, :active) {
+    background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  }
+  /* A dialog for the first-run surfaces: the menu tone on a hairline of ink, lifted only in Daylight. */
+  .ui-modal {
+    border: 0.5px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+    border-radius: 14px;
+    background: var(--color-menu);
+  }
+  .ui-modal-divider {
+    height: 0.5px;
+    background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  }
+  :root[data-skin="daylight"] .ui-modal {
+    border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
+    box-shadow: 0 20px 32px -5px rgb(28 28 28 / 0.1), 0 8px 12px -6px rgb(28 28 28 / 0.1);
+  }
+  :root[data-skin="daylight"] .ui-modal-divider {
+    background: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  }
+  .ui-scrim { background: rgb(0 0 0 / 0.5); }
+  :root[data-skin="midnight"] .ui-scrim { background: rgb(0 0 0 / 0.7); }
   @media (prefers-reduced-motion: reduce) {
     .ui-button,
     .ui-icon-button,
