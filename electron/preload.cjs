@@ -275,6 +275,7 @@ const bridge = {
     check: () => ipcRenderer.invoke("update:check"),
     install: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("update:install") : Promise.reject(new Error("Choose Restart to update.")),
+    seen: () => ipcRenderer.invoke("update:seen"),
     onState: (cb) => {
       ipcRenderer
         .invoke("update:get-state")

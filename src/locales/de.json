@@ -2408,5 +2408,7 @@
   "mcp.team.everyone": "Alle in deinem Team können das nutzen.",
   "mcp.team.onlyMe": "Nur für mich",
   "mcp.team.onlyMeOn": "Nur du kannst das nutzen. Teammitglieder können auf ihrer Teamseite einen eigenen Schlüssel hinzufügen.",
-  "mcp.auth.loadingTools": "Angemeldet. Verbinde …"
+  "mcp.auth.loadingTools": "Angemeldet. Verbinde …",
+  "update.card.idleNote": "Jetzt neu starten oder einfach lassen: {app} installiert es von selbst, sobald du das nächste Mal weg bist und nichts läuft.",
+  "update.updatedItself": "{app} hat sich selbst auf {version} aktualisiert."
 }

@@ -1271,6 +1271,8 @@
   "update.card.failed": "更新が完了しませんでした。",
   "update.card.later": "あとで",
   "update.card.close": "閉じる",
+  "update.card.idleNote": "今すぐ再起動するか、そのままにしておいてください。次に席を外していて何も動いていないときに、{app} が自動でインストールします。",
+  "update.updatedItself": "{app} は {version} に自動でアップデートされました。",
   "common.save": "保存",
   "common.saved": "保存しました",
   "common.cancel": "キャンセル",

@@ -1280,6 +1280,8 @@
   "update.card.failed": "The update did not finish.",
   "update.card.later": "Later",
   "update.card.close": "Close",
+  "update.card.idleNote": "Restart now, or leave it: {app} installs it by itself the next time you're away and nothing is running.",
+  "update.updatedItself": "{app} updated itself to {version}.",
   "common.save": "Save",
   "common.saved": "Saved",
   "common.cancel": "Cancel",

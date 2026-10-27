@@ -49,6 +49,8 @@ const FROZEN = new Set(["freeze", "final", "check"]);
 const AWAY = new Set(["switch", "done", "keeping"]);
 /** The phases that use My Cloud's owner session, a pass that failed and waits to go again included. */
 const MOVING = new Set(["copy", "wait", "freeze", "final", "check", "switch"]);
+/** The phases a restart of this app would cut into: from the wait for the quiet moment to the switch. */
+const CUT_SHORT = new Set(["wait", ...FROZEN, "switch"]);
 const AUTOMATION = /^(routine|call|webhook|app-event):([\w-]{1,128})$/u;
 
 /** At most this many ids of a kind in the log line. */
@@ -604,6 +606,8 @@ export function createOneHome(deps) {
     view,
     /** Home is My Cloud: the switch happened, My Cloud has not ended, and this computer's bots are not home yet. */
     away: () => awayIn(read()),
+    /** A move or a send under way that restarting this app would cut into. */
+    busy: () => Boolean(running) || Boolean(deps.send.snapshot?.()?.running) || CUT_SHORT.has(read()?.phase ?? ""),
     /** This computer keeps its bots here: the person's own choice. */
     keeps: kept,
     /** Keeps this computer's bots here (`on`), or lets them move with everything else again, at the next quiet moment as

@@ -892,6 +892,8 @@
   "update.card.failed": "Güncelleme tamamlanamadı.",
   "update.card.later": "Daha sonra",
   "update.card.close": "Kapat",
+  "update.card.idleNote": "Şimdi yeniden başlatın ya da bırakın: {app}, bir dahaki sefere siz uzaktayken ve hiçbir şey çalışmıyorken kendi kendine yükler.",
+  "update.updatedItself": "{app} kendini {version} sürümüne güncelledi.",
   "common.save": "Kaydet",
   "common.cancel": "İptal",
   "common.close": "Kapat",

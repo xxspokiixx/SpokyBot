@@ -892,6 +892,8 @@
   "update.card.failed": "Quá trình cập nhật không hoàn tất.",
   "update.card.later": "Để sau",
   "update.card.close": "Đóng",
+  "update.card.idleNote": "Khởi động lại ngay, hoặc cứ để đó: {app} sẽ tự cài đặt vào lần tới khi bạn vắng mặt và không có việc gì đang chạy.",
+  "update.updatedItself": "{app} đã tự cập nhật lên {version}.",
   "common.save": "Lưu",
   "common.cancel": "Hủy",
   "common.close": "Đóng",

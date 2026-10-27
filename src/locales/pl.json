@@ -1264,6 +1264,8 @@
   "update.card.failed": "Aktualizacja nie została ukończona.",
   "update.card.later": "Później",
   "update.card.close": "Zamknij",
+  "update.card.idleNote": "Uruchom ponownie teraz albo zostaw: {app} zainstaluje ją sam, gdy następnym razem odejdziesz od komputera i nic nie będzie działać.",
+  "update.updatedItself": "{app} zaktualizował się sam do wersji {version}.",
   "common.save": "Zapisz",
   "common.saved": "Zapisano",
   "common.cancel": "Anuluj",

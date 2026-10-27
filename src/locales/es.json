@@ -1086,6 +1086,8 @@
   "update.card.failed": "La actualización no terminó.",
   "update.card.later": "Más tarde",
   "update.card.close": "Cerrar",
+  "update.card.idleNote": "Reinicia ahora o déjalo así: {app} lo instala solo la próxima vez que no estés y no haya nada en marcha.",
+  "update.updatedItself": "{app} se actualizó solo a la versión {version}.",
   "common.save": "Guardar",
   "common.cancel": "Cancelar",
   "common.close": "Cerrar",

@@ -1271,6 +1271,8 @@
   "update.card.failed": "Обновление не завершилось.",
   "update.card.later": "Позже",
   "update.card.close": "Закрыть",
+  "update.card.idleNote": "Перезапустите сейчас или оставьте как есть: {app} установит обновление сам, когда вас в следующий раз не будет рядом и ничего не будет выполняться.",
+  "update.updatedItself": "{app} обновился сам до версии {version}.",
   "common.save": "Сохранить",
   "common.saved": "Сохранено",
   "common.cancel": "Отмена",

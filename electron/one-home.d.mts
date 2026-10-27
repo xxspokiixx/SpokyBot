@@ -91,6 +91,8 @@ export function createOneHome(deps: {
   kick(): Promise<void>;
   view(): OneHomeView | null;
   away(): boolean;
+  /** A move or a send under way that restarting this app would cut into. */
+  busy(): boolean;
   keeps(): boolean;
   /** Throws once this computer's bots are on their way home past turning back and `on` is false. */
   keep(on: boolean): Promise<void>;
