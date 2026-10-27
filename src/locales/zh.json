@@ -310,7 +310,8 @@
   "cloudPhone.step2": "打开你名字下方的菜单，选择“连接你的手机”，再用手机应用扫描配对代码。",
   "lending.activity.title": "这台电脑上的活动",
   "files.shared.title": "与 Cloud 共享",
-  "files.shared.help": "即使这台电脑关机，Cloud 上的机器人也能使用这些文件夹。它们绝不会更改你在这里的文件。",
+  "files.shared.help": "即使这台电脑关机，Cloud 上的机器人也能使用这些文件夹。它们只会更改你允许编辑的文件夹里的文件。",
+  "files.status.keptBoth": "已保留“{file}”的两个版本：你的版本，以及机器人的版本“{copy}”。",
   "files.stop.body": "Cloud 上的副本会移到它的回收站并保留 30 天。这台电脑上的内容不会有任何变化。",
   "files.status.waiting": "正在等待 Cloud 腾出空间",
   "files.status.deletes": "这个文件夹在这里删除了 {count} 个文件。也要从 Cloud 删除吗？",
@@ -398,7 +399,7 @@
   "lending.drivesHelp": "要共享整个驱动器（例如外置硬盘、U 盘或电脑中的第二块硬盘），请直接选择该驱动器，而不是逐个选择其中的文件夹。也可以选择你的主目录：它始终为只读，其中存放密钥、密码和浏览器数据的位置仍然保密。系统盘无法共享；除非勾选“可编辑”，驱动器均为只读。",
   "lending.refused.notFolder": "请选择文件夹，而不是文件。",
   "lending.refused.tooMany": "最多出借 20 个文件夹。",
-  "lending.status.lent": "已共享。这台电脑处于唤醒状态时，Cloud 上的机器人即可使用。",
+  "lending.status.lent": "已共享。这台电脑处于唤醒状态时，Cloud 上的机器人即可使用；它的文件夹在睡眠时也能使用。",
   "lending.status.busy": "Cloud 上的机器人正在使用这台电脑。",
   "lending.status.starting": "正在启动…",
   "lending.status.afterMove": "你的机器人搬到 My Cloud 后，这会自动开启。",
@@ -3225,5 +3226,6 @@
   "update.card.idleNote": "现在重启，或者先不管它：下次你不在、也没有任务在运行时，{app} 会自动安装。",
   "update.updatedItself": "{app} 已自动更新到 {version}。",
   "newBot.failed": "无法新建机器人：{error}",
-  "newBot.startsOnAsk": "{name} 会先询问再行动。要让它在这台电脑上自行操作，请在它的设置中选择“代我批准”。"
+  "newBot.startsOnAsk": "{name} 会先询问再行动。要让它在这台电脑上自行操作，请在它的设置中选择“代我批准”。",
+  "automations.firstRun": "首次运行：{when}"
 }

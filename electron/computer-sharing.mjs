@@ -529,6 +529,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       store({ ...records, [env.id]: grant }); run(env, grant); changed(); return state(env.id);
     },
     cloudState,
+    /** What Files copies to My Cloud (electron/lent-folders.mjs): the folders lent to it, with this grant's id and the
+     * places no grant reaches; `{ off: true }` while nothing is lent to it. */
+    lentToCloud(env) {
+      const grant = env ? records[env.id] : undefined;
+      const lent = grant?.cloud ? grant : grant?.enabled === true ? grant : null;
+      if (lent?.enabled !== true || !Array.isArray(lent.folders)) return { off: true };
+      return { lendingId: lent.id, folders: lent.folders.map(({ id, path: where, name, write }) => ({ id, path: where, name, write: write === true })), protectedPaths: protectedRoots };
+    },
     /** Lending to My Cloud is running, so it calls My Cloud whenever it is awake. */
     lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)),
     /** A server is using this computer now: a job running on it, or its browsing going through this computer. */

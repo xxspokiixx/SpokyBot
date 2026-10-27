@@ -422,7 +422,8 @@
   "cloudPhone.step1": "在此視窗開啟 My Cloud：Server 選單 → My Cloud。",
   "cloudPhone.step2": "開啟你名字下方的選單，選擇「連接你的手機」，再用手機 App 掃描配對碼。",
   "files.shared.title": "與 Cloud 共用",
-  "files.shared.help": "即使這台電腦關機，Cloud 上的機器人也能使用這些資料夾。它們絕不會變更你在這裡的檔案。",
+  "files.shared.help": "即使這台電腦關機，Cloud 上的機器人也能使用這些資料夾。它們只會變更你允許編輯的資料夾裡的檔案。",
+  "files.status.keptBoth": "已保留「{file}」的兩個版本：你的版本，以及機器人的版本「{copy}」。",
   "files.stop.body": "Cloud 上的副本會移到它的垃圾桶並保留 30 天。這台電腦上的內容不會有任何變動。",
   "files.status.waiting": "正在等待 Cloud 騰出空間",
   "files.status.deletes": "這個資料夾在這裡移除了 {count} 個檔案。也要從 Cloud 移除嗎？",
@@ -515,7 +516,7 @@
   "lending.drivesHelp": "若要共用整個磁碟機（例如外接硬碟、USB 隨身碟或電腦中的第二顆硬碟），請直接選擇該磁碟機，而不是逐一選擇其中的資料夾。也可以選擇你的家目錄：它一律為唯讀，其中存放金鑰、密碼與瀏覽器資料的位置仍會保持私密。系統磁碟無法共用；除非勾選「可編輯」，否則磁碟機一律為唯讀。",
   "lending.refused.notFolder": "請選擇資料夾，而不是檔案。",
   "lending.refused.tooMany": "最多出借 20 個資料夾。",
-  "lending.status.lent": "已共用。這台電腦處於喚醒狀態時，Cloud 上的機器人即可使用。",
+  "lending.status.lent": "已共用。這台電腦處於喚醒狀態時，Cloud 上的機器人即可使用；它的資料夾在睡眠時也能使用。",
   "lending.status.busy": "Cloud 上的機器人正在使用這台電腦。",
   "lending.status.starting": "正在啟動…",
   "lending.status.afterMove": "你的機器人搬到 My Cloud 後，這會自動開啟。",
@@ -4244,5 +4245,6 @@
   "mcp.team.onlyMeOn": "只有你可以使用。隊友可以在自己的團隊頁面新增自己的金鑰。",
   "mcp.auth.loadingTools": "已登入。正在連線…",
   "update.card.idleNote": "現在重新啟動，或先不用管：下次你不在、也沒有工作在執行時，{app} 會自動安裝。",
-  "update.updatedItself": "{app} 已自動更新至 {version}。"
+  "update.updatedItself": "{app} 已自動更新至 {version}。",
+  "automations.firstRun": "首次執行：{when}"
 }

@@ -162,7 +162,8 @@
   "cloudPhone.step2": "Ouvrez le menu sous votre nom, choisissez Connecter votre téléphone, puis scannez le code avec l’app mobile.",
   "lending.activity.title": "Activité sur cet ordinateur",
   "files.shared.title": "Partagé avec le Cloud",
-  "files.shared.help": "Les bots du Cloud peuvent utiliser ces dossiers, même quand cet ordinateur est éteint. Ils ne modifient jamais vos fichiers d'ici.",
+  "files.shared.help": "Les bots du Cloud peuvent utiliser ces dossiers, même quand cet ordinateur est éteint. Ils ne modifient vos fichiers d'ici que dans les dossiers que vous les laissez modifier.",
+  "files.status.keptBoth": "Les deux versions de « {file} » sont conservées : la vôtre, et celle du bot sous « {copy} ».",
   "files.stop.body": "La copie du Cloud part dans sa corbeille pendant 30 jours. Rien ne change sur cet ordinateur.",
   "files.status.waiting": "En attente de place dans le Cloud",
   "files.status.deletes": "{count} fichiers ont été retirés de ce dossier ici. Les retirer aussi du Cloud ?",
@@ -250,7 +251,7 @@
   "lending.drivesHelp": "Pour partager un disque entier, comme un disque externe, une clé USB ou un second disque de l’ordinateur, choisissez le disque lui-même plutôt que ses dossiers un par un. Votre dossier personnel peut aussi être choisi : il est toujours en lecture seule, et les emplacements qui y contiennent les clés, les mots de passe et les données des navigateurs restent privés. Le disque système ne peut pas être partagé, et un disque est en lecture seule sauf si vous cochez « Peut modifier ».",
   "lending.refused.notFolder": "Choisissez un dossier, pas un fichier.",
   "lending.refused.tooMany": "Prêtez au plus 20 dossiers.",
-  "lending.status.lent": "Partagé. Les bots du Cloud peuvent utiliser cet ordinateur tant qu'il est éveillé.",
+  "lending.status.lent": "Partagé. Les bots du Cloud peuvent utiliser cet ordinateur tant qu'il est éveillé, et ses dossiers même pendant sa veille.",
   "lending.status.busy": "Les bots du Cloud utilisent cet ordinateur en ce moment.",
   "lending.status.starting": "Démarrage…",
   "lending.status.afterMove": "Il s'active tout seul dès que vos bots sont sur My Cloud.",
@@ -2382,5 +2383,6 @@
   "update.card.idleNote": "Redémarrez maintenant, ou laissez faire : {app} l’installe tout seul la prochaine fois que vous serez absent et que rien ne tourne.",
   "update.updatedItself": "{app} s’est mis à jour tout seul vers la version {version}.",
   "newBot.failed": "Impossible de créer le nouveau bot : {error}",
-  "newBot.startsOnAsk": "{name} demandera avant d'agir. Pour qu'il agisse seul sur cet ordinateur, choisissez « Approuver à ma place » dans ses réglages."
+  "newBot.startsOnAsk": "{name} demandera avant d'agir. Pour qu'il agisse seul sur cet ordinateur, choisissez « Approuver à ma place » dans ses réglages.",
+  "automations.firstRun": "Première exécution {when}"
 }
