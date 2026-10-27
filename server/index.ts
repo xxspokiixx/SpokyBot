@@ -6139,11 +6139,11 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
 }
 
 function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string) {
-  const instance = registry.get(bot.modelSelection.instanceId);
-  const forcedBoat = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
+  const instance = registry.get(bot.modelSelection.instanceId), forcedBoat = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
+  const task = forcedBoat || !threadId ? undefined : store.taskByThread(bot.id, threadId);
   return resolveSurface({
     destination: threadId && proactive.fence.confines(threadId) ? "off" : forcedBoat ? "cloud" : bot.computer,
-    pinnedSurface: forcedBoat || !threadId ? null : store.taskByThread(bot.id, threadId)?.surface,
+    pinnedSurface: task?.surface, botOpened: Boolean(task?.openedBy),
     browserOn: builtInBrowserEnabled(cfg) && bot.browser !== false && instance?.adapter.capabilities.browserMcp === true,
   });
 }
@@ -8532,7 +8532,7 @@ async function startTurn(
       if (
         liveBot &&
         plan.browser &&
-        !(plan.computer === undefined && mountedComputer) &&
+        !(plan.computer === undefined && mountedComputer && !plan.botOpened) &&
         builtInBrowserEnabled(cfg) &&
         liveBot.browser !== false &&
         instance.adapter.capabilities.browserMcp === true
@@ -8588,7 +8588,7 @@ async function startTurn(
         { id: "shell", label: "Long-running commands", text: worksInWorkspace ? longCommandsPrompt(computerPromptKind) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
-        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + vpsUnavailableNote + vmUpdateNote + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : ""), canSelect: computerSelectionTurns.has(threadId), cloudHome: Boolean(CLOUD_HOME) }) },
+        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + vpsUnavailableNote + vmUpdateNote + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : ""), canSelect: computerSelectionTurns.has(threadId), cloudHome: Boolean(CLOUD_HOME), botOpened: plan.botOpened }) },
         { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER)) : "" },
         { id: "composio", label: "Connected apps", text: integrations.composio ? composioSystemPrompt(liveBot?.connectorTools ?? bot.connectorTools) + describeConnectorScopes((liveBot ?? bot).connectorScopes) : "" },
         { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot) + teamConnections.prompt(threadId, integrations) },
