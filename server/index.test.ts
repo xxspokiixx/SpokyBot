@@ -6495,6 +6495,11 @@ describe("harness HTTP API", () => {
         return await response.json() as { ok: boolean; text: string };
       };
       expect(await fill()).toEqual({ ok: false, text: "fill_login works in the built-in browser, and this conversation has none. Call request_sign_in instead." });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
+      const onScreen = await fill();
+      expect(onScreen.ok).toBe(false);
+      expect(onScreen.text).toContain("it never types one on the screen of this computer");
+      expect(onScreen.text).toContain("Call request_sign_in so the person signs in on this computer.");
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser" })).status).toBe(200);
       const inBrowser = await fill();
       expect(inBrowser.ok).toBe(false);
@@ -7665,7 +7670,7 @@ describe("harness HTTP API", () => {
     await api("DELETE", `/api/bots/${bot.id}`);
   });
 
-  it("refuses approval-level changes while a bot is working", async () => {
+  it("saves an approval-level change while a bot is working", async () => {
     const instances = (await api("GET", "/api/instances")).body.instances;
     const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
     const bot = (await api("POST", "/api/bots", {
@@ -7679,15 +7684,14 @@ describe("harness HTTP API", () => {
         return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
       }, { timeout: 5_000 }).toBe(true);
 
-      const blocked = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
-      expect(blocked.status).toBe(409);
-      expect(blocked.body.error).toMatch(/stop this bot's turn before changing its approval level/i);
+      const changed = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
+      expect(changed.status, JSON.stringify(changed.body)).toBe(200);
       const stored = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(stored.busy).toBe(true);
-      expect(stored.approvalMode).toBe(bot.approvalMode);
-      expect(stored.autoApprove).toBe(bot.autoApprove);
+      expect(stored.approvalMode).toBe("auto");
+      expect(stored.autoApprove).toBe(true);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
       await expect.poll(async () => {
