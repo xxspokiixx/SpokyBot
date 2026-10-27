@@ -6378,7 +6378,6 @@
   "usageMeter.err.priceChanged": "Цена изменилась с момента просмотра, поэтому списаний не было. Нажмите «Улучшить», чтобы увидеть актуальную цену.",
   "usageMeter.err.rateLimited": "Слишком много попыток. Подождите несколько минут и попробуйте снова.",
   "usageMeter.err.failed": "Не удалось сменить тариф. Списаний не было. Попробуйте ещё раз через минуту.",
-  "chat.setupOffer.button": "Настроить меня",
   "composer.setupRequest.placeholder": "Напишите {name}, с чем нужна помощь",
   "composer.setupRequest.waiting": "{name} готов к настройке",
   "composer.setupRequest.cancel": "Остановить настройку {name}",

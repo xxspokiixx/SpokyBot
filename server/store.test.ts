@@ -540,6 +540,19 @@ describe("Store", () => {
     expect(greeting(store.createBot({ soul: "  \n", description: " " }))?.setupOffer).toBe(true);
   });
 
+  it("puts the setup card's answers, in the app's language, on a blank bot's greeting only", () => {
+    let language = "en";
+    const store = new Store(selection, undefined, undefined, () => language);
+    const greeting = (bot: BotRecord) => store.messagesFor(bot.threadId)[0];
+    expect(greeting(store.createBot())?.setupChoices).toEqual([
+      "Research and digging into topics", "Keeping an eye on things for me", "Email, calendar and messages",
+      "Bookings, shopping and errands", "Data, spreadsheets and reports",
+    ]);
+    expect(greeting(store.createBot({ description: "Files bugs." }))?.setupChoices).toBeUndefined();
+    language = "es-MX";
+    expect(greeting(store.createBot())?.setupChoices?.[0]).toBe("Investigar y profundizar en temas");
+  });
+
   it("reads the current language when creating a bot", () => {
     let language = "en";
     const store = new Store(selection, undefined, undefined, () => language);
@@ -547,6 +560,16 @@ describe("Store", () => {
 
     const bot = store.createBot();
     expect(store.messagesFor(bot.threadId)[0]?.text).toBe(`Oi, eu sou ${bot.name}. O que você gostaria que eu fizesse?`);
+  });
+
+  it("greets the person by the first name they have given by the time the bot is created", () => {
+    let person: string | undefined;
+    const store = new Store(selection, undefined, undefined, "en", () => person);
+    const greeting = (name: string) => store.messagesFor(store.createBot({ name }).threadId)[0]?.text;
+
+    expect(greeting("Ivy")).toBe("Hi, I'm Ivy. What would you like me to do?");
+    person = "Milind Soni";
+    expect(greeting("Scout")).toBe("Hi Milind, I'm Scout. What would you like me to do?");
   });
 
   it("clears provider-owned voice ids as one durable mutation", () => {

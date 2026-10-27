@@ -5439,5 +5439,13 @@
   "voice.yourVoices": "Tus voces",
   "voice.library": "Biblioteca de voces de ElevenLabs",
   "voice.libraryHint": "Al elegir una, se añade a tus voces.",
-  "voice.adding": "Añadiendo…"
+  "voice.adding": "Añadiendo…",
+  "chat.setupCard.title": "¿En qué te ayudo primero?",
+  "chat.setupCard.other": "Otra cosa",
+  "chat.setupCard.answer": "Tu respuesta",
+  "chat.setupCard.research": "Investigar y profundizar en temas",
+  "chat.setupCard.watch": "Estar pendiente de cosas por mí",
+  "chat.setupCard.inbox": "Correo, calendario y mensajes",
+  "chat.setupCard.errands": "Reservas, compras y recados",
+  "chat.setupCard.data": "Datos, hojas de cálculo e informes"
 }
