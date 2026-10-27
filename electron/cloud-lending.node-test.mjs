@@ -153,6 +153,15 @@ test("the terminal is lent only when asked for with exactly true: the bots can t
   await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), /terminal/);
 });
 
+test("Your Chrome does not outlive the switch: after an Off nothing reports it and a plain save does not bring it back", async t => {
+  const { folderPath, sharing } = await lendingFixture(t);
+  const folders = [{ id: randomUUID(), path: folderPath, write: false }];
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false, chrome: true })).chrome, true);
+  sharing.revoke(env);
+  assert.equal(sharing.cloudState(env).chrome, false);
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false })).chrome, false);
+});
+
 test("refuses to lend unless the Cloud sign-in is verified for this exact machine, and never to a server that is not a Cloud home", async t => {
   const folder = async dir => [{ id: randomUUID(), path: dir, write: false }];
   for (const cloud of [null, { status: "signed-out", accountId: null, origin: null }, { status: "unavailable", accountId: "acct_1", origin: null }, { status: "connected", accountId: "acct_1", origin: "https://omb-u-other.fly.dev" }]) {

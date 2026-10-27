@@ -2474,9 +2474,9 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
 
 const {
   browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions,
-  currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, browserSessionSpec, browserIntegration,
+  currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, lentChromeSummary, browserSessionSpec, browserIntegration,
   browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, closeBrowser, browserEngineSwitched, eraseDeletedBrowser, engineSummary, browserSessionsOf, signedInSitesTarget, uploadPaths, eraseAudienceBrowsers,
-} = createBrowserHost({ cfg, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), mayLend: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }) === null, device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) ?? { unshared: true as const } });
+} = createBrowserHost({ cfg, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), lendRefusal: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }), device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) ?? { unshared: true as const }, lentChrome: CLOUD_PERSONAL ? { route: () => deviceLinks.chromeRoute(CLOUD_HOME_LENDER), lender: () => sharedComputers.chromeLender(CLOUD_HOME_LENDER) } : undefined });
 
 const dataSheets = new DataSheetRegistry({
   broadcast: (frame) => broadcast({ ...frame }),
@@ -2513,9 +2513,9 @@ function highlevelIntegration(bot: BotRecord, turn: { threadId: string; generati
 
 let browserEngineInstall: Promise<void> | null = null;
 let browserEngineInstallError: string | null = null;
-export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; chrome?: string; installing?: boolean; installError?: string; myChrome: boolean; engine: "agent-browser" | "chrome" } {
+export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; chrome?: string; installing?: boolean; installError?: string; myChrome: boolean; myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean }; myChromeLendable?: true; engine: "agent-browser" | "chrome" } {
   const status = browserEngineStatus();
-  const progress = { myChrome: myChromeAvailable(), ...(browserEngineInstall ? { installing: true } : {}), ...(browserEngineInstallError ? { installError: browserEngineInstallError } : {}) };
+  const progress = { myChrome: myChromeAvailable(), ...lentChromeSummary(), ...(browserEngineInstall ? { installing: true } : {}), ...(browserEngineInstallError ? { installError: browserEngineInstallError } : {}) };
   return engineSummary(status.kind === "ready"
     ? { kind: "engine" as const, version: status.version, chrome: chromeLauncher.describe(), ...progress }
     : { kind: "unavailable" as const, reason: status.reason, installable: status.installable, ...progress });
@@ -13001,7 +13001,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Two public routes come first; everything else needs the loopback owner or a paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && (moveFreeze.screen(path) ? (res.writeHead(302, { location: moveFreeze.screen(path)!, "cache-control": "no-store" }).end(), true) : serveStatic(res, path, STATIC_DIR))) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME) }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
@@ -13071,7 +13071,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, result.status, { error: result.error });
       }
       if (CLOUD_TEAM) teamHost.met(result.session);
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME) });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null });
       if (wantsCookie) {
         const previous = browser ? sessions.authenticate(parseCookies(req.headers.cookie).get(SESSION_COOKIE)) : null;
         if (previous && previous.id !== result.session.id) sessions.revoke(previous.id);
