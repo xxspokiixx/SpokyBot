@@ -140,26 +140,26 @@
   --animate-sent-border: sent-border 1.2s ease-out forwards;
 
   /* Defaults = Midnight. Kept here so the app is never unstyled. */
-  --color-app: #070707;
-  --color-panel: #111111;
-  --color-raised: #2f2f2f;
-  --color-raised-hover: #3d3d3d;
+  --color-app: #121212;
+  --color-panel: #0e0e0e;
+  --color-raised: #202020;
+  --color-raised-hover: #2e2e2e;
   /* the composer pill. Every skin but Daylight paints it in `raised`; there
      it is the page colour with a hairline ring, so it needs a tone (and a
      ring, transparent everywhere else) of its own. */
-  --color-composer: #2f2f2f;
-  --color-composer-ring: transparent;
+  --color-composer: #1f1f1f;
+  --color-composer-ring: #2e2e2e;
   /* popover and right-click menus. Same story as the composer: every skin
      but Daylight paints them in `card`, which there is the bot's bubble and
      a shade too grey for a menu. */
-  --color-menu: #262626;
-  --color-card: #262626;
-  --color-inset: #191919;
+  --color-menu: #1f1f1f;
+  --color-card: #1f1f1f;
+  --color-inset: #171717;
   /* a control ON a card. The dark skins take their `raised` value, so this
      is a no-op for them; the light skins need a tone of their own, because
      there `raised` is pure white and a card is too. */
-  --color-control: #2f2f2f;
-  --color-hairline: #333333;
+  --color-control: #282828;
+  --color-hairline: #383838;
   --color-ink: #fcfcfc;
   --color-ink-secondary: #fcfcfcbf;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -248,17 +248,17 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="midnight"] {
   --code-color-scheme: dark;
-  --color-app: #070707;
-  --color-panel: #111111;
-  --color-raised: #2f2f2f;
-  --color-raised-hover: #3d3d3d;
-  --color-composer: #2f2f2f;    /* = raised: unchanged */
-  --color-composer-ring: transparent;
-  --color-card: #262626;
-  --color-menu: #262626;    /* = card: unchanged */
-  --color-inset: #191919;
-  --color-control: #2f2f2f;       /* = raised: Midnight is unchanged */
-  --color-hairline: #333333;
+  --color-app: #121212;
+  --color-panel: #0e0e0e;
+  --color-raised: #202020;
+  --color-raised-hover: #2e2e2e;
+  --color-composer: #1f1f1f;
+  --color-composer-ring: #2e2e2e;
+  --color-card: #1f1f1f;
+  --color-menu: #1f1f1f;    /* = card: unchanged */
+  --color-inset: #171717;
+  --color-control: #282828;
+  --color-hairline: #383838;
   --color-ink: #fcfcfc;
   --color-ink-secondary: #fcfcfcbf;
   --color-ink-tertiary: #fcfcfc90;
@@ -284,7 +284,7 @@
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
   --identity-orange: #E78531;
-  --identity-purple: #8963cc;
+  --identity-purple: #8d69ce;
   --identity-cyan: #0EA5C6;
   --identity-pink: #D84F8B;
   --identity-yellow: #D8A729;
@@ -685,15 +685,15 @@
    page, the one place a light skin carries inverted ink. That is what
    --color-bubble-user-ink exists for — see the rule at the bottom of the
    file. Everything else is a short ladder of greys: page #fcfcfc, sidebar
-   #f7f7f7, selected row #e1e1e1.
+   #f5f5f5, selected row #e4e4e4, and white for the composer and menus.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
   --color-app: #fcfcfc;           /* the thread */
-  --color-panel: #f7f7f7;         /* sidebar, one step down from the thread */
-  --color-raised: #e1e1e1;
-  --color-raised-hover: #d7d7d7;  /* the selected row */
-  --color-card: #eeeeee;          /* what a bot says */
+  --color-panel: #f5f5f5;         /* sidebar, one step down from the thread */
+  --color-raised: #e4e4e4;
+  --color-raised-hover: #d8d8d8;
+  --color-card: #f0f0f0;          /* what a bot says */
   --color-inset: #e6e6e6;         /* the search field */
   --color-control: #dedede;       /* a chip on a card */
   /* Sampled at #efefef, which is what the eye reads on the divider — but a
@@ -716,9 +716,9 @@
   --color-accent-ink: #ffffff;
   /* The composer is the page with a ring around it, not a grey slab —
      the one surface where this skin departs from `raised`. */
-  --color-composer: #fcfcfc;
+  --color-composer: #ffffff;
   --color-composer-ring: #e4e4e4;
-  --color-menu: #fcfcfc;          /* menus sit on the page tone, not the bubble */
+  --color-menu: #ffffff;          /* menus sit a step above the page, not on the bubble */
   --color-bubble-user: #070707;   /* your own messages, inverted */
   --color-bubble-user-ink: #fcfcfc;
 
