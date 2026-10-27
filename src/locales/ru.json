@@ -6379,5 +6379,11 @@
   "chat.setupOffer.button": "Настроить меня",
   "composer.setupRequest.placeholder": "Напишите {name}, с чем нужна помощь",
   "composer.setupRequest.waiting": "{name} готов к настройке",
-  "composer.setupRequest.cancel": "Остановить настройку {name}"
+  "composer.setupRequest.cancel": "Остановить настройку {name}",
+  "about.version": "Версия {version}",
+  "about.connectedTo": "Подключено к {name} · версия {version}",
+  "sidebar.update.availableOther": "{name} можно обновить до {version}",
+  "sidebar.update.upToDateOther": "{name}: установлена последняя версия",
+  "sidebar.update.howOther": "Тот, кто управляет этим сервером, обновляет его командой: {command}",
+  "sidebar.update.howOtherRestart": "Тот, кто управляет этим сервером, обновляет его командой: {command}, а затем перезапускает"
 }

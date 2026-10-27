@@ -114,6 +114,9 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,
+       * whose page carries that server's version. Absent in desktop builds before it. */
+      app?: { version: string; ownPage: boolean };
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
       /** "Let my bots use this Mac" (this PC, this computer), on My Cloud's own page in this app: its one switch and

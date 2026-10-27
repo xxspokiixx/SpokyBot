@@ -2077,7 +2077,7 @@ function createWindow({ deferNavigation = false } = {}) {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
       additionalArguments: [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess),
-        ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : [])],
+        ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`],
     },
   });
   mainWindow = win; hiddenStart = false;
