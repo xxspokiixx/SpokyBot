@@ -39,7 +39,7 @@ export function AskCard({
       data-ask-card="pending"
       onKeyDown={onKeyDown}
       className={simple
-        ? "w-full max-w-[560px] rounded-[20px] bg-composer px-[17px] pb-2 pt-[13px] text-start ring-[0.5px] ring-ink/10"
+        ? "w-full max-w-[560px] rounded-[24px] bg-composer px-[17px] pb-2 pt-[13px] text-start ring-[0.5px] ring-ink/10"
         : "w-full max-w-[600px] rounded-2xl bg-composer px-4 py-3 text-start ring-1 ring-composer-ring"}
     >
       <div className={cn("flex min-w-0 gap-2", plain || simple ? "items-start" : "items-center")}>

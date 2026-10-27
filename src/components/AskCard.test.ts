@@ -36,7 +36,7 @@ describe("AskCard", () => {
     mode.advanced = false;
     const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Plan", icon: null, title: "Choose a plan", explanation: "Why it asks." }));
     const card = html.match(/^<div[^>]*class="([^"]*)"/)![1]!.split(" ");
-    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "max-w-[560px]", "rounded-[20px]", "w-full"]));
+    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "max-w-[560px]", "rounded-[24px]", "w-full"]));
     expect(card).not.toContain("rounded-2xl");
     expect(html).toMatch(/text-\[16px\] font-semibold leading-\[22px\] text-ink-secondary"><bdi dir="auto">Choose a plan</);
     expect(html).not.toContain("text-accent-text\"><bdi");

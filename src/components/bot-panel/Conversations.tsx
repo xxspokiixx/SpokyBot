@@ -10,7 +10,8 @@ import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
 
-export const CONVERSATIONS_SHOWN = 8;
+export const CONVERSATIONS_SHOWN = 3;
+const PANEL_ROW_LOOK = "[&_.font-semibold]:font-medium [&_time]:text-[12px] [&_time]:text-ink-tertiary [&_span.bg-accent]:size-2";
 const LAST_LINE_PAGE = 8;
 const MAX_CACHED = 200;
 
@@ -104,9 +105,11 @@ export function BotConversations({ bot }: { bot: Bot }) {
     setSearching(false);
   };
 
+  const listed = conversations.length >= 2;
+
   return (
-    <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")} className="mt-5">
-      <div className="mb-2 flex items-center gap-2">
+    <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")} className="mt-3.5">
+      <div className={cn("flex items-center gap-2", listed && "mb-2")}>
         <button
           type="button"
           data-conversations-new
@@ -117,19 +120,21 @@ export function BotConversations({ bot }: { bot: Bot }) {
           <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
           <span className="truncate">{t("botPanel.conversations.new")}</span>
         </button>
-        <button
-          type="button"
-          data-conversations-search
-          aria-label={t("botPanel.conversations.search")}
-          title={t("botPanel.conversations.search")}
-          aria-pressed={searching}
-          onClick={() => (searching ? stopSearching() : setSearching(true))}
-          className={cn("flex size-9 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
-        >
-          <Search size={15} aria-hidden="true" />
-        </button>
+        {listed && (
+          <button
+            type="button"
+            data-conversations-search
+            aria-label={t("botPanel.conversations.search")}
+            title={t("botPanel.conversations.search")}
+            aria-pressed={searching}
+            onClick={() => (searching ? stopSearching() : setSearching(true))}
+            className={cn("flex size-9 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
+          >
+            <Search size={15} aria-hidden="true" />
+          </button>
+        )}
       </div>
-      {searching && (
+      {listed && searching && (
         <input
           autoFocus
           type="search"
@@ -147,7 +152,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
           className="mb-1.5 w-full rounded-[10px] border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-focus"
         />
       )}
-      <div role="list" aria-label={t("botPanel.conversations.title")} className="flex flex-col gap-px">
+      {listed && <div role="list" aria-label={t("botPanel.conversations.title")} className={cn("flex flex-col gap-px", PANEL_ROW_LOOK)}>
         {shown.map((task) => (
           <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
             <SidebarThreadRow
@@ -164,11 +169,11 @@ export function BotConversations({ bot }: { bot: Bot }) {
             />
           </div>
         ))}
-      </div>
-      {needle && shown.length === 0 && (
+      </div>}
+      {listed && needle && shown.length === 0 && (
         <p className="px-3 py-3 text-[13px] text-ink-secondary">{t("task.noMatch", { query: needle })}</p>
       )}
-      {!needle && hidden > 0 && (
+      {listed && !needle && hidden > 0 && (
         <button
           type="button"
           data-conversations-more

@@ -3,6 +3,7 @@ import { cn } from "@/lib/cn";
 import { WorkingTimer } from "@/components/WorkingIndicator";
 import { phraseAt, phraseHoldMs } from "@/lib/live-activity";
 import { t } from "@/lib/i18n";
+import { formatElapsed } from "@/lib/working-time";
 
 const FADE_MS = 320;
 
@@ -69,6 +70,7 @@ export function TurnPresence({
   since = null,
   size,
   simple = false,
+  detail,
   className,
 }: {
   avatar: ReactNode;
@@ -81,6 +83,8 @@ export function TurnPresence({
   since?: number | null;
   size?: string;
   simple?: boolean;
+  /** Simple mode: Advanced's wording for what is happening now, kept in the row's tooltip with the timer and size. */
+  detail?: string;
   className?: string;
 }) {
   const [mounted, setMounted] = useState(visible);
@@ -112,21 +116,22 @@ export function TurnPresence({
   const { current, previous } = useRotatingPhrase(now ?? NOTHING, phase ?? now?.[0] ?? "", seed, mounted && showWorking && now !== null);
   if (!mounted) return null;
   return (
-    <div className={cn("turn-presence flex flex-col items-start", simple && "ps-0.5", className)}>
+    <div className={cn("turn-presence flex flex-col items-start", className)}>
       <div
+        title={simple && showWorking ? [lead, since !== null ? formatElapsed(Date.now() - since) : null, detail ?? (now ? current : null), size].filter(Boolean).join(" · ") : undefined}
         className={cn(
-          "flex items-center gap-2",
+          simple ? "flex h-9 items-center gap-2 ps-2" : "flex items-center gap-2",
           presencePhase === "think" && "turn-mascot-in",
           presencePhase === "out" && "turn-mascot-out",
         )}
       >
         {avatar}
         {showWorking && simple ? (
-          <span className="turn-phrase relative grid text-[14px] leading-[22px]" data-turn-status data-turn-now={now ? "" : undefined}>
+          <span className="turn-phrase turn-phrase-quiet relative grid text-[14px] leading-[22px] text-ink-tertiary" data-turn-status data-turn-now={now ? "" : undefined}>
             {now ? (
               <ShimmerPhrase key={`in:${current}`} text={current} className={previous !== null ? "turn-phrase-in" : undefined} />
             ) : (
-              <span className="text-ink-secondary">{label ?? t("chat.typing")}</span>
+              <span>{label ?? t("chat.typing")}</span>
             )}
           </span>
         ) : showWorking ? (

@@ -34,7 +34,7 @@ vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
   },
 }));
 
-const { ChatMoreMenu, ChatHeaderMenu } = await import("./ChatMoreMenu");
+const { ChatMoreMenu, ChatHeaderMenu, ChatShareMenu } = await import("./ChatMoreMenu");
 afterAll(() => vi.unstubAllGlobals());
 
 const task = (threadId: string, title: string, at: number, extra: Partial<Task> = {}): Task => ({
@@ -141,6 +141,13 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     inspector.onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleInspector" });
     expect(menu.trigger).toContain("text-accent");
+  });
+});
+
+describe("ChatShareMenu, the bot panel's Share", () => {
+  it("copies or downloads the conversation, in those words", () => {
+    const menu = menuOf(createElement(ChatShareMenu, { bot, className: "" }));
+    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["copy", "Copy conversation"], ["download", "Download conversation"]]);
   });
 });
 

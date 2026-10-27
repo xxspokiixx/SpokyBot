@@ -113,7 +113,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
               onChange={(event) => name.setDraft(event.target.value)}
               onKeyDown={name.onKeyDown}
               onBlur={name.onBlur}
-              className={cn(inlineInputCls, "w-[220px] max-w-full text-[18px] font-medium")}
+              className={cn(inlineInputCls, "w-[220px] max-w-full text-[17px] font-medium leading-6")}
             />
           ) : (
             <button
@@ -122,7 +122,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
               data-panel-rename
               title={t("botPanel.rename")}
               onClick={() => name.start(bot.name)}
-              className="group/name relative inline-flex max-w-full items-center rounded-[7px] px-1.5 py-px text-[18px] font-medium leading-6 text-ink hover:bg-ink/[0.04]"
+              className="group/name relative inline-flex max-w-full items-center rounded-[7px] px-1.5 text-[17px] font-medium leading-6 text-ink hover:bg-ink/[0.04]"
             >
               <span className="min-w-0 truncate">{bot.name}</span>
               <Pencil size={13} aria-hidden="true" className="absolute -right-4 shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100 group-focus-within/name:opacity-100 touch:opacity-100" />
@@ -144,18 +144,15 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
           onBlur={label.onBlur}
           className={cn(inlineInputCls, "mt-[3px] w-[200px] max-w-full text-[13px]")}
         />
-      ) : (
+      ) : title && (
         <button
           ref={label.buttonRef}
           type="button"
           data-panel-label
           onClick={() => label.start(bot.title)}
-          className={cn(
-            "mt-px max-w-full truncate rounded-md px-1.5 py-px text-[13px] hover:bg-ink/[0.04] hover:text-ink-secondary",
-            title ? "text-ink-secondary" : "text-ink-tertiary opacity-0 transition-opacity focus-visible:opacity-100 group-hover/hero:opacity-100 touch:opacity-100",
-          )}
+          className="mt-px max-w-full truncate rounded-md px-1.5 py-px text-[13px] text-ink-secondary hover:bg-ink/[0.04]"
         >
-          {title || t("botPanel.addLabel")}
+          {title}
         </button>
       )}
     </div>

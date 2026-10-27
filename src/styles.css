@@ -111,6 +111,8 @@
 @media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
 /* inside a 28px file pill under a reply, the table preview is a 24px circle */
 .file-chip .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; border-radius: 9999px; }
+/* a table card's hover plate fits the card's 24px top band; touch keeps 40px targets in a taller band */
+@media (pointer: fine) { .table-plate .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; } }
 
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1112,6 +1114,14 @@
 [data-chat-bubble="simple"] .chat-md > * + * {
   margin-top: 10px;
 }
+/* A card under its own bot's bubble (and a bubble under its card) sits 12px below it, not the 16px between senders. */
+[data-simple-rows] > [data-tuck] > :first-child {
+  margin-top: -4px;
+}
+/* Arabic and Hebrew script needs the taller line the rest of the app gives it. */
+[data-chat-bubble="simple"] .chat-md [dir="rtl"] {
+  line-height: 1.75;
+}
 
 .chat-code-actions > button:focus-visible {
   outline: 2px solid var(--color-focus);
@@ -1594,8 +1604,10 @@ body {
    Unlayered, so it wins over the resting `border-hairline/40` every field
    carries as well as over a faint per-file `focus:border-*`. --color-focus
    clears 3:1 on every field surface (pnpm check:contrast). A borderless
-   field, such as the composer or a find bar, has no border to paint and is
-   left as it was; its rounded wrapper takes `focus-within:border-focus`.
+   field has no border to paint and is left as it was: a find bar's rounded
+   wrapper takes `focus-within:border-focus`, and Simple mode's composer pill
+   shows focus as a stronger hairline (`focus-within:ring-ink/[0.22]`), not
+   in the focus colour.
    A field reporting an error (aria-invalid) keeps its danger border, so the
    red does not vanish while the user is fixing it. */
 :is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
@@ -1670,6 +1682,9 @@ body {
 @keyframes msg-in {
   from { transform: translateY(4px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+@keyframes slot-fade-in {
+  from { opacity: 0; }
 }
 .reply-bubble {
   width: fit-content;
@@ -1861,6 +1876,10 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   padding: 0.35em 0.12em;
   margin: -0.35em -0.12em;
 }
+/* Simple mode's typing row is quieter: the shimmer runs from tertiary ink up to secondary. */
+.turn-phrase-quiet .thinking-shimmer {
+  background-image: linear-gradient(90deg, var(--color-ink-tertiary) 40%, var(--color-ink-secondary) 50%, var(--color-ink-tertiary) 60%);
+}
 /* rotating presence phrase: the new phrase fades in where the old one was;
    only one is ever drawn */
 @keyframes turn-phrase-in {
@@ -1871,6 +1890,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
+  .turn-phrase-quiet .thinking-shimmer { background: none; color: var(--color-ink-tertiary); }
   .turn-phrase-in { animation: none; }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
   .reply-bubble-in { animation: none; }
@@ -2848,6 +2868,9 @@ button:disabled.bg-danger {
 
 .user-bubble-colored {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+[data-chat-bubble="simple"].user-bubble-colored {
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.16);
 }
 .user-bubble-colored .mention-highlight {
   color: var(--color-ink);

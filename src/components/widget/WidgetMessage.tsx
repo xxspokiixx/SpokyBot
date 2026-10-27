@@ -7,11 +7,13 @@ import { resolvedThreadTarget } from "@/lib/thread-target";
 import { openThread } from "@/state/thread-navigation";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import {
   widgetActions, widgetFields, widgetInitialValues, widgetScope, widgetString, type WidgetField, type WidgetNode, type WidgetOther, type WidgetPayload,
   type WidgetSettled, type WidgetValues,
 } from "../../../shared/widget";
 import { ASK_QUIET_BUTTON, AskSettledLine, returnFocusToComposer } from "../AskCard";
+import { plainBotBubble } from "../chat-bubble";
 import { WidgetBody } from "./WidgetBody";
 import { WIDGET_COMPACT_BELOW, widgetActionUrl, widgetThreadTarget, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
 import { kids } from "./widget-style";
@@ -34,10 +36,11 @@ function isEmpty(field: WidgetField, values: WidgetValues, other: WidgetOther): 
 }
 
 export function WidgetMessage({ botId, threadId, message }: { botId: string; threadId?: string; message: Message }) {
+  const simple = !useAdvancedMode();
   const payload = message.widget;
   if (!payload?.root || typeof payload.root !== "object" || typeof payload.root.type !== "string") {
     return message.text
-      ? <div className="chat-text w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">{message.text}</div>
+      ? <div data-chat-bubble={simple ? "simple" : ""} className={plainBotBubble(simple)}>{message.text}</div>
       : null;
   }
   // update_widget renumbers node ids, so a new revision remounts the card.
