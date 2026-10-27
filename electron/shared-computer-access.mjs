@@ -15,6 +15,9 @@ const OUTPUT_LIMIT = 256 * 1024;
 // A process the command left running in the background can hold its output pipes open long after the command ended,
 // and on Windows a grandchild whose parent has exited is outside the tree taskkill /T ends. A command's result is
 // therefore what it wrote by shortly after it exited, and a stopped command ends shortly after the stop.
+const COMMAND_SECONDS = 120;
+/** Below the 300-second wait for response headers in Node's fetch (undici), which carries the result back to the bot. */
+const MAX_COMMAND_SECONDS = 240;
 const PIPE_GRACE_MS = 1000;
 const STOP_GRACE_MS = 5000;
 /** The server reads a result body of at most 4,000,000 bytes. */
@@ -130,8 +133,11 @@ function killTree(child) {
  * without USERPROFILE has no home, and one without TEMP or TMP puts temporary files in the Windows folder. */
 const hostEnvironment = () => Object.fromEntries(["PATH", "PATHEXT", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
 
-export function sharedCommand(command, cwd, signal) {
+export const validCommandSeconds = value => value === undefined || (Number.isInteger(value) && value >= 1 && value <= MAX_COMMAND_SECONDS);
+
+export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
   if (typeof command !== "string" || !command.trim() || command.length > 8000) throw new Error("Give a command of at most 8000 characters");
+  if (!validCommandSeconds(seconds)) throw new Error(`Give timeout_seconds as a whole number from 1 to ${MAX_COMMAND_SECONDS}`);
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const windows = process.platform === "win32";
@@ -165,7 +171,7 @@ export function sharedCommand(command, cwd, signal) {
     };
     const abort = () => stop("Computer access was revoked or the requesting turn ended. Inspect the result before retrying.");
     signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => stop("Command timed out after 30 seconds; inspect before retrying."), 30_000);
+    const timer = setTimeout(() => stop(`Command timed out after ${seconds} second${seconds === 1 ? "" : "s"}; inspect before retrying, or give a longer timeout_seconds.`), seconds * 1000);
     for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => {
       bytes += chunk.length;
       if (bytes <= OUTPUT_LIMIT) chunks.push(chunk); else stop("Command output exceeded the limit");
@@ -236,7 +242,7 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   if (grant.enabled !== true) throw new Error("Computer sharing is off");
   if (operation.action === "run_command") {
     if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this server");
-    return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal);
+    return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal, operation.timeout_seconds);
   }
   if (["computer_tools", "computer_call"].includes(operation.action)) {
     if (grant.computer !== true) throw new Error("Computer control is not enabled for this server");

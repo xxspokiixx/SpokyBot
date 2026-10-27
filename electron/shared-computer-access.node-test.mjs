@@ -210,6 +210,21 @@ test("explicit terminal grant executes a harmless command and cancellation stops
   await assert.rejects(pending, /revoked|turn ended/);
 });
 
+test("a command runs up to the time the call asks for, and a time out of range is refused", async t => {
+  const { dir, grant, folder } = await fixture(t);
+  grant.terminal = true;
+  const run = operation => executeSharedOperation(grant, { folder_id: folder.id, action: "run_command", ...operation }, new AbortController().signal);
+  const command = process.platform === "win32" ? "Start-Sleep -Seconds 5" : "sleep 5";
+  const started = Date.now();
+  await assert.rejects(run({ command, timeout_seconds: 1 }), /timed out after 1 second/);
+  assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started} ms`);
+  for (const timeout_seconds of [0, 241, 1.5, "60"]) {
+    await assert.rejects(run({ command: "echo no", timeout_seconds }), /from 1 to 240/);
+  }
+  assert.equal(payload(await run({ command: "echo fixture-default" })).exitCode, 0);
+  void dir;
+});
+
 /** A command that starts a process which outlives it, outside its process tree, holding its output; and that process's pid. */
 async function backgroundHolder(dir, then) {
   const script = path.join(dir, "holder.mjs");
