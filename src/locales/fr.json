@@ -1591,6 +1591,7 @@
   "computer.botSettings": "Réglages du bot",
   "computer.tab.computer": "Écran",
   "routines.retried.stalled": "Nouvel essai après un blocage de l'IA · {status}",
+  "routines.retried.failed": "Nouvel essai après un échec · {status}",
   "automations.editor.app.cloud": "Bureau cloud",
   "automations.app.placeCloud": "dans le Cloud",
   "routines.runsOn.botCloud": "Le bureau cloud du bot",

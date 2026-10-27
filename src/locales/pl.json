@@ -4074,6 +4074,7 @@
   "routines.retried.rate_limited": "Ponowiono po limicie zapytań · {status}",
   "routines.retried.provider": "Ponowiono po tymczasowym błędzie · {status}",
   "routines.retried.usage_limit": "Uruchomiono po odnowieniu limitu wykorzystania · {status}",
+  "routines.retried.failed": "Ponowiono po błędzie · {status}",
   "routines.goal.completed": "Zakończone",
   "routines.goal.needs-input": "Wymaga twojej odpowiedzi",
   "routines.goal.blocked": "Zablokowane",

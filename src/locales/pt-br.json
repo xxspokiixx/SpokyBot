@@ -3900,6 +3900,7 @@
   "routines.retried.rate_limited": "Nova tentativa depois de um limite de requisições · {status}",
   "routines.retried.provider": "Nova tentativa depois de um erro temporário · {status}",
   "routines.retried.usage_limit": "Rodou depois que o limite de uso foi renovado · {status}",
+  "routines.retried.failed": "Nova tentativa depois de uma falha · {status}",
   "routines.goal.completed": "Concluída",
   "routines.goal.needs-input": "Precisa da sua resposta",
   "routines.goal.blocked": "Bloqueada",

@@ -1598,6 +1598,7 @@
   "computer.botSettings": "Bot-Einstellungen",
   "computer.tab.computer": "Bildschirm",
   "routines.retried.stalled": "Erneut versucht, nachdem die KI hing · {status}",
+  "routines.retried.failed": "Erneut versucht nach einem Fehler · {status}",
   "automations.editor.app.cloud": "Cloud-Desktop",
   "automations.app.placeCloud": "in der Cloud",
   "routines.runsOn.botCloud": "Der Cloud-Desktop des Bots",
