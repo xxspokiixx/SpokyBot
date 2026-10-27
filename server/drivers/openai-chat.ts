@@ -712,7 +712,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             usage.input += completion.usage.input;
             usage.output += completion.usage.output;
             hasUsage = true;
-            emit({ ...base(turn.threadId, turnId), type: "thread.token-usage.updated", ...usage });
+            const contextWindow = options.models().options.find((entry) => entry.id === model)?.contextWindow;
+            // Accounting sums the turn; context occupancy is the latest round only.
+            emit({ ...base(turn.threadId, turnId), type: "thread.token-usage.updated", ...usage,
+              contextTokens: completion.usage.input + completion.usage.output, ...(contextWindow ? { contextWindow } : {}) });
           }
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length ? "" : completion.reasoning;
