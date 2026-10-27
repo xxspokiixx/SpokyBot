@@ -5010,6 +5010,8 @@
   "skills.library.noVersion": "バージョンなし",
   "skills.library.importedAt": "{date} にインポート",
   "skills.library.notAssigned": "どのボットにも割り当てられていません。",
+  "skills.library.everyBot": "すべてのボット",
+  "skills.library.everyBotHint": "このスキルを、今あるボットにもこれから作るボットにも使えるようにします。",
   "skills.library.assignLabel": "ボットに割り当て",
   "skills.library.assignPickBot": "ボットを選択…",
   "skills.library.assign": "割り当て",

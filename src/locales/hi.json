@@ -1893,6 +1893,8 @@
   "remote.signInAccess.note": "बदलाव तुरंत लागू होते हैं। किसी को हटाने से नए साइन-इन रुक जाते हैं; उनके मौजूदा डिवाइस तब तक साइन इन रहते हैं जब तक आप उन्हें ऊपर साइन आउट न करें।",
   "remote.signInAccess.error": "सहेज नहीं सका: {error}",
   "botAccess.mcpDisabled": "Apps → MCP servers में बंद है — पहले वहाँ इसे जाँचें और चालू करें।",
+  "skills.library.everyBot": "हर बॉट",
+  "skills.library.everyBotHint": "यह कौशल अभी के और आगे बनने वाले हर बॉट को दें।",
   "canvas.botComputer": "{name} के लिए डेस्कटॉप",
   "canvas.teamComputer": "{team} विभाग के लिए डेस्कटॉप: {name}",
   "canvas.assignComputer": "{team} को एक डेस्कटॉप दें",

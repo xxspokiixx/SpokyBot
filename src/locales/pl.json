@@ -4935,6 +4935,8 @@
   "skills.library.noVersion": "Brak wersji",
   "skills.library.importedAt": "Zaimportowano {date}",
   "skills.library.notAssigned": "Nie przypisano do żadnego bota.",
+  "skills.library.everyBot": "Każdy bot",
+  "skills.library.everyBotHint": "Udostępnij tę umiejętność każdemu obecnemu i przyszłemu botowi.",
   "skills.library.assignLabel": "Przypisz do bota",
   "skills.library.assignPickBot": "Wybierz bota…",
   "skills.library.assign": "Przypisz",
