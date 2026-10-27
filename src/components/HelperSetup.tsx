@@ -19,7 +19,7 @@ const STEPS: Record<SetupStep, { label: LocaleKey; icon: LucideIcon }> = {
 export function setupAction(step: SetupStep): Action {
   switch (step) {
     case "ai": return { type: "toggleAppSettings", open: true, section: "engines" };
-    case "bots": return { type: "toggleNewBot", open: true };
+    case "bots": return { type: "newBot" };
     case "apps": return { type: "togglePlugins", open: true, surface: "apps" };
     case "phone": return phonePairingSettingsAction();
     case "cloud": return { type: "openCloudAdd", source: "app_onboarding" };
