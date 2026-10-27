@@ -84,4 +84,13 @@ describe("ThreadChip", () => {
       { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
     ]);
   });
+
+  it("marks the receipt when the work in that thread failed", () => {
+    const failed = renderToStaticMarkup(createElement(ThreadChip, {
+      message: { ...receipt(), tool: { name: "Scout — cancelled: stopped by the person", ok: false } },
+    }));
+    expect(failed).toContain("Scout — cancelled: stopped by the person");
+    expect(failed).toMatch(/<button[^>]*class="[^"]*text-danger/);
+    expect(renderToStaticMarkup(createElement(ThreadChip, { message: receipt() }))).not.toContain("text-danger");
+  });
 });
