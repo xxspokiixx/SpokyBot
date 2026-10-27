@@ -2,7 +2,7 @@
 // answers, then Something else. A pick sends its words, which the server runs as setup at once; Something else is
 // answered by the bot's own line, and the next thing the person types is what the bot sets itself up for. While it
 // waits, a chip above the message box says so and its x stops it. Once answered, the card stays, quiet, with the answer.
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Sparkles, X } from "lucide-react";
 
 import { currentReactor, useReactor } from "@/lib/cloud-guest";
@@ -17,6 +17,11 @@ const LETTERS = "ABCDEFGH";
 const FALLBACK_CHOICES: LocaleKey[] = [
   "chat.setupCard.research", "chat.setupCard.watch", "chat.setupCard.inbox", "chat.setupCard.errands", "chat.setupCard.data",
 ];
+/** How long the card waits for personal answers after it is first shown, and how old a greeting can be before a wait on
+ * it is one a restart left behind: the server clears the wait within 6 s. */
+const PENDING_GRACE_MS = 8_000;
+const STALE_WAIT_MS = 20_000;
+const PLACEHOLDER_WIDTHS = ["62%", "48%", "56%", "44%", "58%", "30%"];
 
 /** The server closes the card once the bot is given instructions or the card is closed; the bot's own fields and the
  * transcript cover the moments before that reaches this screen. The conversation's AI must have the tools a bot sets
@@ -26,8 +31,18 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
   const [busy, setBusy] = useState(false);
   const [closed, setClosed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [waitedOut, setWaitedOut] = useState(false);
   // A double click lands before the disabled buttons are drawn.
   const sending = useRef(false);
+  // The first list the card shows stays, so a letter key always picks the job on screen.
+  const shown = useRef<{ id: string; choices: string[] } | null>(null);
+  const waitedOnce = useRef(false);
+  const waiting = message.setupChoicesPending === true && !waitedOut && Date.now() - message.at < STALE_WAIT_MS;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setTimeout(() => setWaitedOut(true), PENDING_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [waiting]);
   const bot = state.bots.find((candidate) => candidate.id === botId);
   if (closed || message.setupOffer !== true || !bot) return null;
   const selection = bot.tasks?.find((task) => task.threadId === threadId)?.modelSelection ?? bot.modelSelection;
@@ -37,7 +52,12 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
   if (first ? !first.setupRequest && !capable : !(blank(bot) && capable)) return null;
   const settled = first !== undefined;
   const answer = first?.setupRequest ? first : undefined;
-  const choices = message.setupChoices?.length ? message.setupChoices : FALLBACK_CHOICES.map((key) => t(key));
+  const pending = waiting && !settled;
+  if (pending) waitedOnce.current = true;
+  else if (shown.current?.id !== message.id) {
+    shown.current = { id: message.id, choices: message.setupChoices?.length ? message.setupChoices : FALLBACK_CHOICES.map((key) => t(key)) };
+  }
+  const choices = pending ? [] : shown.current!.choices;
   const title = t("chat.setupCard.title");
 
   const ask = (text?: string) => {
@@ -73,7 +93,7 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
   };
 
   return (
-    <section data-setup-card={message.id} aria-label={title} aria-busy={busy || undefined} onKeyDown={settled ? undefined : byLetter}
+    <section data-setup-card={message.id} aria-label={title} aria-busy={busy || pending || undefined} onKeyDown={settled || pending ? undefined : byLetter}
       className="w-full max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-[20px] bg-card px-2 pb-2 pt-3">
       <div className="flex items-start justify-between gap-2 ps-3 pe-1">
         <h3 dir="auto" className="py-px text-[16px] font-semibold leading-[22px] text-ink-secondary">{title}</h3>
@@ -82,7 +102,13 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
           <X size={15} aria-hidden="true" />
         </button>}
       </div>
-      <div className="mt-1.5 flex flex-col">
+      {pending ? <div data-setup-waiting="" className="mt-1.5 flex flex-col">
+        {PLACEHOLDER_WIDTHS.map((width) => (
+          <div key={width} className="flex min-h-10 items-center px-3 py-2">
+            <span className="h-4 rounded-md bg-ink/[0.06] motion-safe:animate-pulse" style={{ width }} />
+          </div>
+        ))}
+      </div> : <div className={cn("mt-1.5 flex flex-col", waitedOnce.current && "motion-safe:animate-msg-in")}>
         {options.map((option, index) => (
           <button key={option.label} type="button" data-ask-choice="" disabled={settled || busy} onClick={option.pick}
             className={cn("group flex min-h-10 items-center gap-3 rounded-xl px-3 py-2 text-start",
@@ -94,7 +120,7 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
             <span dir="auto" className={cn("min-w-0 break-words text-[14px] leading-5", settled ? "text-ink-tertiary" : "text-ink")}>{option.label}</span>
           </button>
         ))}
-      </div>
+      </div>}
       {settled && answer && (
         <div data-setup-answer="" className="mx-3 mb-1 mt-1.5 border-t border-hairline/40 pt-2.5">
           <div className="text-[12px] leading-4 text-ink-tertiary">{t("chat.setupCard.answer")}</div>

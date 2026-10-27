@@ -31,6 +31,11 @@ export function setupChoices(language?: string): string[] {
   return [...byLanguage(SETUP_CHOICES, language)];
 }
 
+/** The fixed answers exist in this language, not only the English stand-in. */
+export function hasSetupChoices(language?: string): boolean {
+  return byLanguage(SETUP_CHOICES, language) !== SETUP_CHOICES.en || /^en(?:-|$)/i.test(language?.trim() || "en");
+}
+
 /** `person`: the name the person gave, greeted by its first word; absent or blank, the greeting names no one. */
 export function initialGreeting(name: string, language?: string, person?: string): string {
   return byLanguage(GREETINGS, language)(name, person?.trim().split(/\s+/)[0] || undefined);

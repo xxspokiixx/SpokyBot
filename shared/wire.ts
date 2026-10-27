@@ -477,8 +477,12 @@ export interface WireMessage extends HelperIntroField {
    * card can show the answer; closing the card clears it. */
   setupOffer?: true;
   /** The setup card's answers, in the app's language. Picking one sends its words; absent on older greetings, where a
-   * client offers its own. */
+   * client offers its own. Replaced at most once, by personal answers, in the change that clears setupChoicesPending. */
   setupChoices?: string[];
+  /** Personal answers for this card are being written (server/setup-suggestions.ts): clients show the card without
+   * answers until it clears. The server clears it within 6 s, in the same change that sets setupChoices if they came in
+   * time; a client still seeing it 8 s after showing the card, or on a greeting older than 20 s, shows setupChoices. */
+  setupChoicesPending?: true;
   /** A person's line Set me up turned into a setup request: the bot reads it as `/setup <text>`; the chat shows `text`. */
   setupRequest?: true;
   /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */

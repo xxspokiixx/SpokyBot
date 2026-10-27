@@ -390,10 +390,10 @@ import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillR
 import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
-import { pickBotName } from "./names.ts";
+import { isPickedBotName, pickBotName } from "./names.ts"; import { appLabel } from "./app-event-catalog.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
-import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, openSetupOffer, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { suggestSetupChoices, suggestionModel } from "./setup-suggestions.ts"; import { createSetupRequestRoutes, type SetupPickSent } from "./routes/setup-request.ts";
+import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { aboutMeExcerpt, createSetupSuggestions, type SuggestionApps, type SuggestionBasis } from "./setup-suggestions.ts"; import { createSetupRequestRoutes, type SetupPickSent } from "./routes/setup-request.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
@@ -5257,6 +5257,63 @@ const sideJobs = createSideJobs({
   log: (line) => console.log(line),
 });
 
+/** The connected apps, read at most every ten minutes; a setup card waits for a read on its way for at most 700 ms. */
+let setupApps: { key: string; at: number; slugs: string[] } | null = null;
+let setupAppsReading: Promise<string[]> | null = null;
+function setupAppSlugs(): { known: string[] } | { known: string[]; later: Promise<string[]> } {
+  const key = composio.connectionMode(cfg);
+  if (setupApps && setupApps.key === key && Date.now() - setupApps.at < 10 * 60_000) return { known: setupApps.slugs };
+  setupAppsReading ??= composio.connectedServices(cfg)
+    .then((services) => {
+      const slugs = Object.entries(services).filter(([, state]) => state.connected).map(([slug]) => slug).sort();
+      setupApps = { key, at: Date.now(), slugs };
+      return slugs;
+    })
+    .catch(() => [] as string[])
+    .finally(() => { setupAppsReading = null; });
+  return { known: [], later: setupAppsReading };
+}
+
+/** What a new bot's setup card is written from. On a shared place, never the profile's About me or other people's
+ * bots: the card can reach other members. Never names, email addresses or anything the person wrote in a chat. */
+function setupSuggestionBasis(bot: BotRecord): SuggestionBasis {
+  const shared = sharedMembership();
+  const languageCode = appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale;
+  let language = "English";
+  try { language = new Intl.DisplayNames(["en"], { type: "language" }).of(languageCode) ?? "English"; } catch { language = "English"; }
+  const aboutMe = shared ? undefined : aboutMeExcerpt(cfg.profile?.aboutMe, redactSecretsInText);
+  const caps = registry.get(bot.modelSelection.instanceId)?.adapter.capabilities;
+  return {
+    ...(isPickedBotName(bot.name) ? {} : { name: bot.name }),
+    ...(bot.title ? { title: bot.title } : {}),
+    ...(bot.section ? { department: bot.section } : {}),
+    ...(aboutMe ? { aboutMe } : {}),
+    otherJobs: shared ? [] : store.bots
+      .filter((other) => other.id !== bot.id && !other.hidden && !other.movedTo && !other.defaultBot && !other.chiefOfStaff)
+      .map((other) => other.title?.trim() || other.description?.split("\n")[0]?.trim() || "").filter(Boolean),
+    language, languageCode,
+    canBrowse: caps?.browserMcp === true && builtInBrowserEnabled(cfg) && bot.browser !== false,
+  };
+}
+
+const setupSuggestions = createSetupSuggestions({
+  store,
+  enabled: () => cfg.features?.smartSetupChoices !== false,
+  canSetUp: (bot) => registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.agentsMcp === true,
+  withinBudget: () => { try { assertWithinBudget(cfg, DATA_DIR); return true; } catch { return false; } },
+  writer: (botId) => sideJobs.text("setup-suggestions", botId),
+  facts: setupSuggestionBasis,
+  apps: (bot): SuggestionApps => {
+    const caps = registry.get(bot.modelSelection.instanceId)?.adapter.capabilities;
+    if (!caps?.composioMcp || bot.composio === false || !composio.configured(cfg)) return null;
+    const allowed = bot.connectorTools ? new Set(Object.keys(bot.connectorTools)) : null;
+    const named = (slugs: readonly string[]) => slugs.filter((slug) => !allowed || allowed.has(slug)).map((slug) => appLabel(slug));
+    const read = setupAppSlugs();
+    return "later" in read ? { known: [], later: read.later.then(named) } : { known: named(read.known) };
+  },
+  log: (line) => console.log(line),
+});
+
 const memoryUpkeep = createMemoryUpkeep({
   bots: () => store.bots,
   bot: (id) => store.bot(teamHost.baseBotId(id)) ?? undefined,
@@ -7749,31 +7806,6 @@ function threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; in
     return { ok: false, refusal: error instanceof Error ? error.message : String(error) };
   }
   return { ok: true, instance };
-}
-
-/** A new bot's setup card, answered from what the person told the app about themselves (About me), by the bot's own
- * engine. Only where one person uses the place, so the profile is theirs; without About me the fixed answers stay. */
-async function personaliseSetupCard(bot: BotRecord): Promise<void> {
-  const aboutMe = cfg.profile?.aboutMe?.trim();
-  if (!aboutMe || sharedMembership() || !openSetupOffer(store, bot.id, bot.threadId)) return;
-  if (hostedModels && !hostedModels.allows(bot.modelSelection)) return;
-  const instanceId = bot.modelSelection.instanceId;
-  const engine = registry.get(instanceId);
-  if (!engine?.generateText || policyModelRefusal(engine)) return;
-  try { assertWithinBudget(cfg, DATA_DIR); } catch { return; }
-  const url = (cfg.instances?.[instanceId]?.config as { url?: unknown } | undefined)?.url;
-  let host: string | undefined;
-  try { host = typeof url === "string" ? new URL(url).hostname : undefined; } catch { host = undefined; }
-  const refused = quickFallback.refused(instanceId);
-  const model = suggestionModel({ instanceId, driverKind: engine.driverKind, catalog: engine.models.options.map((option) => option.id), host,
-    quickModelsUsable: engine.quickModelsUsable?.() !== false }, bot.modelSelection.model || undefined, refused,
-  (candidate) => !hostedModels || hostedModels.allows({ instanceId, model: candidate }));
-  const choices = await suggestSetupChoices(engine.generateText.bind(engine), {
-    botName: bot.name, aboutMe, language: appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
-    otherBots: store.bots.filter((other) => other.id !== bot.id && !other.hidden).map((other) => other.title ? `${other.name} (${other.title})` : other.name),
-  }, { model, own: bot.modelSelection.model || undefined, refused, onRefused: (refusedModel) => quickFallback.remember(instanceId, refusedModel) });
-  const greeting = choices ? openSetupOffer(store, bot.id, bot.threadId) : null;
-  if (greeting && choices) store.patchMessage(bot.threadId, greeting.id, { setupChoices: choices });
 }
 
 const titleRegenerations = new Set<string>();
@@ -12588,7 +12620,7 @@ ROUTES.push(createBotCreateRoutes({
   hostedModels, cloudRoutineAuthors,
   routines: () => routines,
   storedAvatarExists, defaultSelection, checkedModelSelection, cloudOwnerSession, wireBot, team: CLOUD_TEAM && teamOwners.people ? { name: CLOUD_TEAM.name, people: teamOwners.people } : null,
-  personaliseSetupCard: (bot) => { personaliseSetupCard(bot).catch(() => undefined); },
+  personaliseSetupCard: (bot) => setupSuggestions.personalise(bot.id),
 }), createTeamOwnerRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, sees: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId), publicBot,
   profileOf: (email) => teamHost.people.profile(personKey({ id: "", email })) }));
 ROUTES.push(createBotSettingsRoutes({

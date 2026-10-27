@@ -163,6 +163,8 @@ let fakeClaudePrompts: string;
 let fakeClaudeRelease: string;
 let oneShotTextFile: string;
 let oneShotTextDump: string;
+let setupAnswersFile: string;
+let setupAnswersDump: string;
 let fakeDockerFixture: string;
 let fakeVpsFixture: string;
 let fakeDockerLog: string;
@@ -392,6 +394,8 @@ beforeAll(async () => {
   fakeClaudeRelease = join(home, "fake-claude-release");
   oneShotTextFile = join(home, "fake-claude-one-shot.txt");
   oneShotTextDump = join(home, "fake-claude-one-shot-dump.json");
+  setupAnswersFile = join(home, "fake-claude-setup-answers.txt");
+  setupAnswersDump = join(home, "fake-claude-setup-answers-dump.json");
   const fakeDockerDir = join(home, "fake-docker-bin");
   const fakeDockerProgram = join(fakeDockerDir, "docker-empty.mjs");
   fakeDockerFixture = join(home, ".openmausbot", "fake-unmanaged-container");
@@ -455,8 +459,8 @@ beforeAll(async () => {
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
-      // generated titles are opt-in; this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below)
-      features: { llmThreadTitles: true, browser: false },
+      // generated titles are opt-in; this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below); one test turns the setup card's answers on
+      features: { llmThreadTitles: true, browser: false, smartSetupChoices: false },
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
@@ -1227,6 +1231,8 @@ beforeAll(async () => {
       // The one-shot text helper fails until a test writes its reply file, and its dump never overwrites a turn's.
       FAKE_CLAUDE_TEXT_FILE: oneShotTextFile,
       FAKE_CLAUDE_TEXT_DUMP: oneShotTextDump,
+      FAKE_CLAUDE_SETUP_FILE: setupAnswersFile,
+      FAKE_CLAUDE_SETUP_DUMP: setupAnswersDump,
       // the real CLI runs Manual for these even when asked for auto
       FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS: "claude-haiku-4-5",
       OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
@@ -7746,6 +7752,48 @@ describe("harness HTTP API", () => {
       stream.close();
       if (id) await api("DELETE", `/api/bots/${id}`);
       await api("PUT", "/api/config", { profile: { name: before } });
+    }
+  });
+
+  it("writes a new bot's setup answers with its own engine on Haiku 5.5 without thinking, and keeps the fixed ones when that fails", async () => {
+    const before = (await api("GET", "/api/config")).body.profile?.name ?? "";
+    const answers = ["Sort my receipts", "Check my unpaid invoices", "Draft a payment reminder", "Find a missing expense", "Remind me of tax deadlines"];
+    const ids: string[] = [];
+    const greeting = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages[0];
+    const create = async (name: string) => {
+      const created = await api("POST", "/api/bots", { name, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true });
+      expect(created.status).toBe(201);
+      ids.push(created.body.bot.id);
+      return created.body.bot;
+    };
+    expect((await api("PUT", "/api/config", { profile: { name: "Milind Soni" }, features: { smartSetupChoices: true } })).status).toBe(200);
+    try {
+      writeFileSync(setupAnswersFile, `${JSON.stringify(answers)}\n`);
+      rmSync(setupAnswersDump, { force: true });
+      const bot = await create("Bookkeeper");
+      expect(bot.messages[0]).toMatchObject({ setupOffer: true, setupChoicesPending: true });
+      await expect.poll(async () => (await greeting(bot.threadId)).setupChoicesPending ?? null, { timeout: 10_000 }).toBeNull();
+      expect((await greeting(bot.threadId)).setupChoices).toEqual(answers);
+      const seen = await readJsonFileWhenReady<{ argv: string[]; env: Record<string, string | undefined>; prompt: string }>(setupAnswersDump);
+      expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("claude-haiku-5-5");
+      expect(JSON.parse(seen.argv[seen.argv.indexOf("--settings") + 1]!)).toEqual({ alwaysThinkingEnabled: false, disableAllHooks: true });
+      expect(seen.argv).not.toContain("--effort");
+      expect(seen.env.MAX_THINKING_TOKENS).toBeUndefined();
+      expect(seen.prompt).toContain("Bot name: Bookkeeper");
+      expect(seen.prompt).not.toContain("Milind");
+      const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+      const usage = await (await fetch(`${BASE}/api/usage.csv?from=${day(-1)}&to=${day(1)}`)).text();
+      expect(usage.split("\n").some((line) => line.includes("Bookkeeper") && line.includes(",setup-suggestions-"))).toBe(true);
+
+      rmSync(setupAnswersFile, { force: true });
+      const other = await create("Gardener");
+      expect(other.messages[0].setupChoicesPending).toBe(true);
+      await expect.poll(async () => (await greeting(other.threadId)).setupChoicesPending ?? null, { timeout: 10_000 }).toBeNull();
+      expect((await greeting(other.threadId)).setupChoices).toEqual(other.messages[0].setupChoices);
+    } finally {
+      rmSync(setupAnswersFile, { force: true });
+      for (const id of ids) await api("DELETE", `/api/bots/${id}`);
+      await api("PUT", "/api/config", { profile: { name: before }, features: { smartSetupChoices: false } });
     }
   });
 
