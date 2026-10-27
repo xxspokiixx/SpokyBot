@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Archive, CircleUser, Cloud, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Archive, ChartNoAxesColumn, Cloud, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
@@ -32,14 +32,15 @@ import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
-import { ProSettingsCard } from "./ProIntroduction";
-import { CloudUsageSettings } from "./CloudUsageMeter";
-import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { CloudPlanRow, ProSettingsCard } from "./ProIntroduction";
+import { CloudUsageDetails, CloudUsageSettings, CloudUsageSummaryView, useCloudUsageSettings } from "./CloudUsageMeter";
+import { Card, SettingRow, SettingsDisclosure, SettingsGroup, SettingsRows, SIMPLE_SELECT, Switch } from "./SettingsPrimitives";
 import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
+import { PlanUsageSummary } from "./PlanUsage";
 import { SkillsSection } from "./SkillsSection";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
@@ -48,7 +49,7 @@ import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "./AppearanceSelect
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
-import { ProfileFields } from "./ProfileSettings";
+import { ProfileFields, ProfileSummaryRow } from "./ProfileSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { AutomaticRecoverySettings } from "./AutomaticRecoverySettings";
 import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
@@ -61,6 +62,9 @@ import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
+import { appVersion } from "@/lib/app-links";
+import { useServerUpdateItem } from "./SidebarProfileMenu";
+import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalPins, SIDEBAR_DENSITIES, usePinnedCircles, useSidebarDensity, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
@@ -111,28 +115,35 @@ export type SimpleSettingsPage = {
   labelKey: LocaleKey;
   icon: typeof User;
   sections: AppSettingsSection[];
+  keywords?: string[];
 };
 
 export const SIMPLE_PAGES: SimpleSettingsPage[] = [
-  { id: "general", labelKey: "settings.section.general", icon: User, sections: ["general"] },
-  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, sections: ["appearance"] },
+  { id: "general", labelKey: "settings.section.general", icon: Settings, sections: ["general", "appearance", "people", "import", "organization", "activity"],
+    keywords: ["account", "font", "open at login", "startup", "welcome", "tour", "advanced mode", "more settings"] },
   { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"] },
-  { id: "computers", labelKey: "settings.group.computers", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
-  { id: "cloud", labelKey: "settings.section.cloudAccount", icon: Cloud, sections: ["cloudAccount"] },
-  { id: "account", labelKey: "settings.group.account", icon: CircleUser, sections: ["organization", "import", "people", "activity", "usage"] },
+  { id: "computer", labelKey: "settings.page.computer", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
+  { id: "billing", labelKey: "settings.page.billing", icon: ChartNoAxesColumn, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
+  { id: "updates", labelKey: "settings.updates.title", icon: CloudDownload, sections: ["updates"],
+    keywords: ["update", "version", "release", "product updates", "newsletter", "email updates", "analytics", "diagnostics", "logs", "support"] },
 ];
 
 export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "decisionModel"];
 
-export function simpleSettingsPages(
-  available: ReadonlyArray<(typeof SECTIONS)[number]>,
-  open: AppSettingsSection,
-): SimpleSettingsPage[] {
-  const allowed = new Set(available.map((entry) => entry.id));
+export type SimpleDisclosureId = "general-more" | "ai-other" | "ai-more" | "computer-more" | "billing-details" | "updates-more";
+
+export const SIMPLE_FOLDED: Partial<Record<AppSettingsSection, SimpleDisclosureId>> = {
+  import: "general-more",
+  organization: "general-more",
+  activity: "general-more",
+  connections: "ai-other",
+};
+
+export function simpleSettingsPages(available: ReadonlySet<AppSettingsSection>, open: AppSettingsSection): SimpleSettingsPage[] {
   const pages = SIMPLE_PAGES
-    .map((page) => ({ ...page, sections: page.sections.filter((id) => allowed.has(id)) }))
+    .map((page) => ({ ...page, sections: page.sections.filter((id) => available.has(id)) }))
     .filter((page) => page.sections.length > 0);
-  const hidden = SIMPLE_HIDDEN_SECTIONS.includes(open) ? available.find((entry) => entry.id === open) : undefined;
+  const hidden = SIMPLE_HIDDEN_SECTIONS.includes(open) && available.has(open) ? SECTIONS.find((entry) => entry.id === open) : undefined;
   if (hidden) pages.push({ id: hidden.id, labelKey: hidden.labelKey, icon: hidden.icon, sections: [hidden.id] });
   return pages;
 }
@@ -148,7 +159,7 @@ export function revealSettingsBlock(
 
 function simplePageMatches(page: SimpleSettingsPage, query: string): boolean {
   if (!query) return true;
-  if (t(page.labelKey).toLowerCase().includes(query)) return true;
+  if ([t(page.labelKey), ...page.keywords ?? []].some((part) => part.toLowerCase().includes(query))) return true;
   return page.sections.some((id) => {
     const entry = SECTIONS.find((candidate) => candidate.id === id);
     return entry ? sectionMatches(entry, query) : false;
@@ -160,7 +171,7 @@ export function sectionMatches(section: (typeof SECTIONS)[number], query: string
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
-export function UpdatesRow() {
+export function UpdatesRow({ title = t("settings.updates.title") }: { title?: string }) {
   const s = useUpdaterState();
   const updater = window.ogb?.updater;
   if (!s || !updater) return null;
@@ -188,7 +199,7 @@ export function UpdatesRow() {
                   ? t("settings.updates.failed", { message: s.message ?? t("settings.updates.unknownError") })
                   : t("settings.updates.latest");
   return (
-    <SettingRow title={t("settings.updates.title")} subtitle={label}>
+    <SettingRow title={title} subtitle={label}>
       <button
         onClick={() => {
           if (s.status === "downloaded") return void updater.install();
@@ -316,16 +327,16 @@ function ReplayTourRow() {
   );
 }
 
-function LanguageRow() {
+function LanguageRow({ simple = false }: { simple?: boolean }) {
   const { state } = useStore();
   const current = effectiveLanguage(useLanguageChoice(), state.config?.language);
 
   return (
     <SettingRow
       title={t("settings.language.title")}
-      subtitle={t("settings.language.subtitle")}
+      subtitle={simple ? undefined : t("settings.language.subtitle")}
     >
-      <Select size="sm" className="w-full max-w-[240px]"
+      <Select size="sm" variant={simple ? "pill" : "field"} className={simple ? SIMPLE_SELECT : "w-full max-w-[240px]"}
         value={current}
         aria-label={t("settings.language.aria")}
         onChange={(event) => setLanguageChoice(event.target.value)}
@@ -341,11 +352,11 @@ function LanguageRow() {
   );
 }
 
-function SendKeyRow() {
+function SendKeyRow({ simple = false }: { simple?: boolean }) {
   const sendKey = useSendKey();
   return (
-    <SettingRow title={t("settings.sendKey.title")} subtitle={t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
-      <Select size="sm" className="w-full max-w-[240px]"
+    <SettingRow title={t("settings.sendKey.title")} subtitle={simple ? undefined : t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
+      <Select size="sm" variant={simple ? "pill" : "field"} className={simple ? SIMPLE_SELECT : "w-full max-w-[240px]"}
         value={sendKey}
         aria-label={t("settings.sendKey.title")}
         onChange={(event) => setSendKey(parseSendKey(event.target.value))}
@@ -358,10 +369,10 @@ function SendKeyRow() {
   );
 }
 
-function ColorUserBubblesRow() {
+function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
   const enabled = useColorUserBubbles();
   return (
-    <SettingRow title={t("settings.userBubbles.title")} subtitle={t("settings.userBubbles.subtitle")}>
+    <SettingRow title={t("settings.userBubbles.title")} subtitle={simple ? undefined : t("settings.userBubbles.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.userBubbles.aria")}
@@ -371,10 +382,11 @@ function ColorUserBubblesRow() {
   );
 }
 
-function AdvancedModeRow() {
+function AdvancedModeRow({ simple = false }: { simple?: boolean }) {
   const enabled = useAdvancedMode();
   return (
-    <SettingRow className="rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4" title={t("settings.advancedMode.title")} subtitle={t("settings.advancedMode.subtitle")}>
+    <SettingRow className={simple ? undefined : "rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4"} title={t("settings.advancedMode.title")}
+      subtitle={t(simple ? "settings.advancedMode.simpleSubtitle" : "settings.advancedMode.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.advancedMode.title")}
@@ -557,16 +569,214 @@ function BrowserProfilesRow() {
   );
 }
 
+type Disclose = (id: SimpleDisclosureId) => { id: SimpleDisclosureId; open: boolean; onToggle: () => void };
+
+function SimpleGeneralPage({ has, remoteActive, disclose, peopleOpen }: {
+  has: (id: AppSettingsSection) => boolean;
+  remoteActive: boolean;
+  disclose: Disclose;
+  peopleOpen: boolean;
+}) {
+  return (
+    <>
+      {(has("general") || has("people")) && (
+        <SettingsGroup label={t("settings.group.account")} block="general">
+          <SettingsRows>
+            {has("general") && <ProfileSummaryRow />}
+            {has("general") && <CloudPlanRow />}
+            {has("people") && <div data-settings-block="people" className="scroll-mt-4"><PeopleSection simple startOpen={peopleOpen} /></div>}
+          </SettingsRows>
+        </SettingsGroup>
+      )}
+      {has("appearance") && (
+        <SettingsGroup label={t("settings.section.appearance")} block="appearance">
+          <SettingsRows>
+            <ColorUserBubblesRow simple />
+            <LanguageRow simple />
+            <SendKeyRow simple />
+          </SettingsRows>
+        </SettingsGroup>
+      )}
+      {has("appearance") && (
+        <SettingsGroup label={t("notifications.title")}>
+          <SettingsRows><NotificationRows simple /></SettingsRows>
+        </SettingsGroup>
+      )}
+      {has("general") && (
+        <SettingsGroup label={t("settings.group.system")}>
+          <SettingsRows>
+            <OpenAtLoginRow />
+            <DefaultBotSidebarRow />
+            {!remoteActive && <ReplayTourRow />}
+          </SettingsRows>
+        </SettingsGroup>
+      )}
+      <SettingsDisclosure label={t("settings.more")} {...disclose("general-more")}>
+        {has("appearance") && (
+          <SettingsGroup label={t("settings.group.display")}>
+            <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
+              <SkinPicker />
+            </Card>
+            <SettingsRows>
+              <FontRow />
+              <ChatWidthRow />
+              <SidebarDensityRow />
+              <PinnedCirclesRow />
+              <UniversalPinsRow />
+              {!remoteActive && <ToolCallsRow />}
+              <RunCardRow />
+            </SettingsRows>
+          </SettingsGroup>
+        )}
+        {has("general") && (
+          <SettingsGroup label={t("settings.group.newBots")}>
+            <SettingsRows>
+              <NewBotEffortRow />
+              <DefaultBotSettings />
+            </SettingsRows>
+          </SettingsGroup>
+        )}
+        {has("general") && (
+          <SettingsGroup label={t("settings.group.runningBots")}>
+            <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
+              <RoomTurnTimeoutSettings />
+            </Card>
+            <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}>
+              <McpCallTimeoutSettings />
+            </Card>
+            <ThreadConcurrencySettings />
+            <AutomaticRecoverySettings />
+            <ThreadCleanupSettings />
+          </SettingsGroup>
+        )}
+        {has("import") && <div data-settings-block="import" className="scroll-mt-4"><ImportSettings /></div>}
+        {has("organization") && <div data-settings-block="organization" className="scroll-mt-4"><OrganizationSettings /></div>}
+        {has("activity") && <div data-settings-block="activity" className="scroll-mt-4"><ActivitySection /></div>}
+      </SettingsDisclosure>
+      <SettingsRows><AdvancedModeRow simple /></SettingsRows>
+    </>
+  );
+}
+
+function SimpleAiPage({ has, disclose, connections }: { has: (id: AppSettingsSection) => boolean; disclose: Disclose; connections: ReactNode }) {
+  const { state } = useStore();
+  return (
+    <>
+      {has("engines") && <div data-settings-block="engines" className="scroll-mt-4"><EnginesSettings simple /></div>}
+      {has("connections") && (
+        <SettingsDisclosure label={t("settings.ai.otherProviders")} {...disclose("ai-other")}>
+          <div data-settings-block="connections" className="scroll-mt-4">{connections}</div>
+        </SettingsDisclosure>
+      )}
+      {has("engines") && state.config?.cacheKeepWarm && (
+        <SettingsDisclosure label={t("settings.more")} {...disclose("ai-more")}>
+          <CacheKeepWarmSettings />
+        </SettingsDisclosure>
+      )}
+    </>
+  );
+}
+
+type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "companion", ReactNode>;
+
+function SimpleComputerPage({ has, remoteAccess, servers, disclose }: {
+  has: (id: AppSettingsSection) => boolean;
+  remoteAccess: RemoteAccessCards;
+  servers: ReactNode;
+  disclose: Disclose;
+}) {
+  return (
+    <>
+      {has("companion") && (
+        <SettingsGroup label={t("settings.section.companion")} block="companion">
+          {remoteAccess.pairing}
+          {remoteAccess.companion}
+          {remoteAccess.client}
+        </SettingsGroup>
+      )}
+      {has("desktopWorkspaces") && <SettingsGroup label={t("settings.section.desktopWorkspaces")} block="desktopWorkspaces">{servers}</SettingsGroup>}
+      {has("computer") && <SettingsGroup label={t("settings.section.computer")} block="computer"><LocalComputerSection /></SettingsGroup>}
+      {has("computer") && (
+        <SettingsGroup label={t("settings.experimental.browser")} block="browser">
+          <SettingsRows><BuiltInBrowserRow /></SettingsRows>
+          <BrowserProfilesRow />
+        </SettingsGroup>
+      )}
+      {has("logins") && <div data-settings-block="logins" className="scroll-mt-4"><LoginsSettings /></div>}
+      {has("companion") && remoteAccess.domain && (
+        <SettingsDisclosure label={t("settings.more")} {...disclose("computer-more")}>
+          {remoteAccess.domain}
+        </SettingsDisclosure>
+      )}
+    </>
+  );
+}
+
+function SimpleBillingPage({ has, disclose, cloudAccount }: { has: (id: AppSettingsSection) => boolean; disclose: Disclose; cloudAccount: ReactNode }) {
+  const { usage, upgrade, dialog } = useCloudUsageSettings();
+  return (
+    <>
+      <div data-settings-block="usage" className="scroll-mt-4">
+        {usage ? <CloudUsageSummaryView usage={usage} upgrade={upgrade}>{dialog}</CloudUsageSummaryView> : <PlanUsageSummary />}
+      </div>
+      {has("cloudAccount") && <div data-settings-block="cloudAccount" className="flex scroll-mt-4 flex-col gap-4">{cloudAccount}</div>}
+      {(usage || has("usage")) && (
+        <SettingsDisclosure label={t("settings.billing.details")} {...disclose("billing-details")}>
+          {usage && <CloudUsageDetails usage={usage} upgrade={upgrade} />}
+          {has("usage") && <UsageSection />}
+        </SettingsDisclosure>
+      )}
+    </>
+  );
+}
+
+const versionTitle = () => `${brand().name} ${appVersion()}`;
+
+function ServerUpdatesRow() {
+  const entry = useServerUpdateItem(true);
+  if (!entry) return null;
+  const status = entry.phase === "idle" ? undefined : [entry.label, entry.item.subtitle].filter(Boolean).join(" ");
+  const action = entry.phase === "available" ? t("settings.updates.seeRelease")
+    : entry.phase === "reload" ? t("settings.updates.reload")
+      : entry.phase === "checking" ? t("common.checking") : t("settings.updates.check");
+  return (
+    <SettingRow title={versionTitle()} subtitle={status}>
+      <button type="button" className="ui-button" disabled={entry.item.disabled} onClick={entry.item.onSelect}>{action}</button>
+    </SettingRow>
+  );
+}
+
+function SimpleUpdatesPage({ disclose }: { disclose: Disclose }) {
+  return (
+    <>
+      <SettingsGroup block="updates">
+        <SettingsRows>
+          {window.ogb?.updater ? <UpdatesRow title={versionTitle()} /> : <ServerUpdatesRow />}
+          <UpdatesConsentRow />
+        </SettingsRows>
+      </SettingsGroup>
+      <SettingsDisclosure label={t("settings.more")} {...disclose("updates-more")}>
+        <SettingsRows>
+          <AnalyticsRow />
+          <DiagnosticsRow />
+        </SettingsRows>
+      </SettingsDisclosure>
+    </>
+  );
+}
+
 export function SettingsModal() {
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
   const remoteActive = window.ogb?.remoteClient?.active === true;
+  const requested = state.appSettingsSection;
   const section: AppSettingsSection =
-    (remoteActive && !["appearance", "desktopWorkspaces"].includes(state.appSettingsSection)) || state.appSettingsSection === "remote"
+    (remoteActive && !["appearance", "desktopWorkspaces"].includes(requested)) || requested === "remote"
       ? "companion"
-      : state.appSettingsSection;
+      : advanced && requested === "updates" ? "general" : requested;
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchFirst = useRef(advanced);
   const [query, setQuery] = useState("");
   useEffect(() => window.ogb?.environments?.onOpenSettings?.(() => setQuery("")), []);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
@@ -582,7 +792,8 @@ export function SettingsModal() {
   const availableSections = baseSections.filter((entry) => entry.id !== "skills" || skillsLibraryEnabled(state.config));
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
 
-  const simplePages = advanced ? [] : simpleSettingsPages(availableSections, section);
+  const simpleAvailable = new Set<AppSettingsSection>([...availableSections.map((entry) => entry.id), ...(remoteActive ? [] : ["updates" as const])]);
+  const simplePages = advanced ? [] : simpleSettingsPages(simpleAvailable, section);
   const visiblePages = simplePages.filter((page) => simplePageMatches(page, q));
   const currentPage = simplePages.find((page) => page.sections.includes(section));
 
@@ -599,6 +810,12 @@ export function SettingsModal() {
     if (nextVisibleSection) dispatch({ type: "toggleAppSettings", open: true, section: nextVisibleSection });
   }, [dispatch, nextVisibleSection]);
 
+  const [folds, setFolds] = useState<Partial<Record<SimpleDisclosureId, boolean>>>({});
+  const disclose: Disclose = (id) => {
+    const open = q !== "" || (folds[id] ?? SIMPLE_FOLDED[section] === id);
+    return { id, open, onToggle: () => setFolds((current) => ({ ...current, [id]: !open })) };
+  };
+
   const sectionIndex = currentPage?.sections.indexOf(section) ?? 0;
   useEffect(() => {
     if (scrollRef.current) revealSettingsBlock(scrollRef.current, section, advanced ? 0 : sectionIndex);
@@ -608,7 +825,7 @@ export function SettingsModal() {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     const search = dialog?.querySelector<HTMLInputElement>("[data-settings-search]");
-    if (search?.checkVisibility()) search.focus();
+    if (searchFirst.current && search?.checkVisibility()) search.focus();
     else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
@@ -653,6 +870,16 @@ export function SettingsModal() {
   }, [dispatch]);
 
   const openSection = (id: AppSettingsSection) => dispatch({ type: "toggleAppSettings", open: true, section: id });
+
+  const phoneFocus = state.appSettingsPhonePairing;
+  const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
+  const remoteAccess = {
+    client: <RemoteComputerSection hideWhenUnavailable={!advanced} />,
+    domain: remoteActive ? null : <CustomDomainSettings />,
+    // Security: the server decides who may pair (an owner or admin session), not this gate.
+    pairing: <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} />,
+    companion: remoteActive ? null : <CompanionSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? phoneFocus : 0} />,
+  };
 
   const renderSection = (id: AppSettingsSection) => {
     switch (id) {
@@ -714,8 +941,8 @@ export function SettingsModal() {
             <ColorUserBubblesRow />
             <SendKeyRow />
             <SidebarDensityRow />
-            {advanced && <SidebarToolsLayoutRow />}
-            {advanced && <ShowThreadsRow />}
+            <SidebarToolsLayoutRow />
+            <ShowThreadsRow />
             <PinnedCirclesRow />
             <UniversalPinsRow />
             <NotificationRows />
@@ -775,23 +1002,10 @@ export function SettingsModal() {
       case "engines": return <EnginesSettings />;
       case "backups": return <><WorkspaceBackupSettings /><CompanyBackupSettings /></>;
       case "import": return <ImportSettings />;
-      case "companion": {
-        const phoneFocus = state.appSettingsPhonePairing;
-        const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
-        return (
-          <>
-            <RemoteComputerSection />
-            {!remoteActive && <CustomDomainSettings />}
-            {/* Security: the server decides who may pair (an owner or admin session), not this gate. */}
-            <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} />
-            {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? phoneFocus : 0} />}
-          </>
-        );
-      }
+      case "companion":
+        return <>{remoteAccess.client}{remoteAccess.domain}{remoteAccess.pairing}{remoteAccess.companion}</>;
       case "computer":
-        return advanced
-          ? <><BuiltInBrowserRow /><BrowserProfilesRow /><LocalComputerSection /></>
-          : <LocalComputerSection />;
+        return <><BuiltInBrowserRow /><BrowserProfilesRow /><LocalComputerSection /></>;
       case "logins":
         return <LoginsSettings />;
       case "usage":
@@ -809,16 +1023,145 @@ export function SettingsModal() {
     }
   };
 
-  const blockHeading = (labelKey: LocaleKey) => (
-    <h3 className="px-4 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-secondary">{t(labelKey)}</h3>
+  const renderSimplePage = (page: SimpleSettingsPage) => {
+    const has = (id: AppSettingsSection) => page.sections.includes(id);
+    switch (page.id) {
+      case "general": return <SimpleGeneralPage has={has} remoteActive={remoteActive} disclose={disclose} peopleOpen={section === "people"} />;
+      case "ai": return <SimpleAiPage has={has} disclose={disclose} connections={renderSection("connections")} />;
+      case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={renderSection("desktopWorkspaces")} disclose={disclose} />;
+      case "billing": return <SimpleBillingPage has={has} disclose={disclose} cloudAccount={renderSection("cloudAccount")} />;
+      case "updates": return <SimpleUpdatesPage disclose={disclose} />;
+      default:
+        return page.sections.map((id) => <section key={id} data-settings-block={id} className="flex scroll-mt-4 flex-col gap-4">{renderSection(id)}</section>);
+    }
+  };
+
+  const close = () => dispatch({ type: "toggleAppSettings", open: false });
+  const searchField = (className: string, inputClassName: string) => (
+    <div className={className}>
+      <Search size={advanced ? 14 : 16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      <input
+        data-settings-search
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          e.stopPropagation();
+          if (query) setQuery("");
+          else close();
+        }}
+        placeholder={t("settings.search")}
+        aria-label={t("settings.searchAria")}
+        className={inputClassName}
+      />
+    </div>
   );
+
+  if (!advanced) {
+    return (
+      <div
+        className="glass-popup-frame"
+        data-settings-sheet
+        data-settings-look="simple"
+        style={glassPopupFrameStyle()}
+        onMouseDown={(e) => e.target === e.currentTarget && close()}
+      >
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-black/50" />
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="app-settings-title"
+          tabIndex={-1}
+          style={{ outline: "none" }}
+          className="glass-popup animate-pop-in relative flex overflow-hidden rounded-[14px] border-[0.5px] border-ink/10 bg-app text-ink md:max-h-[700px] md:max-w-[900px]"
+        >
+          <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
+          <nav aria-label={t("settings.title")} className="hidden min-h-0 w-[200px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r-[0.5px] border-ink/10 p-3 pt-4 sm:flex">
+            {searchField(
+              "mb-1 flex h-[34px] shrink-0 items-center gap-2.5 rounded-lg px-2 text-ink-secondary transition-colors hover:bg-ink/[0.04] focus-within:bg-ink/[0.06] motion-reduce:transition-none",
+              "w-full min-w-0 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none",
+            )}
+            {visiblePages.length === 0 && (
+              <div className="px-2 py-3 text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</div>
+            )}
+            {visiblePages.map((page) => {
+              const Icon = page.icon;
+              const current = page === currentPage;
+              return (
+                <button
+                  key={page.id}
+                  type="button"
+                  data-settings-page={page.id}
+                  onClick={() => openSection(page.sections[0]!)}
+                  aria-current={current ? "page" : undefined}
+                  className={cn(
+                    "flex h-[34px] shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-[14px] text-ink transition-colors motion-reduce:transition-none",
+                    current ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
+                  )}
+                >
+                  <Icon size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
+                  <span className="truncate">{t(page.labelKey)}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <header className="flex shrink-0 items-center gap-3 py-3 pl-4 pr-14 sm:px-10 sm:pb-0 sm:pt-[30px]">
+              <Select className="min-w-0 sm:hidden"
+                aria-label={t("settings.title")}
+                value={currentPage?.id ?? ""}
+                onChange={(event) => {
+                  setQuery("");
+                  const page = simplePages.find((candidate) => candidate.id === event.target.value);
+                  if (page) openSection(page.sections[0]!);
+                }}
+              >
+                {simplePages.map((page) => (
+                  <option key={page.id} value={page.id}>{t(page.labelKey)}</option>
+                ))}
+              </Select>
+              <h2 className="hidden truncate text-[17px] font-medium leading-6 tracking-[-0.008em] text-ink sm:block">
+                {currentPage ? t(currentPage.labelKey) : null}
+              </h2>
+            </header>
+            <button
+              type="button"
+              onClick={close}
+              aria-label={t("settings.close")}
+              title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
+              className="absolute right-3 top-3 flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none"
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+
+            <div
+              ref={scrollRef}
+              data-settings-scroll
+              className={cn(
+                "flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-4 pb-10 pt-4 sm:px-8 sm:pt-6",
+                "[&_.bg-card]:bg-menu [&_.ui-button]:rounded-full [&_.ui-button]:px-3 [&_.ui-button]:text-[14px] [&_.ui-button]:font-normal",
+                "[&_.ui-button:not(.ui-button-primary)]:border-transparent [&_.ui-button:not(.ui-button-primary)]:bg-ink/[0.07]",
+                "[&_.ui-button:not(.ui-button-primary):enabled:hover]:bg-ink/[0.11] [&_.ui-button-primary]:bg-ink [&_.ui-button-primary]:text-app",
+                "[&_.uppercase]:normal-case [&_.uppercase]:tracking-normal",
+              )}
+            >
+              <LicenseExpiryBanner config={state.config} />
+              {currentPage ? renderSimplePage(currentPage) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       className="glass-popup-frame"
       data-settings-sheet
       style={glassPopupFrameStyle()}
-      onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
+      onMouseDown={(e) => e.target === e.currentTarget && close()}
     >
       {/* A sibling, not the parent: a backdrop-filter on an ancestor would stop the pop-up's own glass from seeing the app behind it. */}
       <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
@@ -835,29 +1178,16 @@ export function SettingsModal() {
           <div className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
             {t("settings.title")}
           </div>
-          <div className="mb-2 mt-1 flex min-h-8 shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus">
-            <Search size={14} className="shrink-0 text-ink-secondary" />
-            <input
-              data-settings-search
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key !== "Escape") return;
-                e.stopPropagation();
-                if (query) setQuery("");
-                else dispatch({ type: "toggleAppSettings", open: false });
-              }}
-              placeholder={t("settings.search")}
-              aria-label={t("settings.searchAria")}
-              className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
-            />
-          </div>
-          {(advanced ? visibleSections.length === 0 : visiblePages.length === 0) && (
+          {searchField(
+            "mb-2 mt-1 flex min-h-8 shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus",
+            "w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
+          )}
+          {visibleSections.length === 0 && (
             <div className="px-2.5 py-4 text-[13px] leading-relaxed text-ink-secondary">
               {t("settings.noMatch", { query: query.trim() })}
             </div>
           )}
-          {advanced ? SETTINGS_GROUPS.map((group) => {
+          {SETTINGS_GROUPS.map((group) => {
             const entries = visibleSections.filter((entry) => entry.group === group.id);
             if (entries.length === 0) return null;
             return (
@@ -882,73 +1212,35 @@ export function SettingsModal() {
                 ))}
               </div>
             );
-          }) : (
-            <div className="flex flex-col gap-0.5 pb-2">
-              {visiblePages.map((page) => {
-                const Icon = page.icon;
-                const current = page === currentPage;
-                return (
-                  <button
-                    key={page.id}
-                    data-settings-page={page.id}
-                    onClick={() => openSection(page.sections[0]!)}
-                    aria-current={current ? "page" : undefined}
-                    className={cn(
-                      "cursor-pointer flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
-                      current ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
-                    )}
-                  >
-                    <Icon size={15} className="shrink-0" />
-                    {t(page.labelKey)}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          })}
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-9">
-            {advanced ? (
-              <Select className="min-w-0 sm:hidden"
-                aria-label={t("settings.title")}
-                value={section}
-                onChange={(event) => {
-                  setQuery("");
-                  openSection(event.target.value as AppSettingsSection);
-                }}
-              >
-                {SETTINGS_GROUPS.map((group) => {
-                  const entries = availableSections.filter((entry) => entry.group === group.id);
-                  return entries.length === 0 ? null : (
-                    <optgroup key={group.id} label={t(group.labelKey)}>
-                      {entries.map(({ id, labelKey }) => (
-                        <option key={id} value={id}>{t(labelKey)}</option>
-                      ))}
-                    </optgroup>
-                  );
-                })}
-              </Select>
-            ) : (
-              <Select className="min-w-0 sm:hidden"
-                aria-label={t("settings.title")}
-                value={currentPage?.id ?? ""}
-                onChange={(event) => {
-                  setQuery("");
-                  const page = simplePages.find((candidate) => candidate.id === event.target.value);
-                  if (page) openSection(page.sections[0]!);
-                }}
-              >
-                {simplePages.map((page) => (
-                  <option key={page.id} value={page.id}>{t(page.labelKey)}</option>
-                ))}
-              </Select>
-            )}
+            <Select className="min-w-0 sm:hidden"
+              aria-label={t("settings.title")}
+              value={section}
+              onChange={(event) => {
+                setQuery("");
+                openSection(event.target.value as AppSettingsSection);
+              }}
+            >
+              {SETTINGS_GROUPS.map((group) => {
+                const entries = availableSections.filter((entry) => entry.group === group.id);
+                return entries.length === 0 ? null : (
+                  <optgroup key={group.id} label={t(group.labelKey)}>
+                    {entries.map(({ id, labelKey }) => (
+                      <option key={id} value={id}>{t(labelKey)}</option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </Select>
             <span className="hidden text-[15px] font-semibold text-ink sm:block">
               {sectionLabelKey ? t(sectionLabelKey) : null}
             </span>
             <button
-              onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
+              onClick={close}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
               className="ui-icon-button cursor-pointer shrink-0 max-md:size-9 max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card"
@@ -959,27 +1251,7 @@ export function SettingsModal() {
 
           <div ref={scrollRef} className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-5 sm:pb-5">
             <LicenseExpiryBanner config={state.config} />
-            {advanced ? (
-              renderSection(section)
-            ) : currentPage ? (
-              currentPage.sections.map((id) => {
-                const stacked = currentPage.sections.length > 1;
-                const labelKey = SECTIONS.find((entry) => entry.id === id)?.labelKey;
-                return (
-                  <section key={id} data-settings-block={id} className="flex scroll-mt-2 flex-col gap-4">
-                    {stacked && labelKey ? blockHeading(labelKey) : null}
-                    {renderSection(id)}
-                    {id === "computer" && (
-                      <div data-settings-block="browser" className="flex flex-col gap-4 pt-2">
-                        {blockHeading("settings.experimental.browser")}
-                        <BuiltInBrowserRow />
-                        <BrowserProfilesRow />
-                      </div>
-                    )}
-                  </section>
-                );
-              })
-            ) : null}
+            {renderSection(section)}
           </div>
         </div>
       </div>
