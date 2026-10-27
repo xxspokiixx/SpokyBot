@@ -2,14 +2,14 @@ import { useState } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
 import { useUpdaterState } from "@/lib/updater";
 import { brand } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { NewBrowserSettings } from "./BrowserSettingsRows";
-import { Card, SettingRow, SIMPLE_SELECT, Switch } from "./SettingsPrimitives";
+import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
@@ -185,14 +185,14 @@ export function LanguageRow({ simple = false }: { simple?: boolean }) {
   return (
     <SettingRow
       title={t("settings.language.title")}
-      subtitle={simple ? undefined : t("settings.language.subtitle")}
+      subtitle={simple ? activeLocale() === "en" ? undefined : t("settings.simple.language.partial") : t("settings.language.subtitle")}
     >
-      <Select size="sm" variant={simple ? "pill" : "field"} className={simple ? SIMPLE_SELECT : "w-full max-w-[240px]"}
+      <Select size="sm" variant={simple ? "ghost" : "field"} className={simple ? undefined : "w-full max-w-[240px]"}
         value={current}
         aria-label={t("settings.language.aria")}
         onChange={(event) => setLanguageChoice(event.target.value)}
       >
-        <option value="">{t("settings.language.system")}</option>
+        <option value="">{t(simple ? "settings.simple.language.system" : "settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
           <option key={code} value={code}>
             {label}
@@ -206,8 +206,8 @@ export function LanguageRow({ simple = false }: { simple?: boolean }) {
 export function SendKeyRow({ simple = false }: { simple?: boolean }) {
   const sendKey = useSendKey();
   return (
-    <SettingRow title={t("settings.sendKey.title")} subtitle={simple ? undefined : t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
-      <Select size="sm" variant={simple ? "pill" : "field"} className={simple ? SIMPLE_SELECT : "w-full max-w-[240px]"}
+    <SettingRow title={t("settings.sendKey.title")} subtitle={t(simple ? "settings.simple.sendKey" : "settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
+      <Select size="sm" variant={simple ? "ghost" : "field"} className={simple ? undefined : "w-full max-w-[240px]"}
         value={sendKey}
         aria-label={t("settings.sendKey.title")}
         onChange={(event) => setSendKey(parseSendKey(event.target.value))}
@@ -237,7 +237,7 @@ export function AdvancedModeRow({ simple = false }: { simple?: boolean }) {
   const enabled = useAdvancedMode();
   return (
     <SettingRow className={simple ? undefined : "rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4"} title={t("settings.advancedMode.title")}
-      subtitle={t(simple ? "settings.advancedMode.simpleSubtitle" : "settings.advancedMode.subtitle")}>
+      subtitle={t(simple ? "settings.simple.advancedMode" : "settings.advancedMode.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.advancedMode.title")}

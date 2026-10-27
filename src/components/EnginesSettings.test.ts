@@ -377,32 +377,35 @@ describe("Settings → Engines → Claude accounts", () => {
 });
 
 describe("Settings → AI in Simple mode", () => {
-  const engine = (instanceId: string, displayName: string, authenticated: boolean): InstanceInfo => ({
-    instanceId, driverKind: instanceId === "claude" ? "claudeAgent" : "kimiAgent", displayName, cliDefault: instanceId,
-    snapshot: { state: "available", authenticated }, models: { default: "model", options: [] },
+  const engine = (instanceId: string, driverKind: string, authenticated: boolean, extra: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId, driverKind, displayName: instanceId, cliDefault: instanceId,
+    snapshot: { state: "available", authenticated }, models: { default: "model", options: [] }, ...extra,
   });
-  const simple = () => {
+  const simple = (open = false) => {
     vi.stubGlobal("window", {});
     vi.stubGlobal("navigator", { userAgent: "Linux" });
     fixture.bots = [];
-    return renderToStaticMarkup(createElement(EnginesSettings, { simple: true }));
+    return renderToStaticMarkup(createElement(EnginesSettings, { simple: true, more: { id: "ai-more", open, onToggle: () => {} } }));
   };
-  const cards = (html: string) => [...html.matchAll(/data-engine-card="([^"]+)"/g)].map((match) => match[1]);
+  const rows = (html: string) => [...html.matchAll(/data-simple-engine="([^"]+)"/g)].map((match) => match[1]);
 
-  it("shows the connected AI and folds the rest behind Connect another", () => {
-    fixture.instances = [engine("claude", "Claude", true), engine("other", "Other", false)];
+  it("lists each ready provider, and each one signed in by subscription, as a row with Manage or Set up", () => {
+    fixture.instances = [
+      engine("claude", "claudeAgent", true),
+      engine("codex", "codexAgent", false, { authentication: { method: "device-code" } }),
+      engine("kimi", "kimiAgent", false),
+    ];
     const html = simple();
     expect(html).toContain(">Your AI</h3>");
-    expect(cards(html)).toEqual(["claude"]);
-    expect(html).toMatch(/data-connect-another=""[^>]*>[\s\S]*Connect another<\/button>/);
+    expect(rows(html)).toEqual(["claude", "codex"]);
+    expect(html).toMatch(/data-simple-engine="claude"[\s\S]*?>Manage<\/button>/);
+    expect(html).toMatch(/data-simple-engine="codex"[\s\S]*?>Set up<\/button>/);
     expect(html).not.toContain("Model providers and accounts");
   });
 
-  it("lists every provider under Connect an AI while none is connected", () => {
-    fixture.instances = [engine("claude", "Claude", false), engine("other", "Other", false)];
-    const html = simple();
-    expect(html).toContain(">Connect an AI</h3>");
-    expect(cards(html)).toEqual(["claude", "other"]);
-    expect(html).not.toContain("data-connect-another");
+  it("folds every other provider under More AI providers, with the count", () => {
+    fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More AI providers \(2\)/);
+    expect(simple(true)).toContain('data-engine-card="kimi"');
   });
 });

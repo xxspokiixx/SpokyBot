@@ -315,13 +315,13 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 }
 
 /** One card for a provider's accounts: who is signed in, one button for whoever is not, and one way to add another. */
-export function AccountsCard({ group, accounts, advanced }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode }) {
+export function AccountsCard({ group, accounts, advanced, bare = false }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode; bare?: boolean }) {
   const [signingIn, setSigningIn] = useState<string | null>(null);
   const primary = accounts[0]!;
   const installed = accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
   return (
-    <EngineCard instance={primary} summary={summaryFor(group, accounts)}>
+    <EngineCard instance={primary} summary={summaryFor(group, accounts)} bare={bare}>
       {policy && <p className="mb-3 text-[12px] leading-relaxed text-ink-secondary">
         <span className="font-medium text-ink">{t("policy.managedBy", { organization: policy.organizationName })}</span> · {policy.reason}
       </p>}

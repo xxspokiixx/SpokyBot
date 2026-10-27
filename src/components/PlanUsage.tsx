@@ -200,14 +200,14 @@ export function PlanUsageSummary() {
   if (!report) return null;
   const busiest = busiestWeekly(report);
   if (!busiest) {
-    return <section data-usage-summary="own-ai" className={cn(SIMPLE_CARD, "p-3.5 text-[14px] leading-5 text-ink-secondary")}>{t("settings.billing.ownAi")}</section>;
+    return <section data-usage-summary="own-ai" className={cn(SIMPLE_CARD, "px-4 py-3.5 text-[14px] leading-5 text-ink-secondary")}>{t("settings.simple.billing.ownAi")}</section>;
   }
   const percent = Math.round(Math.min(100, Math.max(0, busiest.used)));
   const when = formatResetDistance(busiest.provider.weekly.resetsAt, now);
   const name = providerLabel(busiest.provider);
   return (
-    <UsageSummaryCard kind="plan" title={t("settings.billing.weekly")} percent={percent} label={`${name}: ${t("planUsage.used", { used: percent })}`}
-      note={when ? `${name} · ${t("planUsage.resetsIn", { when })}` : name} />
+    <UsageSummaryCard kind="plan" title={t("settings.simple.billing.weekly", { provider: name })} percent={percent} label={`${name}: ${t("planUsage.used", { used: percent })}`}
+      note={when ? t("planUsage.resetsIn", { when }) : null} />
   );
 }
 

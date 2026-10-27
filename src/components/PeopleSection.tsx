@@ -297,9 +297,9 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
   if (simple) {
     return (
       <div data-people-summary="">
-        <SettingRow title={t("people.title")} subtitle={t("people.simpleSubtitle")}>
+        <SettingRow title={t("people.title")} subtitle={t("settings.simple.people")}>
           <button type="button" aria-expanded={open} className="ui-button" onClick={() => setOpen(!open)}>
-            {open ? t("common.done") : t("people.inviteSomeone")}
+            {open ? t("common.done") : t("settings.simple.people.invite")}
           </button>
         </SettingRow>
         {open && <div className="px-3.5 pb-3.5 pt-1">{portal ?? content}</div>}

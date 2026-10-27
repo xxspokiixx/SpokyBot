@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Loader2, Plus, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
@@ -13,7 +13,8 @@ import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
-import { SettingsGroup } from "./SettingsPrimitives";
+import { SettingsDisclosureRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { InstanceProviderMark } from "./ProviderIcons";
 
 interface ProbeResult {
   ok: boolean;
@@ -330,22 +331,22 @@ function RemoveAntigravityAccount({ instance }: { instance: InstanceInfo }) {
   </>;
 }
 
-function EngineRow({ instance }: { instance: InstanceInfo }) {
+function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: boolean }) {
   const policyNote = instance.policy && <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
     <span className="font-medium text-ink">{t("policy.managedBy", { organization: instance.policy.organizationName })}</span> · {instance.policy.reason}
   </p>;
-  if (instance.trialCredit) return <EngineCard instance={instance}>
+  if (instance.trialCredit) return <EngineCard instance={instance} bare={bare}>
     <p data-trial-credit={instance.trialCredit} className="text-[13px] leading-relaxed text-ink-secondary">{t(instance.trialCredit === "used_up" ? "engines.trialCreditUsedUp"
       : instance.trialCredit === "ended" ? "engines.trialCreditEnded" : engineReady(instance) ? "engines.trialCredit" : "engines.trialCreditOwn")}</p>
   </EngineCard>;
-  if (instance.readOnly) return <EngineCard instance={instance}>
+  if (instance.readOnly) return <EngineCard instance={instance} bare={bare}>
     {policyNote}
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("organization.managedEngine")}</p>
     {!engineReady(instance) && <p className="mt-2 text-[12px] text-ink-secondary">{t("organization.engineUnavailable")}</p>}
   </EngineCard>;
 
   return (
-    <EngineCard instance={instance}>
+    <EngineCard instance={instance} bare={bare}>
       {policyNote}
       {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
@@ -371,45 +372,64 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
   );
 }
 
-// One parent for every card: a card that becomes ready moves up without remounting, so a sign-in in progress survives.
-function SimpleEngines({ rows, isReady, renderEngine }: {
+function simpleStatus(instance: InstanceInfo, ready: boolean): string {
+  if (ready) return instance.snapshot.authenticated === true && instance.snapshot.account?.email ? instance.snapshot.account.email : t("onboarding.engines.ready");
+  return instance.snapshot.state === "available" && instance.snapshot.authenticated === false ? t("model.signInRequired") : t("onboarding.engines.needsSetup");
+}
+
+function SimpleEngines({ rows, isReady, renderEngine, more }: {
   rows: InstanceInfo[];
   isReady: (instance: InstanceInfo) => boolean;
-  renderEngine: (instance: InstanceInfo) => ReactNode;
+  renderEngine: (instance: InstanceInfo, bare?: boolean) => ReactNode;
+  more: { id: string; open: boolean; onToggle: () => void };
 }) {
-  const [adding, setAdding] = useState(false);
-  const connected = rows.filter(isReady);
-  const others = rows.filter((instance) => !isReady(instance));
-  const showOthers = connected.length === 0 || adding;
-  const card = (instance: InstanceInfo) => (
-    <div key={instance.instanceId} className={isReady(instance) ? "col-span-full" : "contents"}>{renderEngine(instance)}</div>
-  );
+  const [opened, setOpened] = useState<string | null>(null);
+  const featured = rows.filter((instance) => isReady(instance) || instance.authentication !== undefined);
+  const others = rows.filter((instance) => !featured.includes(instance));
   return (
-    <SettingsGroup label={t(connected.length ? "settings.ai.connected" : "settings.ai.connect")} actions={<RefreshEngines />}>
-      <div data-simple-engines="" className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] items-start gap-3">
-        {connected.map(card)}
-        {connected.length > 0 && others.length > 0 && (adding ? (
-          <div key="more" className="col-span-full mt-4 flex items-center justify-between gap-3 px-4">
-            <h4 className="text-[13px] text-ink-secondary">{t("settings.ai.moreProviders")}</h4>
-            <button type="button" onClick={() => setAdding(false)} className="cursor-pointer rounded-md text-[13px] text-ink-secondary hover:text-ink focus-visible:outline-2 focus-visible:outline-focus">
-              {t("settings.ai.hide")}
-            </button>
-          </div>
-        ) : (
-          <div key="more" className="col-span-full">
-            <button type="button" data-connect-another="" onClick={() => setAdding(true)} className="ui-button gap-1.5">
-              <Plus size={14} aria-hidden="true" />{t("settings.ai.connectAnother")}
-            </button>
-          </div>
-        ))}
-        {showOthers && others.map(card)}
-        {rows.length === 0 && <p key="none" className="col-span-full px-4 py-2 text-[13px] text-ink-secondary">{t("engines.none")}</p>}
-      </div>
-    </SettingsGroup>
+    <>
+      <SettingsGroup label={t("settings.simple.ai.yours")} actions={<RefreshEngines />}>
+        <SettingsRows>
+          {featured.map((instance) => {
+            const ready = isReady(instance), open = opened === instance.instanceId;
+            return (
+              <div key={instance.instanceId} data-simple-engine={instance.instanceId} className="group">
+                <div className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5">
+                  <span className="flex min-w-[min(100%,15rem)] flex-1 items-center gap-3">
+                    <InstanceProviderMark instance={instance} size={14} subtle />
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate text-[14px] leading-5 text-ink">{instance.displayName}</span>
+                      <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{simpleStatus(instance, ready)}</span>
+                    </span>
+                  </span>
+                  <button type="button" aria-expanded={open} className="ui-button ml-auto shrink-0" onClick={() => setOpened(open ? null : instance.instanceId)}>
+                    {t(open ? "common.done" : ready ? "settings.simple.ai.manage" : "settings.simple.ai.setUp")}
+                  </button>
+                </div>
+                {open && <div className="px-4 pb-3">{renderEngine(instance, true)}</div>}
+              </div>
+            );
+          })}
+        </SettingsRows>
+      </SettingsGroup>
+      {others.length > 0 && (
+        <SettingsDisclosureRow
+          title={t("settings.simple.ai.more", { count: String(others.length) })}
+          trailing={<span aria-hidden="true" className="flex items-center -space-x-1">
+            {others.slice(0, 4).map((instance) => (
+              <span key={instance.instanceId} className="flex size-[18px] items-center justify-center rounded-full bg-menu"><InstanceProviderMark instance={instance} size={14} subtle /></span>
+            ))}
+          </span>}
+          {...more}
+        >
+          <EngineSections instances={others} isReady={isReady} renderEngine={(instance) => renderEngine(instance)} />
+        </SettingsDisclosureRow>
+      )}
+    </>
   );
 }
 
-export function EnginesSettings({ simple = false }: { simple?: boolean }) {
+export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
   const { state } = useStore();
   const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i));
   // A provider's accounts share one card, which takes the place of its first account.
@@ -424,14 +444,14 @@ export function EnginesSettings({ simple = false }: { simple?: boolean }) {
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
-  const renderEngine = (instance: InstanceInfo) => {
+  const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);
     return group
-      ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} />
-      : <EngineRow instance={instance} />;
+      ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} bare={bare} />
+      : <EngineRow instance={instance} bare={bare} />;
   };
 
-  if (simple) return <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} />;
+  if (simple && more) return <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />;
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">

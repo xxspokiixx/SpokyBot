@@ -1,10 +1,11 @@
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
 import { SECTIONS, SIMPLE_FOLDED, SIMPLE_HIDDEN_SECTIONS, SIMPLE_PAGES, SettingsModal, revealSettingsBlock } from "./SettingsModal";
+import { SIMPLE_ADVANCED_ONLY } from "./SettingsSimplePages";
 
 const fixture = vi.hoisted(() => ({
   section: "general" as AppSettingsSection,
@@ -68,6 +69,10 @@ vi.mock("./WorkspaceBackupSettings", () => ({ WorkspaceBackupSettings: marker("b
 vi.mock("./RoomTurnTimeoutSettings", () => ({ RoomTurnTimeoutSettings: () => null }));
 vi.mock("./CompanyBackupSettings", () => ({ CompanyBackupSettings: () => null }));
 vi.mock("./ImportSettings", () => ({ ImportSettings: marker("import") }));
+vi.mock("./UpdatesConsent", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./UpdatesConsent")>(),
+  UpdatesConsentRow: marker("updatesConsent"),
+}));
 vi.mock("./SidebarProfileMenu", async (importOriginal) => ({
   ...await importOriginal<typeof import("./SidebarProfileMenu")>(),
   useServerUpdateItem: () => fixture.serverUpdate,
@@ -136,7 +141,6 @@ describe("Settings in Simple mode", () => {
     const picker = html.match(/<select aria-label="Settings"[\s\S]*?<\/select>/)![0];
     expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "ai", "computer", "billing", "updates"]);
     expect(html).toContain('data-settings-look="simple"');
-    expect(html).not.toContain("glass-surface");
   });
 
   it("files every Advanced page under one Simple page, or hides it", () => {
@@ -147,59 +151,40 @@ describe("Settings in Simple mode", () => {
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
-  it("lays General out as Account, Appearance, Notifications and System, then More settings, and ends on the Advanced mode switch", () => {
+  it("opens General on Account, then Appearance, Notifications, System and Import, with Advanced mode last as a plain row", () => {
     const html = render();
     expect(currentPage(html)).toBe("general");
-    expect(groupLabels(html).slice(0, 4)).toEqual(["Account", "Appearance", "Notifications", "System"]);
-    const at = (needle: string) => html.indexOf(needle);
-    expect(at("Add your name")).toBeLessThan(at('aria-label="App language"'));
-    expect(at('aria-label="App language"')).toBeLessThan(at("More settings"));
-    expect(at("More settings")).toBeLessThan(at('aria-label="Advanced mode"'));
+    expect(groupLabels(html)).toEqual(["Account", "Appearance", "Notifications", "System", "Import", "Organization"]);
+    expect(blocks(html).at(-1)).toBe("advanced-mode");
     expect([...html.matchAll(/<button[^>]*role="switch"[^>]*>/g)].at(-1)?.[0]).toContain('aria-label="Advanced mode"');
-    expect(html).toContain("Shows every control and builder tool. Nothing is deleted either way.");
-    expect(placement(html, 'aria-label="Advanced mode"')).toBe("shown");
-    expect(html).toMatch(/aria-expanded="false"[^>]*>More settings/);
+    expect(html).toContain("Show every control, including tools for builders. Nothing is deleted either way.");
+    expect(html).not.toContain("border-accent-border/40");
+    expect(html).toContain("Add your name");
+    expect(html).toMatch(/aria-expanded="false" aria-controls="[^"]+"[^>]*>Add<\/button>/);
   });
 
-  it("keeps every setting Simple showed before, on its page or under More settings", () => {
+  it("keeps the everyday rows and leaves the fifteen builder controls to Advanced, where search still points", () => {
     const general = open("general");
-    for (const shown of [
-      "Add your name", 'aria-label="Color my messages with the bot&#x27;s color"', 'aria-label="App language"', 'aria-label="Send messages with"',
-      'aria-label="Notification sounds"', 'aria-label="Show the notification feed"', "Replay welcome tour", "Replay app tour", 'aria-label="Advanced mode"',
-    ]) expect(placement(general, shown), shown).toBe("shown");
-    for (const folded of [
-      "Midnight", 'aria-label="Interface font"', 'aria-label="Chat width"', 'aria-label="Choose sidebar density"', 'aria-label="Pinned bots as circles"',
-      'aria-label="Universal pins"', 'aria-label="Show tool calls in chat"', 'aria-label="Show the run card"', 'aria-label="Effort for new bots"',
-      "Defaults for new bots", "Group turns", "Maximum call length", "Maximum running threads per bot", "Use a backup model",
-      "Delete event logs of finished threads after", "MARKER:import;", "MARKER:organization;",
-    ]) expect(placement(general, folded), folded).toBe("folded");
-
-    const ai = open("engines");
-    expect(placement(ai, "MARKER:engines;")).toBe("shown");
-    expect(placement(ai, "MARKER:apiKey;")).toBe("folded");
-    expect(placement(ai, "More providers for OpenCode bots")).toBe("folded");
-
-    const computer = open("companion");
-    for (const shown of ["MARKER:companion;", "MARKER:desktopWorkspaces;", "MARKER:computer;", 'aria-label="Enable the built-in browser"', "Logins"]) {
-      expect(placement(computer, shown), shown).toBe("shown");
+    for (const shown of ['aria-label="Send usage analytics"', 'aria-label="Color my messages with the bot&#x27;s color"', 'aria-label="Send messages with"',
+      'aria-label="Notification sounds"', 'aria-label="Show the notification feed"', 'aria-label="App language"', 'role="radiogroup" aria-label="Theme"']) {
+      expect(placement(general, shown), shown).toBe("shown");
     }
-
-    const billing = open("usage");
-    expect(placement(billing, "MARKER:cloudAccount;")).toBe("shown");
-    expect(placement(billing, "MARKER:usage;")).toBe("folded");
-
-    const updates = open("updates");
-    expect(placement(updates, 'aria-label="Send usage analytics"')).toBe("folded");
-    expect(placement(updates, "Diagnostics")).toBe("folded");
+    expect(placement(open("updates"), "MARKER:updatesConsent;")).toBe("shown");
+    const everyPage = ["general", "engines", "companion", "usage", "updates"].map((section) => open(section as AppSettingsSection)).join("");
+    for (const gone of ["Effort for new bots", "Defaults for new bots", "Group turns", "MCP calls", "Parallel threads", "Automatic recovery", "Event log cleanup",
+      "Interface font", "Chat width", "Sidebar density", "Pinned bots as circles", "Universal pins", "Tool calls", "This run", "Keep prompt cache warm"]) {
+      expect(everyPage, gone).not.toContain(`>${gone}<`);
+    }
+    expect(SIMPLE_ADVANCED_ONLY).toHaveLength(15);
+    expect(SIMPLE_ADVANCED_ONLY.map((key) => t(key))).toEqual(expect.arrayContaining(["Effort for new bots", "Interface font", "Keep prompt cache warm"]));
   });
 
-  it("names this app and its version on Updates, with the update check", () => {
+  it("names this app and its version on Updates, then product updates, the welcome tour and diagnostics", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, updater: { check: vi.fn(), install: vi.fn(), onState: vi.fn() } } });
     fixture.updater = { status: "idle" };
     const html = open("updates");
     expect(html).toMatch(/>OpenMausBot [^<]+<\/div>/);
-    expect(placement(html, "Check for updates")).toBe("shown");
-    expect(placement(html, "You&#x27;re on the latest version we know of.")).toBe("shown");
+    for (const shown of ["Check for updates", "MARKER:updatesConsent;", "Replay welcome tour", "Diagnostics"]) expect(placement(html, shown), shown).toBe("shown");
   });
 
   it("checks the server's version from a browser", () => {
@@ -212,42 +197,44 @@ describe("Settings in Simple mode", () => {
     expect(placement(html, "Check for updates")).toBe("shown");
   });
 
-  it("opens the fold that holds a linked setting: API keys, Import or Organization", () => {
+  it("opens the fold that holds a linked setting: API keys, Servers or this app as a client", () => {
     expect(placement(open("connections"), "MARKER:apiKey;")).toBe("shown");
-    expect(placement(open("import"), "MARKER:import;")).toBe("shown");
-    expect(placement(open("organization"), "MARKER:organization;")).toBe("shown");
-    expect(placement(open("general"), "MARKER:import;")).toBe("folded");
-    expect(SIMPLE_FOLDED).toEqual({ import: "general-more", organization: "general-more", activity: "general-more", connections: "ai-other" });
+    expect(placement(open("engines"), "MARKER:apiKey;")).toBe("folded");
+    expect(placement(open("desktopWorkspaces"), "MARKER:desktopWorkspaces;")).toBe("shown");
+    expect(placement(open("remote"), "MARKER:companion;")).toBe("shown");
+    expect(placement(open("companion"), "MARKER:companion;")).toBe("folded");
+    expect(SIMPLE_FOLDED).toEqual({ connections: "ai-keys", remote: "computer-elsewhere", desktopWorkspaces: "computer-elsewhere" });
   });
 
-  it("shows the connected AI, then Other providers for keys", () => {
+  it("shows the AI page as Your AI, then API keys and connections", () => {
     fixture.section = "engines";
     const html = render();
     expect(currentPage(html)).toBe("ai");
     expect(blocks(html)).toEqual(["engines", "connections"]);
     expect(markers(html).filter((name) => name === "engines" || name === "decisionModel")).toEqual(["engines"]);
-    expect(html).toMatch(/aria-expanded="false"[^>]*>Other providers/);
+    expect(html).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?API keys and connections/);
   });
 
-  it("stacks Remote access, Servers, Bot desktops, the built-in browser and Logins on Computer", () => {
+  it("orders Computer as your bots' computers, your devices, the browser, logins, then Connect from elsewhere", () => {
     fixture.section = "companion";
     const html = render();
     expect(currentPage(html)).toBe("computer");
-    expect(blocks(html)).toEqual(["companion", "desktopWorkspaces", "computer", "browser", "logins"]);
-    expect(groupLabels(html)).toEqual(["Remote access", "Servers", "Bot desktops", "Built-in browser"]);
+    expect(blocks(html)).toEqual(["computer", "companion", "browser", "logins", "elsewhere", "remote", "desktopWorkspaces"]);
+    expect(groupLabels(html)).toEqual(["Your bots’ computers", "Your devices", "Built-in browser"].map((label) => label.replace("’", "&#x27;")));
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
-  it("leads Usage & billing with one usage block, then MausBot Cloud, and folds the rest under Details", () => {
+  it("leads Usage & billing with one usage block, folds the limits, then shows the plan", () => {
     fixture.section = "cloudAccount";
     const html = render();
     expect(currentPage(html)).toBe("billing");
     expect(blocks(html)).toEqual(["usage", "cloudAccount"]);
-    expect(html.indexOf("MARKER:cloudAccount;")).toBeLessThan(html.indexOf(">Details"));
+    expect(html.indexOf("See all limits")).toBeLessThan(html.indexOf("MARKER:cloudAccount;"));
     expect(placement(html, "MARKER:usage;")).toBe("folded");
+    expect(groupLabels(html)).toContain("Plan");
   });
 
-  it("shows a hosted workspace's admins People on General, Activity under More settings, and the usage itself on Usage & billing", () => {
+  it("shows a hosted workspace's admins People in Account and Activity as its own group", () => {
     vi.stubGlobal("window", {});
     fixture.ownerOrAdmin = true;
     fixture.section = "people";
@@ -255,20 +242,17 @@ describe("Settings in Simple mode", () => {
     expect(pages(html)).toEqual(["general", "ai", "computer", "billing", "updates"]);
     expect(currentPage(html)).toBe("general");
     expect(placement(html, "MARKER:people;")).toBe("shown");
-    expect(placement(html, "MARKER:activity;")).toBe("folded");
-    fixture.section = "usage";
-    const billing = render();
-    expect(placement(billing, "MARKER:usage;")).toBe("folded");
-    expect(billing).toMatch(/aria-expanded="false"[^>]*>Details/);
+    expect(placement(html, "MARKER:activity;")).toBe("shown");
+    expect(groupLabels(html)).toContain("Activity");
   });
 
-  it("keeps a paired remote client's reduced set: General for appearance, and Computer with Remote access and Servers", () => {
+  it("keeps a paired remote client's reduced set: General for appearance, and Computer with your devices and Connect from elsewhere", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, remoteClient: { active: true } } });
     fixture.section = "desktopWorkspaces";
     const html = render();
     expect(pages(html)).toEqual(["general", "computer"]);
     expect(currentPage(html)).toBe("computer");
-    expect(blocks(html)).toEqual(["companion", "desktopWorkspaces"]);
+    expect(blocks(html)).toEqual(["companion", "elsewhere", "remote", "desktopWorkspaces"]);
     expect(html).not.toContain('aria-label="Enable the built-in browser"');
     fixture.section = "appearance";
     const general = render();
@@ -297,7 +281,7 @@ describe("Settings in Simple mode", () => {
     fixture.section = section;
     const html = render();
     expect(currentPage(html)).toBe(page);
-    expect(blocks(html)).toContain(section === "remote" ? "companion" : section);
+    expect(blocks(html)).toContain(section === "remote" ? "remote" : section);
   });
 
   it.each<[AppSettingsSection, string]>([
