@@ -1282,7 +1282,7 @@
   "approvalMode.antigravity.desc": "自动批准这个机器人的工具请求，包括命令、编辑和电脑操作。没有自动审核。",
   "approvalMode.noNativeReview": "该提供方没有自动审核，行为与询问相同",
   "approvalMode.triggerAria": "{provider}：{mode}",
-  "approvalMode.busy": "更改批准级别前请先停止这个机器人的轮次",
+  "approvalMode.whileWorking": "机器人正在工作。如果它的 AI 支持，更改从下一步开始生效，否则从下一轮开始生效。",
   "approvalMode.threadTrustedNotice": "完全访问和自定义访问权限需在桌面应用的机器人设置中管理。",
   "approvalMode.menuAria": "{provider} 的批准方式",
   "approvalMode.question": "{provider} 的操作该如何批准？",

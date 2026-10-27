@@ -844,7 +844,7 @@
   "approvalMode.antigravity.desc": "Approuver automatiquement les demandes d'outils de ce bot, y compris les commandes, les modifications et les actions sur l'ordinateur. Aucune revue automatique.",
   "approvalMode.noNativeReview": "Ce fournisseur n'a pas de revue automatique ; se comporte comme Demander",
   "approvalMode.triggerAria": "{mode} pour {provider}",
-  "approvalMode.busy": "Arrêtez le tour de ce bot avant de changer son niveau d'autorisation",
+  "approvalMode.whileWorking": "Le bot est en train de travailler. Un changement s’applique dès sa prochaine étape si son IA le permet, sinon dès son prochain tour.",
   "approvalMode.menuAria": "Mode d'autorisation pour {provider}",
   "approvalMode.question": "Comment les actions de {provider} doivent-elles être autorisées ?",
   "approvalMode.learnMore": "En savoir plus",

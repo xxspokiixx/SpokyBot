@@ -939,7 +939,7 @@
   "approvalMode.antigravity.desc": "Werkzeuganfragen dieses Bots automatisch freigeben, auch Befehle, Änderungen und Computeraktionen. Keine automatische Prüfung.",
   "approvalMode.noNativeReview": "Dieser Anbieter hat keine automatische Prüfung; verhält sich wie Fragen",
   "approvalMode.triggerAria": "{mode} für {provider}",
-  "approvalMode.busy": "Stoppe den Zug dieses Bots, bevor du seine Freigabestufe änderst",
+  "approvalMode.whileWorking": "Der Bot arbeitet gerade. Eine Änderung gilt ab seinem nächsten Schritt, wenn seine KI das erlaubt, sonst ab seinem nächsten Zug.",
   "approvalMode.menuAria": "Freigabemodus für {provider}",
   "approvalMode.question": "Wie sollen Aktionen von {provider} freigegeben werden?",
   "approvalMode.learnMore": "Mehr erfahren",

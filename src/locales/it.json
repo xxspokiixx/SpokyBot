@@ -2376,7 +2376,7 @@
   "approvalMode.antigravity.desc": "Approva in automatico le richieste di strumenti di questo bot, inclusi comandi, modifiche e azioni sul computer. Nessuna revisione automatica.",
   "approvalMode.noNativeReview": "Questo fornitore non ha la revisione automatica; si comporta come Chiedi",
   "approvalMode.triggerAria": "{mode} per {provider}",
-  "approvalMode.busy": "Ferma il turno di questo bot prima di cambiarne il livello di approvazione",
+  "approvalMode.whileWorking": "Il bot sta lavorando. Una modifica vale dal suo prossimo passo se la sua AI lo consente, altrimenti dal suo prossimo turno.",
   "approvalMode.threadTrustedNotice": "Accesso completo e Accesso personalizzato si gestiscono nelle impostazioni del bot nell'app desktop.",
   "approvalMode.menuAria": "Modalità di approvazione per {provider}",
   "approvalMode.question": "Come vanno approvate le azioni di {provider}?",

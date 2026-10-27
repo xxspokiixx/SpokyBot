@@ -2466,7 +2466,7 @@
   "approvalMode.antigravity.desc": "このボットのツール要求（コマンド、編集、コンピューター操作を含む）を自動的に承認します。自動レビューはありません。",
   "approvalMode.noNativeReview": "このプロバイダーには自動レビューがなく、確認と同じ動きになります",
   "approvalMode.triggerAria": "{provider} は{mode}",
-  "approvalMode.busy": "承認レベルを変える前に、このボットのターンを止めてください",
+  "approvalMode.whileWorking": "ボットは作業中です。AI が対応していれば次のステップから、そうでなければ次のターンから変更が適用されます。",
   "approvalMode.threadTrustedNotice": "フルアクセスとカスタムアクセスは、デスクトップアプリのボット設定で管理します。",
   "approvalMode.menuAria": "{provider} の承認モード",
   "approvalMode.question": "{provider} の操作はどう承認しますか？",

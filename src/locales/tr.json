@@ -2000,7 +2000,7 @@
   "approvalMode.antigravity.desc": "Komutlar, düzenlemeler ve bilgisayar eylemleri dahil bu bot için araç isteklerini otomatik olarak onaylar. Otomatik inceleme yoktur.",
   "approvalMode.noNativeReview": "Bu sağlayıcının otomatik incelemesi yok; Onay iste gibi davranır",
   "approvalMode.triggerAria": "{provider} için {mode}",
-  "approvalMode.busy": "Onay düzeyini değiştirmeden önce bu botun turunu durdurun",
+  "approvalMode.whileWorking": "Bot şu anda çalışıyor. Değişiklik, AI'ı izin veriyorsa bir sonraki adımından, aksi halde bir sonraki turundan itibaren geçerli olur.",
   "approvalMode.threadTrustedNotice": "Tam ve Özel erişim, masaüstü uygulamasındaki bot ayarlarından yönetilir.",
   "approvalMode.menuAria": "{provider} için onay modu",
   "approvalMode.question": "{provider} eylemleri nasıl onaylanmalıdır?",

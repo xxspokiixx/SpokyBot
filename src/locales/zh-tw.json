@@ -1688,7 +1688,7 @@
   "approvalMode.antigravity.desc": "自動核准此機器人的工具要求，包括指令、編輯與電腦操作。不會自動審查。",
   "approvalMode.noNativeReview": "此供應商沒有自動審查；行為與「詢問」相同",
   "approvalMode.triggerAria": "{provider} 的{mode}",
-  "approvalMode.busy": "變更核准層級前，請先停止此機器人的回合",
+  "approvalMode.whileWorking": "機器人正在工作。若它的 AI 支援，變更會從下一步開始生效，否則從下一個回合開始生效。",
   "approvalMode.threadTrustedNotice": "「完整存取權」與「自訂」是在桌面版的機器人設定中管理。",
   "approvalMode.menuAria": "{provider} 的核准模式",
   "approvalMode.question": "{provider} 的操作應如何核准？",

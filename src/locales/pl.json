@@ -2422,7 +2422,7 @@
   "approvalMode.antigravity.desc": "Automatycznie zatwierdzaj żądania narzędzi dla tego bota, w tym polecenia, zmiany i działania na komputerze. Bez automatycznego przeglądu.",
   "approvalMode.noNativeReview": "Ten dostawca nie ma automatycznego przeglądu; działa jak Pytaj",
   "approvalMode.triggerAria": "Tryb {mode} dla {provider}",
-  "approvalMode.busy": "Zatrzymaj turę tego bota przed zmianą poziomu zatwierdzania",
+  "approvalMode.whileWorking": "Bot pracuje. Zmiana obowiązuje od jego następnego kroku, jeśli pozwala na to jego AI, a w przeciwnym razie od następnej tury.",
   "approvalMode.threadTrustedNotice": "Pełny dostęp i dostęp niestandardowy są zarządzane w ustawieniach bota w aplikacji na komputer.",
   "approvalMode.menuAria": "Tryb zatwierdzania dla {provider}",
   "approvalMode.question": "Jak zatwierdzać działania dostawcy {provider}?",

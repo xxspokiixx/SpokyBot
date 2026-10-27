@@ -844,7 +844,7 @@
   "approvalMode.antigravity.desc": "इस बॉट के टूल अनुरोध अपने आप मंज़ूर करें — कमांड, संपादन और कंप्यूटर पर की गई कार्रवाइयाँ भी। कोई स्वचालित समीक्षा नहीं।",
   "approvalMode.noNativeReview": "इस प्रदाता के पास स्वचालित समीक्षा नहीं है; यह पूछें की तरह काम करता है",
   "approvalMode.triggerAria": "{provider} के लिए {mode}",
-  "approvalMode.busy": "मंज़ूरी का स्तर बदलने से पहले इस बॉट की बारी रोकें",
+  "approvalMode.whileWorking": "बॉट अभी काम कर रहा है। जहाँ उसका AI अनुमति दे, बदलाव उसके अगले कदम से लागू होता है, नहीं तो उसकी अगली बारी से।",
   "approvalMode.menuAria": "{provider} के लिए मंज़ूरी का तरीका",
   "approvalMode.question": "{provider} की कार्रवाइयों को कैसे मंज़ूरी मिले?",
   "approvalMode.learnMore": "और जानें",
