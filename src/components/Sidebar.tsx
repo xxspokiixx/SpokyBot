@@ -105,7 +105,7 @@ import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
 import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
-import { SidebarTileGrid } from "./SidebarTiles";
+import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
 import { AvatarActivityDot, PreviewDot, RowStatusText, rowSurface } from "./SidebarRowMarkers";
@@ -1577,6 +1577,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         />
       )}
       {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} />}
+      {simpleDesk && !tiles && <SidebarNoBots />}
       </GlassBar>
 
       {density !== "icons" && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} style={windowNoDragStyle} />}

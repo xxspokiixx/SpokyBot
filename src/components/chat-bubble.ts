@@ -47,7 +47,7 @@ export function joinedCorners(side: "start" | "end", join: BubbleJoin): string {
 
 /** Which bubble group a transcript row belongs to in Simple mode: this bot's words, the person's own words, or none. */
 export function bubbleGroup(message: Message, botId: string): "bot" | "user" | null {
-  if (message.kind !== "text" || message.publishedPage || message.automation) return null;
+  if (message.kind !== "text" || message.publishedPage || message.automation || message.helperFollowup) return null;
   if (message.role === "user") return peerLine(message) ? null : "user";
   if (message.role !== "bot" || peerRequest(message, botId)) return null;
   return isPureLeakedSystemHarnessMessage(message.text) && !message.attachments?.length ? null : "bot";
@@ -57,9 +57,10 @@ export function isBotTextRow(message: Message, botId: string): boolean {
   return bubbleGroup(message, botId) === "bot";
 }
 
-/** A transcript row that draws nothing: a reaction, or a tool step or work summary while tool calls are hidden. */
+/** A transcript row that draws nothing: a reaction, MausBot's follow-up (drawn under its intro), or a tool step or work
+ * summary while tool calls are hidden. */
 export function quietRow(message: Message, showToolCalls: boolean): boolean {
-  if (message.reaction) return true;
+  if (message.reaction || message.helperFollowup) return true;
   if (message.kind === "digest") return !showToolCalls;
   if (message.kind !== "activity" || showToolCalls) return false;
   if (message.dataResult || message.comm || message.threadRef || message.relay || isStatusActivity(message)) return false;

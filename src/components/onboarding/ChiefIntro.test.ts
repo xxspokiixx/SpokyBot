@@ -7,13 +7,14 @@ import { introStaged, stageIntro, useWelcomingBot } from "@/lib/default-bot";
 import { setLocale } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 
-const f = vi.hoisted(() => ({ state: {} as { bots: Bot[]; instances: unknown[] }, dispatch: vi.fn(), landed: vi.fn(), onDone: vi.fn(), reduced: true }));
+const f = vi.hoisted(() => ({ state: {} as { bots: Bot[]; instances: unknown[] }, dispatch: vi.fn(), landed: vi.fn(), onDone: vi.fn(), onLeave: vi.fn(), reduced: true }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
 vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
 vi.mock("@/components/mascot-clock", () => ({ usePrefersReducedMotion: () => f.reduced }));
 vi.mock("@/lib/default-bot", async (original) => ({ ...(await original<typeof import("@/lib/default-bot")>()), useViewerEmail: () => null }));
-vi.mock("@/lib/mausbot-landing", () => ({ landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
-const { ChiefIntro } = await import("./ChiefIntro");
+vi.mock("@/lib/mausbot-landing", () => ({ FLIGHT_MS: 700, landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
+const { CHIEF_FADE_MS, CHIEF_GUARD_MS, ChiefIntro } = await import("./ChiefIntro");
+const { FLIGHT_MS } = await import("@/lib/mausbot-landing");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const bot = (id: string, name: string, extra: Partial<Bot> = {}): Bot => ({
@@ -33,16 +34,27 @@ function Watch() {
 const text = () => host.textContent ?? "";
 const button = (label: string) => [...host.querySelectorAll("button")].find((node) => node.textContent === label);
 const press = async (label: string) => { await act(async () => { button(label)!.click(); }); };
-const show = async (replay = false) => {
-  await act(async () => { root.render([createElement(Watch, { key: "w" }), createElement(ChiefIntro, { key: "c", replay, onDone: f.onDone })]); });
+const tick = async (ms: number) => { await act(async () => { vi.advanceTimersByTime(ms); }); };
+/** Opens the dialog and waits out its input guard, unless `armed` is false. */
+const show = async (replay = false, armed = true) => {
+  await act(async () => { root.render([createElement(Watch, { key: "w" }), createElement(ChiefIntro, { key: "c", replay, onDone: f.onDone, onLeave: f.onLeave })]); });
+  if (armed) await tick(CHIEF_GUARD_MS);
+};
+/** Presses and lets the dialog finish leaving. */
+const choose = async (label: string) => {
+  await press(label);
+  await tick(FLIGHT_MS);
 };
 const patches = () => f.dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "updateBot");
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  HTMLElement.prototype.animate = vi.fn(() => ({ onfinish: null, oncancel: null, cancel() {} }) as unknown as Animation);
   setLocale("en");
   f.dispatch.mockReset();
   f.landed.mockReset();
   f.onDone.mockReset();
+  f.onLeave.mockReset();
   f.reduced = true;
   f.state = { bots: [maus()], instances: [CLAUDE, CHAT_ONLY] };
   stageIntro(null);
@@ -53,27 +65,37 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  vi.useRealTimers();
 });
 
 describe("Create", () => {
-  it("finishes on its own clock, even in a window that runs no animation frames", async () => {
-    vi.useFakeTimers();
+  it("fades the dialog and scrim, flies MausBot to its tile, and opens the chat when the flight ends, on its own clock", async () => {
     f.reduced = false;
-    HTMLElement.prototype.animate = vi.fn(() => ({ onfinish: null, oncancel: null }) as unknown as Animation);
     await show();
     await press("Create Chief of Staff");
-    expect(f.onDone).not.toHaveBeenCalled();
-    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(f.onLeave).toHaveBeenCalledOnce();
+    expect(f.landed).toHaveBeenCalledWith("maus");
+    await tick(FLIGHT_MS - 1);
+    expect(f.onDone, "the chat waits for the landing").not.toHaveBeenCalled();
+    await tick(1);
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
-    vi.useRealTimers();
   });
 
-  it("on a new install introduces MausBot, already its Chief, lands it in the sidebar and opens its chat", async () => {
+  it("crossfades with reduced motion", async () => {
+    await show();
+    await press("Create Chief of Staff");
+    await tick(CHIEF_FADE_MS);
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
+  });
+
+  it("on a new install is the only action: MausBot, already its Chief, lands in the sidebar and its chat opens", async () => {
     await show();
     expect(text()).toContain("Introducing your Chief of Staff");
     expect(text()).toContain("Your main point of contact. It checks in on its own and coordinates work with your other bots.");
+    expect(button("Choose an existing bot"), "nothing to choose on a new install").toBeUndefined();
+    expect(document.activeElement).toBe(button("Create Chief of Staff"));
     expect(welcoming, "kept out of the sidebar until it lands").toBe("maus");
-    await press("Create Chief of Staff");
+    await choose("Create Chief of Staff");
     expect(patches()).toEqual([{ type: "updateBot", botId: "maus", patch: { welcomed: true } }]);
     expect(f.landed).toHaveBeenCalledWith("maus");
     expect(welcoming).toBeNull();
@@ -84,25 +106,37 @@ describe("Create", () => {
   it("makes MausBot the Chief where the place has none, and brings it back to the sidebar", async () => {
     f.state = { ...f.state, bots: [maus({ chiefOfStaff: false, sidebarHidden: true })] };
     await show();
-    await press("Create Chief of Staff");
+    await choose("Create Chief of Staff");
     expect(patches()).toEqual([{ type: "updateBot", botId: "maus", patch: { welcomed: true, sidebarHidden: false, chiefOfStaff: true } }]);
   });
 
-  it("is never offered over a Chief the person already has, whose role MausBot never takes", async () => {
-    f.state = { ...f.state, bots: [maus({ chiefOfStaff: false }), bot("research", "Research", { chiefOfStaff: true })] };
-    await show();
-    expect(button("Create Chief of Staff")).toBeUndefined();
-    expect(text()).toContain("Meet Research, your Chief of Staff");
-    await press("Continue with Research");
-    expect(patches()).toEqual([{ type: "updateBot", botId: "maus", patch: { welcomed: true } }]);
-    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("research");
+  it("ignores clicks, Enter and Space for its first 300 ms, so a double click on Next presses nothing", async () => {
+    await show(false, false);
+    const create = button("Create Chief of Staff")!;
+    await act(async () => { create.click(); });
+    for (const key of ["Enter", " "]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => { create.dispatchEvent(event); });
+      expect(event.defaultPrevented, `${JSON.stringify(key)} is held`).toBe(true);
+    }
+    await tick(CHIEF_GUARD_MS - 1);
+    await act(async () => { create.click(); });
+    await tick(FLIGHT_MS);
+    expect(f.dispatch).not.toHaveBeenCalled();
+    expect(f.onDone).not.toHaveBeenCalled();
+    await tick(1);
+    await choose("Create Chief of Staff");
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
   });
 });
 
 describe("Choose an existing bot", () => {
-  it("is off while there is nothing to choose", async () => {
+  it("sits beside Create where the person has bots, with Create still the one focused", async () => {
+    f.state = { ...f.state, bots: [maus(), bot("research", "Research")] };
     await show();
-    expect(button("Choose an existing bot")!.disabled).toBe(true);
+    const actions = [...host.querySelectorAll<HTMLButtonElement>("button")].map((node) => node.textContent);
+    expect(actions).toEqual(["Choose an existing bot", "Create Chief of Staff"]);
+    expect(document.activeElement).toBe(button("Create Chief of Staff"));
   });
 
   it("lists the person's own bots to pick one, any whose AI cannot lead held back, and Confirm makes it the Chief", async () => {
@@ -114,18 +148,19 @@ describe("Choose an existing bot", () => {
     const choices = [...host.querySelectorAll<HTMLElement>("[role=radio]")];
     expect(choices.map((choice) => choice.dataset.chiefChoice)).toEqual(["research", "writer"]);
     expect(choices[1]!.getAttribute("aria-disabled")).toBe("true");
-    expect(choices[1]!.textContent).toContain("This model cannot contact other bots");
+    expect(choices[1]!.title).toBe("Choose Claude or an ACP model provider first");
     expect(button("Confirm")!.disabled, "nothing picked yet").toBe(true);
     await act(async () => { choices[1]!.click(); });
     expect(button("Confirm")!.disabled, "a bot that cannot lead is never picked").toBe(true);
     await act(async () => { choices[0]!.click(); });
     expect(choices[0]!.getAttribute("aria-checked")).toBe("true");
     expect(f.dispatch, "nothing changes before Confirm").not.toHaveBeenCalled();
-    await press("Confirm");
+    await choose("Confirm");
     expect(patches()).toEqual([
       { type: "updateBot", botId: "maus", patch: { welcomed: true } },
       { type: "updateBot", botId: "research", patch: { chiefOfStaff: true } },
     ]);
+    expect(f.onLeave).toHaveBeenCalledOnce();
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith("research");
     expect(introStaged("maus"), "MausBot's first messages are not where the person lands").toBe(false);
   });

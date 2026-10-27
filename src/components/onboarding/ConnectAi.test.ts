@@ -26,7 +26,7 @@ vi.mock("@/components/EngineSetup", async () => {
 });
 // The row has its own tests; here only whether the first screen offers it.
 vi.mock("./beats/OrganisationRow", () => ({ OrganisationRow: (props: NonNullable<typeof f.row>) => { f.row = props; return null; } }));
-const { ConnectAi } = await import("./ConnectAi");
+const { ConnectAi, ConnectAiDialog } = await import("./ConnectAi");
 const { useWelcomeAi } = await import("./welcome-ai");
 const { useStore } = await import("@/state/store");
 
@@ -47,9 +47,9 @@ const text = () => host.textContent ?? "";
 const show = async (extra: { hosted?: boolean } = {}) => {
   await act(async () => { root.render(createElement(FirstScreenAi, extra)); });
 };
+/** Every other way is listed under the recommended one, with nothing to unfold. */
 const otherWays = async () => {
-  const toggle = [...host.querySelectorAll("button")].find((button) => button.textContent === "Other ways")!;
-  await act(async () => { toggle.click(); });
+  await act(async () => {});
 };
 
 beforeEach(() => {
@@ -90,14 +90,14 @@ describe("connecting an AI on the first screen", () => {
     expect(text()).not.toContain("Couldn't check your AI connections");
   });
 
-  it("leads with one recommended way and folds every other way, with no status list and no engine talk", async () => {
+  it("leads with one recommended way, then lists every other way, with no status list and no engine talk", async () => {
     await show();
     expect([...host.querySelectorAll("[data-engine-setup]")].map((node) => node.getAttribute("data-engine-setup"))).toEqual(["claude"]);
     expect(host.querySelector("[data-ai-recommended]")?.getAttribute("data-ai-recommended")).toBe("claude");
-    expect(text()).not.toContain("Grok");
-    await otherWays();
-    expect(text()).toContain("Grok");
-    expect(text()).toContain("Codex");
+    const rows = [...host.querySelectorAll("button[aria-expanded]")].map((node) => node.textContent);
+    expect(rows).toHaveLength(2);
+    expect(rows).toContain("Codex");
+    expect(text()).not.toContain("Other ways");
     for (const word of [/\bengines?\b/i, /\bReady\b/, /Needs setup/i, /to set up/i, /provider/i]) expect(text()).not.toMatch(word);
   });
 
@@ -140,11 +140,6 @@ describe("connecting an AI on the first screen", () => {
     expect(host.querySelector("[data-ai-connected]")?.textContent).toContain("Claude");
     expect(host.querySelector("[data-ai-recommended]")).toBeNull();
     expect(text()).not.toContain("Other ways");
-  });
-
-  it("says the one thing to do first in a plain line", async () => {
-    await show();
-    expect(host.querySelector("h2")?.textContent).toBe("First, connect an AI to think with");
   });
 
   it("says Connected only after the AI answered a test message, and plainly while it checks", async () => {
@@ -229,5 +224,20 @@ describe("connecting an AI on the first screen", () => {
     f.row!.onOpenSettings();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "organization" });
     delete window.ogb;
+  });
+
+  it("opens as the Connect an AI dialog, which Escape and a click outside close", async () => {
+    const onClose = vi.fn();
+    await act(async () => { root.render(createElement(ConnectAiDialog, { tested: null, onClose })); });
+    const dialog = host.querySelector<HTMLElement>("[data-connect-ai]")!;
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.querySelector("h2")?.textContent).toBe("Connect an AI");
+    expect(dialog.querySelector("[data-ai-recommended]")).not.toBeNull();
+    await act(async () => { dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(onClose).toHaveBeenCalledOnce();
+    await act(async () => { dialog.parentElement!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+    expect(onClose).toHaveBeenCalledTimes(2);
+    await act(async () => { dialog.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+    expect(onClose, "a click inside stays").toHaveBeenCalledTimes(2);
   });
 });

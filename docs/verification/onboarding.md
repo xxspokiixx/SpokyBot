@@ -1,11 +1,14 @@
 # Welcome flow and guided tour
 
 The first run is two screens, then the chat (Oct 27 2026): "Meet OpenMausBot"
-(a composer typing a few asks, Next, and Connect an AI on the same screen when
-none works), then "Introducing your Chief of Staff" over the app (Create Chief
-of Staff, or Choose an existing bot). It lands in the Chief's chat, where
-MausBot's first messages and its look around offer only what is still missing.
-The app tour starts only from Settings → Replay app tour.
+(a composer typing one sentence and Next; with no AI working, the same pill
+signs one in, with "Other ways to connect · Set up later" under it), then
+"Introducing your Chief of Staff" over an empty app (Create Chief of Staff, and
+Choose an existing bot where the person has bots). The Chief step shows only
+for a MausBot not yet introduced where no other bot is the Chief. It lands in
+the Chief's chat, where MausBot's three lines, its follow-up (written once by
+the server, `POST /api/bots/:id/helper-followup`) and chips offer only what is
+still missing. The app tour starts only from Settings → Replay app tour.
 
 Launch the isolated full-app fixture following [Chat UI](chat-ui.md):
 
@@ -26,8 +29,9 @@ pairing, native permissions or user workspace is involved.
 
 Assertions cover the two screens: no field, step count, Back or Skip on the
 first; a reload on the second coming back to it; Create landing in the Chief's
-chat with its first messages even when the completion save fails, and the next
-browser without this one's mark seeing the welcome again and saving it (with
+chat with its first messages and one saved follow-up even when the completion
+save fails, and the next browser without this one's mark seeing the welcome
+again, without the Chief step MausBot already had, and saving it (with
 `met-chief-v1`); no app tour after the welcome or a reload; automatic
 starter-model selection and a successful first composer message without opening
 the model picker; every app tour step from Settings, persistence after reload,
@@ -39,6 +43,17 @@ permissions remain covered by their separate platform recipes, not this browser
 fixture.
 
 Stop the launcher with Ctrl-C; it owns and removes only its disposable home.
+
+The rules behind it run offline:
+
+```sh
+pnpm exec vitest run src/components/onboarding/WelcomeFlow.test.ts src/components/onboarding/ChiefIntro.test.ts src/components/onboarding/ConnectAi.test.ts src/components/HelperIntro.test.ts src/lib/default-bot.test.ts server/routes/helper-followup.test.ts electron/system-name.test.mjs src/components/CardHint.test.ts
+```
+
+They cover when the Chief step shows, its 300 ms input guard, the Cloud Pro
+popup settled by a first run that could offer the Cloud, the chips' order and
+cap, the follow-up written once and only by MausBot's own person, the default
+profile name's guards, and the Advanced intro and spotlights kept as they were.
 
 ## Providers connected after first launch
 

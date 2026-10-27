@@ -6226,5 +6226,6 @@
   "voice.adding": "Dodawanie…",
   "needsYou.message": "Wiadomość od: {name}",
   "relay.told": "Przekazano: {name}",
-  "relay.toldHint": "Ta wiadomość trafiła do: {name}"
+  "relay.toldHint": "Ta wiadomość trafiła do: {name}",
+  "helperIntro.watch": "Pilnuję też Twojego dnia i wysyłam Ci krótkie podsumowanie."
 }

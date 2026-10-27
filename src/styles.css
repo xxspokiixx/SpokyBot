@@ -128,6 +128,8 @@
      spaces siblings out. Rare, first-time motion, so it may run past the
      300ms UI ceiling. */
   --animate-rise: rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade-in: fade-in 0.2s ease-out both;
+  --animate-meet-caret: meet-caret 1s linear infinite;
   /* onboarding: a spotlight card or a first-sight hint scaling in from its
      anchor. Never from zero; nothing appears from nothing. */
   --animate-spot-in: spot-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -1344,8 +1346,14 @@ body {
   :root[data-skin="daylight"] .ui-modal-divider {
     background: color-mix(in srgb, var(--color-ink) 12%, transparent);
   }
-  .ui-scrim { background: rgb(0 0 0 / 0.5); }
-  :root[data-skin="midnight"] .ui-scrim { background: rgb(0 0 0 / 0.7); }
+  /* Dims the app under a first-run dialog as a sheet does: half in a light skin, deeper in a dark one. */
+  .ui-scrim {
+    background: rgb(0 0 0 / 0.5);
+    animation: fade-in 200ms ease-out both;
+  }
+  @container style(--code-color-scheme: dark) {
+    .ui-scrim { background: rgb(0 0 0 / 0.7); }
+  }
   @media (prefers-reduced-motion: reduce) {
     .ui-button,
     .ui-icon-button,
@@ -1735,6 +1743,15 @@ body {
   transform-origin: 18px 100%;
   animation: turn-answer-in 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* The first screen's demo caret: on for the first half of each second, off for the rest. */
+@keyframes meet-caret {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
 @keyframes rise {
   from { transform: translateY(10px); opacity: 0; }
   to { transform: none; opacity: 1; }
@@ -1776,11 +1793,6 @@ body {
    (its index) inline; the delay is decorative and never blocks input. */
 .stagger > * {
   animation-delay: calc(var(--stagger, 40ms) * var(--i, 0));
-}
-/* The first run's Chief screen dims the app as a sheet does: half in a light skin, deeper in a dark one. */
-.welcome-scrim { background: rgb(0 0 0 / 0.5); }
-@container style(--code-color-scheme: dark) {
-  .welcome-scrim { background: rgb(0 0 0 / 0.7); }
 }
 ::view-transition-old(root),
 ::view-transition-new(root) {
