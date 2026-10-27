@@ -4922,5 +4922,6 @@
   "mcp.team.everyone": "Ekibinizdeki herkes bunu kullanabilir.",
   "mcp.team.onlyMe": "Yalnızca benim için",
   "mcp.team.onlyMeOn": "Bunu yalnızca siz kullanabilirsiniz. Ekip arkadaşlarınız kendi anahtarlarını ekip sayfalarından ekleyebilir.",
-  "mcp.auth.loadingTools": "Oturum açıldı. Bağlanıyor…"
+  "mcp.auth.loadingTools": "Oturum açıldı. Bağlanıyor…",
+  "automations.firstRun": "İlk çalışma {when}"
 }

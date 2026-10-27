@@ -4922,5 +4922,6 @@
   "mcp.team.everyone": "Mọi người trong nhóm của bạn đều dùng được.",
   "mcp.team.onlyMe": "Chỉ cho tôi",
   "mcp.team.onlyMeOn": "Chỉ bạn dùng được. Đồng đội có thể thêm khóa của riêng họ từ trang nhóm của họ.",
-  "mcp.auth.loadingTools": "Đã đăng nhập. Đang kết nối…"
+  "mcp.auth.loadingTools": "Đã đăng nhập. Đang kết nối…",
+  "automations.firstRun": "Lần chạy đầu {when}"
 }

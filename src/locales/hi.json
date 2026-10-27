@@ -2414,5 +2414,6 @@
   "mcp.team.onlyMeOn": "सिर्फ़ आप इसका इस्तेमाल कर सकते हैं। टीम के साथी अपने टीम पेज से अपनी कुंजी जोड़ सकते हैं।",
   "mcp.auth.loadingTools": "साइन इन हो गया। कनेक्ट हो रहा है…",
   "update.card.idleNote": "अभी रीस्टार्ट करें, या ऐसे ही छोड़ दें: अगली बार जब आप दूर हों और कुछ न चल रहा हो, {app} इसे अपने आप इंस्टॉल कर लेगा।",
-  "update.updatedItself": "{app} ने खुद को {version} पर अपडेट कर लिया।"
+  "update.updatedItself": "{app} ने खुद को {version} पर अपडेट कर लिया।",
+  "automations.firstRun": "पहली बार {when}"
 }

@@ -2435,7 +2435,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -6116,7 +6117,7 @@
       "automations.wake": "c2381a289fc06275a8391be054b4714f9b76d72bedffcce9c04bed4686da7518",
       "automations.wakeBattery": "3aab0d40e326cabe4ecdcb116836fff2ff658868d0eda2d9b16d6818a4003e2a",
       "automations.allBots": "0d18b2ead0e123481c308f431c1da969f06d7dfbe6e8eea863a0f2aeeece94f7",
-      "automations.status.working": "a92f0449a9f7235bf69dc2e8ff7070bfae3f00ec8f8f26e5457a9beac53466ac",
+      "automations.status.working": "130011756125313c72f2cab730db4347e2841526d236a89cb25f38789fa49229",
       "automations.status.paused": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "automations.status.needsYou": "74b6abdf59690fdffec2059089487cd63658249da5301cbf065e9977518fbd8f",
       "automations.status.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516",
@@ -6124,6 +6125,7 @@
       "automations.lastRan": "e340b6f8dd9f779406e281b368b2038c98324d43a8a6eee67ae532fe3721e376",
       "automations.next": "ab6afb712e0308290eca602411d69385329e37f70ba613b2a01fba942298f63e",
       "automations.notRunYet": "5a459ade1c63b6e4ba6e877c2fc16ab548cdfea99b11d7d26b3ed4bce92e8817",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e",
       "automations.runningNow": "d64450a6a52899c4015535b540f1a92ca159b6560976db3cd6e7ca9206638955",
       "automations.time.today": "171a27d61a9d1c0a8daa60bc718b0b29ab28d48a92463b1eb3f9fa49c137f9c5",
       "automations.time.yesterday": "9523d9fbe79bcf3ee5f9f664a8041fa3cdba4b6b8bb902cb5ec335a5bf1ca769",
@@ -10297,7 +10299,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -12715,7 +12718,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -16854,7 +16858,7 @@
       "automations.wake": "c2381a289fc06275a8391be054b4714f9b76d72bedffcce9c04bed4686da7518",
       "automations.wakeBattery": "3aab0d40e326cabe4ecdcb116836fff2ff658868d0eda2d9b16d6818a4003e2a",
       "automations.allBots": "0d18b2ead0e123481c308f431c1da969f06d7dfbe6e8eea863a0f2aeeece94f7",
-      "automations.status.working": "a92f0449a9f7235bf69dc2e8ff7070bfae3f00ec8f8f26e5457a9beac53466ac",
+      "automations.status.working": "130011756125313c72f2cab730db4347e2841526d236a89cb25f38789fa49229",
       "automations.status.paused": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "automations.status.needsYou": "74b6abdf59690fdffec2059089487cd63658249da5301cbf065e9977518fbd8f",
       "automations.status.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516",
@@ -16864,6 +16868,7 @@
       "automations.readsAndDrafts": "622a92c262110c3393eb7092d3bdf81b2a7b88d9364d9be63bf34541f2a6479b",
       "automations.next": "ab6afb712e0308290eca602411d69385329e37f70ba613b2a01fba942298f63e",
       "automations.notRunYet": "5a459ade1c63b6e4ba6e877c2fc16ab548cdfea99b11d7d26b3ed4bce92e8817",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e",
       "automations.runningNow": "d64450a6a52899c4015535b540f1a92ca159b6560976db3cd6e7ca9206638955",
       "automations.time.today": "171a27d61a9d1c0a8daa60bc718b0b29ab28d48a92463b1eb3f9fa49c137f9c5",
       "automations.time.yesterday": "9523d9fbe79bcf3ee5f9f664a8041fa3cdba4b6b8bb902cb5ec335a5bf1ca769",
@@ -23012,7 +23017,7 @@
       "automations.wake": "c2381a289fc06275a8391be054b4714f9b76d72bedffcce9c04bed4686da7518",
       "automations.wakeBattery": "3aab0d40e326cabe4ecdcb116836fff2ff658868d0eda2d9b16d6818a4003e2a",
       "automations.allBots": "0d18b2ead0e123481c308f431c1da969f06d7dfbe6e8eea863a0f2aeeece94f7",
-      "automations.status.working": "a92f0449a9f7235bf69dc2e8ff7070bfae3f00ec8f8f26e5457a9beac53466ac",
+      "automations.status.working": "130011756125313c72f2cab730db4347e2841526d236a89cb25f38789fa49229",
       "automations.status.paused": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "automations.status.needsYou": "74b6abdf59690fdffec2059089487cd63658249da5301cbf065e9977518fbd8f",
       "automations.status.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516",
@@ -23020,6 +23025,7 @@
       "automations.lastRan": "e340b6f8dd9f779406e281b368b2038c98324d43a8a6eee67ae532fe3721e376",
       "automations.next": "ab6afb712e0308290eca602411d69385329e37f70ba613b2a01fba942298f63e",
       "automations.notRunYet": "5a459ade1c63b6e4ba6e877c2fc16ab548cdfea99b11d7d26b3ed4bce92e8817",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e",
       "automations.runningNow": "d64450a6a52899c4015535b540f1a92ca159b6560976db3cd6e7ca9206638955",
       "automations.time.today": "171a27d61a9d1c0a8daa60bc718b0b29ab28d48a92463b1eb3f9fa49c137f9c5",
       "automations.time.yesterday": "9523d9fbe79bcf3ee5f9f664a8041fa3cdba4b6b8bb902cb5ec335a5bf1ca769",
@@ -28558,7 +28564,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -32868,7 +32875,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -35759,7 +35767,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -40685,7 +40694,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -45611,7 +45621,8 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -49678,7 +49689,7 @@
       "automations.wake": "c2381a289fc06275a8391be054b4714f9b76d72bedffcce9c04bed4686da7518",
       "automations.wakeBattery": "3aab0d40e326cabe4ecdcb116836fff2ff658868d0eda2d9b16d6818a4003e2a",
       "automations.allBots": "0d18b2ead0e123481c308f431c1da969f06d7dfbe6e8eea863a0f2aeeece94f7",
-      "automations.status.working": "a92f0449a9f7235bf69dc2e8ff7070bfae3f00ec8f8f26e5457a9beac53466ac",
+      "automations.status.working": "130011756125313c72f2cab730db4347e2841526d236a89cb25f38789fa49229",
       "automations.status.paused": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "automations.status.needsYou": "74b6abdf59690fdffec2059089487cd63658249da5301cbf065e9977518fbd8f",
       "automations.status.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516",
@@ -49688,6 +49699,7 @@
       "automations.readsAndDrafts": "622a92c262110c3393eb7092d3bdf81b2a7b88d9364d9be63bf34541f2a6479b",
       "automations.next": "ab6afb712e0308290eca602411d69385329e37f70ba613b2a01fba942298f63e",
       "automations.notRunYet": "5a459ade1c63b6e4ba6e877c2fc16ab548cdfea99b11d7d26b3ed4bce92e8817",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e",
       "automations.runningNow": "d64450a6a52899c4015535b540f1a92ca159b6560976db3cd6e7ca9206638955",
       "automations.time.today": "171a27d61a9d1c0a8daa60bc718b0b29ab28d48a92463b1eb3f9fa49c137f9c5",
       "automations.time.yesterday": "9523d9fbe79bcf3ee5f9f664a8041fa3cdba4b6b8bb902cb5ec335a5bf1ca769",
@@ -56061,7 +56073,7 @@
       "automations.wake": "c2381a289fc06275a8391be054b4714f9b76d72bedffcce9c04bed4686da7518",
       "automations.wakeBattery": "3aab0d40e326cabe4ecdcb116836fff2ff658868d0eda2d9b16d6818a4003e2a",
       "automations.allBots": "0d18b2ead0e123481c308f431c1da969f06d7dfbe6e8eea863a0f2aeeece94f7",
-      "automations.status.working": "a92f0449a9f7235bf69dc2e8ff7070bfae3f00ec8f8f26e5457a9beac53466ac",
+      "automations.status.working": "130011756125313c72f2cab730db4347e2841526d236a89cb25f38789fa49229",
       "automations.status.paused": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "automations.status.needsYou": "74b6abdf59690fdffec2059089487cd63658249da5301cbf065e9977518fbd8f",
       "automations.status.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516",
@@ -56071,6 +56083,7 @@
       "automations.readsAndDrafts": "622a92c262110c3393eb7092d3bdf81b2a7b88d9364d9be63bf34541f2a6479b",
       "automations.next": "ab6afb712e0308290eca602411d69385329e37f70ba613b2a01fba942298f63e",
       "automations.notRunYet": "5a459ade1c63b6e4ba6e877c2fc16ab548cdfea99b11d7d26b3ed4bce92e8817",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e",
       "automations.runningNow": "d64450a6a52899c4015535b540f1a92ca159b6560976db3cd6e7ca9206638955",
       "automations.time.today": "171a27d61a9d1c0a8daa60bc718b0b29ab28d48a92463b1eb3f9fa49c137f9c5",
       "automations.time.yesterday": "9523d9fbe79bcf3ee5f9f664a8041fa3cdba4b6b8bb902cb5ec335a5bf1ca769",
@@ -62333,7 +62346,7 @@
       "automations.wake": "c2381a289fc06275a8391be054b4714f9b76d72bedffcce9c04bed4686da7518",
       "automations.wakeBattery": "3aab0d40e326cabe4ecdcb116836fff2ff658868d0eda2d9b16d6818a4003e2a",
       "automations.allBots": "0d18b2ead0e123481c308f431c1da969f06d7dfbe6e8eea863a0f2aeeece94f7",
-      "automations.status.working": "a92f0449a9f7235bf69dc2e8ff7070bfae3f00ec8f8f26e5457a9beac53466ac",
+      "automations.status.working": "130011756125313c72f2cab730db4347e2841526d236a89cb25f38789fa49229",
       "automations.status.paused": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "automations.status.needsYou": "74b6abdf59690fdffec2059089487cd63658249da5301cbf065e9977518fbd8f",
       "automations.status.done": "11a6767d5674c7e45f7e00dc525762275b3a48491ad6045427d2609cc496c516",
@@ -62343,6 +62356,7 @@
       "automations.readsAndDrafts": "622a92c262110c3393eb7092d3bdf81b2a7b88d9364d9be63bf34541f2a6479b",
       "automations.next": "ab6afb712e0308290eca602411d69385329e37f70ba613b2a01fba942298f63e",
       "automations.notRunYet": "5a459ade1c63b6e4ba6e877c2fc16ab548cdfea99b11d7d26b3ed4bce92e8817",
+      "automations.firstRun": "6d4a91e1252c97a9a3818e473ab6a89fa93e3155305d505bc1ea4714c562732e",
       "automations.runningNow": "d64450a6a52899c4015535b540f1a92ca159b6560976db3cd6e7ca9206638955",
       "automations.time.today": "171a27d61a9d1c0a8daa60bc718b0b29ab28d48a92463b1eb3f9fa49c137f9c5",
       "automations.time.yesterday": "9523d9fbe79bcf3ee5f9f664a8041fa3cdba4b6b8bb902cb5ec335a5bf1ca769",
