@@ -284,7 +284,7 @@ import { CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, cloudHomeConfiguration, clo
 import { botBox, startBotBoxAtBoot } from "./bot-box/boot.ts";
 import { createCloudSignedHost } from "./host/cloud-signed-host.ts"; import { hiddenThreadRefusal, hideOthersSyncFolders } from "./host/team-private.ts"; import { createTeamMemberLeft } from "./host/team-member-left.ts"; import { createVisibilityHost } from "./host/visibility-host.ts";
 import { createCloudPower, registerCloudPower, wokeFromSleep, type CloudPower } from "./cloud-power.ts"; import { createSharedComputerRoutes } from "./routes/shared-computers.ts";
-import { noteSyncBotTurn } from "./routes/cloud-sync.ts";
+import { lentCopies, noteSyncBotTurn } from "./routes/cloud-sync.ts";
 import { CLOUD_PERSONAL_REFUSAL, type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost, type MemberProfile } from "./host/cloud-team-host.ts"; import { engineHomes } from "./engine-homes/engine-homes.ts"; import { audienceMember } from "./audience.ts"; import { createMeRoutes } from "./routes/me.ts"; import { createTeamPhoneRoutes } from "./routes/team-phone.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_OUTSIDE_KEY, outsideDriven } from "./cloud-sharing.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts";
@@ -686,7 +686,7 @@ const sessions = new SessionRegistry({
   },
   portalMembership: hostedWorkspaceConfiguration()?.portalMembership === true,
 });
-const deviceLinks = new DeviceLinks(); const sharedComputers = new SharedComputers(id => sessions.isLive(id), new LentComputers(join(DATA_DIR, "lent-computers.json")), deviceLinks);
+const deviceLinks = new DeviceLinks(); const sharedComputers = new SharedComputers(id => sessions.isLive(id), new LentComputers(join(DATA_DIR, "lent-computers.json")), deviceLinks, lentCopies);
 // A Cloud home's secrets come over the launcher's pipe, never this process's environment.
 const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
 const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
