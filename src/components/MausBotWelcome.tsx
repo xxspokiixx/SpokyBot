@@ -5,6 +5,7 @@ import { BookOpen, Crown, Pencil, Sparkles, Wand2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { emailGateDone } from "@/lib/analytics";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { DEFAULT_BOT_NAME, myDefaultBot, setWelcomingBot, useViewerEmail } from "@/lib/default-bot";
 import { landInSidebar } from "@/lib/mausbot-landing";
 import { firstReplyPending } from "@/lib/corner-popup";
@@ -83,6 +84,7 @@ export function MausBotWelcome({ viewer }: { viewer: WelcomeViewer | null }) {
 
 export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const { dispatch } = useStore();
+  const advanced = useAdvancedMode();
   const reduced = usePrefersReducedMotion();
   const [draft, setDraft] = useState<WelcomeDraft>(() => draftOf(bot));
   const [editing, setEditing] = useState(false);
@@ -135,7 +137,7 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
   };
 
   return (
-    <div ref={overlayRef} className={cn("fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 px-6 pb-6 pt-[min(6vh,48px)]", leaving && "pointer-events-none")} data-mausbot-welcome="">
+    <div ref={overlayRef} className={cn("fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-6 pb-6 pt-[min(6vh,48px)]", advanced ? "bg-black/55" : "ui-scrim", leaving && "pointer-events-none")} data-mausbot-welcome="">
       <div
         ref={dialogRef}
         role="dialog"
@@ -148,7 +150,7 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
           event.preventDefault();
           if (editing && panelRef.current?.contains(event.target as Node)) { setEditing(false); pictureRef.current?.focus(); } else dismiss();
         }}
-        className="animate-pop-in w-full max-w-[460px] rounded-2xl border border-hairline/50 bg-panel px-6 pb-5 pt-5 shadow-2xl"
+        className={cn("animate-pop-in w-full max-w-[460px] rounded-2xl px-6 pb-5 pt-5", advanced ? "border border-hairline/50 bg-panel shadow-2xl" : "ui-modal")}
       >
         <div className="flex flex-col items-center text-center">
           <button

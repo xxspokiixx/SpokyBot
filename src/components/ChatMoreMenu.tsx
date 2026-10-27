@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
@@ -144,6 +145,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
 
 function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolean }) {
   const { items, on } = useChatMoreItems(bot, phoneHeader);
+  const advanced = useAdvancedMode();
   return (
     <SidebarPopoverMenu
       items={items}
@@ -154,7 +156,8 @@ function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolea
         <span
           data-testid="chat-more"
           className={cn(
-            "flex size-8 items-center justify-center rounded-full bg-raised/50 transition-colors hover:bg-raised",
+            "flex size-8 items-center justify-center rounded-full",
+            advanced ? "bg-raised/50 transition-colors hover:bg-raised" : cn(ELEVATED_CONTROL, ELEVATED_HOVER, open && ELEVATED_OPEN),
             "max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card",
             open || on ? "text-accent" : "text-ink",
           )}
@@ -190,8 +193,8 @@ function ShareMenu({ bot, className }: { bot: Bot; className: string }) {
       ariaLabel={t("chat.export.heading")}
       triggerClassName="rounded-full"
       triggerTitle={t("chat.export.heading")}
-      renderTrigger={() => (
-        <span data-panel-share className={className}>
+      renderTrigger={({ open }) => (
+        <span data-panel-share className={cn(className, open && ELEVATED_OPEN)}>
           <Share size={16} aria-hidden="true" />
         </span>
       )}

@@ -169,7 +169,7 @@ describe("the anchored menu in a document", () => {
       await hover(support!, usage!, 60);
       await wait(320);
       expect(submenu()).not.toBeNull();
-      expect(support!.className).not.toContain("bg-raised/60");
+      expect(support!.classList.contains("bg-menu-hover")).toBe(false);
       await hover(settings!, support!, 90);
       expect(submenu()).toBeNull();
     });

@@ -414,7 +414,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
         if (event.key === "Tab") onClose();
         else navigateThreadMenu(event);
       }}
-      className={cn("animate-pop-in absolute right-0 z-30 w-[280px] rounded-xl border border-hairline bg-panel p-1.5 text-left shadow-2xl space-y-1", placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
+      className={cn("popover-surface animate-pop-in absolute right-0 z-30 w-[280px] rounded-xl border border-hairline bg-panel p-1.5 text-left shadow-2xl space-y-1", placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
     >
       {CALL_MODES.map((entry) => {
         const unavailable = entry.id === "turns" ? turnsUnavailable : null;

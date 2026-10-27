@@ -98,7 +98,7 @@ describe("the Simple composer in a bot chat", () => {
     expect(plus()?.getAttribute("aria-label")).toBe("Add");
     const pill = container.querySelector('[data-tour="composer"]')!.className.split(" ");
     expect(pill).toEqual(expect.arrayContaining(["rounded-[22px]", "bg-composer", "p-2", "ring-[0.5px]"]));
-    expect(pill.some((name) => name.startsWith("shadow"))).toBe(false);
+    expect(pill.filter((name) => name.startsWith("shadow"))).toEqual(["shadow-(--shadow-float)"]);
     expect(container.querySelector("[data-composer-row]")!.className).not.toContain("flex-wrap");
     expect(container.querySelector("[data-composer-plus]")!.className.split(" ")).toContain("size-7");
     expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();

@@ -6,6 +6,7 @@ import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type M
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
+import { ELEVATED_FLOAT } from "./elevated";
 import { activeLocale, t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
@@ -90,7 +91,7 @@ import {
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
 
-const SIMPLE_COMPOSER = "bg-composer p-2 ring-[0.5px] ring-ink/10 transition-[border-radius]";
+const SIMPLE_COMPOSER = `${ELEVATED_FLOAT} p-2 transition-[border-radius]`;
 
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
@@ -799,7 +800,7 @@ export function Composer({
             />
           </div>
         )}
-        <div className={singleRow ? "min-w-0 flex-1 rounded-[26px] bg-composer px-3 py-1.5 ring-1 ring-composer-ring" : "contents"}>
+        <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5", advanced ? "bg-composer ring-1 ring-composer-ring" : ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
         <div data-composer-row className={cn("flex items-end", simpleDock ? "gap-1.5" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:flex-wrap")}>
           <input
@@ -957,7 +958,8 @@ export function Composer({
           }
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className={cn(
-              "block max-h-[9rem] w-full resize-none overflow-y-auto bg-transparent placeholder:text-ink-secondary focus:outline-none",
+              "block max-h-[9rem] w-full resize-none overflow-y-auto bg-transparent focus:outline-none",
+              advanced ? "placeholder:text-ink-secondary" : "placeholder:text-ink-tertiary",
               !simpleDock && "px-1 text-[15px]",
               simpleDock ? "min-h-7 px-0.5 py-1 text-[14px] leading-5" : "min-h-6 py-1 leading-6",
             )}

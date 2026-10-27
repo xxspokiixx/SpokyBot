@@ -119,7 +119,7 @@ const ASK_CONTROL =
   "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium leading-5 transition-colors [&>svg]:shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-40";
 
 export const ASK_PRIMARY_BUTTON =
-  `${ASK_CONTROL} bg-accent text-accent-ink hover:brightness-110`;
+  `${ASK_CONTROL} ui-button-primary bg-accent text-accent-ink hover:brightness-110`;
 
 export const ASK_CHIP = `${ASK_CONTROL} max-w-full border`;
 export const ASK_CHIP_IDLE = "border-transparent bg-ink/[0.07] text-ink hover:bg-ink/[0.12]";

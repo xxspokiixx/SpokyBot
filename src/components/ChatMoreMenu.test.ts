@@ -69,12 +69,14 @@ beforeEach(() => {
 });
 
 describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
-  it("is a round 32px button labelled More", () => {
+  it("is a round 32px button labelled More, on the raised surface in Simple mode", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
     expect(menu.ariaLabel).toBe("More");
     expect(menu.placement).toBeUndefined();
     expect(menu.trigger).toContain('data-testid="chat-more"');
-    expect(menu.trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b/);
+    expect(menu.trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-composer\b[^"]*\bring-inset\b/);
+    fixture.advanced = true;
+    expect(menuOf(createElement(ChatMoreMenu, { bot })).trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b/);
   });
 
   it("offers threads in Simple mode, and Usage and the Inspector unlocked", () => {

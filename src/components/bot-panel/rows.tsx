@@ -3,10 +3,11 @@ import { Check, ChevronLeft, ChevronRight, Trash2, type LucideIcon } from "lucid
 
 import { cn } from "@/lib/cn";
 import { MAUS_COLORS, type MausColor } from "@/lib/mascot";
+import { ELEVATED_CONTROL, ELEVATED_HOVER } from "../elevated";
 import { Switch } from "../SettingsPrimitives";
 
 export const rowCls = "flex min-h-[46px] items-center gap-2.5 px-3.5 py-[11px]";
-export const roundButtonCls = "flex size-[34px] shrink-0 items-center justify-center rounded-full bg-composer text-ink ring-[0.5px] ring-ink/10 transition-colors hover:bg-[color-mix(in_srgb,var(--color-composer)_92%,var(--color-ink))]";
+export const roundButtonCls = `flex size-[34px] shrink-0 items-center justify-center rounded-full text-ink ${ELEVATED_CONTROL} ${ELEVATED_HOVER}`;
 const titleCls = "text-[14px] font-medium text-ink";
 const hintCls = "mt-px text-[13px] leading-[1.35] text-ink-secondary";
 export const buttonCls =

@@ -117,11 +117,11 @@ function MenuRows({
             className={cn(
               "flex w-full items-center text-start disabled:opacity-60 focus-visible:outline-none",
               look === "roomy"
-                ? "min-h-10 gap-3 rounded-lg px-3 py-2 text-[15px] font-medium leading-5 focus-visible:bg-raised/70"
+                ? "min-h-10 gap-3 rounded-lg px-3 py-2 text-[15px] font-medium leading-5 focus-visible:bg-menu-hover"
                 : look === "compact"
-                  ? "min-h-[30px] gap-2 rounded-md px-1.5 py-1.5 text-[13px] leading-[18px] focus-visible:bg-raised/70"
-                  : "gap-3 px-3.5 py-2 text-[14px] focus-visible:bg-raised/70",
-              item.active ? "bg-raised text-ink" : item.submenu && openSubmenu === item.key && engaged ? "bg-raised/60 text-ink" : "text-ink hover:bg-raised/70",
+                  ? "min-h-[30px] gap-2 rounded-md px-1.5 py-1.5 text-[13px] leading-[18px] focus-visible:bg-menu-hover"
+                  : "gap-3 px-3.5 py-2 text-[14px] focus-visible:bg-menu-hover",
+              item.active ? "bg-menu-active text-ink" : item.submenu && openSubmenu === item.key && engaged ? "bg-menu-hover text-ink" : "text-ink hover:bg-menu-hover",
             )}
           >
             {item.icon && (
@@ -342,8 +342,8 @@ export function SidebarPopoverMenu({
   const look: MenuLook = !anchored ? "plain" : compact ? "compact" : "roomy";
   const width = compact ? COMPACT_MENU_WIDTH : ANCHORED_MENU_WIDTH;
   const sheetClass = look === "compact"
-    ? "flex flex-col gap-1 overflow-hidden rounded-[12px] border border-hairline/50 bg-menu p-2 shadow-lg"
-    : cn("overflow-hidden border border-hairline/50 bg-menu shadow-2xl shadow-black/50", look === "roomy" ? "rounded-2xl p-1.5" : "rounded-xl py-1.5");
+    ? "popover-surface flex flex-col gap-1 overflow-hidden rounded-[12px] border border-hairline/50 bg-menu p-2 shadow-lg"
+    : cn("popover-surface overflow-hidden border border-hairline/50 bg-menu shadow-2xl shadow-black/50", look === "roomy" ? "rounded-2xl p-1.5" : "rounded-xl py-1.5");
 
   const sheet = motion.shown && (
     <div

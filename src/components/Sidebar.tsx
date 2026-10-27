@@ -344,8 +344,11 @@ function RoomContextMenu({
     <div
       data-room-menu
       data-sidebar
+      role="menu"
+      aria-label={t("sidebar.bot.actions", { name: group.name })}
+      onKeyDown={navigateThreadMenu}
       style={{ top, left }}
-      className={cn("fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
+      className={cn("popover-surface fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       {!remoteClient && describing ? (
         <div className="flex items-center gap-1 px-2 py-1">
@@ -430,11 +433,12 @@ function RoomContextMenu({
         </div>
       ) : (
         <button
+          role="menuitem"
           onClick={() => {
             setDraft(group.name);
             setRenaming(true);
           }}
-          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-menu-hover"
         >
           <Pencil size={16} className="text-ink-secondary" />
           {isBotChat ? t("sidebar.room.renameChat") : t("sidebar.room.renameChannel")}
@@ -442,11 +446,12 @@ function RoomContextMenu({
       ))}
       {!remoteClient && !renaming && !isBotChat && (
         <button
+          role="menuitem"
           onClick={() => {
             setDescriptionDraft(group.description ?? "");
             setDescribing(true);
           }}
-          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-menu-hover"
         >
           <TextQuote size={16} className="text-ink-secondary" />
           {t("sidebar.room.setDescription")}
@@ -454,32 +459,35 @@ function RoomContextMenu({
       )}
       {!remoteClient && !isBotChat && (
         <button
+          role="menuitem"
           onClick={() => {
             onClose();
             onMoveToSection(group.id);
           }}
-          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-menu-hover"
         >
           <FolderPlus size={16} className="text-ink-secondary" />
           {t("sidebar.section.moveToContext")}
         </button>
       )}
       <button
+        role="menuitem"
         onClick={() => {
           void copyText(group.threadId);
           onClose();
         }}
-        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-menu-hover"
       >
         <ClipboardCopy size={16} className="text-ink-secondary" />
         {t("sidebar.copyConversationId")}
       </button>
       {!remoteClient && <button
+        role="menuitem"
         onClick={() => {
           onClose();
           onDelete(group.id);
         }}
-        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-raised/70"
+        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-menu-hover"
       >
         <Trash2 size={16} />
         {isBotChat ? t("sidebar.room.deleteChat") : t("sidebar.room.deleteChannel")}
@@ -638,7 +646,7 @@ export function BotContextMenu({
       className={cn(
         simpleMenu ? SIMPLE_MENU_ITEM : "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]",
         opts?.danger ? "text-danger" : "text-ink",
-        opts?.disabled ? "cursor-default opacity-40" : "hover:bg-raised/70",
+        opts?.disabled ? "cursor-default opacity-40" : "hover:bg-menu-hover",
       )}
     >
       {icon}
@@ -700,7 +708,7 @@ export function BotContextMenu({
           event.preventDefault();
           showMore(true);
         }}
-        className={cn(SIMPLE_MENU_ITEM, "text-ink hover:bg-raised/70", moreOpen && moreEngaged && "bg-raised/60")}
+        className={cn(SIMPLE_MENU_ITEM, "text-ink hover:bg-menu-hover", moreOpen && moreEngaged && "bg-menu-hover")}
       >
         <MoreHorizontal size={16} className="text-ink-secondary" />
         <span className="flex-1">{t("sidebar.bot.more")}</span>
@@ -793,7 +801,7 @@ export function BotContextMenu({
       aria-label={t("sidebar.bot.actions", { name: bot.name })}
       onKeyDown={navigateThreadMenu}
       style={{ top: shown.y, left: shown.x }}
-      className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
+      className={cn("popover-surface fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       {showThreads && <>
         {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
@@ -1664,7 +1672,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, quiet: quietRows, query: q, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0 });
-  const plusItem = advanced ? "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70" : cn(SIMPLE_MENU_ITEM, "text-ink hover:bg-raised/70");
+  const plusItem = advanced ? "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-menu-hover" : cn(SIMPLE_MENU_ITEM, "text-ink hover:bg-menu-hover");
   const plusControl = (
     <div ref={plusMenuRef} className="contents">
     <button
@@ -1681,8 +1689,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     </button>
     {plusMotion.shown && (
       <>
-        <div className={cn(
-          advanced ? "absolute z-40 w-52 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60" : cn("absolute z-40 w-max min-w-[200px] overflow-hidden", SIMPLE_MENU),
+        <div role="menu" aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")} onKeyDown={navigateThreadMenu} className={cn(
+          advanced ? "popover-surface absolute z-40 w-52 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60" : cn("absolute z-40 w-max min-w-[200px] overflow-hidden", SIMPLE_MENU),
           rail ? "bottom-0 left-full ml-4" : cn("top-full", advanced ? "mt-1" : "mt-1.5", density === "icons" ? "left-0" : "right-0"),
           plusMotion.className,
         )} {...plusMotion.exitProps}>
@@ -1691,6 +1699,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
               setPlusOpen(false);
               setNewChatOpen(true);
             }}
+            role="menuitem"
             className={plusItem}
           >
             <MessageSquarePlus size={16} className="text-ink-secondary" />
@@ -1698,6 +1707,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           </button>}
           <button
             onClick={() => { setPlusOpen(false); dispatch({ type: "newBot" }); }}
+            role="menuitem"
             className={plusItem}
           >
             <BotIcon size={16} className="text-ink-secondary" />
@@ -1709,6 +1719,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
               setPlusOpen(false);
               setNewRoom(true);
             }}
+            role="menuitem"
             className={plusItem}
           >
             <Users size={16} className="text-ink-secondary" />
@@ -1716,6 +1727,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           </button>
           {advanced && !remoteClient && <button
             onClick={() => { setPlusOpen(false); setNewTeam(true); }}
+            role="menuitem"
             className={plusItem}
           >
             <FolderPlus size={16} className="text-ink-secondary" /> {t("team.create")}
@@ -1723,6 +1735,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           {!remoteClient && <>
           <button
             onClick={() => { setPlusOpen(false); setTeamLibraryOpen(true); }}
+            role="menuitem"
             className={plusItem}
           >
             <Library size={16} className="text-ink-secondary" />
@@ -1734,6 +1747,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                 setPlusOpen(false);
                 setArchivedBotsOpen(true);
               }}
+              role="menuitem"
               className={plusItem}
             >
               <Archive size={16} className="text-ink-secondary" />
@@ -1854,7 +1868,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             {attentionMotion.shown && (
               <>
                 <div className={cn(
-                  "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
+                  "popover-surface absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                   density === "icons" ? "left-0" : "right-0",
                   density === "icons" ? "w-72" : density === "compact" ? "w-60 md:w-[min(240px,calc(var(--sidebar-width)_-_32px))]" : "w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]",
                   attentionMotion.className,
