@@ -39,7 +39,8 @@ export interface BrokerFake {
   /** The Composio user of each tool router Session the broker made, in order. */
   sessionUsers: string[];
   /** Each tool router MCP request the broker relayed: the Session's Composio user and the JSON-RPC method and tool. */
-  mcpCalls: Array<{ user: string; method: string; tool?: string }>;
+  /** `slugs`: the app tools a multi-execute call ran, in order. */
+  mcpCalls: Array<{ user: string; method: string; tool?: string; slugs?: string[] }>;
   /** Google Calendar event resources of a Composio user's primary calendar, as its multi-execute tool answers them. */
   calendarEvents: Record<string, unknown[]>;
   /** Today's queued count for an installation, set directly, to reach the daily limit without 500 deliveries. */
@@ -72,7 +73,7 @@ export async function startBrokerFake(): Promise<BrokerFake> {
   const mcpCalls: BrokerFake["mcpCalls"] = [];
   const calendarEvents: BrokerFake["calendarEvents"] = {};
   /** A Google Calendar read for a user with events set, in Composio's multi-execute answer; undefined for anything else. */
-  const calendarAnswer = (user: string, params: { name?: string; arguments?: { tools?: Array<{ tool_slug?: string }> } } | undefined) => {
+  const calendarAnswer = (user: string, params: { name?: string; arguments?: { tools?: Array<{ tool_slug?: unknown }> } } | undefined) => {
     const slug = params?.name === "COMPOSIO_MULTI_EXECUTE_TOOL" ? params.arguments?.tools?.[0]?.tool_slug : undefined;
     if (!calendarEvents[user] || (slug !== "GOOGLECALENDAR_EVENTS_LIST" && slug !== "GOOGLECALENDAR_LIST_CALENDARS")) return undefined;
     const data = slug === "GOOGLECALENDAR_EVENTS_LIST" ? { items: calendarEvents[user] } : { items: [{ id: "primary", primary: true, accessRole: "owner", selected: true }] };
@@ -86,8 +87,9 @@ export async function startBrokerFake(): Promise<BrokerFake> {
     if (url.hostname === "mcp.composio.dev") {
       const user = sessionUser(url.pathname.slice(1));
       const raw = init?.body instanceof ArrayBuffer || ArrayBuffer.isView(init?.body) ? new TextDecoder().decode(init.body as ArrayBuffer) : String(init?.body ?? "{}");
-      const rpc = JSON.parse(raw) as { id?: unknown; method?: string; params?: { name?: string; arguments?: { tools?: Array<{ tool_slug?: string }> } } };
-      mcpCalls.push({ user, method: rpc.method ?? "", ...(rpc.params?.name ? { tool: rpc.params.name } : {}) });
+      const rpc = JSON.parse(raw) as { id?: unknown; method?: string; params?: { name?: string; arguments?: { tools?: Array<{ tool_slug?: unknown }> } } };
+      const slugs = Array.isArray(rpc.params?.arguments?.tools) ? rpc.params.arguments.tools.map((item) => String(item?.tool_slug ?? "")) : [];
+      mcpCalls.push({ user, method: rpc.method ?? "", ...(rpc.params?.name ? { tool: rpc.params.name } : {}), ...(slugs.length ? { slugs } : {}) });
       const reply = (result: unknown) => Response.json({ jsonrpc: "2.0", id: rpc.id ?? null, result }, { headers: { "mcp-session-id": `mcp-${user}` } });
       const calendar = rpc.method === "tools/call" ? calendarAnswer(user, rpc.params) : undefined;
       if (calendar) return reply(calendar);
