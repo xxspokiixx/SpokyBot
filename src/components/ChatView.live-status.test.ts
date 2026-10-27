@@ -87,13 +87,17 @@ afterEach(() => {
 });
 
 describe("Simple mode's working line", () => {
-  it("is the bot's 32px avatar and one friendly phrase for what is happening now, with no timer or size", () => {
+  it("is the bot's 28px avatar and one quiet friendly phrase, with the timer and size kept in its tooltip", () => {
     mode.advanced = false;
     engine({ type: "turn.started" });
     render(busyBot([ask]));
     expect(mascot()).not.toBeNull();
     expect(statusLine()).toBe("Thinking it through");
-    expect(mascot()!.innerHTML).toContain('width="32px"');
+    expect(mascot()!.innerHTML).toContain('width="28px"');
+    const row = mascot()!.firstElementChild as HTMLElement;
+    expect([...row.classList]).toEqual(expect.arrayContaining(["h-9", "ps-2", "gap-2"]));
+    expect(row.title).toMatch(/^Working · /);
+    expect(mascot()!.querySelector("[data-turn-status]")!.classList).toContain("text-ink-tertiary");
     expect(mascot()!.classList).not.toContain("-mt-3");
 
     engine({ type: "item.completed", itemType: "assistant_text", text: intro.text! } as Partial<RuntimeEvent>);

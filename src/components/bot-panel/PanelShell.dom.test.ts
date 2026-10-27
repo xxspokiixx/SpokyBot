@@ -7,12 +7,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, BotSettingsSection } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), settingsOpen: false }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
     ...original,
-    useStore: () => ({ state: original.initialState, dispatch: fixture.dispatch, flushBotPatches: () => Promise.resolve(null) }),
+    useStore: () => ({ state: { ...original.initialState, settingsOpen: fixture.settingsOpen }, dispatch: fixture.dispatch, flushBotPatches: () => Promise.resolve(null) }),
   };
 });
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, readAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
@@ -226,22 +226,57 @@ describe("the chat header's pill", () => {
     const header = document.createElement("div");
     document.body.append(header);
     const headerRoot = createRoot(header);
-    const onOpen = vi.fn();
-    flushSync(() => headerRoot.render(createElement(ChatHeadPill, { bot: withTasks, avatar: { state: "idle" }, privacy: null, onOpen, ...props })));
-    return { header, onOpen, done: () => { flushSync(() => headerRoot.unmount()); header.remove(); } };
+    const onToggle = vi.fn();
+    flushSync(() => headerRoot.render(createElement(ChatHeadPill, { bot: withTasks, avatar: { state: "idle" }, privacy: null, onToggle, ...props })));
+    return { header, onToggle, done: () => { flushSync(() => headerRoot.unmount()); header.remove(); } };
   };
 
   it("names the bot, opens the bot panel, and dots another conversation that needs a look", () => {
-    const { header, onOpen, done } = pill();
+    const { header, onToggle, done } = pill();
     try {
       const button = header.querySelector<HTMLButtonElement>("[data-chathead-pill]")!;
       expect(button.textContent).toBe("Scout");
       expect(button.getAttribute("aria-label")).toBe("Open Scout's profile");
+      expect(button.getAttribute("aria-expanded")).toBe("false");
+      expect(button.hasAttribute("aria-controls")).toBe(false);
+      expect(header.querySelector("[data-chathead-chevron]")).not.toBeNull();
       expect(header.querySelector("[data-chathead-elsewhere]")!.getAttribute("aria-label")).toBe("Other activity (1)");
       click(button);
-      expect(onOpen).toHaveBeenCalledOnce();
+      expect(onToggle).toHaveBeenCalledOnce();
     } finally {
       done();
+    }
+  });
+
+  it("says the panel is open and points at it, then hides the hover chevron", () => {
+    fixture.settingsOpen = true;
+    const { header, done } = pill();
+    try {
+      const button = header.querySelector<HTMLButtonElement>("[data-chathead-pill]")!;
+      expect(button.getAttribute("aria-expanded")).toBe("true");
+      expect(button.getAttribute("aria-controls")).toBe("bot-panel");
+      expect(header.querySelector("[data-chathead-chevron]")).toBeNull();
+    } finally {
+      fixture.settingsOpen = false;
+      done();
+    }
+  });
+
+  it("names the conversation on screen when it is not the bot's main one", () => {
+    const { header, done } = pill({ bot: { ...withTasks, mainThreadId: "other" } });
+    try {
+      const button = header.querySelector<HTMLButtonElement>("[data-chathead-pill]")!;
+      expect(header.querySelector("[data-chathead-conversation]")!.textContent).toBe("Plan the launch");
+      expect(button.getAttribute("aria-label")).toBe("Open Scout's profile, Plan the launch");
+      expect(header.querySelector("[data-chathead-chevron]")).toBeNull();
+    } finally {
+      done();
+    }
+    const untitled = pill({ bot: { ...withTasks, mainThreadId: "other", tasks: [{ ...withTasks.tasks![0]!, title: "New thread" }, withTasks.tasks![1]!] } });
+    try {
+      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("New conversation");
+    } finally {
+      untitled.done();
     }
   });
 
