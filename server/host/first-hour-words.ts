@@ -298,7 +298,7 @@ const pl: FirstHourWords = {
   prepped: (n) => `przygotowano ${n} ${plCount(n, { one: "spotkanie", few: "spotkania", other: "spotkań" })}`,
   routines: (n) => `uruchomiono ${n} ${plCount(n, { one: "rutynę", few: "rutyny", other: "rutyn" })}`,
   list: (items) => joined(items, " i "),
-  time: (minutes) => { const { unit, n } = roundedTime(minutes); return unit === "minutes" ? `około ${n} minut` : n === 1 ? "około godziny" : `około ${n} ${plCount(n, { few: "godziny", other: "godzin" })}`; },
+  time: (minutes) => { const { unit, n } = roundedTime(minutes); return unit === "minutes" ? `około ${n} minut` : n === 1 ? "około godziny" : `około ${n} godzin`; },
   recap: (done, time) => `Do tej pory ${done}: to ${time} mniej pracy.`,
   overnight: (done) => `Przez noc ${done}.`,
 };

@@ -23,12 +23,13 @@ function setup(options: { zone: string; start: string; morning?: string; overnig
   const chief = store.createBot({ name: "MausBot" });
   store.setChiefOfStaff(chief.id);
   const pushed: string[] = [];
+  const hooks: { pushed?: () => void } = {};
   const sinces: number[] = [];
   const runs: RoutineRun[] = [];
   let first = true;
   const brief = createBrief({
     store, dataDir: dir, now: () => now, hosted: false, watching: () => true, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => false,
-    notify: (_bot, _thread, detail) => pushed.push(detail), runs: () => runs, needsYou: () => [], engineName: () => "Claude",
+    notify: (_bot, _thread, detail) => { pushed.push(detail); hooks.pushed?.(); }, runs: () => runs, needsYou: () => [], engineName: () => "Claude",
     hostTimeZone: () => undefined, language: () => undefined, session: () => null, address: () => "me@x.test",
     failRun: () => {}, keep: () => {}, items: () => null,
     morning: {
@@ -43,7 +44,7 @@ function setup(options: { zone: string; start: string; morning?: string; overnig
     attendees: [{ email: "me@x.test", self: true, organizer: true }, { email: "ada@x.test", name: "Ada", self: false, organizer: false }],
   });
   const tick = async () => { brief.tick(); await settle(); await settle(); };
-  return { brief, store, chief, pushed, sinces, runs, cards, meeting, tick, now: () => now, set: (iso: string) => { now = Date.parse(iso); }, advance: (ms: number) => { now += ms; } };
+  return { brief, store, chief, pushed, hooks, sinces, runs, cards, meeting, tick, now: () => now, set: (iso: string) => { now = Date.parse(iso); }, advance: (ms: number) => { now += ms; } };
 }
 
 describe("the morning brief", () => {
@@ -70,6 +71,18 @@ describe("the morning brief", () => {
     await s.tick();
     expect(s.pushed).toHaveLength(2);
     expect(s.pushed[1]).toMatch(/^Your brief: .*1 meeting/);
+  });
+
+  it("is pushed once even when another edit of the brief comes while it is being posted", async () => {
+    const s = setup({ zone: "UTC", start: "2026-10-22T07:59:00Z" });
+    await s.brief.active("desktop", "UTC", "en");
+    await s.brief.report({ routine: {} as never, at: s.now(), meetings: [s.meeting(Date.parse("2026-10-22T10:00:00Z"))], clashes: [] });
+    s.hooks.pushed = () => { s.hooks.pushed = undefined; void s.brief.refresh(); };
+    s.advance(MINUTE);
+    await s.tick();
+    await s.tick();
+    await s.tick();
+    expect(s.pushed).toEqual(["Your first brief is ready"]);
   });
 
   it("leads with what was done while the person was away, from the counts since they were last here", async () => {

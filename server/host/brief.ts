@@ -503,8 +503,8 @@ export function createBrief(deps: BriefDeps) {
       const text = away ? deps.morning!.overnight(Math.max(state.lastActiveAt ?? 0, now() - OVERNIGHT_MS)) : undefined;
       if (text) state.morningLine = { day, text: clip(text, 400) };
     }
-    await render({ create: true, notify: true, morning: true });
-    if (dirty) return;
+    const shown = await render({ create: true, notify: true, morning: true });
+    if (!shown && dirty) return;
     state.morningOn = day;
     save();
   }

@@ -43,6 +43,11 @@ describe("the first hour's words", () => {
     expect([1, 4, 12].map((n) => firstHourWords("pl").drafted(n))).toEqual(["napisano 1 szkic odpowiedzi", "napisano 4 szkice odpowiedzi", "napisano 12 szkiców odpowiedzi"]);
   });
 
+  it("say the hours saved in the case \"about\" takes", () => {
+    expect([firstHourWords("ru").time(110), firstHourWords("uk").time(110), firstHourWords("pl").time(110), firstHourWords("pl").time(300)])
+      .toEqual(["около 2 часов", "близько 2 годин", "około 2 godzin", "około 5 godzin"]);
+  });
+
   it("fall back to English for a language it does not have, and to the parent for a regional one", () => {
     expect(firstHourWords("sv").briefOn).toBe(firstHourWords("en").briefOn);
     expect(firstHourWords("de-AT").briefOn).toBe(firstHourWords("de").briefOn);
