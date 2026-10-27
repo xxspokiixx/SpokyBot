@@ -1824,6 +1824,8 @@
   "composer.mention.channel": "Chat de grupo",
   "composer.mention.everyoneOne": "1 bot en este chat",
   "composer.mention.everyoneMany": "{count} bots en este chat",
+  "composer.mention.devs": "Desarrolladores",
+  "composer.mention.devsDesc": "Informar de un error a MausBot",
   "composer.attach": "Adjuntar un archivo",
   "newBot.profileFailed": "Tu bot se creó, pero su preajuste no se pudo aplicar por completo. Revisa sus instrucciones en la configuración: {error}",
   "composer.goal.aria": "Terminar en equipo",

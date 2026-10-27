@@ -2024,6 +2024,8 @@
   "composer.mention.teamMany": "この部署のボット {count} 体",
   "composer.mention.allOne": "ここにいる唯一のボット",
   "composer.mention.allMany": "全 {count} 体のボット",
+  "composer.mention.devs": "開発者",
+  "composer.mention.devsDesc": "MausBot に不具合を報告",
   "composer.attach": "ファイルを添付",
   "newBot.profileFailed": "ボットは作成されましたが、プリセットを完全に適用できませんでした。設定で指示を確認してください: {error}",
   "composer.goal.aria": "みんなで仕上げる",

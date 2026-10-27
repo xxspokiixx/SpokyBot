@@ -697,6 +697,8 @@
   "composer.mention.aria": "Mentionner un bot",
   "composer.mention.agent": "Agent",
   "composer.mention.person": "Personne",
+  "composer.mention.devs": "Développeurs",
+  "composer.mention.devsDesc": "Signaler un bug à MausBot",
   "composer.attach": "Joindre un fichier",
   "composer.goal.aria": "Terminer ensemble",
   "composer.goal.title": "Terminer ensemble — l'équipe travaille jusqu'à ce que l'objectif soit atteint",

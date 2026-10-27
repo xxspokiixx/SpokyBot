@@ -1980,6 +1980,8 @@
   "composer.mention.teamMany": "Boty w tym dziale: {count}",
   "composer.mention.allOne": "Jedyny bot tutaj",
   "composer.mention.allMany": "Wszystkie boty: {count}",
+  "composer.mention.devs": "Programiści",
+  "composer.mention.devsDesc": "Zgłoś błąd do MausBot",
   "composer.attach": "Załącz plik",
   "newBot.profileFailed": "Twój bot został utworzony, ale nie udało się w pełni zastosować jego ustawień wstępnych. Przejrzyj jego instrukcje w ustawieniach: {error}",
   "composer.goal.aria": "Zakończcie razem",

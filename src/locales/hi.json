@@ -697,6 +697,8 @@
   "composer.mention.aria": "किसी बॉट को टैग करें",
   "composer.mention.agent": "एजेंट",
   "composer.mention.person": "व्यक्ति",
+  "composer.mention.devs": "डेवलपर",
+  "composer.mention.devsDesc": "MausBot को बग की रिपोर्ट करें",
   "composer.attach": "फ़ाइल संलग्न करें",
   "composer.goal.aria": "साथ मिलकर पूरा करें",
   "composer.goal.title": "साथ मिलकर पूरा करें — लक्ष्य पूरा होने तक टीम काम करती रहती है",

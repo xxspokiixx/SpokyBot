@@ -2033,6 +2033,8 @@
   "composer.mention.teamMany": "{count} bots in this department",
   "composer.mention.allOne": "The only bot here",
   "composer.mention.allMany": "All {count} bots",
+  "composer.mention.devs": "Developers",
+  "composer.mention.devsDesc": "Report a bug to MausBot",
   "composer.attach": "Attach a file",
   "newBot.profileFailed": "Your bot was created, but its preset could not be fully applied. Review its instructions in settings: {error}",
   "composer.goal.aria": "Finish together",

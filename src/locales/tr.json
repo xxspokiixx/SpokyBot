@@ -1630,6 +1630,8 @@
   "composer.mention.channel": "Grup sohbeti",
   "composer.mention.everyoneOne": "Bu sohbetteki 1 bot",
   "composer.mention.everyoneMany": "Bu sohbetteki {count} bot",
+  "composer.mention.devs": "Geliştiriciler",
+  "composer.mention.devsDesc": "MausBot'a hata bildir",
   "composer.attach": "Bir dosya ekle",
   "newBot.profileFailed": "Botunuz oluşturuldu ancak ön ayarı tam olarak uygulanamadı. Ayarlardan talimatlarını inceleyin: {error}",
   "composer.goal.aria": "Birlikte tamamlayın",
