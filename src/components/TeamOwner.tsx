@@ -106,7 +106,7 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
         {team.people.map((person) => (
           <button key={person.email} type="button" role="menuitemradio" aria-checked={person.email === shown.current} disabled={busy}
             onClick={() => void pick(person)}
-            className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink", person.email === shown.current ? "bg-raised" : "hover:bg-raised/70")}>
+            className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink", person.email === shown.current ? "bg-menu-active" : "hover:bg-menu-hover")}>
             <PersonFace person={person} size={20} />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{person.you ? t("owner.you", { name: person.name }) : person.name}</span>
@@ -188,7 +188,7 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
                 openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads);
                 if (item.kind === "message") readConversation(state.groups, botId, item.threadId);
               }}
-              className="flex w-full flex-col items-start px-3.5 py-2 text-left hover:bg-raised/70">
+              className="flex w-full flex-col items-start px-3.5 py-2 text-left hover:bg-menu-hover">
               <NeedsYouTitle item={item} title={title} />
               {text && <span className="w-full truncate text-[12px] text-ink-secondary">{text}</span>}
             </button>;

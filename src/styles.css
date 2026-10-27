@@ -143,32 +143,34 @@
   --color-app: #121212;
   --color-panel: #0e0e0e;
   --color-raised: #202020;
-  --color-raised-hover: #2e2e2e;
+  --color-raised-hover: #2c2c2c;
   /* the composer pill. Every skin but Daylight paints it in `raised`; there
      it is the page colour with a hairline ring, so it needs a tone (and a
      ring, transparent everywhere else) of its own. */
   --color-composer: #1f1f1f;
-  --color-composer-ring: #2e2e2e;
+  --color-composer-ring: #2a2a2a;
   /* popover and right-click menus. Same story as the composer: every skin
      but Daylight paints them in `card`, which there is the bot's bubble and
      a shade too grey for a menu. */
   --color-menu: #1f1f1f;
+  --color-menu-hover: #f5f5f50f;
+  --color-menu-active: #f5f5f514;
   --color-card: #1f1f1f;
-  --color-inset: #171717;
+  --color-inset: #1b1b1b;
   /* a control ON a card. The dark skins take their `raised` value, so this
      is a no-op for them; the light skins need a tone of their own, because
      there `raised` is pure white and a card is too. */
   --color-control: #282828;
   --color-hairline: #383838;
-  --color-ink: #fcfcfc;
-  --color-ink-secondary: #fcfcfcbf;
+  --color-ink: #f5f5f5;
+  --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
      be `text-ink-secondary/70`, which fades an ink already tuned close to
      AA and landed at 2.2–4:1. Each skin sets this to the quietest ink that
      still clears 4.5:1 on every text surface, raised-hover included; on the
      light skins that leaves little room below the secondary ink, so there
      size carries the hierarchy. Measured by pnpm check:contrast. */
-  --color-ink-tertiary: #fcfcfc90;
+  --color-ink-tertiary: #f5f5f591;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
   /* the ring a keyboard user follows; sits on the accent so focus reads as
@@ -229,11 +231,11 @@
   --color-danger-ink: #ffffff;
   /* ink carried by the user's own bubble. A hex rather than the ink token so
      the contrast check can measure it; every dark skin repeats its ink here. */
-  --color-bubble-user-ink: #fcfcfc;
+  --color-bubble-user-ink: #f5f5f5;
   --color-success-ink: #072114;
   --color-scrollbar: #3d3d3d;
   /* second speed line of the mascot — contrasts against the app ground */
-  --color-maus-line: #fcfcfc;
+  --color-maus-line: #f5f5f5;
   --shadow-float: 0 0 #0000;
 }
 
@@ -252,30 +254,32 @@
   --color-app: #121212;
   --color-panel: #0e0e0e;
   --color-raised: #202020;
-  --color-raised-hover: #2e2e2e;
+  --color-raised-hover: #2c2c2c;
   --color-composer: #1f1f1f;
-  --color-composer-ring: #2e2e2e;
+  --color-composer-ring: #2a2a2a;
   --color-card: #1f1f1f;
   --color-menu: #1f1f1f;    /* = card: unchanged */
-  --color-inset: #171717;
+  --color-menu-hover: #f5f5f50f;
+  --color-menu-active: #f5f5f514;
+  --color-inset: #1b1b1b;
   --color-control: #282828;
   --color-hairline: #383838;
-  --color-ink: #fcfcfc;
-  --color-ink-secondary: #fcfcfcbf;
-  --color-ink-tertiary: #fcfcfc90;
+  --color-ink: #f5f5f5;
+  --color-ink-secondary: #f5f5f5a8;
+  --color-ink-tertiary: #f5f5f591;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
   --color-accent-text: #7fc0ff;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #5a5a5a;
-  --color-bubble-user-ink: #fcfcfc;   /* = ink: unchanged */
+  --color-bubble-user-ink: #f5f5f5;   /* = ink: unchanged */
   --color-success: #38d591;
   --color-danger: #ff5667;
   --color-danger-ink: #ffffff;
   --color-success-ink: #072114;
   --color-warning: #ff9800;
   --color-scrollbar: #3d3d3d;
-  --color-maus-line: #fcfcfc;
+  --color-maus-line: #f5f5f5;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -314,6 +318,8 @@
   --color-composer-ring: transparent;
   --color-card: #ffffff;
   --color-menu: #ffffff;    /* = card: unchanged */
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-inset: #f5f1eb;         /* inset surfaces pick the rail tone back up */
   --color-control: #ece4d6;       /* raised is white here and so is a card, so
                                      a control needs its own tone: 1.26:1 on a
@@ -387,6 +393,8 @@
   --color-composer-ring: transparent;
   --color-card: #1e1a14;
   --color-menu: #1e1a14;    /* = card: unchanged */
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-inset: #0b0a08;         /* inset sinks below the ground */
   --color-control: #262019;       /* = raised: Foundry is unchanged */
   --color-hairline: #3d3529;      /* visible on purpose — this UI has edges */
@@ -459,6 +467,8 @@
   --color-composer-ring: transparent;
   --color-card: #ffffff;
   --color-menu: #ffffff;    /* = card: unchanged */
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-inset: #d5e8e5;
   --color-control: #c3dcd9;       /* Lagoon's surfaces climb white → panel →
                                      app → inset → hover in small steps, so a
@@ -522,6 +532,8 @@
   --color-composer-ring: transparent;
   --color-card: #22252a;
   --color-menu: #22252a;    /* = card: unchanged */
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-inset: #0d0e10;
   --color-control: #2a2d32;
   --color-hairline: #3b4048;
@@ -579,6 +591,8 @@
   --color-composer-ring: transparent;
   --color-card: #ffffff;
   --color-menu: #ffffff;    /* = card: unchanged */
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-inset: #e6e9ee;
   --color-control: #d3d9e1;
   --color-hairline: #b4bbc5;
@@ -635,6 +649,8 @@
   --color-composer-ring: transparent;
   --color-card: #231f27;
   --color-menu: #231f27;    /* = card: unchanged */
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-inset: #0d0b0f;
   --color-control: #2b2630;
   --color-hairline: #403847;
@@ -695,16 +711,16 @@
   --color-raised: #e4e4e4;
   --color-raised-hover: #d8d8d8;
   --color-card: #f0f0f0;          /* what a bot says */
-  --color-inset: #e6e6e6;         /* the search field */
-  --color-control: #dedede;       /* a chip on a card */
+  --color-inset: #ebebeb;         /* the search field */
+  --color-control: #e3e3e3;       /* a chip on a card */
   /* Sampled at #efefef, which is what the eye reads on the divider — but a
      hairline that faint fails this repo's own gate (1.5:1 against the page)
      and every border is drawn at /40 on top of that. #d0d0d0 is the lightest
      grey that still passes; see scripts/check-skin-contrast.mjs. */
   --color-hairline: #d0d0d0;
 
-  --color-ink: #0d0d0d;
-  --color-ink-secondary: #444444;
+  --color-ink: #1c1c1c;
+  --color-ink-secondary: #555555;
   --color-ink-tertiary: #5c5c5c;
 
   /* The upstream blue is #1084fe, which carries white at 3.1:1 — fine for the
@@ -718,8 +734,10 @@
   /* The composer is the page with a ring around it, not a grey slab —
      the one surface where this skin departs from `raised`. */
   --color-composer: #ffffff;
-  --color-composer-ring: #e4e4e4;
+  --color-composer-ring: #ebebeb;
   --color-menu: #ffffff;          /* menus sit a step above the page, not on the bubble */
+  --color-menu-hover: #1c1c1c0f;
+  --color-menu-active: #1c1c1c14;
   --color-bubble-user: #070707;   /* your own messages, inverted */
   --color-bubble-user-ink: #fcfcfc;
 
@@ -779,6 +797,8 @@
   --color-composer: #ffffff;
   --color-composer-ring: #e3e9e4;
   --color-menu: #ffffff;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-bubble-user: #e1e9e3;   /* your own messages, a step under a bot's card */
   --color-bubble-user-ink: #0f1a13;
 
@@ -838,6 +858,8 @@
   --color-composer: #ffffff;
   --color-composer-ring: #1b1613;
   --color-menu: #ffffff;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-bubble-user: #1b1613;   /* your own messages, inverted */
   --color-bubble-user-ink: #ffffff;
 
@@ -877,6 +899,8 @@
   --color-composer-ring: #352a40;
   --color-card: #201a29;
   --color-menu: #1e1827;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
   --color-inset: #1b1622;
   --color-control: #262030;
   --color-hairline: #3b3048;
@@ -917,6 +941,30 @@
   --identity-coral: #E5634E;
   --identity-silver: #A8ADB4;
   --identity-chrome: #B3BAC4;
+}
+
+/* Advanced mode keeps Midnight's and Daylight's brighter inks, firmer fields and raised menu rows. :where() holds
+   these at a skin block's specificity, so the phone and wide-gamut blocks below still win. */
+[data-skin="midnight"]:where(:root[data-interface="advanced"], :root[data-interface="advanced"] *) {
+  --color-raised-hover: #2e2e2e;
+  --color-composer-ring: #2e2e2e;
+  --color-inset: #171717;
+  --color-ink: #fcfcfc;
+  --color-ink-secondary: #fcfcfcbf;
+  --color-ink-tertiary: #fcfcfc90;
+  --color-bubble-user-ink: #fcfcfc;
+  --color-maus-line: #fcfcfc;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
+}
+[data-skin="daylight"]:where(:root[data-interface="advanced"], :root[data-interface="advanced"] *) {
+  --color-inset: #e6e6e6;
+  --color-control: #dedede;
+  --color-composer-ring: #e4e4e4;
+  --color-ink: #0d0d0d;
+  --color-ink-secondary: #444444;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
 }
 
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
@@ -1186,7 +1234,7 @@ body {
     font-weight: 400;
     line-height: 1.25rem;
   }
-  .ui-menu-row:enabled:hover { background: color-mix(in srgb, var(--color-raised) 70%, transparent); }
+  .ui-menu-row:enabled:hover { background: var(--color-menu-hover); }
   .ui-menu-row:disabled { opacity: 0.6; }
   .ui-button:enabled:hover,
   .ui-icon-button:enabled:hover {
@@ -1394,6 +1442,11 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
+}
+/* Simple mode shows keyboard focus on a menu row as the row's hover fill. */
+:root[data-interface="simple"] [role="menu"] :is(button, [role^="menuitem"]):focus-visible {
+  outline: none;
+  background-color: var(--color-menu-hover);
 }
 
 /* Text fields already sit in a bordered card (the composer pill especially).

@@ -76,7 +76,7 @@ export function SectionPicker({
               onClick={() => assign(section)}
               className={cn(
                 "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px]",
-                section === sectionCurrent ? "bg-raised text-ink" : "text-ink hover:bg-raised/70",
+                section === sectionCurrent ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
               )}
             >
               <span className="truncate">{section}</span>
@@ -118,7 +118,7 @@ export function SectionPicker({
           <div className="mx-2 my-1 border-t border-hairline/40" />
           <button
             onClick={() => assign("")}
-            className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[13px] text-danger hover:bg-raised/70"
+            className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[13px] text-danger hover:bg-menu-hover"
           >
             <FolderMinus size={15} />
             {t("sidebar.section.removeFromContext")}

@@ -958,7 +958,8 @@ export function Composer({
           }
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className={cn(
-              "block max-h-[9rem] w-full resize-none overflow-y-auto bg-transparent placeholder:text-ink-secondary focus:outline-none",
+              "block max-h-[9rem] w-full resize-none overflow-y-auto bg-transparent focus:outline-none",
+              advanced ? "placeholder:text-ink-secondary" : "placeholder:text-ink-tertiary",
               !simpleDock && "px-1 text-[15px]",
               simpleDock ? "min-h-7 px-0.5 py-1 text-[14px] leading-5" : "min-h-6 py-1 leading-6",
             )}

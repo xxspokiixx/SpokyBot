@@ -211,7 +211,7 @@ export function MessageActions({
                 setMenuOpen(false);
                 moreRef.current?.focus();
               }}
-              className="flex w-full items-center gap-3 px-3.5 py-2 text-start text-[14px] text-ink hover:bg-raised/70 focus-visible:bg-raised/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex w-full items-center gap-3 px-3.5 py-2 text-start text-[14px] text-ink hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className="flex size-5 shrink-0 items-center justify-center text-ink-secondary" aria-hidden="true">{item.icon}</span>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
