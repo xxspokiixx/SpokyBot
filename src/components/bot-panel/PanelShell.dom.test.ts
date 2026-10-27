@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-// The Simple bot panel in a real DOM, where effects run and focus moves: named links, Escape and focus.
+// The Simple bot panel in a real DOM, where effects run and focus moves: named links, Escape and focus, and the chat
+// header's pill that opens it.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -23,15 +24,16 @@ vi.mock("../Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
 vi.mock("../AvatarImageGenerator", () => ({ AvatarImageGenerator: () => null }));
 vi.mock("@/lib/use-organization-branding", () => ({ useOrganizationBranding: () => null }));
 const stub = (name: string) => (props: Record<string, unknown>) =>
-  createElement("div", { [`data-stub-${name}`]: true, "data-editing-instructions": props.editingInstructions === true ? "true" : undefined },
-    name === "bot" ? createElement("section", { "data-panel-card": "conversations" }) : null);
-vi.mock("./BotTab", () => ({ BotTab: stub("bot") }));
+  createElement("div", { [`data-stub-${name}`]: true, "data-editing-instructions": props.editingInstructions === true ? "true" : undefined });
+vi.mock("./DetailsTab", () => ({ DetailsTab: stub("details") }));
+vi.mock("./Conversations", () => ({ BotConversations: stub("conversations") }));
+vi.mock("./LibraryTab", () => ({ LibraryTab: stub("library") }));
 vi.mock("./ComputerTab", () => ({ ComputerTab: stub("computer") }));
 vi.mock("./pages", () => ({ PageBody: ({ page }: { page: string }) => createElement("div", { "data-stub-page": page }), pageSurfaceCls: "" }));
 
 const { BotPanel } = await import("./PanelShell");
 const { openBotSettings } = await import("./panel-link");
-const { ChatHeadConversation } = await import("../ChatHeadConversation");
+const { ChatHeadPill } = await import("../ChatHeadPill");
 
 const bot: Bot = {
   id: "scout", threadId: "thread-scout", name: "Scout", title: "Researcher", description: "", soul: "",
@@ -63,7 +65,7 @@ const press = (element: Element | null, key: string) => {
   return event;
 };
 const menu = () => document.querySelector("[data-sidebar-popover-menu]");
-const moreButton = () => host.querySelector('[data-testid="chat-more"]')?.closest("button") ?? null;
+const moreButton = () => host.querySelector("[data-panel-share]")?.closest("button") ?? null;
 // What BotSettingsDialog's window listener would do with the key: close the whole panel.
 const dialogCloses = vi.fn();
 const onWindowKey = (event: KeyboardEvent) => {
@@ -117,8 +119,8 @@ describe("named links into the bot panel", () => {
     await settle();
     expect(tab()).toBe("computer");
 
-    click(host.querySelector('[data-panel-tab="bot"]'));
-    expect(tab()).toBe("bot");
+    click(host.querySelector('[data-panel-tab="details"]'));
+    expect(tab()).toBe("details");
 
     flushSync(() => openBotSettings(fixture.dispatch, "access"));
     render("access");
@@ -130,88 +132,97 @@ describe("named links into the bot panel", () => {
     openBotSettings(fixture.dispatch, "soul");
     render("soul");
     await settle();
-    expect(tab()).toBe("bot");
-    expect(host.querySelector("[data-stub-bot]")?.getAttribute("data-editing-instructions")).toBe("true");
+    expect(tab()).toBe("details");
+    expect(host.querySelector("[data-stub-details]")?.getAttribute("data-editing-instructions")).toBe("true");
     click(host.querySelector('[data-panel-tab="computer"]'));
-    click(host.querySelector('[data-panel-tab="bot"]'));
-    expect(host.querySelector("[data-stub-bot]")?.getAttribute("data-editing-instructions")).toBeNull();
+    click(host.querySelector('[data-panel-tab="details"]'));
+    expect(host.querySelector("[data-stub-details]")?.getAttribute("data-editing-instructions")).toBeNull();
   });
 
-  it("lands usage, history, voice and visibility links on the Bot tab, with no Advanced page", async () => {
+  it("lands usage, history, voice and visibility links on the Details tab, with no Advanced page", async () => {
     for (const section of ["usage", "history", "voice", "visibility", "overview"] as const) {
       openBotSettings(fixture.dispatch, section);
       render(section);
       await settle();
-      expect([tab(), page()], section).toEqual(["bot", null]);
+      expect([tab(), page()], section).toEqual(["details", null]);
     }
   });
 });
 
-describe("the panel header's Call button", () => {
-  it("sits right after the bot's name, in the name's row, small and round, and not on the avatar", async () => {
+describe("the panel's tabs", () => {
+  it("are Details, Conversations, Library and Computer, opening on Details, each drawing its own tab", async () => {
     render(null);
     await settle();
-    const row = host.querySelector("[data-panel-name-row]")!;
-    const call = row.querySelector<HTMLButtonElement>('[data-call-button="panel"]')!;
-    const name = row.querySelector("[data-panel-rename]")!;
-    expect(name.textContent).toBe("Scout");
-    expect(name.compareDocumentPosition(call) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(call.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-8"]));
-    expect(call.getAttribute("aria-label")).toContain("Scout");
-    const avatar = host.querySelector("[data-panel-avatar]")!;
-    expect(avatar.contains(call)).toBe(false);
-    expect(avatar.nextElementSibling).toBe(row);
-    expect(host.querySelectorAll("[data-call-button]")).toHaveLength(1);
+    expect([...host.querySelectorAll('[role="tab"]')].map((element) => [element.getAttribute("data-panel-tab"), element.textContent]))
+      .toEqual([["details", "Details"], ["conversations", "Conversations"], ["library", "Library"], ["computer", "Computer"]]);
+    expect(tab()).toBe("details");
+    for (const id of ["conversations", "library", "computer", "details"]) {
+      click(host.querySelector(`[data-panel-tab="${id}"]`));
+      expect(tab()).toBe(id);
+      expect(host.querySelector(`[data-stub-${id}]`), id).not.toBeNull();
+    }
   });
 });
 
-describe("the chat header's conversation title", () => {
+describe("the panel's top", () => {
+  it("has a round Share button that copies or downloads the conversation, and Close", async () => {
+    render(null);
+    await settle();
+    const top = [...host.querySelectorAll("button")].slice(0, 2);
+    expect(top.map((button) => button.getAttribute("aria-label") ?? button.getAttribute("title"))).toEqual(["Share", "Close settings"]);
+    for (const button of [moreButton()!, top[1]!]) expect(button.querySelector("span, svg")).not.toBeNull();
+    click(moreButton());
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["copy", "download"]);
+    click(top[1]!);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("puts the name right under the avatar, with no call button beside it", async () => {
+    render(null);
+    await settle();
+    const row = host.querySelector("[data-panel-name-row]")!;
+    expect(row.querySelector("[data-panel-rename]")!.textContent).toBe("Scout");
+    expect(host.querySelector("[data-panel-avatar]")!.nextElementSibling).toBe(row);
+    expect(host.querySelector("[data-call-button]")).toBeNull();
+  });
+});
+
+describe("the chat header's pill", () => {
   const withTasks: Bot = { ...bot, tasks: [
     { threadId: "thread-scout", title: "Plan the launch", createdAt: 1 },
     { threadId: "other", title: "Older notes", createdAt: 0, unread: true },
   ] };
-  const scrolledTo = () => vi.mocked(HTMLElement.prototype.scrollIntoView).mock.contexts
-    .map((element) => (element as HTMLElement).getAttribute("data-panel-card"));
-
-  it("reads Bot / Conversation ▾, marks other conversations that need a look, and opens the panel at Conversations", async () => {
+  const pill = (props: Partial<Parameters<typeof ChatHeadPill>[0]> = {}) => {
     const header = document.createElement("div");
     document.body.append(header);
     const headerRoot = createRoot(header);
+    const onOpen = vi.fn();
+    flushSync(() => headerRoot.render(createElement(ChatHeadPill, { bot: withTasks, avatar: { state: "idle" }, privacy: null, onOpen, ...props })));
+    return { header, onOpen, done: () => { flushSync(() => headerRoot.unmount()); header.remove(); } };
+  };
+
+  it("names the bot, opens the bot panel, and dots another conversation that needs a look", () => {
+    const { header, onOpen, done } = pill();
     try {
-      flushSync(() => headerRoot.render(createElement(ChatHeadConversation, { bot: withTasks })));
-      const title = header.querySelector("[data-chathead-conversation]")!;
-      expect(header.textContent).toBe("/Plan the launch");
-      expect(title.getAttribute("title")).toBe("Show Scout's conversations");
-      expect(title.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe("Other activity (1)");
-      click(title);
-      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleSettings", open: true, section: "overview" });
-
-      render("overview");
-      await settle();
-      expect(tab()).toBe("bot");
-      expect(scrolledTo()).toEqual(["conversations"]);
-
-      vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
-      click(host.querySelector('[data-panel-tab="computer"]'));
-      click(title);
-      render("overview");
-      await settle();
-      expect(tab()).toBe("bot");
-      expect(scrolledTo()).toEqual(["conversations"]);
+      const button = header.querySelector<HTMLButtonElement>("[data-chathead-pill]")!;
+      expect(button.textContent).toBe("Scout");
+      expect(button.getAttribute("aria-label")).toBe("Open Scout's profile");
+      expect(header.querySelector("[data-chathead-elsewhere]")!.getAttribute("aria-label")).toBe("Other activity (1)");
+      click(button);
+      expect(onOpen).toHaveBeenCalledOnce();
     } finally {
-      flushSync(() => headerRoot.unmount());
-      header.remove();
+      done();
     }
   });
 
-  it("draws nothing for a bot without a conversation list, and no dot when the others are quiet", () => {
-    const header = document.createElement("div");
-    const headerRoot = createRoot(header);
-    flushSync(() => headerRoot.render(createElement(ChatHeadConversation, { bot })));
-    expect(header.innerHTML).toBe("");
-    flushSync(() => headerRoot.render(createElement(ChatHeadConversation, { bot: { ...withTasks, tasks: withTasks.tasks!.map((task) => ({ ...task, unread: false })) } })));
-    expect(header.querySelector('[role="img"]')).toBeNull();
-    flushSync(() => headerRoot.unmount());
+  it("has no dot when the other conversations are quiet, and says who can read a team chat", () => {
+    const quiet = pill({ bot: { ...withTasks, tasks: withTasks.tasks!.map((task) => ({ ...task, unread: false })) }, privacy: { kind: "private" } });
+    try {
+      expect(quiet.header.querySelector("[data-chathead-elsewhere]")).toBeNull();
+      expect(quiet.header.querySelector('[data-chathead-privacy="private"]')!.textContent).toBe("Private · only you");
+    } finally {
+      quiet.done();
+    }
   });
 });
 
@@ -229,14 +240,14 @@ describe("Escape in the bot panel", () => {
     back?.focus();
     const event = press(back, "Escape");
     expect(event.defaultPrevented).toBe(true);
-    expect([tab(), page()]).toEqual(["bot", null]);
+    expect([tab(), page()]).toEqual(["details", null]);
     expect(dialogCloses).not.toHaveBeenCalled();
     // On a tab, Escape is the dialog's: it closes the panel.
-    press(host.querySelector('[data-panel-tab="bot"]'), "Escape");
+    press(host.querySelector('[data-panel-tab="details"]'), "Escape");
     expect(dialogCloses).toHaveBeenCalledTimes(1);
   });
 
-  it("closes the ⋯ menu first, on a tab and on a page, and only the next Escape reaches the panel", async () => {
+  it("closes the Share menu first, on a tab and on a page, and only the next Escape reaches the panel", async () => {
     render(null);
     await settle();
     moreButton()?.focus();
@@ -257,7 +268,7 @@ describe("Escape in the bot panel", () => {
     expect(menu()).toBeNull();
     expect(page()).toBe("skills");
     press(moreButton(), "Escape");
-    expect([tab(), page()]).toEqual(["bot", null]);
+    expect([tab(), page()]).toEqual(["details", null]);
     expect(dialogCloses).not.toHaveBeenCalled();
   });
 });

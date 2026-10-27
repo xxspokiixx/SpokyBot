@@ -179,7 +179,7 @@ describe("composer call button", () => {
     }
   });
 
-  it("is round and filled with the bot's colour in the Simple composer, the call mode left to its + menu", () => {
+  it("is a 28px circle filled with the bot's colour in the Simple composer, the call mode left to the bot panel", () => {
     let tree: ReactNode = null;
     function Capture() {
       const element = CallButton({ bot, placement: "composer", fill: "#8057C8" }) as ReactElement<Parameters<typeof CallTargetButton>[0]>;
@@ -189,7 +189,7 @@ describe("composer call button", () => {
     const html = renderToStaticMarkup(createElement(Capture));
     const button = findButton(tree)!;
     const classes = String(button.props.className).split(" ");
-    expect(classes).toEqual(expect.arrayContaining(["size-8", "rounded-full", "text-white"]));
+    expect(classes).toEqual(expect.arrayContaining(["size-7", "rounded-full", "text-white"]));
     expect(classes).not.toContain("rounded-l-3xl");
     expect(classes).not.toContain("bg-control");
     expect(button.props.style).toEqual({ backgroundColor: "#8057C8" });

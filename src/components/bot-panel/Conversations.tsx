@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
@@ -9,9 +9,8 @@ import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot
 import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
-import { CardLabel } from "./rows";
 
-export const CONVERSATIONS_SHOWN = 4;
+export const CONVERSATIONS_SHOWN = 8;
 const LAST_LINE_PAGE = 8;
 const MAX_CACHED = 200;
 
@@ -106,34 +105,30 @@ export function BotConversations({ bot }: { bot: Bot }) {
   };
 
   return (
-    <section data-panel-card="conversations" aria-labelledby="bot-panel-conversations">
-      <CardLabel action={
-        <span className="flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            data-conversations-search
-            aria-label={t("botPanel.conversations.search")}
-            title={t("botPanel.conversations.search")}
-            aria-pressed={searching}
-            onClick={() => (searching ? stopSearching() : setSearching(true))}
-            className={cn("flex size-7 items-center justify-center rounded-full hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
-          >
-            <Search size={14} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            data-conversations-new
-            aria-label={t("botPanel.conversations.new")}
-            title={t("botPanel.conversations.new")}
-            onClick={startNew}
-            className="flex size-7 items-center justify-center rounded-full hover:bg-ink/[0.06] hover:text-ink"
-          >
-            <Plus size={15} aria-hidden="true" />
-          </button>
-        </span>
-      }>
-        <span id="bot-panel-conversations">{t("botPanel.conversations.title")}</span>
-      </CardLabel>
+    <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")} className="mt-5">
+      <div className="mb-2 flex items-center gap-2">
+        <button
+          type="button"
+          data-conversations-new
+          aria-label={t("botPanel.conversations.new")}
+          onClick={startNew}
+          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]"
+        >
+          <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+          <span className="truncate">{t("botPanel.conversations.new")}</span>
+        </button>
+        <button
+          type="button"
+          data-conversations-search
+          aria-label={t("botPanel.conversations.search")}
+          title={t("botPanel.conversations.search")}
+          aria-pressed={searching}
+          onClick={() => (searching ? stopSearching() : setSearching(true))}
+          className={cn("flex size-9 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
+        >
+          <Search size={15} aria-hidden="true" />
+        </button>
+      </div>
       {searching && (
         <input
           autoFocus
@@ -152,7 +147,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
           className="mb-1.5 w-full rounded-[10px] border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-focus"
         />
       )}
-      <div role="list" aria-labelledby="bot-panel-conversations" className="flex flex-col gap-px">
+      <div role="list" aria-label={t("botPanel.conversations.title")} className="flex flex-col gap-px">
         {shown.map((task) => (
           <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
             <SidebarThreadRow

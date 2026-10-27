@@ -116,14 +116,19 @@ const { BotSettingsDialog } = await import("./BotSettingsDialog");
 const { BotPanel } = await import("./bot-panel/PanelShell");
 const { PanelHero } = await import("./bot-panel/PanelHero");
 const { AvatarEditorCard } = await import("./bot-panel/AvatarEditorCard");
-const { BotTab } = await import("./bot-panel/BotTab");
+const { DetailsTab } = await import("./bot-panel/DetailsTab");
+const { BotConversations } = await import("./bot-panel/Conversations");
+const { LibraryTab } = await import("./bot-panel/LibraryTab");
+const { ApprovalChip } = await import("./ComposerPlusMenu");
+const { getDraftChannelMode } = await import("@/lib/drafts");
+const { callMode, setCallMode } = await import("@/lib/call-mode");
 const { ComputerTab } = await import("./bot-panel/ComputerTab");
 const { PageBody, AppsPage, RoutinesPage, MemoryPage, SkillsPage, FolderPage, BrowserPage } = await import("./bot-panel/pages");
 const { BrowserLogins } = await import("./bot-panel/browser-logins");
 const { PAGES, sectionTarget } = await import("./bot-panel/page-registry");
 const { openBotSettings } = await import("./bot-panel/panel-link");
 const { PageHeader } = await import("./bot-panel/rows");
-const { ChatMoreMenu } = await import("./ChatMoreMenu");
+const { ChatShareMenu } = await import("./ChatMoreMenu");
 const { SoulField } = await import("./SoulField");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
 const { ModelPicker, ModelVariantRow } = await import("./ModelPicker");
@@ -183,7 +188,7 @@ const panel = (bot: Bot, linkedSection: BotSettingsSection | null = null) =>
   capture(() => BotPanel({ bot, derived: derived(), linkedSection, onClose }));
 const dialog = (bot: Bot) => capture(() => BotSettingsDialog({ bot }));
 const botTab = (bot: Bot, editingInstructions = false) =>
-  capture(() => BotTab({ bot, derived: derived(), editingInstructions, onEditInstructions, onOpen }));
+  capture(() => DetailsTab({ bot, derived: derived(), editingInstructions, onEditInstructions, onOpen }));
 const computer = (bot: Bot) => capture(() => ComputerTab({ bot, derived: derived(), onOpen }));
 const find = (rendered: { nodes: Node[] }, attr: string, value: unknown = true) => {
   const found = rendered.nodes.find((node) => node.props[attr] === value);
@@ -261,25 +266,25 @@ beforeEach(() => {
 });
 
 describe("the bot panel in Simple mode", () => {
-  it("has the chat menu and a close button on top, the hero, and two tabs: Bot, then Computer", () => {
+  it("has Share and a close button on top, the hero, and four tabs: Details, Conversations, Library, Computer", () => {
     const bot = makeBot();
     const rendered = panel(bot);
-    expect(ofType(rendered, ChatMoreMenu)!.props.bot).toBe(bot);
+    expect(ofType(rendered, ChatShareMenu)!.props.bot).toBe(bot);
     click(find(rendered, "aria-label", "Close settings"));
     expect(onClose).toHaveBeenCalled();
     const hero = ofType(rendered, PanelHero)!;
     expect(hero.props.bot).toBe(bot);
     expect(hero.props.patch).toBe(patch);
     const tabs = [...rendered.html.matchAll(/data-panel-tab="(\w+)"[^>]*>([^<]+)<\/button>/g)].map((match) => [match[1], match[2]]);
-    expect(tabs).toEqual([["bot", "Bot"], ["computer", "Computer"]]);
-    expect(shown(rendered)).toEqual({ tab: "bot", page: undefined });
-    expect(ofType(rendered, BotTab)!.props.bot).toBe(bot);
+    expect(tabs).toEqual([["details", "Details"], ["conversations", "Conversations"], ["library", "Library"], ["computer", "Computer"]]);
+    expect(shown(rendered)).toEqual({ tab: "details", page: undefined });
+    expect(ofType(rendered, DetailsTab)!.props.bot).toBe(bot);
     expect(rendered.html).toContain('id="bot-settings-title"');
   });
 
   it("switches tabs", () => {
     const bot = makeBot();
-    for (const [tab, type] of [["computer", ComputerTab], ["bot", BotTab]] as const) {
+    for (const [tab, type] of [["computer", ComputerTab], ["conversations", BotConversations], ["library", LibraryTab], ["details", DetailsTab]] as const) {
       click(find(panel(bot), "data-panel-tab", tab));
       const rendered = panel(bot);
       expect(shown(rendered).tab).toBe(tab);
@@ -289,14 +294,14 @@ describe("the bot panel in Simple mode", () => {
 
   it("drills into a page with its intro and back, naming where Back goes", () => {
     const bot = makeBot();
-    (ofType(panel(bot), BotTab)!.props.onOpen as (page: string) => void)("apps");
+    (ofType(panel(bot), DetailsTab)!.props.onOpen as (page: string) => void)("apps");
     const page = panel(bot);
     expect(shown(page)).toEqual({ tab: undefined, page: "apps" });
     expect(has(page, "role", "tablist")).toBe(false);
-    expect(ofType(page, PageHeader)!.props).toMatchObject({ back: "Bot", title: "Apps it can use", intro: "Switch on the apps Scout may use. Everything else stays off." });
+    expect(ofType(page, PageHeader)!.props).toMatchObject({ back: "Details", title: "Apps it can use", intro: "Switch on the apps Scout may use. Everything else stays off." });
     expect(page.html).toContain('id="bot-settings-title"');
     (ofType(page, PageHeader)!.props.onBack as () => void)();
-    expect(shown(panel(bot))).toEqual({ tab: "bot", page: undefined });
+    expect(shown(panel(bot))).toEqual({ tab: "details", page: undefined });
 
     click(find(panel(bot), "data-panel-tab", "computer"));
     (ofType(panel(bot), ComputerTab)!.props.onOpen as (page: string) => void)("browser");
@@ -305,7 +310,7 @@ describe("the bot panel in Simple mode", () => {
 
   it("goes back on Escape from a page, and leaves Escape to the dialog on a tab", () => {
     const bot = makeBot();
-    (ofType(panel(bot), BotTab)!.props.onOpen as (page: string) => void)("skills");
+    (ofType(panel(bot), DetailsTab)!.props.onOpen as (page: string) => void)("skills");
     const event = key(panel(bot).nodes[0]!, "Escape");
     expect(event.stopPropagation).toHaveBeenCalled();
     expect(shown(panel(bot)).page).toBeUndefined();
@@ -315,12 +320,12 @@ describe("the bot panel in Simple mode", () => {
 
   it("holds the Instructions editor open for the Bot tab, and closes it when the panel moves on", () => {
     const bot = makeBot();
-    expect(ofType(panel(bot), BotTab)!.props.editingInstructions).toBe(false);
-    (ofType(panel(bot), BotTab)!.props.onEditInstructions as (open: boolean) => void)(true);
-    expect(ofType(panel(bot), BotTab)!.props.editingInstructions).toBe(true);
+    expect(ofType(panel(bot), DetailsTab)!.props.editingInstructions).toBe(false);
+    (ofType(panel(bot), DetailsTab)!.props.onEditInstructions as (open: boolean) => void)(true);
+    expect(ofType(panel(bot), DetailsTab)!.props.editingInstructions).toBe(true);
     click(find(panel(bot), "data-panel-tab", "computer"));
-    click(find(panel(bot), "data-panel-tab", "bot"));
-    expect(ofType(panel(bot), BotTab)!.props.editingInstructions).toBe(false);
+    click(find(panel(bot), "data-panel-tab", "details"));
+    expect(ofType(panel(bot), DetailsTab)!.props.editingInstructions).toBe(false);
   });
 
   it("opens the avatar editor from the avatar and closes it with Escape", () => {
@@ -336,11 +341,11 @@ describe("the bot panel in Simple mode", () => {
   });
 
   it.each([
-    ["overview", "bot", undefined], ["identity", "bot", undefined], ["slack", "bot", undefined],
-    ["soul", "bot", undefined], ["skills", "bot", "skills"], ["memory", "bot", "memory"],
-    ["routines", "bot", "routines"], ["access", "computer", undefined], ["model", "bot", undefined],
-    ["permissions", "bot", undefined], ["voice", "bot", undefined], ["visibility", "bot", undefined],
-    ["history", "bot", undefined], ["usage", "bot", undefined],
+    ["overview", "details", undefined], ["identity", "details", undefined], ["slack", "details", undefined],
+    ["soul", "details", undefined], ["skills", "details", "skills"], ["memory", "details", "memory"],
+    ["routines", "details", "routines"], ["access", "computer", undefined], ["model", "details", undefined],
+    ["permissions", "details", undefined], ["voice", "details", undefined], ["visibility", "details", undefined],
+    ["history", "details", undefined], ["usage", "details", undefined],
   ] as const)("lands a deep link to %s on %s › %s", (section, tab, page) => {
     expect([sectionTarget(section).tab, sectionTarget(section).page]).toEqual([tab, page]);
     const rendered = panel(makeBot(), section);
@@ -350,7 +355,7 @@ describe("the bot panel in Simple mode", () => {
   });
 
   it("opens the Instructions editor for a soul link, and scrolls Model and Before it acts into view", () => {
-    expect(ofType(panel(makeBot(), "soul"), BotTab)!.props.editingInstructions).toBe(true);
+    expect(ofType(panel(makeBot(), "soul"), DetailsTab)!.props.editingInstructions).toBe(true);
     expect(sectionTarget("model").anchor).toBe("model");
     expect(sectionTarget("permissions").anchor).toBe("approval");
     expect(sectionTarget("soul").anchor).toBe("instructions");
@@ -372,9 +377,10 @@ describe("the bot panel in Simple mode", () => {
     expect(shown(panel(makeBot(), "access"))).toEqual({ tab: "computer", page: undefined });
   });
 
-  it("shows no memory, upkeep, browser or record-steps switch anywhere in Simple mode", () => {
+  it("shows no memory, upkeep, browser or record-steps switch anywhere in Simple mode: Work until done is its one switch", () => {
     const bot = makeBot();
-    expect(switches(panel(bot).html)).toBe(0);
+    expect(switches(panel(bot).html)).toBe(1);
+    expect(panel(bot).html).toContain('aria-label="Work until done"');
     click(find(panel(bot), "data-panel-tab", "computer"));
     const screen = panel(bot);
     expect(switches(screen.html)).toBe(0);
@@ -523,18 +529,78 @@ describe("the avatar editor", () => {
 });
 
 
-describe("the Bot tab", () => {
-  it("has the model picker in its Simple pane for this bot's own conversation, then the rows in order", () => {
+describe("the Details tab", () => {
+  it("leads with routines, then the model picker for this bot's own conversation, then the rows in order", () => {
     const rendered = botTab(makeBot());
     expect(ofType(rendered, ModelPicker)!.props).toMatchObject({ bot: expect.objectContaining({ id: "scout" }), threadId: "thread-scout", contained: true });
-    const order = ["data-panel-row=\"model\"", "data-panel-row=\"thinking\"", "data-panel-edit=\"soul\"", "data-panel-row=\"approval\"",
-      "data-panel-page=\"apps\"", "data-panel-page=\"routines\"", "data-panel-page=\"memory\"", "data-panel-page=\"skills\"", "data-panel-page=\"folder\""]
+    const order = ["data-panel-empty=\"routines\"", "data-panel-row=\"model\"", "data-panel-row=\"thinking\"", "data-panel-edit=\"soul\"", "data-panel-row=\"approval\"",
+      "data-panel-row=\"goal\"", "data-panel-row=\"call-mode\"",
+      "data-panel-page=\"apps\"", "data-panel-page=\"routines\"", "data-panel-page=\"memory\"", "data-panel-page=\"skills\"", "data-panel-page=\"folder\"",
+      "data-panel-item=\"find\"", "data-panel-item=\"inspector\""]
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(rendered.html).not.toContain("More model options");
     expect(rendered.html).not.toContain("More approval options");
-    expect(switches(rendered.html)).toBe(0);
+    expect(switches(rendered.html)).toBe(1);
+  });
+
+  it("says what routines are while the bot has none, and lists them first once it has some", () => {
+    const empty = botTab(makeBot());
+    expect(empty.html).toContain('data-panel-empty="routines"');
+    expect(empty.html).toContain(">Routines are recurring tasks this bot runs on a schedule. Ask it in chat to set one up.<");
+    fixture.derived.botRoutines = [routine()];
+    const some = botTab(makeBot());
+    expect(some.html).not.toContain('data-panel-empty="routines"');
+    expect(some.html.indexOf('data-panel-page="routines"')).toBeLessThan(some.html.indexOf('data-panel-row="model"'));
+  });
+
+  it("holds the conversation's approval level, the composer's choice, beside the bot's own", () => {
+    expect(has(botTab(makeBot()), "data-panel-row", "thread-approval")).toBe(false);
+    fixture.storeState = { ...fixture.storeState, instances: [engine({ displayName: "Claude" })] };
+    const rendered = botTab(makeBot({ tasks: [{ threadId: "thread-scout", title: "Plan", createdAt: 1, approvalMode: "full" }] }));
+    expect(has(rendered, "data-panel-row", "thread-approval")).toBe(true);
+    const choice = ofType(rendered, ApprovalChip)!.props.choice as Parameters<typeof ApprovalChip>[0]["choice"];
+    expect(choice).toMatchObject({ approvalMode: "full", providerName: "Claude", driverKind: "claudeAgent" });
+    choice.onSelect("ask");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "scout", threadId: "thread-scout", patch: { approvalMode: "ask" } });
+  });
+
+  it("switches Work until done for this conversation's next message, as the composer's + menu did", () => {
+    const bot = makeBot();
+    const id = `bot:${bot.id}:${bot.threadId}`;
+    const row = () => find(botTab(bot), "data-panel-row", "goal");
+    expect(row().props.checked).toBe(false);
+    (row().props.onChange as () => void)();
+    expect(getDraftChannelMode(localStorage, id)).toBe("goal");
+    expect(row().props.checked).toBe(true);
+    (row().props.onChange as () => void)();
+    expect(getDraftChannelMode(localStorage, id)).toBe("chat");
+  });
+
+  it("chooses the call mode, Take turns or Live", () => {
+    setCallMode("turns");
+    try {
+      const calls = segment(botTab(makeBot()), "data-call-mode");
+      expect(calls.options.map((option) => [option.value, option.label])).toEqual([["turns", "Take turns"], ["live", "Live"]]);
+      calls.onChange("live");
+      expect(callMode()).toBe("live");
+    } finally {
+      setCallMode("turns");
+    }
+  });
+
+  it("lists the chat's ⋯ items for this conversation as rows that run them", () => {
+    const rendered = botTab(makeBot());
+    expect([...rendered.html.matchAll(/data-panel-item="(\w+)"/g)].map((match) => match[1])).toEqual(["find", "copy", "download", "activity", "inspector"]);
+    expect(rendered.html).toContain(">Find in conversation<");
+    expect(rendered.html).toContain(">Copy as Markdown<");
+    expect(rendered.html).toContain(">Download as .md<");
+    const run = (key: string) => (rendered.nodes.find((node) => (node.props.item as { key?: string } | undefined)?.key === key)!.props.item as { onSelect: () => void }).onSelect();
+    run("activity");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleActivity" });
+    run("inspector");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleInspector" });
   });
 
   it.each([

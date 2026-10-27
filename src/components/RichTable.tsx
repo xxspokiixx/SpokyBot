@@ -41,6 +41,76 @@ export function TableDialog({ title, onClose, children, returnFocus }: { title: 
 }
 
 const SMALL_TABLE_ROWS = 8;
+/** Beyond this many rows a table keeps its search and virtual scrolling, whatever the mode. */
+export const PLAIN_TABLE_MAX_ROWS = 100;
+
+/** Simple mode's table: plain inside its bubble, a bold header row and faint row lines, with Copy and Expand appearing
+ * only on hover. Expand opens the full table, with its search, sort and download. */
+export function PlainTable({ columns, rows, name = t("table.title"), direction = "ltr" }: RichTableProps) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (copyState === "idle") return;
+    const timer = setTimeout(() => setCopyState("idle"), 2500);
+    return () => clearTimeout(timer);
+  }, [copyState]);
+  const numeric = useMemo(() => columns.map((_, index) => {
+    const nonempty = rows.map((row) => row[index]?.text.trim() ?? "").filter(Boolean);
+    return nonempty.length > 0 && nonempty.every(isTableNumber);
+  }), [columns, rows]);
+  const alignment = (cell: TableCell | undefined, column: TableColumn, index: number) =>
+    cell?.align ?? column.align ?? (numeric[index] || direction === "rtl" ? "right" : "left");
+  const copy = async () => {
+    const result = await copyText(tableCsv(columns.map((column) => column.text), rows.map((row) => row.map((cell) => cell.text))));
+    if (result !== "empty") setCopyState(result);
+  };
+  return (
+    <div data-plain-table className="group/table relative min-w-0 max-w-full">
+      <div role="region" aria-label={name} tabIndex={0} className="overflow-x-auto overscroll-x-contain rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+        <table dir={direction} className="w-full border-collapse text-[15px] leading-[22px]">
+          <thead>
+            <tr>
+              {columns.map((column, index) => (
+                <th key={index} scope="col" className="border-b border-ink/[0.08] px-3 pb-2 pt-1 align-bottom font-semibold first:ps-0 last:pe-0" style={{ textAlign: alignment(undefined, column, index) }}>
+                  <span dir="auto" className="block min-w-[4rem]">{column.content ?? (column.text || t("table.column", { number: index + 1 }))}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-b border-ink/[0.05] last:border-b-0">
+                {columns.map((column, index) => {
+                  const cell = row[index];
+                  return (
+                    <td key={index} className="px-3 py-2 align-top tabular-nums first:ps-0 last:pe-0" style={{ textAlign: alignment(cell, column, index), verticalAlign: cell?.vAlign }}>
+                      <div dir="auto" className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{cell?.content ?? cell?.text}</div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="absolute -right-1.5 -top-1.5 flex items-center gap-0.5 rounded-full bg-composer p-0.5 opacity-0 shadow-[0_1px_3px_rgb(0_0_0/0.18)] ring-1 ring-composer-ring transition-opacity focus-within:opacity-100 group-hover/table:opacity-100 [@media(hover:none)]:opacity-100">
+        <button type="button" className="table-action !min-h-6 !min-w-6 !rounded-full" aria-label={t("table.copyPlain")} title={t("table.copyPlain")} onClick={() => void copy()}>
+          {copyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+        <button type="button" className="table-action !min-h-6 !min-w-6 !rounded-full" aria-label={t("table.expand")} title={t("table.expand")} onClick={(event) => { trigger.current = event.currentTarget; setOpen(true); }}>
+          <Maximize2 size={13} />
+        </button>
+      </div>
+      {copyState !== "idle" && <span role={copyState === "failed" ? "alert" : "status"} className="sr-only">{t(copyState === "failed" ? "table.copyFailed" : "table.copied")}</span>}
+      {open && (
+        <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}>
+          <RichTable columns={columns} rows={rows} name={name} direction={direction} expanded />
+        </TableDialog>
+      )}
+    </div>
+  );
+}
 
 export function RichTable({ columns, rows, name = t("table.title"), expanded = false, direction = "ltr", headless = false }: RichTableProps) {
   const [query, setQuery] = useState("");

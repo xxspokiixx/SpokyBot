@@ -972,6 +972,13 @@
 .chat-md :is(strong, b) {
   font-weight: 600;
 }
+[data-chat-bubble="simple"] :is(.chat-md, .chat-text),
+[data-chat-bubble="simple"].chat-text {
+  line-height: 22px;
+}
+[data-chat-bubble="simple"] .chat-md > * + * {
+  margin-top: 10px;
+}
 
 .chat-code-actions > button:focus-visible {
   outline: 2px solid var(--color-focus);
