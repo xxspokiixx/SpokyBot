@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Archive, ChartNoAxesColumn, Cloud, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen } from "lucide-react";
-import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
-import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
-import { localeChoices, type LocaleKey } from "@/locales";
+import { useStore, type AppSettingsSection } from "@/state/store";
+import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
-import { withTourReset } from "@/lib/guided-tour";
-import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
 import { AnalyticsRow } from "./AnalyticsRow";
 import { UpdatesConsentRow } from "./UpdatesConsent";
@@ -14,8 +12,6 @@ import { DefaultBotSidebarRow } from "./DefaultBotControls";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { LmStudioServer, OtherOpenAiCompatServers } from "./OpenAiCompatServers";
 import { DecisionModelSettings } from "./DecisionModelSettings";
-import { useUpdaterState } from "@/lib/updater";
-import { brand } from "../lib/brand";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
@@ -25,32 +21,26 @@ import { ActivitySection } from "./ActivitySection";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { currentPhonePairingTarget, phonePairingSettingsAction } from "@/lib/phone-pairing";
 import { CustomDomainSettings } from "./CustomDomainSettings";
-import { BrowserProfilesManager } from "./BrowserProfilesManager";
-import { BuiltInBrowserRow, NewBrowserSettings } from "./BrowserSettingsRows";
+import { BuiltInBrowserRow } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
-import { CloudPlanRow, ProSettingsCard } from "./ProIntroduction";
-import { CloudUsageDetails, CloudUsageSettings, CloudUsageSummaryView, useCloudUsageSettings } from "./CloudUsageMeter";
-import { Card, SettingRow, SettingsDisclosure, SettingsGroup, SettingsRows, SIMPLE_SELECT, Switch } from "./SettingsPrimitives";
-import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
-import { effortLabel } from "./ModelPicker";
-import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
+import { ProSettingsCard } from "./ProIntroduction";
+import { CloudUsageSettings } from "./CloudUsageMeter";
+import { Card, SettingsGroup } from "./SettingsPrimitives";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
-import { PlanUsageSummary } from "./PlanUsage";
 import { SkillsSection } from "./SkillsSection";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
 import { ThemeRow } from "./ThemeRow";
 import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "./AppearanceSelectRows";
-import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
-import { ProfileFields, ProfileSummaryRow } from "./ProfileSettings";
+import { ProfileFields } from "./ProfileSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { AutomaticRecoverySettings } from "./AutomaticRecoverySettings";
 import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
@@ -61,19 +51,14 @@ import { ImportSettings } from "./ImportSettings";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { NotificationRows } from "./NotificationSettingsRows";
-import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
-import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
-import { appVersion } from "@/lib/app-links";
-import { useServerUpdateItem } from "./SidebarProfileMenu";
-import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
-import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalPins, SIDEBAR_DENSITIES, usePinnedCircles, useSidebarDensity, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
-import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
-import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
-import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { Select } from "./Select";
+import { BrowserProfilesRow, ColorUserBubblesRow, AdvancedModeRow, ExperimentalFeaturesRow, LanguageRow, NewBotEffortRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow, SidebarDensityRow, ToolCallsRow, UniversalPinsRow, UpdatesRow } from "./AppSettingsRows";
+import { SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
 // boot language.
+
 export type SettingsGroup = "you" | "ai" | "computers" | "account";
 
 export const SETTINGS_GROUPS: Array<{ id: SettingsGroup; labelKey: LocaleKey }> = [
@@ -131,7 +116,6 @@ export const SIMPLE_PAGES: SimpleSettingsPage[] = [
 
 export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "decisionModel"];
 
-export type SimpleDisclosureId = "general-more" | "ai-other" | "ai-more" | "computer-more" | "billing-details" | "updates-more";
 
 export const SIMPLE_FOLDED: Partial<Record<AppSettingsSection, SimpleDisclosureId>> = {
   import: "general-more",
@@ -170,600 +154,6 @@ function simplePageMatches(page: SimpleSettingsPage, query: string): boolean {
 export function sectionMatches(section: (typeof SECTIONS)[number], query: string): boolean {
   if (!query) return true;
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
-}
-
-export function UpdatesRow({ title = t("settings.updates.title") }: { title?: string }) {
-  const s = useUpdaterState();
-  const updater = window.ogb?.updater;
-  if (!s || !updater) return null;
-  const label =
-    s.status === "checking"
-      ? t("settings.updates.checking")
-      : s.status === "downloading"
-        ? s.percent == null
-          ? t("settings.updates.startingDownload")
-          : t("settings.updates.downloading", { percent: Math.round(s.percent) })
-        : s.status === "preparing"
-          ? t("settings.updates.preparing")
-          : s.status === "downloaded"
-            ? s.installMode === "handoff"
-              ? t("settings.updates.readyInstall", { app: brand().name, version: s.version ?? "" })
-              : t("settings.updates.ready", { app: brand().name, version: s.version ?? "" })
-            : s.status === "installing"
-              ? s.message ||
-                (s.installMode === "handoff"
-                  ? t("settings.updates.openingTerminal")
-                  : t("settings.updates.restarting"))
-              : s.status === "handed-off"
-                ? t("settings.updates.handedOff")
-                : s.status === "error"
-                  ? t("settings.updates.failed", { message: s.message ?? t("settings.updates.unknownError") })
-                  : t("settings.updates.latest");
-  return (
-    <SettingRow title={title} subtitle={label}>
-      <button
-        onClick={() => {
-          if (s.status === "downloaded") return void updater.install();
-          void updater.check();
-        }}
-        disabled={
-          s.status === "checking" || s.status === "downloading" || s.status === "preparing" ||
-          s.status === "installing" || s.retryable === false
-        }
-        className="ui-button"
-      >
-        {s.retryable === false
-          ? t("settings.updates.quitReopen")
-          : s.status === "downloaded"
-            ? s.installMode === "handoff"
-              ? t("settings.updates.install")
-              : t("settings.updates.restart")
-            : s.status === "preparing"
-              ? t("settings.updates.preparingShort")
-              : s.status === "installing"
-                ? s.installMode === "handoff"
-                  ? t("settings.updates.opening")
-                  : t("settings.updates.restartingShort")
-                : t("settings.updates.check")}
-      </button>
-    </SettingRow>
-  );
-}
-
-function NewBotEffortRow() {
-  const { state, dispatch } = useStore();
-  const current = state.config?.newBots?.effort ?? "";
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const save = async (value: string) => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ newBots: { effort: isEffortLevel(value) ? value : null } }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.newBotEffort.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <SettingRow
-      title={t("settings.newBotEffort.title")}
-      subtitle={t("settings.newBotEffort.subtitle")}
-      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
-    >
-      <Select size="sm" className="w-full max-w-[240px]"
-        value={current}
-        disabled={saving}
-        aria-label={t("settings.newBotEffort.aria")}
-        onChange={(event) => void save(event.target.value)}
-      >
-        <option value="">{t("settings.newBotEffort.default")}</option>
-        {EFFORT_LEVELS.map((level) => (
-          <option key={level} value={level}>
-            {effortLabel(level)}
-          </option>
-        ))}
-      </Select>
-    </SettingRow>
-  );
-}
-
-function ReplayAppTourButton() {
-  const { state, dispatch } = useStore();
-  const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState(false);
-  return (
-    <div>
-      <button
-        disabled={saving}
-        onClick={() => {
-          setSaving(true);
-          setFailed(false);
-          void api("/api/config", {
-            method: "PUT",
-            body: JSON.stringify({ onboarding: {
-              ...(!state.config?.onboarding?.completedAt ? completionPatch().onboarding : {}),
-              hintsSeen: withTourReset(state.config?.onboarding),
-            } }),
-            signal: AbortSignal.timeout(10_000),
-          })
-            .then((config) => {
-              dispatch({ type: "configStatus", config });
-              dispatch({ type: "toggleTour", open: true });
-            })
-            .catch(() => setFailed(true))
-            .finally(() => setSaving(false));
-        }}
-        className="ui-button"
-      >
-        {t("settings.welcome.appTour")}
-      </button>
-      {failed && <p role="alert" className="mt-2 text-[13px] text-danger">{t("onboarding.tour.error")}</p>}
-    </div>
-  );
-}
-
-function ReplayTourRow() {
-  const { dispatch } = useStore();
-  return (
-    <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitleShort")}>
-      <div className="flex flex-wrap justify-end gap-2">
-        <ReplayAppTourButton />
-        <button
-          onClick={() => dispatch({ type: "toggleWelcome", open: true })}
-          className="ui-button"
-        >
-          {t("settings.welcome.replay")}
-        </button>
-      </div>
-    </SettingRow>
-  );
-}
-
-function LanguageRow({ simple = false }: { simple?: boolean }) {
-  const { state } = useStore();
-  const current = effectiveLanguage(useLanguageChoice(), state.config?.language);
-
-  return (
-    <SettingRow
-      title={t("settings.language.title")}
-      subtitle={simple ? undefined : t("settings.language.subtitle")}
-    >
-      <Select size="sm" variant={simple ? "pill" : "field"} className={simple ? SIMPLE_SELECT : "w-full max-w-[240px]"}
-        value={current}
-        aria-label={t("settings.language.aria")}
-        onChange={(event) => setLanguageChoice(event.target.value)}
-      >
-        <option value="">{t("settings.language.system")}</option>
-        {localeChoices.map(({ code, label }) => (
-          <option key={code} value={code}>
-            {label}
-          </option>
-        ))}
-      </Select>
-    </SettingRow>
-  );
-}
-
-function SendKeyRow({ simple = false }: { simple?: boolean }) {
-  const sendKey = useSendKey();
-  return (
-    <SettingRow title={t("settings.sendKey.title")} subtitle={simple ? undefined : t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
-      <Select size="sm" variant={simple ? "pill" : "field"} className={simple ? SIMPLE_SELECT : "w-full max-w-[240px]"}
-        value={sendKey}
-        aria-label={t("settings.sendKey.title")}
-        onChange={(event) => setSendKey(parseSendKey(event.target.value))}
-      >
-        {SEND_KEYS.map((mode) => (
-          <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
-        ))}
-      </Select>
-    </SettingRow>
-  );
-}
-
-function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
-  const enabled = useColorUserBubbles();
-  return (
-    <SettingRow title={t("settings.userBubbles.title")} subtitle={simple ? undefined : t("settings.userBubbles.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.userBubbles.aria")}
-        onClick={() => setColorUserBubbles(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function AdvancedModeRow({ simple = false }: { simple?: boolean }) {
-  const enabled = useAdvancedMode();
-  return (
-    <SettingRow className={simple ? undefined : "rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4"} title={t("settings.advancedMode.title")}
-      subtitle={t(simple ? "settings.advancedMode.simpleSubtitle" : "settings.advancedMode.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.advancedMode.title")}
-        onClick={() => setAdvancedMode(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function ShowThreadsRow() {
-  const enabled = useShowThreadsChoice();
-  return (
-    <SettingRow title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.threadDisplay.show")}
-        onClick={() => setShowThreads(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function PinnedCirclesRow() {
-  const enabled = usePinnedCircles();
-  return (
-    <SettingRow title={t("settings.pinnedCircles.title")} subtitle={t("settings.pinnedCircles.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.pinnedCircles.title")}
-        onClick={() => setPinnedCircles(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-const SIDEBAR_DENSITY_LABEL_KEYS: Record<SidebarDensity, LocaleKey> = {
-  comfortable: "sidebar.density.comfortable",
-  compact: "sidebar.density.compact",
-  icons: "sidebar.density.iconsOnly",
-};
-
-function SidebarDensityRow() {
-  const density = useSidebarDensity();
-  return (
-    <SettingRow title={t("sidebar.density.title")} subtitle={t("settings.sidebarDensity.subtitle")}>
-      <Select size="sm" className="w-full max-w-[240px]"
-        value={density}
-        aria-label={t("sidebar.density.chooseAria")}
-        onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
-      >
-        {SIDEBAR_DENSITIES.map((option) => (
-          <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
-        ))}
-      </Select>
-    </SettingRow>
-  );
-}
-
-function RunCardRow() {
-  const enabled = useShowRunCard();
-  return (
-    <SettingRow title={t("settings.runCard.title")} subtitle={t("settings.runCard.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.runCard.show")}
-        onClick={() => setShowRunCard(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function UniversalPinsRow() {
-  const enabled = useUniversalPins();
-  return (
-    <SettingRow title={t("settings.universalPins.title")} subtitle={t("settings.universalPins.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.universalPins.title")}
-        onClick={() => setUniversalPins(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function ToolCallsRow() {
-  const { state, dispatch } = useStore();
-  const enabled = showToolCallsEnabled(state.config);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const toggle = async () => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ features: { showToolCalls: !enabled } }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.toolCalls.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <SettingRow
-      title={t("settings.toolCalls.title")}
-      subtitle={<>{t("settings.toolCalls.subtitle")} {t("settings.toolCalls.detail")}</>}
-      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
-    >
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.toolCalls.aria")}
-        disabled={saving}
-        onClick={() => void toggle()}
-        className="disabled:cursor-wait disabled:opacity-50"
-      />
-    </SettingRow>
-  );
-}
-
-function ExperimentalFeaturesRow() {
-  const { state, dispatch } = useStore();
-  const skillAuthoring = skillAuthoringEnabled(state.config);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const toggle = async (next: boolean) => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ features: { skillAuthoring: next } }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.experimental.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Card title={t("settings.experimental.title")} subtitle={t("settings.experimental.subtitle")}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillAuthoring")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t("settings.experimental.skillAuthoringDetail")}
-          </div>
-        </div>
-        <Switch
-          checked={skillAuthoring}
-          aria-label={t("settings.experimental.skillAuthoringAria")}
-          disabled={saving}
-          onClick={() => void toggle(!skillAuthoring)}
-          className="disabled:cursor-wait disabled:opacity-50"
-        />
-      </div>
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
-      <LearnedSkillsSettings />
-      <NewBrowserSettings />
-    </Card>
-  );
-}
-
-function BrowserProfilesRow() {
-  const { state } = useStore();
-  const profiles = state.config?.browserProfiles ?? [];
-  if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
-  return (
-    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.sharedSubtitle")}>
-      <BrowserProfilesManager />
-    </Card>
-  );
-}
-
-type Disclose = (id: SimpleDisclosureId) => { id: SimpleDisclosureId; open: boolean; onToggle: () => void };
-
-function SimpleGeneralPage({ has, remoteActive, disclose, peopleOpen }: {
-  has: (id: AppSettingsSection) => boolean;
-  remoteActive: boolean;
-  disclose: Disclose;
-  peopleOpen: boolean;
-}) {
-  return (
-    <>
-      {(has("general") || has("people")) && (
-        <SettingsGroup label={t("settings.group.account")} block="general">
-          <SettingsRows>
-            {has("general") && <ProfileSummaryRow />}
-            {has("general") && <CloudPlanRow />}
-            {has("people") && <div data-settings-block="people" className="scroll-mt-4"><PeopleSection simple startOpen={peopleOpen} /></div>}
-          </SettingsRows>
-        </SettingsGroup>
-      )}
-      {has("appearance") && (
-        <SettingsGroup label={t("settings.section.appearance")} block="appearance">
-          <SettingsRows>
-            <ColorUserBubblesRow simple />
-            <LanguageRow simple />
-            <SendKeyRow simple />
-          </SettingsRows>
-        </SettingsGroup>
-      )}
-      {has("appearance") && (
-        <SettingsGroup label={t("notifications.title")}>
-          <SettingsRows><NotificationRows simple /></SettingsRows>
-        </SettingsGroup>
-      )}
-      {has("general") && (
-        <SettingsGroup label={t("settings.group.system")}>
-          <SettingsRows>
-            <OpenAtLoginRow />
-            <DefaultBotSidebarRow />
-            {!remoteActive && <ReplayTourRow />}
-          </SettingsRows>
-        </SettingsGroup>
-      )}
-      <SettingsDisclosure label={t("settings.more")} {...disclose("general-more")}>
-        {has("appearance") && (
-          <SettingsGroup label={t("settings.group.display")}>
-            <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
-              <SkinPicker />
-            </Card>
-            <SettingsRows>
-              <FontRow />
-              <ChatWidthRow />
-              <SidebarDensityRow />
-              <PinnedCirclesRow />
-              <UniversalPinsRow />
-              {!remoteActive && <ToolCallsRow />}
-              <RunCardRow />
-            </SettingsRows>
-          </SettingsGroup>
-        )}
-        {has("general") && (
-          <SettingsGroup label={t("settings.group.newBots")}>
-            <SettingsRows>
-              <NewBotEffortRow />
-              <DefaultBotSettings />
-            </SettingsRows>
-          </SettingsGroup>
-        )}
-        {has("general") && (
-          <SettingsGroup label={t("settings.group.runningBots")}>
-            <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
-              <RoomTurnTimeoutSettings />
-            </Card>
-            <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}>
-              <McpCallTimeoutSettings />
-            </Card>
-            <ThreadConcurrencySettings />
-            <AutomaticRecoverySettings />
-            <ThreadCleanupSettings />
-          </SettingsGroup>
-        )}
-        {has("import") && <div data-settings-block="import" className="scroll-mt-4"><ImportSettings /></div>}
-        {has("organization") && <div data-settings-block="organization" className="scroll-mt-4"><OrganizationSettings /></div>}
-        {has("activity") && <div data-settings-block="activity" className="scroll-mt-4"><ActivitySection /></div>}
-      </SettingsDisclosure>
-      <SettingsRows><AdvancedModeRow simple /></SettingsRows>
-    </>
-  );
-}
-
-function SimpleAiPage({ has, disclose, connections }: { has: (id: AppSettingsSection) => boolean; disclose: Disclose; connections: ReactNode }) {
-  const { state } = useStore();
-  return (
-    <>
-      {has("engines") && <div data-settings-block="engines" className="scroll-mt-4"><EnginesSettings simple /></div>}
-      {has("connections") && (
-        <SettingsDisclosure label={t("settings.ai.otherProviders")} {...disclose("ai-other")}>
-          <div data-settings-block="connections" className="scroll-mt-4">{connections}</div>
-        </SettingsDisclosure>
-      )}
-      {has("engines") && state.config?.cacheKeepWarm && (
-        <SettingsDisclosure label={t("settings.more")} {...disclose("ai-more")}>
-          <CacheKeepWarmSettings />
-        </SettingsDisclosure>
-      )}
-    </>
-  );
-}
-
-type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "companion", ReactNode>;
-
-function SimpleComputerPage({ has, remoteAccess, servers, disclose }: {
-  has: (id: AppSettingsSection) => boolean;
-  remoteAccess: RemoteAccessCards;
-  servers: ReactNode;
-  disclose: Disclose;
-}) {
-  return (
-    <>
-      {has("companion") && (
-        <SettingsGroup label={t("settings.section.companion")} block="companion">
-          {remoteAccess.pairing}
-          {remoteAccess.companion}
-          {remoteAccess.client}
-        </SettingsGroup>
-      )}
-      {has("desktopWorkspaces") && <SettingsGroup label={t("settings.section.desktopWorkspaces")} block="desktopWorkspaces">{servers}</SettingsGroup>}
-      {has("computer") && <SettingsGroup label={t("settings.section.computer")} block="computer"><LocalComputerSection /></SettingsGroup>}
-      {has("computer") && (
-        <SettingsGroup label={t("settings.experimental.browser")} block="browser">
-          <SettingsRows><BuiltInBrowserRow /></SettingsRows>
-          <BrowserProfilesRow />
-        </SettingsGroup>
-      )}
-      {has("logins") && <div data-settings-block="logins" className="scroll-mt-4"><LoginsSettings /></div>}
-      {has("companion") && remoteAccess.domain && (
-        <SettingsDisclosure label={t("settings.more")} {...disclose("computer-more")}>
-          {remoteAccess.domain}
-        </SettingsDisclosure>
-      )}
-    </>
-  );
-}
-
-function SimpleBillingPage({ has, disclose, cloudAccount }: { has: (id: AppSettingsSection) => boolean; disclose: Disclose; cloudAccount: ReactNode }) {
-  const { usage, upgrade, dialog } = useCloudUsageSettings();
-  return (
-    <>
-      <div data-settings-block="usage" className="scroll-mt-4">
-        {usage ? <CloudUsageSummaryView usage={usage} upgrade={upgrade}>{dialog}</CloudUsageSummaryView> : <PlanUsageSummary />}
-      </div>
-      {has("cloudAccount") && <div data-settings-block="cloudAccount" className="flex scroll-mt-4 flex-col gap-4">{cloudAccount}</div>}
-      {(usage || has("usage")) && (
-        <SettingsDisclosure label={t("settings.billing.details")} {...disclose("billing-details")}>
-          {usage && <CloudUsageDetails usage={usage} upgrade={upgrade} />}
-          {has("usage") && <UsageSection />}
-        </SettingsDisclosure>
-      )}
-    </>
-  );
-}
-
-const versionTitle = () => `${brand().name} ${appVersion()}`;
-
-function ServerUpdatesRow() {
-  const entry = useServerUpdateItem(true);
-  if (!entry) return null;
-  const status = entry.phase === "idle" ? undefined : [entry.label, entry.item.subtitle].filter(Boolean).join(" ");
-  const action = entry.phase === "available" ? t("settings.updates.seeRelease")
-    : entry.phase === "reload" ? t("settings.updates.reload")
-      : entry.phase === "checking" ? t("common.checking") : t("settings.updates.check");
-  return (
-    <SettingRow title={versionTitle()} subtitle={status}>
-      <button type="button" className="ui-button" disabled={entry.item.disabled} onClick={entry.item.onSelect}>{action}</button>
-    </SettingRow>
-  );
-}
-
-function SimpleUpdatesPage({ disclose }: { disclose: Disclose }) {
-  return (
-    <>
-      <SettingsGroup block="updates">
-        <SettingsRows>
-          {window.ogb?.updater ? <UpdatesRow title={versionTitle()} /> : <ServerUpdatesRow />}
-          <UpdatesConsentRow />
-        </SettingsRows>
-      </SettingsGroup>
-      <SettingsDisclosure label={t("settings.more")} {...disclose("updates-more")}>
-        <SettingsRows>
-          <AnalyticsRow />
-          <DiagnosticsRow />
-        </SettingsRows>
-      </SettingsDisclosure>
-    </>
-  );
 }
 
 export function SettingsModal() {
