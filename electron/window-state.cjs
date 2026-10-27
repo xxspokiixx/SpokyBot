@@ -1,4 +1,4 @@
-const DEFAULT_BOUNDS = Object.freeze({ width: 1338, height: 870 });
+const DEFAULT_BOUNDS = Object.freeze({ width: 1040, height: 760 });
 const MIN_BOUNDS = Object.freeze({ width: 840, height: 620 });
 
 const integer = (value) => Number.isFinite(value) && Number.isInteger(value);
