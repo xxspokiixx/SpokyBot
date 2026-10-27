@@ -7,7 +7,8 @@ import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
-import { choiceIsSelected, modelChoices, type ModelChoice } from "@/lib/model-choices";
+import { choiceIsSelected, modelChoices, modelSelectionForPick, type ModelChoice } from "@/lib/model-choices";
+export { modelSelectionForPick } from "@/lib/model-choices";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import { isTypeaheadKey, TYPEAHEAD_RESET_MS, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
@@ -231,16 +232,6 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
       )}
     </div>
   );
-}
-
-export function modelSelectionForPick(selection: ModelSelection, instance: InstanceInfo, model: string): ModelSelection {
-  const next: ModelSelection = { instanceId: instance.instanceId, model };
-  if (instance.instanceId === selection.instanceId) {
-    if (instance.capabilities?.modelVariants) {
-      if (model === selection.model && selection.variant !== undefined) next.variant = selection.variant;
-    } else if (selection.effort) next.effort = selection.effort;
-  }
-  return next;
 }
 
 const POPOVER_WIDTH = 420;
@@ -534,6 +525,12 @@ export function ModelPicker({
     if (updateBotDefault && threadId) setChangedBotModel(true);
     close(true);
   };
+
+  const resetVariant = contained && selection.variant !== undefined ? () => {
+    const { variant: _variant, ...nextSelection } = selection;
+    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || simpleUpdatesBotDefault, selection: nextSelection });
+    close(true);
+  } : undefined;
 
   const official = railInstance ? modelChoices(railInstance, railInstance.models.options.filter((option) => !option.custom)) : [];
   const custom = railInstance?.models.options.filter((option) => option.custom) ?? [];
@@ -1097,6 +1094,7 @@ export function ModelPicker({
           onSetUp={openFull}
           onCheckAgain={(instance) => refreshModels(instance.instanceId)}
           onManage={openEngines}
+          onResetVariant={resetVariant}
         />
       ) : fullPane}
     </div>

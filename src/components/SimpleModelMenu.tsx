@@ -24,6 +24,7 @@ export interface SimpleMenuActions {
   onSetUp: (instance: InstanceInfo, keyboard: boolean) => void;
   onCheckAgain: (instance: InstanceInfo) => void;
   onManage: () => void;
+  onResetVariant?: () => void;
 }
 
 export interface SimpleModelMenuProps extends SimpleMenuActions {
@@ -275,6 +276,12 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
             <Thinking thinking={props.thinking} labelId={`${idPrefix}-thinking`} />
             <div role="separator" className={MENU_SEPARATOR} />
           </>
+        )}
+        {props.onResetVariant && (
+          <button type="button" data-menu-row data-simple-variant-default onClick={props.onResetVariant} className={MENU_ROW}>
+            <Gutter />
+            <span className="min-w-0 flex-1 truncate">{t("model.variant.session")}</span>
+          </button>
         )}
         <button type="button" data-menu-row data-simple-manage onClick={props.onManage} className={MENU_ROW}>
           <Gutter><Settings size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /></Gutter>
