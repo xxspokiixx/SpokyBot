@@ -4,15 +4,13 @@ import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-
-export const SIMPLE_SURFACE = "bg-composer ring-1 ring-inset ring-ink/[0.07]";
-export const SIMPLE_SURFACE_HOVER = "hover:bg-[color-mix(in_srgb,var(--color-composer),var(--color-ink)_7%)]";
+import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 
 export const SIMPLE_MENU = "flex flex-col gap-1 rounded-[12px] border border-hairline/50 bg-menu p-2 shadow-lg";
 export const SIMPLE_MENU_ITEM = "flex min-h-[30px] w-full shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-1.5 py-1.5 text-left text-[13px] leading-[18px] focus-visible:bg-raised/70";
 export const SIMPLE_MENU_SEPARATOR = "mx-1 my-0.5 h-px shrink-0 bg-hairline/50";
 
-export const SIMPLE_TOP_BUTTON =`flex size-[34px] shrink-0 items-center justify-center rounded-full text-ink transition-colors ${SIMPLE_SURFACE} ${SIMPLE_SURFACE_HOVER} aria-expanded:bg-[color-mix(in_srgb,var(--color-composer),var(--color-ink)_7%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`;
+export const SIMPLE_TOP_BUTTON = `flex size-[34px] shrink-0 items-center justify-center rounded-full text-ink ${ELEVATED_CONTROL} ${ELEVATED_HOVER} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`;
 
 /** The round control at either end of the phone bot list's top row. */
 export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-center rounded-full border border-hairline bg-card text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
@@ -95,7 +93,7 @@ export function SidebarSearchToggle({ open, onToggle, ref }: { open: boolean; on
 export function SidebarSearchPill({ query, onQuery, onClose }: { query: string; onQuery: (query: string) => void; onClose: () => void }) {
   return (
     <div data-sidebar-search-pill className="px-3 pb-2 pt-0.5">
-      <div className={cn("flex h-[34px] items-center gap-2 rounded-full pl-3 pr-1.5 text-ink-secondary focus-within:ring-focus", SIMPLE_SURFACE)}>
+      <div className={cn("flex h-[34px] items-center gap-2 rounded-full pl-3 pr-1.5 text-ink-secondary focus-within:ring-focus", ELEVATED_CONTROL)}>
         <Search size={15} aria-hidden="true" className="shrink-0" />
         <input
           autoFocus

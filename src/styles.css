@@ -234,6 +234,7 @@
   --color-scrollbar: #3d3d3d;
   /* second speed line of the mascot — contrasts against the app ground */
   --color-maus-line: #fcfcfc;
+  --shadow-float: 0 0 #0000;
 }
 
 /* ── Midnight ──────────────────────────────────────────────────────────────
@@ -746,6 +747,7 @@
   --identity-coral: #d83920;
   --identity-silver: #6e7580;
   --identity-chrome: #697688;
+  --shadow-float: 0 4px 12px -1px rgb(28 28 28 / 0.08), 0 2px 4px -2px rgb(28 28 28 / 0.06);
 }
 
 /* ── Meadow ───────────────────────────────────────────────────────────────

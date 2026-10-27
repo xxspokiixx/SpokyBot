@@ -1,9 +1,11 @@
 import { Lock, Users } from "lucide-react";
 import type { ComponentProps } from "react";
 
+import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore, type Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
+import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 
 export type ChatHeadPrivacy = { kind: "private" } | { kind: "shared"; team: string } | null;
@@ -29,7 +31,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onOpen }: {
       onClick={onOpen}
       title={t("chat.openProfile")}
       aria-label={t("chat.openProfileAria", { name: bot.name })}
-      className="flex min-w-0 max-w-full items-center gap-2 rounded-full bg-composer py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink ring-[0.5px] ring-ink/10 transition-colors hover:bg-[color-mix(in_srgb,var(--color-composer)_93%,var(--color-ink))]"
+      className={cn("flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
     >
       <BotAvatar bot={bot} size={24} {...avatar} />
       <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>

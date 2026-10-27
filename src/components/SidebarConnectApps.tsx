@@ -6,7 +6,7 @@ import { useStore } from "@/state/store";
 
 import { loadAppCards } from "./bot-settings/useBotApps";
 import { preloadConnectedApps, type ToolkitCard } from "./PluginsPanel";
-import { SIMPLE_SURFACE, SIMPLE_SURFACE_HOVER } from "./SidebarSimpleTop";
+import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 
 export type AppFace = Pick<ToolkitCard, "slug" | "label" | "logo" | "domain">;
 
@@ -64,7 +64,7 @@ export function SidebarConnectApps() {
       data-sidebar-nav="apps"
       aria-pressed={state.pluginsOpen}
       onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      className={cn("flex h-[34px] min-w-0 flex-1 items-center justify-center gap-[9px] rounded-full px-3 text-[15px] leading-5 text-ink transition-colors", SIMPLE_SURFACE, SIMPLE_SURFACE_HOVER)}
+      className={cn("flex h-[34px] min-w-0 flex-1 items-center justify-center gap-[9px] rounded-full px-3 text-[15px] leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
     >
       <span className="min-w-0 truncate">{t("sidebar.connectApps")}</span>
       <span aria-hidden="true" className="flex shrink-0 items-center">
