@@ -465,6 +465,13 @@ describe("times, days, labels and progress", () => {
     expect(widgetAdvice(card("Today's mood"))).toBeUndefined();
   });
 
+  it("leaves a Textarea alone: it may list several days and times, which no single picker holds", () => {
+    const notes = parsed({ type: "Card", confirm: { label: "Build my plan", action: { type: "plan" } }, children: [
+      { type: "Textarea", name: "fixed", label: "Fixed meetings (days and times)" },
+    ] });
+    expect(widgetAdvice(notes)).toBeUndefined();
+  });
+
   it("tells the bot when a form has nothing the person can press to send it", () => {
     const silent = parsed({ type: "Card", children: [{ type: "DayPicker", name: "days", label: "Days" }, { type: "TimePicker", name: "at", label: "Time" }] });
     expect(widgetAdvice(silent)).toBe("Nothing in this widget sends what the person fills in. Call update_widget with confirm: {label, action} (and cancel if they may decline) so they can send it.");

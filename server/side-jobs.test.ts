@@ -550,7 +550,7 @@ describe("when the helper is not used", () => {
 // engine is whatever the resolver hands it, as server/index.ts wires it.
 describe("memory upkeep through the resolver", () => {
   const BOT: UpkeepBot = { id: "pi", name: "Bot pi" };
-  const facts = JSON.stringify([{ text: "The person is vegetarian", kind: "preference", confidence: 0.9 }]);
+  const facts = JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", confidence: 0.9 }]);
   const turns = [{ person: "I'm vegetarian", bot: "Noted." }];
 
   beforeEach(() => {
