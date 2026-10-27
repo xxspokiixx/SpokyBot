@@ -9,6 +9,7 @@ import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
 import { AnalyticsRow } from "./AnalyticsRow";
 import { UpdatesConsentRow } from "./UpdatesConsent";
+import { OpenAtLoginRow } from "./OpenAtLoginRow";
 import { DefaultBotSidebarRow } from "./DefaultBotControls";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { OtherOpenAiCompatServers } from "./OpenAiCompatServers";
@@ -301,7 +302,7 @@ function ReplayAppTourButton() {
 function ReplayTourRow() {
   const { dispatch } = useStore();
   return (
-    <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitle")}>
+    <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitleShort")}>
       <div className="flex flex-wrap justify-end gap-2">
         <ReplayAppTourButton />
         <button
@@ -677,6 +678,7 @@ export function SettingsModal() {
             </Card>
 
             <LanguageRow />
+            <OpenAtLoginRow />
             <NewBotEffortRow />
             <AnalyticsRow />
             <UpdatesConsentRow />
