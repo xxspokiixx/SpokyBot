@@ -785,6 +785,8 @@
   "composer.mention.aria": "Einen Bot markieren",
   "composer.mention.agent": "Agent",
   "composer.mention.person": "Person",
+  "composer.mention.devs": "Entwickler",
+  "composer.mention.devsDesc": "Einen Fehler an MausBot melden",
   "composer.attach": "Datei anhängen",
   "composer.goal.aria": "Gemeinsam fertigstellen",
   "composer.goal.title": "Gemeinsam fertigstellen — das Team arbeitet, bis das Ziel erreicht ist",

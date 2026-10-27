@@ -1637,6 +1637,8 @@
   "composer.mention.channel": "Group chat",
   "composer.mention.everyoneOne": "1 bot trong cuộc trò chuyện này",
   "composer.mention.everyoneMany": "{count} bot trong cuộc trò chuyện này",
+  "composer.mention.devs": "Nhà phát triển",
+  "composer.mention.devsDesc": "Báo lỗi cho MausBot",
   "composer.attach": "Đính kèm tệp",
   "newBot.profileFailed": "Bot của bạn đã được tạo, nhưng không thể áp dụng hoàn toàn cấu hình định sẵn. Hãy xem lại hướng dẫn của bot trong cài đặt: {error}",
   "composer.goal.aria": "Cùng hoàn thành",

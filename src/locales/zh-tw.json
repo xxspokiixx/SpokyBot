@@ -1364,6 +1364,8 @@
   "composer.mention.agent": "機器人",
   "composer.mention.person": "成員",
   "composer.mention.channel": "聊天室",
+  "composer.mention.devs": "開發人員",
+  "composer.mention.devsDesc": "向 MausBot 回報錯誤",
   "composer.attach": "附加檔案",
   "newBot.profileFailed": "你的機器人已建立，但無法完整套用其預設組態。請在設定中檢查其指示：{error}",
   "composer.goal.aria": "一起完成",

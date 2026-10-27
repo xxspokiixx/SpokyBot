@@ -2024,6 +2024,8 @@
   "composer.mention.teamMany": "{count} ботов в этом департаменте",
   "composer.mention.allOne": "Единственный бот здесь",
   "composer.mention.allMany": "Все {count} ботов",
+  "composer.mention.devs": "Разработчики",
+  "composer.mention.devsDesc": "Сообщить MausBot об ошибке",
   "composer.attach": "Прикрепить файл",
   "newBot.profileFailed": "Ваш бот создан, но его предустановка применена не полностью. Проверьте его инструкции в настройках: {error}",
   "composer.goal.aria": "Завершить вместе",

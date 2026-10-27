@@ -1893,6 +1893,8 @@
   "composer.mention.channel": "Chat em grupo",
   "composer.mention.everyoneOne": "1 bot neste chat",
   "composer.mention.everyoneMany": "{count} bots neste chat",
+  "composer.mention.devs": "Desenvolvedores",
+  "composer.mention.devsDesc": "Relatar um bug ao MausBot",
   "composer.attach": "Anexar um arquivo",
   "newBot.profileFailed": "Seu bot foi criado, mas não foi possível aplicar toda a predefinição. Revise as instruções dele nas configurações: {error}",
   "composer.goal.aria": "Concluir junto",

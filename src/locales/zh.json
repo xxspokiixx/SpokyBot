@@ -1016,6 +1016,8 @@
   "composer.mention.agent": "智能体",
   "composer.mention.person": "成员",
   "composer.mention.channel": "群组聊天",
+  "composer.mention.devs": "开发者",
+  "composer.mention.devsDesc": "向 MausBot 报告错误",
   "composer.attach": "附加文件",
   "newBot.profileFailed": "你的机器人已创建，但无法完整套用其默认角色。请在设置中查看其指示：{error}",
   "composer.goal.aria": "一起完成",
