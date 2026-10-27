@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -241,5 +243,101 @@ describe("locale catalogs on disk", () => {
     });
     expect(() => quietly(() => recordSourceHashes(directory))).toThrow(/placeholders must stay/);
     expect(readHashes(directory)).toEqual({ version: 1, locales: {} });
+  });
+});
+
+describe("--record-hashes in a git checkout", () => {
+  const catalog = (value) => `${JSON.stringify(value, null, 2)}\n`;
+  function repository() {
+    const directory = temporaryDirectory();
+    const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" }).trim();
+    git("init", "--quiet");
+    git("config", "user.name", "Locale fixture");
+    git("config", "user.email", "locale@example.invalid");
+    git("config", "commit.gpgsign", "false");
+    const commit = (files, message) => {
+      for (const [name, value] of Object.entries(files)) writeFileSync(join(directory, name), catalog(value));
+      git("add", "--all");
+      git("commit", "--quiet", "-m", message);
+    };
+    return { directory, git, commit };
+  }
+  const record = (directory) => {
+    const lines = [];
+    const error = vi.spyOn(console, "error").mockImplementation((line) => lines.push(line));
+    try {
+      recordSourceHashes(directory);
+    } finally {
+      error.mockRestore();
+    }
+    return lines;
+  };
+  const check = (directory) => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      checkCatalogs(directory);
+      return "";
+    } catch (error) {
+      return error.message;
+    } finally {
+      log.mockRestore();
+    }
+  };
+  const hashesOf = (directory, code) =>
+    JSON.parse(readFileSync(join(directory, "source-hashes.json"), "utf8")).locales[code];
+
+  it("hashes the English a translation was written against, so English changed since then is stale", () => {
+    const { directory, commit } = repository();
+    commit({
+      "en.json": { kept: "Kept", reworded: "Old wording" },
+      "de.json": { kept: "Behalten", reworded: "Alter Wortlaut" },
+      "source-hashes.json": { version: 1, locales: {} },
+    }, "translate both keys");
+    commit({ "en.json": { kept: "Kept", reworded: "New wording" } }, "reword the English only");
+
+    const lines = record(directory);
+
+    expect(hashesOf(directory, "de")).toEqual({ kept: sourceHash("Kept"), reworded: sourceHash("Old wording") });
+    expect(lines).toContain("de.json: reworded: translated before its English changed; refresh it (pnpm i18n:check fails until then)");
+    expect(check(directory)).toBe(
+      "de.json: reworded: English source changed; refresh the translation or remove it for English fallback",
+    );
+  });
+
+  it("follows a value past a commit that only added a comma after it", () => {
+    const { directory, commit } = repository();
+    commit({
+      "en.json": { reworded: "Old wording" },
+      "de.json": { reworded: "Alter Wortlaut" },
+      "source-hashes.json": { version: 1, locales: {} },
+    }, "translate");
+    commit({ "en.json": { reworded: "New wording" } }, "reword the English only");
+    commit({
+      "en.json": { reworded: "New wording", added: "Added" },
+      "de.json": { reworded: "Alter Wortlaut", added: "Hinzugefügt" },
+    }, "append a key after it");
+
+    record(directory);
+
+    expect(hashesOf(directory, "de")).toEqual({ reworded: sourceHash("Old wording"), added: sourceHash("Added") });
+    expect(check(directory)).toContain("de.json: reworded: English source changed");
+    expect(check(directory)).not.toContain("added");
+  });
+
+  it("falls back to today's English, and says so, when the clone is shallow", () => {
+    const { directory: origin, commit } = repository();
+    commit({
+      "en.json": { reworded: "Old wording" },
+      "de.json": { reworded: "Alter Wortlaut" },
+      "source-hashes.json": { version: 1, locales: {} },
+    }, "translate");
+    commit({ "en.json": { reworded: "New wording" } }, "reword the English only");
+    const directory = join(temporaryDirectory(), "clone");
+    execFileSync("git", ["clone", "--quiet", "--depth", "1", pathToFileURL(origin).href, directory]);
+
+    const lines = record(directory);
+
+    expect(hashesOf(directory, "de")).toEqual({ reworded: sourceHash("New wording") });
+    expect(lines).toContain("de.json: hashed today's English for 1 translations because the clone's history is shallow");
   });
 });

@@ -30,13 +30,16 @@ English each translation was made from. A pull request does not edit it:
 - a key whose recorded hash no longer matches today's English fails the check.
 
 The release bump (`prepare-release.yml`) runs
-`node scripts/generate-locale.mjs --record-hashes`, which records the hash of
-every translated key that has none and drops the hashes of removed keys and
-languages, and commits the file with the bump. It never replaces an existing
-hash, so a stale translation stays stale until it is refreshed and accepted.
-The check cannot see an English change to a key translated since the last
-release, because that key has no hash yet; review English edits to recently
-added keys with their translations in mind.
+`node scripts/generate-locale.mjs --record-hashes` and commits the file with
+the bump. For every translated key without a hash it records the hash of the
+English the translation was written against: `git blame` finds the commit that
+last changed the translated value, and the hash is of `en.json`'s text for
+that key in that commit. If the English changed since, the key is recorded
+stale, the script names it, and `pnpm i18n:check` fails in the bump PR until
+the translation is refreshed. Without that history (no git, a shallow clone,
+or a key `en.json` did not have in that commit) it hashes today's English and
+prints a line saying so. It also drops the hashes of removed keys and
+languages, and it never replaces an existing hash.
 
 ## Optional model-assisted draft
 
