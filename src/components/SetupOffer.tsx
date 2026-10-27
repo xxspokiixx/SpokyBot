@@ -94,7 +94,7 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
 
   return (
     <section data-setup-card={message.id} aria-label={title} aria-busy={busy || pending || undefined} onKeyDown={settled || pending ? undefined : byLetter}
-      className="w-full max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-[20px] bg-card px-2 pb-2 pt-3">
+      className="w-full max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-[24px] bg-composer px-2 pb-2 pt-3 ring-[0.5px] ring-ink/10">
       <div className="flex items-start justify-between gap-2 ps-3 pe-1">
         <h3 dir="auto" className="py-px text-[16px] font-semibold leading-[22px] text-ink-secondary">{title}</h3>
         {!settled && <button type="button" onClick={close} aria-label={t("common.close")} title={t("common.close")}
