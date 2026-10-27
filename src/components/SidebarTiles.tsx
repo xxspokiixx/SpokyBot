@@ -35,7 +35,6 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
   const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";
   const label = [bot.name, bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : "", onLiveCall ? t("call.live.badge") : "", status, unread ? t("task.unread") : ""].filter(Boolean).join(" · ");
   const reorder = pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId });
-  const avatar = primary ? 56 : 48;
   const open = () => openBot(dispatch, bot, showThreads);
   const rename = (name: string) => {
     if (!remoteClient) return dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
@@ -74,8 +73,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
       onKeyDown={onKeyDown}
       onContextMenu={(event) => openBotContextMenu(onMenu, bot.id, event)}
       className={cn(
-        "flex shrink-0 cursor-default flex-col items-center rounded-[14px] bg-[var(--tile)] pt-2 transition-colors duration-150",
-        primary ? "h-[92px] min-w-[94px] max-w-[120px] px-2" : "h-[84px] w-[84px] px-1.5",
+        "flex h-[92px] w-[78px] shrink-0 cursor-default flex-col items-center rounded-[10px] bg-[var(--tile)] px-1 pt-2 transition-colors duration-150",
         selected ? "[--tile:var(--color-raised)]" : "[--tile:var(--color-panel)] hover:[--tile:color-mix(in_srgb,var(--color-raised)_50%,var(--color-panel))]",
         pinnedCircleDragClass({ drag, dragging, drop }),
       )}
@@ -84,12 +82,12 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
         <BotAvatar
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
-          size={avatar}
+          size={56}
           motion={mascotMotion?.kind ?? "none"}
           motionKey={mascotMotion?.nonce ?? 0}
           animated={working || unread || (mascotMotion?.kind ?? "none") !== "none"}
         />
-        {bot.chiefOfStaff && (
+        {primary && bot.chiefOfStaff && (
           <span data-testid="chief-badge" className={cn("absolute -bottom-px -right-px flex size-4 items-center justify-center rounded-full bg-accent", RING)}>
             <Crown size={10} strokeWidth={1.5} fill="currentColor" aria-hidden="true" />
           </span>
@@ -118,8 +116,8 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
           title={tooltip}
           onCommit={rename}
           onEditingChange={setRenaming}
-          className="min-w-0 truncate text-center text-[13px] leading-4 text-ink"
-          inputClassName="w-full rounded bg-inset px-1 text-center text-[13px] leading-4"
+          className="min-w-0 truncate text-center text-[13px] font-medium leading-4 text-ink"
+          inputClassName="w-full rounded bg-inset px-1 text-center text-[13px] font-medium leading-4"
         />
       </span>
     </div>
@@ -130,13 +128,9 @@ export function SidebarTileGrid({ primary, pinned, row }: { primary: Bot | null;
   const order = usePinnedCircleDrag(pinned);
   if (!primary && order.ranked.length === 0) return null;
   return (
-    <div data-sidebar-tiles="" className="flex flex-col items-center gap-1 pb-4 pt-2.5">
+    <div data-sidebar-tiles="" className="flex flex-wrap justify-center gap-1 pb-4 pt-2.5" {...order.frameProps}>
       {primary && <SidebarBotTile {...row(primary)} primary />}
-      {order.ranked.length > 0 && (
-        <div data-sidebar-pinned-tiles="" className="flex w-full flex-wrap justify-center gap-0.5" {...order.frameProps}>
-          {order.ranked.map((bot) => <SidebarBotTile key={bot.id} {...row(bot)} {...order.dragProps(bot)} />)}
-        </div>
-      )}
+      {order.ranked.map((bot) => <SidebarBotTile key={bot.id} {...row(bot)} {...order.dragProps(bot)} />)}
       <span role="status" className="sr-only">{order.moved}</span>
     </div>
   );
