@@ -67,13 +67,13 @@ export function reconcileLent({ shared, folders, plan, sameFolder, now, newKey =
 }
 
 /** What My Cloud is told: this computer's lent folders, each with its copy there, or why it has none. */
-export function lentReport({ computerId, lendingId, name, platform, folders, plan, shared }) {
+export function lentReport({ computerId, lendingId, name, platform, folders, plan, shared, git = new Map() }) {
   return {
     computerId, lendingId, name: String(name).slice(0, 120) || "Computer", ...(["darwin", "win32", "linux"].includes(platform) ? { platform } : {}),
     folders: folders.slice(0, 20).map((folder) => {
       const entry = shared.find((candidate) => candidate.lentId === folder.id);
       const live = plan.get(folder.id)?.copy === false ? plan.get(folder.id).live : null;
-      return { id: folder.id, name: String(folder.name).slice(0, 120) || "Folder", write: folder.write === true, syncId: entry?.id ?? null, ...(live ? { live } : {}) };
+      return { id: folder.id, name: String(folder.name).slice(0, 120) || "Folder", write: folder.write === true, syncId: entry?.id ?? null, ...(live ? { live } : {}), ...(git.get(folder.id) ? { git: git.get(folder.id) } : {}) };
     }),
   };
 }

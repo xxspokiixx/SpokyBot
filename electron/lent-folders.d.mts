@@ -15,7 +15,8 @@ export declare function reconcileLent<Entry extends { lentId?: string; pcPath: s
 }): { shared: Entry[]; dropped: Entry[] };
 export declare function lentReport(input: {
   computerId: string; lendingId: string; name: string; platform: string; folders: LentFolder[]; plan: LentPlan; shared: Array<{ lentId?: string; id: string | null }>;
-}): { computerId: string; lendingId: string; name: string; platform?: string; folders: Array<{ id: string; name: string; write: boolean; syncId: string | null; live?: string }> };
+  git?: Map<string, { repo: string; branch: string | null; head: string | null }>;
+}): { computerId: string; lendingId: string; name: string; platform?: string; folders: Array<{ id: string; name: string; write: boolean; syncId: string | null; live?: string; git?: { repo: string; branch: string | null; head: string | null } }> };
 /** Lending to My Cloud as Files sees it: main's environment, its computer-sharing controller and its folder check. */
 export declare function lendingForFiles(parts: {
   environment: () => unknown;

@@ -33,6 +33,16 @@ Nothing new. Lending a folder is what it was; the copy happens behind it. There 
 - **Lending stops** (the switch off, or the folder no longer lent): its copy goes to My Cloud's trash, as Stop sharing does.
 - **A Cloud from before lent copies** (its `GET /api/sync` has no `lentCopies: true`) gets no copies of lent folders: there they would sit where every bot reads them, so lending stays live only until that Cloud is updated.
 
+## Git repositories
+
+`electron/lent-git.mjs` (which lent folders are GitHub repositories), `server/lent-clone.ts` (the clone).
+
+- **A lent folder that is a GitHub repository** (its own `.git` folder, with an `origin` on github.com) says so to My Cloud: its `owner/name`, branch and commit, read from `.git`'s own files. A user name or token in the remote is never sent.
+- **Its copy starts as a clone.** When My Cloud registers a new copy of one, it clones `https://github.com/<owner>/<name>.git` there in the background, history without file contents (`--filter=blob:none`), at the computer's commit on its branch; a commit GitHub doesn't have yet falls back to the branch as GitHub has it. git there never asks for a sign-in: it uses whatever git on My Cloud already signs in with (a public repository needs none), with no hooks. Until it is done, the desktop leaves that copy alone (`cloning`); then Files sends only what differs on the computer: changes not pushed yet, and files git ignores that Files carries, such as `.env`. The size and room rules are the same as for any lent folder.
+- **No clone** (a private repository My Cloud can't sign in to, no network, a copy Files had started meanwhile): the copy is Files' as for any other folder, and the clone is tried again a day later for a copy still empty. A Cloud restarted mid-clone hands it to Files.
+- **Bots return code work as branches and pull requests.** While the computer is away, `list_shared_computers` shows such a folder with `github` and `branch`, and bots are told to return code changes as a new branch and a pull request with their GitHub tools (a connected GitHub app) when they have them, not as writes to the folder. Without GitHub tools, a write waits for the computer like any other.
+- The person chooses nothing: there is no move, list of files to tick or sign-in step.
+
 ## Folders the Files page shared before
 
 Folders shared from the Files page before lent folders keep working. Once lending to My Cloud is on, each joins what is lent, read only, and keeps its copy and its records: nothing is sent again, and nobody redoes anything. From then on it is a lent folder like any other, so turning lending off takes it back too. Until lending is on, it stays a copy as before. Its copy stays in `/data/Synced`, where bots read it as before.

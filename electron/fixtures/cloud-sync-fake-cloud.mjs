@@ -17,14 +17,16 @@ export function fakeCloud({ freeBytes = 100 * GB } = {}) {
   const files = (id) => folders.get(id).files;
   const info = (path, bytes) => ({ path, size: bytes.length, mtimeMs: 1, sha256: sha(bytes) });
   const client = {
-    summary: async () => ({ ...(state.lentCopies ? { lentCopies: true } : {}), folders: [...folders.values()].map((entry) => (entry.folder.kind === "pc" ? { ...entry.folder, staged: lent.staged.filter((change) => change.syncId === entry.folder.id).length } : entry.folder)), cursor: 1, disk: { totalBytes: 10 * GB, freeBytes: state.freeBytes, syncedBytes: 0, botFileBytes: 0, trashBytes: 0, reserveBytes: GB } }),
+    summary: async () => ({ ...(state.lentCopies ? { lentCopies: true } : {}), folders: [...folders.values()].map((entry) => (entry.folder.kind === "pc" ? { ...entry.folder, staged: lent.staged.filter((change) => change.syncId === entry.folder.id).length, ...(entry.cloning ? { cloning: true } : {}) } : entry.folder)), cursor: 1, disk: { totalBytes: 10 * GB, freeBytes: state.freeBytes, syncedBytes: 0, botFileBytes: 0, trashBytes: 0, reserveBytes: GB } }),
     register: async (input) => {
       calls.push(["register", input.pcPath]);
       const existing = [...folders.values()].find((entry) => entry.folder.pcPath === input.pcPath && entry.folder.computerId === input.computerId);
       if (existing) return existing.folder;
       const folder = { id: `pc-${++ids}`, kind: "pc", computerId: input.computerId, computerName: input.computerName, pcPath: input.pcPath, cloudPath: `/data/Synced/PC/${input.name}` };
-      folders.set(folder.id, { folder, files: new Map() });
-      return folder;
+      // Like My Cloud with git that can reach the repository: a lent GitHub repository's copy starts as a clone.
+      const cloning = Boolean(state.clones && input.lent && input.git);
+      folders.set(folder.id, { folder, files: new Map(), cloning, git: input.git ?? null });
+      return cloning ? { ...folder, cloning: true } : folder;
     },
     unregister: async (id, keep) => { calls.push(["unregister", id, keep]); folders.delete(id); },
     files: async (id) => {
@@ -88,6 +90,8 @@ export function fakeCloud({ freeBytes = 100 * GB } = {}) {
     get(folderId, path) { return files(folderId).get(path)?.toString(); },
     setBots(value) { bots = value; },
     lent,
+    /** The clone landed: these files are in the copy now. */
+    cloned(folderId, files) { const entry = folders.get(folderId); entry.cloning = false; for (const [path, text] of Object.entries(files)) entry.files.set(path, Buffer.from(text)); },
     /** A bot's change while the computer was away: `base` is the sha256 it was read at, null for a new file. */
     stage(syncId, path, text, base = null) { const change = { id: `change-${++ids}`, syncId, path, bytes: Buffer.from(text), base }; lent.staged.push(change); return change; },
   };

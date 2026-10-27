@@ -13,6 +13,7 @@ import { openSyncState } from "./cloud-sync-state.mjs";
 import { watchFolder } from "./cloud-sync-scan.mjs";
 import { RECHECK_MS, copiedLent, lentReport, planLentCopies, reconcileLent } from "./lent-folders.mjs";
 import { applyStaged } from "./lent-staged.mjs";
+import { lentGit } from "./lent-git.mjs";
 
 const FULL_PASS_MS = 5 * 60_000;
 const LONG_POLL_MS = 60_000;
@@ -201,16 +202,24 @@ export function createCloudFilesService({
       const summary = await cloud.summary();
       const lent = await reconcileLending(cloud, summary);
       const listed = new Set(summary.folders.map((folder) => folder.id));
+      const cloning = new Set();
       for (const folder of settings.shared) {
         if (only && folder.id && !only.has(folder.id)) continue;
         try {
           if (!folder.id || !listed.has(folder.id)) {
-            const registered = await cloud.register({ computerId: settings.computerId, computerName: hostname, pcPath: folder.pcPath, name: folder.name, ...(folder.lentId ? { lent: true } : {}) });
+            const git = folder.lentId ? lent?.git.get(folder.lentId) : null;
+            const registered = await cloud.register({ computerId: settings.computerId, computerName: hostname, pcPath: folder.pcPath, name: folder.name, ...(folder.lentId ? { lent: true } : {}), ...(git ? { git } : {}) });
             if (registered.id !== folder.id) state.dropFolder(folder.id ?? folder.key);
             update(folder.key, { id: registered.id });
+            if (registered.cloning) cloning.add(registered.id);
           }
           const current = sharedBy(folder.key);
           if (!current) continue;
+          // A GitHub repository's copy starts as My Cloud's own clone: Files sends only what differs, once it is there.
+          if (cloning.has(current.id) || summary.folders.find((entry) => entry.id === current.id)?.cloning) {
+            results.set(folder.key, { status: "copying", files: 0, done: 0, waitingBytes: 0, pendingDeletes: 0, problem: null });
+            continue;
+          }
           const approveDeletes = current.deletes === "remove" ? true : current.deletes === "keep" ? false : null;
           // Bots' changes from while this computer was away land first, so this pass carries them up to the copy.
           const lentFolder = current.lentId ? lent?.folders.find((entry) => entry.id === current.lentId) : null;
@@ -255,7 +264,7 @@ export function createCloudFilesService({
           outputsProblem = String(error?.message ?? error);
         }
       }
-      if (lent) await cloud.lent(lentReport({ computerId: settings.computerId, lendingId: lent.lendingId, name: hostname, platform, folders: lent.folders, plan: lent.plan, shared: settings.shared }))
+      if (lent) await cloud.lent(lentReport({ computerId: settings.computerId, lendingId: lent.lendingId, name: hostname, platform, folders: lent.folders, plan: lent.plan, shared: settings.shared, git: lent.git }))
         .catch(noted("saying what is lent"));
       watchShared();
       const disk = summary.disk;
@@ -315,7 +324,9 @@ export function createCloudFilesService({
     }
     save({ ...settings, shared, unregister: [...(settings.unregister ?? []), ...dropped.filter((entry) => entry.id).map((entry) => entry.id)] });
     if (dropped.length) await unregisterDropped(cloud);
-    return { ...lendingNow, folders, plan };
+    // GitHub repositories among the copied ones: My Cloud clones them, and bots return code work as pull requests.
+    const git = new Map(folders.filter((folder) => plan.get(folder.id)?.copy).map((folder) => [folder.id, lentGit(folder.path)]).filter(([, found]) => found));
+    return { ...lendingNow, folders, plan, git };
   }
 
   async function pollLoop(signal) {

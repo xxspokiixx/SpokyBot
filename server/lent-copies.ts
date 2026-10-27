@@ -13,6 +13,7 @@ import { SyncError } from "./cloud-sync.ts";
 import { SyncPathError, insideFolder } from "./cloud-sync-paths.ts";
 import { readFolders } from "./cloud-sync-store.ts";
 import { LENT_PLATFORMS, deviceWord } from "./lent-computers.ts";
+import { lentGit } from "./lent-clone.ts";
 
 /** The same limits as a live read and write (electron/shared-computer-access.mjs). */
 const READ_LIMIT = 2 * 1024 * 1024;
@@ -32,6 +33,8 @@ const lentFolder = z.object({
   id: z.string().uuid(), name: z.string().min(1).max(120), write: z.boolean(),
   /** Its copy here (a Files folder id), or null: kept only on the computer ("too-big" for the copy, "refused" by Files' rules). */
   syncId: z.string().regex(SYNC_ID).nullable(), live: z.enum(["too-big", "refused"]).optional(),
+  /** A GitHub repository: bots return code work as a branch and a pull request. */
+  git: lentGit.optional(),
 }).strict();
 export const lentReport = z.object({
   computerId: z.string().uuid(), lendingId: z.string().uuid(), name: z.string().min(1).max(120),
@@ -233,11 +236,12 @@ export function createLentCopies(options: { dataDir: string; now?: () => number 
         computer_id: computer.lendingId, name: computer.name, device: deviceWord(computer.platform), away: true,
         folders: computer.folders.map((folder) => {
           const waiting = folder.syncId ? state.staged.filter((entry) => entry.syncId === folder.syncId).length : 0;
-          return { folder_id: folder.id, name: folder.name, write: folder.write, copy: folder.syncId ? copyAge(state.synced[folder.syncId], at) : null, ...(waiting ? { changes_waiting: waiting } : {}) };
+          return { folder_id: folder.id, name: folder.name, write: folder.write, copy: folder.syncId ? copyAge(state.synced[folder.syncId], at) : null, ...(waiting ? { changes_waiting: waiting } : {}),
+            ...(folder.git ? { github: folder.git.repo, ...(folder.git.branch ? { branch: folder.git.branch } : {}) } : {}) };
         }),
       }));
       const device = deviceWord(away[0]!.platform);
-      return { away_computers, say: `Their ${device} ${away[0]!.name} is away, but the folders it lends still work from the Cloud's copy: list and read them with shared_computer as usual, with the computer_id and folder_id in away_computers (each answer says how fresh it is, like "from 2 h ago"). A change to a folder lent with editing is saved on the Cloud and reaches the ${device} when it's on: say so in a few words. A folder whose copy is null is only on the ${device}. Apps and screen and the terminal need the ${device} on.` };
+      return { away_computers, say: `Their ${device} ${away[0]!.name} is away, but the folders it lends still work from the Cloud's copy: list and read them with shared_computer as usual, with the computer_id and folder_id in away_computers (each answer says how fresh it is, like "from 2 h ago"). A change to a folder lent with editing is saved on the Cloud and reaches the ${device} when it's on: say so in a few words. A folder whose copy is null is only on the ${device}.${away.some((computer) => computer.folders.some((folder) => folder.git)) ? " A folder with github is that GitHub repository: return code changes there as a new branch and a pull request with your GitHub tools when you have them, not as writes to the folder." : ""} Apps and screen and the terminal need the ${device} on.` };
     },
     /** A folder action for a computer that is away, answered from its copy; null when there is no copy to answer from. */
     answer(operation: Operation, principal: string | null, online: ReadonlyArray<{ id: string; name: string }> = []): Promise<Result> | null {
