@@ -67,7 +67,6 @@ import { NewConversationInstead } from "./NewConversationInstead";
 import { VerifyCard } from "./VerifyCard";
 import { askText, runSkill, runSteps, runSummary, showRun, skillPrompt } from "@/lib/verify-steps";
 import { useShowRunCard } from "@/lib/run-card-preferences";
-import { sendsMessage, useSendKey } from "@/lib/send-key";
 import { useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { userBubbleStyle } from "@/lib/user-bubble-tone";
 import { ToolActivity } from "./ToolActivity";
@@ -104,11 +103,12 @@ import { effectivePlace, toolPlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
-import { groupActivityRuns, groupTranscript, isStatusActivity } from "@/lib/activity-runs";
+import { groupTranscript, isStatusActivity } from "@/lib/activity-runs";
 import { StatusActivityRow } from "@/components/StatusActivityRow";
 import { CancelledTurnRow } from "./CancelledTurnRow";
 import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
+import { BubbleEditor } from "./BubbleEditor";
 import { webhookMessageView } from "@/lib/webhook-message";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useComposerDockPad } from "@/lib/composer-dock";
@@ -130,7 +130,7 @@ import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/trans
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { JumpToLatestButton } from "./JumpToLatestButton";
-import { bubbleGroup, bubbleJoins, isBotTextRow, joinedCorners, quietRow, SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_ROW_GAP, SIMPLE_STACKED, SIMPLE_USER_BUBBLE, type BubbleJoin } from "./chat-bubble";
+import { bubbleGroup, bubbleJoins, isBotTextRow, joinedCorners, quietRow, SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_STACKED, SIMPLE_USER_BUBBLE, type BubbleJoin } from "./chat-bubble";
 
 const USER_COLLAPSE_CHARS = 600;
 const USER_COLLAPSE_LINES = 8;
@@ -307,65 +307,6 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
 }
 
 export { MessageBoundary };
-
-function BubbleEditor({
-  initial,
-  onCancel,
-  onSubmit,
-  bubbleStyle,
-}: {
-  initial: string;
-  onCancel: () => void;
-  onSubmit: (text: string) => void;
-  bubbleStyle?: ReturnType<typeof userBubbleStyle>;
-}) {
-  const [draft, setDraft] = useState(initial);
-  const sendKey = useSendKey();
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-  }, []);
-  const submit = () => {
-    if (draft.trim()) onSubmit(draft.trim());
-  };
-  return (
-    <div className={cn("w-full max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl border border-hairline/40 bg-bubble-user px-4 py-3", bubbleStyle && "user-bubble-colored")} style={bubbleStyle}>
-      <textarea
-        ref={ref}
-        dir="auto"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (sendsMessage(e.nativeEvent, sendKey)) {
-            e.preventDefault();
-            submit();
-          }
-          if (e.key === "Escape") onCancel();
-        }}
-        rows={Math.min(10, Math.max(2, draft.split("\n").length))}
-        className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-ink focus:outline-none"
-      />
-      <div className="mt-2 flex items-center justify-end gap-2">
-        <button
-          onClick={onCancel}
-          className="rounded-full px-3 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
-        >
-          {t("common.cancel")}
-        </button>
-        <button
-          onClick={submit}
-          disabled={!draft.trim()}
-          className="rounded-full bg-accent px-3 py-1 text-[13px] font-medium text-white disabled:opacity-40"
-        >
-          {t("chat.send")}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 /** Simple mode keeps a message's Reply and Copy in its "…" menu, beside the one reaction button. */
 function replyAndCopy(onReply: () => void, text: string): MessageMenuItem[] {
@@ -741,8 +682,8 @@ const MessagesList = memo(function MessagesList({
   onReply: (message: Message) => void;
 }) {
   const { botId, threadId, botName, busy, hasMore, focus, showToolCalls, locale, simple = false } = useChatRows();
-  // Simple mode keeps a turn's progress messages in place as plain bubbles; Advanced folds them under "Worked for".
-  const items = useMemo(() => simple ? groupActivityRuns(messages) : groupTranscript(messages), [messages, locale, simple]);
+  // A finished turn keeps the bot's progress lines and folds only its tool steps under "Worked for", in both modes.
+  const items = useMemo(() => groupTranscript(messages), [messages, locale]);
   const newestMessageId = messages.at(-1)?.id;
   let newestUserMessageId: string | undefined;
   for (let i = messages.length - 1; i >= 0 && !newestUserMessageId; i--) {
@@ -759,7 +700,7 @@ const MessagesList = memo(function MessagesList({
       const previous = items[i - 1];
       const prev = previous && rowsOf(previous).at(-1);
       const breakBefore = !prev || localDay(prev.at) !== localDay(rowsOf(item)[0]!.at) || i === dividerAt;
-      if (item.kind !== "message") return { group: null, hidden: item.kind === "run" && !showToolCalls, breakBefore, breakAfter: false };
+      if (item.kind !== "message") return { group: null, hidden: !showToolCalls, breakBefore, breakAfter: false };
       const m = item.message;
       const group = isCancelledTranscriptRow(m) ? null : bubbleGroup(m, botId);
       const hidden = !group && (quietRow(m, showToolCalls) || (m.role === "bot" && m.kind === "text" && !m.publishedPage && !peerRequest(m, botId) && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length));
@@ -1234,7 +1175,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       >
         <div
           ref={transcriptRef}
-          className={cn("glass-scroller-content chat-column relative flex w-full flex-col", advanced ? "gap-3" : SIMPLE_ROW_GAP)}
+          // Simple mode spaces groups 16px apart, Advanced 12px.
+          data-simple-rows={advanced ? undefined : ""}
+          className="glass-scroller-content chat-column relative flex w-full flex-col gap-3 data-[simple-rows]:gap-4"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
           // off: a polite log re-reads every tick and chip while the bot works; TranscriptAnnouncer speaks once when

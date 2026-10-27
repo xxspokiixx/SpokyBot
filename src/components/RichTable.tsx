@@ -95,7 +95,7 @@ export function PlainTable({ columns, rows, name = t("table.title"), direction =
           </tbody>
         </table>
       </div>
-      <div className="absolute -right-1.5 -top-1.5 flex items-center gap-0.5 rounded-full bg-composer p-0.5 opacity-0 shadow-[0_1px_3px_rgb(0_0_0/0.18)] ring-1 ring-composer-ring transition-opacity focus-within:opacity-100 group-hover/table:opacity-100 [@media(hover:none)]:opacity-100">
+      <div className="absolute -right-1.5 -top-1.5 flex items-center gap-0.5 rounded-full bg-composer p-0.5 opacity-0 shadow-[0_1px_3px_rgb(0_0_0/0.18)] ring-1 ring-composer-ring transition-opacity focus-within:opacity-100 group-hover/table:opacity-100 touch:opacity-100">
         <button type="button" className="table-action !min-h-6 !min-w-6 !rounded-full" aria-label={t("table.copyPlain")} title={t("table.copyPlain")} onClick={() => void copy()}>
           {copyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
         </button>
