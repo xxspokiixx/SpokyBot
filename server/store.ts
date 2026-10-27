@@ -319,6 +319,7 @@ export class Store {
   private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
   private driverKindOf: (instanceId: string) => string | undefined;
   private initialLanguage: string | (() => string);
+  private personName: () => string | undefined;
   private listeners = new Set<(change: StoreChange) => void>();
   private registeringInitialSections = true;
   /** Clearing this slot must not clear a concurrently running task's activity. */
@@ -330,11 +331,15 @@ export class Store {
     /** Unknown counts as another driver, so Full and Custom fall back to Ask. */
     driverKindOf: (instanceId: string) => string | undefined = () => undefined,
     initialLanguage: string | (() => string) = Intl.DateTimeFormat().resolvedOptions().locale,
+    /** The person a new bot's greeting names, read as each bot is created; undefined where no one person owns the
+     * server. */
+    personName: () => string | undefined = () => undefined,
   ) {
     this.defaultSelection = defaultSelection;
     this.completeNewBotSelection = completeNewBotSelection;
     this.driverKindOf = driverKindOf;
     this.initialLanguage = initialLanguage;
+    this.personName = personName;
     mkdirSync(DATA_DIR, { recursive: true });
     for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     // An unreadable bots.json must never read as "every member was deleted".
@@ -1389,7 +1394,7 @@ export class Store {
     // Before its transcript: clients need the bot/thread mapping to place either message.
     this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
-      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim()));
+      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()));
     }
     return bot;
   }

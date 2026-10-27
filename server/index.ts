@@ -390,10 +390,10 @@ import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillR
 import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
-import { pickBotName } from "./names.ts";
+import { isPickedBotName, pickBotName } from "./names.ts"; import { appLabel } from "./app-event-catalog.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
-import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
+import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { aboutMeExcerpt, createSetupSuggestions, type SuggestionApps, type SuggestionBasis } from "./setup-suggestions.ts"; import { createSetupRequestRoutes, type SetupPickSent } from "./routes/setup-request.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
@@ -2901,6 +2901,7 @@ const store = new Store(
   (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels),
   (instanceId) => registry.cliTarget(instanceId)?.driverKind,
   () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
+  () => sharedMembership() ? undefined : cfg.profile?.name,
 );
 const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusal, cloudThreadStarters, cloudLendingView, cloudReportFromOthers, roomTurnStarted, roomTurnEnded } = createCloudLendingTurns({
   store, cloudHome: CLOUD_HOME !== null, directRequest: (threadId) => directRequestOwners.get(threadId), threadStarter: (threadId) => threadStarters.get(threadId),
@@ -5256,6 +5257,63 @@ const sideJobs = createSideJobs({
   log: (line) => console.log(line),
 });
 
+/** The connected apps, read at most every ten minutes; a setup card waits for a read on its way for at most 700 ms. */
+let setupApps: { key: string; at: number; slugs: string[] } | null = null;
+let setupAppsReading: Promise<string[]> | null = null;
+function setupAppSlugs(): { known: string[] } | { known: string[]; later: Promise<string[]> } {
+  const key = composio.connectionMode(cfg);
+  if (setupApps && setupApps.key === key && Date.now() - setupApps.at < 10 * 60_000) return { known: setupApps.slugs };
+  setupAppsReading ??= composio.connectedServices(cfg)
+    .then((services) => {
+      const slugs = Object.entries(services).filter(([, state]) => state.connected).map(([slug]) => slug).sort();
+      setupApps = { key, at: Date.now(), slugs };
+      return slugs;
+    })
+    .catch(() => [] as string[])
+    .finally(() => { setupAppsReading = null; });
+  return { known: [], later: setupAppsReading };
+}
+
+/** What a new bot's setup card is written from. On a shared place, never the profile's About me or other people's
+ * bots: the card can reach other members. Never names, email addresses or anything the person wrote in a chat. */
+function setupSuggestionBasis(bot: BotRecord): SuggestionBasis {
+  const shared = sharedMembership();
+  const languageCode = appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale;
+  let language = "English";
+  try { language = new Intl.DisplayNames(["en"], { type: "language" }).of(languageCode) ?? "English"; } catch { language = "English"; }
+  const aboutMe = shared ? undefined : aboutMeExcerpt(cfg.profile?.aboutMe, redactSecretsInText);
+  const caps = registry.get(bot.modelSelection.instanceId)?.adapter.capabilities;
+  return {
+    ...(isPickedBotName(bot.name) ? {} : { name: bot.name }),
+    ...(bot.title ? { title: bot.title } : {}),
+    ...(bot.section ? { department: bot.section } : {}),
+    ...(aboutMe ? { aboutMe } : {}),
+    otherJobs: shared ? [] : store.bots
+      .filter((other) => other.id !== bot.id && !other.hidden && !other.movedTo && !other.defaultBot && !other.chiefOfStaff)
+      .map((other) => other.title?.trim() || other.description?.split("\n")[0]?.trim() || "").filter(Boolean),
+    language, languageCode,
+    canBrowse: caps?.browserMcp === true && builtInBrowserEnabled(cfg) && bot.browser !== false,
+  };
+}
+
+const setupSuggestions = createSetupSuggestions({
+  store,
+  enabled: () => cfg.features?.smartSetupChoices !== false,
+  canSetUp: (bot) => registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.agentsMcp === true,
+  withinBudget: () => { try { assertWithinBudget(cfg, DATA_DIR); return true; } catch { return false; } },
+  writer: (botId) => sideJobs.text("setup-suggestions", botId),
+  facts: setupSuggestionBasis,
+  apps: (bot): SuggestionApps => {
+    const caps = registry.get(bot.modelSelection.instanceId)?.adapter.capabilities;
+    if (!caps?.composioMcp || bot.composio === false || !composio.configured(cfg)) return null;
+    const allowed = bot.connectorTools ? new Set(Object.keys(bot.connectorTools)) : null;
+    const named = (slugs: readonly string[]) => slugs.filter((slug) => !allowed || allowed.has(slug)).map((slug) => appLabel(slug));
+    const read = setupAppSlugs();
+    return "later" in read ? { known: [], later: read.later.then(named) } : { known: named(read.known) };
+  },
+  log: (line) => console.log(line),
+});
+
 const memoryUpkeep = createMemoryUpkeep({
   bots: () => store.bots,
   bot: (id) => store.bot(teamHost.baseBotId(id)) ?? undefined,
@@ -7575,6 +7633,18 @@ async function acceptDirectSend(
       return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
     },
   );
+}
+
+/** A pick on a new bot's setup card: its words, sent exactly as if the caller had typed them. */
+async function sendSetupPick(auth: RequestAuth, botId: string, threadId: string, text: string): Promise<SetupPickSent> {
+  try {
+    const receipt = await acceptDirectSend({ botId, threadId, text, sender: messageSender(auth), trigger: usageTriggerFor(auth),
+      personPresent: auth.kind === "session" || DESKTOP_MANAGED });
+    return { ok: true, ...("message" in receipt ? { message: receipt.message } : {}) };
+  } catch (error) {
+    if (error instanceof DirectSendRefused) return { ok: false, status: error.status, error: error.message };
+    throw error;
+  }
 }
 
 const personReplies = createPersonReplies({
@@ -12550,6 +12620,7 @@ ROUTES.push(createBotCreateRoutes({
   hostedModels, cloudRoutineAuthors,
   routines: () => routines,
   storedAvatarExists, defaultSelection, checkedModelSelection, cloudOwnerSession, wireBot, team: CLOUD_TEAM && teamOwners.people ? { name: CLOUD_TEAM.name, people: teamOwners.people } : null,
+  personaliseSetupCard: (bot) => setupSuggestions.personalise(bot.id),
 }), createTeamOwnerRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, sees: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId), publicBot,
   profileOf: (email) => teamHost.people.profile(personKey({ id: "", email })) }));
 ROUTES.push(createBotSettingsRoutes({
@@ -12607,7 +12678,7 @@ ROUTES.push(createBotMemoryRoutes({
     broadcast({ kind: "config", ...configStatus() });
   },
 }));
-const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin") ? { person: actorKey(auth), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); teamOwners.backfill(teamMoveIn.list()); } ROUTES.push(createDeciderRoutes({ decider, extractor, config: () => cfg }), createTtsRoutes({ config: () => cfg }), createHelperSuggestionRoutes({ notNow: proactive.suggestionNotNow }), createSetupRequestRoutes({ store, language: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, sendRefusal: cloudGuestSendRefusal, presser: (auth) => setupPresser(sharedMembership(), auth, messageSender(auth)), canSetUp: (botId, threadId) => registry.get(store.projectBotForTask(botId, threadId)?.modelSelection.instanceId ?? "")?.adapter.capabilities.agentsMcp === true }), createNotificationRoutes(undefined, threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), automations: { routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager }, connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(teamOwners.asks ? { asks: teamOwners.asks, messages: teamMessages.needsYou } : {}), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }));
+const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin") ? { person: actorKey(auth), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); teamOwners.backfill(teamMoveIn.list()); } ROUTES.push(createDeciderRoutes({ decider, extractor, config: () => cfg }), createTtsRoutes({ config: () => cfg }), createHelperSuggestionRoutes({ notNow: proactive.suggestionNotNow }), createSetupRequestRoutes({ store, language: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, sendRefusal: cloudGuestSendRefusal, presser: (auth) => setupPresser(sharedMembership(), auth, messageSender(auth)), canSetUp: (botId, threadId) => registry.get(store.projectBotForTask(botId, threadId)?.modelSelection.instanceId ?? "")?.adapter.capabilities.agentsMcp === true, send: sendSetupPick }), createNotificationRoutes(undefined, threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), automations: { routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager }, connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(teamOwners.asks ? { asks: teamOwners.asks, messages: teamMessages.needsYou } : {}), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }));
 if (CLOUD_TEAM) teamHost.adoptServerProfile(sessions.list().flatMap((session) => session.email ? [session.email] : []));
 ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot }), createPresenceRoutes({ isOwner: ownerOrAdmin, active: (source, zone, language) => proactive.brief.active(source, zone, language), ...(teamOwners.presence ? { member: teamOwners.presence } : {}) }), createMeRoutes({ team: CLOUD_TEAM, session: (auth) => (auth.kind === "session" ? auth.session : null), profile: teamHost.memberProfile, save: teamHost.saveMemberProfile, seed: teamHost.seedMemberProfile, seeded: teamHost.seededFields, changed: () => broadcast({ kind: "config", ...configStatus() }) }), createTeamPhoneRoutes({ team: CLOUD_TEAM, sessions, publicBase: (req, auth) => publicUrl() ?? (auth.kind === "session" ? requestOrigin(req) : null) }),
   createTeamConnectionRoutes({ host: teamConnections, cfg: () => cfg, composio, publicOrigin: CLOUD_HOME?.publicOrigin ?? null, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), createSignInCardRoutes({ settle: settleSignIn, saveLogin: (botId, threadId, messageId, body, auth) => CLOUD_TEAM && !auth.scopes.includes("admin") ? Promise.resolve({ status: 403 as const, body: { error: memberLoginRefusal(CLOUD_TEAM) } }) : saveLoginFromCard(botId, threadId, messageId, body), saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));

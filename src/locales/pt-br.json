@@ -6142,5 +6142,13 @@
   "voice.yourVoices": "Suas vozes",
   "voice.library": "Biblioteca de vozes do ElevenLabs",
   "voice.libraryHint": "Ao escolher uma, ela é adicionada às suas vozes.",
-  "voice.adding": "Adicionando…"
+  "voice.adding": "Adicionando…",
+  "chat.setupCard.title": "Com o que eu te ajudo primeiro?",
+  "chat.setupCard.other": "Outra coisa",
+  "chat.setupCard.answer": "Sua resposta",
+  "chat.setupCard.research": "Pesquisar e aprofundar temas",
+  "chat.setupCard.watch": "Ficar de olho nas coisas para mim",
+  "chat.setupCard.inbox": "E-mail, agenda e mensagens",
+  "chat.setupCard.errands": "Reservas, compras e tarefas",
+  "chat.setupCard.data": "Dados, planilhas e relatórios"
 }
