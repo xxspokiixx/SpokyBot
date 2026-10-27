@@ -2,7 +2,12 @@
 // waits for them, for at most 6 s, and is filled once: the answers never change under the person's eyes, so a letter
 // key always picks the job it shows. Without anything to go on, or when no one can write them, the fixed answers
 // (initial-greeting.ts) show at once.
+import { redactSecretsInText } from "../shared/redact.ts";
+import { appLabel } from "./app-event-catalog.ts";
+import type { AppConfig } from "./config.ts";
+import type { ProviderAdapter } from "./contracts.ts";
 import { hasSetupChoices } from "./initial-greeting.ts";
+import { isPickedBotName } from "./names.ts";
 import { LEARNED_LINE } from "./profile-learned.ts";
 import { openSetupOffer, type SetupRequestStore } from "./setup-request.ts";
 import type { SideJobText } from "./side-jobs.ts";
@@ -241,4 +246,79 @@ export function createSetupSuggestions(deps: SetupSuggestionsDeps) {
       }
     },
   };
+}
+
+/** What a bot's card is written from, as this place may send it. On a shared place, never the profile's About me or
+ * other people's bots: the card can reach other members. Never names the server picked, the profile's name, email
+ * addresses or anything the person wrote in a chat. */
+export function suggestionBasis(bot: BotRecord, place: { bots: readonly BotRecord[]; shared: boolean; aboutMe?: string; languageCode: string; canBrowse: boolean }): SuggestionBasis {
+  let language = "English";
+  try { language = new Intl.DisplayNames(["en"], { type: "language" }).of(place.languageCode) ?? "English"; } catch { language = "English"; }
+  const aboutMe = place.shared ? undefined : aboutMeExcerpt(place.aboutMe, redactSecretsInText);
+  return {
+    ...(isPickedBotName(bot.name) ? {} : { name: bot.name }),
+    ...(bot.title ? { title: bot.title } : {}),
+    ...(bot.section ? { department: bot.section } : {}),
+    ...(aboutMe ? { aboutMe } : {}),
+    otherJobs: place.shared ? [] : place.bots
+      .filter((other) => other.id !== bot.id && !other.hidden && !other.movedTo && !other.defaultBot && !other.chiefOfStaff)
+      .map((other) => other.title?.trim() || other.description?.split("\n")[0]?.trim() || "").filter(Boolean),
+    language, languageCode: place.languageCode, canBrowse: place.canBrowse,
+  };
+}
+
+type EngineCapabilities = Partial<Pick<ProviderAdapter["capabilities"], "agentsMcp" | "browserMcp" | "composioMcp">>;
+
+/** The server's side of the card's writer, read as each bot is made. */
+export interface SetupSuggestionsHost extends Pick<SetupSuggestionsDeps, "withinBudget" | "writer" | "log"> {
+  store: SetupRequestStore & { readonly bots: readonly BotRecord[] };
+  config(): Pick<AppConfig, "features" | "profile">;
+  /** Several people share this place. */
+  shared(): boolean;
+  /** The app's language code ("en", "pt-BR"). */
+  languageCode(): string;
+  engine(bot: BotRecord): EngineCapabilities | undefined;
+  /** The built-in browser is on here. */
+  browserOn(): boolean;
+  /** The connected-apps broker: set up or not, the connection it uses, and what is connected. */
+  apps: { configured(): boolean; mode(): string; connected(): Promise<Record<string, { connected: boolean }>> };
+}
+
+const APPS_FRESH_MS = 10 * 60_000;
+
+/** createSetupSuggestions on this server's settings, people and connected apps. The apps are read at most every ten
+ * minutes, and a card waits for a read on its way for at most 700 ms. */
+export function setupSuggestionsFor(host: SetupSuggestionsHost) {
+  let read: { key: string; at: number; slugs: string[] } | null = null;
+  let reading: Promise<string[]> | null = null;
+  const slugs = (): { known: string[] } | { known: string[]; later: Promise<string[]> } => {
+    const key = host.apps.mode();
+    if (read && read.key === key && Date.now() - read.at < APPS_FRESH_MS) return { known: read.slugs };
+    reading ??= host.apps.connected()
+      .then((services) => {
+        const found = Object.entries(services).filter(([, state]) => state.connected).map(([slug]) => slug).sort();
+        read = { key, at: Date.now(), slugs: found };
+        return found;
+      })
+      .catch(() => [] as string[])
+      .finally(() => { reading = null; });
+    return { known: [], later: reading };
+  };
+  return createSetupSuggestions({
+    store: host.store,
+    enabled: () => host.config().features?.smartSetupChoices !== false,
+    canSetUp: (bot) => host.engine(bot)?.agentsMcp === true,
+    withinBudget: host.withinBudget,
+    writer: host.writer,
+    facts: (bot) => suggestionBasis(bot, { bots: host.store.bots, shared: host.shared(), aboutMe: host.config().profile?.aboutMe,
+      languageCode: host.languageCode(), canBrowse: host.engine(bot)?.browserMcp === true && host.browserOn() && bot.browser !== false }),
+    apps: (bot) => {
+      if (!host.engine(bot)?.composioMcp || bot.composio === false || !host.apps.configured()) return null;
+      const allowed = bot.connectorTools ? new Set(Object.keys(bot.connectorTools)) : null;
+      const named = (found: readonly string[]) => found.filter((slug) => !allowed || allowed.has(slug)).map((slug) => appLabel(slug));
+      const now = slugs();
+      return "later" in now ? { known: [], later: now.later.then(named) } : { known: named(now.known) };
+    },
+    ...(host.log ? { log: host.log } : {}),
+  });
 }

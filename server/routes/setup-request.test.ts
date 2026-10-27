@@ -22,7 +22,7 @@ function setup(refusal: string | null = null, options: { canSetUp?: boolean; sen
   const sent: string[] = [];
   // As the messages route does: the person's line is stored, then its turn reads it as setup or as typed.
   const send = async (_auth: RequestAuth, botId: string, threadId: string, text: string) => {
-    if (options.sendFails) return { ok: false as const, status: 409, error: "Ava is busy." };
+    if (options.sendFails) throw Object.assign(new Error("Ava is busy."), { status: 409 });
     sent.push(text);
     await options.hold;
     const line = store.appendMessage(threadId, { role: "user", kind: "text", text });

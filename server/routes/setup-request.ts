@@ -6,8 +6,6 @@ import { askForSetup, cancelSetupRequest, type SetupRequestStore } from "../setu
 import type { Message } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-export type SetupPickSent = { ok: true; message?: Message } | { ok: false; status: number; error: string };
-
 export interface SetupRequestRouteDeps {
   store: SetupRequestStore;
   /** The language the server writes the bot's lines in. */
@@ -18,8 +16,9 @@ export interface SetupRequestRouteDeps {
   presser(auth: RequestAuth): string | undefined;
   /** The conversation's AI has the tools a bot sets itself up with. */
   canSetUp(botId: string, threadId: string): boolean;
-  /** Sends the caller's words in this conversation exactly as a typed message, starting (or queueing) its turn. */
-  send(auth: RequestAuth, botId: string, threadId: string, text: string): Promise<SetupPickSent>;
+  /** Sends the caller's words in this conversation exactly as a typed message, starting (or queueing) its turn. A
+   * refusal throws an error with its HTTP status. */
+  send(auth: RequestAuth, botId: string, threadId: string, text: string): Promise<{ ok: true; message?: Message }>;
 }
 
 const PATH = /^\/api\/bots\/([\w-]+)\/setup-request$/;
@@ -60,9 +59,12 @@ export function createSetupRequestRoutes(deps: SetupRequestRouteDeps): RouteHand
     picking.add(key);
     try {
       const sent = await deps.send(auth, botId, threadId, picked);
-      if (sent.ok) return json(res, 200, sent);
+      return json(res, 200, { ok: true, ...(sent.message ? { message: sent.message } : {}) });
+    } catch (error) {
+      const status = (error as { status?: unknown } | null)?.status;
+      if (typeof status !== "number") throw error;
       deps.store.patchTask(botId, threadId, { setupRequest: undefined });
-      return json(res, sent.status, { error: sent.error });
+      return json(res, status, { error: error instanceof Error ? error.message : String(error) });
     } finally {
       picking.delete(key);
     }
