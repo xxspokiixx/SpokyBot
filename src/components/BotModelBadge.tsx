@@ -10,6 +10,16 @@ export function botModel(bot: Pick<Bot, "modelSelection">, instances: InstanceIn
   return { instance, label: label || instance.displayName };
 }
 
+export function botTooltip(bot: Pick<Bot, "name" | "title" | "chiefOfStaff" | "modelSelection">, instances: InstanceInfo[]): string {
+  const model = botModel(bot, instances);
+  return [
+    bot.name,
+    bot.title.trim(),
+    bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : "",
+    model ? t("sidebar.bot.modelBadge", { model: model.label, engine: model.instance.displayName }) : "",
+  ].filter(Boolean).join(" · ");
+}
+
 export function BotModelBadge({ bot, instances, avatarSize }: {
   bot: Pick<Bot, "modelSelection">;
   instances: InstanceInfo[];

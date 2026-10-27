@@ -97,20 +97,20 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     name: "Work", collapsed: false, onToggle: () => {}, reorderable: true, dragging: false, line: true, ...props,
   }) as ReactElement<Props>;
 
-  it("draws the name, a hairline rule and a ⋯ team menu button, with no trash or grip", () => {
+  it("draws a quiet 12px name with no hairline, and a ⋯ team menu button that shows on hover, with no trash or grip", () => {
     const onMenu = vi.fn();
     const element = line({ onMenu, onDelete: () => {} });
     const html = renderToStaticMarkup(element);
     expect(html).toContain('data-sidebar-section-line=""');
-    expect(html).toMatch(/text-\[12px\][^"]*text-ink-tertiary/);
-    expect(html).toContain('<span aria-hidden="true" class="h-px min-w-4 flex-1 bg-hairline/60"></span>');
+    expect(html).toMatch(/text-\[12px\][^"]*text-ink-secondary/);
+    expect(html).not.toContain("bg-hairline");
     expect(html).toContain('aria-label="Actions for Work department" title="Actions for Work department" aria-haspopup="menu" aria-expanded="false"');
+    expect(html).toMatch(/aria-label="Actions for Work department"[^>]*class="[^"]*\bopacity-0\b[^"]*\bgroup-hover\/section:opacity-100\b[^"]*\baria-expanded:opacity-100\b/);
     expect(html).not.toContain("Delete Work department");
     expect(html).not.toContain("lucide-grip-vertical");
     expect(html).not.toContain("lucide-trash");
     expect(html).not.toContain("lucide-chevron-down");
-    expect(html.indexOf(">Work</span>")).toBeLessThan(html.indexOf("bg-hairline/60"));
-    expect(html.indexOf("bg-hairline/60")).toBeLessThan(html.indexOf("Actions for Work department"));
+    expect(html.indexOf(">Work</span>")).toBeLessThan(html.indexOf("Actions for Work department"));
     const button = { id: "dots" };
     const dots = nodes(element.props.children).find((node) => node.props["aria-label"] === "Actions for Work department")!;
     (dots.props.onClick as (event: { currentTarget: unknown }) => void)({ currentTarget: button });

@@ -20,6 +20,14 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
     .filter((task) => task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.waitingForTeammates === true || task.queued || task.unread);
 }
 
+export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>) {
+  const tasks = sidebarBotActivityTasks(bot, queued);
+  const waiting = bot.activity === "waiting-on-you" || tasks.some((task) => task.activity === "waiting-on-you");
+  const working = !waiting && (Boolean(bot.busy) || tasks.some((task) => task.busy || task.activity === "working"));
+  const teammateWait = !waiting && !working && (Boolean(bot.waitingForTeammates) || tasks.some((task) => Boolean(task.waitingForTeammates)));
+  return { waiting, working, teammateWait, queued: tasks.some((task) => task.queued) };
+}
+
 export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]>) {
   const attention = sidebarBotActivityTasks(bot, queued);
   const seen = new Set(attention.map((task) => task.threadId));

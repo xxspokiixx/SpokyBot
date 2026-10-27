@@ -76,7 +76,7 @@ export function SidebarSectionHeader({
         draggable={reorderable || undefined}
         onDragStart={reorderable ? onDragStart : undefined}
         onDragEnd={reorderable ? onDragEnd : undefined}
-        className={cn("flex items-center gap-2 pb-1.5 pl-1.5 pr-0.5 pt-3.5", reorderable && "cursor-grab", dragging && "opacity-40")}
+        className={cn("group/section flex min-h-[22px] items-center gap-2 pb-1 pl-1.5 pr-2 pt-3.5", reorderable && "cursor-grab", dragging && "opacity-40")}
       >
         {onToggle ? (
           <button
@@ -86,19 +86,19 @@ export function SidebarSectionHeader({
             aria-expanded={!collapsed}
             aria-keyshortcuts={reorderable ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
             title={toggleTitle}
-            className="flex min-w-0 shrink items-center gap-1 rounded px-0.5 text-left text-[12px] font-medium tracking-[0.01em] text-ink-tertiary hover:text-ink-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+            className="flex min-w-0 shrink items-center gap-1 rounded px-0.5 text-left text-[12px] font-medium leading-4 text-ink-secondary hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
           >
             <span className="truncate">{name}</span>
             {collapsed && <ChevronRight size={11} className="shrink-0" aria-hidden="true" />}
             <SectionAttention attention={attention} label={attentionLabel} alert={alert} />
           </button>
         ) : (
-          <div className="flex min-w-0 shrink items-center px-0.5 text-[12px] font-medium tracking-[0.01em] text-ink-tertiary">
+          <div className="flex min-w-0 shrink items-center px-0.5 text-[12px] font-medium leading-4 text-ink-secondary">
             <span className="truncate">{name}</span>
             {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
           </div>
         )}
-        <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-hairline/60" />
+        <span aria-hidden="true" className="min-w-4 flex-1" />
         {leadLabel}
         {onMenu && (
           <button
@@ -108,7 +108,7 @@ export function SidebarSectionHeader({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={(event) => onMenu(event.currentTarget)}
-            className="flex h-[18px] w-[22px] shrink-0 items-center justify-center rounded-[5px] text-ink-tertiary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus aria-expanded:bg-raised aria-expanded:text-ink"
+            className="flex h-[18px] w-[22px] shrink-0 items-center justify-center rounded-[5px] text-ink-tertiary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus group-hover/section:opacity-100 aria-expanded:bg-raised aria-expanded:text-ink aria-expanded:opacity-100 touch:opacity-100"
           >
             <MoreHorizontal size={15} aria-hidden="true" />
           </button>
