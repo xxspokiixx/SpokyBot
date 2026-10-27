@@ -31,7 +31,7 @@ const OPEN_DELAY_MS = 80;
 const CLOSE_DELAY_MS = 250;
 export const ANCHORED_MENU_WIDTH = 280;
 export const COMPACT_MENU_WIDTH = 237;
-const COMPACT_SEPARATOR = "mx-1 my-0.5 h-px shrink-0 bg-hairline/50";
+const COMPACT_SEPARATOR = "mx-1.5 h-px shrink-0 bg-hairline/50";
 const EDGE_MARGIN = 8;
 const ANCHOR_GAP = 6;
 
@@ -102,7 +102,7 @@ function MenuRows({
       {items.map((item) => (
         <div key={item.key} className={look === "compact" ? "flex flex-col gap-1" : undefined}>
           {item.separatorBefore && <div role="separator" className={look === "compact" ? COMPACT_SEPARATOR : cn("h-px bg-hairline/50", look === "roomy" ? "mx-3 my-1.5" : "my-1.5")} />}
-          {item.heading && <div className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{item.heading}</div>}
+          {item.heading && <div className={look === "compact" ? "px-2 pb-1 pt-2 text-[12px] font-medium leading-4 text-ink-secondary" : "px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary"}>{item.heading}</div>}
           <button
             type="button"
             role="menuitem"
@@ -119,7 +119,7 @@ function MenuRows({
               look === "roomy"
                 ? "min-h-10 gap-3 rounded-lg px-3 py-2 text-[15px] font-medium leading-5 focus-visible:bg-menu-hover"
                 : look === "compact"
-                  ? "min-h-[30px] gap-2 rounded-md px-1.5 py-1.5 text-[13px] leading-[18px] focus-visible:bg-menu-hover"
+                  ? "min-h-[30px] gap-2 rounded-md px-2 py-1.5 text-[14px] leading-[18px] focus-visible:bg-menu-hover"
                   : "gap-3 px-3.5 py-2 text-[14px] focus-visible:bg-menu-hover",
               item.active ? "bg-menu-active text-ink" : item.submenu && openSubmenu === item.key && engaged ? cn(look === "compact" ? "bg-menu-active" : "bg-menu-hover", "text-ink") : "text-ink hover:bg-menu-hover",
             )}
@@ -128,7 +128,7 @@ function MenuRows({
               <span
                 className={cn(
                   "flex shrink-0 items-center justify-center",
-                  look === "compact" ? "size-4 [&>svg]:size-4 [&>svg]:stroke-[1.75]" : "size-5",
+                  look === "compact" ? "size-4 [&>svg]:size-4" : "size-5",
                   item.active ? "text-accent" : look === "roomy" ? "text-ink" : "text-ink-secondary",
                 )}
               >
@@ -345,7 +345,7 @@ export function SidebarPopoverMenu({
   const look: MenuLook = !anchored ? "plain" : compact ? "compact" : "roomy";
   const width = compact ? COMPACT_MENU_WIDTH : ANCHORED_MENU_WIDTH;
   const sheetClass = look === "compact"
-    ? "popover-surface flex flex-col gap-1 overflow-hidden rounded-[12px] border border-hairline/50 bg-menu p-2 shadow-lg"
+    ? "popover-surface flex flex-col gap-1 overflow-hidden rounded-[var(--radius-menu)] border border-hairline/50 bg-menu p-1.5 shadow-lg [&_svg.lucide]:stroke-[1.5]"
     : cn("popover-surface overflow-hidden border border-hairline/50 bg-menu shadow-2xl shadow-black/50", look === "roomy" ? "rounded-2xl p-1.5" : "rounded-xl py-1.5");
 
   const sheet = motion.shown && (

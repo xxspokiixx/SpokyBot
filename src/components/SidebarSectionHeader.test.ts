@@ -109,7 +109,7 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(html).not.toContain("Delete Work department");
     expect(html).not.toContain("lucide-grip-vertical");
     expect(html).not.toContain("lucide-trash");
-    expect(html).not.toContain("lucide-chevron-down");
+    expect(html).toMatch(/lucide-chevron-down absolute text-ink-secondary opacity-0 transition-opacity group-hover\/section:opacity-100 group-focus-within\/section:opacity-100 touch:opacity-100/);
     expect(html.indexOf(">Work</span>")).toBeLessThan(html.indexOf("Actions for Work department"));
     const button = { id: "dots" };
     const dots = nodes(element.props.children).find((node) => node.props["aria-label"] === "Actions for Work department")!;
@@ -117,6 +117,12 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(onMenu).toHaveBeenCalledExactlyOnceWith(button);
     expect(renderToStaticMarkup(line({ onMenu, menuOpen: true }))).toContain('aria-haspopup="menu" aria-expanded="true"');
     expect(renderToStaticMarkup(line())).not.toContain("Actions for Work department");
+  });
+
+  it("shows how many rows the section holds at rest, crossfading to the chevron on hover or focus", () => {
+    const html = renderToStaticMarkup(line({ count: 3 }));
+    expect(html).toMatch(/class="h-\[30px\]|group\/section flex h-\[30px\] items-center gap-1\.5 rounded-\[6px\] px-2 pb-1\.5 pt-2 hover:bg-raised\/50/);
+    expect(html).toMatch(/<span class="text-\[12px\] tabular-nums leading-4 text-ink-secondary transition-opacity group-hover\/section:opacity-0 group-focus-within\/section:opacity-0 touch:opacity-0">3<\/span>/);
   });
 
   it("is dragged by the line itself, and only when it can be reordered", () => {

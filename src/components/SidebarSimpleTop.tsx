@@ -6,11 +6,13 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 
-export const SIMPLE_MENU = "popover-surface flex flex-col gap-1 rounded-[12px] border border-hairline/50 bg-menu p-2 shadow-lg";
-export const SIMPLE_MENU_ITEM = "flex min-h-[30px] w-full shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-1.5 py-1.5 text-left text-[13px] leading-[18px] focus-visible:bg-menu-hover";
-export const SIMPLE_MENU_SEPARATOR = "mx-1 my-0.5 h-px shrink-0 bg-hairline/50";
+export const SIMPLE_MENU = "popover-surface flex flex-col gap-1 rounded-[var(--radius-menu)] border border-hairline/50 bg-menu p-1.5 shadow-lg [&_svg.lucide]:stroke-[1.5]";
+export const SIMPLE_MENU_ITEM = "flex min-h-[30px] w-full shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] focus-visible:bg-menu-hover";
+export const SIMPLE_MENU_SEPARATOR = "mx-1.5 h-px shrink-0 bg-hairline/50";
+/** Keyboard focus on a Simple row or tile: the focus ring drawn inside its edge. */
+export const SIMPLE_ROW_FOCUS = "focus-visible:outline-2 focus-visible:-outline-offset-2! focus-visible:outline-focus";
 
-export const SIMPLE_TOP_BUTTON = `flex size-[34px] shrink-0 items-center justify-center rounded-full text-ink ${ELEVATED_CONTROL} ${ELEVATED_HOVER} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`;
+export const SIMPLE_TOP_BUTTON = `flex size-9 shrink-0 items-center justify-center rounded-full text-ink/90 ${ELEVATED_CONTROL} ${ELEVATED_HOVER} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`;
 
 /** The round control at either end of the phone bot list's top row. */
 export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-center rounded-full border border-hairline bg-card text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
@@ -62,7 +64,7 @@ export function SidebarEdgeToggle({ collapsed, onToggle, style, anchorRef, shown
       onPointerLeave={() => onHover?.(false)}
       className={cn(
         pinned ? "fixed" : "absolute -right-[14px]",
-        shown ? "opacity-100" : "opacity-0 focus-visible:opacity-100",
+        shown ? "opacity-100" : "pointer-events-none opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100 touch:pointer-events-auto touch:opacity-100",
         "transition-opacity duration-150",
         "top-[14px] z-30 hidden h-8 w-[14px] items-center justify-center rounded-r-[4px] border border-l-0 border-hairline/50 bg-panel text-ink-tertiary shadow-[1px_0_2px_rgb(0_0_0/0.06)] hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus md:flex",
       )}
@@ -85,7 +87,7 @@ export function SidebarSearchToggle({ open, onToggle, ref }: { open: boolean; on
       title={t("sidebar.searchAria")}
       className={SIMPLE_TOP_BUTTON}
     >
-      <Search size={16} strokeWidth={1.75} aria-hidden="true" />
+      <Search size={18} strokeWidth={1.5} aria-hidden="true" />
     </button>
   );
 }
