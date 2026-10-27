@@ -3,6 +3,10 @@ import { MAUS_COLOR_NAMES, type MausColor } from "../shared/wire.ts";
 
 export const STARTER_SHAPES: readonly MascotBodyId[] = ["cursor", "blob", "circle", "squircle", "drop", "hexagon", "diamond", "star"];
 export const STARTER_COLORS: readonly MausColor[] = MAUS_COLOR_NAMES.filter((color) => color !== "silver" && color !== "chrome");
+const ROTATION: readonly MausColor[] = ["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"];
+
+/** The colour of the bot made `index`-th when nothing else picks one. */
+export const rotationColor = (index: number): MausColor => ROTATION[index % ROTATION.length]!;
 
 /** A new bot's first look, at random, preferring a colour and a shape no bot here wears yet. */
 export function freshLook(

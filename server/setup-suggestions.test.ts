@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import { isPickedBotName } from "./names.ts";
 import { hasSetupChoices } from "./initial-greeting.ts";
-import { aboutMeExcerpt, createSetupSuggestions, parseSetupSuggestions, setupSuggestionPrompt, worthAsking, type SuggestionApps,
+import { aboutMeExcerpt, createSetupSuggestions, parseSetupSuggestions, setupSuggestionPrompt, suggestionBasis, worthAsking, type SuggestionApps,
   type SuggestionBasis } from "./setup-suggestions.ts";
+import type { BotRecord } from "./store.ts";
 import { cancelSetupRequest } from "./setup-request.ts";
 import type { SideJobText } from "./side-jobs.ts";
 import { Store } from "./store.ts";
@@ -99,6 +100,19 @@ describe("what is sent", () => {
     expect(worthAsking({ ...nothing, languageCode: "es" }, null)).toBe(false);
     expect(hasSetupChoices("de")).toBe(false);
     expect(worthAsking({ ...nothing, languageCode: "de" }, null)).toBe(true);
+  });
+
+  it("sends a typed name, the title, the department and what the other bots do, and on a shared place no About me or other bots", () => {
+    const bot = (extra: Record<string, unknown>) => ({ id: "b", name: "Pesto", title: "", description: "", ...extra }) as unknown as BotRecord;
+    const made = bot({ id: "new", name: "Ledger", title: "Bookkeeper", section: "Finance" });
+    const bots = [made, bot({ id: "a", title: "Travel planner" }), bot({ id: "b", description: "Plans meals\nand shops" }),
+      bot({ id: "c", title: "Hidden", hidden: true }), bot({ id: "d", title: "Default", defaultBot: {} }),
+      bot({ id: "e", title: "Chief", chiefOfStaff: true }), bot({ id: "f", title: "Moved", movedTo: { team: { id: "t", name: "Team" }, state: "moved", at: 1 } })];
+    const place = { bots, shared: false, aboutMe: "I keep the books for a bakery.", languageCode: "pt-BR", canBrowse: true };
+    expect(suggestionBasis(made, place)).toEqual({ name: "Ledger", title: "Bookkeeper", department: "Finance", aboutMe: "I keep the books for a bakery.",
+      otherJobs: ["Travel planner", "Plans meals"], language: "Brazilian Portuguese", languageCode: "pt-BR", canBrowse: true });
+    expect(suggestionBasis(bot({ id: "new", name: "Pesto 2" }), { ...place, shared: true })).toEqual({ otherJobs: [], language: "Brazilian Portuguese",
+      languageCode: "pt-BR", canBrowse: true });
   });
 });
 

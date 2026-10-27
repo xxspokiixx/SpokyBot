@@ -19,6 +19,7 @@ import { workspaceDir } from "./workspace.ts";
 import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
+import { rotationColor } from "./bot-look.ts";
 import { redactBotAuthored } from "./message-redaction.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
@@ -30,7 +31,7 @@ import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-
 import type { HandedState } from "./delta-context.ts";
 import type { AgentPart, PartPair, RoomPart } from "./package-parts.ts";
 import type {
-  BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
+  BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord,
   TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
@@ -203,19 +204,6 @@ function tightenRegistryFile(file: string): void {
   }
 }
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
-
-const COLORS: MausColor[] = [
-  "green",
-  "blue",
-  "red",
-  "orange",
-  "purple",
-  "cyan",
-  "pink",
-  "yellow",
-  "teal",
-  "coral",
-];
 
 export const sectionKey = (section?: string | null): string => section?.trim() || "";
 
@@ -1358,7 +1346,7 @@ export class Store {
       soul: profile.soul ?? "",
       soulHash: soulHash(profile.soul ?? ""),
       notifications: true,
-      color: profile.color ?? COLORS[this.bots.length % COLORS.length],
+      color: profile.color ?? rotationColor(this.bots.length),
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
       // Restricted from its first frame: no one else is ever told it exists.
@@ -1416,7 +1404,7 @@ export class Store {
         const createdAt = Date.now();
         const modelSelection = this.newBotSelection(operation.fields.modelSelection);
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
-          title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
+          title: "", description: "", soul: "", notifications: true, color: rotationColor(nextBots.length), unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
           autoApprove: false, approvePeerComms: false,
           // A restricted Chief never creates a bot everyone sees.
