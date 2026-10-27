@@ -1032,7 +1032,7 @@ export function ModelPicker({
                     )}
 
                     <div data-model-list className="min-h-[min(180px,30dvh)] flex-1 overflow-y-auto px-2 pb-2">
-                      {pane === "main" && loadingList ? <div className="px-2 py-5 text-[12.5px] text-ink-secondary">{statusLine(t("model.loadingModels", { name: railInstance.displayName }))}</div> : pane === "main" ? (
+                      {pane === "main" && loadingList ? <div className="px-2 py-5 text-[13px] text-ink-secondary">{statusLine(t("model.loadingModels", { name: railInstance.displayName }))}</div> : pane === "main" ? (
                         <>
                           {railInstance.snapshot.update && (
                             <EngineUpdateNotice update={railInstance.snapshot.update} instance={railInstance} className="mx-1 mb-2" />
