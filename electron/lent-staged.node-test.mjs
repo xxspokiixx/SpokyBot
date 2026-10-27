@@ -90,3 +90,14 @@ test("a protected place inside a lent folder is never written", async (t) => {
   assert.match(outcome.problem, /cannot be accessed/);
   assert.deepEqual(readdirSync(join(s.root, "secrets")), []);
 });
+
+test("a replaced file keeps its own permissions, as a live write in place does", { skip: process.platform === "win32" }, async (t) => {
+  const s = setup(t);
+  const { chmodSync, statSync } = await import("node:fs");
+  writeFileSync(join(s.root, "run.sh"), "#!/bin/sh\necho one\n");
+  chmodSync(join(s.root, "run.sh"), 0o755);
+  s.cloud.stage("pc-1", "run.sh", "#!/bin/sh\necho two\n", sha("#!/bin/sh\necho one\n"));
+  await s.apply();
+  assert.equal(readFileSync(join(s.root, "run.sh"), "utf8"), "#!/bin/sh\necho two\n");
+  assert.equal(statSync(join(s.root, "run.sh")).mode & 0o777, 0o755);
+});

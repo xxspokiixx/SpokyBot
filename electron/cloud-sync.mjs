@@ -220,10 +220,15 @@ export function createCloudFilesService({
           if (landed?.kept.length) update(folder.key, { kept: [...landed.kept, ...(current.kept ?? [])].slice(0, KEPT_MAX) });
           const result = await shareFolder({ client: cloud, state, folder: { id: current.id }, local: current.pcPath, now, approveDeletes, report });
           if (!sharedBy(folder.key)) continue;
-          if (landed?.problem) result.problem ??= landed.problem;
+          const inStep = result.status === "synced";
+          // A bot's change that can't land here (a name this computer can't hold, a protected place) shows on the folder.
+          if (landed?.problem) {
+            result.problem ??= landed.problem;
+            if (inStep) result.status = "problem";
+          }
           results.set(folder.key, result);
           if (current.deletes) update(folder.key, { deletes: null });
-          if (current.lentId && result.status === "synced") await cloud.synced(current.id).catch(noted("saying the copy is in step"));
+          if (current.lentId && inStep) await cloud.synced(current.id).catch(noted("saying the copy is in step"));
         } catch (error) {
           if (passStopper(error)) throw error;
           if (!sharedBy(folder.key)) continue;

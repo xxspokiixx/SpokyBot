@@ -59,8 +59,10 @@ async function applyOne({ client, folderId, folder, change, protectedRoots, now,
       const sha256 = await sha256File(target);
       const after = fs.lstatSync(target, { throwIfNoEntry: false });
       if (same(before, after) && sha256 === change.sha256) return { applied: true };
-      // Untouched since the bot read it: the bot's version, and the one it replaces to the Recycle Bin.
+      // Untouched since the bot read it: the bot's version, with the file's own permissions (a script stays runnable, as
+      // a live write in place keeps them), and the one it replaces to the Recycle Bin.
       if (same(before, after) && sha256 === change.baseSha256) {
+        fs.chmodSync(temporary, before.mode & 0o777);
         await trashItem(target);
         fs.renameSync(temporary, target);
         return { applied: true };
@@ -73,6 +75,7 @@ async function applyOne({ client, folderId, folder, change, protectedRoots, now,
     const beside = clashPath(change.path, now(), (candidate) => fs.existsSync(path.join(folder.path, ...candidate.split("/"))), BESIDE_LABEL);
     const besideFile = await sharedPath(folder, beside);
     await assertOutsideProtected(protectedRoots, besideFile);
+    if (before?.isFile()) fs.chmodSync(temporary, before.mode & 0o777);
     fs.renameSync(temporary, besideFile);
     return { applied: true, beside };
   } finally {

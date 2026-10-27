@@ -191,3 +191,17 @@ test("a lent folder deleted from disk never stops lending or unlending the rest"
   await lending.lend("/Users/ash/New");
   assert.deepEqual(saved.at(-1).folders.map((entry) => entry.name), ["Kept", "New"]);
 });
+
+test("a bot's change that can't land here shows on the folder; the copy is still as fresh as the computer", async (t) => {
+  const s = setup(t);
+  await s.service.pass();
+  const [entry] = s.service.state().shared;
+  const synced = s.cloud.lent.synced.get(entry.id);
+  s.cloud.stage(entry.id, ".git/config", "[core]");
+  await s.service.pass();
+  const shown = s.service.state().shared[0];
+  assert.equal(shown.status, "problem");
+  assert.match(shown.problem, /^\.git\/config: Files inside \.git/);
+  assert.equal(s.cloud.lent.synced.get(entry.id), synced + 1);
+  assert.equal(s.cloud.lent.staged.length, 1, "it keeps waiting on My Cloud");
+});
