@@ -47,9 +47,10 @@ export function TableDialog({ title, onClose, children, returnFocus }: { title: 
 
 const SMALL_TABLE_ROWS = 8;
 
-/** Simple mode's table card: the composer surface with a hairline edge, a 24px band on top for the hover plate (44px
- * on touch, where the plate's buttons keep 40px targets), and no footer. */
-const TABLE_CARD = "group/table relative w-full overflow-hidden rounded-[20px] bg-composer pt-6 text-ink shadow-[0_0_0_0.5px_var(--color-composer-ring),0_2px_8px_rgb(28_28_28/0.035)] touch:pt-11";
+/** Simple mode's table card: the composer surface with a hairline edge and no footer. Its header row starts at the
+ * top; the hover plate floats over the header's right end and takes no room. Only touch screens, where the plate is
+ * always shown and its buttons keep 40px targets, give it a band of its own. */
+const TABLE_CARD = "group/table relative w-full overflow-hidden rounded-[20px] bg-composer text-ink shadow-[0_0_0_0.5px_var(--color-composer-ring),0_2px_8px_rgb(28_28_28/0.035)] touch:pt-11";
 
 export function RichTable({ columns, rows, name = t("table.title"), expanded = false, direction = "ltr", headless = false, card: asCard = true }: RichTableProps) {
   const simple = !useAdvancedMode();
@@ -91,7 +92,7 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
   const sortBy = (column: number) => setSort(sort?.column !== column ? { column, descending: false } : !sort.descending ? { column, descending: true } : null);
   const card = () => (
     <div data-table-card className={TABLE_CARD} dir="ltr">
-      <div className="table-plate absolute end-1 top-0 z-[1] flex h-6 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/table:opacity-100 touch:h-11 touch:opacity-100">
+      <div className="table-plate absolute end-1.5 top-1.5 z-20 flex items-center gap-0.5 rounded-full bg-composer p-0.5 opacity-0 ring-[0.5px] ring-ink/10 transition-opacity focus-within:opacity-100 group-hover/table:opacity-100 touch:end-1 touch:top-0 touch:bg-transparent touch:p-0 touch:opacity-100 touch:ring-0">
         <button type="button" className="table-action !rounded-full" aria-label={t("table.copyPlain")} title={t("table.copyPlain")} onClick={() => void copy()}>{copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}</button>
         <button type="button" className="table-action !rounded-full" aria-label={t("table.download")} title={t("table.download")} onClick={download}><Download size={14} /></button>
         <button type="button" className="table-action !rounded-full" aria-label={t("table.expand")} title={t("table.expand")} onClick={(event) => { trigger.current = event.currentTarget; setOpen(true); }}><Maximize2 size={14} /></button>

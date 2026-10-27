@@ -73,9 +73,11 @@ describe("Simple mode's table card", () => {
   it("draws a short table as a card with a hover plate, header names that sort, and no footer", () => {
     const html = card(3);
     const surface = html.match(/<div data-table-card="[^"]*" class="([^"]*)"/)?.[1] ?? "";
-    expect(surface.split(" ")).toEqual(expect.arrayContaining(["rounded-[20px]", "bg-composer", "pt-6", "touch:pt-11"]));
+    expect(surface.split(" ")).toEqual(expect.arrayContaining(["rounded-[20px]", "bg-composer", "touch:pt-11"]));
+    // The header row starts at the card's top: the plate floats over it instead of keeping a band at rest.
+    expect(surface.split(" ").some((name) => /^(pt|py|p)-/.test(name))).toBe(false);
     const plate = html.match(/<div class="(table-plate [^"]*)"/)?.[1] ?? "";
-    expect(plate.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "group-hover/table:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
+    expect(plate.split(" ")).toEqual(expect.arrayContaining(["absolute", "top-1.5", "end-1.5", "bg-composer", "opacity-0", "group-hover/table:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
     expect(html).toContain('aria-label="Copy table"');
     expect(html).toContain('aria-label="Download results as CSV"');
     expect(html).toContain('aria-label="Expand table"');
