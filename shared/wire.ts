@@ -28,6 +28,7 @@ import type { NotificationLogEntry } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
+import type { InboxItem } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
 export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveSettings } from "./live-call-wire.ts";
 
@@ -144,6 +145,8 @@ export interface WireTask {
   openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
+  /** On a team's server: this person's inbox, the conversation with their Chief where everything for them arrives. */
+  inbox?: true;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
   archivedAt?: number;
@@ -597,10 +600,11 @@ export interface WireMessage extends HelperIntroField {
   reaction?: string;
   /** comm chips: "Messaged @X", linking to the bot-bot channel. */
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
-  /** On a Team Cloud, a message a bot passed between people (message_person): "told" on the chip in the asking
-   * conversation names who got it, "from" on the line it delivered names who asked, "reply" on an answer that came
-   * back names who answered. */
-  relay?: { kind: "told" | "from" | "reply"; email: string; name: string };
+  /** On a Team Cloud, a message passed between people: "told" on the chip in the asking conversation names whose inbox
+   * got it, "reply" on an answer that came back names who answered, "assistant" one their assistant answered for them. */
+  relay?: { kind: "told" | "reply" | "assistant"; email: string; name: string };
+  /** On a Team Cloud, a line in its person's inbox: who it is from and where it came from. */
+  inbox?: InboxItem;
   /** thread chips: "Opened thread #Title on @X". */
   threadRef?: { botId: string; threadId: string; title: string };
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`

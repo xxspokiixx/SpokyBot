@@ -34,7 +34,8 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
   return HELPER_MODEL_ID.test(model) ? { instanceId, model } : null;
 }
 
-export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions";
+/** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
+export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative";
 
 export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
@@ -75,8 +76,9 @@ export interface SideJobs {
 
 type TextCall = (prompt: string, options?: TextGenerationOptions) => Promise<string>;
 
-/** Jobs someone is waiting on run only on a one-off text call: generateMemoryText starts a whole agent process. */
-const ONE_OFF_ONLY: ReadonlySet<SideJob> = new Set(["compaction", "setup-suggestions"]);
+/** Jobs someone is waiting on, and the representative, which must never get tools, run only on a one-off text call:
+ * generateMemoryText starts a whole agent process. */
+const ONE_OFF_ONLY: ReadonlySet<SideJob> = new Set(["compaction", "setup-suggestions", "representative"]);
 
 function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined {
   const call = ONE_OFF_ONLY.has(job) ? instance.generateText : instance.generateText ?? instance.generateMemoryText;

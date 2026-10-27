@@ -133,7 +133,7 @@ export interface SecretRequestCardData {
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "sender" | "setupSuggestion" | "helperIntro" | "helperFollowup" | "setupOffer" | "setupChoices" | "setupChoicesPending" | "setupRequest" | "relay" | "sentDirectly" | "doneWhen"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "sender" | "setupSuggestion" | "helperIntro" | "helperFollowup" | "setupOffer" | "setupChoices" | "setupChoicesPending" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -230,7 +230,7 @@ export interface ModelSelection {
   variant?: string;
 }
 
-export interface Task extends Pick<WireTask, "private" | "setupRequest"> {
+export interface Task extends Pick<WireTask, "private" | "setupRequest" | "inbox"> {
   waitingForTeammates?: boolean;
   threadId: string;
   routineRunId?: string;
