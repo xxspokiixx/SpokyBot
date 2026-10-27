@@ -100,7 +100,7 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
   const left = Math.max(8, Math.min(shown.x, window.innerWidth - 260));
   return createPortal(
     <div data-owner-picker role="menu" aria-label={shown.title} style={{ top, left }}
-      className={cn("fixed z-50 w-[248px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}>
+      className={cn("popover-surface fixed z-50 w-[248px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}>
       <div className="px-3.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{shown.title}</div>
       <div className="flex max-h-[260px] flex-col gap-0.5 overflow-y-auto px-1.5 py-1">
         {team.people.map((person) => (
@@ -175,7 +175,7 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
         <span className="rounded-full bg-warning px-1.5 text-[11px] font-semibold tabular-nums text-panel">{items.length}</span>
       </button>
       {open && (
-        <div role="menu" aria-label={t("needsYou.title")} className="absolute left-2 right-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60">
+        <div role="menu" aria-label={t("needsYou.title")} className="popover-surface absolute left-2 right-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60">
           {items.map((item) => {
             const botId = "botId" in item ? item.botId : item.botIds[0]!;
             const title = item.kind === "message" ? t("needsYou.message", { name: item.from })

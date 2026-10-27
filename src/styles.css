@@ -967,6 +967,18 @@
   --color-menu-active: var(--color-raised);
 }
 
+/* Simple mode: every popover and menu in the menu tone, flat in Midnight and on a soft lift in Daylight. A
+   popover's rim is its border, never a ring, so clearing box-shadow leaves the rim. */
+:root[data-interface="simple"] .popover-surface {
+  background-color: var(--color-menu);
+}
+:root[data-interface="simple"][data-skin="midnight"] .popover-surface {
+  box-shadow: none;
+}
+:root[data-interface="simple"][data-skin="daylight"] .popover-surface {
+  box-shadow: 0 10px 20px -3px rgb(28 28 28 / 0.1), 0 4px 6px -4px rgb(28 28 28 / 0.1);
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {

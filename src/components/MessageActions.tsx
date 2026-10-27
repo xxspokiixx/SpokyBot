@@ -194,7 +194,7 @@ export function MessageActions({
           aria-label={t("chat.messageActions")}
           onKeyDown={moveFocus}
           className={cn(
-            "absolute z-40 min-w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50",
+            "popover-surface absolute z-40 min-w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50",
             menuAbove ? "bottom-full mb-1" : "top-full mt-1",
             mirrored !== menuFlipped ? "end-0" : "start-0",
           )}

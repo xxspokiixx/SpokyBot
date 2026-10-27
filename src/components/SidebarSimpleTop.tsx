@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 
-export const SIMPLE_MENU = "flex flex-col gap-1 rounded-[12px] border border-hairline/50 bg-menu p-2 shadow-lg";
+export const SIMPLE_MENU = "popover-surface flex flex-col gap-1 rounded-[12px] border border-hairline/50 bg-menu p-2 shadow-lg";
 export const SIMPLE_MENU_ITEM = "flex min-h-[30px] w-full shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-1.5 py-1.5 text-left text-[13px] leading-[18px] focus-visible:bg-menu-hover";
 export const SIMPLE_MENU_SEPARATOR = "mx-1 my-0.5 h-px shrink-0 bg-hairline/50";
 
