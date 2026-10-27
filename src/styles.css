@@ -973,6 +973,33 @@
   font-weight: 600;
 }
 
+.chat-code-actions > button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+@media (width < 40rem), (hover: none), (pointer: coarse) {
+  .chat-code-actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+
+  .chat-code-actions > button {
+    min-width: 44px;
+    min-height: 44px;
+    max-width: 100%;
+    padding: 8px 10px;
+    font-size: 12px;
+    white-space: normal;
+  }
+
+  .chat-code-actions svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+}
+
 html,
 body,
 #root {
@@ -1638,22 +1665,17 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   padding: 0.35em 0.12em;
   margin: -0.35em -0.12em;
 }
-/* rotating presence phrase: the old phrase fades out where the new one
-   fades in, in the same grid cell */
+/* rotating presence phrase: the new phrase fades in where the old one was;
+   only one is ever drawn */
 @keyframes turn-phrase-in {
   from { opacity: 0; }
 }
-@keyframes turn-phrase-out {
-  to { opacity: 0; }
-}
 .turn-phrase-in { animation: shimmer 2s linear infinite, turn-phrase-in 0.32s ease-out both; }
-.turn-phrase-out { animation: shimmer 2s linear infinite, turn-phrase-out 0.32s ease-in both; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   .turn-phrase-in { animation: none; }
-  .turn-phrase-out { display: none; }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
   .reply-bubble-in { animation: none; }
   .animate-rise, .animate-spot-in { animation: none; }
