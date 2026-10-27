@@ -393,7 +393,7 @@ import { skillExport } from "./skill-export.ts";
 import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
-import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, openSetupOffer, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { suggestSetupChoices } from "./setup-suggestions.ts"; import { createSetupRequestRoutes, type SetupPickSent } from "./routes/setup-request.ts";
+import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, openSetupOffer, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { suggestSetupChoices, suggestionModel } from "./setup-suggestions.ts"; import { createSetupRequestRoutes, type SetupPickSent } from "./routes/setup-request.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
@@ -7757,13 +7757,21 @@ async function personaliseSetupCard(bot: BotRecord): Promise<void> {
   const aboutMe = cfg.profile?.aboutMe?.trim();
   if (!aboutMe || sharedMembership() || !openSetupOffer(store, bot.id, bot.threadId)) return;
   if (hostedModels && !hostedModels.allows(bot.modelSelection)) return;
-  const engine = registry.get(bot.modelSelection.instanceId);
+  const instanceId = bot.modelSelection.instanceId;
+  const engine = registry.get(instanceId);
   if (!engine?.generateText || policyModelRefusal(engine)) return;
   try { assertWithinBudget(cfg, DATA_DIR); } catch { return; }
-  const choices = await suggestSetupChoices(engine, {
+  const url = (cfg.instances?.[instanceId]?.config as { url?: unknown } | undefined)?.url;
+  let host: string | undefined;
+  try { host = typeof url === "string" ? new URL(url).hostname : undefined; } catch { host = undefined; }
+  const refused = quickFallback.refused(instanceId);
+  const model = suggestionModel({ instanceId, driverKind: engine.driverKind, catalog: engine.models.options.map((option) => option.id), host,
+    quickModelsUsable: engine.quickModelsUsable?.() !== false }, bot.modelSelection.model || undefined, refused,
+  (candidate) => !hostedModels || hostedModels.allows({ instanceId, model: candidate }));
+  const choices = await suggestSetupChoices(engine.generateText.bind(engine), {
     botName: bot.name, aboutMe, language: appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
     otherBots: store.bots.filter((other) => other.id !== bot.id && !other.hidden).map((other) => other.title ? `${other.name} (${other.title})` : other.name),
-  });
+  }, { model, own: bot.modelSelection.model || undefined, refused, onRefused: (refusedModel) => quickFallback.remember(instanceId, refusedModel) });
   const greeting = choices ? openSetupOffer(store, bot.id, bot.threadId) : null;
   if (greeting && choices) store.patchMessage(bot.threadId, greeting.id, { setupChoices: choices });
 }
