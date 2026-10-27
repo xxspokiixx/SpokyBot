@@ -31,13 +31,13 @@ export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items
 }
 
 /** Settings → General: whether the viewer's own MausBot has a row in the sidebar. */
-export function DefaultBotSidebarRow() {
+export function DefaultBotSidebarRow({ simple = false }: { simple?: boolean }) {
   const { state, dispatch } = useStore();
   const bot = myDefaultBot(state.bots, useViewerEmail());
   if (!bot) return null;
   const shown = !bot.sidebarHidden;
   return (
-    <SettingRow title={t("defaultBot.show.title", { name: bot.name || DEFAULT_BOT_NAME })} subtitle={t("defaultBot.show.subtitle")}>
+    <SettingRow title={t("defaultBot.show.title", { name: bot.name || DEFAULT_BOT_NAME })} subtitle={t(simple ? "settings.simple.defaultBot" : "defaultBot.show.subtitle")}>
       <Switch
         checked={shown}
         data-default-bot-shown=""

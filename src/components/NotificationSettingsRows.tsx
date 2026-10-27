@@ -52,7 +52,7 @@ export function DeviceNotificationsRow({ simple = false }: { simple?: boolean })
   return (
     <SettingRow
       title={t("settings.deviceNotifications.title")}
-      subtitle={t(blocked ? "settings.deviceNotifications.blocked" : simple ? "settings.deviceNotifications.simpleSubtitle" : "settings.deviceNotifications.subtitle")}
+      subtitle={t(blocked ? "settings.deviceNotifications.blocked" : simple ? "settings.simple.deviceNotifications" : "settings.deviceNotifications.subtitle")}
     >
       <Switch
         checked={permission === "granted" && enabled}
@@ -67,7 +67,7 @@ export function DeviceNotificationsRow({ simple = false }: { simple?: boolean })
 export function NotificationSoundsRow({ simple = false }: { simple?: boolean }) {
   const enabled = useNotificationSounds();
   return (
-    <SettingRow title={t("settings.notificationSounds.title")} subtitle={simple ? undefined : t("settings.notificationSounds.subtitle")}>
+    <SettingRow title={t("settings.notificationSounds.title")} subtitle={t(simple ? "settings.simple.notificationSounds" : "settings.notificationSounds.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.notificationSounds.play")}
@@ -80,7 +80,7 @@ export function NotificationSoundsRow({ simple = false }: { simple?: boolean }) 
 export function NotificationFeedRow({ simple = false }: { simple?: boolean }) {
   const enabled = useNotificationFeed();
   return (
-    <SettingRow title={t("settings.notificationFeed.title")} subtitle={t(simple ? "settings.notificationFeed.simpleSubtitle" : "settings.notificationFeed.subtitle")}>
+    <SettingRow title={t("settings.notificationFeed.title")} subtitle={t(simple ? "settings.simple.notificationFeed" : "settings.notificationFeed.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.notificationFeed.show")}

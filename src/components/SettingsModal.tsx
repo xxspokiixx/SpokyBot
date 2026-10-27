@@ -54,7 +54,7 @@ import { NotificationRows } from "./NotificationSettingsRows";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { Select } from "./Select";
 import { BrowserProfilesRow, ColorUserBubblesRow, AdvancedModeRow, ExperimentalFeaturesRow, LanguageRow, NewBotEffortRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow, SidebarDensityRow, ToolCallsRow, UniversalPinsRow, UpdatesRow } from "./AppSettingsRows";
-import { SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
+import { SIMPLE_ADVANCED_ONLY, SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleLooksPage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
 // boot language.
@@ -106,22 +106,21 @@ export type SimpleSettingsPage = {
 
 export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "general", labelKey: "settings.section.general", icon: Settings, sections: ["general", "appearance", "people", "import", "organization", "activity"],
-    keywords: ["account", "font", "open at login", "startup", "welcome", "tour", "advanced mode", "more settings"] },
+    keywords: ["account", "theme", "looks", "open at login", "startup", "analytics", "advanced mode"] },
   { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"] },
-  { id: "computer", labelKey: "settings.page.computer", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
-  { id: "billing", labelKey: "settings.page.billing", icon: ChartNoAxesColumn, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
-  { id: "updates", labelKey: "settings.updates.title", icon: CloudDownload, sections: ["updates"],
-    keywords: ["update", "version", "release", "product updates", "newsletter", "email updates", "analytics", "diagnostics", "logs", "support"] },
+  { id: "computer", labelKey: "settings.simple.page.computer", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
+  { id: "billing", labelKey: "settings.simple.page.billing", icon: ChartNoAxesColumn, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
+  { id: "updates", labelKey: "settings.simple.page.updates", icon: CloudDownload, sections: ["updates"],
+    keywords: ["update", "version", "release", "product updates", "newsletter", "email updates", "welcome", "tour", "diagnostics", "logs", "support"] },
 ];
 
 export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "decisionModel"];
 
 
 export const SIMPLE_FOLDED: Partial<Record<AppSettingsSection, SimpleDisclosureId>> = {
-  import: "general-more",
-  organization: "general-more",
-  activity: "general-more",
-  connections: "ai-other",
+  connections: "ai-keys",
+  remote: "computer-elsewhere",
+  desktopWorkspaces: "computer-elsewhere",
 };
 
 export function simpleSettingsPages(available: ReadonlySet<AppSettingsSection>, open: AppSettingsSection): SimpleSettingsPage[] {
@@ -203,14 +202,23 @@ export function SettingsModal() {
 
   const [folds, setFolds] = useState<Partial<Record<SimpleDisclosureId, boolean>>>({});
   const disclose: Disclose = (id) => {
-    const open = q !== "" || (folds[id] ?? SIMPLE_FOLDED[section] === id);
+    const open = q !== "" || (folds[id] ?? SIMPLE_FOLDED[requested] === id);
     return { id, open, onToggle: () => setFolds((current) => ({ ...current, [id]: !open })) };
   };
+  const [looks, setLooks] = useState(false);
+  const [reveal, setReveal] = useState<string | null>(null);
+  const advancedMatches = advanced || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
 
   const sectionIndex = currentPage?.sections.indexOf(section) ?? 0;
+  const revealBlock = !advanced && requested === "remote" ? "remote" : section;
   useEffect(() => {
-    if (scrollRef.current) revealSettingsBlock(scrollRef.current, section, advanced ? 0 : sectionIndex);
-  }, [advanced, section, sectionIndex]);
+    if (scrollRef.current) revealSettingsBlock(scrollRef.current, revealBlock as AppSettingsSection, advanced ? 0 : revealBlock === section ? sectionIndex : 1);
+  }, [advanced, revealBlock, section, sectionIndex]);
+  useEffect(() => {
+    if (!reveal) return;
+    scrollRef.current?.querySelector(`[data-settings-block="${reveal}"]`)?.scrollIntoView?.({ block: "start" });
+    setReveal(null);
+  }, [reveal]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -220,6 +228,13 @@ export function SettingsModal() {
     else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
+      if (!searchFirst.current && dialog && document.activeElement === dialog && event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey
+        && search?.checkVisibility()) {
+        event.preventDefault();
+        search.focus();
+        setQuery((current) => current + event.key);
+        return;
+      }
       // A child editor owns Escape and its focus trap, including while saving.
       if (event.defaultPrevented || (dialog && [...dialog.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')]
         .some(child => child.getClientRects().length))) return;
@@ -268,7 +283,7 @@ export function SettingsModal() {
     client: <RemoteComputerSection hideWhenUnavailable={!advanced} />,
     domain: remoteActive ? null : <CustomDomainSettings />,
     // Security: the server decides who may pair (an owner or admin session), not this gate.
-    pairing: <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} />,
+    pairing: <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} simple={!advanced} />,
     companion: remoteActive ? null : <CompanionSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? phoneFocus : 0} />,
   };
 
@@ -418,11 +433,13 @@ export function SettingsModal() {
   const renderSimplePage = (page: SimpleSettingsPage) => {
     const has = (id: AppSettingsSection) => page.sections.includes(id);
     switch (page.id) {
-      case "general": return <SimpleGeneralPage has={has} remoteActive={remoteActive} disclose={disclose} peopleOpen={section === "people"} />;
+      case "general": return looks
+        ? <SimpleLooksPage onBack={() => { setLooks(false); setReveal("appearance"); }} />
+        : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setLooks(true)} />;
       case "ai": return <SimpleAiPage has={has} disclose={disclose} connections={renderSection("connections")} />;
       case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={renderSection("desktopWorkspaces")} disclose={disclose} />;
       case "billing": return <SimpleBillingPage has={has} disclose={disclose} cloudAccount={renderSection("cloudAccount")} />;
-      case "updates": return <SimpleUpdatesPage disclose={disclose} />;
+      case "updates": return <SimpleUpdatesPage remoteActive={remoteActive} />;
       default:
         return page.sections.map((id) => <section key={id} data-settings-block={id} className="flex scroll-mt-4 flex-col gap-4">{renderSection(id)}</section>);
     }
@@ -431,7 +448,7 @@ export function SettingsModal() {
   const close = () => dispatch({ type: "toggleAppSettings", open: false });
   const searchField = (className: string, inputClassName: string) => (
     <div className={className}>
-      <Search size={advanced ? 14 : 16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      <Search size={advanced ? 14 : 15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
       <input
         data-settings-search
         value={query}
@@ -450,6 +467,8 @@ export function SettingsModal() {
   );
 
   if (!advanced) {
+    const looksOpen = looks && currentPage?.id === "general";
+    const goTo = (id: AppSettingsSection) => { setLooks(false); openSection(id); };
     return (
       <div
         className="glass-popup-frame"
@@ -458,7 +477,7 @@ export function SettingsModal() {
         style={glassPopupFrameStyle()}
         onMouseDown={(e) => e.target === e.currentTarget && close()}
       >
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-black/50" />
+        <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
         <div
           ref={dialogRef}
           role="dialog"
@@ -466,16 +485,16 @@ export function SettingsModal() {
           aria-labelledby="app-settings-title"
           tabIndex={-1}
           style={{ outline: "none" }}
-          className="glass-popup animate-pop-in relative flex overflow-hidden rounded-[14px] border-[0.5px] border-ink/10 bg-app text-ink md:max-h-[700px] md:max-w-[900px]"
+          className="glass-surface glass-popup animate-pop-in relative flex overflow-hidden rounded-2xl text-ink"
         >
           <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
-          <nav aria-label={t("settings.title")} className="hidden min-h-0 w-[200px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r-[0.5px] border-ink/10 p-3 pt-4 sm:flex">
+          <nav aria-label={t("settings.title")} className="glass-rail hidden min-h-0 w-[198px] shrink-0 flex-col gap-0.5 overflow-y-auto px-3 py-4 sm:flex">
             {searchField(
-              "mb-1 flex h-[34px] shrink-0 items-center gap-2.5 rounded-lg px-2 text-ink-secondary transition-colors hover:bg-ink/[0.04] focus-within:bg-ink/[0.06] motion-reduce:transition-none",
-              "w-full min-w-0 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none",
+              "mb-2 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
+              "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
             )}
-            {visiblePages.length === 0 && (
-              <div className="px-2 py-3 text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</div>
+            {visiblePages.length === 0 && advancedMatches.length === 0 && (
+              <div className="px-[9px] py-3 text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</div>
             )}
             {visiblePages.map((page) => {
               const Icon = page.icon;
@@ -485,29 +504,40 @@ export function SettingsModal() {
                   key={page.id}
                   type="button"
                   data-settings-page={page.id}
-                  onClick={() => openSection(page.sections[0]!)}
+                  onClick={() => goTo(page.sections[0]!)}
                   aria-current={current ? "page" : undefined}
                   className={cn(
-                    "flex h-[34px] shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-[14px] text-ink transition-colors motion-reduce:transition-none",
+                    "flex h-8 shrink-0 cursor-pointer items-center gap-[9px] rounded-lg px-[9px] text-left text-[13px] text-ink transition-colors motion-reduce:transition-none",
                     current ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
                   )}
                 >
-                  <Icon size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
+                  <Icon size={15} aria-hidden="true" className="shrink-0" />
                   <span className="truncate">{t(page.labelKey)}</span>
                 </button>
               );
             })}
+            {advancedMatches.map((key) => (
+              <button
+                key={key}
+                type="button"
+                data-settings-advanced-only={key}
+                onClick={() => { setQuery(""); goTo("general"); setReveal("advanced-mode"); }}
+                className="flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none"
+              >
+                <span>{t(key)} <span className="text-ink-secondary">· {t("settings.simple.advanced")}</span></span>
+              </button>
+            ))}
           </nav>
 
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-center gap-3 py-3 pl-4 pr-14 sm:px-10 sm:pb-0 sm:pt-[30px]">
+            <header className="flex shrink-0 items-center gap-3 py-3 pl-4 pr-14 sm:pb-1.5 sm:pl-12 sm:pt-8">
               <Select className="min-w-0 sm:hidden"
                 aria-label={t("settings.title")}
                 value={currentPage?.id ?? ""}
                 onChange={(event) => {
                   setQuery("");
                   const page = simplePages.find((candidate) => candidate.id === event.target.value);
-                  if (page) openSection(page.sections[0]!);
+                  if (page) goTo(page.sections[0]!);
                 }}
               >
                 {simplePages.map((page) => (
@@ -515,7 +545,7 @@ export function SettingsModal() {
                 ))}
               </Select>
               <h2 className="hidden truncate text-[17px] font-medium leading-6 tracking-[-0.008em] text-ink sm:block">
-                {currentPage ? t(currentPage.labelKey) : null}
+                {looksOpen ? t("settings.simple.page.looks") : currentPage ? t(currentPage.labelKey) : null}
               </h2>
             </header>
             <button
@@ -532,10 +562,10 @@ export function SettingsModal() {
               ref={scrollRef}
               data-settings-scroll
               className={cn(
-                "flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-4 pb-10 pt-4 sm:px-8 sm:pt-6",
-                "[&_.bg-card]:bg-menu [&_.ui-button]:rounded-full [&_.ui-button]:px-3 [&_.ui-button]:text-[14px] [&_.ui-button]:font-normal",
-                "[&_.ui-button:not(.ui-button-primary)]:border-transparent [&_.ui-button:not(.ui-button-primary)]:bg-ink/[0.07]",
-                "[&_.ui-button:not(.ui-button-primary):enabled:hover]:bg-ink/[0.11] [&_.ui-button-primary]:bg-ink [&_.ui-button-primary]:text-app",
+                "flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-4 pb-8 pt-4 sm:px-8 sm:pb-7 sm:pt-[22px]",
+                "[&_.ui-button]:h-8 [&_.ui-button]:rounded-full [&_.ui-button]:border-0 [&_.ui-button]:px-3 [&_.ui-button]:text-[14px] [&_.ui-button]:font-normal",
+                "[&_.ui-button:not(.ui-button-primary)]:bg-ink/5 [&_.ui-button:not(.ui-button-primary)]:text-ink [&_.ui-button:not(.ui-button-primary):enabled:hover]:bg-ink/10",
+                "[&_.ui-button-primary]:bg-ink [&_.ui-button-primary]:text-app [&_.ui-button-primary:enabled:hover]:bg-ink/85",
                 "[&_.uppercase]:normal-case [&_.uppercase]:tracking-normal",
               )}
             >

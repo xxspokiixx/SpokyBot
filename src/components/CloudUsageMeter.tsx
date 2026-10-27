@@ -231,7 +231,7 @@ export function CloudUsageSettings() {
   return <CloudUsageSettingsView usage={usage} upgrade={upgrade}>{dialog}</CloudUsageSettingsView>;
 }
 
-function UpgradeButton({ usage, upgrade, className }: { usage: CloudUsage; upgrade: UpgradeUi; className?: string }) {
+export function UpgradeButton({ usage, upgrade, className }: { usage: CloudUsage; upgrade: UpgradeUi; className?: string }) {
   const path = upgradePath(usage), target = nextPlan(usage);
   if (path === "top") return null;
   return (
@@ -255,13 +255,13 @@ export function UsageSummaryCard({ kind, title, percent, label, note, children }
 }) {
   const band = meterBand(percent);
   return (
-    <section data-usage-summary={kind} data-band={band} aria-label={label} className={cn(SIMPLE_CARD, "p-3.5")}>
-      <p className="text-[14px] leading-5 text-ink">{title}</p>
+    <section data-usage-summary={kind} data-band={band} aria-label={label} className={cn(SIMPLE_CARD, "px-4 py-3.5")}>
+      <p className="text-[13px] leading-[18px] text-ink">{title}</p>
       <p className="mt-2 flex items-baseline gap-1.5">
         <span className="text-[22px] font-medium leading-7 tracking-[-0.012em] text-ink tabular-nums">{percent}%</span>
-        <span className="text-[13px] text-ink-secondary">{t("settings.billing.used")}</span>
+        <span className="text-[13px] text-ink-secondary">{t("settings.simple.billing.used")}</span>
       </p>
-      <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="mt-2 h-1 w-full overflow-hidden rounded-full bg-ink/[0.08]">
+      <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="mt-2 h-1 w-full overflow-hidden rounded-full bg-ink/[0.04]">
         <div className={cn("h-full rounded-full", SUMMARY_BAR[band])} style={{ width: `${percent > 0 ? Math.max(percent, 1) : 0}%` }} />
       </div>
       <p className="mt-2 text-[12px] leading-4 text-ink-secondary">{note}</p>
@@ -273,7 +273,7 @@ export function UsageSummaryCard({ kind, title, percent, label, note, children }
 export function CloudUsageSummaryView({ usage, upgrade, children }: { usage: CloudUsage; upgrade: UpgradeUi; children?: ReactNode }) {
   const percent = includedUsePercent(usage);
   return (
-    <UsageSummaryCard kind="cloud" title={t("settings.billing.included")} percent={percent} label={t("settings.billing.summary", { percent: String(percent) })} note={resetLine(usage)}>
+    <UsageSummaryCard kind="cloud" title={t("settings.simple.billing.included")} percent={percent} label={t("settings.simple.billing.summary", { percent: String(percent) })} note={resetLine(usage)}>
       <UpgradeButton usage={usage} upgrade={upgrade} className="mt-3.5" />
       {upgrade.note && <div className="mt-2"><NoteLine note={upgrade.note} /></div>}
       {children}
