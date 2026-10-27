@@ -2413,5 +2413,6 @@
   "mcp.team.onlyMeOn": "Vous seul pouvez l’utiliser. Vos coéquipiers peuvent ajouter leur propre clé depuis leur page d’équipe.",
   "mcp.auth.loadingTools": "Connecté. Connexion au serveur…",
   "update.card.idleNote": "Redémarrez maintenant, ou laissez faire : {app} l’installe tout seul la prochaine fois que vous serez absent et que rien ne tourne.",
-  "update.updatedItself": "{app} s’est mis à jour tout seul vers la version {version}."
+  "update.updatedItself": "{app} s’est mis à jour tout seul vers la version {version}.",
+  "automations.firstRun": "Première exécution {when}"
 }

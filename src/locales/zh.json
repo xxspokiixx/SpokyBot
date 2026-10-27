@@ -3286,5 +3286,6 @@
   "mcp.team.onlyMeOn": "只有你可以使用。队友可以在自己的团队页面添加自己的密钥。",
   "mcp.auth.loadingTools": "已登录。正在连接…",
   "update.card.idleNote": "现在重启，或者先不管它：下次你不在、也没有任务在运行时，{app} 会自动安装。",
-  "update.updatedItself": "{app} 已自动更新到 {version}。"
+  "update.updatedItself": "{app} 已自动更新到 {version}。",
+  "automations.firstRun": "首次运行：{when}"
 }
