@@ -41,7 +41,7 @@ const plural = (language: string) => {
 };
 
 const en: FirstHourWords = {
-  greeting: (name, bot) => `Hi${name ? ` ${name}` : ""}! I'm ${bot}, your Chief of Staff. I live on your Cloud, so I keep working while your computer is off. What do you want off your plate?`,
+  greeting: (name, bot) => `Hi${name ? ` ${name}` : ""}! I'm ${bot}, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?`,
   connect: "So I can see what needs you today, connect Gmail and Google Calendar. It's one sign-in each. I only read and write drafts: nothing is sent, accepted or deleted without you.",
   connected: "You're connected. I couldn't take a first look just now; I'll keep an eye on it and tell you when something needs you.",
   briefOn: "Every morning at 8 I'll send you a brief of what needs you.",
