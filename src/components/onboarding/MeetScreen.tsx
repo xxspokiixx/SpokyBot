@@ -1,80 +1,60 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowUp, Check, Plus } from "lucide-react";
 import { BotAvatar, MausAvatar } from "@/components/Avatar";
+import { engineReady } from "@/components/EngineLibrary";
 import { usePrefersReducedMotion } from "@/components/mascot-clock";
 import { brand } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { DEFAULT_BOT_NAME, myDefaultBot, useViewerEmail } from "@/lib/default-bot";
-import { t } from "@/lib/i18n";
-import { aiWorks } from "@/lib/onboarding";
-import type { MausState } from "@/lib/mascot";
-import type { LocaleKey } from "@/locales";
+import { activeLocale, t } from "@/lib/i18n";
+import { aiChoices, aiWorks } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
-import { ConnectAi } from "./ConnectAi";
+import { ConnectAiDialog } from "./ConnectAi";
+import { PILL, SignInPill, useSignInPill } from "./SignInPill";
 import { useWelcomeAi } from "./welcome-ai";
 
 const MASCOT_SIZE = 72;
+const PLACEHOLDER_MS = 700;
+const GRAPHEME_MS = 35;
 
-/** What the composer on the first screen types by itself, one after another. */
-export const DEMO_ASKS: readonly LocaleKey[] = [
-  "onboarding.meet.ask.inbox", "onboarding.meet.ask.replies", "onboarding.meet.ask.week", "onboarding.meet.ask.price",
-];
+function graphemes(text: string): string[] {
+  const Segmenter = (Intl as { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  return Segmenter ? Array.from(new Segmenter(activeLocale(), { granularity: "grapheme" }).segment(text), (part) => part.segment) : Array.from(text);
+}
 
-const START_MS = 700;
-const KEY_MS = 34;
-const PAUSE_MS = 110;
-const HOLD_MS = 2_200;
-const SEND_MS = 280;
-
-const askChars = (ask: number) => Array.from(t(DEMO_ASKS[ask % DEMO_ASKS.length]!));
-/** Each ask starts with its first word already in, so the composer is never seen empty. */
-const head = (chars: readonly string[]) => (chars.includes(" ") ? chars.indexOf(" ") + 1 : Math.min(3, chars.length));
-
-/** The ask being typed and how far: one character at a time, held, sent, then the next. Reduced motion shows the first,
- * whole and still. */
-function useTypedAsk(reduced: boolean): { text: string; sent: boolean; typing: boolean } {
-  const [state, setState] = useState(() => ({ ask: 0, length: head(askChars(0)), sent: false, fresh: true }));
-  const full = askChars(state.ask);
-  const shown = reduced ? full.length : Math.min(state.length, full.length);
+/** The demo's one sentence, typed once after the placeholder has been read; reduced motion shows it whole. */
+function useDemoSentence(reduced: boolean): { text: string; typing: boolean; waiting: boolean } {
+  const parts = useMemo(() => graphemes(t("onboarding.meet.demo")), []);
+  const [typed, setTyped] = useState(reduced ? parts.length : -1);
   useEffect(() => {
-    if (reduced) return;
-    const chars = askChars(state.ask);
-    const finished = state.length >= chars.length;
-    const last = chars[state.length - 1];
-    const wait = state.fresh ? START_MS : state.sent ? SEND_MS : finished ? HOLD_MS : last === " " || last === "," ? PAUSE_MS : KEY_MS;
-    const timer = setTimeout(() => setState((now) => now.sent
-      ? { ask: now.ask + 1, length: head(askChars(now.ask + 1)), sent: false, fresh: false }
-      : finished ? { ...now, sent: true, fresh: false } : { ...now, length: now.length + 1, fresh: false }), wait);
+    if (reduced || typed >= parts.length) return;
+    const timer = setTimeout(() => setTyped((now) => now + 1), typed < 0 ? PLACEHOLDER_MS : GRAPHEME_MS);
     return () => clearTimeout(timer);
-  }, [reduced, state]);
-  return { text: full.slice(0, shown).join(""), sent: state.sent, typing: !reduced && shown < full.length };
+  }, [reduced, typed, parts.length]);
+  const shown = reduced ? parts.length : typed;
+  return { text: parts.slice(0, Math.max(0, shown)).join(""), typing: shown >= 0 && shown < parts.length, waiting: shown < 0 };
 }
 
 function DemoComposer({ reduced, onTyping }: { reduced: boolean; onTyping: (typing: boolean) => void }) {
-  const { text, sent, typing } = useTypedAsk(reduced);
-  const line = useRef<HTMLDivElement>(null);
+  const { text, typing, waiting } = useDemoSentence(reduced);
   useEffect(() => onTyping(typing), [typing, onTyping]);
-  useEffect(() => {
-    if (line.current) line.current.scrollLeft = line.current.scrollWidth;
-  }, [text]);
   return (
-    <div aria-hidden="true" data-demo-composer="" className="w-[420px] max-w-full select-none rounded-[18px] border-[0.5px] border-ink/[0.12] bg-composer px-2 pb-1.5 pt-2.5 text-left shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03)]">
-      <div ref={line} className="overflow-hidden whitespace-nowrap px-2.5 text-[15px] leading-5 text-ink">
-        <span className={cn("transition-[opacity,transform] duration-200 ease-out", sent && "inline-block -translate-y-1 opacity-0")}>{text}</span>
-        <span className={cn("ml-px inline-block h-[17px] w-[1.5px] translate-y-[3px] bg-ink", !typing && !sent && "animate-caret", sent && "opacity-0")} />
+    <div aria-hidden="true" data-demo-composer=""
+      className="absolute left-1/2 top-[calc(50%-14px)] flex min-h-[76px] w-[348px] max-w-[calc(100%-32px)] -translate-x-1/2 select-none flex-col gap-2.5 rounded-[20px] border-[0.5px] border-ink/10 bg-composer px-2 pb-2 pt-3 text-left [:root[data-skin=daylight]_&]:shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03)]">
+      <div className="mx-2 whitespace-nowrap text-[14px] leading-5">
+        {waiting ? <span className="text-ink-tertiary">{t("onboarding.meet.placeholder", { app: brand().name })}</span> : <span className="text-ink">{text}</span>}
+        {!reduced && (waiting || typing) && <span className="animate-meet-caret ml-px inline-block h-[15px] w-[1.5px] translate-y-[2px] bg-ink align-[-2px]" />}
       </div>
-      <div className="mt-3 flex items-center justify-between">
-        <span className="flex size-7 items-center justify-center rounded-full bg-ink/[0.07] text-ink-secondary"><Plus size={16} /></span>
-        <span className={cn("flex size-7 items-center justify-center rounded-full transition-colors duration-200",
-          text && !sent ? "bg-ink text-app" : "bg-ink/[0.12] text-ink-tertiary")}
-        ><ArrowUp size={16} strokeWidth={2.2} /></span>
+      <div className="flex items-center justify-between">
+        <span className="flex size-7 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--color-ink)_4%,var(--color-composer))] text-ink-tertiary"><Plus size={14} /></span>
+        <span className="flex size-7 items-center justify-center rounded-full bg-ink text-app"><ArrowUp size={14} strokeWidth={2} /></span>
       </div>
     </div>
   );
 }
 
-/** The first run's first screen: the app's name, its mascot and a composer typing a few asks by itself, then Next. With
- * no AI working yet it also holds the one thing to do before chatting: connecting one, which Later leaves for after. */
+/** The first run's first screen: the app's name, its mascot and a composer typing one sentence, then one pill. With
+ * no AI working yet the pill is the sign-in, and Next comes once the AI has answered its test message. */
 export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => void }) {
   const { state } = useStore();
   const reduced = usePrefersReducedMotion();
@@ -82,61 +62,63 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
   // An AI counts once it answered a test message (or cannot be sent one); OpenCode's free model never does.
   const tested = useWelcomeAi(state.instances, !hosted);
   const ready = aiWorks(tested);
+  const known = state.instances.length > 0;
   const [asking, setAsking] = useState(false);
   useEffect(() => {
-    if (!hosted && state.instances.length > 0 && !ready && tested?.state !== "testing") setAsking(true);
-  }, [hosted, state.instances.length, ready, tested?.state]);
+    if (!hosted && known && !ready && tested?.state !== "testing") setAsking(true);
+  }, [hosted, known, ready, tested?.state]);
+  const { recommended } = aiChoices(state.instances.filter((instance) => instance.install && !engineReady(instance)));
+  const pill = useSignInPill(recommended);
+  const [dialog, setDialog] = useState(false);
   const [typing, setTyping] = useState(false);
-  const [motion, setMotion] = useState<{ kind: "arrive" | "success"; key: number }>({ kind: "arrive", key: 0 });
-  const connectedOnce = useRef(false);
-  useEffect(() => {
-    if (!asking || !ready || connectedOnce.current) return;
-    connectedOnce.current = true;
-    setMotion((now) => ({ kind: "success", key: now.key + 1 }));
-  }, [asking, ready]);
 
   const logo = brand().logo;
-  const face: MausState = asking && ready ? "proud" : typing ? "listening" : "happy";
-  const blocked = asking && !ready;
+  const face = typing ? "listening" : "idle";
+  const failure = pill.error ?? (tested?.state === "failed" ? tested.error ?? t("onboarding.engines.noAnswer", { name: tested.instance.displayName }) : null);
+  const signingIn = asking && !ready;
   return (
-    <div className="flex min-h-full w-full flex-col items-center px-4 text-center">
-      <div className="min-h-4 grow-[1.34]" />
-      <h1 id="welcome-title" className="text-[28px] font-light leading-[34px] tracking-[-0.015em] text-ink">{t("onboarding.meet.title", { app: brand().name })}</h1>
-      <div className="min-h-4 grow" />
-      <span className="flex shrink-0" style={{ width: MASCOT_SIZE, height: MASCOT_SIZE }}>
+    <div className="relative h-full min-h-[600px] w-full text-center">
+      <h1 id="welcome-title" className="absolute left-1/2 top-[calc(50%-264px)] w-max max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 text-[28px] font-normal leading-[34px] tracking-[-0.02em] text-ink">
+        {t("onboarding.meet.title", { app: brand().name })}
+      </h1>
+      <span className="absolute left-1/2 top-[calc(50%-75px)] flex -translate-x-1/2 -translate-y-1/2" style={{ width: MASCOT_SIZE, height: MASCOT_SIZE }}>
         {logo ? (
           <img src={logo} alt="" width={MASCOT_SIZE} height={MASCOT_SIZE} className="size-full object-contain" />
         ) : maus ? (
-          <BotAvatar bot={maus} size={MASCOT_SIZE} state={face} motion={motion.kind} motionKey={motion.key} gaze={typing ? { x: 0, y: 0.55 } : undefined} />
+          <BotAvatar bot={maus} size={MASCOT_SIZE} state={face} animated={!reduced} />
         ) : (
-          <MausAvatar color="chrome" size={MASCOT_SIZE} state={face} motion={motion.kind} motionKey={motion.key} label={DEFAULT_BOT_NAME} />
+          <MausAvatar color="chrome" size={MASCOT_SIZE} state={face} animated={!reduced} label={DEFAULT_BOT_NAME} />
         )}
       </span>
-      <div className="h-8 shrink-0" />
       <DemoComposer reduced={reduced} onTyping={setTyping} />
-      {hosted && <p className="mt-6 max-w-[420px] text-[14px] leading-relaxed text-ink-secondary">{t("onboarding.hosted.intro")}</p>}
-      {asking && (
-        <div className="mt-8 w-[440px] max-w-full">
-          <ConnectAi hosted={hosted} tested={tested} />
-        </div>
+      {hosted && (
+        <p className="absolute left-1/2 top-[calc(50%+86px)] w-[420px] max-w-[calc(100%-32px)] -translate-x-1/2 text-[13px] leading-[18px] text-ink-secondary">
+          {t("onboarding.hosted.intro")}
+        </p>
       )}
-      <div className="min-h-4 grow-[1.06]" />
-      <button
-        type="button"
-        data-primary=""
-        onClick={onNext}
-        disabled={blocked}
-        className="h-9 w-[288px] max-w-full shrink-0 rounded-full bg-ink px-4 text-[14px] font-medium text-app transition-[transform,background-color,color] duration-150 hover:bg-ink/90 active:scale-[0.98] disabled:bg-ink/[0.12] disabled:text-ink-tertiary disabled:active:scale-100"
-      >
-        {t("onboarding.meet.next")}
-      </button>
-      {blocked && (
-        <button type="button" data-welcome-later="" onClick={onNext}
-          className="mt-3 rounded-full px-3 py-1 text-[13px] text-ink-secondary transition-colors hover:text-ink">
-          {t("onboarding.meet.later")}
-        </button>
-      )}
-      <div className="min-h-4 grow-[1.54]" />
+      <div className="absolute left-1/2 top-[calc(50%+200px)] flex w-[320px] max-w-[calc(100%-32px)] -translate-x-1/2 flex-col items-center">
+        {asking && ready && tested && (
+          <p role="status" data-ai-connected="" className="absolute -top-8 flex items-center gap-1.5 whitespace-nowrap text-[13px] leading-[18px] text-success">
+            <Check size={14} strokeWidth={2.5} aria-hidden="true" />{t("onboarding.meet.connected", { name: tested.instance.displayName })}
+          </p>
+        )}
+        {signingIn ? (
+          <SignInPill pill={pill} instance={recommended} waiting={tested?.state === "testing"} onDialog={() => setDialog(true)} />
+        ) : (
+          <button type="button" data-primary="" onClick={onNext} className={cn(PILL, asking && "animate-fade-in [animation-duration:150ms]")}>
+            {t("onboarding.meet.next")}
+          </button>
+        )}
+        {signingIn && (
+          <p className="mt-3 text-[13px] leading-[18px] text-ink-secondary">
+            <button type="button" onClick={() => setDialog(true)} className="rounded transition-colors hover:text-ink">{t("onboarding.meet.otherWays")}</button>
+            <span aria-hidden="true"> · </span>
+            <button type="button" data-welcome-later="" onClick={onNext} className="rounded transition-colors hover:text-ink">{t("onboarding.meet.setupLater")}</button>
+          </p>
+        )}
+        {signingIn && failure && <p role="alert" className="mt-2 text-[13px] leading-[18px] text-danger">{failure}</p>}
+      </div>
+      {dialog && <ConnectAiDialog hosted={hosted} tested={tested} onClose={() => setDialog(false)} />}
     </div>
   );
 }

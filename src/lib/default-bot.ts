@@ -56,15 +56,54 @@ export function chiefChoices<T extends ChiefCandidate>(bots: readonly T[], maus:
   return bots.filter((bot) => !bot.defaultBot && !bot.hidden && !hiddenFromSidebar(bot, viewer) && chiefScope(bot) === scope);
 }
 
+/** The first run shows its Chief step only for a MausBot not yet introduced, where no other bot is the Chief in its
+ * scope; otherwise the first run ends in the chat. */
+export function chiefStepFits<T extends ChiefCandidate>(bots: readonly T[], maus: (T & { welcomed?: boolean }) | undefined): boolean {
+  if (!maus || maus.welcomed || maus.hidden) return false;
+  const chief = chiefFor(bots, maus);
+  return !chief || chief.id === maus.id;
+}
+
+let chiefStep = false;
+const chiefStepListeners = new Set<() => void>();
+
+/** The first run's Chief step is on screen: the app behind it is the empty shell, never a chat. */
+export function setChiefStepOpen(open: boolean): void {
+  if (chiefStep === open) return;
+  chiefStep = open;
+  for (const listener of chiefStepListeners) listener();
+}
+
+export function useChiefStepOpen(): boolean {
+  return useSyncExternalStore((listener) => {
+    chiefStepListeners.add(listener);
+    return () => chiefStepListeners.delete(listener);
+  }, () => chiefStep, () => false);
+}
+
 /** What Create saves on MausBot: seen, in the sidebar, and the Chief only where there is none, so a Chief someone
  * already has is never replaced. */
 export function createChiefPatch(maus: DefaultBotFields, chief: { id: string } | undefined): { welcomed: true; sidebarHidden?: false; chiefOfStaff?: true } {
   return { welcomed: true, ...(maus.sidebarHidden ? { sidebarHidden: false as const } : {}), ...(chief ? {} : { chiefOfStaff: true as const }) };
 }
 
-export type SetupStep = "ai" | "apps" | "bots" | "phone" | "cloud" | "import";
+export type SetupStep = "ai" | "bots" | "apps" | "phone" | "cloud";
 
-export interface SetupFacts {
+/** What MausBot's intro offers to set up in Advanced mode, each optional: only what is still to do, and on a place with
+ * bots of the person's own only an AI, which nothing works without. On a Team Cloud the team's admins set those up. */
+export function setupSteps(input: { aiReady: boolean; ownBots: number; onCloud: boolean; team: boolean; remote: boolean }): SetupStep[] {
+  if (input.team) return [];
+  const fresh = input.ownBots === 0;
+  return [
+    ...(input.aiReady ? [] : ["ai" as const]),
+    ...(fresh ? ["bots" as const, "apps" as const, "phone" as const] : []),
+    ...(fresh && !input.onCloud && !input.remote ? ["cloud" as const] : []),
+  ];
+}
+
+export type IntroChip = "ai" | "apps" | "import" | "phone" | "cloud";
+
+export interface IntroFacts {
   aiReady: boolean;
   ownBots: number;
   onCloud: boolean;
@@ -77,18 +116,20 @@ export interface SetupFacts {
   importFound?: boolean;
 }
 
-/** What MausBot's first messages offer to set up: only what is still missing, and on a place with bots of the person's
- * own only an AI, which nothing works without. On a Team Cloud the team's admins set those up. */
-export function setupSteps(input: SetupFacts): SetupStep[] {
+/** At most this many chips under MausBot's look around: a step done or tapped leaves, and the next takes its place. */
+export const INTRO_CHIPS = 3;
+
+/** The chips under MausBot's look around (Simple mode), in order, before the cap: what is still missing, and on a place
+ * with bots of the person's own only an AI. Adding a bot lives on the sidebar's +. */
+export function introChips(input: IntroFacts): IntroChip[] {
   if (input.team) return [];
   const fresh = input.ownBots === 0;
   return [
     ...(input.aiReady ? [] : ["ai" as const]),
     ...(fresh && !input.appsConnected ? ["apps" as const] : []),
-    ...(fresh ? ["bots" as const] : []),
+    ...(fresh && input.importFound ? ["import" as const] : []),
     ...(fresh && !input.phonePaired ? ["phone" as const] : []),
     ...(fresh && !input.onCloud && !input.remote ? ["cloud" as const] : []),
-    ...(fresh && input.importFound ? ["import" as const] : []),
   ];
 }
 

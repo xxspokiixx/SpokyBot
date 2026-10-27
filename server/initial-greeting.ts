@@ -1,4 +1,5 @@
 import { byLanguage } from "./language.ts";
+import { greetingName } from "../shared/greeting-name.ts";
 
 type Greeting = (name: string, person?: string) => string;
 
@@ -36,9 +37,9 @@ export function hasSetupChoices(language?: string): boolean {
   return byLanguage(SETUP_CHOICES, language) !== SETUP_CHOICES.en || /^en(?:-|$)/i.test(language?.trim() || "en");
 }
 
-/** `person`: the name the person gave, greeted by its first word; absent or blank, the greeting names no one. */
+/** `person`: the name the person gave, greeted by greetingName; absent or blank, the greeting names no one. */
 export function initialGreeting(name: string, language?: string, person?: string): string {
-  return byLanguage(GREETINGS, language)(name, person?.trim().split(/\s+/)[0] || undefined);
+  return byLanguage(GREETINGS, language)(name, greetingName(person) || undefined);
 }
 
 export function setupRequestLine(language?: string): string {

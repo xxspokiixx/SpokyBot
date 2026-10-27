@@ -7,7 +7,8 @@ import { t } from "@/lib/i18n";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { stateForBot } from "@/lib/mascot";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { api, openBot, type Bot } from "@/state/store";
+import { api, openBot, useStore, type Bot } from "@/state/store";
+import { useChiefStepOpen } from "@/lib/default-bot";
 
 import { BotAvatar } from "./Avatar";
 import { botTooltip } from "./BotModelBadge";
@@ -124,6 +125,14 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
     </div>
   );
 });
+
+/** The sidebar while the first run's Chief step is open over an app with no bots of the person's own yet. */
+export function SidebarNoBots() {
+  const { state } = useStore();
+  const chiefStep = useChiefStepOpen();
+  if (!chiefStep || state.bots.some((bot) => !bot.hidden && !bot.defaultBot)) return null;
+  return <p data-sidebar-empty="" className="px-5 pt-4 text-[13px] leading-[18px] text-ink-tertiary">{t("onboarding.shell.noBots")}</p>;
+}
 
 export function SidebarTileGrid({ primary, pinned, row }: { primary: Bot | null; pinned: Bot[]; row: (bot: Bot) => BotRowProps }) {
   const order = usePinnedCircleDrag(pinned);

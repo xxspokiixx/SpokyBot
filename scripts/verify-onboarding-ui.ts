@@ -38,6 +38,9 @@ const screenshot = (name: string) => ui("screenshot", "--out", resolve(evidence,
 const openSettings = async () => {
   await click("Onboarding fixture");
   await click("Settings");
+  // Simple Settings keeps the replays with the version, on Updates; it reopens on the page it was left on.
+  await delay(400);
+  if (!(await snapshot()).includes("Replay welcome tour")) await click("Updates");
   await textVisible("Replay welcome tour");
 };
 const holdConfigWrite = () => evaluate(`(() => {
@@ -58,7 +61,10 @@ const holdConfigWrite = () => evaluate(`(() => {
 // suppression; only this fixture browser's localStorage is cleared. The name
 // is the one the person already gave (the welcome no longer asks for it).
 await evaluate("fetch('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profile:{name:'Onboarding fixture'}})}).then(r => r.ok)");
-await evaluate("localStorage.clear(); sessionStorage.clear(); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
+// The standard fixture has MausBot met already (no first-launch card); a new install's has met nobody yet.
+await evaluate("fetch('/api/bots').then(r => r.json()).then(data => Promise.all(data.bots.filter(bot => bot.defaultBot).map(bot => fetch('/api/bots/' + bot.id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({welcomed:false})}).then(r => r.ok)))).then(oks => oks.length > 0 && oks.every(Boolean))");
+// A new install opens in Simple mode; this page's own writes after the clear would otherwise read as an earlier run.
+await evaluate("localStorage.clear(); sessionStorage.clear(); localStorage.setItem('omb-advanced-mode', '0'); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
 await textVisible("Meet OpenMausBot");
 await evaluate("document.documentElement.dataset.reducedMotion = 'true'; true");
 await screenshot("welcome");
@@ -93,8 +99,10 @@ assert.ok(first?.name, "the Chief");
 assert.equal(first.welcomed, true, "MausBot is introduced, so its old first-launch card never comes");
 const composer = `Message ${first.name}`;
 await textVisible(composer);
-await textVisible(`Hi Onboarding! I'm ${first.name}, your Chief of Staff.`);
-await textVisible("I looked around.");
+await textVisible(`Hey! I'm ${first.name}. I'm new here.`);
+await textVisible("I looked around");
+const followups = await evaluate(`fetch('/api/threads/${first.threadId}/messages?limit=20').then(r => r.json()).then(data => data.messages.filter(message => message.helperFollowup).length)`);
+assert.equal(followups, 1, "its follow-up is written once, as a message the model reads");
 assert.equal((await config()).profile.email, "", "the welcome saves no email");
 console.log("PASS Create lands in the Chief's chat with its first messages, though the save failed");
 
@@ -107,10 +115,11 @@ assert.notEqual(selected?.snapshot.authenticated, false, "starter uses a connect
 assert.equal(starter.modelSelection.model, selected.models.default);
 // The failed save left the server's record empty: a browser without this one's local mark shows the welcome again,
 // and this time it is saved.
+// MausBot has met the person by now, so the Chief step is not shown again: Next lands in the Chief's chat.
 await evaluate("localStorage.removeItem('omb-email-gate'); setTimeout(() => location.reload(), 0); true");
 await textVisible("Meet OpenMausBot");
 await click("Next");
-await click("Create Chief of Staff");
+await poll(() => evaluate("document.querySelectorAll('[data-welcome]').length"), 0, "Next lands in the chat");
 await textVisible(composer);
 await poll(async () => Boolean((await config()).onboarding.completedAt), true, "welcome completion saved");
 assert.ok((await config()).onboarding.hintsSeen.includes("met-chief-v1"), "the first chat is marked to stay quiet");
@@ -163,7 +172,6 @@ await click("Replay welcome tour");
 await textVisible("Meet OpenMausBot");
 await holdConfigWrite();
 await click("Next");
-await click("Create Chief of Staff");
 await poll(() => evaluate("document.querySelectorAll('[data-welcome]').length"), 0, "slow completion cannot trap welcome");
 await evaluate("window.releaseWrite(); true");
 console.log("PASS welcome replay can close while persistence is pending");
