@@ -51,10 +51,11 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { setLocale, t } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference";
-import { botShowsUnread } from "@/lib/bot-unread";
+import { botShowsUnread, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
+import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
 import { usePresence } from "@/hooks/use-presence";
 import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
@@ -187,8 +188,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.bots, state.selectedId, state.shortcutsOpen, showThreads, dispatch]);
 
+  useReadShownChatOnFocus();
   useEffect(() => {
-    window.ogb?.setUnreadCount?.(unreadCount);
+    if (window.ogb?.setUnreadCount) window.ogb.setUnreadCount(unreadCount);
+    else showBrowserUnread(unreadCount);
   }, [unreadCount]);
 
   useEffect(() => {
