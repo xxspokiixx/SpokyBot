@@ -205,3 +205,28 @@ test("a bot's change that can't land here shows on the folder; the copy is still
   assert.equal(s.cloud.lent.synced.get(entry.id), synced + 1);
   assert.equal(s.cloud.lent.staged.length, 1, "it keeps waiting on My Cloud");
 });
+
+test("a lent GitHub repository's copy starts as My Cloud's clone: Files waits for it, then sends only what differs", async (t) => {
+  const s = setup(t);
+  const { execFileSync } = await import("node:child_process");
+  const git = (...args) => execFileSync("git", ["-C", s.notes, "-c", "user.name=t", "-c", "user.email=t@example.test", ...args], { encoding: "utf8" }).trim();
+  git("init", "--quiet", "--initial-branch", "main");
+  git("remote", "add", "origin", "git@github.com:ash/notes.git");
+  git("add", "plan.md");
+  git("commit", "--quiet", "-m", "plan");
+  writeFileSync(join(s.notes, ".env"), "TOKEN=local");
+  utimesSync(join(s.notes, ".env"), new Date(AT), new Date(AT));
+  s.cloud.state.clones = true;
+  await s.service.pass();
+  const [entry] = s.service.state().shared;
+  const sent = () => s.cloud.calls.filter(([call]) => call === "upload").map(([, path]) => path);
+  assert.deepEqual(sent(), [], "nothing sent while My Cloud clones");
+  assert.equal(s.service.state().shared[0].status, "copying");
+  const folder = s.cloud.folders.get(entry.id);
+  assert.deepEqual(folder.git, { repo: "ash/notes", branch: "main", head: git("rev-parse", "HEAD") });
+  assert.deepEqual(s.cloud.lent.reports.at(-1).folders[0].git, folder.git, "bots learn it is that repository");
+  s.cloud.cloned(entry.id, { "plan.md": "the plan" });
+  await s.service.pass();
+  assert.deepEqual(sent(), [".env"], "only what GitHub doesn't have: the ignored config file");
+  assert.equal(s.service.state().shared[0].status, "synced");
+});

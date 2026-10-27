@@ -5,6 +5,7 @@ import { cloudHomeConfigured } from "../cloud-home.ts";
 import { DATA_DIR } from "../config.ts";
 import { SyncError, createCloudSync, type CloudSync } from "../cloud-sync.ts";
 import { createLentCopies, type LentCopies } from "../lent-copies.ts";
+import { createLentClones, type LentClones } from "../lent-clone.ts";
 import { answerAsleep, cloudPowerNow, type CloudPower } from "../cloud-power.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
@@ -21,11 +22,16 @@ export function createCloudSyncRoutes(options: {
   power?: () => Pick<CloudPower, "sleeping" | "sleepSignal"> | null;
   /** Lent folders' copies and the changes waiting for their computer (server/lent-copies.ts). */
   lent?: LentCopies;
-}): RouteHandler & { close(): void; noteBotTurn(botId: string, threadId: string): void; showFolders(shown: FolderFilter): void } {
+  /** A lent GitHub repository's copy, started as a clone (server/lent-clone.ts). */
+  clones?: LentClones;
+}): RouteHandler & { close(): void; noteBotTurn(botId: string, threadId: string): void; showFolders(shown: FolderFilter): void; lent: LentCopies; idle(): Promise<void> } {
   let sync: CloudSync | null = null;
   let folderFilter: FolderFilter = () => () => true;
   const service = () => sync ??= createCloudSync({ dataDir: options.dataDir, root: options.root, statfs: options.statfs });
   const lent = options.lent ?? createLentCopies({ dataDir: options.dataDir });
+  // Built on first use too: its restart sweep writes to the data folder, which the server owns only once it started.
+  let cloneService: LentClones | null = options.clones ?? null;
+  const clones = () => cloneService ??= createLentClones({ dataDir: options.dataDir, changed: (syncId) => sync?.noteChange(syncId) });
   const handler = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> => {
     if (path !== "/api/sync" && !path.startsWith("/api/sync/")) return PASS;
     if (!options.cloudHome()) return PASS;
@@ -45,7 +51,7 @@ export function createCloudSyncRoutes(options: {
         // `staged`: changes bots made to a lent folder while its computer was away, waiting for it.
         // `lentCopies`: this Cloud keeps lent folders' copies out of bots' reach and answers for them while their computer
         // is away; a desktop copies lent folders only to a Cloud that says so.
-        json(res, 200, { ...summary, lentCopies: true, folders: summary.folders.filter((entry) => shown(entry.id)).map((entry) => entry.kind === "pc" ? { ...entry, staged: lent.stagedCount(entry.id) } : entry) });
+        json(res, 200, { ...summary, lentCopies: true, folders: summary.folders.filter((entry) => shown(entry.id)).map((entry) => entry.kind === "pc" ? { ...entry, staged: lent.stagedCount(entry.id), ...(clones().cloning(entry.id) ? { cloning: true } : {}) } : entry) });
         return;
       }
       if (method === "POST" && path === "/api/sync/lent") { lent.report(await readBody(req, 100_000)); json(res, 200, { ok: true }); return; }
@@ -75,7 +81,14 @@ export function createCloudSyncRoutes(options: {
       }
       if (method === "GET" && path === "/api/sync/trash") { json(res, 200, { entries: s.trash().entries.filter((entry) => shown(entry.folderId)) }); return; }
       if (method === "POST" && path === "/api/sync/trash/restore") { json(res, 200, await s.restore((await readBody(req, 10_000))?.entryId)); return; }
-      if (method === "POST" && path === "/api/sync/folders") { json(res, 200, { folder: s.register(await readBody(req, 100_000)) }); return; }
+      if (method === "POST" && path === "/api/sync/folders") {
+        const body = await readBody(req, 100_000);
+        const folder = s.register(body);
+        // A new copy of a lent GitHub repository starts as a clone; the desktop leaves it alone while it is `cloning`.
+        const cloning = folder.lent === true && clones().start(folder.id, folder.cloudPath, (body as { git?: unknown } | null)?.git);
+        json(res, 200, { folder: { ...folder, ...(cloning ? { cloning: true } : {}) } });
+        return;
+      }
       if (method === "DELETE" && (m = match(`/api/sync/folders/${FOLDER}`))) {
         s.unregister(m[1]!, url.searchParams.get("keepCloudCopy") !== "0");
         res.writeHead(204).end();
@@ -114,7 +127,7 @@ export function createCloudSyncRoutes(options: {
   };
   // Before the desktop's first call there is nobody to tell: its first pass reads every folder.
   return Object.assign(handler, { close: () => { sync?.close(); sync = null; }, noteBotTurn: (botId: string, threadId: string) => sync?.noteBotTurn(botId, threadId),
-    showFolders: (next: FolderFilter) => { folderFilter = next; } });
+    showFolders: (next: FolderFilter) => { folderFilter = next; }, lent, idle: () => cloneService?.idle() ?? Promise.resolve() });
 }
 
 /** Which synced folders a session may reach (index.ts sets it on a Team Cloud: a bot's folder of someone else's chat never). */
