@@ -11,6 +11,8 @@ import {
   profileMenuItems,
   resetsIn,
   simplePhoneItems,
+  simpleUpdateTop,
+  accountLabel,
   toolMenuItems,
   type PlanUsageWindows,
   selectPhoneDestination,
@@ -35,6 +37,7 @@ import type { CloudMachine } from "../../electron/cloud-home.mjs";
 import { PHONE_APPS, PhoneAppDialog, type PhoneAppConnect } from "./PhoneAppDialog";
 import type { UpdaterState } from "@/lib/updater";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
+import { InitialsAvatar } from "./Avatar";
 
 const state = (patch: Partial<UpdaterState>): UpdaterState => ({ status: "idle", ...patch }) as UpdaterState;
 
@@ -429,18 +432,35 @@ describe("Simple mode's account menu", () => {
     return all;
   }, []);
 
-  it("leads with usage, the phone app and Settings, then Automations and Team map, then where this window is, then support, Cloud and updates", () => {
-    expect(groups(build())).toEqual([
-      ["usage", "phone-app", "settings"],
+  it("leads with usage, the phone app, support and Settings, then Automations and Team map, then where this window is and Cloud", () => {
+    const items = build();
+    expect(groups(items)).toEqual([
+      ["usage", "phone-app", "support", "settings"],
       ["automations", "team-map"],
-      ["place", "switch-place"],
-      ["support", "account", "update"],
+      ["place", "switch-place", "account"],
     ]);
+    expect(items.find((item) => item.key === "support")!.submenu!.map((item) => item.key)).toEqual(["help", "feedback", "shortcuts", "about", "update"]);
   });
 
-  it("raises an update that is ready to install to the top group", () => {
-    const update = { key: "update", label: "OpenMausBot 0.2.0 ready — restart", onSelect: noop };
-    expect(groups(build({ update, updateReady: true }))[0]).toEqual(["usage", "update", "phone-app", "settings"]);
+  it("raises an update that is ready or failed to its own top row with a pill, and keeps it out of support", () => {
+    const update = { key: "update", label: "OpenMausBot 0.2.0 ready — restart", subtitle: "notes", attention: true, onSelect: noop };
+    const items = build({ update, updateTop: { label: "Update ready", action: "Restart" } });
+    expect(groups(items)[0]).toEqual(["update"]);
+    expect(items[0]).toMatchObject({ label: "Update ready", subtitle: undefined, attention: false });
+    expect(renderToStaticMarkup(createElement("div", null, items[0]!.trailing))).toContain(">Restart</span>");
+    expect(items[1]!.separatorBefore).toBe(true);
+    expect(items.find((item) => item.key === "support")!.submenu!.map((item) => item.key)).not.toContain("update");
+  });
+
+  it("raises a downloaded or failed app update and a newer server, and nothing else", () => {
+    expect(simpleUpdateTop({ source: "desktop", phase: "downloaded" })).toEqual({ label: "Update ready", action: "Restart" });
+    expect(simpleUpdateTop({ source: "desktop", phase: "downloaded", installMode: "handoff" })).toEqual({ label: "Update ready", action: "Install" });
+    expect(simpleUpdateTop({ source: "desktop", phase: "error" })).toEqual({ label: "Update failed", action: "Retry" });
+    expect(simpleUpdateTop({ source: "server", phase: "available" })).toEqual({ label: "Update ready", action: "Install" });
+    expect(simpleUpdateTop({ source: "server", phase: "reload" })).toEqual({ label: "Update ready", action: "Restart" });
+    for (const phase of ["idle", "checking", "downloading", "up-to-date"] as const) expect(simpleUpdateTop({ source: "desktop", phase })).toBeNull();
+    expect(simpleUpdateTop({ source: "server", phase: "error" })).toBeNull();
+    expect(simpleUpdateTop(null)).toBeNull();
   });
 
   it("gives the usage row a trailing meta and a chevron, with the reset as its second line", () => {
@@ -454,6 +474,29 @@ describe("Simple mode's account menu", () => {
     const items = build({ simple: undefined, usageSummary: { value: "12% used" } });
     expect(items.map((item) => item.key)).toEqual(["usage", "phone-app", "support", "settings", "update", "account"]);
     expect(items[0]!.chevron).toBeUndefined();
+  });
+
+  it("adds Files once My Cloud's files are ready and Archived bots while there are any, after Team map", () => {
+    const open = vi.fn();
+    const items = toolMenuItems({ activeView: "files", automationsNeedYou: false, onAutomations: noop, onTeamMap: noop, onFiles: noop, archived: { count: 3, open } });
+    expect(items.map((item) => [item.key, item.active, item.value])).toEqual([["automations", false, undefined], ["team-map", false, undefined], ["files", true, undefined], ["archived", undefined, "3"]]);
+    items[3]!.onSelect();
+    expect(open).toHaveBeenCalledOnce();
+    expect(toolMenuItems({ activeView: "chat", automationsNeedYou: false, onAutomations: noop, onTeamMap: noop, archived: { count: 0, open } }).map((item) => item.key)).toEqual(["automations", "team-map"]);
+  });
+
+  it("names the account button after the person and whatever its dot is raised for", () => {
+    expect(accountLabel("You", { automationsNeedYou: false, update: null })).toBe("You");
+    expect(accountLabel("Ada", { automationsNeedYou: true, update: "Update failed — try again" })).toBe("Ada · Automations need you · Update failed — try again");
+  });
+
+  it("draws a person instead of a question mark for someone with no name, at the trigger's own size", () => {
+    const glyph = createElement("svg", { "data-glyph": "" });
+    const nameless = renderToStaticMarkup(createElement(InitialsAvatar, { initials: profileInitials({}), size: 36, fallback: glyph, fontSize: 14 }));
+    expect(nameless).toContain("data-glyph");
+    expect(nameless).not.toContain("?");
+    expect(nameless).toContain("font-size:14px");
+    expect(renderToStaticMarkup(createElement(InitialsAvatar, { initials: "AL", size: 50 }))).toContain("font-size:19px");
   });
 
   it("marks Automations open and needing attention, and Team map plain", () => {
@@ -496,8 +539,8 @@ describe("the usage meta", () => {
     expect(planUsageSummary({ providers: [provider({ fiveHour: window(40, "2026-10-27T15:00:00Z") })] }, now)).toEqual({ value: "40% used", weekly: false, resets: "Resets in 3 hours" });
   });
 
-  it("falls back to the plan's name, and to nothing", () => {
-    expect(planUsageSummary({ providers: [provider({ plan: "Max" })] }, now)).toEqual({ value: "Max" });
+  it("shows nothing without a percent, not even the plan's name", () => {
+    expect(planUsageSummary({ providers: [provider({ plan: "Max" })] }, now)).toBeNull();
     expect(planUsageSummary({ providers: [provider()] }, now)).toBeNull();
     expect(planUsageSummary(null, now)).toBeNull();
   });
@@ -508,10 +551,10 @@ describe("the usage meta", () => {
     expect(resetsIn(null, now)).toBeUndefined();
   });
 
-  it("reads a paid Cloud's tightest meter first, else its plan", () => {
+  it("reads a paid Cloud's tightest meter, and nothing without one", () => {
     const usage = { tier: "pro", resetsAt: Date.parse("2026-11-01T00:00:00Z"), meters: [{ kind: "voice", used: 30, max: 100 }, { kind: "decisions", used: 85, max: 100 }] };
     expect(cloudUsageSummary({ status: "paid", tier: "pro", usage } as never)).toMatchObject({ value: "85% used" });
-    expect(cloudUsageSummary({ status: "paid", tier: "pro" } as never)).toEqual({ value: "Pro" });
+    expect(cloudUsageSummary({ status: "paid", tier: "pro" } as never)).toBeNull();
     expect(cloudUsageSummary({ status: "none" } as never)).toBeNull();
   });
 });

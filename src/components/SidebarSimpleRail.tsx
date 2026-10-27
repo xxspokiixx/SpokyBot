@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 
 import { SidebarPlaceStatus, useSimplePlace } from "./SidebarFooter";
 import { SidebarFooterNav } from "./SidebarFooterNav";
-import { SidebarProfileMenu, useSimpleAccount } from "./SidebarProfileMenu";
+import { SidebarProfileMenu, useSimpleAccount, type ArchivedBots } from "./SidebarProfileMenu";
 import { SIMPLE_RAIL_BUTTON } from "./SidebarSimpleTop";
 import { UpdateIndicator } from "./UpdateIndicator";
 
@@ -13,13 +13,14 @@ export function SidebarRailSeparator() {
   return <div aria-hidden="true" data-sidebar-rail-separator="" className="mx-auto my-1.5 h-px w-8 shrink-0 bg-hairline/70" />;
 }
 
-export function SimpleRailFooter({ onSearch, plus, owner = null }: {
+export function SimpleRailFooter({ onSearch, plus, owner = null, archived }: {
   onSearch: () => void;
   plus: ReactNode;
   owner?: string | null;
+  archived?: ArchivedBots;
 }) {
   const place = useSimplePlace();
-  const account = useSimpleAccount(place, owner);
+  const account = useSimpleAccount(place, owner, archived);
   return (
     <div data-sidebar-rail-footer="" className="relative flex flex-col items-center gap-0.5 px-2 pb-3 pt-2">
       <button type="button" onClick={onSearch} aria-label={t("sidebar.searchAria")} title={t("sidebar.searchAria")} className={SIMPLE_RAIL_BUTTON}>

@@ -232,7 +232,7 @@ export function BotContextMenu({
           event.preventDefault();
           showMore(true);
         }}
-        className={cn(SIMPLE_MENU_ITEM, "text-ink hover:bg-menu-hover", moreOpen && moreEngaged && "bg-menu-hover")}
+        className={cn(SIMPLE_MENU_ITEM, "text-ink hover:bg-menu-hover", moreOpen && moreEngaged && "bg-menu-active")}
       >
         <MoreHorizontal size={16} className="text-ink-secondary" />
         <span className="flex-1">{t("sidebar.bot.more")}</span>

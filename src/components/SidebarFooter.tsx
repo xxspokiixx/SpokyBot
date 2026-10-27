@@ -7,7 +7,7 @@ import { endCloudHowTo, useWorkspacePlace, type WorkspacePlace } from "./Desktop
 import { SidebarConnectApps } from "./SidebarConnectApps";
 import { SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
-import { SidebarProfileMenu, useSimpleAccount } from "./SidebarProfileMenu";
+import { SidebarProfileMenu, useSimpleAccount, type ArchivedBots } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 
 export function useSimplePlace(): WorkspacePlace {
@@ -21,12 +21,11 @@ export function SidebarPlaceStatus({ place, className }: { place: WorkspacePlace
   return null;
 }
 
-function SimpleSidebarFooter({ density, owner }: { density: SidebarDensity; owner: string | null }) {
+function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archived?: ArchivedBots }) {
   const place = useSimplePlace();
-  const account = useSimpleAccount(place, owner);
+  const account = useSimpleAccount(place, owner, archived);
   return (
     <div data-sidebar-footer="simple" className="pb-4 pl-4 pr-[17px] pt-2">
-      <SidebarFooterNav density={density} />
       <CloudUsageCard />
       <SidebarPlaceStatus place={place} className="mb-2 px-1" />
       <div className="flex items-center gap-[9px] not-first:mt-2">
@@ -38,15 +37,16 @@ function SimpleSidebarFooter({ density, owner }: { density: SidebarDensity; owne
   );
 }
 
-export function SidebarFooter({ density, simple = false, owner = null, toolsCollapsed, onToggleTools }: {
+export function SidebarFooter({ density, simple = false, owner = null, archived, toolsCollapsed, onToggleTools }: {
   density: SidebarDensity;
   simple?: boolean;
   owner?: string | null;
+  archived?: ArchivedBots;
   toolsCollapsed: boolean;
   onToggleTools?: () => void;
 }) {
   const { dispatch } = useStore();
-  if (simple) return <SimpleSidebarFooter density={density} owner={owner} />;
+  if (simple) return <SimpleSidebarFooter owner={owner} archived={archived} />;
   return (
     <div className={cn("pb-3 pt-2", density === "icons" ? "flex flex-col items-center gap-1 px-2" : "px-3")}>
       <SidebarFooterNav density={density} collapsed={toolsCollapsed} onToggleCollapsed={onToggleTools} />

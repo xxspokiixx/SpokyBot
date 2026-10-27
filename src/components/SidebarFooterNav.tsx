@@ -138,7 +138,7 @@ export function SidebarFooterNav({
     icon={(active) => <FolderOpen size={iconSize} className={tone(active)} />}
     onClick={() => dispatch({ type: "showFiles" })}
   />;
-  if (!advanced && !iconsOnly) return filesRow ? <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{filesRow}</nav> : null;
+  if (!advanced && !iconsOnly) return null;
   const appsRow = iconsOnly && <NavRow
     id="apps"
     label={t("sidebar.nav.apps")}
@@ -149,7 +149,7 @@ export function SidebarFooterNav({
     icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
     onClick={() => dispatch({ type: "togglePlugins", open: true })}
   />;
-  if (rail) return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col items-center gap-0.5">{appsRow}{filesRow}</nav>;
+  if (rail) return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col items-center gap-0.5">{appsRow}</nav>;
 
   const rows = (
     <>

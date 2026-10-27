@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
   ArrowDownToLine,
   ArrowLeftRight,
   Check,
   CircleUserRound,
   Cloud,
   Download,
+  FolderOpen,
   Gauge,
   Info,
   HelpCircle,
@@ -16,6 +18,7 @@ import {
   RefreshCw,
   Settings as SettingsIcon,
   Smartphone,
+  UserRound,
   UsersRound,
   Zap,
 } from "lucide-react";
@@ -29,6 +32,7 @@ import { usageBridge } from "./CloudUsageMeter";
 import { useCloudPlanSnapshot } from "./CloudTrialNotice";
 import type { WorkspacePlace } from "./DesktopWorkspaceSwitcher";
 import { useAutomationsNeedYou } from "./SidebarFooterNav";
+import { useCloudFilesReady } from "@/lib/cloud-files";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
@@ -40,7 +44,6 @@ import { brand } from "../lib/brand";
 import { cloudColor } from "@/lib/cloud-look";
 import { cn } from "@/lib/cn";
 import { meterPercent, resetLine } from "@/lib/usage-meter";
-import { cloudPlanLabel } from "@/lib/cloud-plan";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { activeLocale, t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
@@ -148,6 +151,22 @@ interface UpdateEntry {
   phase: UpdatePhase;
   pending: boolean;
   label: string;
+  source?: "desktop" | "server";
+  installMode?: string;
+}
+
+/** The update a Simple account menu raises to its top row: one waiting to be installed, or one that failed. */
+export function simpleUpdateTop(entry: Pick<UpdateEntry, "phase" | "source" | "installMode"> | null): { label: string; action: string } | null {
+  const ready = () => t("sidebar.update.readyShort");
+  if (entry?.source === "desktop") {
+    if (entry.phase === "downloaded") return { label: ready(), action: t(entry.installMode === "handoff" ? "sidebar.update.installAction" : "sidebar.update.restartAction") };
+    if (entry.phase === "error") return { label: t("sidebar.update.failedShort"), action: t("sidebar.update.retryAction") };
+  }
+  if (entry?.source === "server") {
+    if (entry.phase === "available") return { label: ready(), action: t("sidebar.update.installAction") };
+    if (entry.phase === "reload") return { label: ready(), action: t("sidebar.update.restartAction") };
+  }
+  return null;
 }
 
 export function useUpdateItem(): UpdateEntry | null {
@@ -174,6 +193,8 @@ export function useUpdateItem(): UpdateEntry | null {
     phase,
     pending,
     label,
+    source: "desktop",
+    installMode: state.installMode,
     item: {
       key: "update",
       label,
@@ -212,6 +233,7 @@ export function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
     phase,
     pending: false,
     label: row.label,
+    source: "server",
     item: {
       key: "update",
       label: row.label,
@@ -306,16 +328,26 @@ export function phoneMenuItems({
   ];
 }
 
-export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, onTeamMap }: {
+export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, onTeamMap, onFiles, archived }: {
   activeView: string;
   automationsNeedYou: boolean;
   onAutomations: () => void;
   onTeamMap: () => void;
+  /** set once My Cloud's files are ready to open */
+  onFiles?: () => void;
+  archived?: ArchivedBots;
 }): SidebarMenuItem[] {
   return [
     { key: "automations", label: t("sidebar.nav.automations"), icon: <Zap size={16} />, active: activeView === "routines", attention: automationsNeedYou, onSelect: onAutomations },
     { key: "team-map", label: t("sidebar.nav.teamMap"), icon: <UsersRound size={16} />, active: activeView === "team-map", onSelect: onTeamMap },
+    ...(onFiles ? [{ key: "files", label: t("sidebar.nav.files"), icon: <FolderOpen size={16} />, active: activeView === "files", onSelect: onFiles }] : []),
+    ...(archived?.count ? [{ key: "archived", label: t("sidebar.archived.title"), icon: <Archive size={16} />, value: String(archived.count), onSelect: archived.open }] : []),
   ];
+}
+
+/** The Simple account button's name: the person, then whatever its dot is raised for. */
+export function accountLabel(name: string, { automationsNeedYou, update }: { automationsNeedYou: boolean; update: string | null }): string {
+  return [name, automationsNeedYou ? t("sidebar.account.automationsNeedYou") : "", update ?? ""].filter(Boolean).join(" · ");
 }
 
 export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" | "cloudHome" | "onLine" | "openMenu" | "switchable">, { owner, onCloudSettings }: {
@@ -372,15 +404,14 @@ export function planUsageSummary(report: PlanUsageWindows | null, now = Date.now
     const resets = resetsIn(tightest.resetsAt ? Date.parse(tightest.resetsAt) : null, now);
     return { value: t("sidebar.menu.usageUsed", { percent: Math.round(tightest.usedPercent!) }), weekly: window === "weekly", ...(resets ? { resets } : {}) };
   }
-  const plan = signedIn.find((provider) => provider.plan?.trim())?.plan?.trim();
-  return plan ? { value: plan } : null;
+  return null;
 }
 
 export function cloudUsageSummary(plan: CloudPlanSnapshot | null): UsageSummary | null {
   if (plan?.status !== "paid") return null;
   const usage = plan.usage;
   if (usage?.meters.length) return { value: t("sidebar.menu.usageUsed", { percent: Math.max(...usage.meters.map(meterPercent)) }), resets: resetLine(usage) };
-  return plan.tier ? { value: cloudPlanLabel(plan.tier) } : null;
+  return null;
 }
 
 function usePlanUsageSummary(enabled: boolean): UsageSummary | null {
@@ -401,7 +432,7 @@ export function profileMenuItems({
   usage,
   usageSummary = null,
   update,
-  updateReady = false,
+  updateTop = null,
   account,
   simple,
   onUsage,
@@ -416,7 +447,7 @@ export function profileMenuItems({
   usage: boolean;
   usageSummary?: UsageSummary | null;
   update: SidebarMenuItem | null;
-  updateReady?: boolean;
+  updateTop?: { label: string; action: string } | null;
   account: string | null;
   simple?: { tools: SidebarMenuItem[]; places: SidebarMenuItem[] };
   onUsage: () => void;
@@ -453,23 +484,36 @@ export function profileMenuItems({
   const accountItem: SidebarMenuItem | null = account ? { key: "account", label: account, icon: <CircleUserRound size={18} />, onSelect: onAccount } : null;
   const present = (...items: Array<SidebarMenuItem | null | false>) => items.filter((item): item is SidebarMenuItem => Boolean(item));
   if (!simple) return [...present(usageItem), ...phone, support, settings, ...present(update), ...(accountItem ? [{ ...accountItem, separatorBefore: true }] : [])];
+  const raised: SidebarMenuItem | null = update && updateTop ? {
+    ...update,
+    label: updateTop.label,
+    subtitle: undefined,
+    attention: false,
+    trailing: <span className="flex h-6 shrink-0 items-center rounded-full bg-ink px-2.5 text-[12px] font-medium text-app">{updateTop.action}</span>,
+  } : null;
   const groups = [
-    [...present(usageItem, updateReady && update), ...phone, settings],
+    present(raised),
+    [...present(usageItem), ...phone, { ...support, submenu: raised ? help : [...help, ...present(update)] }, settings],
     simple.tools,
-    simple.places,
-    present(support, accountItem, !updateReady && update),
+    [...simple.places, ...present(accountItem)],
   ].filter((group) => group.length > 0);
   return groups.flatMap((group, at) => group.map((item, index) => (at > 0 && index === 0 ? { ...item, separatorBefore: true } : item)));
+}
+
+export interface ArchivedBots {
+  count: number;
+  open: () => void;
 }
 
 export interface SimpleAccount {
   place: WorkspacePlace;
   owner: string | null;
   automationsNeedYou: boolean;
+  archived?: ArchivedBots;
 }
 
-export function useSimpleAccount(place: WorkspacePlace, owner: string | null): SimpleAccount {
-  return { place, owner, automationsNeedYou: useAutomationsNeedYou() };
+export function useSimpleAccount(place: WorkspacePlace, owner: string | null, archived?: ArchivedBots): SimpleAccount {
+  return { place, owner, automationsNeedYou: useAutomationsNeedYou(), archived };
 }
 
 /** `circle` is the phone's round avatar button at the top of the bot list. */
@@ -505,6 +549,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;
+  const filesReady = useCloudFilesReady();
   const cloudAccount = !remote && Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true));
 
   const items = profileMenuItems({
@@ -519,7 +564,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     usage: !remote,
     usageSummary: cloudUsage ?? engineUsage,
     update: update?.item ?? null,
-    updateReady: Boolean(update && updateNoteworthy(update.phase, update.pending)),
+    updateTop: simple ? simpleUpdateTop(update) : null,
     account: cloudAccount ? t("settings.section.cloudAccount") : null,
     ...(account ? { simple: {
       tools: toolMenuItems({
@@ -527,6 +572,8 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         automationsNeedYou: account.automationsNeedYou,
         onAutomations: () => dispatch({ type: "showRoutines", view: "list" }),
         onTeamMap: () => dispatch({ type: "showTeamMap" }),
+        onFiles: filesReady ? () => dispatch({ type: "showFiles" }) : undefined,
+        archived: account.archived,
       }),
       places: placeMenuItems(account.place, { owner: account.owner, onCloudSettings: () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }) }),
     } } : {}),
@@ -543,6 +590,9 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   });
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
   const needsYou = account?.automationsNeedYou === true;
+  const initials = profileInitials(profile);
+  const nameless = simple && initials === "?" ? <UserRound size={18} strokeWidth={1.75} aria-hidden /> : undefined;
+  const label = simple ? accountLabel(name, { automationsNeedYou: needsYou, update: noteworthy && update ? update.label : null }) : name;
 
   return (
     <>
@@ -552,7 +602,8 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         compact={simple}
         onOpenChange={simple ? setMenuOpen : undefined}
         triggerClassName={iconOnly || simple ? cn("shrink-0", circle || (simple && !rail) ? "rounded-full" : "rounded-xl") : "w-full"}
-        triggerTitle={iconOnly || simple ? name : undefined}
+        triggerTitle={iconOnly || simple ? label : undefined}
+        triggerLabel={label}
         triggerTour={account?.place.switchable ? "server-switcher" : undefined}
         renderTrigger={({ open }) => simple && !rail ? (
           <span
@@ -560,7 +611,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             data-sidebar-account=""
             className={cn("relative flex size-9 items-center justify-center rounded-full ring-2 transition-shadow", open ? "ring-ink/15" : "ring-transparent hover:ring-ink/10")}
           >
-            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={36} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} />
             {(noteworthy || needsYou) && (
               <span
                 aria-hidden
@@ -581,7 +632,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} fallback={rail ? nameless : undefined} />
             {(noteworthy || needsYou) && (
               <span
                 aria-hidden

@@ -121,7 +121,7 @@ function MenuRows({
                 : look === "compact"
                   ? "min-h-[30px] gap-2 rounded-md px-1.5 py-1.5 text-[13px] leading-[18px] focus-visible:bg-menu-hover"
                   : "gap-3 px-3.5 py-2 text-[14px] focus-visible:bg-menu-hover",
-              item.active ? "bg-menu-active text-ink" : item.submenu && openSubmenu === item.key && engaged ? "bg-menu-hover text-ink" : "text-ink hover:bg-menu-hover",
+              item.active ? "bg-menu-active text-ink" : item.submenu && openSubmenu === item.key && engaged ? cn(look === "compact" ? "bg-menu-active" : "bg-menu-hover", "text-ink") : "text-ink hover:bg-menu-hover",
             )}
           >
             {item.icon && (
@@ -173,6 +173,7 @@ export function SidebarPopoverMenu({
   compact = false,
   triggerClassName = "w-full",
   triggerTitle,
+  triggerLabel,
   triggerTour,
   onOpenChange,
   renderTrigger,
@@ -184,6 +185,8 @@ export function SidebarPopoverMenu({
   openOnHover?: boolean;
   triggerClassName?: string;
   triggerTitle?: string;
+  /** the trigger's own name, when it says more than the menu's */
+  triggerLabel?: string;
   triggerTour?: string;
   onOpenChange?: (open: boolean) => void;
   renderTrigger: (state: { open: boolean }) => React.ReactNode;
@@ -422,7 +425,7 @@ export function SidebarPopoverMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={ariaLabel}
+        aria-label={triggerLabel ?? ariaLabel}
         title={triggerTitle}
         data-tour={triggerTour}
         onClick={(event) => {
