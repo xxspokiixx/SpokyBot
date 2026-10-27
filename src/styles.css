@@ -2556,6 +2556,27 @@ button:disabled.bg-danger {
   }
 }
 
+.menu-surface {
+  background: var(--color-menu);
+  border-radius: var(--radius-menu);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 10%, transparent), var(--menu-shadow);
+}
+.menu-surface:focus-visible {
+  outline: none;
+}
+.menu-surface :focus-visible {
+  outline-width: 1.5px;
+  outline-offset: -1.5px;
+}
+:root,
+:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"]) {
+  --radius-menu: 12px;
+  --menu-shadow: 0 0 #0000;
+}
+:is([data-skin="atelier"], [data-skin="lagoon"], [data-skin="linen"], [data-skin="daylight"], [data-skin="meadow"], [data-skin="pop"]) {
+  --menu-shadow: 0 8px 24px -6px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
 /* ── Phone ─────────────────────────────────────────────────────────────────
    Below the width where the sidebar stops being inline (SIDEBAR_INLINE in
    src/lib/use-media-query.ts, 768px), Midnight and Meadow take softer ground,

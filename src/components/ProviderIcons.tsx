@@ -5,6 +5,7 @@ import { CursorMark } from "./CursorMark";
 import { GrokBotMark } from "./GrokBotMark";
 import type { InstanceInfo } from "@/state/store";
 import type { ProviderIconPreset } from "../../shared/provider-icon";
+import { PROVIDER_MARK_FADE } from "./provider-mark-fade";
 
 export { HermesMark, CursorMark, GrokBotMark };
 
@@ -155,7 +156,7 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <PiMark size={size} className={className} />;
     default:
       return (
-        <span className="flex size-full items-center justify-center text-[10px] font-semibold tracking-tight text-ink-secondary">
+        <span className={cn("flex size-full items-center justify-center text-[10px] font-semibold tracking-tight text-ink-secondary", className)}>
           {(driverKind.replace(/Agent$/i, "").slice(0, 1) || "?").toUpperCase()}
         </span>
       );
@@ -197,9 +198,11 @@ export function PresetProviderMark({ preset, size = 16, className }: IconProps &
   }
 }
 
-export function InstanceProviderMark({ instance, size = 16, className }: IconProps & {
+export function InstanceProviderMark({ instance, size = 16, subtle = false, className: given }: IconProps & {
   instance: Pick<InstanceInfo, "driverKind" | "icon">;
+  subtle?: boolean;
 }) {
+  const className = subtle ? cn(PROVIDER_MARK_FADE, given) : given;
   if (instance.icon?.kind === "custom") {
     return <CustomProviderMark key={instance.icon.dataUrl} dataUrl={instance.icon.dataUrl} driverKind={instance.driverKind} size={size} className={className} />;
   }
