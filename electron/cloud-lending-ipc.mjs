@@ -217,8 +217,9 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
       return { ...pageLending(current), screenReady: current.screenReady === true, ownOff: ownOff(current.state) };
     },
     /** At the move to My Cloud, and when the person chooses Use my Mac (`asked`): lends the default grant (defaultGrant)
-     * on top of what is lent. Without `asked` the person's own Off is never undone: lending they turned off stays off,
-     * and so does an internet connection they unticked. Answers the page's view, or null when it stayed off. */
+     * on top of what is lent, a terminal lent now included. Without `asked` the person's own Off is never undone: lending
+     * they turned off stays off, and so does an internet connection they unticked. Answers the page's view, or null when
+     * it stayed off. */
     async lendByDefault({ projects = [], asked = false } = {}) {
       const current = await snapshot();
       const kept = current.state;
@@ -227,7 +228,7 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
       const internet = asked || kept?.enabled !== true || kept.internet === true;
       const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true, internet }, usual: await defaults(), projects: await editableFolders(projects, validate),
         screenAvailable: current.screenAvailable, screenReady: current.screenReady });
-      await save(env(), grant);
+      await save(env(), { ...grant, ...keptTerminal(kept) });
       return pageLending(await snapshot());
     },
     /** Apps and screen on top of what is lent, once computer control works here; null while lending is off or computer

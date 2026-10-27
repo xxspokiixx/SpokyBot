@@ -181,6 +181,15 @@ test("the move's default keeps an internet connection the person unticked off; U
   assert.equal(defaultGrant({ kept: { internet: false }, usual, projects: [] }).internet, false);
 });
 
+test("the move's default and Use my Mac keep a terminal lent now, and never bring back one lent before an Off", async () => {
+  const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
+  const lent = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true, terminal: true } });
+  assert.equal((await lent.lending.lendByDefault({ projects: [] })).terminal, true);
+  assert.equal((await lent.lending.lendByDefault({ asked: true })).terminal, true);
+  const offBefore = setup({ kept: { folders: plans, screen: false, internet: true, terminal: true }, stopped: { reason: "signed-out", at: 1 } });
+  assert.equal((await offBefore.lending.lendByDefault({ asked: true })).terminal, false);
+});
+
 test("Use my Mac lends apps and screen on top of what is lent, once computer control works; never while lending is off", async () => {
   const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: true }];
   const lent = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true } });

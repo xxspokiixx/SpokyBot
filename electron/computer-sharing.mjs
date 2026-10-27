@@ -176,6 +176,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     return {
       lending,
       internetOnly: lending.length > 0 && lending.every(id => internetOnly(records[id])),
+      terminal: lending.some(id => records[id].terminal === true),
       busy: executing ?? (browsing ? { env: browsing, action: "internet" } : null),
     };
   };
