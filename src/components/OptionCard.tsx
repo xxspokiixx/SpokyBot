@@ -49,7 +49,7 @@ export function OptionCard({
   if (!card || shouldHideOnboardingCard(message, transcript) || (card.requestId && card.dismissed && card.answered)) return null;
 
   // A bot's own question reads as itself in Simple mode, not under "Your bot has a question".
-  const asksItself = simple && Boolean(card.requestId && card.subtitle);
+  const asksItself = simple && card.requestType === "question" && Boolean(card.subtitle);
   const title = asksItself ? card.subtitle! : card.title;
   const subtitle = asksItself ? undefined : card.subtitle;
   const options = parseChoices(card.options, LETTERS.length) ?? [];
