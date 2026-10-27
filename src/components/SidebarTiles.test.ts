@@ -102,7 +102,7 @@ describe("the tile grid", () => {
     const html = grid(main, pins(count));
     const drag = count > 1 ? ":drag" : "";
     expect(tiles(html)).toEqual(["primary:mausbot", ...pins(count).map((pin) => `pinned:${pin.id}${drag}`)]);
-    expect(html).toMatch(/^<div data-sidebar-tiles="" class="flex flex-wrap justify-center gap-1 /);
+    expect(html).toMatch(/^<div data-sidebar-tiles="" class="flex max-h-\[40vh\] flex-wrap justify-center gap-1 overflow-y-auto /);
     expect(html.match(/\bh-\[92px\] w-\[78px\]/g)).toHaveLength(count + 1);
     expect(html.match(/width="56px" height="56px"/g)).toHaveLength(count + 1);
     expect(html.match(/data-testid="chief-badge"/g)).toHaveLength(1);
@@ -118,13 +118,15 @@ describe("the tile grid", () => {
     expect(grid(null, [])).toBe("");
   });
 
-  // The Simple sidebar's scroller pads 12px each side, and an overflowing list adds the 8px scrollbar.
+  // A grid taller than its 40vh cap scrolls, and its 8px scrollbar takes from the room.
   it.each([[280, 3], [360, 4]])("fits %ipx of sidebar to %i tiles across, with or without a scrollbar", (width, columns) => {
     const html = grid(main, pins(5));
     const tile = Number(/data-sidebar-tile="primary"[^>]*class="[^"]*\bw-\[(\d+)px\]/.exec(html)![1]);
-    const gap = 4 * Number(/data-sidebar-tiles="" class="[^"]*\bgap-(\d+)\b/.exec(html)![1]);
+    const gridClass = /data-sidebar-tiles="" class="([^"]*)"/.exec(html)![1]!;
+    const gap = 4 * Number(/\bgap-(\d+)\b/.exec(gridClass)![1]);
+    const gutters = 2 * 4 * Number(/\bpx-(\d+)\b/.exec(gridClass)![1]);
     const across = (room: number) => Math.floor((room + gap) / (tile + gap));
-    expect(across(width - 24)).toBe(columns);
-    expect(across(width - 24 - 8)).toBe(columns);
+    expect(across(width - gutters)).toBe(columns);
+    expect(across(width - gutters - 8)).toBe(columns);
   });
 });

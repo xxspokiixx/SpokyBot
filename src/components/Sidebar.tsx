@@ -1763,7 +1763,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       onPointerLeave={() => showEdge(false)}
       style={{ "--sidebar-width": `${sizing.width}px` } as CSSProperties}
       className={cn(
-        advanced ? "relative flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel" : "relative flex h-full shrink-0 flex-col bg-panel",
+        advanced ? "relative flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel" : "relative flex h-full shrink-0 flex-col bg-panel max-md:[--scroll-fade-surface:var(--color-app)]",
         sizing.resizing ? "transition-none" : "transition-[width] duration-200",
         density === "icons" ? rail ? "w-[92px]" : "w-[80px]" : density === "compact" ? "w-[272px] md:w-[var(--sidebar-width)]" : advanced ? "w-[320px] md:w-[var(--sidebar-width)]" : "w-[280px] md:w-[var(--sidebar-width)]",
         sidePanelOpen ? density === "compact" ? "md:max-w-[272px]" : advanced ? "md:max-w-[320px]" : "md:max-w-[280px]" : "md:max-w-[calc(100vw-320px)]",
@@ -1774,7 +1774,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
-      <GlassScrollFrame className="flex-1">
+      <GlassScrollFrame className="flex-1" fade={!advanced}>
       <GlassBar edge="top">
       <div
         data-sidebar-top-row
@@ -1942,18 +1942,18 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           onToggle={layoutInteractive ? () => toggleSection(PINNED_THREADS_SECTION_ID) : undefined}
         />
       )}
+      {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} />}
       </GlassBar>
 
       {density !== "icons" && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} style={windowNoDragStyle} />}
       {!advanced && !collapseToIcons && <SidebarEdgeToggle collapsed={rail} shown={rail || edgeShown} onHover={showEdge} onToggle={toggleCollapsed} style={windowNoDragStyle} anchorRef={sidebarRef} />}
 
       <GlassScroller className={rail ? "[scrollbar-gutter:stable_both-edges]" : simpleDesk ? "px-3" : "px-2"}>
-        <div className={cn("flex flex-col", simpleDesk ? cn("gap-0.5", !tiles && "pt-2") : advanced ? "gap-0.5" : "gap-1 pt-2")}>
+        <div className={cn("flex flex-col", simpleDesk ? cn("gap-0.5 pb-2", !tiles && "pt-2") : advanced ? "gap-0.5" : "gap-1 pb-2 pt-2")}>
           {matchingBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
           )}
           {!q && <NeedsYouButton compact={rail} />}
-          {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} />}
           {unsectionedChief && (phone ? (
             <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBot(dispatch, unsectionedChief, showThreads)} onMenu={setMenu} />
           ) : (

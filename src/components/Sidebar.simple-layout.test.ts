@@ -49,6 +49,7 @@ import { PinnedBotRoster } from "./PinnedCircleThreads";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { SidebarTileGrid } from "./SidebarTiles";
+import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
@@ -127,6 +128,21 @@ describe("Simple-mode sidebar layout", () => {
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["bea"]);
     expect(headers(tree).map((header) => header.props.name)).toEqual(["Work"]);
+  });
+
+  it("fades the list's edges, with the top buttons and the tiles fixed above it, and keeps Advanced's glass", () => {
+    fixture.state = { ...fixture.state, bots: [bot("chief", { chiefOfStaff: true, pinned: true }), bot("atlas", { pinned: true }), bot("bea")] };
+    const simple = render();
+    expect(simple.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(true);
+    const head = simple.tree.find((node) => node.type === GlassBar && node.props.edge === "top")!;
+    expect(nodes(head.props.children).some((node) => node.type === SidebarTileGrid)).toBe(true);
+    const list = simple.tree.find((node) => node.type === GlassScroller)!;
+    expect(nodes(list.props.children).some((node) => node.type === SidebarTileGrid)).toBe(false);
+    expect(simple.root.props.className).toContain("max-md:[--scroll-fade-surface:var(--color-app)]");
+    fixture.advanced = true;
+    const advanced = render();
+    expect(advanced.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(false);
+    expect(advanced.root.props.className).not.toContain("--scroll-fade-surface");
   });
 
   it("keeps Advanced's Pinned heading and rows, with the Chief as a row", () => {

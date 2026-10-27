@@ -128,7 +128,7 @@ export function SidebarTileGrid({ primary, pinned, row }: { primary: Bot | null;
   const order = usePinnedCircleDrag(pinned);
   if (!primary && order.ranked.length === 0) return null;
   return (
-    <div data-sidebar-tiles="" className="flex flex-wrap justify-center gap-1 pb-4 pt-2.5" {...order.frameProps}>
+    <div data-sidebar-tiles="" className="flex max-h-[40vh] flex-wrap justify-center gap-1 overflow-y-auto px-3 pb-4 pt-2.5" {...order.frameProps}>
       {primary && <SidebarBotTile {...row(primary)} primary />}
       {order.ranked.map((bot) => <SidebarBotTile key={bot.id} {...row(bot)} {...order.dragProps(bot)} />)}
       <span role="status" className="sr-only">{order.moved}</span>
