@@ -49,6 +49,7 @@ describe("the sidebar tiles", () => {
     expect(html).toContain('data-testid="chief-badge"');
     expect(html).toMatch(/text-\[13px\] leading-4 text-ink"[^>]*>MausBot</);
     expect(html).toContain('title="MausBot · Chief of Staff"');
+    expect(html).not.toContain("data-provider-mark");
   });
 
   it("draws a pinned bot as an 84px tile with a 48px avatar, and a badge only for a Chief", () => {

@@ -85,7 +85,7 @@ describe("bot-first sidebar", () => {
     { advanced: true, enabled: true, density: "compact", size: 26, spacing: ["gap-1.5", "py-1", "pl-6"] },
     { advanced: true, enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
     { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
-    { advanced: false, enabled: false, density: "comfortable", size: 36, spacing: ["gap-2", "rounded-[10px]", "pl-2", "pr-2", "group-hover:pr-9", "md:h-[54px]"] },
+    { advanced: false, enabled: false, density: "comfortable", size: 36, spacing: ["gap-2", "rounded-[10px]", "pl-2", "pr-2", "md:h-[54px]"] },
     { advanced: false, enabled: false, density: "compact", size: 36, spacing: ["gap-2.5", "py-1.5", "pl-2", "pr-9"] },
     { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[52px]", "justify-center"] },
   ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
@@ -142,7 +142,49 @@ describe("bot-first sidebar", () => {
     expect(renderToStaticMarkup(createElement(BotListItem, rowProps(density)))).not.toContain('data-testid="bot-role"');
   });
 
-  it.each(["comfortable", "compact"] as const)("keeps a Simple row to its name and preview, naming role, Chief and engine in its tooltip, %s density", (density) => {
+  it("ends a Simple row's preview line with its engine's mark, faded, before the unread dot, and keeps the line still on hover", () => {
+    fixture.showThreads = false;
+    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
+    const candidate = { ...bot, tasks: [], projects: [], unread: true, messages: [{ id: "m", role: "bot", kind: "text", text: "Done.", at: 1 }] } as Bot;
+    let tree: ReactNode;
+    function Capture() { tree = botRow(rowProps("comfortable", candidate)); return tree; }
+    const markup = renderToStaticMarkup(createElement(Capture));
+    const line = markup.slice(markup.indexOf(">Done.<"));
+    expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge" role="img" aria-label="Model: [^"]+ \(Claude\)" class="[^"]*\bms-auto\b[^"]*"><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
+    expect(line.indexOf("data-provider-mark")).toBeLessThan(line.indexOf('aria-label="Unread threads"'));
+    expect(markup.match(/data-provider-mark=/g)).toHaveLength(1);
+    expect(line.slice(0, line.indexOf("data-provider-mark"))).not.toContain("title=");
+    expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
+    expect(markup).toContain("group-hover:pr-7");
+    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\btop-1\b[^"]*\btranslate-y-0\b/);
+  });
+
+  it("fades the collapsed rail's engine badge in Simple mode and leaves Advanced's at full strength", () => {
+    fixture.showThreads = false;
+    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
+    const candidate = { ...bot, tasks: [], projects: [] };
+    const rail = renderToStaticMarkup(createElement(BotListItem, rowProps("icons", candidate)));
+    expect(rail).toMatch(/<span data-testid="model-badge"[^>]*><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
+    fixture.advanced = true;
+    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("icons", candidate)));
+    expect(advanced).toContain('data-testid="model-badge"');
+    expect(advanced).not.toContain("data-provider-mark");
+  });
+
+  it("draws no engine mark for a bot with no AI yet, in a group chat, or in Advanced mode, where the full mark stays", () => {
+    fixture.showThreads = false;
+    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
+    const candidate = { ...bot, tasks: [], projects: [] };
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...candidate, modelSelection: { instanceId: "none", model: "m" } })))).not.toContain("data-provider-mark");
+    const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    expect(renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }))).not.toContain("data-provider-mark");
+    fixture.advanced = true;
+    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
+    expect(advanced).not.toContain("data-provider-mark");
+    expect(advanced).toContain('data-testid="model-badge"');
+  });
+
+  it.each(["comfortable", "compact"] as const)("keeps a Simple row to its name, preview and one faded engine mark, naming role, Chief and engine in its tooltip, %s density", (density) => {
     fixture.showThreads = false;
     const instances = [{ instanceId: "fake", driverKind: "claude", displayName: "Claude", models: { options: [{ id: "test", label: "Sonnet" }] } }] as unknown as AppState["instances"];
     fixture.state = { ...fixture.state, instances, selectedId: bot.id };
@@ -151,7 +193,8 @@ describe("bot-first sidebar", () => {
     function Capture() { tree = botRow(rowProps(density, candidate)); return tree; }
     const markup = renderToStaticMarkup(createElement(Capture));
     expect(markup).not.toContain('data-testid="bot-role"');
-    expect(markup).not.toContain('data-testid="model-badge"');
+    expect(markup.match(/data-testid="model-badge"/g)).toHaveLength(1);
+    expect(markup.match(/data-provider-mark=/g)).toHaveLength(1);
     expect(markup).not.toContain('data-testid="chief-crown"');
     expect(markup).not.toContain("lucide-pin");
     expect(markup).not.toMatch(/tabular-nums text-ink-secondary transition-opacity group-hover:opacity-0/);

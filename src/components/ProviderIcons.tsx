@@ -5,6 +5,7 @@ import { CursorMark } from "./CursorMark";
 import { GrokBotMark } from "./GrokBotMark";
 import type { InstanceInfo } from "@/state/store";
 import type { ProviderIconPreset } from "../../shared/provider-icon";
+import { FADED_PROVIDER_MARK, providerMarkTone } from "./provider-mark-fade";
 
 export { HermesMark, CursorMark, GrokBotMark };
 
@@ -197,9 +198,18 @@ export function PresetProviderMark({ preset, size = 16, className }: IconProps &
   }
 }
 
-export function InstanceProviderMark({ instance, size = 16, className }: IconProps & {
+export function InstanceProviderMark({ instance, size = 16, className, subtle = false }: IconProps & {
   instance: Pick<InstanceInfo, "driverKind" | "icon">;
+  subtle?: boolean;
 }) {
+  if (subtle) {
+    const tone = providerMarkTone(instance);
+    return (
+      <span data-provider-mark={tone} className={cn("inline-flex shrink-0 transition-opacity", FADED_PROVIDER_MARK[tone], className)} style={{ width: size, height: size }}>
+        <InstanceProviderMark instance={instance} size={size} />
+      </span>
+    );
+  }
   if (instance.icon?.kind === "custom") {
     return <CustomProviderMark key={instance.icon.dataUrl} dataUrl={instance.icon.dataUrl} driverKind={instance.driverKind} size={size} className={className} />;
   }
