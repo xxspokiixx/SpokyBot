@@ -12,7 +12,9 @@ vi.mock("@/state/store", async (importOriginal) => ({
   api: vi.fn(),
   useStore: () => ({ state: { appSettingsSection: fixture.section, config: fixture.config }, dispatch: vi.fn() }),
 }));
-vi.mock("./CloudAccountSettings", () => ({ CloudAccountSettings: ({ cloudHome }: { cloudHome?: boolean }) => `CLOUD_PLAN_MARKER${cloudHome ? " home" : ""}` }));
+vi.mock("./CloudAccountSettings", () => ({
+  CloudAccountSettings: ({ cloudHome, onAddCloud }: { cloudHome?: boolean; onAddCloud?: () => void }) => `CLOUD_PLAN_MARKER${cloudHome ? " home" : ""}${onAddCloud ? " offer" : ""}`,
+}));
 
 const plan = { state: vi.fn(), manage: vi.fn() };
 beforeEach(() => {
@@ -43,5 +45,7 @@ describe.each(["Simple", "Advanced"] as const)("%s Settings → OMB Cloud on a s
     expect(html).toContain("CLOUD_PLAN_MARKER");
     expect(html).not.toContain("CLOUD_PLAN_MARKER home");
     expect(html).toContain(reachable());
+    // Simple's plan row above the card already carries the offer, so the card does not repeat it.
+    expect(html.includes("CLOUD_PLAN_MARKER offer")).toBe(fixture.advanced);
   });
 });
