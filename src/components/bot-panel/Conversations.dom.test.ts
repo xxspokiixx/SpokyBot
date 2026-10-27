@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-// The bot panel's Conversations tab in a real DOM: what it lists, how it searches, and what a click does.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -95,27 +94,41 @@ afterEach(() => {
 });
 
 describe("a bot's conversations in its panel", () => {
-  it("lists eight, newest first, with the open one marked, and Show N more opens the rest", () => {
+  it("lists three, newest first, with the open one marked, and Show N more opens the rest", () => {
     render(research());
-    expect(CONVERSATIONS_SHOWN).toBe(8);
-    expect(listed()).toEqual(["hiring", "launch", "who", "pricing", "deck", "podcasts", "compare", "trip"]);
+    expect(CONVERSATIONS_SHOWN).toBe(3);
+    expect(listed()).toEqual(["hiring", "launch", "who"]);
     expect(row("who").querySelector('[data-sidebar-thread-row="who"]')!.getAttribute("aria-current")).toBe("page");
     expect(row("launch").querySelector("[aria-current]")).toBeNull();
     expect(listed()).not.toContain("run");
-    expect(more()!.textContent).toBe("Show 2 more");
+    expect(more()!.textContent).toBe("Show 7 more");
     expect(more()!.getAttribute("aria-expanded")).toBe("false");
 
     click(more());
     expect(listed()).toEqual(["hiring", "launch", "who", "pricing", "deck", "podcasts", "compare", "trip", "taxes", "gift"]);
     expect(more()!.textContent).toBe("Show fewer");
     click(more());
-    expect(listed()).toHaveLength(8);
+    expect(listed()).toHaveLength(3);
   });
 
-  it("keeps the open conversation listed when it is older than the first eight", () => {
+  it("keeps the open conversation listed when it is older than the first three", () => {
     render(research({ threadId: "gift", messages: [] }));
-    expect(listed()).toEqual(["hiring", "launch", "who", "pricing", "deck", "podcasts", "compare", "trip", "gift"]);
-    expect(more()!.textContent).toBe("Show 1 more");
+    expect(listed()).toEqual(["hiring", "launch", "who", "gift"]);
+    expect(more()!.textContent).toBe("Show 6 more");
+  });
+
+  it("offers only New conversation while the open one is the bot's only conversation", () => {
+    render(research({ tasks: [task("who", "Who am I?", 2)] }));
+    expect(host.querySelector("[data-conversations-new]")).not.toBeNull();
+    expect(host.querySelector("[data-conversations-search]")).toBeNull();
+    expect(host.querySelector('[role="list"]')).toBeNull();
+    expect(listed()).toEqual([]);
+  });
+
+  it("sets the rows in the panel's type: never bolder than medium, a 12px time and a larger unread dot", () => {
+    render(research());
+    const list = host.querySelector('[role="list"]')!.className.split(" ");
+    expect(list).toEqual(expect.arrayContaining(["[&_.font-semibold]:font-medium", "[&_time]:text-[12px]", "[&_time]:text-ink-tertiary", "[&_span.bg-accent]:size-2"]));
   });
 
   it("puts New conversation first, as a labelled button beside search", () => {
@@ -139,8 +152,9 @@ describe("a bot's conversations in its panel", () => {
     expect(row("who").querySelector('[aria-label="Unread"]')).toBeNull();
     expect(row("hiring").querySelector('svg[aria-label="Pin"]')).not.toBeNull();
     expect(row("launch").querySelector('svg[aria-label="Pin"]')).toBeNull();
+    expect(row("pricing")).toBeNull();
+    click(more());
     expect(row("pricing").querySelector("[data-thread-working]")!.textContent).toMatch(/^Working·1m 1[23]s$/);
-    expect(row("taxes")).toBeNull();
     expect(host.querySelectorAll("[data-thread-working]")).toHaveLength(1);
   });
 
@@ -151,13 +165,8 @@ describe("a bot's conversations in its panel", () => {
     expect(row("launch").textContent).toContain("Done. Want me to translate another post?");
     expect(row("hiring").textContent).toContain("Draft ready for review");
     expect(fixture.api.mock.calls.map(([path]) => path).sort()).toEqual([
-      "/api/threads/compare/messages?limit=8",
-      "/api/threads/deck/messages?limit=8",
       "/api/threads/hiring/messages?limit=8",
       "/api/threads/launch/messages?limit=8",
-      "/api/threads/podcasts/messages?limit=8",
-      "/api/threads/pricing/messages?limit=8",
-      "/api/threads/trip/messages?limit=8",
     ]);
     expect(fixture.api.mock.calls[0]![1]).toEqual({ background: true });
   });
@@ -183,7 +192,7 @@ describe("a bot's conversations in its panel", () => {
     flushSync(() => input.dispatchEvent(escape));
     expect(escape.defaultPrevented).toBe(true);
     expect(host.querySelector("[data-conversations-query]")).toBeNull();
-    expect(listed()).toHaveLength(8);
+    expect(listed()).toHaveLength(3);
   });
 
   it("opens a conversation, and leaves the open one alone", () => {
