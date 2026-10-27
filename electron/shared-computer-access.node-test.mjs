@@ -106,6 +106,33 @@ test("selected folders are read-only; writes require an explicit grant and fresh
   await assert.rejects(run({ action: "delete_file", path: "note.txt" }), /Unsupported/);
 });
 
+test("a new file's missing folders are made inside the shared folder, never in a read-only, protected or linked one", async t => {
+  const { dir, folder, grant, run } = await fixture(t);
+  const piece = "articles/pieces/relationship-with-money";
+  await assert.rejects(run({ action: "write_file", path: `${piece}/brief.md`, content: "brief" }), /read-only/);
+  await assert.rejects(stat(path.join(dir, "articles")), { code: "ENOENT" });
+  folder.write = true;
+  await run({ action: "write_file", path: `${piece}/brief.md`, content: "brief" });
+  await run({ action: "write_file", path: `${piece}/notes.md`, content: "notes" });
+  assert.equal(await readFile(path.join(dir, piece, "brief.md"), "utf8"), "brief");
+  assert.equal(await readFile(path.join(dir, piece, "notes.md"), "utf8"), "notes");
+  await writeFile(path.join(dir, "taken"), "a file");
+  await assert.rejects(run({ action: "write_file", path: "taken/inside.md", content: "x" }), /taken is a file, not a folder/);
+  await assert.rejects(run({ action: "write_file", path: ".git/hooks/pre-commit", content: "x" }), /inside \.git/);
+  await assert.rejects(stat(path.join(dir, ".git")), { code: "ENOENT" });
+  await mkdir(path.join(dir, "vault"));
+  grant.protectedPaths = [path.join(dir, "vault")];
+  await assert.rejects(run({ action: "write_file", path: "vault/deep/planted.json", content: "{}" }), /Desktop credentials|sharing settings/);
+  await assert.rejects(stat(path.join(dir, "vault", "deep")), { code: "ENOENT" });
+  if (process.platform !== "win32") {
+    const outside = await realpath(await mkdtemp(path.join(tmpdir(), "omb-shared-outside-")));
+    t.after(() => rm(outside, { recursive: true, force: true }));
+    await symlink(outside, path.join(dir, "linked"));
+    await assert.rejects(run({ action: "write_file", path: "linked/deep/planted.md", content: "x" }), /Symbolic links/);
+    await assert.rejects(stat(path.join(outside, "deep")), { code: "ENOENT" });
+  }
+});
+
 test("folder boundary rejects traversal, links, oversized files and unknown folder IDs", async t => {
   const { dir, run } = await fixture(t);
   for (const unsafe of ["../escape", "/etc/passwd", "nested/../../escape", "C:\\secret", "note.txt\0"]) {

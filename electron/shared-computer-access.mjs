@@ -110,12 +110,27 @@ export async function sharedPath(folder, relative = "") {
   const root = await fs.realpath(folder.path);
   if (root !== folder.path) throw new Error("Shared folder moved. Choose it again in Settings.");
   let target = root;
-  for (const part of relative.split("/").filter(part => part && part !== ".")) {
+  const parts = relative.split("/").filter(part => part && part !== ".");
+  for (const [index, part] of parts.entries()) {
     target = path.join(target, part);
     try { if ((await fs.lstat(target)).isSymbolicLink()) throw new Error("Symbolic links cannot be followed in shared folders"); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
+    catch (error) {
+      if (error.code === "ENOTDIR") throw new Error(`${parts.slice(0, index).join("/")} is a file, not a folder`);
+      if (error.code !== "ENOENT") throw error;
+    }
   }
   return target;
+}
+
+/** One level at a time, so a folder swapped for a link between two levels is refused, not followed. */
+async function makeMissingFolders(folder, relative) {
+  const parts = relative.split("/").filter(part => part && part !== ".").slice(0, -1);
+  let current = await fs.realpath(folder.path);
+  for (const part of parts) {
+    current = path.join(current, part);
+    try { await fs.mkdir(current); } catch (error) { if (error.code !== "EEXIST") throw error; }
+    if ((await fs.lstat(current)).isSymbolicLink()) throw new Error("Symbolic links cannot be followed in shared folders");
+  }
 }
 
 function killTree(child) {
@@ -274,6 +289,7 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
     if (typeof operation.content !== "string") throw new Error("Give file content to write");
     data = Buffer.from(operation.content, operation.encoding === "base64" ? "base64" : "utf8");
     if (data.length > WRITE_LIMIT) throw new Error("A file written here is limited to 256 KiB");
+    if (!operation.expected_sha256) await makeMissingFolders(folder, operation.path ?? "");
   }
   const flags = (write ? operation.expected_sha256 ? constants.O_RDWR : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
   const file = await fs.open(target, flags, 0o600);
