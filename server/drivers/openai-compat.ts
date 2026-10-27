@@ -1,6 +1,7 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { lmStudioV1Catalog } from "./local-inject.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -46,7 +47,8 @@ export interface OpenAICompatConfig {
   tools?: boolean;
   url: string;
   apiKeyEnv: string;
-  catalog?: "openai";
+  /** Which model list the server serves besides /models: OpenAI's own, or LM Studio's native /api/v1/models. */
+  catalog?: "openai" | "lmstudio";
   key?: string;
   model?: string;
   provider?: string;
@@ -76,12 +78,24 @@ function isOpenRouterUrl(url: string): boolean {
   }
 }
 
+function loopbackLmStudioV1Url(baseUrl: string): string | null {
+  try {
+    const url = new URL(baseUrl);
+    const host = url.hostname.toLowerCase();
+    if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") return null;
+    if (url.pathname.replace(/\/+$/, "") !== "/v1") return null;
+    return `${url.origin}/api/v1/models`;
+  } catch {
+    return null;
+  }
+}
+
 function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
   if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
   if (config.managedModels !== undefined && (!Array.isArray(config.managedModels) || !config.managedModels.length || config.managedModels.some(model => typeof model !== "string" || !model.trim()))) throw new Error("Invalid managed models.");
   const ownKey = typeof config.apiKeyEnv === "string" && OWN_KEY_ENVS.has(config.apiKeyEnv);
-  if (config.catalog !== undefined && config.catalog !== "openai") throw new Error("catalog must be \"openai\"");
+  if (config.catalog !== undefined && config.catalog !== "openai" && config.catalog !== "lmstudio") throw new Error("catalog must be \"openai\" or \"lmstudio\"");
   const envUrl = ownKey ? undefined : process.env.OPENAI_COMPAT_URL;
   return {
     ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
@@ -91,7 +105,7 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
       ? config.apiKeyEnv
       : DEFAULT_KEY_ENV,
-    ...(config.catalog === "openai" ? { catalog: "openai" as const } : {}),
+    ...(config.catalog === "openai" || config.catalog === "lmstudio" ? { catalog: config.catalog } : {}),
     key: typeof config.key === "string" && config.key ? config.key : undefined,
     model: typeof config.model === "string" && config.model
       ? config.model
@@ -151,6 +165,37 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       if (config.managedModels) return;
       if (!apiKey) return;
       try {
+        // Only a server added as LM Studio: any other local server would get a request it never serves.
+        const nativeUrl = config.catalog === "lmstudio" ? loopbackLmStudioV1Url(config.url) : null;
+        if (nativeUrl) {
+          try {
+            const native = await fetch(nativeUrl, {
+              headers: { authorization: `Bearer ${apiKey}` },
+              signal: AbortSignal.timeout(8_000),
+            });
+            if (native.ok) {
+              let parsed: ReturnType<typeof lmStudioV1Catalog> = null;
+              try {
+                parsed = lmStudioV1Catalog(await native.json());
+              } catch {
+                parsed = null;
+              }
+              if (parsed?.ids.length) {
+                const options = parsed.ids.map((id) => ({ id, label: id, custom: true as const }));
+                if (config.model && !options.some((model) => model.id === config.model)) {
+                  options.unshift({ id: config.model, label: config.model, custom: true });
+                }
+                catalog = {
+                  default: config.model ?? options[0]!.id,
+                  options,
+                };
+                return;
+              }
+            }
+          } catch {
+            // Native LM Studio catalog unavailable; try OpenAI-compatible /models below.
+          }
+        }
         const response = await fetch(`${config.url}/models`, {
           headers: { authorization: `Bearer ${apiKey}` },
           signal: AbortSignal.timeout(8_000),
