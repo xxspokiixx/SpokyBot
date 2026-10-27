@@ -156,7 +156,7 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <PiMark size={size} className={className} />;
     default:
       return (
-        <span className="flex size-full items-center justify-center text-[10px] font-semibold tracking-tight text-ink-secondary">
+        <span className={cn("flex size-full items-center justify-center text-[10px] font-semibold tracking-tight text-ink-secondary", className)}>
           {(driverKind.replace(/Agent$/i, "").slice(0, 1) || "?").toUpperCase()}
         </span>
       );
