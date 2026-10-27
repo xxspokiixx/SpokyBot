@@ -34,6 +34,7 @@ export declare const COPY_RETRY_MS: number[];
 export declare const FAILING_LINE_MS: number;
 export declare const KEPT_MS: number;
 export function parseJournal(value: unknown): Record<string, any> | null;
+export function rateLimited(error: unknown): boolean;
 /** Home is My Cloud by this journal. */
 export function awayIn(journal: Record<string, any> | null | undefined): boolean;
 export function parseKeep(value: unknown): { on: boolean };
@@ -96,5 +97,8 @@ export function createOneHome(deps: {
   retry(): Promise<void>;
   seen(): OneHomeView | null;
   changed(): void;
+  /** What the last run found holding the move that only a run finds out (move-status.mjs), and what kind of work holds
+   * the freeze ("" when the server didn't say), never its name. */
+  facts(): { noted: "waiting_quiet" | "thaw_failed" | "frozen_without_move" | "local_unavailable" | null; waiting: string | null };
   close(): void;
 };
