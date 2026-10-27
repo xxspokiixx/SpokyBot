@@ -42,7 +42,7 @@ type LentFolder = z.infer<typeof lentFolder>;
 export interface StagedChange { id: string; syncId: string; path: string; sha256: string; size: number; base: string | null; at: number }
 interface State { version: 1; computers: Record<string, Report>; synced: Record<string, number>; staged: StagedChange[] }
 
-type Operation = { action: string; folder_id?: string; path?: string; content?: string; encoding?: "utf8" | "base64"; expected_sha256?: string };
+type Operation = { action: string; computer_id?: string; folder_id?: string; path?: string; content?: string; encoding?: "utf8" | "base64"; expected_sha256?: string };
 type Result = { content: Array<{ type: "text"; text: string }>; isError?: true };
 const text = (value: unknown): Result => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 const refusal = (message: string): Result => ({ ...text(message), isError: true });
@@ -158,6 +158,8 @@ export function createLentCopies(options: { dataDir: string; now?: () => number 
     const state = read();
     const change = pending(state, syncId, path);
     const found = change ? null : inCopy(root, path);
+    // A file too big to read can't be overwritten either: never hashed whole for nothing.
+    if (found && found.size > READ_LIMIT) return refusal("Only regular, single-link files up to 2 MiB can be shared");
     const current = change ? change.sha256 : found ? hash(readFileSync(found.file)) : null;
     if (current && !operation.expected_sha256) return refusal("That file already exists. Read it first, then pass its sha256 as expected_sha256 to overwrite it.");
     if (operation.expected_sha256 && operation.expected_sha256 !== current) return refusal("File changed. Read it again before overwriting it.");
@@ -246,6 +248,8 @@ export function createLentCopies(options: { dataDir: string; now?: () => number 
       const device = deviceWord(computer.platform);
       // Back with a new grant (lending changed meanwhile): the live folder, not the copy.
       if (online.some((entry) => entry.name === computer.name)) return Promise.resolve(refusal(`Their ${device} is on again: call list_shared_computers for its current computer_id and folder_id, then try again.`));
+      // A folder only ever with the computer that lends it.
+      if (operation.computer_id !== computer.lendingId) return Promise.resolve(refusal(`That folder is lent by ${computer.name}: use its computer_id from list_shared_computers.`));
       const later = `Tell them in a few words that you'll get it when their ${device} is on.`;
       if (!folder.syncId) return Promise.resolve(refusal(`${folder.name} is only on their ${device}${folder.live === "too-big" ? ": it is too big to keep a copy on the Cloud" : ""}. ${later}`));
       const root = copyOf(folder.syncId);

@@ -359,9 +359,9 @@ describe("cloudHomePrompt", () => {
 
   it("says lent folders keep working from the Cloud's copy while the computer is away, and what to tell the person", () => {
     const mac = cloudHomePrompt(true, [], [{ name: "Ash-MBP", platform: "darwin" }]);
-    expect(mac).toContain("While that Mac is away, the folders it lends still work from the Cloud's copy: list_shared_computers lists them under away_computers, every read says how fresh the copy is");
+    expect(mac).toContain("While that Mac is away, each folder it lends that the Cloud keeps a copy of still works from that copy: list_shared_computers lists them under away_computers (copy null means a folder only on the Mac), every read says how fresh the copy is");
     expect(mac).toContain("a write to a folder lent with editing is saved here and reaches the Mac when it's on (tell them so in a few words)");
-    expect(mac).toContain("A file that isn't in the copy is only on the Mac: say you'll get it when it's on.");
+    expect(mac).toContain("A file or folder that isn't in the copy is only on the Mac: say you'll get it when it's on.");
     expect(cloudHomePrompt(false, [], [{ name: "Ash-MBP", platform: "darwin" }])).not.toContain("away_computers");
   });
 

@@ -180,7 +180,7 @@ it("a lent folder keeps working while the Mac is away: read from the copy, chang
     const tools = await botTools(bot.id);
     // The bot is told how lent folders behave while the Mac is away, and is never handed the copy's place on disk.
     const prompt = String(JSON.parse(readFileSync(join(home, "fake-claude-dump.json"), "utf8")).systemPrompt);
-    expect(prompt).toContain("the folders it lends still work from the Cloud's copy");
+    expect(prompt).toContain("each folder it lends that the Cloud keeps a copy of still works from that copy");
     expect(prompt).not.toContain(join("sync", "lent"));
     const live = await tools.list();
     expect(live.computers).toHaveLength(1);

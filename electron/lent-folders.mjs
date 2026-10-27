@@ -3,6 +3,7 @@
 // computer sleeps. Nobody chooses anything: what fits is copied, the rest stays live only. Pure, apart from
 // `lendingForFiles`, main's handle on lending; cloud-sync.mjs carries the plan out.
 import { randomUUID } from "node:crypto";
+import { existingFolders } from "./cloud-lending-ipc.mjs";
 import { cloudReserveBytes } from "./cloud-sync-rules.mjs";
 
 /** A lent folder bigger than this keeps no copy on My Cloud: bots use it live, while this computer is on. */
@@ -100,7 +101,8 @@ export function lendingForFiles({ environment, sharing, validate }) {
       const state = found.sharing.cloudState(found.env);
       const [folder] = await validate([{ id: randomUUID(), path: pcPath, write: false }]);
       if (!folder) return null;
-      const lent = state.enabled ? state.folders : [];
+      // A lent folder deleted since is left out, as lending itself does, so it never stops the rest.
+      const lent = state.enabled ? await existingFolders(state.folders, validate) : [];
       const already = lent.find((entry) => entry.path === folder.path);
       if (already) return already;
       await found.sharing.saveCloud(found.env, { folders: [...lent, folder], ...(state.enabled ? kept(state) : {}) });
@@ -112,7 +114,7 @@ export function lendingForFiles({ environment, sharing, validate }) {
       if (!found) return;
       const state = found.sharing.cloudState(found.env);
       if (!state.enabled || !state.folders.some((folder) => folder.id === folderId)) return;
-      const folders = state.folders.filter((folder) => folder.id !== folderId);
+      const folders = await existingFolders(state.folders.filter((folder) => folder.id !== folderId), validate);
       const rest = kept(state);
       if (!folders.length && !Object.values(rest).some(Boolean)) { found.sharing.revoke(found.env); return; }
       await found.sharing.saveCloud(found.env, { folders, ...rest });

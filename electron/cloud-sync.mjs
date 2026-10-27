@@ -43,8 +43,13 @@ function writeSettings(file, value) {
   fs.renameSync(temporary, file);
 }
 
-/** A My Cloud from before lent folders' copies answers their calls 404: lending still works there, live only. */
-const older = (error) => error?.status === 404 || error?.status === 400;
+/** A My Cloud from before lent folders' copies answers their calls 404 (no route): lending still works there, live only. */
+const older = (error) => error?.status === 404;
+/** A lent folder's bookkeeping that failed is this pass's note, never what stops Files. */
+const noted = (what) => (error) => {
+  if (passStopper(error)) throw error;
+  if (!older(error)) console.error(`[files] ${what}: ${error?.message ?? error}`);
+};
 const KEPT_MAX = 5;
 
 const sleep = (ms, signal) => new Promise((resolve) => {
@@ -218,7 +223,7 @@ export function createCloudFilesService({
           if (landed?.problem) result.problem ??= landed.problem;
           results.set(folder.key, result);
           if (current.deletes) update(folder.key, { deletes: null });
-          if (current.lentId && result.status === "synced") await cloud.synced(current.id).catch((error) => { if (passStopper(error) || !older(error)) throw error; });
+          if (current.lentId && result.status === "synced") await cloud.synced(current.id).catch(noted("saying the copy is in step"));
         } catch (error) {
           if (passStopper(error)) throw error;
           if (!sharedBy(folder.key)) continue;
@@ -246,7 +251,7 @@ export function createCloudFilesService({
         }
       }
       if (lent) await cloud.lent(lentReport({ computerId: settings.computerId, lendingId: lent.lendingId, name: hostname, platform, folders: lent.folders, plan: lent.plan, shared: settings.shared }))
-        .catch((error) => { if (passStopper(error) || !older(error)) throw error; });
+        .catch(noted("saying what is lent"));
       watchShared();
       const disk = summary.disk;
       const usedBytes = disk.totalBytes - disk.freeBytes;

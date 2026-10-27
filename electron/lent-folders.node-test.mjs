@@ -59,7 +59,7 @@ test("lending for Files lends a folder read only on top of what is lent, and sto
   let state = { enabled: true, folders: [folder("Documents")], screen: true, internet: true, chrome: false, terminal: false };
   const saved = [], revoked = [];
   const sharing = { cloudState: () => state, saveCloud: async (_env, input) => { saved.push(input); state = { ...state, ...input, enabled: true }; }, revoke: () => { revoked.push(true); state = { ...state, enabled: false }; }, lentToCloud: () => ({ off: true }) };
-  const lending = lendingForFiles({ environment: () => env, sharing: () => sharing, validate: async ([entry]) => [{ ...entry, path: entry.path, name: "Clients" }] });
+  const lending = lendingForFiles({ environment: () => env, sharing: () => sharing, validate: async ([entry]) => [{ ...entry, name: entry.path.split("/").at(-1) }] });
   const lent = await lending.lend("/Users/ash/Clients");
   assert.equal(lent.write, false);
   assert.deepEqual(saved.at(-1), { folders: [state.folders[0], lent], screen: true, internet: true, chrome: false, terminal: false });
@@ -174,4 +174,20 @@ test("a Cloud from before lent copies gets none: lending stays live only there, 
   await s.service.pass();
   assert.deepEqual(s.service.state().shared, []);
   assert.equal(s.cloud.calls.some(([call]) => call === "register" || call === "lent"), false);
+});
+
+test("a lent folder deleted from disk never stops lending or unlending the rest", async () => {
+  const env = { id: "cloud", origin: "https://omb-u-aaaaaaaaaaaa.fly.dev" };
+  const gone = folder("Gone"), kept = folder("Kept");
+  let state = { enabled: true, folders: [gone, kept], screen: false, internet: true, chrome: false, terminal: false };
+  const saved = [];
+  const sharing = { cloudState: () => state, saveCloud: async (_env, input) => { saved.push(input); state = { ...state, ...input }; }, revoke: () => {}, lentToCloud: () => ({ off: true }) };
+  // As validateSharedFolders does: a folder no longer on disk rejects with ENOENT.
+  const validate = async ([entry]) => { if (entry.path === gone.path) throw Object.assign(new Error("gone"), { code: "ENOENT" }); return [{ ...entry, name: entry.path.split("/").at(-1) }]; };
+  const lending = lendingForFiles({ environment: () => env, sharing: () => sharing, validate });
+  await lending.unlend(kept.id);
+  assert.deepEqual(saved.at(-1).folders, []);
+  state = { ...state, folders: [gone, kept] };
+  await lending.lend("/Users/ash/New");
+  assert.deepEqual(saved.at(-1).folders.map((entry) => entry.name), ["Kept", "New"]);
 });

@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const op = (action: string, rest: Record<string, unknown> = {}) => copies.answer({ action, folder_id: notes, ...rest }, OWNER)!;
+const op = (action: string, rest: Record<string, unknown> = {}) => copies.answer({ action, computer_id: lending, folder_id: notes, ...rest }, OWNER)!;
 
 describe("how fresh a copy is", () => {
   it("says it the way a person would", () => {
@@ -84,12 +84,20 @@ describe("a lent folder while its computer is away", () => {
     expect(missing.isError).toBe(true);
     expect(missing.content[0].text).toContain("only on their Mac");
     expect(missing.content[0].text).toContain("you'll get it when their Mac is on");
-    const live = await copies.answer({ action: "read_file", folder_id: big, path: "a.jpg" }, OWNER)!;
+    const live = await copies.answer({ action: "read_file", computer_id: lending, folder_id: big, path: "a.jpg" }, OWNER)!;
     expect(live.isError).toBe(true);
     expect(live.content[0].text).toBe("Photos is only on their Mac: it is too big to keep a copy on the Cloud. Tell them in a few words that you'll get it when their Mac is on.");
     // Not a folder action, or not a lent folder: the usual offline answer.
     expect(copies.answer({ action: "run_command", folder_id: notes }, OWNER)).toBeNull();
     expect(copies.answer({ action: "read_file", folder_id: randomUUID(), path: "plan.md" }, OWNER)).toBeNull();
+  });
+
+  it("answers a folder only with the computer that lends it, and never hashes a file too big to read", async () => {
+    const other = await copies.answer({ action: "read_file", computer_id: randomUUID(), folder_id: notes, path: "plan.md" }, OWNER)!;
+    expect(other.isError).toBe(true);
+    expect(other.content[0].text).toContain("That folder is lent by Ash-MBP");
+    writeFileSync(join(copy, "big.bin"), Buffer.alloc(3 * 1024 * 1024));
+    expect((await op("write_file", { path: "big.bin", content: "x" })).content[0].text).toBe("Only regular, single-link files up to 2 MiB can be shared");
   });
 
   it("never leaves the folder, and never follows a link", async () => {
@@ -116,7 +124,7 @@ describe("a lent folder while its computer is away", () => {
     expect((await op("write_file", { path: ".git/config", content: "x" })).content[0].text).toContain("Files inside .git");
     expect((await op("write_file", { path: "big.bin", content: Buffer.alloc(300 * 1024).toString("base64"), encoding: "base64" })).content[0].text).toContain("256 KiB");
     expect((await op("write_file", { path: "plan.md/x", content: "x" })).content[0].text).toContain("is a file, not a folder");
-    const readOnly = await copies.answer({ action: "write_file", folder_id: docs, path: "x.md", content: "x" }, OWNER)!;
+    const readOnly = await copies.answer({ action: "write_file", computer_id: lending, folder_id: docs, path: "x.md", content: "x" }, OWNER)!;
     expect(readOnly.content[0].text).toBe("This folder is read-only.");
     expect(copies.staged(syncId)).toHaveLength(1);
   });
