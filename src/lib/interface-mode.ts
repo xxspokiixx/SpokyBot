@@ -54,8 +54,9 @@ function onStorage(event: StorageEvent) {
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  if (listeners.size === 1 && typeof window !== "undefined") {
-    window.addEventListener("storage", onStorage);
+  if (listeners.size === 1) {
+    applyInterfaceMode();
+    if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
   }
   return () => {
     listeners.delete(listener);

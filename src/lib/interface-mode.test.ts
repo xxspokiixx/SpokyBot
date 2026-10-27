@@ -90,7 +90,7 @@ describe("interface mode", () => {
     expect(root.dataset.interface).toBe("simple");
   });
 
-  it("moves the page mark when another window switches the mode", async () => {
+  it("marks the page once the app reads the mode, and moves the mark when another window switches it", async () => {
     // Stands in for React subscribing a component, which is what attaches the storage listener.
     vi.doMock("react", () => ({
       useSyncExternalStore: (subscribe: (listener: () => void) => void, read: () => boolean) => {
@@ -100,7 +100,9 @@ describe("interface mode", () => {
     }));
     const { useAdvancedMode, setAdvancedMode, ADVANCED_MODE_KEY } = await fresh();
     setAdvancedMode(false);
+    root.dataset = {};
     expect(useAdvancedMode()).toBe(false);
+    expect(root.dataset.interface).toBe("simple");
     local.setItem(ADVANCED_MODE_KEY, "1");
     window.dispatchEvent(Object.assign(new Event("storage"), { key: ADVANCED_MODE_KEY, storageArea: local }));
     expect(root.dataset.interface).toBe("advanced");
