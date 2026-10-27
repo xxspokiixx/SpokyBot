@@ -96,7 +96,7 @@ describe("a new Cloud's first hour", () => {
     const s = setup();
     const fh = s.make();
     fh.begin();
-    expect(s.texts()[0]).toBe("Hi! I'm MausBot, your Chief of Staff. I live on your Cloud, so I keep working while your computer is off. What do you want off your plate?");
+    expect(s.texts()[0]).toBe("Hi! I'm MausBot, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?");
     s.world.person = { email: "sam.lee@example.test" };
     s.world.language = "de";
     fh.arrived();
