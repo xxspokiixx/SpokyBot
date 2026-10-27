@@ -124,12 +124,7 @@ export function TurnPresence({
         {showWorking && simple ? (
           <span className="turn-phrase relative grid text-[14px] leading-[22px]" data-turn-status data-turn-now={now ? "" : undefined}>
             {now ? (
-              <>
-                {previous && previous !== current && (
-                  <ShimmerPhrase key={`out:${previous}`} text={previous} className="turn-phrase-out absolute start-0 top-0 whitespace-nowrap" hidden />
-                )}
-                <ShimmerPhrase key={`in:${current}`} text={current} className={previous !== null ? "turn-phrase-in" : undefined} />
-              </>
+              <ShimmerPhrase key={`in:${current}`} text={current} className={previous !== null ? "turn-phrase-in" : undefined} />
             ) : (
               <span className="text-ink-secondary">{label ?? t("chat.typing")}</span>
             )}
