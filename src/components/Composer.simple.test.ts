@@ -121,9 +121,11 @@ describe("the Simple composer in a bot chat", () => {
     expect(pill.className.split(" ")).toContain("rounded-[18px]");
   });
 
-  it("leaves the area behind and below the composer see-through, with no solid backdrop", () => {
+  it("sets the composer on plain canvas from its top edge down, with no fade above it", () => {
     render({ bot });
-    expect(container.querySelector("[data-composer-backdrop]")).toBeNull();
+    const backdrop = container.querySelector("[data-composer-backdrop]")!.className.split(" ");
+    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-left-5", "-right-5"]));
+    expect(backdrop.some((name) => /gradient|blur|^from-|^to-|^opacity/.test(name))).toBe(false);
   });
 
   it("attaches through the same file picker as the paperclip", () => {
@@ -225,7 +227,7 @@ describe("the Advanced composer", () => {
     expect(container.querySelector('[aria-haspopup="menu"][aria-label$="for Claude"]')).not.toBeNull();
     expect(fixture.call).toMatchObject({ placement: "composer" });
     expect(fixture.call?.fill).toBeUndefined();
-    expect(container.querySelector("[data-composer-backdrop]")).not.toBeNull();
+    expect(container.querySelector("[data-composer-backdrop]")!.className.split(" ")).toContain("top-1/2");
   });
 
   it("keeps the room's Goal chip and its header call button", () => {

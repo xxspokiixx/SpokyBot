@@ -293,6 +293,20 @@ describe("glass header", () => {
     expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
   });
 
+  it("fades the transcript into the canvas under Simple mode's header, where Advanced keeps the glass", () => {
+    const bar = (markup: string) => markup.match(/<div data-glass-bar="top"[^>]*>/)?.[0] ?? "";
+    expect(bar(renderToStaticMarkup(createElement(ChatView, { bot })))).not.toContain("data-glass-fade");
+    fixture.advanced = false;
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(bar(markup)).toContain('data-glass-fade=""');
+      expect(bar(markup)).not.toContain("before:hidden");
+      expect(markup).toMatch(/class="glass-scroller [^"]*" style="scroll-padding-bottom:calc\(/);
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
   it("holds every row's positioned parts inside the transcript, so nothing in it can make the window scroll", () => {
     // An absolutely positioned reply label with no positioned ancestor in the scroller is placed past
     // the window, which then scrolls by script: an app frame's scrollIntoView lifts the whole app off the top.

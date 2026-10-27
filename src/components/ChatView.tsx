@@ -1104,7 +1104,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <CallOverlay bot={bot} />
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the CallOverlay (z-30). */}
-      <GlassBar edge="top" className={cn("z-[25]", simpleHead && "before:hidden")}>
+      <GlassBar edge="top" fade={simpleHead} className="z-[25]">
       <div
         {...headerDragProps}
         className={cn(
@@ -1257,6 +1257,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <div
         ref={scrollRef}
         className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-5 [overflow-anchor:none]"
+        // Simple mode's composer sits on plain canvas, so a row scrolled into view stops clear of it.
+        style={advanced ? undefined : { scrollPaddingBottom: composerDock.pad }}
         {...scrollHandlers}
       >
         <div
