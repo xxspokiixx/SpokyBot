@@ -454,7 +454,7 @@ describe("how every bot replies", () => {
       "first check what you can already reach",
       "ask for exactly one thing, in plain words, with the reason",
       "do the parts that do not depend on it in the same turn",
-      "Never name tools or functions, the files that hold your notes or settings (MEMORY.md, memory/…, SOUL.md), MCP",
+      "Never name tools or functions, the files that hold your notes or settings, MCP",
       "state the money facts you found: price, fees, deposit, cancellation terms",
       "Nothing that cannot be undone happens until they explicitly pick an option or say go",
       "Never ask for passwords, one-time codes or card numbers in chat.",
