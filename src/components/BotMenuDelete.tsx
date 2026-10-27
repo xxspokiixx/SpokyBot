@@ -7,7 +7,7 @@ import { currentTaskBot, useStore, type Action, type Bot } from "@/state/store";
 import { bulkDeleteBody, bulkDeleteOutcome, deleteThreadsInBulk } from "./BulkSelectBar";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; onClick: () => void }) {
+export function BotDeleteMenuItem({ deleting, onClick, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { deleting: boolean; onClick: () => void; className?: string }) {
   return (
     <button
       type="button"
@@ -16,7 +16,8 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
       onClick={onClick}
       title={deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined}
       className={cn(
-        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger",
+        className,
+        "text-danger",
         deleting ? "cursor-default opacity-40" : "hover:bg-raised/70",
       )}
     >

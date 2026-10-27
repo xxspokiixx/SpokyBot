@@ -3,13 +3,50 @@ import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
 import { CloudUsageCard } from "./CloudUsageMeter";
+import { endCloudHowTo, useWorkspacePlace, type WorkspacePlace } from "./DesktopWorkspaceSwitcher";
+import { SidebarConnectApps } from "./SidebarConnectApps";
 import { SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
-import { SidebarProfileMenu } from "./SidebarProfileMenu";
+import { SidebarProfileMenu, useSimpleAccount } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 
-export function SidebarFooter({ density, toolsCollapsed, onToggleTools }: { density: SidebarDensity; toolsCollapsed: boolean; onToggleTools?: () => void }) {
+export function useSimplePlace(): WorkspacePlace {
+  const { state, dispatch } = useStore();
+  return useWorkspacePlace({ cloudHome: state.config?.cloudHome === true, howTo: state.cloudHowTo, onMenuClosed: () => endCloudHowTo(dispatch) });
+}
+
+export function SidebarPlaceStatus({ place, className }: { place: WorkspacePlace; className?: string }) {
+  if (place.error) return <p role="alert" className={cn("text-[12px] text-danger", className)}>{place.error}</p>;
+  if (place.waking) return <p role="status" data-cloud-waking className={cn("text-[12px] text-ink-secondary", className)}>{place.waking}</p>;
+  return null;
+}
+
+function SimpleSidebarFooter({ density, owner }: { density: SidebarDensity; owner: string | null }) {
+  const place = useSimplePlace();
+  const account = useSimpleAccount(place, owner);
+  return (
+    <div data-sidebar-footer="simple" className="pb-4 pl-4 pr-[17px] pt-2">
+      <SidebarFooterNav density={density} />
+      <CloudUsageCard />
+      <SidebarPlaceStatus place={place} className="mb-2 px-1" />
+      <div className="flex items-center gap-[9px] not-first:mt-2">
+        <SidebarProfileMenu simple={account} />
+        <SidebarConnectApps />
+        <UpdateIndicator className="size-9" />
+      </div>
+    </div>
+  );
+}
+
+export function SidebarFooter({ density, simple = false, owner = null, toolsCollapsed, onToggleTools }: {
+  density: SidebarDensity;
+  simple?: boolean;
+  owner?: string | null;
+  toolsCollapsed: boolean;
+  onToggleTools?: () => void;
+}) {
   const { dispatch } = useStore();
+  if (simple) return <SimpleSidebarFooter density={density} owner={owner} />;
   return (
     <div className={cn("pb-3 pt-2", density === "icons" ? "flex flex-col items-center gap-1 px-2" : "px-3")}>
       <SidebarFooterNav density={density} collapsed={toolsCollapsed} onToggleCollapsed={onToggleTools} />

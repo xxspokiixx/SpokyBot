@@ -3,9 +3,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  cloudUsageSummary,
   phoneMenuItems,
+  placeMenuItems,
+  planUsageSummary,
   profileInitials,
   profileMenuItems,
+  resetsIn,
+  simplePhoneItems,
+  toolMenuItems,
+  type PlanUsageWindows,
   selectPhoneDestination,
   profileLabel,
   updateBusy,
@@ -27,6 +34,7 @@ import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudMachine } from "../../electron/cloud-home.mjs";
 import { PHONE_APPS, PhoneAppDialog, type PhoneAppConnect } from "./PhoneAppDialog";
 import type { UpdaterState } from "@/lib/updater";
+import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 const state = (patch: Partial<UpdaterState>): UpdaterState => ({ status: "idle", ...patch }) as UpdaterState;
 
@@ -391,5 +399,119 @@ describe("profileMenuItems", () => {
     items.find((item) => item.key === "account")!.onSelect();
     expect(onUsage).toHaveBeenCalledOnce();
     expect(onAccount).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Simple mode's account menu", () => {
+  const noop = () => {};
+  const tools = toolMenuItems({ activeView: "routines", automationsNeedYou: true, onAutomations: noop, onTeamMap: noop });
+  const place = (patch: Partial<Parameters<typeof placeMenuItems>[0]> = {}) => ({
+    bridge: { state: async () => ({ local: true, name: "This computer" }), menu: async () => {} },
+    current: { local: true, name: "This computer" },
+    cloudHome: false,
+    onLine: "",
+    openMenu: vi.fn(),
+    switchable: true,
+    ...patch,
+  });
+  const build = (patch: Partial<Parameters<typeof profileMenuItems>[0]> = {}) => profileMenuItems({
+    phone: simplePhoneItems({ connected: false, onGetApp: noop }),
+    usage: true,
+    update: { key: "update", label: "Check for updates", onSelect: noop },
+    account: "MausBot Cloud",
+    simple: { tools, places: placeMenuItems(place(), { owner: null, onCloudSettings: noop }) },
+    onUsage: noop, onSettings: noop, onShortcuts: noop, onAbout: noop, onHelp: noop, onFeedback: noop, onAccount: noop,
+    ...patch,
+  });
+  const groups = (items: SidebarMenuItem[]) => items.reduce<string[][]>((all, item) => {
+    if (item.separatorBefore || all.length === 0) all.push([]);
+    all[all.length - 1]!.push(item.key);
+    return all;
+  }, []);
+
+  it("leads with usage, the phone app and Settings, then Automations and Team map, then where this window is, then support, Cloud and updates", () => {
+    expect(groups(build())).toEqual([
+      ["usage", "phone-app", "settings"],
+      ["automations", "team-map"],
+      ["place", "switch-place"],
+      ["support", "account", "update"],
+    ]);
+  });
+
+  it("raises an update that is ready to install to the top group", () => {
+    const update = { key: "update", label: "OpenMausBot 0.2.0 ready — restart", onSelect: noop };
+    expect(groups(build({ update, updateReady: true }))[0]).toEqual(["usage", "update", "phone-app", "settings"]);
+  });
+
+  it("gives the usage row a trailing meta and a chevron, with the reset as its second line", () => {
+    const usage = build({ usageSummary: { value: "12% used", weekly: true, resets: "Resets in 3 days" } })[0]!;
+    expect(usage).toMatchObject({ label: "Weekly usage", value: "12% used", subtitle: "Resets in 3 days", chevron: true });
+    expect(build()[0]).toMatchObject({ label: "Usage", chevron: true });
+    expect(build()[0]!.value).toBeUndefined();
+  });
+
+  it("keeps Advanced's account menu as it was", () => {
+    const items = build({ simple: undefined, usageSummary: { value: "12% used" } });
+    expect(items.map((item) => item.key)).toEqual(["usage", "phone-app", "support", "settings", "update", "account"]);
+    expect(items[0]!.chevron).toBeUndefined();
+  });
+
+  it("marks Automations open and needing attention, and Team map plain", () => {
+    expect(tools.map((item) => [item.key, item.active, item.attention])).toEqual([["automations", true, true], ["team-map", false, undefined]]);
+  });
+
+  it("ticks the current place and switches through the same native menu as the server pill", () => {
+    const here = place();
+    const items = placeMenuItems(here, { owner: null, onCloudSettings: noop });
+    expect(items.map((item) => [item.key, item.label])).toEqual([["place", "This computer"], ["switch-place", "Switch to…"]]);
+    expect(items[0]!.trailing).toBeTruthy();
+    items[0]!.onSelect();
+    items[1]!.onSelect();
+    expect(here.openMenu).toHaveBeenCalledTimes(2);
+  });
+
+  it("names My Cloud and opens its settings when it is the window's only place, and offers nothing without either", () => {
+    const onCloudSettings = vi.fn();
+    const home = placeMenuItems(place({ switchable: false, cloudHome: true, onLine: "always on" }), { owner: "ada@example.test", onCloudSettings });
+    expect(home.map((item) => [item.label, item.subtitle])).toEqual([["My Cloud", "always on · ada@example.test’s Cloud"]]);
+    home[0]!.onSelect();
+    expect(onCloudSettings).toHaveBeenCalledOnce();
+    expect(placeMenuItems(place({ bridge: undefined, switchable: false }), { owner: null, onCloudSettings })).toEqual([]);
+  });
+
+  it("shows one Get the phone app row, dotted while this computer's phone is connected", () => {
+    expect(simplePhoneItems({ connected: true, onGetApp: noop }).map((item) => [item.key, Boolean(item.trailing)])).toEqual([["phone-app", true]]);
+    expect(simplePhoneItems({ connected: false, onGetApp: noop })[0]!.trailing).toBeUndefined();
+  });
+});
+
+describe("the usage meta", () => {
+  const now = Date.parse("2026-10-27T12:00:00Z");
+  const window = (usedPercent: number | null, resetsAt: string | null = null) => ({ available: usedPercent !== null, usedPercent, resetsAt });
+  const provider = (patch: Partial<PlanUsageWindows["providers"][number]> = {}) => ({ ok: true, plan: null, weekly: window(null), fiveHour: window(null), ...patch });
+
+  it("reads the tightest weekly window, then the 5-hour one, with when it resets", () => {
+    const report = { providers: [provider({ weekly: window(12, "2026-10-30T12:00:00Z") }), provider({ weekly: window(31.6, "2026-10-28T12:00:00Z") }), provider({ ok: false, weekly: window(90) })] };
+    expect(planUsageSummary(report, now)).toEqual({ value: "32% used", weekly: true, resets: "Resets tomorrow" });
+    expect(planUsageSummary({ providers: [provider({ fiveHour: window(40, "2026-10-27T15:00:00Z") })] }, now)).toEqual({ value: "40% used", weekly: false, resets: "Resets in 3 hours" });
+  });
+
+  it("falls back to the plan's name, and to nothing", () => {
+    expect(planUsageSummary({ providers: [provider({ plan: "Max" })] }, now)).toEqual({ value: "Max" });
+    expect(planUsageSummary({ providers: [provider()] }, now)).toBeNull();
+    expect(planUsageSummary(null, now)).toBeNull();
+  });
+
+  it("says when a reset is days away, and nothing once it has passed", () => {
+    expect(resetsIn(now + 3 * 86_400_000, now)).toBe("Resets in 3 days");
+    expect(resetsIn(now - 1, now)).toBeUndefined();
+    expect(resetsIn(null, now)).toBeUndefined();
+  });
+
+  it("reads a paid Cloud's tightest meter first, else its plan", () => {
+    const usage = { tier: "pro", resetsAt: Date.parse("2026-11-01T00:00:00Z"), meters: [{ kind: "voice", used: 30, max: 100 }, { kind: "decisions", used: 85, max: 100 }] };
+    expect(cloudUsageSummary({ status: "paid", tier: "pro", usage } as never)).toMatchObject({ value: "85% used" });
+    expect(cloudUsageSummary({ status: "paid", tier: "pro" } as never)).toEqual({ value: "Pro" });
+    expect(cloudUsageSummary({ status: "none" } as never)).toBeNull();
   });
 });

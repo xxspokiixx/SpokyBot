@@ -8,8 +8,9 @@ import { BotContextMenu } from "./Sidebar";
 import { setLocale } from "@/lib/i18n";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
+const mode = vi.hoisted(() => ({ advanced: true }));
 vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(), useShowThreads: () => false,
+  ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => mode.advanced,
 }));
 
 const bot: Bot = { id: "reviewer", threadId: "selected", name: "Reviewer", title: "", description: "", color: "green",
@@ -23,10 +24,11 @@ const bot: Bot = { id: "reviewer", threadId: "selected", name: "Reviewer", title
 let root: Root, container: HTMLDivElement, state: AppState;
 let menu: { botId: string; x: number; y: number } | null;
 const onClose = vi.fn();
+const onRename = vi.fn();
 const dispatch = (action: Action) => { state = reducer(state, action); draw(); };
 const draw = () => flushSync(() => root.render(createElement(BotEditorStore, {
   value: { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
-  children: createElement(BotContextMenu, { menu, onClose, onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn() }),
+  children: createElement(BotContextMenu, { menu, onClose, onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(), onRename }),
 })));
 const button = (label = "Mark all conversations as read") => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((node) => node.textContent === label)!;
 const response = (threadId: string) => {
@@ -35,6 +37,7 @@ const response = (threadId: string) => {
 };
 
 beforeEach(() => {
+  mode.advanced = true;
   setLocale("en"); document.documentElement.dataset.reducedMotion = "true";
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   state = { ...initialState, bots: [structuredClone(bot)], selectedId: "another-bot" };
@@ -101,5 +104,58 @@ describe("bot menu bulk reads", () => {
   it("does not expose bulk sibling reads to thread-pinned remote clients", () => {
     window.ogb = { remoteClient: { active: true } } as typeof window.ogb;
     draw(); expect(button()).toBeUndefined();
+  });
+
+  it("offers Simple mode one toggle: Mark as Read while anything is unread, Mark as Unread once nothing is", async () => {
+    mode.advanced = false;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => response(JSON.parse(String(init?.body)).threadId));
+    vi.stubGlobal("fetch", fetch); draw();
+    expect(button("Mark as Unread")).toBeUndefined();
+    flushSync(() => button("Mark as Read").click());
+    await expect.poll(() => onClose.mock.calls.length).toBe(1);
+    expect(state.bots[0]!.tasks!.every((task) => !task.unread)).toBe(true);
+    draw();
+    expect(button("Mark as Read")).toBeUndefined();
+    flushSync(() => button("Mark as Unread").click());
+    expect(state.bots[0]!.unread).toBe(true);
+  });
+});
+
+describe("Simple mode's bot menu", () => {
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sheet = () => document.querySelector<HTMLElement>('[data-bot-menu][aria-label="Actions for Reviewer"]')!;
+  const more = () => document.querySelector<HTMLElement>("[data-bot-menu-more]")!;
+  const flyout = () => document.querySelector('[role="menu"][aria-label="More"]');
+  const point = (target: Element, y: number) => target.dispatchEvent(new MouseEvent("pointerover", { bubbles: true, clientX: 60, clientY: y }));
+  beforeEach(() => { mode.advanced = false; });
+
+  it("leads with Rename, then Pin, Move, Mark as Read, Copy conversation ID and More, and ends with Archive and Delete", () => {
+    draw();
+    expect([...sheet().querySelectorAll("button")].map((node) => node.textContent)).toEqual([
+      "Rename", "Pin", "Move to department", "Mark as Read", "Copy conversation ID", "More", "Archive", "Delete",
+    ]);
+    flushSync(() => button("Rename").click());
+    expect(onRename).toHaveBeenCalledWith(bot.id);
+  });
+
+  it("opens More only after the pointer rests on it, closes it when a sibling row takes the pointer, and opens it at once on a click", async () => {
+    draw();
+    const pin = button("Pin");
+    point(more(), 200);
+    await wait(100);
+    expect(flyout()).toBeNull();
+    point(pin, 80);
+    await wait(400);
+    expect(flyout()).toBeNull();
+    point(more(), 200);
+    await wait(320);
+    expect(flyout()).not.toBeNull();
+    expect([...flyout()!.querySelectorAll("button")].map((node) => node.textContent)).toEqual(["Make Chief of Staff", "Edit Profile", "Duplicate", "Delete all threads…"]);
+    point(pin, 80);
+    await wait(20);
+    expect(flyout()).toBeNull();
+    flushSync(() => more().click());
+    await wait(20);
+    expect(flyout()).not.toBeNull();
   });
 });
