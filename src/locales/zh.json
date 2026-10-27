@@ -1030,7 +1030,6 @@
   "composer.mention.devs": "开发者",
   "composer.mention.devsDesc": "向 MausBot 报告错误",
   "composer.attach": "附加文件",
-  "newBot.profileFailed": "你的机器人已创建，但无法完整套用其默认角色。请在设置中查看其指示：{error}",
   "composer.goal.aria": "一起完成",
   "composer.goal.title": "一起完成——团队会一直工作到目标完成",
   "composer.goal.soloAria": "做到完成",
@@ -2643,9 +2642,6 @@
   "remote.signInAccess.invalid": "请输入邮箱地址，或用 @domain 表示该域名下的所有人。",
   "remote.signInAccess.note": "更改立即生效。移除某人会阻止其新的登录；已登录的设备会保留，直到你在上面将其退出。",
   "remote.signInAccess.error": "无法保存：{error}",
-  "newBot.intro": "从一份职务开始，或从空白开始。之后所有内容都可以修改。",
-  "newBot.blank": "空白机器人",
-  "newBot.blankDescription": "没有默认指示。发送 /setup 给它来形塑角色。",
   "botSetup.ideas": "设置灵感",
   "botSetup.optional": "自订这个机器人的选用方式。你现在就可以开始对话。",
   "botSetup.withBot": "与机器人一起设置",
@@ -3286,5 +3282,7 @@
   "mcp.team.onlyMeOn": "只有你可以使用。队友可以在自己的团队页面添加自己的密钥。",
   "mcp.auth.loadingTools": "已登录。正在连接…",
   "update.card.idleNote": "现在重启，或者先不管它：下次你不在、也没有任务在运行时，{app} 会自动安装。",
-  "update.updatedItself": "{app} 已自动更新到 {version}。"
+  "update.updatedItself": "{app} 已自动更新到 {version}。",
+  "newBot.failed": "无法新建机器人：{error}",
+  "newBot.startsOnAsk": "{name} 会先询问再行动。要让它在这台电脑上自行操作，请在它的设置中选择“代我批准”。"
 }

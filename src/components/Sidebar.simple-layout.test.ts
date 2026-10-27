@@ -259,7 +259,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
   });
 
-  it("New Bot opens the form in both modes, Chief of Staff or not; Advanced keeps Create department and Templates", () => {
+  it("New Bot makes a bot at once in both modes, Chief of Staff or not; Advanced keeps Create department and Templates", () => {
     fixture.state = { ...fixture.state, bots: [bot("atlas", { chiefOfStaff: true }), bot("bea")] };
     const openMenu = () => {
       const plus = () => render().tree.find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
@@ -268,7 +268,7 @@ describe("Simple-mode sidebar layout", () => {
       return (label: string) => tree.find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
     };
     (openMenu()("New Bot")!.props.onClick as () => void)();
-    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "toggleNewBot", open: true }]);
+    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
     fixture.dispatch.mockClear();
     fixture.values = [];
     fixture.advanced = true;
@@ -276,7 +276,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(item("Create department")).toBeDefined();
     expect(item("Templates")).toBeDefined();
     (item("New Bot")!.props.onClick as () => void)();
-    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "toggleNewBot", open: true }]);
+    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
   });
 
   it("opens the search pill from the rail's search button by expanding the sidebar", () => {

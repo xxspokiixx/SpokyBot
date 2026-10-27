@@ -2434,7 +2434,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -4267,7 +4269,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -6839,9 +6840,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -7877,7 +7875,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -10294,7 +10294,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -12711,7 +12713,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -14744,7 +14748,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -17598,9 +17601,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -19117,7 +19117,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -21012,7 +21014,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -23752,9 +23753,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -25261,7 +25259,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -26279,7 +26279,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -27873,9 +27872,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -28551,7 +28547,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -29917,7 +29915,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -31974,9 +31971,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -32860,7 +32854,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -33717,7 +33713,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -35186,9 +35181,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -35750,7 +35742,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37389,7 +37383,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -39674,9 +39667,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -40675,7 +40665,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -42314,7 +42306,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -44599,9 +44590,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -45600,7 +45588,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -47592,7 +47582,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -50415,9 +50404,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -51900,7 +51886,9 @@
       "onboarding.engines.checkingAnswer": "dd550b8b2659162203aea3f3c78f038fa3096a5e6a74f8f513999492641a0ff9",
       "onboarding.engines.noAnswer": "177fc79a217635454752e614680df8154080c9d1ecd259c032293dc430dd8e8c",
       "onboarding.engines.orAnother": "1787e55e45eba537c4a9afd62a0864c54346fe170e4448de79b0fe62d543635a",
-      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3"
+      "onboarding.engines.freeBackup": "30650fa5303e75f1c62c2159d00d8191f3d9ab640fc8251dc0e41870d974c3b3",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -53931,7 +53919,6 @@
       "composer.mention.devs": "fc799da2088d4e67e8481653d88c9601a83fcba3855e41d212de938c8a3574ae",
       "composer.mention.devsDesc": "8dbeb563e0f7a6a024aa3701ce3db0f850c7afce86b827774d92ff94a7026627",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -56837,9 +56824,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -58291,7 +58275,9 @@
       "sidebar.update.howOther": "c8c6f89ce0b420107b0bf3e98ccc99ddb4677820437a6e5c87d1e6fea870dcf2",
       "sidebar.update.howOtherRestart": "3f3c7744d5366d82720d7dafab9fd13a940da36431e8f2dbed06acd2b73c18f7",
       "update.card.idleNote": "5d6671e21155381b56faca30f5fb300f0c1cde66ddff40f0d69a6c0ce4fd0575",
-      "update.updatedItself": "120dfee7c90ee87d501e5ffe8f42dc58a6d86bd49c3287a707cf0348cac8ad03"
+      "update.updatedItself": "120dfee7c90ee87d501e5ffe8f42dc58a6d86bd49c3287a707cf0348cac8ad03",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -60251,7 +60237,6 @@
       "composer.mention.allOne": "8ea4b2810cafb5a789d6d07c808795064211776df44d4bb1e260c487b5a02584",
       "composer.mention.allMany": "f7c32141dcae5178dccc1818773f118e6afc3843c7d8c0253d635c48c62d0858",
       "composer.attach": "21298c62c8e5e476231789443dbe9a36897ac782aba12a697678335c410c62b9",
-      "newBot.profileFailed": "501bb76df0dc9a95d1e2070e699de72490419e8c92f2b8a922bd3a43200c26fb",
       "composer.goal.aria": "beb082ec9f205208a6b76cfe706aa220803125abe9255a53c33035d471e55153",
       "composer.goal.title": "c083d41fd08abadcdf95b37b22e711a4a36f468a17e61bbc8d94bebecd5258eb",
       "composer.goal.soloAria": "5291fc2c28a72e2abf0989fdd87a68ff7d68ce7b3ad73fcef0499e6fd7b008cd",
@@ -63051,9 +63036,6 @@
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
       "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
-      "newBot.intro": "4bcec4c991ab4abb9662397c6a120e592ac21d067898d68bfb8bea1800db7904",
-      "newBot.blank": "cc27d75150e20096ccd7ac116c4bb013c41450fe44b6b1e257208b654767c809",
-      "newBot.blankDescription": "ca614ed730e684afa8d8a2e14f09fb3aadf0675acfba37620143ba8157eb2112",
       "botSetup.ideas": "c320b7aa4ac54b2eabcba35892bd6f9e701963eaac92577ebbc03acd21b310dc",
       "botSetup.optional": "c6729cf312357d7ce3ff14ff1081e64e121c2159b617c3eb7b6e66360f6b0965",
       "botSetup.withBot": "cd77c558c7d8056d0e1ed686ae18000283a23501db7745c51ec7e4c4a4e494a7",
@@ -64472,7 +64454,9 @@
       "lending.useMyComputer.detail.computer": "eb0efb85788fe5d6fd0529115070ac011a9b491be7f20a4dd6fd509bc7aa93f5",
       "lending.useMyComputer.detailNoScreen.computer": "ff63480c8e7b06c1524cd551fcabcc97937f5ae91243db9b3e31cac5bedbe0d5",
       "lending.useMyComputer.use.computer": "f200da2c406bbf25113b893f01574b60357aa08cc11c2aed6f1ad17e0f7028d6",
-      "lending.useMyComputer.notNow": "a0e63d7c7125d29af84d6919af5550529be77c327324940c98c4b2cb13a99c8c"
+      "lending.useMyComputer.notNow": "a0e63d7c7125d29af84d6919af5550529be77c327324940c98c4b2cb13a99c8c",
+      "newBot.startsOnAsk": "8627f1d1f3141b00c60b5d1ae603410fe0e54fbafb266091d5dc9e41144725cd",
+      "newBot.failed": "e64f0bb0c827cd8f5c518c6e3156acf9d65aa0db5a849690d49f07582aadf626"
     }
   }
 }

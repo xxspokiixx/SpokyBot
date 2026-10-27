@@ -88,7 +88,7 @@ describe("MausBot's intro in the chat", () => {
 
   it("opens the app's own flow for each setup step", () => {
     expect(setupAction("ai")).toEqual({ type: "toggleAppSettings", open: true, section: "engines" });
-    expect(setupAction("bots")).toEqual({ type: "toggleNewBot", open: true });
+    expect(setupAction("bots")).toEqual({ type: "newBot" });
     expect(setupAction("apps")).toEqual({ type: "togglePlugins", open: true, surface: "apps" });
     expect(setupAction("phone")).toMatchObject({ type: "toggleAppSettings", section: "companion", phonePairing: true });
     expect(setupAction("cloud")).toEqual({ type: "openCloudAdd", source: "app_onboarding" });

@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import { askingWhom, departmentOwner, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import type { NeedsYouItem } from "../../shared/today";
 import { useHeldMenuMotion } from "./MenuMotion";
 
@@ -134,14 +134,6 @@ export function pickOwnerOf(bots: readonly Bot[], team: TeamPeople, at: { x: num
   const title = bots.length === 1 && at.name === undefined ? t("owner.pickTitle") : t("owner.setForAllTitle", { name: at.name ?? "" });
   const current = bots.length === 1 ? ownerOf(bots[0]!, team)?.email ?? null : departmentOwner(bots, team)?.email ?? null;
   requestOwnerPick({ botIds: bots.map((bot) => bot.id), title, current, x: at.x, y: at.y });
-}
-
-/** The person every bot in a department reports to, when they all report to one person. */
-export function departmentOwner(bots: readonly Bot[], team: ReturnType<typeof useTeamPeople>): TeamPerson | null {
-  if (!team || bots.length === 0) return null;
-  const owners = bots.map((bot) => ownerOf(bot, team));
-  const first = owners[0];
-  return first && owners.every((owner) => owner?.email === first.email) ? first : null;
 }
 
 /** A tag or passed message is done once its person opens it, even in a shared chat someone else already read. */

@@ -122,9 +122,9 @@ import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { useCloudOwner } from "./CloudOwner";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { NeedsYouButton, OwnerFace, OwnerPickerHost, departmentOwner, ownerMenuLabel, pickOwnerOf } from "./TeamOwner";
+import { NeedsYouButton, OwnerFace, OwnerPickerHost, ownerMenuLabel, pickOwnerOf } from "./TeamOwner";
 import { showWhoReportsToWhom, TeamMenuItems } from "./SidebarTeamMenu";
-import { mayChangeOwner, useTeamPeople } from "@/state/team-people";
+import { departmentOwner, mayChangeOwner, useTeamPeople } from "@/state/team-people";
 export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { PHONE_TOP_BUTTON, SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
@@ -139,7 +139,7 @@ import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { addBot } from "@/lib/add-bot"; import { useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
+import { useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
 import { ArchivedBotsPanel, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel"; import { MovedBotRows, useMoveToTeam } from "./MoveToTeam";
@@ -1503,7 +1503,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             {t("sidebar.newChat.title")}
           </button>
           <button
-            onClick={() => { setPlusOpen(false); addBot(dispatch); }}
+            onClick={() => { setPlusOpen(false); dispatch({ type: "newBot" }); }}
             className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
           >
             <BotIcon size={16} className="text-ink-secondary" />
@@ -2040,7 +2040,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           anchor={sidebarRef.current}
           style={windowNoDragStyle}
           onClose={() => setNewChatOpen(false)}
-          onNewBot={() => { setNewChatOpen(false); addBot(dispatch); }}
+          onNewBot={() => { setNewChatOpen(false); dispatch({ type: "newBot" }); }}
           onNewGroup={() => { setNewChatOpen(false); setNewRoom(true); }}
         />,
         document.body,

@@ -1990,6 +1990,8 @@
   "newBot.randomName": "Zufälliger Name",
   "newBot.edit": "Bearbeiten",
   "newBot.loading": "Einstellungen werden geladen…",
+  "newBot.failed": "Neuer Bot konnte nicht erstellt werden: {error}",
+  "newBot.startsOnAsk": "{name} fragt vor jeder Aktion nach. Damit er auf diesem Computer selbstständig handelt, wähle in seinen Einstellungen „Für mich freigeben“.",
   "newBot.randomFemaleName": "Zufälliger weiblicher Name",
   "newBot.randomMaleName": "Zufälliger männlicher Name",
   "botAccess.grants.noApps": "Noch keine Apps verbunden.",
