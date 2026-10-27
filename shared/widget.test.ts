@@ -179,6 +179,8 @@ describe("widget actions", () => {
       { ref: "cancel", label: "Fix #719 first", tone: "cancel", kind: "cancel" },
     ]);
     expect(widgetActions(sample("sources")).filter((entry) => entry.client).length).toBe(2);
+    const phone = parsed({ type: "Card", children: [{ type: "Button", label: "Connect your phone", onClickAction: { type: "open_phone_pairing" } }] });
+    expect(widgetActions(phone).map((entry) => [entry.action.type, entry.client])).toEqual([["open_phone_pairing", true]]);
     expect(widgetActionByLabel(sample("pullRequests"), "Merge the two ready")?.action).toEqual({ type: "pr.merge", payload: { prs: [750, 739] } });
     expect(widgetActionByLabel(sample("sources"), "ChatKit widgets guide")).toBeUndefined();
   });

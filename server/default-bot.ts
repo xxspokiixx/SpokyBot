@@ -81,8 +81,11 @@ function introduce(store: DefaultBotStore, bot: BotRecord, team?: string | null)
   if (threadId) store.appendMessage(threadId, helperIntroMessage(bot, team));
 }
 
+/** The first message a new MausBot says instead of its intro. */
+export type DefaultBotIntro = (bot: BotRecord) => Omit<Message, "id" | "at">;
+
 /** A new MausBot, with its intro as its first message. On a Team Cloud it is its member's alone. */
-export function createDefaultBot(store: DefaultBotStore, options: { person?: string; team?: string | null; chief?: (id: string) => void } = {}): BotRecord {
+export function createDefaultBot(store: DefaultBotStore, options: { person?: string; team?: string | null; chief?: (id: string) => void; intro?: DefaultBotIntro } = {}): BotRecord {
   const person = options.person?.trim().toLowerCase() ?? "";
   const taken = new Set(person ? [] : store.bots.map((bot) => bot.name.trim().toLowerCase()));
   const created = store.createBot({
@@ -92,7 +95,7 @@ export function createDefaultBot(store: DefaultBotStore, options: { person?: str
   }, { seedMessages: false });
   options.chief?.(created.id);
   const bot = store.patchBot(created.id, { defaultBot: person ? { person } : {} }) ?? created;
-  store.appendMessage(bot.threadId, helperIntroMessage(bot, options.team));
+  store.appendMessage(bot.threadId, options.intro?.(bot) ?? helperIntroMessage(bot, options.team));
   return bot;
 }
 
