@@ -17,7 +17,7 @@ export type SimpleThinking =
 
 export interface SimpleMenuActions {
   onQuery: (query: string) => void;
-  onPick: (instance: InstanceInfo, model: string) => void;
+  onPick: (instance: InstanceInfo, model: string, variant?: string) => void;
   onPickCurrent: () => void;
   onFollowBot: () => void;
   onToggle: (instance: InstanceInfo) => void;
@@ -48,7 +48,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       aria-label={[option.label, option.provider].filter(Boolean).join(" · ")}
       title={[option.label, option.provider, modelBlurb(option)].filter(Boolean).join(" · ")}
       tabIndex={-1}
-      onClick={() => onPick(instance, option.id)}
+      onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={MENU_ROW}
     >
       <Gutter />
