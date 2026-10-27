@@ -32,14 +32,18 @@ export function ownsDefaultBot(bot: BotRecord | null | undefined, email: string 
   return Boolean(email && bot?.defaultBot && defaultBotPerson(bot) === email.trim().toLowerCase());
 }
 
-/** The English intro; clients that know `helperIntro` say it in the viewer's own language. */
+/** The English intro: who MausBot is, what it does here, and that it is looking around (its follow-up comes after, from
+ * helper-followup.ts). Clients that know `helperIntro` say it in the viewer's own language. */
 export function helperIntroMessage(bot: Pick<BotRecord, "name" | "chiefOfStaff">, team?: string | null): Omit<Message, "id" | "at"> {
-  const title = `Hi, I'm ${bot.name}, your helper for everything here.`;
+  const title = bot.chiefOfStaff ? `Hey! I'm ${bot.name}. I'm new here.` : `Hi! I'm ${bot.name}, your helper for everything here.`;
   const subtitle = [
-    "I know this app inside out, so ask me how to do anything. I can set up new bots, apps and routines with you, and tell you what your bots are up to.",
-    bot.chiefOfStaff ? "As your Chief of Staff, I also keep an eye on your day and send you a short brief." : team ? "" : "I also keep an eye on your day and send you a short brief.",
+    bot.chiefOfStaff
+      ? "I'm here to be your Chief of Staff. I can manage your other bots. Task me with anything. I'll make sure it gets to the right bot."
+      : team
+        ? "Ask me how to do anything here. I can set up bots, apps and routines with you."
+        : "Ask me how to do anything here. I can set up bots, apps and routines with you, and keep an eye on your day.",
     team ? `On ${team}, I'm here for you and look after your own bots.` : "",
-    "Try one of these, or just say what you need.",
+    "I'm taking a look around to see if there's anything I can pick up for you. I'll follow up in a moment.",
   ].filter(Boolean).join(" ");
   return { role: "bot", kind: "options", text: `${title} ${subtitle}`, helperIntro: true, card: { title, subtitle, options: [...HELPER_ASKS], fixedOptions: true } };
 }

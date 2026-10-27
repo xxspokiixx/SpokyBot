@@ -27,6 +27,7 @@ import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
 import { cancelSteeredMessage, holdSteeredQueue, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
+import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -400,6 +401,20 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
     }
 
+    m = path.match(/^\/api\/bots\/([\w-]+)\/helper-followup$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]!);
+      if (!bot?.defaultBot || bot.hidden) return json(res, 404, { error: "no such MausBot" });
+      if (!mayFollowUp(bot, auth)) return json(res, 403, { error: "only MausBot's own person can do this" });
+      const parsed = helperFollowupBody.safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "body must be { ai, apps?, threadId? }" });
+      const threadId = parsed.data.threadId ?? bot.threadId;
+      if (store.botByThread(threadId)?.id !== bot.id) return json(res, 404, { error: "no such conversation" });
+      const next = helperFollowup(store.messagesFor(threadId), () => followupFacts(bot, parsed.data, store.bots, routines?.listRoutines() ?? []));
+      if (!next) return json(res, 409, { error: "this conversation has no intro to follow up" });
+      if ("existing" in next) return json(res, 200, { message: next.existing });
+      return json(res, 201, { message: store.appendMessage(threadId, next.append) });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/compact$/);
     if (m && method === "POST") {
       const body = await readBody(req);

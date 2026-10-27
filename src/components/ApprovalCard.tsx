@@ -15,6 +15,7 @@ import type { SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { TriggerCard } from "./TriggerCard";
+import { CardHint } from "./CardHint";
 
 interface ToolLabels {
   [tool: string]: LocaleKey;
@@ -444,7 +445,7 @@ export function ApprovalCard({
       : bot
         ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
         : t("approval.card.wantsTo", { action: toolLabel(displayTool) });
-    return (
+    const row = (
       <CompactApprovalRow
         header={header}
         summary={outbound?.summary || undefined}
@@ -457,6 +458,7 @@ export function ApprovalCard({
         answeredBelow={Boolean(card.requestId && card.tool && !card.dismissed)}
       />
     );
+    return waiting && card.requestId && card.tool ? <div className="flex w-full flex-col gap-1">{row}<CardHint id="spot.approval" /></div> : row;
   }
 
   return (

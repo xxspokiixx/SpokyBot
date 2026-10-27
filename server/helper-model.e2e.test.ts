@@ -251,7 +251,7 @@ posixOnly("the helper model, through the real server", () => {
     await waitFor(async () => (await memory(bot.id)).includes("The person is vegetarian"), "the bot's own capture");
     await waitFor(() => ledger(bot.id).some((row) => row.threadId.startsWith("memory-")), "the capture call to be booked");
     const background = ledger(bot.id).filter((row) => row.threadId.startsWith("memory-"));
-    expect(background.every((row) => row.trigger.kind === "bot" && row.model === "claude-haiku-4-5")).toBe(true);
+    expect(background.every((row) => row.trigger.kind === "bot" && row.model === "claude-haiku-5-5")).toBe(true);
     expect(ledger(bot.id).some((row) => row.trigger.kind === "helper")).toBe(false);
   }, 180_000);
 });
