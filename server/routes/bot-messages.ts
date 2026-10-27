@@ -127,6 +127,9 @@ export interface BotMessageRouteDeps {
   /** Records a send a registered phone made, so the turn it starts knows the person is talking from the phone. */
   notePhoneSend(sendId: string): void;
   goals: Pick<OneOnOneGoals, "start">;
+  /** A Team Cloud: the person's reply to a line in their own inbox goes back where that line came from, with no turn
+   * here; null for any other message. */
+  inboxReply?(auth: RequestAuth, threadId: string, replyToId: string, text: string, line: { sendId?: string; sender?: ResolvedSender }): { status: number; message?: Message; error?: string } | null;
 }
 
 /** External interfaces (the Slack worker) opt in. `onBehalfOf`, advertised by /api/health as
@@ -241,6 +244,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const text = press ? press.text : appSent ? appSent.text : typed;
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });
+      const passedBack = !guarded && !press && !appSent && !pointed && target ? deps.inboxReply?.(auth, threadId, target.id, text, { sendId, sender: messageSender(auth) }) : null;
+      if (passedBack) return json(res, passedBack.status, passedBack.message ? { ok: true, threadId, message: passedBack.message } : { error: passedBack.error });
       // Only a real press or reaction, or an app's own words, marks the reply; a typed reply to the same row never does, whatever its words.
       const records = press && target ? pressRecords(bot, press.action) : null;
       const replyTo: ReplyTarget | undefined = press && target ? { ...target, widgetPress: { label: press.label, action: press.action, ...(records ? { records } : {}) } }

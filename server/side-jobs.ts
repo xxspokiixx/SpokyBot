@@ -32,7 +32,8 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
   return HELPER_MODEL_ID.test(model) ? { instanceId, model } : null;
 }
 
-export type SideJob = "compaction" | "memory" | "skill-review";
+/** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
+export type SideJob = "compaction" | "memory" | "skill-review" | "representative";
 
 export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
@@ -74,8 +75,9 @@ export interface SideJobs {
 type TextCall = (prompt: string, options?: TextGenerationOptions) => Promise<string>;
 
 function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined {
-  // generateMemoryText starts a whole agent process: background jobs only, never the summary a turn waits on.
-  const call = job === "compaction" ? instance.generateText : instance.generateText ?? instance.generateMemoryText;
+  // generateMemoryText starts a whole agent process, with tools: background jobs only, never the summary a turn waits on,
+  // and never the representative.
+  const call = job === "compaction" || job === "representative" ? instance.generateText : instance.generateText ?? instance.generateMemoryText;
   return call?.bind(instance);
 }
 

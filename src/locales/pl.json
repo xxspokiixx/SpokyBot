@@ -6298,5 +6298,18 @@
   "voice.adding": "Dodawanie…",
   "needsYou.message": "Wiadomość od: {name}",
   "relay.told": "Przekazano: {name}",
-  "relay.toldHint": "Ta wiadomość trafiła do: {name}"
+  "relay.toldHint": "Ta wiadomość trafiła do: {name}",
+  "inbox.from": "Od: {name}",
+  "inbox.via": "przez: {name}",
+  "inbox.in": "w: {title}",
+  "inbox.openOrigin": "Otwórz: {title}",
+  "inbox.assistantOf": "Asystent: {name}",
+  "inbox.assistantAnswered": "Twój asystent odpowiedział",
+  "inbox.assistantHint": "Na podstawie tego, co udostępniasz zespołowi. Odpowiedz, aby to poprawić.",
+  "relay.reply": "Odpowiedź od: {name}",
+  "relay.assistant": "Asystent odpowiedział za: {name}",
+  "sidebar.people.title": "Osoby",
+  "sidebar.people.you": "{name} (ty)",
+  "sidebar.people.yourInbox": "Twoja skrzynka: wszystko, co do ciebie trafia",
+  "sidebar.people.mention": "Napisz do: {name}"
 }

@@ -182,6 +182,18 @@ describe("who writes a small job", () => {
     expect(state.logs).toEqual([]);
   });
 
+  it.each(["grok", "codex"] as const)("never answers for a person with %s's own background call, which runs a whole agent with tools", async (botId) => {
+    const all = setup();
+    const own = botId === "grok" ? all.acp : all.codex;
+    const answer = all.jobs.text("representative", botId);
+    expect(answer?.via).toBe("helper");
+    await answer!.generateText("representative prompt");
+    expect(own.calls).toEqual([]);
+    expect(all.claude.calls.map((call) => call.prompt)).toEqual(["representative prompt"]);
+    expect(setup({ helper: null }).jobs.text("representative", botId)).toBeNull();
+    expect(all.jobs.text("representative", "claude")?.via, "an engine's one-off text call has no tools").toBe("engine");
+  });
+
   it.each(["grok", "codex"] as const)("gives %s the helper for the compaction summary only: its own background call keeps memory upkeep and the skill review", async (botId) => {
     const all = setup();
     const { jobs, claude } = all;

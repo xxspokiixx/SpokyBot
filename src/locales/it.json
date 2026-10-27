@@ -6179,5 +6179,18 @@
   "lending.useMyComputer.detail.computer": "I tuoi bot su My Cloud potranno leggere Scrivania, Documenti e Download e usare le tue app e il tuo schermo, mentre questo computer è acceso e OpenMausBot è aperto.",
   "lending.useMyComputer.detailNoScreen.computer": "I tuoi bot su My Cloud potranno leggere Scrivania, Documenti e Download, mentre questo computer è acceso e OpenMausBot è aperto.",
   "lending.useMyComputer.use.computer": "Usa questo computer",
-  "lending.useMyComputer.notNow": "Non ora"
+  "lending.useMyComputer.notNow": "Non ora",
+  "inbox.from": "Da {name}",
+  "inbox.via": "tramite {name}",
+  "inbox.in": "in {title}",
+  "inbox.openOrigin": "Apri {title}",
+  "inbox.assistantOf": "Assistente di {name}",
+  "inbox.assistantAnswered": "Il tuo assistente ha risposto",
+  "inbox.assistantHint": "Da ciò che condividi con il team. Rispondi per correggerlo.",
+  "relay.reply": "{name} ha risposto",
+  "relay.assistant": "L'assistente di {name} ha risposto",
+  "sidebar.people.title": "Persone",
+  "sidebar.people.you": "{name} (tu)",
+  "sidebar.people.yourInbox": "La tua posta in arrivo: tutto ciò che ti viene inviato",
+  "sidebar.people.mention": "Scrivi a {name}"
 }
