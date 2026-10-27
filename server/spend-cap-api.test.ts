@@ -40,7 +40,7 @@ describe("spend cap and prices through real turns", () => {
     const routes = join(layerDir, "memory-replies.json");
     const dump = join(layerDir, "memory-call.json");
     writeFileSync(routes, JSON.stringify({
-      [CAPTURE_MARKER]: '[{"text":"Project codename is Bluebird","kind":"fact","confidence":0.9}]',
+      [CAPTURE_MARKER]: '[{"text":"Project codename is Bluebird","kind":"fact","evidence":"project codename is Bluebird","confidence":0.9}]',
       [ORGANIZE_MARKER]: '{"moves":[]}',
       [TIDY_MARKER]: '{"pairs":[]}',
     }));

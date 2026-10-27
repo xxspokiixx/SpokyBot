@@ -46,7 +46,7 @@ async function boot(extraConfig: Record<string, unknown>) {
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   const routes = join(home, "one-shot-routes.json");
   writeFileSync(routes, JSON.stringify({
-    [CAPTURE_MARKER]: JSON.stringify([{ text: "The person is vegetarian", kind: "preference", aboutUser: true, confidence: 0.9 }]),
+    [CAPTURE_MARKER]: JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 }]),
     [SUMMARY_MARKER]: SUMMARY,
     [SKILL_REVIEW_MARKER]: JSON.stringify({ changes: [{ action: "create", skill_md: SKILL_MD, gist: "Five-bullet weekly report." }] }),
   }));
