@@ -58,11 +58,14 @@ import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { usePresence } from "@/hooks/use-presence";
 import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
+import { useAiSwitchKeeper } from "@/lib/ai-switch";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   useTeamChats(state.config);
   useTeamPeopleLoader(state.config, needsYouVersion(state.bots, state.groups, state.notifications));
+  // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
+  useAiSwitchKeeper({ bots: state.bots, dispatch });
   const showThreads = useShowThreads();
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
