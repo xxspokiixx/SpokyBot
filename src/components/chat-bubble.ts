@@ -16,8 +16,7 @@ export const SIMPLE_USER_BUBBLE = `${SIMPLE_BUBBLE_SHAPE} bg-bubble-user font-no
 /** At most 560 wide, 80% of the column, and always 82px short of it, so a reply never meets the far edge. */
 export const SIMPLE_BUBBLE_MAX = "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct),calc(100%-82px))]";
 
-/** Rows of one sender's group sit 4px apart; a new group starts 16px below the last. */
-export const SIMPLE_ROW_GAP = "gap-4";
+/** Simple mode's transcript spaces rows 16px apart (ChatView's data-simple-rows); a row in the same group pulls up 12px, to 4px. */
 export const SIMPLE_STACKED = "-mt-3";
 
 /** Where a Simple bubble meets its group's neighbours: those corners tighten to 6px on the bubble's own side. */
