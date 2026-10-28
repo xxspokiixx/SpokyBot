@@ -2871,6 +2871,51 @@ button:disabled.bg-danger {
   color: var(--bubble-selection-ink, #ffffff);
 }
 
+/* MausBot Cloud's night: a deep night sky in the dark skins and an indigo dusk in the light ones. light-dark() picks by
+   the color-scheme of the element that paints it. One star twinkles, the z's drift and now and then a star shoots, each
+   slowly; the z's need transform-box to grow around their own centre. */
+:root {
+  --cloud-night-from: light-dark(#2c3274, #0e1230);
+  --cloud-night-mid: light-dark(#373b84, #151a45);
+  --cloud-night-to: light-dark(#7a68ae, #252c69);
+  --cloud-night-glow: light-dark(#f2a9c23d, #6d5fd02e);
+  --cloud-night-ink: #ffffff;
+  --cloud-night-ink-quiet: light-dark(#ffffffd6, #ffffffc4);
+  --cloud-night-star: light-dark(#ffffff, #fff7dd);
+  --cloud-night-laptop: light-dark(#eceef7, #c4c9de);
+  --cloud-night-laptop-edge: light-dark(#a9aecb, #7c84a8);
+  --cloud-night-z: light-dark(#ffffffe0, #dfe3ffcc);
+  --cloud-night-paper: light-dark(#f7eedb, #efe4c6);
+  --cloud-night-carve: light-dark(#d6c7a2, #c9bb95);
+  --cloud-night-far: light-dark(#5a4e9c, #1f2560);
+  --cloud-night-near: light-dark(#463f8c, #161b4b);
+}
+.cloud-night {
+  color-scheme: var(--code-color-scheme);
+  color: var(--cloud-night-ink);
+  background:
+    radial-gradient(55% 110% at 90% 115%, var(--cloud-night-glow), transparent 70%),
+    linear-gradient(100deg, var(--cloud-night-from) 0%, var(--cloud-night-mid) 55%, var(--cloud-night-to) 100%);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.08);
+}
+.cloud-night-twinkle { animation: cloud-night-twinkle 9s ease-in-out infinite; }
+.cloud-night-z { transform-box: fill-box; transform-origin: center; animation: cloud-night-z 7s linear infinite; }
+.cloud-night-z:nth-child(2) { animation-delay: -2.4s; }
+.cloud-night-z:nth-child(3) { animation-delay: -4.8s; }
+.cloud-night-shoot { opacity: 0; animation: cloud-night-shoot 19s ease-in infinite; }
+.cloud-night[data-paused] * { animation-play-state: paused; }
+@keyframes cloud-night-twinkle { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes cloud-night-z {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  15%, 70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(14px, -22px) scale(1.05); }
+}
+@keyframes cloud-night-shoot {
+  0%, 90% { opacity: 0; transform: translate(0, 0); }
+  92% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(120px, 36px); }
+}
+
 /* Trace waterfall: AI steps lavender, tools pale teal, errors red, each mixed into the skin's card so every skin keeps its contrast. */
 .trace-bar { border: 1px solid transparent; }
 .trace-bar-step {

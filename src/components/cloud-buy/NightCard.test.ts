@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -6,18 +7,19 @@ import { MAUS_COLOR_NAMES } from "@/lib/mascot";
 
 type Seen = { color: string; state: string; animated: boolean; trackPointer?: boolean; size: number };
 vi.mock("@/components/Avatar", () => ({
-  MausAvatar: ({ color, state, animated, trackPointer, size, ...choreography }: Seen) => createElement("i", {
-    "data-maus": color, "data-state": state, "data-animated": String(animated), "data-pointer": String(trackPointer), "data-size": String(size),
+  MausAvatar: ({ color, state, animated, trackPointer, size: _size, ...choreography }: Seen) => createElement("i", {
+    "data-maus": color, "data-state": state, "data-animated": String(animated), "data-pointer": String(trackPointer),
     "data-extra": Object.keys(choreography).join(",") }),
 }));
-const { CloudMascots } = await import("./CloudMascots");
+const { NightCard } = await import("./NightCard");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;
-const render = async (size?: number) => { await act(async () => { root.render(createElement(CloudMascots, size === undefined ? {} : { size })); }); };
-const mark = () => host.querySelector<HTMLElement>("[data-cloud-mascots]")!;
+const render = async (small = false) => { await act(async () => { root.render(createElement(NightCard, { small, children: createElement("h2", null, "MausBot Cloud") })); }); };
+const card = () => host.querySelector<HTMLElement>("[data-night-card]")!;
 const mascots = () => [...host.querySelectorAll<HTMLElement>("[data-maus]")];
 const animated = () => mascots().map(node => node.dataset.animated);
+const motion = () => ["twinkle", "z", "shoot"].map(name => host.querySelectorAll(`.cloud-night-${name}`).length);
 
 beforeEach(() => { host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(async () => {
@@ -27,7 +29,14 @@ afterEach(async () => {
   vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks();
 });
 
-it("three of the app's own mascots in three colours, each in its own calm state, small and hidden from screen readers beside the name", async () => {
+it("the scene is hidden from screen readers: the card's own text is what is read", async () => {
+  await render();
+  expect(card().querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
+  expect(card().textContent).toBe("MausBot Cloud");
+  expect(card().querySelector("h2")!.closest("svg"), "the text sits outside the scene").toBeNull();
+});
+
+it("three of the app's own mascots ride the cloud in three colours, each in a calm state, never following the pointer", async () => {
   await render();
   const colors = mascots().map(node => node.dataset.maus!);
   expect(colors).toHaveLength(3);
@@ -35,38 +44,44 @@ it("three of the app's own mascots in three colours, each in its own calm state,
   for (const color of colors) expect(MAUS_COLOR_NAMES).toContain(color);
   expect(mascots().map(node => node.dataset.state)).toEqual(["working", "idle", "thinking"]);
   expect(mascots().map(node => node.dataset.extra), "no faces, gazes or motions laid on top").toEqual(["", "", ""]);
-  expect(mascots().map(node => node.dataset.pointer), "they never follow the pointer").toEqual(["false", "false", "false"]);
-  expect(mascots().map(node => node.dataset.size)).toEqual(["20", "20", "20"]);
-  expect(mark().getAttribute("aria-hidden")).toBe("true");
-  await render(22);
-  expect(mascots().map(node => node.dataset.size)).toEqual(["22", "22", "22"]);
+  expect(mascots().map(node => node.dataset.pointer)).toEqual(["false", "false", "false"]);
 });
 
-it("live, the only motion is the mascots' own: no timer or frame of its own", async () => {
+it("live, one star twinkles, the z's drift and now and then a star shoots, all in CSS: no timer or frame of its own", async () => {
   vi.useFakeTimers();
   await render();
-  expect(mark().hasAttribute("data-paused")).toBe(false);
+  expect(card().hasAttribute("data-paused")).toBe(false);
   expect(animated()).toEqual(["true", "true", "true"]);
+  expect(motion(), "twinkling stars, drifting z's, shooting stars").toEqual([1, 3, 1]);
   expect(vi.getTimerCount(), "no setTimeout, setInterval or requestAnimationFrame").toBe(0);
   const markup = host.innerHTML;
   await act(async () => { vi.advanceTimersByTime(60_000); });
   expect(host.innerHTML, "nothing changes on a clock").toBe(markup);
 });
 
-it("reduced motion holds them still", async () => {
-  document.documentElement.dataset.reducedMotion = "true";
-  await render();
-  expect(animated()).toEqual(["false", "false", "false"]);
-  expect(mark().hasAttribute("data-paused")).toBe(true);
+it("its CSS moves three things, slowly, and holds them while paused", () => {
+  const css = readFileSync("src/styles.css", "utf8");
+  expect([...css.matchAll(/@keyframes (cloud-night-[\w-]+)/g)].map(match => match[1])).toEqual(["cloud-night-twinkle", "cloud-night-z", "cloud-night-shoot"]);
+  for (const [, seconds] of css.matchAll(/animation: cloud-night-[\w-]+ ([\d.]+)s/g)) expect(Number(seconds)).toBeGreaterThanOrEqual(7);
+  expect(css).toContain(".cloud-night[data-paused] * { animation-play-state: paused; }");
 });
 
-it("the system setting or the dev hook, switched while they are shown, stills them at once and lets them go again", async () => {
+it("reduced motion is the same scene held still: no animation at all and the mascots still", async () => {
+  document.documentElement.dataset.reducedMotion = "true";
+  await render();
+  expect(motion()).toEqual([0, 0, 0]);
+  expect(animated()).toEqual(["false", "false", "false"]);
+  expect(host.querySelectorAll("[style*='animation']")).toHaveLength(0);
+  expect(host.querySelectorAll("path[d^='M-2.6-2.6']"), "the z's still rise from the laptop").toHaveLength(3);
+});
+
+it("the system setting or the dev hook, switched while the card is shown, stills it at once and lets it go again", async () => {
   let reduce = false;
   const changes = new Set<() => void>();
   vi.spyOn(window, "matchMedia").mockImplementation(query => ({ matches: reduce && query.includes("reduce"), media: query,
     addEventListener: (_: string, changed: () => void) => changes.add(changed), removeEventListener: (_: string, changed: () => void) => changes.delete(changed) }) as unknown as MediaQueryList);
-  const still = () => animated().every(flag => flag === "false");
-  const moving = () => animated().every(flag => flag === "true");
+  const still = () => motion().every(count => count === 0) && animated().every(flag => flag === "false");
+  const moving = () => motion().every(count => count > 0) && animated().every(flag => flag === "true");
   await render();
   expect(moving()).toBe(true);
   reduce = true;
@@ -81,7 +96,7 @@ it("the system setting or the dev hook, switched while they are shown, stills th
   expect(moving(), "dev hook off").toBe(true);
 });
 
-it("out of view they hold still until they are back", async () => {
+it("out of view it holds: the mascots stop and the CSS animations pause until it is back", async () => {
   let visible: (seen: boolean) => void = () => {};
   vi.stubGlobal("IntersectionObserver", class {
     constructor(report: IntersectionObserverCallback) {
@@ -91,11 +106,17 @@ it("out of view they hold still until they are back", async () => {
     disconnect() {}
   });
   await render();
-  expect(animated()).toEqual(["true", "true", "true"]);
   await act(async () => visible(false));
-  expect(mark().hasAttribute("data-paused")).toBe(true);
+  expect(card().hasAttribute("data-paused")).toBe(true);
   expect(animated()).toEqual(["false", "false", "false"]);
   await act(async () => visible(true));
-  expect(mark().hasAttribute("data-paused")).toBe(false);
+  expect(card().hasAttribute("data-paused")).toBe(false);
   expect(animated()).toEqual(["true", "true", "true"]);
+});
+
+it("the Cloud Pro popup's card is the smaller one", async () => {
+  await render();
+  expect(card().className).toContain("h-[120px]");
+  await render(true);
+  expect(card().className).toContain("h-[92px]");
 });
