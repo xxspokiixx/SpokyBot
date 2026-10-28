@@ -1,4 +1,6 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +9,7 @@ import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import * as procs from "../procs.ts";
 import { PiDriver } from "./pi.ts";
 
 const CLI = fileURLToPath(new URL("../testing/fake-pi-lifecycle.mjs", import.meta.url));
@@ -61,6 +64,52 @@ it.each(["interrupt", "stopAll", "dispose"])("keeps ownership through %s until t
   expect(events.events.filter((event) => event.type === "turn.completed")).toMatchObject([
     { ok: true, stopReason: "cancelled" },
   ]);
+});
+
+it.each(["interrupt", "dispose"])("waits for delayed Windows termination during %s", async (action) => {
+  await instance.adapter.sendTurn({ threadId: "windows-cancel", text: "wait" });
+  await events.until((event) => event.type === "item.started");
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const kill = vi.spyOn(procs, "killCliTree").mockImplementation((child, timeoutMs = 5_000) => new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
+    const timeout = setTimeout(() => resolve(false), timeoutMs);
+    child.once("close", () => { clearTimeout(timeout); resolve(true); });
+    setTimeout(() => child.kill("SIGKILL"), 25);
+  }));
+  Object.defineProperty(process, "platform", { value: "win32" });
+  try {
+    const stopped = action === "interrupt" ? instance.adapter.interruptTurn("windows-cancel") : instance.dispose();
+    expect(instance.adapter.hasSession("windows-cancel")).toBe(true);
+    const error = await stopped.then(() => null, (err: Error) => err.message);
+    await events.until((event) => event.type === "turn.completed");
+    expect({ error, completed: events.events.filter((event) => event.type === "turn.completed") }).toMatchObject({
+      error: null, completed: [{ ok: true, stopReason: "cancelled" }],
+    });
+    expect(events.events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(instance.adapter.hasSession("windows-cancel")).toBe(false);
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    kill.mockRestore();
+  }
+});
+
+it("preserves cancellation when the CLI closes after termination timed out", async () => {
+  await instance.adapter.sendTurn({ threadId: "late-exit", text: "wait" });
+  await events.until((event) => event.type === "item.started");
+  let child!: ChildProcess;
+  const kill = vi.spyOn(procs, "killCliTree").mockImplementationOnce(async (cli) => { child = cli; return false; });
+  try {
+    await expect(instance.adapter.interruptTurn("late-exit")).rejects.toThrow("termination could not be confirmed");
+    expect(instance.adapter.hasSession("late-exit")).toBe(true);
+    const closed = once(child, "close");
+    child.kill("SIGKILL");
+    await closed;
+    expect(await events.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true, stopReason: "cancelled" });
+    expect(events.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+    expect(instance.adapter.hasSession("late-exit")).toBe(false);
+  } finally {
+    kill.mockRestore();
+  }
 });
 
 it("fails a refused model change without sending the prompt", async () => {

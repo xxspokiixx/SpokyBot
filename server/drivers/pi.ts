@@ -462,6 +462,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let completion: Promise<void> | null = null;
       let endStopReason: string | undefined;
       let endUsage: { input?: number; output?: number } | undefined;
+      let completionOutcome: { ok: boolean; stopReason: string; usage?: { input: number; output: number } } | null = null;
       let endErrorMessage: string | undefined;
       let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
       const images = readPiPromptImages(turn);
@@ -545,6 +546,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
       const settle = (ok: boolean, stopReason?: string | null, usage = endUsage): Promise<void> => {
         if (completion) return completion;
+        const outcome = completionOutcome ??= {
+          ok, stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
+          ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
+        };
         settled = true;
         if (agentEndTimer) {
           clearTimeout(agentEndTimer);
@@ -557,7 +562,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           child.stdin.end();
         } catch {}
         completion = (async () => {
-          if (!await killCliTree(child, 0)) throw new Error("Pi process termination could not be confirmed");
+          if (!await killCliTree(child, process.platform === "win32" ? 5_000 : 0)) throw new Error("Pi process termination could not be confirmed");
           rejectWaiters(new Error("pi turn ended"));
           try {
             rmSync(mcpTempDir, { recursive: true, force: true });
@@ -567,9 +572,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           emit({
             ...base(threadId, turnId),
             type: "turn.completed",
-            ok,
-            stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
-            ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
+            ...outcome,
           });
         })();
         void completion.catch((error: Error) => {
