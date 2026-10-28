@@ -39,7 +39,7 @@ async function fixture(t) {
   });
   t.after(async () => { sharing.close(); await rm(dir, { recursive: true, force: true }); });
   return {
-    sharing, env, info, connects, polled: polled.promise,
+    sharing, env, info, connects, dir, polled: polled.promise,
     records: async () => JSON.parse(await readFile(file, "utf8")).records,
     holdIdentity() {
       const held = { entered: Promise.withResolvers(), released: Promise.withResolvers() };
@@ -163,4 +163,29 @@ test("main Stop invalidates a pending save while the stored grant is off", async
   assert.deepEqual((await f.records())[f.env.id], stopped);
   assert.equal(f.sharing.cloudState(f.env).terminal, false);
   assert.equal(f.sharing.lendingToCloud(), false);
+});
+
+test("main Stop cancels a terminal choice held in IPC folder validation", async t => {
+  const f = await fixture(t);
+  await f.sharing.saveCloud(f.env, { folders: [], internet: true });
+  await f.polled;
+  const entered = Promise.withResolvers(), released = Promise.withResolvers();
+  t.after(() => released.resolve());
+  const handlers = await mainLending(f, async folders => {
+    entered.resolve();
+    await released.promise;
+    return validateSharedFolders(folders);
+  });
+  const saving = handlers.get("lending:save")({}, {
+    folders: [{ id: randomUUID(), path: f.dir, write: false }], internet: true, terminal: true,
+  });
+  await entered.promise;
+  await handlers.get("lending:stop")({});
+  const stopped = (await f.records())[f.env.id];
+  released.resolve();
+  assert.equal((await saving).state.enabled, false);
+  assert.deepEqual((await f.records())[f.env.id], stopped);
+  assert.equal(f.sharing.cloudState(f.env).terminal, false);
+  assert.equal(f.sharing.lendingToCloud(), false);
+  assert.ok(f.connects.every(grant => grant.terminal === false));
 });
