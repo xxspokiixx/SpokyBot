@@ -70,7 +70,11 @@ beforeEach(async () => {
   snapshot = deferred();
   switchResponse = undefined;
   newTaskResponse = undefined;
-  localStorage.clear();
+  const stored = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, String(value)); },
+    removeItem: (key: string) => { stored.delete(key); }, clear: () => stored.clear(),
+  });
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("fetch", async (path: string, init?: RequestInit) => {
     if (path.startsWith("/api/bots?")) {
