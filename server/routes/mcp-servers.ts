@@ -2,18 +2,22 @@ import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
 import type { CloudHomeConfig } from "../cloud-home.ts";
 import type { AppConfig } from "../config.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
+import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin, withMcpSignIn, type McpOAuthManager } from "../mcp-oauth.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
 import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn } from "../mcp-registry.ts";
+import { personKey } from "../person-key.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { sessionMember } from "./team-phone.ts";
 
 export interface McpServerRouteDeps {
   cfg: Pick<AppConfig, "mcpServers">;
   sessions: Pick<SessionRegistry, "isLive">;
   mcpOAuth: McpOAuthManager;
+  teamConnections: Pick<TeamConnectionsHost, "personMcp" | "people">;
   cloudHome: Pick<CloudHomeConfig, "publicOrigin"> | null;
   fallbackPublicUrl: string | null;
   mcpConfigBusy: BusyFlag;
@@ -73,12 +77,22 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       try {
         const name = mcpTest[1];
         let target = parsed.server;
-        if (isRemoteMcpServer(target) && mcpOAuth.authState(name, target.url) === "signed-in") {
-          const signedIn = (await withMcpSignIn({ [name]: target }, mcpOAuth))[name];
+        let oauth = mcpOAuth;
+        const personal = deps.teamConnections.personMcp().includes(name);
+        if (personal && isRemoteMcpServer(target)) {
+          const member = auth.kind === "session" ? sessionMember(auth.session) : null;
+          if (!member) return json(res, 403, { error: "Sign in to the team to test your own connection." });
+          const person = personKey({ id: "", email: member.member.email });
+          oauth = deps.teamConnections.people.oauth(person);
+          const key = deps.teamConnections.people.key(person, name, target.url);
+          target = { ...target, headers: key ? { [key.header]: key.value } : {} };
+        }
+        if (isRemoteMcpServer(target) && oauth.authState(name, target.url) === "signed-in") {
+          const signedIn = (await withMcpSignIn({ [name]: target }, oauth))[name];
           if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
         }
-        const result = await probeMcpServer(target, undefined, controller.signal, appCatalog?.probeOptions(name, parsed.server) ?? {});
-        if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) mcpOAuth.markNeedsSignIn(name, target.url);
+        const result = await probeMcpServer(target, undefined, controller.signal, personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {});
+        if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) oauth.markNeedsSignIn(name, target.url);
         return json(res, 200, result);
       } finally {
         res.off("close", disconnect);

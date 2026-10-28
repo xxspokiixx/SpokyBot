@@ -192,7 +192,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
           await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
           await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
           latest = listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, {
-            method: "PUT", body: JSON.stringify({ ...item.body, enabled: false }),
+            method: "PUT", body: JSON.stringify({ ...body, enabled: false }),
           })).servers);
         }
         added.push(item.name);

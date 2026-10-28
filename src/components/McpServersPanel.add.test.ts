@@ -242,8 +242,19 @@ describe("Adding an MCP server on a Team Cloud", () => {
     expect(calls("PUT")).toEqual([
       { url: "/api/team/connection-scopes", body: { kind: "mcp", id: "mail", scope: "person" } },
       { url: "/api/team/my-connections/mcp/mail/key", body: { value: "Bearer mail-key-12345" } },
-      { url: "/api/mcp/servers/mail", body: { type: "http", url: "https://mail.example.com/mcp", headers: { [header]: "Bearer mail-key-12345" }, enabled: false } },
+      { url: "/api/mcp/servers/mail", body: { type: "http", url: "https://mail.example.com/mcp", headers: { [header]: "" }, enabled: false } },
     ]);
+    expect(fixture.sharedHeaders.mail).toEqual({ [header]: "" });
+    expect(calls("POST", "/api/mcp/servers/mail/test")).toHaveLength(1);
+    expect(fixture.servers).toEqual([expect.objectContaining({ name: "mail", enabled: true })]);
+    expect(host.textContent).toContain(`Headers saved: ${header}`);
+    expect(host.textContent).toContain("Connected: 12 tools");
+    fixture.test = { ok: false, error: "Could not reach this address.", reason: "unreachable" };
+    await click("Test");
+    fixture.test = { ok: true, tools: [{ name: "a" }], total: 12 };
+    await click("Try again");
+    expect(calls("POST", "/api/mcp/servers/mail/test")).toHaveLength(3);
+    expect(fixture.sharedHeaders.mail).toEqual({ [header]: "" });
     expect(host.textContent).toContain("Connected: 12 tools");
   });
 

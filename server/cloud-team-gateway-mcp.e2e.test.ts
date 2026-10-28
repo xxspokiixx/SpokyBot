@@ -40,7 +40,7 @@ beforeAll(async () => {
     requireHeaders: { "CF-Access-Client-Id": CLIENT_ID, "CF-Access-Client-Secret": CLIENT_SECRET },
     callResult: (params) => ({ content: [{ type: "text", text: `order ${String((params as { arguments?: { id?: unknown } }).arguments?.id)} shipped` }] }),
   });
-  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, team: { id: "team-acme-1", name: "Acme", engine: ENGINE } });
+  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, team: { id: "team-acme-1", name: "Acme", engine: ENGINE, env: { OMB_BOT_BOX: "0" } } });
   team = fx.team!;
   admin = (await team.pair(ADMIN)).token!;
   ada = (await team.pair(ADA)).token!;
@@ -134,11 +134,20 @@ it("keeps a one-key server Only for me: the admin's own chat gets it with their 
   const own = "Bearer ben-own-key-5521";
   const mail = await startFakeHttpMcp({ tools: [{ name: "read_inbox" }], requireHeader: { name: "Authorization", value: own } });
   try {
-    expect((await as(admin, "POST", "/api/mcp/servers", { name: "mail", type: "http", url: mail.url, headers: { Authorization: own } })).status).toBe(201);
+    const shared = { type: "http", url: mail.url, headers: { Authorization: "" }, enabled: false };
+    expect((await as(admin, "POST", "/api/mcp/servers", { name: "mail", ...shared })).status).toBe(201);
     expect((await as(admin, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "mail", scope: "person" })).body).toEqual({ scopes: { apps: [], mcp: ["mail"] } });
     expect((await as(admin, "PUT", "/api/team/my-connections/mcp/mail/key", { value: own })).body).toEqual({ ok: true });
+    expect((await as(admin, "PUT", "/api/mcp/servers/mail", shared)).status).toBe(200);
+    const saved = () => JSON.parse(readFileSync(join(team.home, ".openmausbot/config.json"), "utf8"));
+    expect(saved().mcpServers.mail.headers).toEqual({ Authorization: "" });
+    expect((await as(admin, "GET", "/api/team/my-connections")).body.mcp).toContainEqual(expect.objectContaining({ name: "mail", connected: true, how: "key" }));
     expect((await as(admin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: true });
+    expect((await as(admin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: true });
+    const otherAdmin = (await team.pair({ email: "cleo@acme.test", role: "admin" })).token!;
+    expect((await as(otherAdmin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: false });
     expect((await as(admin, "PATCH", "/api/mcp/servers/mail", { enabled: true })).status).toBe(200);
+    expect(saved().mcpServers.mail.headers).toEqual({ Authorization: "" });
 
     const bens = await turn(admin, "Check my inbox.", [{ name: "read_inbox", server: "mail", input: {} }], "remote execution recorded");
     expect(bens.mcpConfig.mcpServers.mail).toMatchObject({ url: mail.url, headers: { Authorization: own } });
@@ -147,6 +156,11 @@ it("keeps a one-key server Only for me: the admin's own chat gets it with their 
     expect(Object.keys(adas.mcpConfig.mcpServers)).not.toContain("mail");
     expect(JSON.stringify(adas)).not.toContain("ben-own-key-5521");
     expect(mail.calls).toHaveLength(1);
+    expect((await as(admin, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "mail", scope: "team" })).status).toBe(200);
+    const seen = mail.seenHeaders.length;
+    expect((await as(admin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: false });
+    expect(mail.seenHeaders.slice(seen).every((headers) => headers.authorization !== own)).toBe(true);
+    expect(saved().mcpServers.mail.headers).toEqual({ Authorization: "" });
   } finally {
     await mail.close();
   }
