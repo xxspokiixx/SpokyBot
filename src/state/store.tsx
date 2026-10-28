@@ -21,6 +21,7 @@ import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeed
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
+import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
@@ -471,16 +472,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   };
 }
 
-export interface EngineInstall {
-  platform?: "darwin" | "win32" | "linux";
-  command?: Partial<Record<"darwin" | "win32" | "linux", string>>;
-  docsUrl?: string;
-  signInCommand?: string;
-  needsNode?: boolean;
-  managed?: { label: string; downloadBytes: number };
-  server?: { package: string };
-  settings?: "connections";
-}
+export type { EngineInstall } from "./engine-install";
 
 export interface InstanceInfo {
   instanceId: string;

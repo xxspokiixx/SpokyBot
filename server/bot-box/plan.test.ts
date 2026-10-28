@@ -64,7 +64,9 @@ linuxBox("the box plan", () => {
     // npm's bin entries are relative links into the prefix: `bin/opencode -> ../lib/node_modules/opencode-ai/bin/opencode.exe`.
     const prefix = join(dataDir, "tools", "npm");
     const engineFiles = [`${prefix}/bin/opencode`, `${prefix}/lib/node_modules/opencode-ai/bin/opencode.exe`, `${prefix}/bin/codex`,
-      `${prefix}/lib/node_modules/@openai/codex/bin/codex.js`, join(dataDir, "tools", "antigravity-acp", "linux-x64", "versions", "abc", "agy_acp_server")];
+      `${prefix}/lib/node_modules/@openai/codex/bin/codex.js`, join(dataDir, "tools", "antigravity-acp", "linux-x64", "versions", "abc", "agy_acp_server"),
+      // An AI's own build the app installed without Node.js: the PATH entry and its version folder.
+      join(dataDir, "tools", "standalone", "opencode", "bin", "opencode"), join(dataDir, "tools", "standalone", "opencode", "1.19.4", "opencode")];
     const asked = planBox(setup(), {
       command: `${prefix}/bin/opencode`, args: ["acp", `${prefix}/lib/node_modules/opencode-ai/package.json`], cwd,
       env: { HOME: home, XDG_CACHE_HOME: `${prefix}/cache`, OPENCODE_HOME: `${prefix}/lib` }, rw: [`${prefix}/bin`, join(dataDir, "tools")],
