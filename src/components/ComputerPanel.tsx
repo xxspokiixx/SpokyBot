@@ -11,7 +11,7 @@ import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerFilesPane } from "./ComputerFilesPane";
 import { effectivePlace, isComputerPlace, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
-import { ApiKeyRow } from "./ApiKeys";
+import { KeyRow } from "./keys/KeyRow"; import { openKeySettings } from "./keys/key-focus";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
@@ -266,6 +266,7 @@ export function ComputerPanel({
   const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false
     && (browserAvailableHere || state.config?.browserEngine?.installable === true);
   const [retry, setRetry] = useState(0);
+  const [boatKeyShown, setBoatKeyShown] = useState(false);
   // Auto is the server's decision: never guess host-vs-cloud from desktop capabilities.
   useEffect(() => {
     if (livePlace !== "auto" || !computerSelectionPersisted) return;
@@ -1045,9 +1046,7 @@ export function ComputerPanel({
     dispatch({ type: "toggleAppSettings", open: true });
   };
 
-  const openConnectionSettings = () => {
-    dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
-  };
+  const openConnectionSettings = () => dispatch(openKeySettings("vps"));
 
   const browserCanTurnOn = browserAvailableHere || state.config?.browserEngine?.installable === true;
   const [browserTurningOn, setBrowserTurningOn] = useState(false);
@@ -1521,11 +1520,10 @@ export function ComputerPanel({
             {errorText}
           </div>
         )}
-        {phase === "unconfigured" && cloudView.action?.id === "add-boat-key" && (
-          <div className="mt-3 rounded-xl bg-card p-4">
-            <ApiKeyRow
-              section="box" via="computer_panel"
-              onSaved={(configured) => configured && setRetry((n) => n + 1)}
+        {(boatKeyShown || (phase === "unconfigured" && cloudView.action?.id === "add-boat-key")) && (
+          <div data-boat-key className="mt-3 rounded-xl bg-card py-1.5">
+            <KeyRow id="box" via="computer_panel"
+              onSaved={(configured) => { setBoatKeyShown(true); if (configured) setRetry((n) => n + 1); }}
             />
           </div>
         )}
