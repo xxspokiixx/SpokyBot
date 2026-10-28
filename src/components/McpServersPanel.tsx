@@ -219,7 +219,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     try {
       let body = item.body;
       let ownKey: string | undefined;
-      if (store.config?.team && typeof body.url === "string" && !body.oauth) {
+      if (store.config?.team && existing.scope !== "team" && typeof body.url === "string" && !body.oauth) {
         const connections = await api("/api/team/my-connections");
         if (connections.mcp.some((connection: { name: string }) => connection.name === item.name)) {
           const headers = (body.headers ?? {}) as Record<string, string | true>;

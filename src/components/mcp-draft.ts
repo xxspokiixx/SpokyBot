@@ -25,7 +25,7 @@ export interface McpOAuthClientListing {
   clientSecretConfigured: boolean;
   redirectUri: string;
 }
-export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { managedBy?: string; runsOn?: { environmentId: string; label: string }; apps?: boolean };
+export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { scope?: "team" | "person"; managedBy?: string; runsOn?: { environmentId: string; label: string }; apps?: boolean };
 
 export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {
   return "url" in server;

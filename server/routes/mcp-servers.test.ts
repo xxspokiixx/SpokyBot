@@ -7,6 +7,7 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthManager } from "../mcp-oauth.ts";
+import { listMcpServers } from "../mcp-registry.ts";
 import { createMcpServerRoutes } from "./mcp-servers.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -28,7 +29,7 @@ async function serve() {
     cloudHome: null,
     fallbackPublicUrl: null,
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
-    mcpServerResponse: () => ({ servers: [] }),
+    mcpServerResponse: () => ({ servers: listMcpServers(cfg.mcpServers) }),
     mcpPolicyRefusal: () => undefined,
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     savedCustomDomain: () => null,
@@ -46,8 +47,16 @@ async function serve() {
   const post = (path: string, body: unknown) => fetch(`${base}${path}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
-  return { cfg, post };
+  return { cfg, post, get: () => fetch(`${base}/api/mcp/servers`) };
 }
+
+it.each([["private", "person"], ["public", "team"]])("lists the scope of %s in reads and mutation responses", async (name, scope) => {
+  const { post, get } = await serve();
+  const response = await post("/api/mcp/servers", { name, url: "https://mail.example.com/mcp", headers: { Authorization: "" } });
+  expect(response.status).toBe(201);
+  expect(await response.json()).toMatchObject({ servers: [{ name, scope }] });
+  expect(await (await get()).json()).toMatchObject({ servers: [{ name, scope }] });
+});
 
 it.each(["create", "import"])("rejects personal header values on %s without saving any server", async (action) => {
   const { cfg, post } = await serve();
