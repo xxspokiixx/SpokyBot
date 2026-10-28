@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -79,4 +79,34 @@ it.each([
   await instance.adapter.sendTurn({ threadId: "confirmed-model", text: "hello", model });
   await events.until((event) => event.type === "turn.completed");
   expect(events.events.find((event) => event.type === "session.started")).toMatchObject({ model: confirmed });
+});
+
+it.each(["retry", "nonterminal", "compaction_start", "auto_compaction_start"])(
+  "keeps a turn running beyond the completion grace after %s",
+  async (kind) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      await instance.adapter.sendTurn({ threadId: "maintenance", text: `maintenance:${kind}` });
+      await events.until((event) => event.type === "content.delta" && event.delta === "maintenance-ready");
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(await instance.adapter.steer!("maintenance", "complete")).toBe("steered");
+    } finally {
+      vi.useRealTimers();
+    }
+    const completed = await events.until((event) => event.type === "turn.completed");
+    expect(completed).toMatchObject({ ok: true, stopReason: "end_turn" });
+    expect(events.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+  },
+);
+
+it("retains the completion fallback when no continuation or maintenance arrives", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    await instance.adapter.sendTurn({ threadId: "legacy", text: "maintenance:legacy" });
+    await events.until((event) => event.type === "content.delta" && event.delta === "maintenance-ready");
+    await vi.advanceTimersByTimeAsync(60_001);
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(await events.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true, stopReason: "end_turn" });
 });

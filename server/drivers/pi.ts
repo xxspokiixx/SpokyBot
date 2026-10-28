@@ -734,6 +734,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           case "compaction_end":
           case "auto_compaction_start":
           case "auto_compaction_end": {
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt.
             if (sessionReady && sessionFile) {
               compactionObserved = true;
@@ -745,6 +747,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           {
             // A killed child can still flush one buffered frame after the turn settled.
             if (settled) return;
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             const sr = evt.message?.stopReason;
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
@@ -753,19 +757,21 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             endErrorMessage = evt.message?.errorMessage;
             // pi can schedule maintenance (overflow-recovery compaction) after the final turn_end;
             // only agent_end proves the session is done rewriting itself.
-            if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = setTimeout(finishRun, PI_AGENT_END_GRACE_MS);
             agentEndTimer.unref?.();
+            return;
+          }
+          case "agent_start": {
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             return;
           }
           case "agent_end": {
             // Non-terminal agent_end: upstream pi sets willRetry: true before an automatic retry; the omp
             // fork sets isTerminal: false while maintenance or async delivery is scheduled.
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             if (evt.isTerminal === false || evt.willRetry === true) return;
-            if (agentEndTimer) {
-              clearTimeout(agentEndTimer);
-              agentEndTimer = null;
-            }
             finishRun();
             return;
           }

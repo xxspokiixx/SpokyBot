@@ -26,10 +26,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     dump({ prompt: cmd.message, pid: process.pid });
     reply(cmd.type);
     send({ type: "tool_execution_start", toolCallId: "ready", toolName: "fixture" });
+    if (cmd.message.startsWith("maintenance:")) {
+      send({ type: "turn_end", message: { stopReason: "end_turn" } });
+      const kind = cmd.message.slice("maintenance:".length);
+      if (kind === "retry") send({ type: "agent_end", willRetry: true });
+      else if (kind === "nonterminal") send({ type: "agent_end", isTerminal: false });
+      else send({ type: kind });
+      send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "maintenance-ready" } });
+      return;
+    }
     if (cmd.message !== "wait") {
       send({ type: "turn_end", message: { stopReason: "end_turn" } });
       send({ type: "agent_end", isTerminal: true });
       send({ type: "agent_settled" });
     }
+  }
+  if (cmd.type === "steer") {
+    send({ type: "response", command: cmd.type, id: cmd.id, success: true });
+    send({ type: "turn_end", message: { stopReason: "end_turn" } });
+    send({ type: "agent_end", isTerminal: true });
+    send({ type: "agent_settled" });
   }
 });
