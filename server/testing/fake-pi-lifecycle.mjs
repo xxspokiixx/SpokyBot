@@ -7,7 +7,8 @@ const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\n");
 const reply = (command, data) => send({ type: "response", command, success: true, data });
 const model = { provider: "fixture", id: "default" };
 
-process.on("SIGTERM", () => {});
+// Like Pi, ends its own tool processes on TERM, which takes a moment, then exits.
+process.on("SIGTERM", () => setTimeout(() => { dump({ terminated: true }); process.exit(143); }, 100));
 setInterval(() => {}, 1_000);
 createInterface({ input: process.stdin }).on("line", (line) => {
   const cmd = JSON.parse(line);

@@ -562,7 +562,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           child.stdin.end();
         } catch {}
         completion = (async () => {
-          if (!await killCliTree(child, process.platform === "win32" ? 5_000 : 0)) throw new Error("Pi process termination could not be confirmed");
+          // The TERM grace lets Pi end the detached tool processes it started; a CLI that ignores TERM is killed after it.
+          if (!await killCliTree(child)) throw new Error("Pi process termination could not be confirmed");
           rejectWaiters(new Error("pi turn ended"));
           try {
             rmSync(mcpTempDir, { recursive: true, force: true });
