@@ -61,7 +61,8 @@ it.each(["interrupt", "stopAll", "dispose"])("keeps ownership through %s until t
   expect(ownedWhileStopping).toBe(true);
   expect(() => process.kill(pid, 0)).toThrow();
   expect(runningAtCompletion).toBe(false);
-  expect(readFileSync(join(dir, "rpc.jsonl"), "utf8")).toContain('"terminated":true');
+  // Windows stops the CLI with taskkill /F: no TERM handler runs there.
+  if (process.platform !== "win32") expect(readFileSync(join(dir, "rpc.jsonl"), "utf8")).toContain('"terminated":true');
   expect(events.events.filter((event) => event.type === "turn.completed")).toMatchObject([
     { ok: true, stopReason: "cancelled" },
   ]);
