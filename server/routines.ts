@@ -733,6 +733,7 @@ export class RoutineManager {
   }
 
   runNow(id: string, request?: RoutineRequestCommitFor<"run_now">): RoutineRun | null {
+    if (this.closing) return null;
     if (request) {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
@@ -950,7 +951,7 @@ export class RoutineManager {
   private tickInBackground(): void { this.tick().catch((error) => console.error("routines: a scheduler pass failed", error)); }
 
   start() {
-    if (this.timer) return;
+    if (this.closing || this.timer) return;
     if (!this.startupRunsQueued) this.startupRunsQueued = this.queueStartupRuns();
     this.tickInBackground();
     this.timer = setInterval(() => this.tickInBackground(), 10_000);
@@ -1006,7 +1007,7 @@ export class RoutineManager {
   }
 
   async tick(): Promise<void> {
-    if (this.ticking) return;
+    if (this.closing || this.ticking) return;
     this.ticking = true;
     try {
       const now = this.now();
@@ -1015,7 +1016,7 @@ export class RoutineManager {
           activeMs(run, now) < run.timeoutMinutes * 60_000) continue;
         await this.stopRun(run, `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`, "limit-reached");
       }
-      const isDue = (routine: Routine) => routine.enabled && this.targetState(routine) !== "missing" && (!routine.checks
+      const isDue = (routine: Routine) => !this.closing && routine.enabled && this.targetState(routine) !== "missing" && (!routine.checks
         ? routine.nextRunAt != null && routine.nextRunAt <= now
         : now >= this.bootedAt + CHECK_BOOT_HOLD_MS && [routine.nextRunAt, routine.wakeAt].some((at) => at != null && at <= now));
       // An unanswered wait gives way to its routine's next occurrence, which would otherwise be skipped behind it.
@@ -1084,6 +1085,7 @@ export class RoutineManager {
 
       // Oldest first, by id: a rollback across awaits can replace the run objects.
       for (const id of this.runs.map((run) => run.id)) {
+        if (this.closing) return;
         const run = this.runs.find((candidate) => candidate.id === id);
         if (!run || run.status !== "queued" || (run.retryAt ?? 0) > now) continue;
         const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
@@ -1197,7 +1199,7 @@ export class RoutineManager {
    * Nothing new leaves no run behind a scheduled check, and a quiet completed one behind a manual check. */
   private async runChecks(routineId: string, hold: CheckHold | undefined, manual?: string): Promise<void> {
     const hook = this.options.checks, key = manual ?? routineId, routine = this.routines.find((candidate) => candidate.id === routineId);
-    if (!hook || !routine || this.checking.has(key)) return;
+    if (this.closing || !hook || !routine || this.checking.has(key)) return;
     const revision = routine.updatedAt;
     this.checking.add(key);
     let result: RoutineCheckResult;
@@ -1211,7 +1213,7 @@ export class RoutineManager {
     }
     const current = this.routines.find((candidate) => candidate.id === routineId);
     const queued = manual === undefined ? undefined : this.runs.find((run) => run.id === manual && run.status === "queued");
-    if (!current?.checks || (manual === undefined ? !current.enabled : !queued)) {
+    if (this.closing || !current?.checks || (manual === undefined ? !current.enabled : !queued)) {
       if (result.run) hook.release(result.run.key);
       return;
     }
