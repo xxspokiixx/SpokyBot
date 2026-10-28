@@ -119,6 +119,7 @@ function mainLending({ response }) {
     sharingController: () => ({
       identity: async () => ({ id: "info" }),
       save: async (env, grant, info) => { saved.push(["server", env.id, grant, info]); },
+      beginCloudSave: () => 0,
       saveCloud: async (env, choice) => { saved.push(["cloud", env.id, choice]); cloudState = { ...cloudState, ...choice }; },
       cloudState: () => cloudState, activity: () => [],
     }),
