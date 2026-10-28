@@ -94,6 +94,50 @@ it.each(["interrupt", "dispose"])("waits for delayed Windows termination during 
   }
 });
 
+it.each(["stopAll", "dispose"])("waits for every turn and reports termination failure during %s", async (action) => {
+  for (const threadId of ["failed-stop", "delayed-stop"]) {
+    await instance.adapter.sendTurn({ threadId, text: "wait" });
+    await events.until((event) => event.type === "item.started" && event.threadId === threadId);
+  }
+  const terminate = procs.killCliTree;
+  let failedChild!: ChildProcess;
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => { release = resolve; });
+  const kill = vi.spyOn(procs, "killCliTree")
+    .mockImplementationOnce(async (child) => { failedChild = child; return false; })
+    .mockImplementationOnce(async (child) => { await delayed; return terminate(child); });
+  let returned = false;
+  const stopped = (action === "stopAll" ? instance.adapter.stopAll() : instance.dispose()).then(
+    () => { returned = true; return null; },
+    (error: Error) => { returned = true; return error.message; },
+  );
+  try {
+    await events.until((event) => event.type === "runtime.error" && event.threadId === "failed-stop");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const returnedBeforeSecondStopped = returned;
+    expect(instance.adapter.hasSession("delayed-stop")).toBe(true);
+    release();
+    await events.until((event) => event.type === "turn.completed" && event.threadId === "delayed-stop");
+    const error = await stopped;
+    expect(instance.adapter.hasSession("delayed-stop")).toBe(false);
+    expect(instance.adapter.hasSession("failed-stop")).toBe(true);
+    const beforeLateExit = events.events.length;
+    const closed = once(failedChild, "close");
+    failedChild.kill("SIGKILL");
+    await closed;
+    await instance.adapter.interruptTurn("failed-stop");
+    expect({ returnedBeforeSecondStopped, error, lateEvents: events.events.slice(beforeLateExit).map((event) => event.type) }).toEqual({
+      returnedBeforeSecondStopped: false,
+      error: "Pi process termination could not be confirmed",
+      lateEvents: action === "dispose" ? [] : ["turn.completed"],
+    });
+  } finally {
+    release();
+    await stopped;
+    kill.mockRestore();
+  }
+});
+
 it("preserves cancellation when the CLI closes after termination timed out", async () => {
   await instance.adapter.sendTurn({ threadId: "late-exit", text: "wait" });
   await events.until((event) => event.type === "item.started");

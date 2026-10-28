@@ -423,12 +423,18 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
     const listeners = new Set<RuntimeEventListener>();
     const active = new Map<string, {
-      stop: () => void;
+      stop: () => Promise<void>;
       turnId: string;
       pending: Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>;
       child?: { stdin: { write: (s: string) => void } };
       steer?: (text: string) => Promise<SteerOutcome>;
     }>();
+
+    const stopAll = async () => {
+      const results = await Promise.allSettled([...active.values()].map(({ stop }) => Promise.resolve().then(stop)));
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
+    };
 
     const emit = (event: RuntimeEvent) => {
       for (const l of Array.from(listeners)) l(event);
@@ -1023,17 +1029,18 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           return entry?.steer ? await entry.steer(text) : "refused";
         },
         hasSession: (threadId) => active.has(threadId),
-        stopAll: async () => {
-          await Promise.all([...active.values()].map(({ stop }) => Promise.resolve(stop())));
-        },
+        stopAll,
         onEvent: (listener) => {
           listeners.add(listener);
           return () => listeners.delete(listener);
         },
       },
       dispose: async () => {
-        await Promise.all([...active.values()].map(({ stop }) => Promise.resolve(stop())));
-        listeners.clear();
+        try {
+          await stopAll();
+        } finally {
+          listeners.clear();
+        }
       },
     };
   },
