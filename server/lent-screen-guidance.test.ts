@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LENT_BROWSER_NO_ENDPOINT, LENT_SCREEN_BROWSING, lentScreenResult } from "./lent-screen-guidance.ts";
+import { LENT_BROWSER_NO_ENDPOINT, LENT_SCREEN_BACKGROUND, LENT_SCREEN_BROWSING, lentScreenResult } from "./lent-screen-guidance.ts";
 import { omittedFromErrorNote } from "./mcp-error-result.ts";
 
 const call = (tool_name: string) => ({ action: "computer_call", tool_name });
@@ -7,9 +7,15 @@ const failed = (text: string) => ({ content: [{ type: "text", text }], isError: 
 const texts = (result: unknown) => (result as { content: { text: string }[] }).content.map((part) => part.text);
 
 describe("a lent screen's answers carry the fix", () => {
-  it("lists the screen tools with how to browse there", () => {
+  it("lists the screen tools with how to browse there and how to work beside the person", () => {
     const listing = { content: [{ type: "text", text: "{\"tools\":[]}" }] };
-    expect(texts(lentScreenResult({ action: "computer_tools" }, listing))).toEqual(["{\"tools\":[]}", LENT_SCREEN_BROWSING]);
+    expect(texts(lentScreenResult({ action: "computer_tools" }, listing))).toEqual(["{\"tools\":[]}", LENT_SCREEN_BROWSING, LENT_SCREEN_BACKGROUND]);
+  });
+
+  it("an older desktop's \"in use\" no longer sends the bot waiting for a person", () => {
+    const old = texts(lentScreenResult(call("get_window_state"), failed("This computer is in use locally or held by a person. Wait, then observe it again before acting.")));
+    expect(old).toHaveLength(1);
+    expect(old[0]).toMatch(/^This computer did not let this call use its screen, so it was not performed\. .*it is not necessarily a person\. Try again in a minute/);
   });
 
   it("turns a browser that needs DevTools setup into the screen route, whatever shape the driver used", () => {
