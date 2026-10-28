@@ -47,6 +47,9 @@ import { appendNative } from "./native.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 
+import { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
@@ -134,119 +137,6 @@ export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatal
     if (catalog) return catalog;
   }
   return { default: fallbackDefault, options: [] };
-}
-
-/** omp's RPC v2 splits a frame over 1 MiB into base64 `rpc_chunk` pieces (`chunkId`/`count`/
- *  `byteLength` per frame, sequential `index`, `data` per piece). Any inconsistency drops the sequence. */
-export class PiRpcChunks {
-  /** omp's advertised cap on one reassembled frame. */
-  static readonly MAX_BYTES = 64 * 1024 * 1024;
-  /** omp's cap on one decoded piece, which also bounds the piece count. */
-  static readonly MAX_PIECE_BYTES = 256 * 1024;
-  static readonly MAX_COUNT = PiRpcChunks.MAX_BYTES / PiRpcChunks.MAX_PIECE_BYTES;
-  private chunkId: string | null = null;
-  private count = 0;
-  private byteLength = 0;
-  private bytes = 0;
-  private parts: Buffer[] = [];
-
-  accept(message: Record<string, unknown>): Record<string, unknown> | null {
-    const { chunkId, index, count, byteLength, data } = message;
-    if (
-      typeof chunkId !== "string" || chunkId.length === 0 || typeof data !== "string" ||
-      data.length === 0 || data.length > Math.ceil(PiRpcChunks.MAX_PIECE_BYTES / 3) * 4 ||
-      !Number.isInteger(index) || !Number.isInteger(count) || !Number.isInteger(byteLength) ||
-      (index as number) < 0 || (count as number) < 2 || (count as number) > PiRpcChunks.MAX_COUNT ||
-      (index as number) >= (count as number) ||
-      (byteLength as number) < 0 || (byteLength as number) > PiRpcChunks.MAX_BYTES
-    ) {
-      this.reset();
-      return null;
-    }
-    if (chunkId !== this.chunkId) {
-      if (index !== 0) {
-        this.reset();
-        return null;
-      }
-      this.chunkId = chunkId;
-      this.count = count as number;
-      this.byteLength = byteLength as number;
-      this.parts = [];
-      this.bytes = 0;
-    } else if (count !== this.count || byteLength !== this.byteLength) {
-      this.reset();
-      return null;
-    }
-    const part = Buffer.from(data, "base64");
-    // An empty piece would let a sequence grow without approaching `byteLength`.
-    if (
-      index !== this.parts.length || part.length === 0 || part.length > PiRpcChunks.MAX_PIECE_BYTES ||
-      this.bytes + part.length > this.byteLength
-    ) {
-      this.reset();
-      return null;
-    }
-    this.parts.push(part);
-    this.bytes += part.length;
-    if (this.parts.length < this.count) return null;
-    const complete = this.bytes === this.byteLength;
-    const text = Buffer.concat(this.parts).toString("utf8");
-    this.reset();
-    if (!complete) return null;
-    try {
-      const frame = JSON.parse(text) as unknown;
-      return frame && typeof frame === "object" && !Array.isArray(frame)
-        ? frame as Record<string, unknown>
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private reset(): void {
-    this.chunkId = null;
-    this.count = 0;
-    this.byteLength = 0;
-    this.bytes = 0;
-    this.parts = [];
-  }
-}
-
-export function decodePiFrame(line: string, chunks: PiRpcChunks): Record<string, unknown> | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const frame = parsed as Record<string, unknown>;
-  return frame.type === "rpc_chunk" ? chunks.accept(frame) : frame;
-}
-
-const PI_MAX_LINE = PiRpcChunks.MAX_BYTES;
-
-export function piLineReader(onLine: (line: string) => boolean | void): (chunk: string) => void {
-  let buf = "";
-  let dropping = false;
-  return (chunk) => {
-    buf += chunk;
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      if (dropping) {
-        dropping = false;
-        continue;
-      }
-      if (line.length > PI_MAX_LINE || !line.trim()) continue;
-      if (onLine(line)) return;
-    }
-    if (buf.length > PI_MAX_LINE) {
-      buf = "";
-      dropping = true;
-    }
-  };
 }
 
 export function splitPiModel(id: string): { provider: string; modelId: string } | null {
@@ -563,6 +453,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
       const askTimers = new Set<ReturnType<typeof setTimeout>>();
       let settled = false;
+      let completion: Promise<void> | null = null;
       let endStopReason: string | undefined;
       let endUsage: { input?: number; output?: number } | undefined;
       let endErrorMessage: string | undefined;
@@ -646,8 +537,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
       };
 
-      const settle = (ok: boolean, stopReason?: string | null, usage?: { input?: number; output?: number }) => {
-        if (settled) return;
+      const settle = (ok: boolean, stopReason?: string | null, usage?: { input?: number; output?: number }): Promise<void> => {
+        if (completion) return completion;
         settled = true;
         if (agentEndTimer) {
           clearTimeout(agentEndTimer);
@@ -656,24 +547,30 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         for (const timer of askTimers) clearTimeout(timer);
         askTimers.clear();
         pending.clear();
-        flushAssistantText();
-        emit({
-          ...base(threadId, turnId),
-          type: "turn.completed",
-          ok,
-          stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
-          ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
-        });
         try {
           child.stdin.end();
         } catch {}
-        try {
-          killCliTree(child);
-        } catch {}
-        try {
-          rmSync(mcpTempDir, { recursive: true, force: true });
-        } catch {}
-        active.delete(threadId);
+        completion = (async () => {
+          if (!await killCliTree(child, 0)) throw new Error("Pi process termination could not be confirmed");
+          rejectWaiters(new Error("pi turn ended"));
+          try {
+            rmSync(mcpTempDir, { recursive: true, force: true });
+          } catch {}
+          active.delete(threadId);
+          flushAssistantText();
+          emit({
+            ...base(threadId, turnId),
+            type: "turn.completed",
+            ok,
+            stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
+            ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
+          });
+        })();
+        void completion.catch((error: Error) => {
+          completion = null;
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message });
+        });
+        return completion;
       };
 
       const finishRun = () => {
@@ -694,10 +591,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         try {
           send({ type: "abort" });
         } catch {}
-        try {
-          killCliTree(child);
-        } catch {}
-        settle(true, "cancelled");
+        return settle(true, "cancelled");
       };
 
       // pi queues a steer into the running agent without aborting the step, answers success only after
@@ -723,6 +617,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
       const onEvent = (evt: PiEvent) => {
         appendNative(threadId, { dir: "in", source: "pi.rpc", msg: evt });
+        if (settled) return;
         switch (evt.type) {
           case "response": {
             const key = typeof evt.id === "string" && responseWaiters.has(evt.id) ? evt.id : evt.command;
@@ -1072,7 +967,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           queueing: true,
         },
         sendTurn,
-        interruptTurn: async (threadId) => active.get(threadId)?.stop(),
+        interruptTurn: async (threadId) => { await active.get(threadId)?.stop(); },
         respondToRequest: async (threadId, requestId, decision) => {
           const entry = active.get(threadId);
           const answer = entry?.pending.get(requestId);
@@ -1094,7 +989,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         },
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {
-          for (const { stop } of active.values()) stop();
+          await Promise.all([...active.values()].map(({ stop }) => Promise.resolve(stop())));
         },
         onEvent: (listener) => {
           listeners.add(listener);
@@ -1102,7 +997,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         },
       },
       dispose: async () => {
-        for (const { stop } of active.values()) stop();
+        await Promise.all([...active.values()].map(({ stop }) => Promise.resolve(stop())));
         listeners.clear();
       },
     };
