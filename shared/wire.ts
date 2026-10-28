@@ -11,6 +11,7 @@ import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
+import type { SetupCardFields } from "./setup-card.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
@@ -444,7 +445,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends HelperIntroField {
+export interface WireMessage extends HelperIntroField, SetupCardFields {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
@@ -477,17 +478,6 @@ export interface WireMessage extends HelperIntroField {
   serverCard?: true;
   /** A setup suggestion the device renders in its own words (server/host/helper-suggestion.ts); `text` is the English. */
   setupSuggestion?: { kind: "helperKey"; answer?: "notNow" };
-  /** A new bot's greeting while it has no role or instructions: clients that know it draw the setup card under the
-   * text (server/setup-request.ts); `text` reads on its own for older ones. It stays once the card is answered, so the
-   * card can show the answer; closing the card clears it. */
-  setupOffer?: true;
-  /** The setup card's answers, in the app's language. Picking one sends its words; absent on older greetings, where a
-   * client offers its own. Replaced at most once, by personal answers, in the change that clears setupChoicesPending. */
-  setupChoices?: string[];
-  /** Personal answers for this card are being written (server/setup-suggestions.ts): clients show the card without
-   * answers until it clears. The server clears it within 6 s, in the same change that sets setupChoices if they came in
-   * time; a client still seeing it 8 s after showing the card, or on a greeting older than 20 s, shows setupChoices. */
-  setupChoicesPending?: true;
   /** A person's line Set me up turned into a setup request: the bot reads it as `/setup <text>`; the chat shows `text`. */
   setupRequest?: true;
   /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */
