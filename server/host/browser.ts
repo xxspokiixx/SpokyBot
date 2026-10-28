@@ -498,10 +498,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     ];
     return (await Promise.all(requests.map((request) => eraseOneBrowser(request)))).every(Boolean);
   }
-  /** Where a page's file input finds the files a turn uploads: a boxed Chrome sees only its own profile's folder. */
-  function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): string[] {
-    if (!boxed || chromeTarget(session, spec)) return namedUploadPaths(files, join(DATA_DIR, "browser-uploads"));
-    return namedUploadPaths(files, join(browserProfileDirectory(session), "omb-uploads"), Date.now(), { everyFile: true });
+  /** Chrome receives private copies; a boxed agent-browser reads them from its own profile's folder. */
+  function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): Promise<string[]> {
+    const chrome = chromeTarget(session, spec);
+    const folder = boxed && !chrome ? join(browserProfileDirectory(session), "omb-uploads") : join(DATA_DIR, "browser-uploads");
+    return namedUploadPaths(files, folder, Date.now(), { everyFile: boxed || Boolean(chrome) });
   }
   /** The saved sign-ins of a bot's or a shared profile's browser, for one audience. */
   async function signedInSitesTarget(which: BrowserSitesRef, audience: Audience = "team"): Promise<BrowserSitesTarget | { status: number; error: string }> {

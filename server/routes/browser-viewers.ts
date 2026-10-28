@@ -8,6 +8,7 @@ import type { IncomingMessage } from "node:http";
 import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 
+import { BROWSER_UPLOAD_MAX_BYTES as UPLOAD_MAX_BYTES } from "../../shared/upload-limits.ts";
 import type { Audience } from "../audience.ts";
 import { storeUploads } from "../browser-upload.ts";
 import type { BrowserLive } from "../browser-live.ts";
@@ -24,7 +25,6 @@ const UPLOAD = /^\/api\/bots\/([\w-]+)\/browser\/upload$/;
 const DOWNLOAD = /^\/api\/bots\/([\w-]+)\/browser\/download\/([\w-]{1,64})$/;
 const CHOOSER = /^[\w-]{1,64}$/;
 const UPLOAD_MAX_FILES = 20;
-const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
 const PICKER_CLOSED = "The page's file picker is no longer open.";
 
 type Spec = Parameters<BrowserLive["open"]>[0]["spec"];
