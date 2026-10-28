@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
 import { join } from "node:path";
 
@@ -38,11 +39,18 @@ resolve({ trouble: "Couldn't read Gmail. Reconnect it in Connected apps." });
 await setImmediate();
 assert.equal(manager.listRoutines()[0]!.checkTrouble, "Couldn't read Gmail. Reconnect it in Connected apps.");
 if (mode === "manual") {
-  assert.equal(manager.listRuns()[0]!.status, "queued");
-  storage.save = save;
-  await manager.tick();
+  const disk = JSON.parse(readFileSync(join(dir!, "routines.json"), "utf8"));
+  assert.equal(disk.runs[0].status, "queued");
+  manager.close();
+  const retry = new RoutineManager({
+    file: join(dir!, "routines.json"), botState: () => "ready", createTask: () => null,
+    startTurn: async () => { assert.fail("A failed check must not start a turn"); },
+    checks: { check: async () => pending, release: () => {}, settled: () => {} },
+  });
+  await retry.tick();
   await setImmediate();
-  assert.equal(manager.listRuns()[0]!.status, "failed");
+  assert.equal(retry.listRuns()[0]!.status, "failed");
+  retry.close();
   const restored = new RoutineManager({ file: join(dir!, "routines.json"), botState: () => "ready", createTask: () => null, startTurn: async () => {} });
   assert.equal(restored.listRuns()[0]!.status, "failed");
 } else assert.deepEqual(manager.listRuns(), []);
