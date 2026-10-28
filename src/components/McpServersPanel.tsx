@@ -190,7 +190,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
         latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...body }) })).servers);
         if (item.ownKey) {
           await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
-          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
+          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey, url: body.url }) });
           latest = listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, {
             method: "PUT", body: JSON.stringify({ ...body, enabled: false }),
           })).servers);
@@ -232,7 +232,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
         }
       }
       listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, { method: "PUT", body: JSON.stringify({ ...body, enabled: existing.enabled }) })).servers);
-      if (ownKey) await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: ownKey }) });
+      if (ownKey) await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: ownKey, url: body.url }) });
       closeEditor();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

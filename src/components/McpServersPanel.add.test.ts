@@ -255,7 +255,7 @@ describe("Adding an MCP server on a Team Cloud", () => {
     expect(calls("POST", "/api/mcp/servers")[0]?.body.headers).toEqual({ [header]: "" });
     expect(calls("PUT")).toEqual([
       { url: "/api/team/connection-scopes", body: { kind: "mcp", id: "mail", scope: "person" } },
-      { url: "/api/team/my-connections/mcp/mail/key", body: { value: "Bearer mail-key-12345" } },
+      { url: "/api/team/my-connections/mcp/mail/key", body: { value: "Bearer mail-key-12345", url: "https://mail.example.com/mcp" } },
       { url: "/api/mcp/servers/mail", body: { type: "http", url: "https://mail.example.com/mcp", headers: { [header]: "" }, enabled: false } },
     ]);
     expect(fixture.sharedHeaders.mail).toEqual({ [header]: "" });
@@ -291,7 +291,7 @@ describe("Adding an MCP server on a Team Cloud", () => {
 
     expect(calls("PUT", "/api/mcp/servers/mail")[0]?.body.headers).toEqual({ [header]: "" });
     expect(calls("PUT", "/api/team/my-connections/mcp/mail/key")).toEqual([
-      { url: "/api/team/my-connections/mcp/mail/key", body: { value: "Bearer replacement-key-67890" } },
+      { url: "/api/team/my-connections/mcp/mail/key", body: { value: "Bearer replacement-key-67890", url: "https://mail.example.com/mcp" } },
     ]);
     expect(fixture.sharedHeaders.mail).toEqual({ [header]: "" });
     expect(fixture.personalKeys.mail).toBe("Bearer replacement-key-67890");
@@ -300,6 +300,34 @@ describe("Adding an MCP server on a Team Cloud", () => {
     expect(calls("POST", "/api/mcp/servers/mail/test")).toHaveLength(1);
     expect(host.textContent).toContain("Connected: 1 tool");
     expect(host.querySelector("[data-mcp-editor]")).toBeNull();
+  });
+
+  it.each(["edit", "fix"])("shows the URL conflict and keeps the editor open on %s", async (action) => {
+    fixture.servers = [{ name: "mail", type: "http", url: "https://mail.example.com/mcp", headerKeys: ["Authorization"], enabled: true }];
+    fixture.personalMcp = ["mail"];
+    fixture.personalKeys.mail = "Bearer kept-key-12345";
+    await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Refresh MCP servers']")!.click());
+    await settle();
+    if (action === "fix") {
+      fixture.test = { ok: false, reason: "keys", status: 401 };
+      await click("Test");
+      await click("Fix the keys");
+    } else {
+      await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Edit mail']")!.click());
+    }
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === "/api/team/my-connections/mcp/mail/key") throw new Error("The MCP server address changed. Reload the server and try again.");
+      return previous(path, init);
+    });
+    await type("input[aria-label='Authorization']", "Bearer replacement-key-67890");
+    fixture.api.mockClear();
+    await click("Save");
+
+    expect(host.textContent).toContain("The MCP server address changed. Reload the server and try again.");
+    expect(host.querySelector("[data-mcp-editor]")).not.toBeNull();
+    expect(fixture.personalKeys.mail).toBe("Bearer kept-key-12345");
+    expect(calls("POST")).toEqual([]);
   });
 
   it.each(["Authorization", "X-Api-Key"])("keeps an OAuth-to-key edit private with %s", async (header) => {

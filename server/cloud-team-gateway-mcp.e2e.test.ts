@@ -148,7 +148,7 @@ it("rejects shared header values on a personal OAuth-to-key edit and accepts a p
       expect(JSON.stringify(saved())).not.toContain(own);
     }
     expect((await as(admin, "PUT", "/api/mcp/servers/private-mail", shared)).status).toBe(200);
-    expect((await as(admin, "PUT", "/api/team/my-connections/mcp/private-mail/key", { value: own })).body).toEqual({ ok: true });
+    expect((await as(admin, "PUT", "/api/team/my-connections/mcp/private-mail/key", { value: own, url: mail.url })).body).toEqual({ ok: true });
     expect(saved().mcpServers["private-mail"]).toMatchObject({ headers: { Authorization: "" } });
     expect(saved().mcpServers["private-mail"].oauth).toBeUndefined();
     const seen = mail.seenHeaders.length;
@@ -163,6 +163,27 @@ it("rejects shared header values on a personal OAuth-to-key edit and accepts a p
   }
 }, hostTimeout(60_000));
 
+it("rejects a personal key when another admin changes the URL between the shared save and the key save", async () => {
+  const otherAdmin = (await team.pair({ email: "cleo@acme.test", role: "admin" })).token!;
+  const original = { type: "http", url: "https://mail.example.com/mcp", headers: { Authorization: "" }, enabled: false };
+  const changed = { ...original, url: "https://other.example.com/mcp" };
+  const own = "Bearer raced-personal-key-5521";
+  try {
+    expect((await as(admin, "POST", "/api/mcp/servers", { name: "raced-mail", ...original })).status).toBe(201);
+    expect((await as(admin, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "raced-mail", scope: "person" })).status).toBe(200);
+    expect((await as(admin, "PUT", "/api/mcp/servers/raced-mail", original)).status).toBe(200);
+    expect((await as(otherAdmin, "PUT", "/api/mcp/servers/raced-mail", changed)).status).toBe(200);
+    const refused = await as(admin, "PUT", "/api/team/my-connections/mcp/raced-mail/key", { value: own, url: original.url });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/address changed/i);
+    expect((await as(admin, "GET", "/api/team/my-connections")).body.mcp).toContainEqual(expect.objectContaining({ name: "raced-mail", connected: false }));
+    const keysFile = join(team.home, ".openmausbot/people-connections/mcp-keys.json");
+    expect(existsSync(keysFile) ? readFileSync(keysFile, "utf8") : "").not.toContain(own);
+  } finally {
+    await as(admin, "DELETE", "/api/mcp/servers/raced-mail");
+  }
+}, hostTimeout(30_000));
+
 it("keeps a one-key server Only for me: the admin's own chat gets it with their key, a member's chat doesn't", async () => {
   let own = "Bearer ben-own-key-5521";
   const mail = await startFakeHttpMcp({ tools: [{ name: "read_inbox" }], acceptBearer: (authorization) => authorization === own });
@@ -170,7 +191,7 @@ it("keeps a one-key server Only for me: the admin's own chat gets it with their 
     const shared = { type: "http", url: mail.url, headers: { Authorization: "" }, enabled: false };
     expect((await as(admin, "POST", "/api/mcp/servers", { name: "mail", ...shared })).status).toBe(201);
     expect((await as(admin, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "mail", scope: "person" })).body).toEqual({ scopes: { apps: [], mcp: ["mail"] } });
-    expect((await as(admin, "PUT", "/api/team/my-connections/mcp/mail/key", { value: own })).body).toEqual({ ok: true });
+    expect((await as(admin, "PUT", "/api/team/my-connections/mcp/mail/key", { value: own, url: mail.url })).body).toEqual({ ok: true });
     expect((await as(admin, "PUT", "/api/mcp/servers/mail", shared)).status).toBe(200);
     const saved = () => JSON.parse(readFileSync(join(team.home, ".openmausbot/config.json"), "utf8"));
     expect(saved().mcpServers.mail.headers).toEqual({ Authorization: "" });
@@ -180,7 +201,7 @@ it("keeps a one-key server Only for me: the admin's own chat gets it with their 
     for (const replacement of ["Bearer edited-own-key-6612", "Bearer fixed-own-key-7734"]) {
       own = replacement;
       expect((await as(admin, "PUT", "/api/mcp/servers/mail", shared)).status).toBe(200);
-      expect((await as(admin, "PUT", "/api/team/my-connections/mcp/mail/key", { value: replacement })).body).toEqual({ ok: true });
+      expect((await as(admin, "PUT", "/api/team/my-connections/mcp/mail/key", { value: replacement, url: mail.url })).body).toEqual({ ok: true });
       expect(saved().mcpServers.mail.headers).toEqual({ Authorization: "" });
       const seen = mail.seenHeaders.length;
       expect((await as(admin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: true });

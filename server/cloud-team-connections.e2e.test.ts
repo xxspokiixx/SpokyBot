@@ -135,7 +135,7 @@ it("lets Ada connect her own Gmail and mail key, and nobody reads them back", as
   adaUser = broker.userFor(broker.installationIds().at(-1)!);
   expect(adaUser).not.toBe(teamUser);
   broker.account(adaUser, "gmail", "ada.private@gmail.example");
-  expect((await team.as(ada, "PUT", "/api/team/my-connections/mcp/mail/key", { value: ADA_KEY })).body).toEqual({ ok: true });
+  expect((await team.as(ada, "PUT", "/api/team/my-connections/mcp/mail/key", { value: ADA_KEY, url: mail.url })).body).toEqual({ ok: true });
   // A team app is not hers to connect, and Slack is the team's.
   expect((await team.as(ada, "POST", "/api/team/my-connections/apps/slack/connect", {})).status).toBe(409);
 
@@ -298,7 +298,7 @@ it("skips automatic personal MCP probes after setup and restart while still prob
     const own = { type: "http", url: personal.url, headers: { Authorization: "" } };
     expect((await team.as(owner, "POST", "/api/mcp/servers", { name: "personal_probe", ...own })).status).toBe(201);
     expect((await team.as(owner, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "personal_probe", scope: "person" })).status).toBe(200);
-    expect((await team.as(owner, "PUT", "/api/team/my-connections/mcp/personal_probe/key", { value: ownAuthorization })).status).toBe(200);
+    expect((await team.as(owner, "PUT", "/api/team/my-connections/mcp/personal_probe/key", { value: ownAuthorization, url: personal.url })).status).toBe(200);
     expect((await team.as(owner, "PUT", "/api/mcp/servers/personal_probe", { ...own, enabled: false })).status).toBe(200);
     const tested = await team.as(owner, "POST", "/api/mcp/servers/personal_probe/test", {});
     expect(tested.status).toBe(200);
