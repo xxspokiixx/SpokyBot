@@ -11,6 +11,7 @@ import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import { isTypeaheadKey, TYPEAHEAD_RESET_MS, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
@@ -722,11 +723,14 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "flex items-center gap-1.5 rounded-full border-[0.5px] border-ink/10 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
+        "group flex items-center gap-1.5 rounded-full border-[0.5px] border-ink/10 py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
+        contained
+          ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
+          : cn("bg-composer shadow-(--shadow-float) disabled:text-ink-tertiary disabled:hover:bg-composer", ELEVATED_HOVER),
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
     >
-      {active && <InstanceProviderMark instance={active} size={14} />}
+      {active && <InstanceProviderMark instance={active} size={14} className="group-disabled:opacity-50" />}
       {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
@@ -761,7 +765,10 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent",
+        "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary disabled:cursor-not-allowed disabled:text-ink-tertiary",
+        contained
+          ? "transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
+          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink"),
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
       )}
     >
