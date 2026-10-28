@@ -293,6 +293,7 @@ export class HighLevelClient {
    * connection was replaced meanwhile, so nothing was refreshed. */
   private refresh(current: HighLevelConnection): Promise<HighLevelConnection | null> {
     if (this.refreshing && sameTokens(this.refreshing.from, current)) return this.refreshing.promise;
+    this.activeCall.getStore()?.();
     const promise = (async () => {
       if (current.kind !== "oauth" || !current.refreshToken) {
         this.store.markNeedsSignIn("The saved token was rejected by HighLevel.", current);
