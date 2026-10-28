@@ -17,13 +17,14 @@ export type SimpleThinking =
 
 export interface SimpleMenuActions {
   onQuery: (query: string) => void;
-  onPick: (instance: InstanceInfo, model: string) => void;
+  onPick: (instance: InstanceInfo, model: string, variant?: string) => void;
   onPickCurrent: () => void;
   onFollowBot: () => void;
   onToggle: (instance: InstanceInfo) => void;
   onSetUp: (instance: InstanceInfo, keyboard: boolean) => void;
   onCheckAgain: (instance: InstanceInfo) => void;
   onManage: () => void;
+  onResetVariant?: () => void;
 }
 
 export interface SimpleModelMenuProps extends SimpleMenuActions {
@@ -48,7 +49,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       aria-label={[option.label, option.provider].filter(Boolean).join(" · ")}
       title={[option.label, option.provider, modelBlurb(option)].filter(Boolean).join(" · ")}
       tabIndex={-1}
-      onClick={() => onPick(instance, option.id)}
+      onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={MENU_ROW}
     >
       <Gutter />
@@ -275,6 +276,12 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
             <Thinking thinking={props.thinking} labelId={`${idPrefix}-thinking`} />
             <div role="separator" className={MENU_SEPARATOR} />
           </>
+        )}
+        {props.onResetVariant && (
+          <button type="button" data-menu-row data-simple-variant-default onClick={props.onResetVariant} className={MENU_ROW}>
+            <Gutter />
+            <span className="min-w-0 flex-1 truncate">{t("model.variant.session")}</span>
+          </button>
         )}
         <button type="button" data-menu-row data-simple-manage onClick={props.onManage} className={MENU_ROW}>
           <Gutter><Settings size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /></Gutter>

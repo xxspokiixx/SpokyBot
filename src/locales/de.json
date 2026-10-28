@@ -2,6 +2,7 @@
   "highlevel.unavailable": "Hier nicht verfügbar.",
   "pro.fromPrice": "MausBot Cloud-Tarife ab {price}/Monat zzgl. Steuern.",
   "pro.seePlans": "Tarife vergleichen",
+  "cloudBuy.includes": "In jedem Tarif enthalten",
   "pro.reauthShort": "Melde dich erneut an, um die Cloud auf diesem Computer zu nutzen. Dein Tarif ist davon nicht betroffen.",
   "pro.openCloudSettings": "MausBot Cloud-Einstellungen",
   "pro.settingsSummary": "Hält deine Bots und Routinen rund um die Uhr am Laufen, auch wenn dieser Computer aus ist.",

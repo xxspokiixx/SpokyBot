@@ -92,6 +92,20 @@ describe("request source for the lockout", () => {
 });
 
 describe("scopes", () => {
+  it("allows clients to list and read notifications with exactly the feed's methods and paths", () => {
+    for (const [method, path] of [
+      ["GET", "/api/notifications"],
+      ["POST", "/api/notifications/read-all"],
+      ["POST", "/api/notifications/n-1/read"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
+    for (const [method, path] of [
+      ["POST", "/api/notifications"], ["DELETE", "/api/notifications"],
+      ["GET", "/api/notifications/read-all"], ["PUT", "/api/notifications/read-all"],
+      ["GET", "/api/notifications/n-1/read"], ["DELETE", "/api/notifications/n-1/read"],
+      ["POST", "/api/notifications/n-1/read/extra"], ["GET", "/api/notifications/extra"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
   it("keeps full backups, credentials and replacement behind admin scope", () => {
     for (const path of ["status", "export", "upload", "preview", "restore", "client-state", "download/123"]) {
       for (const method of ["GET", "POST", "DELETE"]) expect(requiredScope(method, `/api/workspace-backup/${path}`)).toBe("admin");

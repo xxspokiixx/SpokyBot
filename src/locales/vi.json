@@ -34,6 +34,7 @@
   "pro.name": "MausBot Cloud",
   "pro.fromPrice": "Các gói MausBot Cloud từ {price}/tháng + thuế.",
   "pro.seePlans": "So sánh các gói",
+  "cloudBuy.includes": "Mọi gói đều có",
   "pro.reauthShort": "Đăng nhập lại để sử dụng Cloud trên máy tính này. Gói của bạn không bị ảnh hưởng.",
   "pro.openCloudSettings": "Cài đặt MausBot Cloud",
   "pro.settingsSummary": "Giúp các bot và tác vụ định kỳ của bạn tiếp tục chạy 24/7, ngay cả khi máy tính này đã tắt.",

@@ -410,7 +410,7 @@ it("the person's own Off survives a restart of the app: nothing is lent again, n
     ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => Promise<any>) => handlers.set(channel, handler) },
     localOnly: (_channel: string, handler: unknown) => handler, cloudPage: (_channel: string, handler: unknown) => handler,
     snapshot: async () => ({ available: true, screenAvailable: false, state: again.connector.cloudState(again.env) }),
-    environment: () => again.env, save: (target: typeof again.env, choice: never) => again.connector.saveCloud(target, choice), stop: () => again.connector.revoke(again.env),
+    environment: () => again.env, beginSave: (target: typeof again.env) => again.connector.beginCloudSave(target), save: (target: typeof again.env, choice: never, version: number) => again.connector.saveCloud(target, choice, version), stop: () => again.connector.revoke(again.env),
     chooseFolder: async () => null, defaults: () => usualFolders(["Desktop", "Documents", "Downloads"].map((name) => join(root, name)), validateSharedFolders), validate: validateSharedFolders,
   });
   expect(await useMyMac.lendByDefault({ projects: [root] })).toBeNull();

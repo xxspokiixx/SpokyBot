@@ -488,6 +488,24 @@ describe("the model picker in Simple mode", () => {
     }));
   });
 
+  it("lets a contained Antigravity picker return a named variant to the session setting", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const forBot = { ...bot(undefined, "antigravity", "gemini-3.8-flash"), modelSelection: {
+      instanceId: "antigravity", model: "gemini-3.8-flash", variant: "high",
+    } };
+    const opened = open(forBot, { contained: true });
+    const simple = pane(opened)!;
+    expect(opened.html).toContain("Use session setting");
+    expect((simple.props as { onResetVariant?: () => void }).onResetVariant).toBeTypeOf("function");
+    (simple.props as { onResetVariant: () => void }).onResetVariant();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: { instanceId: "antigravity", model: "gemini-3.8-flash" },
+    }));
+  });
+
   it.each([[true, true], [false, false], [null, false]] as const)(
     "lets the bot panel's picker, given the open thread, set the default only for the Cloud owner (owner: %s)",
     (ownerOrAdmin, updatesDefault) => {

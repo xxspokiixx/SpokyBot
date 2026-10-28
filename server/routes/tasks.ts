@@ -230,7 +230,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
       deps.threadRead?.(auth, m[2]);
-      readThreadNotifications(m[2], broadcast);
+      readThreadNotifications(m[2], broadcast, auth);
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).
