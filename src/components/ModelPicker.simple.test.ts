@@ -384,7 +384,6 @@ describe("the model picker in Simple mode", () => {
 
   it("puts the header chip on an opaque surface, so scrolled transcript text cannot read through it", () => {
     const classes = () => String(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!.props.className);
-    // bg-composer is a solid fill: the picker reads over any row that scrolls under the fading Simple header.
     expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
     expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
     fixture.advanced = true;
