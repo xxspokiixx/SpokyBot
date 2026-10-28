@@ -31,7 +31,7 @@ import { cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRoutine, loadRun } from "./routine-load.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
-import { routineRunDefinition } from "./routine-run-definition.ts";
+import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 export { intervalHasRestrictions } from "./routine-intervals.ts";
@@ -193,8 +193,6 @@ interface RoutineFile {
 
 
 export type RoutineRequestOwner = Pick<RoutineRequestReceipt, "requestId" | "messageId" | "botId" | "threadId">;
-
-type ResultsThreadAllocation = { botId: string; threadId: string };
 
 function routineRequestOwnerKey(owner: RoutineRequestOwner): string {
   return JSON.stringify([owner.requestId, owner.messageId, owner.botId, owner.threadId]);
@@ -1230,7 +1228,10 @@ export class RoutineManager {
           result.trouble || result.run ? {} : { checkedAt: this.now() });
         if (result.run) {
           run = queued ?? this.newRun(current, this.now(), false, allocations);
-          if (queued) Object.assign(run, routineRunDefinition(current), { timeoutMinutes: current.timeoutMinutes, resultsThreadId: current.resultsThreadId });
+          if (queued) Object.assign(run, routineRunDefinition(current), {
+            timeoutMinutes: current.timeoutMinutes,
+            resultsThreadId: resolveRoutineResultsThread(current, this.options.resolveResultsThread, allocations, this.now(), run.sourceThreadId),
+          });
           if (run.timeoutMinutes === undefined) delete run.timeoutMinutes;
           Object.assign(run, { prompt: result.run.prompt, checkKey: result.run.key });
         } else if (queued && !result.trouble) {
@@ -1427,18 +1428,7 @@ export class RoutineManager {
     allocations: ResultsThreadAllocation[],
     sourceThreadId = routine.sourceThreadId,
   ): RoutineRun {
-    let resultsThreadId = routine.resultsThreadId;
-    if (routine.target === "bot" && this.options.resolveResultsThread) {
-      const destination = this.options.resolveResultsThread({ ...routine, sourceThreadId }, false);
-      const own = destination?.main ? undefined : destination?.threadId;
-      if (own !== routine.resultsThreadId) {
-        if (own) allocations.push({ botId: routine.botId, threadId: own });
-        if (own) routine.resultsThreadId = own;
-        else delete routine.resultsThreadId;
-        routine.updatedAt = Math.max(this.now(), routine.updatedAt + 1);
-      }
-      resultsThreadId = destination?.threadId;
-    }
+    const resultsThreadId = resolveRoutineResultsThread(routine, this.options.resolveResultsThread, allocations, this.now(), sourceThreadId);
     const run: RoutineRun = {
       id: randomUUID(),
       routineId: routine.id,
