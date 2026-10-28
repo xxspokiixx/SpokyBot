@@ -1647,9 +1647,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (!state.settled && !abandoned) {
           if (refused) loginRefused();
           emit({
-            ...base(threadId, turnId),
-            type: "runtime.error",
-            message,
+            ...base(threadId, turnId), type: "runtime.error",
+            message: earlyNotifications.some((event) => ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(event.params?.item?.type))
+              ? `${message} A tool action may have run. Check its effects before trying again.` : message,
             ...(needsAuth ? { setup: true } : codexLimitFacts(raw, route)),
           });
           await settle(false, needsAuth ? "auth_required" : verdict.reason === "provider_safety" ? "provider_safety" : "rpc_error");

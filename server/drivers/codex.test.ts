@@ -3401,6 +3401,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
     expect(recorder.events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
     expect(recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+    expect(recorder.events.filter((event) => event.type === "runtime.error")).toEqual([
+      expect.objectContaining({ message: expect.stringContaining("A tool action may have run. Check its effects before trying again.") }),
+    ]);
+    expect(recorder.events.filter((event) => (event.type === "item.started" || event.type === "item.completed") && event.itemType === "tool")).toHaveLength(0);
   });
 
   it("retries a transient app-server crash before the turn starts", async () => {
