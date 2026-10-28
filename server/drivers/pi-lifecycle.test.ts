@@ -131,7 +131,7 @@ it.each([
   expect(events.events.find((event) => event.type === "session.started")).toMatchObject({ model: confirmed });
 });
 
-it.each(["retry", "nonterminal", "compaction_start", "auto_compaction_start", "agent_start"])(
+it.each(["retry", "nonterminal", "compaction_start", "auto_compaction_start", "agent_start", "turn_start"])(
   "keeps a turn running beyond the completion grace after %s",
   async (kind) => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });

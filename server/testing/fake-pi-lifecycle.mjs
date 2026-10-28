@@ -41,8 +41,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return;
     }
     if (cmd.message.startsWith("maintenance:")) {
-      send({ type: "turn_end", message: { stopReason: "end_turn" } });
       const kind = cmd.message.slice("maintenance:".length);
+      send({ type: "turn_end", message: { stopReason: kind === "turn_start" ? "stop" : "end_turn" } });
       if (kind === "retry") send({ type: "agent_end", willRetry: true });
       else if (kind === "nonterminal") send({ type: "agent_end", isTerminal: false });
       else send({ type: kind });

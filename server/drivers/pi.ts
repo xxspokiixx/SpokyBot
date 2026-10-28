@@ -765,6 +765,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             agentEndTimer.unref?.();
             return;
           }
+          case "turn_start":
           case "agent_start": {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
