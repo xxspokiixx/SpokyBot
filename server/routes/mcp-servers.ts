@@ -79,7 +79,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         let target = parsed.server;
         let oauth = mcpOAuth;
         const personal = deps.teamConnections.personMcp().includes(name);
-        if (personal && isRemoteMcpServer(target)) {
+        if (personal && isRemoteMcpServer(target) && !target.oauth && Object.keys(target.headers).length > 0) {
           const member = auth.kind === "session" ? sessionMember(auth.session) : null;
           if (!member) return json(res, 403, { error: "Sign in to the team to test your own connection." });
           const person = personKey({ id: "", email: member.member.email });
