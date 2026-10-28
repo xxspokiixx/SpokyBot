@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CHECK_BOOT_HOLD_MS, CHECK_RUNS_PER_DAY } from "./routine-check-pacing.ts";
 import { CHECK_WAKE_MS } from "./routine-due.ts";
-import { RoutineManager, type RoutineCheckResult, type RoutineChecks, type RoutineInput, type RoutineRun } from "./routines.ts";
+import { RoutineManager, type Routine, type RoutineCheckResult, type RoutineChecks, type RoutineInput, type RoutineRun } from "./routines.ts";
 
 const MINUTE = 60_000;
 const dirs: string[] = [];
@@ -17,15 +17,17 @@ function harness(options: { bot?: () => "ready" | "busy" | "missing" } = {}) {
   let now = new Date(2026, 9, 22, 9, 0, 0).getTime();
   const answers: RoutineCheckResult[] = [];
   const asked: Array<{ name: string; manual: boolean; hold?: string }> = [];
+  const definitions: Routine[] = [];
   const settled: RoutineRun[] = [];
   const released: string[] = [];
-  const started: Array<{ threadId: string; prompt: string }> = [];
+  const started: Array<{ botId: string; threadId: string; prompt: string }> = [];
   const failed: Array<{ run: RoutineRun; alert: unknown }> = [];
   const deferred: RoutineRun[] = [];
   let thread = 0;
   const gate: { wait?: Promise<void> } = {};
   const checks: RoutineChecks = {
     async check(routine, context) {
+      definitions.push(routine);
       asked.push({ name: routine.name, manual: context.manual, ...(context.hold ? { hold: context.hold } : {}) });
       await gate.wait;
       return answers.shift() ?? {};
@@ -36,7 +38,7 @@ function harness(options: { bot?: () => "ready" | "busy" | "missing" } = {}) {
   const make = () => new RoutineManager({
     file: join(dir, "routines.json"), now: () => now, botState: options.bot ?? (() => "ready"),
     createTask: () => ({ threadId: `thread-${++thread}` }),
-    startTurn: async (_botId, threadId, prompt) => { started.push({ threadId, prompt }); },
+    startTurn: async (botId, threadId, prompt) => { started.push({ botId, threadId, prompt }); },
     onRunFailed: (run, alert) => failed.push({ run, alert }),
     onRunDeferred: (run) => deferred.push(run),
     checks,
@@ -53,7 +55,7 @@ function harness(options: { bot?: () => "ready" | "busy" | "missing" } = {}) {
     manager.handleRuntimeEvent({ type: "turn.completed", threadId: run.threadId!, ok, stopReason: ok ? "end_turn" : "refusal" } as never);
   };
   return {
-    get manager() { return manager; }, gate, answers, asked, settled, released, started, failed, deferred, tick, watch, complete, settle,
+    get manager() { return manager; }, gate, answers, asked, definitions, settled, released, started, failed, deferred, tick, watch, complete, settle,
     advance: (ms: number) => { now += ms; },
     now: () => now,
     restart: () => { manager = make(); },
@@ -64,6 +66,62 @@ function harness(options: { bot?: () => "ready" | "busy" | "missing" } = {}) {
 const past = (h: ReturnType<typeof harness>, ms: number) => { h.advance(ms); return h.tick(); };
 
 describe("routines with checks", () => {
+  it.each(["run", "trouble", "quiet"])("rechecks an edited definition before using a pending %s result", async (result) => {
+    const h = harness();
+    const routine = h.watch({ botId: "bot-a", checks: ["mail"], prompt: "Old mail instructions" });
+    let open!: () => void;
+    h.gate.wait = new Promise((resolve) => { open = resolve; });
+    h.answers.push(result === "run" ? { run: { prompt: "Private mail for bot A", key: "old-mail" } }
+      : result === "trouble" ? { trouble: "Old mail error", wakeAt: h.now() + MINUTE } : {});
+    h.answers.push({ run: { prompt: "Current calendar for bot B", key: "new-calendar" } });
+    await past(h, CHECK_BOOT_HOLD_MS + 15 * MINUTE);
+    expect(h.asked).toHaveLength(1);
+    h.manager.update(routine.id, { botId: "bot-b", checks: ["calendar"], prompt: "New calendar instructions" });
+    open();
+    await h.settle();
+    expect(h.asked).toHaveLength(2);
+    expect(h.definitions[1]).toMatchObject({ botId: "bot-b", checks: ["calendar"], prompt: "New calendar instructions" });
+    expect(h.released).toEqual(result === "run" ? ["old-mail"] : []);
+    expect(h.manager.listRuns()).toEqual([expect.objectContaining({ botId: "bot-b", checkKey: "new-calendar" })]);
+    expect(h.started).toEqual([expect.objectContaining({ botId: "bot-b", prompt: expect.stringContaining("Current calendar for bot B") })]);
+    expect(h.started[0]!.prompt).not.toContain("Private mail for bot A");
+    expect(h.manager.listRoutines()[0]).not.toHaveProperty("checkTrouble");
+  });
+
+  it("rechecks a pending manual run when its instructions change within the same millisecond", async () => {
+    const h = harness();
+    const routine = h.watch();
+    let open!: () => void;
+    h.gate.wait = new Promise((resolve) => { open = resolve; });
+    h.answers.push({ run: { prompt: "Old instructions", key: "old-batch" } }, { run: { prompt: "New instructions", key: "new-batch" } });
+    const manual = h.manager.runNow(routine.id)!;
+    await h.tick();
+    h.manager.update(routine.id, { prompt: "New instructions" });
+    open();
+    await h.settle();
+    expect(h.released).toEqual(["old-batch"]);
+    expect(h.manager.listRuns()).toEqual([expect.objectContaining({ id: manual.id, manual: true, checkKey: "new-batch" })]);
+    expect(h.started[0]!.prompt).toContain("New instructions");
+    expect(h.started[0]!.prompt).not.toContain("Old instructions");
+  });
+
+  it("keeps a rechecked manual run's bot and access aligned with its current definition", async () => {
+    const h = harness();
+    const routine = h.watch({ botId: "bot-a", checks: ["mail"] });
+    let open!: () => void;
+    h.gate.wait = new Promise((resolve) => { open = resolve; });
+    h.answers.push({ run: { prompt: "Old mail", key: "old-batch" } }, { run: { prompt: "Current calendar", key: "new-batch" } });
+    const manual = h.manager.runNow(routine.id)!;
+    await h.tick();
+    h.manager.update(routine.id, { botId: "bot-b", checks: ["calendar"], access: null, deliver: null });
+    open();
+    await h.settle();
+    expect(h.manager.listRuns()).toEqual([expect.objectContaining({ id: manual.id, botId: "bot-b", checkKey: "new-batch" })]);
+    expect(h.manager.listRuns()[0]!.access).toBeUndefined();
+    expect(h.manager.listRuns()[0]!.deliver).toBeUndefined();
+    expect(h.started[0]!.botId).toBe("bot-b");
+  });
+
   it("a check that finds nothing starts no AI turn and leaves no run, only when it last checked", async () => {
     const h = harness();
     const routine = h.watch();

@@ -31,6 +31,7 @@ import { cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRoutine, loadRun } from "./routine-load.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
+import { routineRunDefinition } from "./routine-run-definition.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 export { intervalHasRestrictions } from "./routine-intervals.ts";
@@ -1197,6 +1198,7 @@ export class RoutineManager {
   private async runChecks(routineId: string, hold: CheckHold | undefined, manual?: string): Promise<void> {
     const hook = this.options.checks, key = manual ?? routineId, routine = this.routines.find((candidate) => candidate.id === routineId);
     if (!hook || !routine || this.checking.has(key)) return;
+    const revision = routine.updatedAt;
     this.checking.add(key);
     let result: RoutineCheckResult;
     try {
@@ -1213,6 +1215,10 @@ export class RoutineManager {
       if (result.run) hook.release(result.run.key);
       return;
     }
+    if (current.updatedAt !== revision) {
+      if (result.run) hook.release(result.run.key);
+      return this.runChecks(routineId, hold, manual);
+    }
     const allocations: ResultsThreadAllocation[] = [];
     let run: RoutineRun | undefined;
     try {
@@ -1222,6 +1228,8 @@ export class RoutineManager {
           result.trouble || result.run ? {} : { checkedAt: this.now() });
         if (result.run) {
           run = queued ?? this.newRun(current, this.now(), false, allocations);
+          if (queued) Object.assign(run, routineRunDefinition(current), { timeoutMinutes: current.timeoutMinutes, resultsThreadId: current.resultsThreadId });
+          if (run.timeoutMinutes === undefined) delete run.timeoutMinutes;
           Object.assign(run, { prompt: result.run.prompt, checkKey: result.run.key });
         } else if (queued && !result.trouble) {
           Object.assign(queued, { status: "completed", output: "Nothing new since the last check", report: { state: "quiet" }, finishedAt: this.now() } satisfies Partial<RoutineRun>);
@@ -1432,23 +1440,13 @@ export class RoutineManager {
     const run: RoutineRun = {
       id: randomUUID(),
       routineId: routine.id,
-      routineName: routine.name,
-      prompt: routine.prompt,
-      durationMinutes: routine.durationMinutes,
-      ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
-      attachments: cloneAttachments(routine.attachments),
-      target: routine.target,
-      groupId: routine.groupId,
-      botId: routine.botId,
-      runOn: routine.runOn ?? "maus",
+      ...routineRunDefinition(routine),
       scheduledFor,
       status: "queued",
       manual,
       triggerSource: manual ? "manual" : "schedule",
       sourceThreadId,
       resultsThreadId,
-      ...(routine.access ? { access: routine.access } : {}),
-      ...(routine.deliver ? { deliver: routine.deliver } : {}),
       createdAt: this.now(),
     };
     this.runs.push(run);
