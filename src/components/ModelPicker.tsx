@@ -13,6 +13,7 @@ import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { ApiKeyHint, EngineSetup, EngineUpdateNotice, needsCli, needsSignIn, openKeysFor } from "./EngineSetup";
+import { offersLocalModels, probeLocalModels } from "./local-model-probe";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
@@ -42,29 +43,6 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
 
 function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
   return instance?.models.options.find((option) => option.id === model)?.provider;
-}
-
-export const LOCAL_PROBE_TIMEOUT_MS = 5_000;
-
-export function probeLocalModels(
-  instanceId: string,
-  refreshModels: (instanceId: string) => Promise<void>,
-  timeoutMs = LOCAL_PROBE_TIMEOUT_MS,
-): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
-    void refreshModels(instanceId)
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-  });
-}
-
-export function offersLocalModels(instance: InstanceInfo | undefined, localCount: number): boolean {
-  if (!instance) return false;
-  return localCount > 0 || (instance.driverKind === "claudeAgent" && !needsCli(instance) && !instance.policy);
 }
 
 export function effortLabel(level: EffortLevel): string {
