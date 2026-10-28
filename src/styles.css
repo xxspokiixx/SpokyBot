@@ -1354,6 +1354,11 @@ body {
   @container style(--code-color-scheme: dark) {
     .ui-scrim { background: rgb(0 0 0 / 0.7); }
   }
+  /* A lighter dim, for a dialog about the app behind it, which should still show through as it changes. */
+  .ui-scrim-light { background: rgb(0 0 0 / 0.2); }
+  @container style(--code-color-scheme: dark) {
+    .ui-scrim-light { background: rgb(0 0 0 / 0.4); }
+  }
   @media (prefers-reduced-motion: reduce) {
     .ui-button,
     .ui-icon-button,
