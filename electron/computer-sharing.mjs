@@ -9,6 +9,7 @@ import { sharedCuaConnection } from "./shared-cua-connection.mjs";
 export { sharedCuaConnection };
 import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
 import { cuaUnavailable, SCREEN_LOCKED } from "./lent-screen-failures.mjs";
+import { createLentScreenPresence } from "./lent-screen-presence.mjs";
 import { BACKGROUND_HEADERS, CloudAsleepError, asleepAnswer, createCloudPowerGate } from "./cloud-power.mjs";
 import { linkUrl, runDeviceLink } from "./device-link.mjs";
 import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
@@ -151,10 +152,11 @@ const BROWSE_NOTE_MS = 10 * 60_000;
  * resumes by itself; at most every 15 minutes. `linkHeaders(env)`: the device link's sign-in, as the poll's fetch
  * carries it (the session cookie). `myCloud()`: the saved server that is the person's own My Cloud, which gets this
  * computer's internet connection by default (internetByDefault). */
-export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, screenLocked = () => false, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now, power = createCloudPowerGate(),
+export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, screenLocked = () => false, idleSeconds = () => null, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now, power = createCloudPowerGate(),
   linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null }) {
   const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
   const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
+  const presence = createLentScreenPresence({ idleSeconds, now });
   let records = {};
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -389,8 +391,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             let result;
             try {
               await lease(); jobSignal.throwIfAborted();
-              if (grant.computer && ["computer_tools", "computer_call"].includes(job.operation.action)) {
-                if (job.operation.action === "computer_call" && screenLocked()) throw new Error(SCREEN_LOCKED);
+              // Listing the tools never touches the screen, so only a call takes this computer's screen lock.
+              if (grant.computer && job.operation.action === "computer_call") {
+                if (screenLocked()) throw new Error(SCREEN_LOCKED);
+                const waits = presence.refusal(job.operation.tool_name, job.operation.arguments);
+                if (waits) throw new Error(waits);
                 if (!hostControl) throw new Error("The local computer control gate is unavailable");
                 control = await hostControl(job.id, jobSignal);
                 jobSignal.throwIfAborted();
@@ -408,6 +413,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             } catch (error) { result = sharedComputerError(error); live.cua?.close(); live.cua = null; }
             finally {
               clearInterval(heartbeat); ended = true;
+              if (control) presence.acted(job.operation.tool_name, job.operation.arguments);
               await renewal?.catch(() => {});
               await control?.release().catch(() => {});
               executing = null; changed();
