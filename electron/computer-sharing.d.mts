@@ -116,7 +116,9 @@ export function createComputerSharing(options: {
   lendingToCloud(): boolean;
   /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
   busy(): boolean;
-  saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean; internet?: boolean; chrome?: boolean; terminal?: boolean }): Promise<CloudLendingState>;
+  /** Capture before preparing a choice; Stop or a newer save invalidates this version. */
+  beginCloudSave(env: Workspace): number;
+  saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean; internet?: boolean; chrome?: boolean; terminal?: boolean }, version?: number): Promise<CloudLendingState>;
   cloudChanged(): void;
   start(options?: { maintainer?: boolean }): void;
   close(): void;
