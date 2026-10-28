@@ -32,6 +32,10 @@ export interface PhoneRouteDeps {
 
 export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
   const { registry, jobs } = deps;
+  const removePhone = (key: string, block = false) => {
+    try { return registry.remove(key, { block }); }
+    finally { jobs.drop(key, PHONE_ACCESS_CHANGED); }
+  };
   return async ({ req, res, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> => {
     if (path !== "/api/phones" && !path.startsWith("/api/phones/")) return PASS;
     res.setHeader("Cache-Control", "no-store");
@@ -59,8 +63,7 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
         }
         if (method === "GET") return json(res, 200, { phone: registry.list(owner, (k) => jobs.busy(k)).find((p) => p.key === key) ?? null });
         if (method === "DELETE") {
-          const removed = registry.remove(key);
-          jobs.drop(key, PHONE_ACCESS_CHANGED);
+          const removed = removePhone(key);
           return json(res, 200, { removed });
         }
       }
@@ -88,8 +91,7 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
       if (!deps.isAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can remove phones." });
       // Removed on the computer: its waiting jobs fail and the key stays refused, so the phone must pair again.
       const key = decodeURIComponent(one[1]!);
-      const removed = registry.remove(key, { block: true });
-      jobs.drop(key, PHONE_ACCESS_CHANGED);
+      const removed = removePhone(key, true);
       return json(res, 200, { removed });
     }
     return json(res, 404, { error: "not found" });

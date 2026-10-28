@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as atomic from "../atomic.ts";
 import { json, readBody } from "../harness/http.ts";
 import { PhoneJobs } from "../phones/jobs.ts";
 import { PhoneRegistry } from "../phones/registry.ts";
@@ -16,6 +17,7 @@ import { dispatchRoutes } from "./table.ts";
 const servers: Server[] = [];
 const dirs: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
   await Promise.all(dirs.splice(0).map(removeTempDir));
 });
@@ -62,7 +64,7 @@ async function setup(options: { auth?: RequestAuth; owner?: () => string | null;
     });
     return { status: response.status, body: (await response.json()) as any };
   };
-  return { registry, jobs, call };
+  return { registry, jobs, call, dir };
 }
 
 describe("phone routes", () => {
@@ -160,6 +162,27 @@ describe("phone routes", () => {
     const again = await call("PUT", "/api/phones/self", registration, fromPhone("d1"));
     expect(again).toEqual({ status: 403, body: { error: "This phone was removed on the computer. Pair it again to use its apps." } });
     expect((await call("GET", "/api/phones/self/jobs", undefined, fromPhone("d1"))).status).toBe(404);
+  });
+
+  it.each(["/api/phones/self", "/api/phones/companion%3Ad1"])("reports a failed removal save at %s and still drops jobs", async (path) => {
+    const { call, jobs, registry, dir } = await setup({ auth: companion("d1") });
+    try {
+      await call("PUT", "/api/phones/self", registration);
+      const pending = jobs.request("companion:d1", "PHONE_LIST_EVENTS", {}, { active: () => true, timeoutMs: 10_000, offlineText: "offline", online: () => true });
+      const job = (await call("GET", "/api/phones/self/jobs")).body.job;
+      expect((await call("POST", `/api/phones/self/jobs/${job.id}/lease`)).body).toEqual({ active: true });
+      const fault = Object.assign(new Error("fixture permission denied"), { code: "EACCES" });
+      const write = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw fault; });
+      expect((await call("DELETE", path)).status).toBe(500);
+      expect(registry.get("companion:d1")).toBeUndefined();
+      expect(jobs.busy("companion:d1")).toBe(false);
+      expect(await pending).toMatchObject({ ok: false, code: "denied" });
+      write.mockRestore();
+      expect((await call("DELETE", path)).status).toBe(200);
+      const reloaded = new PhoneRegistry(join(dir, "phones.json"));
+      expect(reloaded.get("companion:d1")).toBeUndefined();
+      expect(reloaded.blocked("companion:d1")).toBe(path !== "/api/phones/self");
+    } finally { jobs.close(); }
   });
 
   it("an open poll answers empty when its phone is removed", async () => {

@@ -3,8 +3,9 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
+import * as atomic from "../atomic.ts";
 import { flushDecisionLog } from "../decision-log.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -15,7 +16,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { createPhones } from "./phones.ts";
 
 const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
+afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0)) await cleanup(); });
 
 async function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "phone-session-revocation-"));
@@ -64,7 +65,7 @@ async function fixture() {
   const request = () => phones.handle({ method: "tools/call", params: {
     name: "PHONE_CREATE_EVENT", arguments: { title: "Private appointment", start: "2026-10-28T10:00:00Z", end: "2026-10-28T11:00:00Z" },
   } }, { botId: bot.id, threadId: "thread-1", generation: "gen-1" }, () => {});
-  return { phones, sessions, paired, session, call, polling, request };
+  return { dir, phones, sessions, paired, session, call, polling, request };
 }
 
 it("revoking a session removes its phone and ends its pending poll before a later job", async () => {
@@ -91,4 +92,20 @@ it("revoking a session fails both a leased job and a queued job", async () => {
     new Promise<null>(resolve => { const timer = setTimeout(() => resolve(null), 1000); timer.unref(); }),
   ]);
   expect(ended).toEqual([expect.objectContaining({ isError: true }), expect.objectContaining({ isError: true })]);
+});
+
+it("a phone save failure does not interrupt session revocation or leave its job waiting", async () => {
+  const h = await fixture();
+  const pending = h.request();
+  const write = atomic.writeFileAtomic;
+  vi.spyOn(atomic, "writeFileAtomic").mockImplementation((file, ...args) => {
+    if (file === join(h.dir, "phones.json")) throw Object.assign(new Error("fixture permission denied"), { code: "EACCES" });
+    write(file, ...args);
+  });
+  let notified = false;
+  h.sessions.onSessionRevoked(() => { notified = true; });
+  expect(() => h.sessions.revoke(h.paired.session.id)).not.toThrow();
+  expect(notified).toBe(true);
+  expect(new SessionRegistry({ file: join(h.dir, "sessions.json") }).isLive(h.paired.session.id)).toBe(false);
+  expect(await pending).toMatchObject({ isError: true });
 });

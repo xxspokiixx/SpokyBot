@@ -62,7 +62,7 @@ export function createPhones(deps: PhonesDeps) {
   const jobs = new PhoneJobs((phone, id) => deps.nudge({ kind: "device.job", phone, id }));
   const unsubscribe = deps.sessions.onSessionRevoked((id) => {
     const key = `session:${id}`;
-    registry.remove(key);
+    try { registry.remove(key); } catch {}
     jobs.drop(key, PHONE_ACCESS_CHANGED);
   });
   const ownerRoutinesFile = join(deps.dataDir, "owner-routines.json");
