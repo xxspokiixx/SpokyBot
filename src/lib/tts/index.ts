@@ -290,7 +290,11 @@ export class Speaker {
         if (finished) return;
         const wasLive = live();
         controller.abort();
-        if (wasLive) this.set({ ...IDLE, error });
+        if (wasLive) {
+          if (this.settlePlayback) this.settlePlayback(false);
+          else this.teardownAudio();
+          this.set({ ...IDLE, error });
+        }
         if (this.request === controller) this.request = null;
         finish();
       },

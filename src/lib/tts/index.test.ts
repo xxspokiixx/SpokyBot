@@ -134,6 +134,48 @@ describe("Speaker lifecycle", () => {
     expect(speaker.state).toEqual({ status: "preparing", messageId: "current" });
     current.cancel();
   });
+
+  it("stops active audio before publishing a stream failure", async () => {
+    vi.stubGlobal("fetch", async () => new Response(new Blob(["mp3"])));
+    const speaker = new Speaker();
+    const stream = speaker.begin({ messageId: "reply" });
+    stream.push("Playing block.");
+    await vi.waitFor(() => expect(FakeAudio.latest).not.toBeNull());
+    const audio = FakeAudio.latest!;
+    let sourceAtFailure: string | undefined;
+    speaker.subscribe(snapshot => {
+      if (snapshot.error) sourceAtFailure = audio.src;
+    });
+
+    stream.fail("splitter unavailable");
+    await stream.end();
+
+    expect(sourceAtFailure).toBe("");
+    expect(audio.pause).toHaveBeenCalled();
+    expect(audio.onended).toBeNull();
+    expect(audio.onerror).toBeNull();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:voice-test");
+    expect(speaker.state).toEqual({ status: "idle", error: "splitter unavailable" });
+  });
+
+  it("does not stop a newer stream's audio when an old stream fails", async () => {
+    vi.stubGlobal("fetch", async () => new Response(new Blob(["mp3"])));
+    const speaker = new Speaker();
+    const old = speaker.begin({ messageId: "old" });
+    const current = speaker.begin({ messageId: "current" });
+    current.push("Current block.");
+    await vi.waitFor(() => expect(FakeAudio.latest).not.toBeNull());
+    const audio = FakeAudio.latest!;
+
+    old.fail("old failure");
+    await old.end();
+
+    expect(audio.src).toBe("blob:voice-test");
+    expect(audio.pause).not.toHaveBeenCalled();
+    expect(speaker.state).toMatchObject({ status: "speaking", messageId: "current" });
+    audio.onended?.();
+    await current.end();
+  });
 });
 
 describe("external voice claims", () => {
