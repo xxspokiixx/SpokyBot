@@ -184,17 +184,16 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     let latest = servers ?? [];
     try {
       for (const item of items) {
-        latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...item.body }) })).servers);
+        const body = item.ownKey
+          ? { ...item.body, headers: Object.fromEntries(Object.keys(item.body.headers ?? {}).map((name) => [name, ""])) }
+          : item.body;
+        latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...body }) })).servers);
         if (item.ownKey) {
-          try {
-            await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
-            await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
-          } catch (cause) {
-            latest = listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, {
-              method: "PUT", body: JSON.stringify({ ...item.body, headers: {}, enabled: false }),
-            })).servers);
-            throw cause;
-          }
+          await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
+          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
+          latest = listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, {
+            method: "PUT", body: JSON.stringify({ ...item.body, enabled: false }),
+          })).servers);
         }
         added.push(item.name);
       }

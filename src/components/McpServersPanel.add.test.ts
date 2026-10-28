@@ -230,24 +230,25 @@ describe("Adding an MCP server on a Team Cloud", () => {
     expect(calls("PUT")).toEqual([]);
   });
 
-  it("keeps the key as this person's own when it's Only for me", async () => {
+  it.each(["Authorization", "X-Api-Key"])("keeps %s as this person's own when it's Only for me", async (header) => {
     await click("Add server");
-    await type("textarea[aria-label='Server link or setup command']", `claude mcp add --transport http mail https://mail.example.com/mcp -H "Authorization: Bearer $MAIL_KEY"`);
-    await type("input[aria-label='Authorization']", "mail-key-12345");
+    await type("textarea[aria-label='Server link or setup command']", `claude mcp add --transport http mail https://mail.example.com/mcp -H "${header}: Bearer $MAIL_KEY"`);
+    await type(`input[aria-label='${header}']`, "mail-key-12345");
     await act(async () => host.querySelector<HTMLInputElement>("[data-mcp-team-scope] input[type=checkbox]")!.click());
     await settle();
     expect(host.querySelector("[data-mcp-team-scope]")?.textContent).toContain("Only you can use this. Teammates can add their own key from their team page.");
     await click("Add");
-    expect(calls("POST", "/api/mcp/servers")[0]?.body.headers).toEqual({ Authorization: "Bearer mail-key-12345" });
+    expect(calls("POST", "/api/mcp/servers")[0]?.body.headers).toEqual({ [header]: "" });
     expect(calls("PUT")).toEqual([
       { url: "/api/team/connection-scopes", body: { kind: "mcp", id: "mail", scope: "person" } },
       { url: "/api/team/my-connections/mcp/mail/key", body: { value: "Bearer mail-key-12345" } },
+      { url: "/api/mcp/servers/mail", body: { type: "http", url: "https://mail.example.com/mcp", headers: { [header]: "Bearer mail-key-12345" }, enabled: false } },
     ]);
     expect(host.textContent).toContain("Connected: 12 tools");
   });
 
   it.each(["/api/team/connection-scopes", "/api/team/my-connections/mcp/mail/key"])(
-    "keeps Only for me disabled and removes the shared key when %s fails", async (failedPath) => {
+    "keeps Only for me disabled and never saves the shared key when %s fails", async (failedPath) => {
       const previous = fixture.api.getMockImplementation()!;
       fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
         if (init?.method === "PUT" && path === failedPath) throw new Error("Personal setup failed.");
@@ -261,11 +262,41 @@ describe("Adding an MCP server on a Team Cloud", () => {
       await click("Add");
 
       expect(fixture.servers).toEqual([expect.objectContaining({ name: "mail", enabled: false })]);
-      expect(fixture.sharedHeaders.mail).toEqual({});
+      expect(fixture.sharedHeaders.mail).toEqual({ Authorization: "" });
       expect(calls("POST", "/api/mcp/servers/mail/test")).toEqual([]);
       expect(calls("PATCH")).toEqual([]);
       expect(host.textContent).toContain("Personal setup failed.");
       expect(host.textContent).not.toContain("Connected:");
+    },
+  );
+
+  it.each(["/api/team/connection-scopes", "/api/team/my-connections/mcp/mail/key"])(
+    "never shares the personal key after %s fails, even if server updates fail and the row is later enabled", async (failedPath) => {
+      const previous = fixture.api.getMockImplementation()!;
+      fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (init?.method === "PUT" && path === failedPath) throw new Error("Personal setup failed.");
+        if (init?.method === "PUT" && path.startsWith("/api/mcp/servers/")) throw new Error("Server update failed.");
+        return previous(path, init);
+      });
+      await click("Add server");
+      await type("textarea[aria-label='Server link or setup command']", 'claude mcp add --transport http mail https://mail.example.com/mcp -H "Authorization: Bearer $MAIL_KEY"');
+      await type("input[aria-label='Authorization']", "mail-key-12345");
+      await act(async () => host.querySelector<HTMLInputElement>("[data-mcp-team-scope] input[type=checkbox]")!.click());
+      await settle();
+      await click("Add");
+
+      expect.soft(host.textContent).toContain("Personal setup failed.");
+      expect.soft(fixture.servers).toEqual([expect.objectContaining({ name: "mail", enabled: false })]);
+      expect.soft(calls("POST", "/api/mcp/servers/mail/test")).toEqual([]);
+      expect.soft(calls("PATCH")).toEqual([]);
+      await click("Cancel");
+      await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Refresh MCP servers']")!.click());
+      await settle();
+      await act(async () => host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Turn mail on"]')!.click());
+      await settle();
+
+      expect(fixture.servers).toEqual([expect.objectContaining({ name: "mail", enabled: true })]);
+      expect(fixture.sharedHeaders.mail).toEqual({ Authorization: "" });
     },
   );
 });
