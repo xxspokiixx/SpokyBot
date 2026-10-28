@@ -332,6 +332,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
           if (grant.cloud) {
             // A new pairing of this desktop keeps lending; another server behind that address does not.
             const info = await cloudIdentity(env);
+            if (signal.aborted || running.get(env.id) !== live) break;
             if (grant.environmentId && grant.environmentId !== info.environmentId) { endCloud(env, "machine-changed"); break; }
             if (grant.environmentId !== info.environmentId || grant.sessionId !== info.sessionId) {
               grant = { ...grant, ...info };

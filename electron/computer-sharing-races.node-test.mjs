@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { runInNewContext } from "node:vm";
+import { setImmediate } from "node:timers/promises";
 import { installCloudLending } from "./cloud-lending-ipc.mjs";
 import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
 
@@ -188,4 +189,28 @@ test("main Stop cancels a terminal choice held in IPC folder validation", async 
   assert.equal(f.sharing.cloudState(f.env).terminal, false);
   assert.equal(f.sharing.lendingToCloud(), false);
   assert.ok(f.connects.every(grant => grant.terminal === false));
+});
+
+test("a stopped worker cannot restore its terminal grant after identity refresh", async t => {
+  const f = await fixture(t);
+  await f.sharing.saveCloud(f.env, { folders: [], terminal: true });
+  await f.polled;
+  const handlers = await mainLending(f);
+  const held = f.holdIdentity();
+  f.sharing.start();
+  await held.entered;
+  await handlers.get("lending:stop")({});
+  const stopped = (await f.records())[f.env.id];
+  f.info.sessionId = randomUUID();
+  held.release();
+  await setImmediate();
+  assert.deepEqual((await f.records())[f.env.id], stopped);
+  f.sharing.cloudChanged();
+  f.sharing.start();
+  await setImmediate();
+  assert.equal(f.sharing.cloudState(f.env).enabled, false);
+  assert.equal(f.sharing.cloudState(f.env).terminal, false);
+  assert.equal(f.sharing.lendingToCloud(), false);
+  assert.deepEqual((await f.records())[f.env.id], stopped);
+  assert.equal(f.connects.length, 1);
 });
