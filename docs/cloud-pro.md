@@ -2023,7 +2023,9 @@ screen's note.
   the menu is.
 - **The dialog** (`components/CloudAddDialog.tsx`, one state→view function,
   `lib/cloud-plan` `cloudAddView`) covers the buying journey only: the offer
-  (MausBot Cloud's name beside its three mascots and one line, then one card
+  (the night card: MausBot Cloud's name and one line over a linocut night sky
+  where the three bots ride a cloud while this computer's laptop sleeps, with
+  Compare plans in the card; then one card
   per plan the Admin sells, side by side on a wide sheet and stacked in a
   narrow window, from `lib/cloud-plan` `planCards`: its name, "Most popular"
   as a quiet tag on the Admin's recommended plan only, the price per month,
