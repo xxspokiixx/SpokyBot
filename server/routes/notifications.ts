@@ -3,9 +3,9 @@ import type { NotificationLogEntry } from "../../shared/notification.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-/** Opening a conversation reads its notifications, so every open app's badge drops them too. */
-export function readThreadNotifications(threadId: string, broadcast: (payload: Record<string, unknown>) => void): void {
-  const ids = markThreadNotificationLogRead(threadId);
+/** Automatic conversation reads keep spend alerts unread unless the opener is an owner or admin. */
+export function readThreadNotifications(threadId: string, broadcast: (payload: Record<string, unknown>) => void, auth: RequestAuth): void {
+  const ids = markThreadNotificationLogRead(threadId, ownerOrAdmin(auth));
   if (ids.length) broadcast({ kind: "notifications.read", threadId, ids });
 }
 

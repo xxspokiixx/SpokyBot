@@ -47,3 +47,50 @@ it("lets a Team Cloud member list and read only their own notification feed", as
     await fixture.close();
   }
 }, hostTimeout(120_000));
+
+it("keeps admin spend alerts unread when a Team Cloud member opens a shared conversation", async () => {
+  const fixture = await launchCloudSendFixture({ onePasswordToken: "synthetic-spend-read-token",
+    team: { id: "team-spend-read", name: "Spend reads" } });
+  try {
+    const team = fixture.team!;
+    const owner = await team.pair({ email: "ada@notifications.test", role: "owner" });
+    const member = await team.pair({ email: "bob@notifications.test", role: "member" });
+    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout" });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    const channel = await team.as(owner.token!, "POST", "/api/groups", { name: "Updates", memberIds: [bot.id],
+      setup: { bulletin: "", defaultResponder: { kind: "everyone" } } });
+    expect(channel.status).toBe(201);
+    const group = channel.body.group;
+    const unread = async () => {
+      const listed = await team.as(owner.token!, "GET", "/api/notifications");
+      expect(listed.status).toBe(200);
+      return listed.body.notifications.filter((entry: { read: boolean }) => !entry.read).map((entry: { id: string }) => entry.id).sort();
+    };
+    await unread();
+    const db = new DatabaseSync(join(team.home, ".openmausbot", "messages.db"));
+    try {
+      const insert = db.prepare("INSERT INTO notification_log(id, at, kind, bot_id, bot_name, thread_id, title, body) VALUES (?, ?, 'spend', ?, 'Scout', ?, 'Fixture spend', '$12 of $20 spent')");
+      insert.run("shared-spend", Date.now(), bot.id, bot.mainThreadId);
+      insert.run("workspace-spend", Date.now(), bot.id, "");
+      for (const [path, threadId] of [
+        [`/api/bots/${bot.id}/read`, bot.mainThreadId],
+        [`/api/bots/${bot.id}/tasks/${bot.mainThreadId}`, bot.mainThreadId],
+        [`/api/groups/${group.id}/read`, group.threadId],
+        [`/api/groups/${group.id}/tasks/${group.threadId}`, group.threadId],
+      ]) {
+        db.prepare("UPDATE notification_log SET read = 0").run();
+        db.prepare("UPDATE notification_log SET thread_id = ? WHERE id = 'shared-spend'").run(threadId);
+        expect(await unread()).toEqual(["shared-spend", "workspace-spend"]);
+        expect((await team.as(member.token!, "POST", path, { threadId })).status, path).toBe(200);
+        expect(await unread(), path).toEqual(["shared-spend", "workspace-spend"]);
+        expect((await team.as(owner.token!, "POST", path, { threadId })).status, path).toBe(200);
+        expect(await unread(), path).toEqual(["workspace-spend"]);
+      }
+    } finally {
+      db.close();
+    }
+  } finally {
+    await fixture.close();
+  }
+}, hostTimeout(120_000));
