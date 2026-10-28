@@ -9,6 +9,7 @@ const fixture = vi.hoisted(() => ({
   api: vi.fn(),
   config: null as null | { team?: { id: string; name: string } },
   servers: [] as Array<Record<string, unknown>>,
+  sharedHeaders: {} as Record<string, Record<string, string>>,
   test: { ok: true, tools: [{ name: "a" }, { name: "b" }], total: 12 } as Record<string, unknown>,
 }));
 vi.mock("@/state/store", () => ({
@@ -49,12 +50,14 @@ beforeEach(async () => {
   setLocale("en");
   fixture.config = null;
   fixture.servers = [];
+  fixture.sharedHeaders = {};
   fixture.test = { ok: true, tools: [{ name: "a" }, { name: "b" }], total: 12 };
   fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     if (method === "GET" && path === "/api/mcp/servers") return { servers: fixture.servers };
     if (method === "POST" && path === "/api/mcp/servers") {
+      fixture.sharedHeaders[body.name] = body.headers ?? {};
       fixture.servers = [...fixture.servers, { name: body.name, type: body.type, url: body.url, headerKeys: Object.keys(body.headers ?? {}), enabled: false }];
       return { servers: fixture.servers };
     }
@@ -62,6 +65,12 @@ beforeEach(async () => {
     if (method === "PATCH") {
       const name = decodeURIComponent(path.split("/").at(-1)!);
       fixture.servers = fixture.servers.map((server) => server.name === name ? { ...server, enabled: body.enabled } : server);
+      return { servers: fixture.servers };
+    }
+    if (method === "PUT" && path.startsWith("/api/mcp/servers/")) {
+      const name = decodeURIComponent(path.split("/").at(-1)!);
+      fixture.sharedHeaders[name] = body.headers ?? {};
+      fixture.servers = fixture.servers.map((server) => server.name === name ? { ...server, headerKeys: Object.keys(body.headers ?? {}), enabled: body.enabled } : server);
       return { servers: fixture.servers };
     }
     if (method === "PUT") return path.includes("connection-scopes") ? { scopes: { apps: [], mcp: [body.id] } } : { ok: true };
@@ -236,4 +245,27 @@ describe("Adding an MCP server on a Team Cloud", () => {
     ]);
     expect(host.textContent).toContain("Connected: 12 tools");
   });
+
+  it.each(["/api/team/connection-scopes", "/api/team/my-connections/mcp/mail/key"])(
+    "keeps Only for me disabled and removes the shared key when %s fails", async (failedPath) => {
+      const previous = fixture.api.getMockImplementation()!;
+      fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (init?.method === "PUT" && path === failedPath) throw new Error("Personal setup failed.");
+        return previous(path, init);
+      });
+      await click("Add server");
+      await type("textarea[aria-label='Server link or setup command']", 'claude mcp add --transport http mail https://mail.example.com/mcp -H "Authorization: Bearer $MAIL_KEY"');
+      await type("input[aria-label='Authorization']", "mail-key-12345");
+      await act(async () => host.querySelector<HTMLInputElement>("[data-mcp-team-scope] input[type=checkbox]")!.click());
+      await settle();
+      await click("Add");
+
+      expect(fixture.servers).toEqual([expect.objectContaining({ name: "mail", enabled: false })]);
+      expect(fixture.sharedHeaders.mail).toEqual({});
+      expect(calls("POST", "/api/mcp/servers/mail/test")).toEqual([]);
+      expect(calls("PATCH")).toEqual([]);
+      expect(host.textContent).toContain("Personal setup failed.");
+      expect(host.textContent).not.toContain("Connected:");
+    },
+  );
 });

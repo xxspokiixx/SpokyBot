@@ -185,11 +185,18 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     try {
       for (const item of items) {
         latest = listed((await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: item.name, ...item.body }) })).servers);
-        added.push(item.name);
         if (item.ownKey) {
-          await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
-          await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
+          try {
+            await api("/api/team/connection-scopes", { method: "PUT", body: JSON.stringify({ kind: "mcp", id: item.name, scope: "person" }) });
+            await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: item.ownKey }) });
+          } catch (cause) {
+            latest = listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, {
+              method: "PUT", body: JSON.stringify({ ...item.body, headers: {}, enabled: false }),
+            })).servers);
+            throw cause;
+          }
         }
+        added.push(item.name);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
