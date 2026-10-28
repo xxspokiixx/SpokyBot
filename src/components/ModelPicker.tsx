@@ -7,6 +7,8 @@ import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
+import { choiceIsSelected, modelChoices, modelSelectionForPick, type ModelChoice } from "@/lib/model-choices";
+export { modelSelectionForPick } from "@/lib/model-choices";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import { isTypeaheadKey, TYPEAHEAD_RESET_MS, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
@@ -32,7 +34,6 @@ import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
 import { Select } from "./Select";
 
-type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
 
 function modelLabel(instance: InstanceInfo | undefined, model: string): string {
@@ -231,16 +232,6 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
       )}
     </div>
   );
-}
-
-export function modelSelectionForPick(selection: ModelSelection, instance: InstanceInfo, model: string): ModelSelection {
-  const next: ModelSelection = { instanceId: instance.instanceId, model };
-  if (instance.instanceId === selection.instanceId) {
-    if (instance.capabilities?.modelVariants) {
-      if (model === selection.model && selection.variant !== undefined) next.variant = selection.variant;
-    } else if (selection.effort) next.effort = selection.effort;
-  }
-  return next;
 }
 
 const POPOVER_WIDTH = 420;
@@ -510,9 +501,10 @@ export function ModelPicker({
     dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: false, selection: profile.modelSelection });
   };
 
-  const pick = (instance: InstanceInfo, model: string) => {
+  const pick = (instance: InstanceInfo, model: string, variant?: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
+    if (variant !== undefined) nextSelection.variant = variant;
     const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
@@ -534,9 +526,16 @@ export function ModelPicker({
     close(true);
   };
 
-  const official = railInstance?.models.options.filter((option) => !option.custom) ?? [];
+  const resetVariant = contained && selection.variant !== undefined ? () => {
+    const { variant: _variant, ...nextSelection } = selection;
+    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || simpleUpdatesBotDefault, selection: nextSelection });
+    close(true);
+  } : undefined;
+
+  const official = railInstance ? modelChoices(railInstance, railInstance.models.options.filter((option) => !option.custom)) : [];
   const custom = railInstance?.models.options.filter((option) => option.custom) ?? [];
-  const currentModel = selection.instanceId === railInstance?.instanceId ? selection.model : undefined;
+  const currentModel = selection.instanceId === railInstance?.instanceId
+    ? official.find((option) => choiceIsSelected(option, selection))?.id : undefined;
   const filteredOfficial = filterCustomModels(official, query);
   const compactOfficial = railInstance
     ? suggestedModels(official, railInstance.models.default, currentModel, COMPACT_MODEL_COUNT)
@@ -576,16 +575,16 @@ export function ModelPicker({
     : levels.length > 0 && !shown.busy ? { levels, current: selection.effort, onPick: writeEffort, onReset: () => writeEffort(undefined) }
     : null;
 
-  const botModelId = follows !== undefined && profile.modelSelection.instanceId === railInstance?.instanceId
-    ? profile.modelSelection.model : undefined;
-  const renderRow = (option: ModelOption) => (
+  const botModelSelection = follows !== undefined && profile.modelSelection.instanceId === railInstance?.instanceId
+    ? profile.modelSelection : undefined;
+  const renderRow = (option: ModelChoice) => (
     <ModelRow
       key={option.id}
       option={option}
-      current={selection.instanceId === railInstance?.instanceId && selection.model === option.id}
+      current={selection.instanceId === railInstance?.instanceId && choiceIsSelected(option, selection)}
       defaultId={railInstance?.models.default ?? ""}
-      botModel={option.id === botModelId}
-      onPick={() => railInstance && pick(railInstance, option.id)}
+      botModel={botModelSelection ? choiceIsSelected(option, botModelSelection) : false}
+      onPick={() => railInstance && pick(railInstance, option.nativeModel ?? option.id, option.variant)}
     />
   );
 
@@ -1095,6 +1094,7 @@ export function ModelPicker({
           onSetUp={openFull}
           onCheckAgain={(instance) => refreshModels(instance.instanceId)}
           onManage={openEngines}
+          onResetVariant={resetVariant}
         />
       ) : fullPane}
     </div>

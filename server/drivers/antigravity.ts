@@ -60,6 +60,7 @@ const support: AcpSupport = {
   images: true,
   spawnArgs: () => [],
   selectModel: { configId: "model" },
+  modelVariants: true,
   // Google's server reads its new-session default from this variable (agy_acp_server 1.4.3
   // model_selection.get_default_model_id); a later switch re-fetches the model list (1.3-1.8 s).
   sessionModelEnv: "AGY_ACP_DEFAULT_MODEL",
