@@ -1641,7 +1641,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route);
         const needsAuth = refused || /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(raw);
         const verdict = classifyError(failure);
-        if (!state.settled && !abandoned && !recoveredMissingSession && !stopRequested && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
+        if (!state.settled && !abandoned && !recoveredMissingSession && !stopRequested && !needsAuth && codexTurnId === null && earlyNotifications.length === 0 && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
           return relaunch(verdict.reason, message, "rpc_error");
         }
         if (!state.settled && !abandoned) {
