@@ -77,6 +77,20 @@ it("accepts only one competing commit over the same uncached version", async () 
   expect(await sync.commit(await upload("third", sha("first")))).toEqual({ sha256: sha("third") });
 });
 
+it.each(["\ud800.txt", "\ud801.txt", "\udc00.txt", "\udfff.txt"])("rejects a malformed Unicode alias %j while its file has a pending commit", async (path) => {
+  const target = join(folder.cloudPath, "\ufffd.txt");
+  writeFileSync(target, "original");
+  const id = await upload("first", sha("original"), "\ufffd.txt");
+  const held = holdCurrent();
+  const committed = sync.commit(id);
+  await held.entered;
+  try {
+    await expect(upload("second", sha("original"), path).then((id) => sync.commit(id))).rejects.toMatchObject({ status: 400 });
+    expect(readFileSync(target, "utf8")).toBe("original");
+  } finally { held.release(); await committed; }
+  expect(readFileSync(target, "utf8")).toBe("first");
+});
+
 it("checks a competing delete against the committed version", async () => {
   writeFileSync(join(folder.cloudPath, "a.txt"), "original");
   const id = await upload("first", sha("original"));
