@@ -61,3 +61,22 @@ it.each(["interrupt", "stopAll", "dispose"])("keeps ownership through %s until t
     { ok: true, stopReason: "cancelled" },
   ]);
 });
+
+it("fails a refused model change without sending the prompt", async () => {
+  await instance.adapter.sendTurn({ threadId: "refused-model", text: "hello", model: "fixture/refused" });
+  const completed = await events.until((event) => event.type === "turn.completed");
+  expect(completed).toMatchObject({ ok: false, stopReason: "failed" });
+  expect(events.events.some((event) => event.type === "runtime.error")).toBe(true);
+  const rows = readFileSync(join(dir, "rpc.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  expect(rows.some((row) => "prompt" in row)).toBe(false);
+  expect(events.events.some((event) => event.type === "session.started" && event.model === "fixture/refused")).toBe(false);
+});
+
+it.each([
+  ["fixture/alias", "fixture/confirmed"],
+  [undefined, "fixture/default"],
+])("reports the confirmed model for selection %s", async (model, confirmed) => {
+  await instance.adapter.sendTurn({ threadId: "confirmed-model", text: "hello", model });
+  await events.until((event) => event.type === "turn.completed");
+  expect(events.events.find((event) => event.type === "session.started")).toMatchObject({ model: confirmed });
+});

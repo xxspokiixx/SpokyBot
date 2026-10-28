@@ -105,6 +105,12 @@ interface PiModelEntry {
   id: string;
   name?: string;
 }
+
+function piModelId(model: unknown): string | null {
+  const entry = model as Partial<PiModelEntry> | null | undefined;
+  return typeof entry?.provider === "string" && entry.provider && typeof entry.id === "string" && entry.id
+    ? `${entry.provider}/${entry.id}` : null;
+}
 interface PiModelsResponse {
   type: "response";
   command: "get_available_models";
@@ -802,7 +808,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // The resumeCursor is pi's sessionFile, which switch_session takes as `sessionPath`.
       const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       let sessionFile = sessionPath;
+      let sessionId: string | null = sessionFile;
       let sessionReady = false;
+      let sessionOpened = false;
+      let confirmedModel: string | null = null;
       try {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command, Infinity);
@@ -810,13 +819,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         const slow = setTimeout(() => emit({ ...base(threadId, turnId), type: "runtime.notice", message: PI_SESSION_SLOW }), PI_SESSION_SLOW_MS);
         const hs = (await hsPromise.finally(() => clearTimeout(slow))) as { sessionFile?: string; sessionId?: string } | undefined;
         if (hs?.sessionFile) sessionFile = hs.sessionFile;
+        sessionId = sessionFile ?? hs?.sessionId ?? null;
         sessionReady = true;
-        emit({
-          ...base(threadId, turnId),
-          type: "session.started",
-          sessionId: sessionFile ?? hs?.sessionId ?? null,
-          model: turn.model ?? null,
-        });
+        sessionOpened = true;
       } catch {
         // pi --no-session accepts a prompt without an explicit session.
       }
@@ -827,9 +832,26 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         try {
           const modelPromise = awaitResponse("set_model");
           send({ type: "set_model", provider: chosen.provider, modelId: chosen.modelId });
-          await modelPromise;
+          confirmedModel = piModelId(await modelPromise);
+          if (!confirmedModel) throw new Error("Pi did not confirm the selected model");
+        } catch (error) {
+          if (!settled) {
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message) });
+            await settle(false);
+          }
+          return { turnId };
+        }
+      }
+      if (!chosen) {
+        try {
+          const statePromise = awaitResponse("get_state");
+          send({ type: "get_state" });
+          const state = await statePromise as { model?: unknown } | undefined;
+          confirmedModel = piModelId(state?.model);
         } catch {}
       }
+      if (settled) return { turnId };
+      if (sessionOpened) emit({ ...base(threadId, turnId), type: "session.started", sessionId, model: confirmedModel });
 
       // After the model: the supported level set is model-dependent.
       if (turn.effort) {
@@ -839,6 +861,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           await levelPromise;
         } catch {}
       }
+      if (settled) return { turnId };
 
       if (scopeReadyPath) {
         let ready = false;

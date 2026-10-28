@@ -17,9 +17,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (["get_state", "new_session", "switch_session"].includes(cmd.type)) {
     reply(cmd.type, { sessionFile: "fixture-session.jsonl", model });
   }
+  if (cmd.type === "set_model") {
+    dump({ setModel: cmd.modelId });
+    if (cmd.modelId === "refused") send({ type: "response", command: cmd.type, success: false, error: "Model unavailable" });
+    else reply(cmd.type, { provider: "fixture", id: "confirmed" });
+  }
   if (cmd.type === "prompt") {
     dump({ prompt: cmd.message, pid: process.pid });
     reply(cmd.type);
     send({ type: "tool_execution_start", toolCallId: "ready", toolName: "fixture" });
+    if (cmd.message !== "wait") {
+      send({ type: "turn_end", message: { stopReason: "end_turn" } });
+      send({ type: "agent_end", isTerminal: true });
+      send({ type: "agent_settled" });
+    }
   }
 });
