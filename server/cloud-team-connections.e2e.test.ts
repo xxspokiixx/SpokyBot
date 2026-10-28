@@ -36,7 +36,7 @@ beforeAll(async () => {
   mail = await startFakeHttpMcp({ tools: [{ name: "read_inbox" }] });
   oauth = await startFakeOAuth();
   notes = await startFakeHttpMcp({ tools: [{ name: "read_notes" }], acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
-  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, broker, team: { id: "team-acme-1", name: "Acme", engine: ENGINE } });
+  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, broker, team: { id: "team-acme-1", name: "Acme", engine: ENGINE, env: { OMB_BOT_BOX: "0" } } });
   team = fx.team!;
   owner = (await team.pair(OWNER)).token!;
   admin = (await team.pair(ADMIN)).token!;
@@ -255,4 +255,81 @@ it("disconnects her own, and switching back to the team gives every turn the tea
   expect(back.servers).not.toContain("own_apps");
   expect(back.config).toContain(TEAM_KEY);
   expect(gmailCallsBy(teamUser)).toBe(teamBefore + 1);
+}, hostTimeout(120_000));
+
+it.each([false, true])("tests a person-scoped OAuth server after panel sign-in (registered client: %s)", async (registered) => {
+  const provider = await startFakeOAuth({ preRegistered: { "panel-client": null } });
+  const server = await startFakeHttpMcp({ acceptBearer: provider.isValid, wwwAuthenticate: provider.challenge });
+  const path = "/api/mcp/servers/panel_oauth";
+  try {
+    expect((await team.as(owner, "POST", "/api/mcp/servers", {
+      name: "panel_oauth", type: "http", url: server.url,
+      ...(registered ? { oauth: { clientId: "panel-client" }, headers: { "X-Workspace": "acme" } } : {}),
+    })).status).toBe(201);
+    expect((await team.as(owner, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "panel_oauth", scope: "person" })).status).toBe(200);
+    expect((await team.as(owner, "POST", `${path}/test`, {})).body.auth).toBe("required");
+    const started = await team.as(owner, "POST", `${path}/sign-in`, {});
+    expect(started.status, JSON.stringify(started.body)).toBe(200);
+    const redirect = await fetch(started.body.auth.authorizationUrl, { redirect: "manual" });
+    const flowPath = `${path}/sign-in/${started.body.auth.flowId}`;
+    const completed = await team.as(owner, "POST", flowPath, { callbackUrl: redirect.headers.get("location") });
+    expect(completed.status, JSON.stringify(completed.body)).toBe(200);
+    expect(completed.body.auth.phase).toBe("succeeded");
+    expect((await team.as(owner, "GET", flowPath)).body.auth.phase).toBe("succeeded");
+    const tested = await team.as(owner, "POST", `${path}/test`, {});
+    expect(tested.status).toBe(200);
+    expect(tested.body).toMatchObject({ ok: true, tools: [{ name: "read_notes" }] });
+    expect((await team.as(owner, "POST", `${path}/sign-out`, {})).status).toBe(200);
+    expect((await team.as(owner, "POST", `${path}/test`, {})).body.auth).toBe("required");
+  } finally {
+    await team.as(owner, "DELETE", path);
+    await server.close();
+    await provider.close();
+  }
+}, hostTimeout(60_000));
+
+it("skips automatic personal MCP probes after setup and restart while still probing team servers", async () => {
+  const ownAuthorization = "Bearer own-probe-key";
+  const teamAuthorization = "Bearer team-probe-key";
+  const personal = await startFakeHttpMcp({ requireHeaders: { Authorization: ownAuthorization } });
+  const shared = await startFakeHttpMcp({ requireHeaders: { Authorization: teamAuthorization },
+    tools: [{ name: "show_view", _meta: { ui: { resourceUri: "ui://probe/view.html" } } }] });
+  try {
+    const own = { type: "http", url: personal.url, headers: { Authorization: "" } };
+    expect((await team.as(owner, "POST", "/api/mcp/servers", { name: "personal_probe", ...own })).status).toBe(201);
+    expect((await team.as(owner, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "personal_probe", scope: "person" })).status).toBe(200);
+    expect((await team.as(owner, "PUT", "/api/team/my-connections/mcp/personal_probe/key", { value: ownAuthorization, url: personal.url })).status).toBe(200);
+    expect((await team.as(owner, "PUT", "/api/mcp/servers/personal_probe", { ...own, enabled: false })).status).toBe(200);
+    const tested = await team.as(owner, "POST", "/api/mcp/servers/personal_probe/test", {});
+    expect(tested.status).toBe(200);
+    expect(tested.body).toMatchObject({ ok: true });
+    expect(personal.toolsLists).toBe(1);
+    expect((await team.as(owner, "PATCH", "/api/mcp/servers/personal_probe", { enabled: true })).status).toBe(200);
+
+    expect((await team.as(owner, "POST", "/api/mcp/servers", {
+      name: "team_probe", type: "http", url: shared.url, headers: { Authorization: teamAuthorization },
+    })).status).toBe(201);
+    expect((await team.as(owner, "PATCH", "/api/mcp/servers/team_probe", { enabled: true })).status).toBe(200);
+    const teamHasApps = async () => {
+      const listed = await team.as(owner, "GET", "/api/mcp/servers");
+      expect(listed.status).toBe(200);
+      return listed.body.servers.find((server: { name: string }) => server.name === "team_probe")?.hasApps;
+    };
+    await expect.poll(teamHasApps, { timeout: 20_000 }).toBe(true);
+    expect(shared.toolsLists).toBe(1);
+    expect.soft(personal.seenHeaders.filter((headers) => headers.authorization !== ownAuthorization), "after personal setup").toEqual([]);
+
+    personal.seenHeaders.length = 0;
+    rmSync(join(team.home, ".openmausbot", "mcp-app-catalog.json"));
+    await team.relaunch();
+    await expect.poll(teamHasApps, { timeout: 40_000 }).toBe(true);
+    expect(shared.toolsLists).toBe(2);
+    expect.soft(personal.seenHeaders, "after restart with a cold app catalog").toEqual([]);
+    expect(shared.seenHeaders.every((headers) => headers.authorization === teamAuthorization)).toBe(true);
+  } finally {
+    await team.as(owner, "DELETE", "/api/mcp/servers/personal_probe");
+    await team.as(owner, "DELETE", "/api/mcp/servers/team_probe");
+    await personal.close();
+    await shared.close();
+  }
 }, hostTimeout(120_000));

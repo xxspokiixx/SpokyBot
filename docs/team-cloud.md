@@ -130,7 +130,7 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
 | `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab) |
 | `DELETE /api/team/my-connections/apps/:slug` | the member | |
 | `POST /api/team/my-connections/mcp/:name/sign-in` | the member | `{ auth }`; it comes back to this server's `/mcp-oauth/callback` |
-| `PUT /api/team/my-connections/mcp/:name/key { value }` | the member | write-only |
+| `PUT /api/team/my-connections/mcp/:name/key { value, url? }` | the member | write-only; with `url`, returns 409 if the server URL changed |
 | `DELETE /api/team/my-connections/mcp/:name` | the member | |
 
 The signed read (`GET /api/cloud/team/admin`) adds `scopes: { apps, mcp }` and `people: { apps: { <slug>: [address] },
