@@ -1123,9 +1123,15 @@ differs from the previous one only in those (a few MB) unless Chrome, an
 engine, Grok's pin, or the Node base image changed in between.
 
 At boot the launcher, running as root, hands the volume's mount point to the
-`maus` user, binds the volume to this machine as `maus`
-(`/data/.omb-cloud-home.json`; another machine's volume, or an unmarked
-volume with data on it, is refused), and runs two children as `maus`: the
+`maus` user, locks the volume for as long as it runs (`flock` on the volume's
+root: a second home on a volume a live home holds refuses to start, which
+Docker on your own server does not prevent by itself), binds the volume to
+this machine as `maus` (`/data/.omb-cloud-home.json`; another machine's
+volume, or an unmarked volume with data on it, is refused), clears the
+data-directory lease records another machine or container left on it (a home
+killed uncleanly leaves one, and on one Docker host every container shares the
+boot id while its pids start again from 1, so the lease names its pid
+namespace and its process's start time too), and runs two children as `maus`: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
 `:8080`. It stays a small root supervisor: if either child exits, both stop
 and Fly restarts the machine. The one exception: after a restore commits
@@ -1226,10 +1232,14 @@ home as a service, never the owner (see above), and the server never binds
 a public interface. Caddy
 (`deploy/fly/Caddyfile`) forwards every request with `X-Forwarded-Proto:
 https` and `X-Forwarded-For`, so the server sees each one as remote: it needs
-a paired session, whatever `Host` it claims. Caddy trusts `Fly-Client-IP`
-only from Fly's private ranges; that address feeds the pairing lockout, never
-authorization. Apart from `/api/health`, Caddy answers only for the machine's
-own name (`OMB_PUBLIC_URL`) and refuses any other `Host`.
+a paired session, whatever `Host` it claims. On Fly (`FLY_APP_NAME` is set),
+Caddy trusts `Fly-Client-IP` only from Fly's private ranges. On your own
+server, where any local process can reach the published port, it trusts
+`Cf-Connecting-IP` only from the home's own loopback, where the Cloudflare
+tunnel connects from, and ignores a client-address header from any other peer
+(the launcher sets both: `edgeClientAddress`). That address feeds the pairing
+lockout, never authorization. Apart from `/api/health`, Caddy answers only for
+the machine's own name (`OMB_PUBLIC_URL`) and refuses any other `Host`.
 
 ### Fly
 
