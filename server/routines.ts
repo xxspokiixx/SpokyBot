@@ -1079,7 +1079,7 @@ export class RoutineManager {
       for (const run of scheduledRuns) {
         if (run.status === "missed") this.options.onRunFailed?.(cloneRun(run));
       }
-      for (const { id, hold } of checks) void this.runChecks(id, hold);
+      for (const { id, hold } of checks) this.runChecks(id, hold).catch((error) => console.error(`routines: the checks of ${id} failed`, error));
 
       // Oldest first, by id: a rollback across awaits can replace the run objects.
       for (const id of this.runs.map((run) => run.id)) {
@@ -1109,7 +1109,7 @@ export class RoutineManager {
         }
         const checked = triggerSource === "webhook" || run.checkKey ? undefined : this.routines.find((routine) => routine.id === run.routineId && routine.checks);
         if (checked) {
-          void this.runChecks(checked.id, checkHold(this.runs, checked.id, now, run.id), run.id);
+          this.runChecks(checked.id, checkHold(this.runs, checked.id, now, run.id), run.id).catch((error) => console.error(`routines: the checks of ${checked.id} failed`, error));
           continue;
         }
         const sameRoutineWorking = triggerSource === "schedule" && this.runs.some(other =>
