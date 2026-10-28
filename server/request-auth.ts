@@ -276,6 +276,9 @@ export function clearSessionCookie(name: string): string {
 /** What a `client` session may do. Default deny: a new route is admin-only until listed here. */
 export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; feature?: "sharedComputers" }> = [
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
+  { methods: ["GET"], path: /^\/api\/notifications$/ },
+  { methods: ["POST"], path: /^\/api\/notifications\/read-all$/ },
+  { methods: ["POST"], path: /^\/api\/notifications\/[\w-]+\/read$/ },
   // the update check only reads a version
   { methods: ["GET"], path: /^\/api\/updates\/check$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
