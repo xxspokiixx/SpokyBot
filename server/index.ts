@@ -2168,7 +2168,7 @@ const directTurnBots = new Map<string, BotRecord>();
 const turnPromptBytes = new Map<string, { stable: number; volatile: number }>();
 let providerFleetReloading = false;
 const turnResources = new TurnResources();
-const sharedComputerControl = new SharedComputerControl(turnResources, () => store.bots.some(bot => botComputerControlSnapshot(bot.id).held));
+const sharedComputerControl = new SharedComputerControl(turnResources, (owner) => store.botByThread(owner.threadId)?.name);
 const turnResourceOwners = new Map<string, TurnOwner>();
 const turnComputerResources = new Map<string, { owner: TurnOwner; resource: string }>();
 const teamComputerTurns = new Map<string, { owner: TurnOwner; computerId: string; botId: string }>();
@@ -13261,7 +13261,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       else {
         const refusal = managedPolicy.computerRefusal("thisComputer");
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
-        sharedComputerControl.acquire(body.id);
+        const busy = sharedComputerControl.acquire(body.id); if (busy) return json(res, 409, { error: busy, code: "bot" });
       }
       return json(res, 200, { ok: true });
     }
