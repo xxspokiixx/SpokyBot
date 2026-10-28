@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { cloudLendingVerdict, createComputerSharing } from "./computer-sharing.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
+import { PERSON_AWAY_SECONDS, personActiveText } from "./lent-screen-presence.mjs";
 
 const ORIGIN = "https://omb-u-fixture.fly.dev";
 const binding = { accountId: "acct_1", origin: ORIGIN };
@@ -35,7 +36,7 @@ async function scratch(t) {
   return dir;
 }
 
-function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false } = {}) {
+function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, disconnectBodies: [], results: [], queue: [], waiting: null };
   const nextJob = () => new Promise(resolve => { state.waiting = resolve; });
@@ -46,7 +47,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return state.paired ? json({ kind: "session", id: state.sessionId, scopes, ...(cloudHome ? { cloudHome: true } : {}) }) : json({ error: "unauthorized" }, 401);
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -93,7 +94,7 @@ async function lendingFixture(t, options = {}) {
     // The maintainer flag is off, as for every Cloud Pro user.
     enabled: async () => { maintainerChecks++; return false; },
     cloud: () => cloud, home: path.join(dir, "home"),
-    cuaConnection: async () => driver.connection,
+    cuaConnection: async () => driver.connection, ...(options.idleSeconds ? { idleSeconds: options.idleSeconds } : {}),
     hostControl: options.hostControl ?? (async id => { leases.push(`acquire:${id}`); return { renew: async () => {}, release: async () => { leases.push(`release:${id}`); } }; }),
     onChange: summary => summaries.push(summary),
   });
@@ -280,6 +281,32 @@ for (const stalled of ["the Cloud's lease answer", "the renew"]) {
   });
 }
 
+test("while the person uses this computer, background screen calls run and one that would take their mouse waits, with the reason", async t => {
+  let idle = 0;
+  const { home, sharing, driver, leases } = await lendingFixture(t, { idleSeconds: () => idle });
+  await sharing.saveCloud(env, { folders: [], screen: true });
+  await connected(sharing, 1, home);
+  const run = async operation => {
+    const before = home.results.length;
+    home.push(operation);
+    await until(() => home.results.length === before + 1, operation.tool_name ?? operation.action);
+    return home.results.at(-1);
+  };
+  // Listing the tools never touches the screen, so it takes no screen lock.
+  assert.notEqual((await run({ action: "computer_tools" })).isError, true);
+  assert.deepEqual(leases, []);
+  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_index: 3 } })).isError, true);
+  for (const args of [{ x: 5, y: 5 }, { pid: 42, window_id: 7, x: 5, y: 5, delivery_mode: "foreground" }]) {
+    const refused = await run({ action: "computer_call", tool_name: "click", arguments: args });
+    assert.equal(refused.isError, true);
+    assert.equal(refused.content[0].text, personActiveText("click"));
+  }
+  assert.equal(leases.filter(entry => entry.startsWith("acquire:")).length, 1, "a refused call never takes the screen");
+  assert.equal((await readFile(driver.calls, "utf8")).trim().split("\n").length, 1, "nor reaches the driver");
+  idle = PERSON_AWAY_SECONDS;
+  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { x: 5, y: 5 } })).isError, true);
+});
+
 test("another Cloud account or another machine ends lending; a sign-in that needs renewing only pauses it", async t => {
   {
     const { folderPath, home, sharing, setCloud } = await lendingFixture(t);
@@ -452,6 +479,15 @@ test("tells My Cloud its platform only when that Cloud takes it, so its bots say
     await connected(sharing, 1, home);
     if (details) assert.equal(home.connects[0].platform, process.platform);
     else assert.equal("platform" in home.connects[0], false, "an older Cloud refuses fields it does not know");
+  }
+});
+
+test("says it takes a command's timeout only to a Cloud that sends one, since an older Cloud refuses fields it does not know", async t => {
+  for (const timeouts of [true, false]) {
+    const { folderPath, home, sharing } = await lendingFixture(t, { home: { timeouts } });
+    await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+    await connected(sharing, 1, home);
+    assert.equal(home.connects[0].commandTimeouts, timeouts ? true : undefined);
   }
 });
 

@@ -1551,9 +1551,28 @@ wait for the next read, `truncated: true`):
   "connectors": { "checkedAt": 1790000000000, "failed": false, "items": [{ "slug": "gmail", "connected": false }] },
   "browser": { "available": true, "installing": false, "interrupted": 0 },
   "system": { "totalBytes": 4294967296, "availableBytes": 2147483648, "rssBytes": 314572800, "load1": 0.4, "cpus": 2,
-    "disk": { "totalBytes": 10737418240, "freeBytes": 8589934592 }, "eventLogWritable": true }
+    "disk": { "totalBytes": 10737418240, "freeBytes": 8589934592 }, "eventLogWritable": true },
+  "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
+    "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
+  "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 }
 }
 ```
+
+**`firstHour`** is there on a personal Cloud that began with its first hour
+(`server/host/first-hour.ts`), else `null`: `startedAt` is the first boot,
+and each milestone in `ms` is how long after it that step happened, present
+once it has: the person first opened the app (`seen`), wrote (`firstMessage`),
+was offered Gmail and Google Calendar (`offered`), connected one (`firstApp`)
+or set the offer aside (`declined`), got the first look (`firstLook`), was
+told the 8:00 morning brief is on (`briefOn`), was offered the phone
+(`phoneOffered`), paired it (`phonePaired`), and got the day-two recap
+(`recap`). `apps` names the apps connected when the first look began (whether or not it
+ran), and `look` says whether
+it was `delivered`, `failed`, or left to the person's own task (`own-task`).
+**`value`** is on any personal Cloud: what its Chief really did, counted when
+it happened (`server/host/value-ledger.ts`): emails sorted, reply drafts
+written, meetings prepared, routine results posted since the first hour
+began, and the minutes that adds up to at 1, 5, 10 and 3 minutes each.
 
 **Incidents** come from one tap on the store: every failed-turn row
 (`shared/failed-turn.ts`, the only way a server writes one) is counted in a
@@ -2004,23 +2023,27 @@ screen's note.
   the menu is.
 - **The dialog** (`components/CloudAddDialog.tsx`, one state→view function,
   `lib/cloud-plan` `cloudAddView`) covers the buying journey only: the offer
-  (one card per plan the Admin sells, side by side on a wide sheet and
-  stacked in a narrow window, from `lib/cloud-plan` `planCards`: its name,
-  "Most popular" on the Admin's recommended plan only, the price per month,
-  its promise, its own button (Start free trial, or Get {plan} without a
-  trial) with its terms in one line under it, then the same rows in the same
-  order on every card in the website's words (with the app's "cloud
+  (MausBot Cloud's name beside its three mascots and one line, then one card
+  per plan the Admin sells, side by side on a wide sheet and stacked in a
+  narrow window, from `lib/cloud-plan` `planCards`: its name, "Most popular"
+  as a quiet tag on the Admin's recommended plan only, the price per month,
+  its promise, and only what sets the plans apart (`cardRows`): the month's
+  cloud desktop hours, storage and what it grows to, voice, and sleeping
+  when the plans differ there; then its own button (Start free trial, or
+  Get {plan} without a trial; the recommended plan's is the one primary
+  pill) with its terms in one line under it. **Compare plans** opens the
+  rest of every card's rows, in the website's words (with the app's "cloud
   desktop" for the website's "cloud computer"), every number from the
   Admin's `allowances`: always on (or sleeping), cloud desktops as many as
-  the bots need (how many at once only as small print), the month's hours,
-  CPUs and memory (swap as small print), storage and what it grows to,
-  voice, and daily backups' days. The card of the plan the account already
-  has says **Your plan** instead of a button (`current`, from the verified
-  entitlement's tier); a plan no longer on sale, such as a Personal
-  subscriber's, shows only for that subscriber when the screen is given it
-  (`own`). Under the cards, when every plan has the same trial, the trial's
-  timeline with the reminder line only while the Admin sends one, and the
-  Claude credit; money-back; prices plus tax. No launch or struck-through
+  the bots need (how many at once only as small print), CPUs and memory
+  (swap as small print), and daily backups' days. The card of the plan the
+  account already has says **Your plan** instead of a button (`current`,
+  from the verified entitlement's tier); a plan no longer on sale, such as a
+  Personal subscriber's, shows only for that subscriber when the screen is
+  given it (`own`). Under the cards, when every plan has the same trial, the
+  trial's timeline with the reminder line only while the Admin sends one,
+  and the Claude credit; money-back; what every plan includes, once; prices
+  plus tax. No launch or struck-through
   price: the Admin's `regularAmount` is not read), the sign-in (its last step
   names the checkout only when the sign-in is on the way to one), the next
   step in the browser (the checkout open there, or, signed in on the way to

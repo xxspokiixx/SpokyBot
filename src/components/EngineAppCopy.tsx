@@ -6,6 +6,8 @@ import { dismissAppCopySwitch, useAppCopySwitch } from "@/state/engine-install";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { RefreshEngines } from "./EngineLibrary";
+import { keyForInstance } from "./keys/key-catalog";
+import { openKeySettings } from "./keys/key-focus";
 
 /** After an install pointed this engine at the app's own copy: says so on its card, Ready or not, until dismissed. */
 export function AppCopyNotice({ instance, className }: { instance: InstanceInfo; className?: string }) {
@@ -49,7 +51,7 @@ export function AppCopySetup({ instance, className, unframed }: { instance: Inst
         {!remote && (
           <button
             type="button"
-            onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+            onClick={() => dispatch(openKeySettings(keyForInstance(instance.instanceId)))}
             className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover"
           >
             <KeyRound size={13} aria-hidden="true" />
