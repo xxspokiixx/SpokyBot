@@ -345,8 +345,58 @@ export interface EngineInstall {
   };
   /** The engine needs a key saved in the app rather than a terminal step. */
   settings?: "connections";
-  /** Settings can npm-install this package as the server's own user into an app-owned dir; set by the registry, never by a client. */
-  server?: { package: string };
+  /** The vendor's own build, pinned here, that the app can download, verify and install without Node.js. */
+  standalone?: StandaloneRelease;
+  /** Settings can install this on the server as its own user into an app-owned dir: the vendor's standalone build when one
+   * exists for this platform, otherwise this npm package. Set by the registry, never by a client. */
+  server?: { package?: string; standalone?: { version: string; downloadBytes: number } };
+  /** Set by the registry: the CLI runs the copy the app installed, which the person's terminal does not reach. */
+  appCopy?: boolean;
+}
+
+/** What a client may see of an install descriptor: the standalone pins (URLs, hashes) stay on the server. */
+export function clientInstall(install: EngineInstall | undefined): EngineInstall | undefined {
+  if (!install) return undefined;
+  const { standalone: _pins, ...shown } = install;
+  return shown;
+}
+
+/** `${platform}-${arch}`, with `-musl` on a Linux without glibc. */
+export type StandalonePlatform =
+  | "darwin-arm64" | "darwin-x64"
+  | "linux-x64" | "linux-arm64" | "linux-x64-musl" | "linux-arm64-musl"
+  | "win32-x64" | "win32-arm64";
+
+export interface StandaloneAsset {
+  /** HTTPS, on one of the release's hosts. */
+  url: string;
+  sha256: string;
+  archive: "zip" | "tar.gz" | "raw";
+  /** The executable's `/`-separated path inside the archive; a raw download is saved under this name. */
+  executable: string;
+  /** SHA-256 of the executable itself, checked after unpacking, before reusing a copy and at every start. */
+  executableSha256: string;
+  /** About how big the download is; a download over twice this is stopped. */
+  approxBytes: number;
+}
+
+/** One vendor release, written in code and never taken from a request. */
+export interface StandaloneRelease {
+  /** The AI's display name, for messages. */
+  name: string;
+  /** Its folder under tools/standalone. */
+  engine: string;
+  version: string;
+  /** Every request, redirects included, must be HTTPS to one of these hosts. */
+  hosts: readonly string[];
+  /** macOS: the Apple Developer Team ID whose certificate must sign the executable. */
+  macTeamId?: string;
+  /** Environment for the app's own copy only, such as turning off the vendor's self-updater. */
+  runEnv?: Readonly<Record<string, string>>;
+  assets: Partial<Record<StandalonePlatform, StandaloneAsset>>;
+  /** Program SHA-256s of earlier pinned versions, per platform: a copy of one of those stays usable after the pin moves
+   * on, until it is updated. Nothing in the data folder can add to this list. */
+  previousPrograms?: Partial<Record<StandalonePlatform, readonly string[]>>;
 }
 
 export interface ProviderAuthenticationStart {

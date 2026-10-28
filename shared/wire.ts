@@ -6,7 +6,7 @@ import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
-import type { BotAvatarCrop } from "./bot-avatar.ts";
+import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
@@ -291,6 +291,8 @@ export interface WireBot extends DefaultBotFields {
   color: MausColor;
   mascotExpression?: MausExpression | null;
   mascotBody?: BotBodyId | null;
+  /** Overrides both eyes and mouth. Absent or null preserves the body's default inks. */
+  mascotFaceColor?: MascotFaceColor | null;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;

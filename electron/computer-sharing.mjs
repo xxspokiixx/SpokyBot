@@ -163,6 +163,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     if (parsed?.version === 1 && parsed.records && typeof parsed.records === "object") records = parsed.records;
   } catch {}
   const running = new Map();
+  const grantVersions = new Map();
+  const changeGrant = id => { const version = (grantVersions.get(id) ?? 0) + 1; grantVersions.set(id, version); return version; };
   const status = new Map();
   const reconnected = new Map();
   /** The Clouds whose device link is open now. */
@@ -332,6 +334,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
           if (grant.cloud) {
             // A new pairing of this desktop keeps lending; another server behind that address does not.
             const info = await cloudIdentity(env);
+            if (signal.aborted || running.get(env.id) !== live) break;
             if (grant.environmentId && grant.environmentId !== info.environmentId) { endCloud(env, "machine-changed"); break; }
             if (grant.environmentId !== info.environmentId || grant.sessionId !== info.sessionId) {
               grant = { ...grant, ...info };
@@ -523,14 +526,16 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       disconnect(env, records[env.id]);
       return info;
     },
-    decline(env, info) { disconnect(env, records[env.id]); store({ ...records, [env.id]: { ...info, enabled: false, folders: [], terminal: false, computer: false } }); },
+    decline(env, info) { changeGrant(env.id); disconnect(env, records[env.id]); store({ ...records, [env.id]: { ...info, enabled: false, folders: [], terminal: false, computer: false } }); },
     async save(env, input, info) {
+      const version = changeGrant(env.id);
       const fresh = await identity(env);
       if (!matches(info, fresh)) throw new Error("Server sign-in changed. Review computer access again.");
       const folders = await validateSharedFolders(input.folders);
       await requireEnabled();
       const grant = { ...fresh, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: input.terminal === true, computer: input.computer === true };
       if (!folders.length && !grant.terminal && !grant.computer) throw new Error("Choose at least one folder or capability to share");
+      if (grantVersions.get(env.id) !== version) return state(env.id);
       disconnect(env, records[env.id]);
       store({ ...records, [env.id]: grant }); run(env, grant); changed(); return state(env.id);
     },
@@ -547,29 +552,33 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)),
     /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
     busy: () => summary().busy !== null,
+    beginCloudSave(env) { return changeGrant(env.id); },
     /** Folders, apps and screen, the internet connection and, only when the person ticks it in this computer's own
      * Settings, a terminal (unrestricted commands as this user; off unless `input.terminal === true`); the Cloud account
      * and its machine must be verified now. The internet connection alone is a grant too. */
-    async saveCloud(env, input) {
+    async saveCloud(env, input, version = changeGrant(env.id)) {
       if (closed) throw new Error("Lending is unavailable while the app is closing.");
+      if (grantVersions.get(env.id) !== version) return cloudState(env);
       const current = verifiedCloud(env);
       if (!current) throw Object.assign(new Error("Open My Cloud first."), { problem: "connect-first" });
       const folders = await validateSharedFolders(input?.folders);
       if (!folders.length && input?.screen !== true && input?.internet !== true && input?.chrome !== true && input?.terminal !== true) throw new Error("Choose at least one folder, apps and screen, the internet connection, your Chrome, or the terminal.");
       let info = { sessionId: null, environmentId: null };
       try { info = await cloudIdentity(env); } catch (error) { if (error.problem !== "connect-first") throw error; }
+      if (grantVersions.get(env.id) !== version) return cloudState(env);
       const grant = cloudGrant(env, current, info, { ...input, folders });
       disconnect(env, records[env.id]);
       store({ ...records, [env.id]: grant }); run(env, grant); changed();
       return cloudState(env);
     },
     revoke(env) {
+      changeGrant(env.id);
       disconnect(env, records[env.id]);
       if (records[env.id]) store({ ...records, [env.id]: { ...records[env.id], enabled: false, ...(records[env.id].enabled ? { stopped: { reason: "you", at: now() } } : {}) } });
       changed();
       return state(env.id);
     },
-    forget(env) { disconnect(env, records[env.id]); const next = { ...records }; delete next[env.id]; store(next); changed(); },
+    forget(env) { changeGrant(env.id); disconnect(env, records[env.id]); const next = { ...records }; delete next[env.id]; store(next); changed(); },
     start({ maintainer = true } = {}) {
       for (const env of environments()) {
         const grant = records[env.id];

@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
+import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
 import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
 import { reorderStable } from "../../shared/bot-order";
 import { withOneChief } from "../../shared/bot-owner";
@@ -21,9 +21,12 @@ import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeed
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
+import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
+import { keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
+export { visibleMessages } from "./snapshot-navigation";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
@@ -286,7 +289,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -420,20 +423,6 @@ function openedUnreadDivider(state: AppState, threadId: string, unread: boolean,
   return messageId ? { threadId, messageId } : null;
 }
 
-export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Message[] {
-  const leafId = bot.activeLeafId;
-  if (!leafId) return bot.messages;
-  const byId = new Map(bot.messages.map((m) => [m.id, m]));
-  if (!byId.has(leafId)) return bot.messages;
-  const path: Message[] = [];
-  let cur = byId.get(leafId);
-  while (cur) {
-    path.push(cur);
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-  return path.reverse();
-}
-
 import type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary } from "./config-status";
 export type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary };
 
@@ -483,16 +472,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   };
 }
 
-export interface EngineInstall {
-  platform?: "darwin" | "win32" | "linux";
-  command?: Partial<Record<"darwin" | "win32" | "linux", string>>;
-  docsUrl?: string;
-  signInCommand?: string;
-  needsNode?: boolean;
-  managed?: { label: string; downloadBytes: number };
-  server?: { package: string };
-  settings?: "connections";
-}
+export type { EngineInstall } from "./engine-install";
 
 export interface InstanceInfo {
   instanceId: string;
@@ -676,6 +656,9 @@ export type Action =
       sections?: string[];
       computerControl: Record<string, ComputerControlState>;
       botQueuedMessages?: AppState["pendingQueued"];
+      preserveNavigation?: boolean;
+      navigationSince?: AppState["transcriptGeneration"];
+      taskIdsAtStart?: ReadonlySet<string>;
       resumeId?: string;
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
@@ -946,14 +929,15 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         bots: action.bots.map((bot) => {
           const previous = state.bots.find((candidate) => candidate.id === bot.id);
-          return previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot;
+          return keepBotNavigation(previous, previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
+            action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
         }),
         groups: action.groups.map((group) => {
           const previous = state.groups.find((candidate) => candidate.id === group.id);
           const merged = previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
           // The wire carries an explicitly-cleared description as null; client state keeps it absent.
           if (merged.description === null) merged.description = undefined;
-          return merged;
+          return keepGroupNavigation(previous, merged, action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
         }),
         sections: action.sections ?? [],
         computerControl: action.computerControl,
@@ -2164,7 +2148,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
   const [state, rawDispatch] = useReducer(reducer, initialState, restoreBotSettingsSection);
-  const stateRef = useRef(state);
+  const stateRef = useRef(state), selectionRevision = useRef(0);
   stateRef.current = state;
   const showThreads = useShowThreads();
   const showThreadsRef = useRef(showThreads);
@@ -2206,7 +2190,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const dispatch = useMemo(() => {
     const navigation = new Map<string, number>();
-    let selectionRevision = 0;
     const roomAnswer = roomAnswers(() => stateRef.current, rawDispatch);
     const olderPagesInFlight = new Set<string>();
     let creatingBot = false;
@@ -2313,7 +2296,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles"].includes(action.type)) selectionRevision++;
+      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
@@ -2878,7 +2861,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "switchTask": {
           const revision = (navigation.get(action.botId) ?? 0) + 1;
           navigation.set(action.botId, revision);
-          const selectedAtStart = selectionRevision;
+          const selectedAtStart = selectionRevision.current;
           const ready = action.type === "newTask"
             ? botPatchQueue.flush(action.botId)
             : Promise.resolve();
@@ -2889,7 +2872,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               if (action.type === "newTask") action.onCreated?.();
               if (!r?.bot || navigation.get(action.botId) !== revision) return;
               const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
-              if (selectsAfterCreation && selectionRevision !== selectedAtStart) return;
+              if (selectsAfterCreation && selectionRevision.current !== selectedAtStart) return;
               dispatch({ type: "taskSwitched", bot: r.bot });
               if (selectsAfterCreation) rawDispatch({ type: "select", id: action.botId });
             })
@@ -3096,6 +3079,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       for (const key of keys) refreshState(key).version += 1;
     };
     const loadAll = async (): Promise<boolean> => {
+      const navigationAtStart = selectionRevision.current;
+      const navigationSince = stateRef.current.transcriptGeneration;
+      const taskIdsAtStart = new Set([...stateRef.current.bots, ...stateRef.current.groups].flatMap(owner => owner.tasks?.map(task => task.threadId) ?? []));
       const since = stateRef.current.liveCallVersion;
       const seq = nextLiveCallLookup();
       void api<unknown>("/api/live/call")
@@ -3114,6 +3100,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sections: sections ?? [],
             computerControl: computerControl ?? {},
             botQueuedMessages,
+            preserveNavigation: selectionRevision.current !== navigationAtStart,
+            navigationSince,
+            taskIdsAtStart,
             resumeId: readLastConversation() ?? undefined,
           });
         });

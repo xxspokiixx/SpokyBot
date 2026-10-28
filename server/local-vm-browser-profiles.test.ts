@@ -2,7 +2,7 @@
 // against a fake home, workspace and container runtime, so "sign-ins survive replacing the desktop" is checked, not assumed.
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -26,7 +26,14 @@ function prepareScript(dir: string, workspace: string): string {
   const start = dockerfile.lastIndexOf("RUN printf", end);
   expect(start).toBeGreaterThan(-1);
   const script = join(dir, "prepare.sh");
-  const printf = dockerfile.slice(start + "RUN ".length, end).replaceAll(VM_WORKSPACE_GUEST, workspace);
+  const bootId = join(dir, "boot-id");
+  const initStat = join(dir, "init-stat");
+  if (!existsSync(bootId)) {
+    writeFileSync(bootId, "synthetic-boot");
+    writeFileSync(initStat, ["1 (container init) S", ...Array(18).fill(0), 123, 0].join(" "));
+  }
+  const printf = dockerfile.slice(start + "RUN ".length, end).replaceAll(VM_WORKSPACE_GUEST, workspace)
+    .replaceAll("/proc/sys/kernel/random/boot_id", bootId).replaceAll("/proc/1/stat", initStat);
   execFileSync("/bin/sh", ["-c", `${printf} > '${script}'`]);
   return script;
 }
@@ -73,6 +80,36 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
     // A second start changes nothing.
     runPrepare(prepareScript(dir, workspace), home);
     expect(readFileSync(join(profile, "cookies.sqlite"), "utf8")).toBe("signed in");
+  });
+
+  it.each(["PID 1 start time", "boot ID"])("keeps live browser locks across a Cua driver restart until the %s changes", (identity) => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const script = prepareScript(dir, workspace);
+    runPrepare(script, home);
+    const profiles = join(workspace, ".browser-profiles");
+    const firefox = join(profiles, "mozilla", "firefox", "live.default-esr");
+    mkdirSync(firefox, { recursive: true });
+    const locks = [
+      [join(profiles, "chromium", "SingletonLock"), `${hostname()}-${process.pid}`],
+      [join(profiles, "chromium", "SingletonSocket"), "/tmp/synthetic-chromium-socket"],
+      [join(profiles, "chromium", "SingletonCookie"), "synthetic-cookie"],
+      [join(firefox, "lock"), `127.0.0.1:+${process.pid}`],
+    ];
+    for (const [lock, target] of locks) symlinkSync(target, lock);
+    writeFileSync(join(firefox, ".parentlock"), "");
+
+    runPrepare(script, home);
+
+    for (const [lock, target] of locks) expect(readlinkSync(lock)).toBe(target);
+    expect(existsSync(join(firefox, ".parentlock"))).toBe(true);
+
+    if (identity === "boot ID") writeFileSync(join(dir, "boot-id"), "next-synthetic-boot");
+    else writeFileSync(join(dir, "init-stat"), ["1 (container init) S", ...Array(18).fill(0), 456, 0].join(" "));
+    runPrepare(script, home);
+    for (const [lock] of locks) expect(() => lstatSync(lock)).toThrow();
+    expect(existsSync(join(firefox, ".parentlock"))).toBe(false);
   });
 });
 

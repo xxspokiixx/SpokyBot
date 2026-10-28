@@ -18,6 +18,7 @@
 //   FAKE_CODEX_ASYNC_QUESTIONS  async-question mode: JSON replacing the message's `questions`
 //   FAKE_CODEX_ASYNC_QUESTION_GATE  async-question mode: the turn keeps running until this file exists (default 300 ms)
 //   FAKE_CODEX_DUMP  path for {pid, argv, env, calls, decision}
+//   FAKE_CODEX_ACTION_LOG  early-tool-timeout/error: append an action before turn/start times out or fails
 //   FAKE_CODEX_ECHO_INPUT  "1": echo turn/start's input back as a userMessage item, as codex-cli 0.164.0 does
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
@@ -608,6 +609,12 @@ process.stdin.on("data", (chunk) => {
         dump();
         logStartup("turn/start");
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
+        if (mode === "early-tool-timeout" || mode === "early-tool-error") {
+          if (process.env.FAKE_CODEX_ACTION_LOG) appendFileSync(process.env.FAKE_CODEX_ACTION_LOG, `${JSON.stringify({ action: "record", pid: process.pid })}\n`);
+          notify("item/completed", { item: { id: "early-tool", type: "commandExecution", command: "record", status: "completed", aggregatedOutput: "recorded" } });
+          if (mode === "early-tool-error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "connection reset by peer" } });
+          break;
+        }
         // Counts turn launches only, not the catalog spawn during create().
         if (process.env.FAKE_CODEX_LAUNCH_CRASHES && process.env.FAKE_CODEX_STATE) {
           let launched = 0;
