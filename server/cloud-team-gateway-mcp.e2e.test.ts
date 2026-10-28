@@ -131,8 +131,8 @@ it("lets a member's turn list and call the gateway's tool, with both values sent
 }, hostTimeout(120_000));
 
 it("keeps a one-key server Only for me: the admin's own chat gets it with their key, a member's chat doesn't", async () => {
-  const own = "Bearer ben-own-key-5521";
-  const mail = await startFakeHttpMcp({ tools: [{ name: "read_inbox" }], requireHeader: { name: "Authorization", value: own } });
+  let own = "Bearer ben-own-key-5521";
+  const mail = await startFakeHttpMcp({ tools: [{ name: "read_inbox" }], acceptBearer: (authorization) => authorization === own });
   try {
     const shared = { type: "http", url: mail.url, headers: { Authorization: "" }, enabled: false };
     expect((await as(admin, "POST", "/api/mcp/servers", { name: "mail", ...shared })).status).toBe(201);
@@ -144,6 +144,16 @@ it("keeps a one-key server Only for me: the admin's own chat gets it with their 
     expect((await as(admin, "GET", "/api/team/my-connections")).body.mcp).toContainEqual(expect.objectContaining({ name: "mail", connected: true, how: "key" }));
     expect((await as(admin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: true });
     expect((await as(admin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: true });
+    for (const replacement of ["Bearer edited-own-key-6612", "Bearer fixed-own-key-7734"]) {
+      own = replacement;
+      expect((await as(admin, "PUT", "/api/mcp/servers/mail", shared)).status).toBe(200);
+      expect((await as(admin, "PUT", "/api/team/my-connections/mcp/mail/key", { value: replacement })).body).toEqual({ ok: true });
+      expect(saved().mcpServers.mail.headers).toEqual({ Authorization: "" });
+      const seen = mail.seenHeaders.length;
+      expect((await as(admin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: true });
+      expect(mail.seenHeaders.length).toBeGreaterThan(seen);
+      expect(mail.seenHeaders.slice(seen).every((headers) => headers.authorization === replacement)).toBe(true);
+    }
     const otherAdmin = (await team.pair({ email: "cleo@acme.test", role: "admin" })).token!;
     expect((await as(otherAdmin, "POST", "/api/mcp/servers/mail/test")).body).toMatchObject({ ok: false });
     expect((await as(admin, "PATCH", "/api/mcp/servers/mail", { enabled: true })).status).toBe(200);
@@ -154,7 +164,7 @@ it("keeps a one-key server Only for me: the admin's own chat gets it with their 
     expect(mail.calls).toHaveLength(1);
     const adas = await turn(ada, "Check the inbox.", [{ name: "read_inbox", server: "mail", input: {} }], "no mail MCP server was launched for this turn");
     expect(Object.keys(adas.mcpConfig.mcpServers)).not.toContain("mail");
-    expect(JSON.stringify(adas)).not.toContain("ben-own-key-5521");
+    expect(JSON.stringify(adas)).not.toContain(own);
     expect(mail.calls).toHaveLength(1);
     expect((await as(admin, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "mail", scope: "team" })).status).toBe(200);
     const seen = mail.seenHeaders.length;

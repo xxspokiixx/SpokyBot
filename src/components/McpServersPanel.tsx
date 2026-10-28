@@ -217,7 +217,19 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     setError(null);
     setNotice(null);
     try {
-      listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, { method: "PUT", body: JSON.stringify({ ...item.body, enabled: existing.enabled }) })).servers);
+      let body = item.body;
+      let ownKey: string | undefined;
+      if (store.config?.team && isRemoteMcpListing(existing) && !existing.oauth) {
+        const connections = await api("/api/team/my-connections");
+        if (connections.mcp.some((connection: { name: string }) => connection.name === item.name)) {
+          const headers = (body.headers ?? {}) as Record<string, string | true>;
+          const value = Object.values(headers)[0];
+          ownKey = typeof value === "string" ? value : undefined;
+          body = { ...body, headers: Object.fromEntries(Object.keys(headers).map((name) => [name, ""])) };
+        }
+      }
+      listed((await api(`/api/mcp/servers/${encodeURIComponent(item.name)}`, { method: "PUT", body: JSON.stringify({ ...body, enabled: existing.enabled }) })).servers);
+      if (ownKey) await api(`/api/team/my-connections/mcp/${encodeURIComponent(item.name)}/key`, { method: "PUT", body: JSON.stringify({ value: ownKey }) });
       closeEditor();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
