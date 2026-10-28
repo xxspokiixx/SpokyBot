@@ -2023,23 +2023,27 @@ screen's note.
   the menu is.
 - **The dialog** (`components/CloudAddDialog.tsx`, one state→view function,
   `lib/cloud-plan` `cloudAddView`) covers the buying journey only: the offer
-  (one card per plan the Admin sells, side by side on a wide sheet and
-  stacked in a narrow window, from `lib/cloud-plan` `planCards`: its name,
-  "Most popular" on the Admin's recommended plan only, the price per month,
-  its promise, its own button (Start free trial, or Get {plan} without a
-  trial) with its terms in one line under it, then the same rows in the same
-  order on every card in the website's words (with the app's "cloud
+  (MausBot Cloud's name beside its three mascots and one line, then one card
+  per plan the Admin sells, side by side on a wide sheet and stacked in a
+  narrow window, from `lib/cloud-plan` `planCards`: its name, "Most popular"
+  as a quiet tag on the Admin's recommended plan only, the price per month,
+  its promise, and only what sets the plans apart (`cardRows`): the month's
+  cloud desktop hours, storage and what it grows to, voice, and sleeping
+  when the plans differ there; then its own button (Start free trial, or
+  Get {plan} without a trial; the recommended plan's is the one primary
+  pill) with its terms in one line under it. **Compare plans** opens the
+  rest of every card's rows, in the website's words (with the app's "cloud
   desktop" for the website's "cloud computer"), every number from the
   Admin's `allowances`: always on (or sleeping), cloud desktops as many as
-  the bots need (how many at once only as small print), the month's hours,
-  CPUs and memory (swap as small print), storage and what it grows to,
-  voice, and daily backups' days. The card of the plan the account already
-  has says **Your plan** instead of a button (`current`, from the verified
-  entitlement's tier); a plan no longer on sale, such as a Personal
-  subscriber's, shows only for that subscriber when the screen is given it
-  (`own`). Under the cards, when every plan has the same trial, the trial's
-  timeline with the reminder line only while the Admin sends one, and the
-  Claude credit; money-back; prices plus tax. No launch or struck-through
+  the bots need (how many at once only as small print), CPUs and memory
+  (swap as small print), and daily backups' days. The card of the plan the
+  account already has says **Your plan** instead of a button (`current`,
+  from the verified entitlement's tier); a plan no longer on sale, such as a
+  Personal subscriber's, shows only for that subscriber when the screen is
+  given it (`own`). Under the cards, when every plan has the same trial, the
+  trial's timeline with the reminder line only while the Admin sends one,
+  and the Claude credit; money-back; what every plan includes, once; prices
+  plus tax. No launch or struck-through
   price: the Admin's `regularAmount` is not read), the sign-in (its last step
   names the checkout only when the sign-in is on the way to one), the next
   step in the browser (the checkout open there, or, signed in on the way to

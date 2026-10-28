@@ -33,6 +33,7 @@
   "pro.name": "MausBot Cloud",
   "pro.fromPrice": "MausBot Cloud 方案每月 {price} 起，另加稅費。",
   "pro.seePlans": "比較方案",
+  "cloudBuy.includes": "所有方案皆包含",
   "pro.reauthShort": "重新登入即可在這台電腦上使用 Cloud。你的方案不受影響。",
   "pro.openCloudSettings": "MausBot Cloud 設定",
   "pro.settingsSummary": "即使這台電腦關機，你的機器人和例行工作也會全天候運作。",

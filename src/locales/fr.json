@@ -2,6 +2,7 @@
   "highlevel.unavailable": "Non disponible ici.",
   "pro.fromPrice": "Forfaits MausBot Cloud à partir de {price}/mois + taxes.",
   "pro.seePlans": "Comparer les forfaits",
+  "cloudBuy.includes": "Inclus dans tous les forfaits",
   "pro.reauthShort": "Reconnectez-vous pour utiliser le Cloud sur cet ordinateur. Votre forfait n'est pas concerné.",
   "pro.openCloudSettings": "Paramètres MausBot Cloud",
   "pro.settingsSummary": "Vos bots et vos routines tournent 24 h/24, même quand cet ordinateur est éteint.",
