@@ -130,6 +130,39 @@ it("lets a member's turn list and call the gateway's tool, with both values sent
   }
 }, hostTimeout(120_000));
 
+it("rejects shared header values on a personal OAuth-to-key edit and accepts a private replacement", async () => {
+  const own = "Bearer converted-personal-key-8842";
+  const mail = await startFakeHttpMcp({ tools: [{ name: "read_private_inbox" }], acceptBearer: (authorization) => authorization === own });
+  const saved = () => JSON.parse(readFileSync(join(team.home, ".openmausbot/config.json"), "utf8"));
+  try {
+    const oauth = { type: "http", url: mail.url, headers: {}, oauth: { clientId: "fixture-client-id" } };
+    expect((await as(admin, "POST", "/api/mcp/servers", { name: "private-mail", ...oauth })).status).toBe(201);
+    expect((await as(admin, "PUT", "/api/team/connection-scopes", { kind: "mcp", id: "private-mail", scope: "person" })).status).toBe(200);
+    const original = saved().mcpServers["private-mail"];
+    const shared = { type: "http", url: mail.url, headers: { Authorization: "" }, enabled: false };
+    for (const extra of [{}, { oauth: oauth.oauth }]) {
+      const refused = await as(admin, "PUT", "/api/mcp/servers/private-mail", { ...shared, ...extra, headers: { Authorization: own } });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(/personal.*header|header.*personal/i);
+      expect(saved().mcpServers["private-mail"]).toEqual(original);
+      expect(JSON.stringify(saved())).not.toContain(own);
+    }
+    expect((await as(admin, "PUT", "/api/mcp/servers/private-mail", shared)).status).toBe(200);
+    expect((await as(admin, "PUT", "/api/team/my-connections/mcp/private-mail/key", { value: own })).body).toEqual({ ok: true });
+    expect(saved().mcpServers["private-mail"]).toMatchObject({ headers: { Authorization: "" } });
+    expect(saved().mcpServers["private-mail"].oauth).toBeUndefined();
+    const seen = mail.seenHeaders.length;
+    expect((await as(admin, "POST", "/api/mcp/servers/private-mail/test")).body).toMatchObject({ ok: true });
+    expect(mail.seenHeaders.length).toBeGreaterThan(seen);
+    expect(mail.seenHeaders.slice(seen).every((headers) => headers.authorization === own)).toBe(true);
+    expect((await as(ada, "POST", "/api/mcp/servers/private-mail/test")).status).toBe(403);
+    expect(JSON.stringify(saved())).not.toContain(own);
+  } finally {
+    await as(admin, "DELETE", "/api/mcp/servers/private-mail");
+    await mail.close();
+  }
+}, hostTimeout(60_000));
+
 it("keeps a one-key server Only for me: the admin's own chat gets it with their key, a member's chat doesn't", async () => {
   let own = "Bearer ben-own-key-5521";
   const mail = await startFakeHttpMcp({ tools: [{ name: "read_inbox" }], acceptBearer: (authorization) => authorization === own });

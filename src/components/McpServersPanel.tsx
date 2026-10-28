@@ -219,10 +219,13 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     try {
       let body = item.body;
       let ownKey: string | undefined;
-      if (store.config?.team && isRemoteMcpListing(existing) && !existing.oauth) {
+      if (store.config?.team && typeof body.url === "string" && !body.oauth) {
         const connections = await api("/api/team/my-connections");
         if (connections.mcp.some((connection: { name: string }) => connection.name === item.name)) {
           const headers = (body.headers ?? {}) as Record<string, string | true>;
+          if (Object.keys(headers).length > 1) {
+            throw new Error("Personal MCP connections support one header. Remove the extra headers before saving.");
+          }
           const value = Object.values(headers)[0];
           ownKey = typeof value === "string" ? value : undefined;
           body = { ...body, headers: Object.fromEntries(Object.keys(headers).map((name) => [name, ""])) };

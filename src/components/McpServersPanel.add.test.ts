@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const fixture = vi.hoisted(() => ({
   api: vi.fn(),
   config: null as null | { team?: { id: string; name: string } },
@@ -298,6 +300,63 @@ describe("Adding an MCP server on a Team Cloud", () => {
     expect(calls("POST", "/api/mcp/servers/mail/test")).toHaveLength(1);
     expect(host.textContent).toContain("Connected: 1 tool");
     expect(host.querySelector("[data-mcp-editor]")).toBeNull();
+  });
+
+  it.each(["Authorization", "X-Api-Key"])("keeps an OAuth-to-key edit private with %s", async (header) => {
+    fixture.servers = [{
+      name: "mail", type: "http", url: "https://mail.example.com/mcp", headerKeys: [], enabled: true,
+      oauth: { clientId: "fixture-client-id", scopes: [], clientSecretConfigured: false, redirectUri: "https://cloud.example.com/callback" },
+    }];
+    fixture.sharedHeaders.mail = {};
+    fixture.personalMcp = ["mail"];
+    await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Refresh MCP servers']")!.click());
+    await settle();
+    await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Edit mail']")!.click());
+    await type("input[value='fixture-client-id']", "");
+    await type("input[aria-label='Header name']", header);
+    await type(`input[aria-label='${header}']`, "Bearer converted-personal-key");
+    await click("Save");
+
+    expect(calls("PUT", "/api/mcp/servers/mail")).toEqual([{
+      url: "/api/mcp/servers/mail",
+      body: { type: "http", url: "https://mail.example.com/mcp", headers: { [header]: "" }, enabled: true },
+    }]);
+    expect(fixture.sharedHeaders.mail).toEqual({ [header]: "" });
+    expect(fixture.personalKeys.mail).toBe("Bearer converted-personal-key");
+    expect(host.textContent).toContain("Connected: 12 tools");
+    expect(host.querySelector("[data-mcp-editor]")).toBeNull();
+  });
+
+  it.each([
+    ["edit", ""], ["fix", ""],
+    ["edit", "Bearer replacement-key"], ["fix", "Bearer replacement-key"],
+  ])("preserves a personal multi-header configuration on %s with first value '%s'", async (action, value) => {
+    fixture.servers = [{ name: "mail", type: "http", url: "https://mail.example.com/mcp", headerKeys: ["Authorization", "X-Tenant"], enabled: true }];
+    fixture.sharedHeaders.mail = { Authorization: "", "X-Tenant": "" };
+    fixture.personalMcp = ["mail"];
+    fixture.personalKeys.mail = "Bearer kept-key-12345";
+    const original = structuredClone(fixture.servers);
+    await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Refresh MCP servers']")!.click());
+    await settle();
+    if (action === "fix") {
+      fixture.test = { ok: false, reason: "keys", status: 401 };
+      await click("Test");
+      await click("Fix the keys");
+    } else {
+      await act(async () => host.querySelector<HTMLButtonElement>("[aria-label='Edit mail']")!.click());
+    }
+    if (value) await type("input[aria-label='Authorization']", value);
+    await type("input[aria-label='X-Tenant']", "new-tenant");
+    fixture.api.mockClear();
+    await click("Save");
+
+    expect(calls("PUT")).toEqual([]);
+    expect(calls("POST")).toEqual([]);
+    expect(fixture.servers).toEqual(original);
+    expect(fixture.sharedHeaders.mail).toEqual({ Authorization: "", "X-Tenant": "" });
+    expect(fixture.personalKeys.mail).toBe("Bearer kept-key-12345");
+    expect(host.textContent).toContain("Personal MCP connections support one header. Remove the extra headers before saving.");
+    expect(host.querySelector("[data-mcp-editor]")).not.toBeNull();
   });
 
   it("keeps a saved personal key when an edit leaves its value blank", async () => {
