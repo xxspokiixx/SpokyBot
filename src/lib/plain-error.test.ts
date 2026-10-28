@@ -27,6 +27,10 @@ describe("plainErrorLine", () => {
     ["TypeError: Cannot read properties of undefined (reading 'id')", "Something went wrong. Try again."],
     ["Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON", "Something went wrong. Try again."],
     ["claude exited 3 before result: fake-claude: simulated crash before result", "Something went wrong. Try again."],
+    ["claude exited null before result", "Something went wrong. Try again."],
+    ["codex exited null (signal SIGKILL) before turn/completed", "Something went wrong. Try again."],
+    ["DeepSeek Harness exited 3 before the prompt result: panicked at src/main.rs", "Something went wrong. Try again."],
+    ["Antigravity ACP exited SIGTERM.", "Something went wrong. Try again."],
     ["rate_limited", "Too many requests right now. Wait a moment, then try again."],
     ["Error\n    at fetchBots (store.tsx:12:3)", "Something went wrong. Try again."],
   ])("reads %j as a plain line", (raw, line) => {
@@ -41,6 +45,7 @@ describe("plainErrorLine", () => {
     "Your Pro plan includes 2 cloud computers at once. Delete one to start another.",
     "ChatGPT plan usage limit reached (subscription_sharing_usage_limit_exceeded)",
     "no activity for 10 minutes — the turn was stopped",
+    "Muse Code stopped unexpectedly. Send the message again to continue.",
     "The server returned HTTP 503. Wait for the scheduled maintenance to finish, then try again.",
     "Couldn't undo that change.",
     registrySaveFailure("the thread switch", "bots.json", "EPERM"),
