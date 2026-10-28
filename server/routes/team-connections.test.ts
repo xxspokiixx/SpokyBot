@@ -61,7 +61,13 @@ it("saves a personal key for the matching URL", async () => {
   expect(people.key(PERSON, "mail", URL_B)).toBeNull();
 });
 
-it.each([undefined, "", 123])("requires the expected URL instead of pinning a key to the current address (%s)", async (url) => {
+it("pins a key sent without a URL to the current address, as members only see the host", async () => {
+  const { people, save } = setup();
+  expect(await save({ value: KEY })).toEqual({ status: 200, body: { ok: true } });
+  expect(people.key(PERSON, "mail", URL_A)).toEqual({ url: URL_A, header: "Authorization", value: KEY });
+});
+
+it.each(["", 123])("refuses a malformed expected URL (%s)", async (url) => {
   const { people, save } = setup();
   expect((await save({ value: KEY, url })).status).toBe(400);
   expect(people.key(PERSON, "mail", URL_A)).toBeNull();

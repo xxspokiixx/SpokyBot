@@ -135,7 +135,7 @@ it("lets Ada connect her own Gmail and mail key, and nobody reads them back", as
   adaUser = broker.userFor(broker.installationIds().at(-1)!);
   expect(adaUser).not.toBe(teamUser);
   broker.account(adaUser, "gmail", "ada.private@gmail.example");
-  expect((await team.as(ada, "PUT", "/api/team/my-connections/mcp/mail/key", { value: ADA_KEY, url: mail.url })).body).toEqual({ ok: true });
+  expect((await team.as(ada, "PUT", "/api/team/my-connections/mcp/mail/key", { value: ADA_KEY })).body).toEqual({ ok: true });
   // A team app is not hers to connect, and Slack is the team's.
   expect((await team.as(ada, "POST", "/api/team/my-connections/apps/slack/connect", {})).status).toBe(409);
 
