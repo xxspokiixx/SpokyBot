@@ -13,7 +13,9 @@ import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import { isTypeaheadKey, TYPEAHEAD_RESET_MS, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { ApiKeyHint, EngineSetup, EngineUpdateNotice, needsCli, needsSignIn, openKeysFor } from "./EngineSetup";
+import { offersLocalModels, probeLocalModels } from "./local-model-probe";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
@@ -42,29 +44,6 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
 
 function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
   return instance?.models.options.find((option) => option.id === model)?.provider;
-}
-
-export const LOCAL_PROBE_TIMEOUT_MS = 5_000;
-
-export function probeLocalModels(
-  instanceId: string,
-  refreshModels: (instanceId: string) => Promise<void>,
-  timeoutMs = LOCAL_PROBE_TIMEOUT_MS,
-): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
-    void refreshModels(instanceId)
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-  });
-}
-
-export function offersLocalModels(instance: InstanceInfo | undefined, localCount: number): boolean {
-  if (!instance) return false;
-  return localCount > 0 || (instance.driverKind === "claudeAgent" && !needsCli(instance) && !instance.policy);
 }
 
 export function effortLabel(level: EffortLevel): string {
@@ -721,11 +700,16 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
+        "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
+        contained
+          ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
+          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
     >
-      {active && <InstanceProviderMark instance={active} size={14} subtle />}
+      {active && (contained
+        ? <InstanceProviderMark instance={active} size={14} subtle />
+        : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={14} subtle /></span>)}
       {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
@@ -760,7 +744,10 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent",
+        "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary disabled:cursor-not-allowed disabled:text-ink-tertiary",
+        contained
+          ? "transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
+          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
       )}
     >

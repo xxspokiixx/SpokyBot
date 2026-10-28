@@ -382,6 +382,25 @@ describe("the model picker in Simple mode", () => {
     expect(String(advanced.props.title)).toContain("High effort");
   });
 
+  it("puts the header chip on an opaque surface, so scrolled transcript text cannot read through it", () => {
+    const classes = () => String(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!.props.className);
+    expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
+    expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    fixture.advanced = true;
+    try {
+      expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "shadow-(--shadow-float)"]));
+      expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    } finally {
+      fixture.advanced = false;
+    }
+  });
+
+  it("leaves a contained picker on its settings row unchanged, with no floating surface", () => {
+    const chip = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(chip.props.className)).not.toContain("bg-composer");
+    expect(String(chip.props.className)).not.toContain("shadow-(--shadow-float)");
+  });
+
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {
     fixture.instances = [claude(), cursor];
     const forBot = bot(undefined, "cursor", "auto");
