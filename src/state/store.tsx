@@ -666,6 +666,7 @@ export type Action =
       botQueuedMessages?: AppState["pendingQueued"];
       preserveNavigation?: boolean;
       navigationSince?: AppState["transcriptGeneration"];
+      taskIdsAtStart?: ReadonlySet<string>;
       resumeId?: string;
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
@@ -937,14 +938,14 @@ export function reducer(state: AppState, action: Action): AppState {
         bots: action.bots.map((bot) => {
           const previous = state.bots.find((candidate) => candidate.id === bot.id);
           return keepBotNavigation(previous, previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
-            action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration));
+            action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
         }),
         groups: action.groups.map((group) => {
           const previous = state.groups.find((candidate) => candidate.id === group.id);
           const merged = previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
           // The wire carries an explicitly-cleared description as null; client state keeps it absent.
           if (merged.description === null) merged.description = undefined;
-          return keepGroupNavigation(previous, merged, action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration));
+          return keepGroupNavigation(previous, merged, action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
         }),
         sections: action.sections ?? [],
         computerControl: action.computerControl,
@@ -3088,6 +3089,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const loadAll = async (): Promise<boolean> => {
       const navigationAtStart = selectionRevision.current;
       const navigationSince = stateRef.current.transcriptGeneration;
+      const taskIdsAtStart = new Set([...stateRef.current.bots, ...stateRef.current.groups].flatMap(owner => owner.tasks?.map(task => task.threadId) ?? []));
       const since = stateRef.current.liveCallVersion;
       const seq = nextLiveCallLookup();
       void api<unknown>("/api/live/call")
@@ -3108,6 +3110,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             botQueuedMessages,
             preserveNavigation: selectionRevision.current !== navigationAtStart,
             navigationSince,
+            taskIdsAtStart,
             resumeId: readLastConversation() ?? undefined,
           });
         });

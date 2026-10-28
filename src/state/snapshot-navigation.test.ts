@@ -44,6 +44,7 @@ let root: Root;
 let container: HTMLDivElement;
 let snapshot: ReturnType<typeof deferred>;
 let switchResponse: ReturnType<typeof deferred> | undefined;
+let newTaskResponse: ReturnType<typeof deferred> | undefined;
 let snapshots: number;
 let sends: unknown[];
 const shown = () => state.bots[0]!;
@@ -51,8 +52,11 @@ const resync = async () => {
   FixtureEventSource.current.send({ kind: "hello", resumed: false, cursor: "fixture:0" });
   await vi.waitFor(() => expect(snapshots).toBe(2));
 };
-const applySnapshot = async (threadId = "a") => {
-  snapshot.resolve(json({ bots: [bot(threadId, "snapshot")], groups: [room(threadId, "snapshot")], sections: ["resynced"] }));
+const applySnapshot = async (threadId = "a", taskIds = ["a", "b"]) => {
+  const incomingBot = bot(threadId, "snapshot"), incomingRoom = room(threadId, "snapshot");
+  incomingBot.tasks = incomingBot.tasks?.filter(task => taskIds.includes(task.threadId));
+  incomingRoom.tasks = incomingRoom.tasks?.filter(task => taskIds.includes(task.threadId.slice(5)));
+  snapshot.resolve(json({ bots: [incomingBot], groups: [incomingRoom], sections: ["resynced"] }));
   await vi.waitFor(() => expect(state.sections).toEqual(["resynced"]));
 };
 const switchBot = async (threadId: string) => {
@@ -65,6 +69,7 @@ beforeEach(async () => {
   sends = [];
   snapshot = deferred();
   switchResponse = undefined;
+  newTaskResponse = undefined;
   localStorage.clear();
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("fetch", async (path: string, init?: RequestInit) => {
@@ -74,6 +79,7 @@ beforeEach(async () => {
     }
     const task = path.match(/^\/api\/bots\/bot\/tasks\/([ab])/);
     if (task) return switchResponse?.promise ?? json({ bot: bot(task[1]!, `fresh-${task[1]}`) });
+    if (path === "/api/bots/bot/tasks" || path === "/api/groups/room/tasks") return newTaskResponse?.promise ?? json({});
     if (path.startsWith("/api/groups/room/tasks/room-b")) return json({ group: room("b", "fresh-room-b") });
     if (path === "/api/bots/bot/messages" || path === "/api/groups/room/messages") sends.push(JSON.parse(String(init?.body)));
     if (path === "/api/instances") return json({ instances: [] });
@@ -95,6 +101,25 @@ afterEach(() => {
 });
 
 describe("navigation while a reconnect snapshot is in flight", () => {
+  it.each(["bot", "group"])("keeps a new %s task entry without restoring tasks omitted by the server", async owner => {
+    await resync();
+    newTaskResponse = deferred();
+    flushSync(() => dispatch(owner === "bot"
+      ? { type: "newTask", botId: "bot" }
+      : { type: "newGroupTask", groupId: "room" }));
+    const createdBot = bot("c", "created"), createdRoom = room("c", "created");
+    createdBot.tasks = [...tasks, { threadId: "c", title: "Created", createdAt: 2 }];
+    createdRoom.tasks = [...createdRoom.tasks!, { threadId: "room-c", title: "Created", createdAt: 2 }];
+    newTaskResponse.resolve(json(owner === "bot" ? { bot: createdBot } : { group: createdRoom }));
+    const current = () => owner === "bot" ? shown() : state.groups[0]!;
+    await vi.waitFor(() => expect(current().messages[0]?.id).toBe("created"));
+    await applySnapshot("a", ["a"]);
+
+    expect(current().threadId).toBe(owner === "bot" ? "c" : "room-c");
+    expect(current().messages.map(message => message.id)).toEqual(["created"]);
+    expect(current().tasks?.map(task => task.threadId)).toEqual(owner === "bot" ? ["a", "c"] : ["room-a", "room-c"]);
+  });
+
   it.each(["b", "a"])("keeps the newer %s transcript and sends to that thread", async target => {
     await resync();
     await switchBot("b");

@@ -23,11 +23,19 @@ export function navigatedSince(
     || (current[owner.threadId] ?? 0) !== (since?.[owner.threadId] ?? 0));
 }
 
-export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, preserve: boolean): Bot {
+function keepNewTasks<T extends { threadId: string }>(previous: T[] | undefined, incoming: T[] | undefined, taskIdsAtStart: ReadonlySet<string> | undefined): T[] | undefined {
+  if (!taskIdsAtStart) return incoming;
+  const received = new Set(incoming?.map(task => task.threadId));
+  const created = previous?.filter(task => !taskIdsAtStart.has(task.threadId) && !received.has(task.threadId)) ?? [];
+  return created.length ? [...(incoming ?? []), ...created] : incoming;
+}
+
+export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, preserve: boolean, taskIdsAtStart?: ReadonlySet<string>): Bot {
   if (!preserve || !previous) return incoming;
   return {
     ...incoming,
     threadId: previous.threadId,
+    tasks: keepNewTasks(previous.tasks, incoming.tasks, taskIdsAtStart),
     switchingTo: previous.switchingTo,
     awaitingThreadSnapshot: previous.awaitingThreadSnapshot,
     messages: previous.messages,
@@ -37,11 +45,12 @@ export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, pres
   };
 }
 
-export function keepGroupNavigation(previous: Group | undefined, incoming: Group, preserve: boolean): Group {
+export function keepGroupNavigation(previous: Group | undefined, incoming: Group, preserve: boolean, taskIdsAtStart?: ReadonlySet<string>): Group {
   if (!preserve || !previous) return incoming;
   return {
     ...incoming,
     threadId: previous.threadId,
+    tasks: keepNewTasks(previous.tasks, incoming.tasks, taskIdsAtStart),
     messages: previous.messages,
     hasMore: previous.hasMore,
     pinnedCwd: previous.pinnedCwd,
