@@ -4,7 +4,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createComputerSharing } from "./computer-sharing.mjs";
+import { runInNewContext } from "node:vm";
+import { installCloudLending } from "./cloud-lending-ipc.mjs";
+import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "omb-sharing-races-"));
@@ -121,4 +123,44 @@ test("a change to another environment leaves a pending grant valid", async t => 
   held.release();
   assert.equal((await saving).enabled, true);
   assert.equal((await f.records())[f.env.id].terminal, true);
+});
+
+async function mainLending(f, validate = validateSharedFolders) {
+  const source = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
+  const section = (from, to) => {
+    const start = source.indexOf(from), end = source.indexOf(to, start);
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end);
+  };
+  const handlers = new Map();
+  runInNewContext(section("function stopLending()", "async function openLendingSettings()") +
+    section("const useMyMac = installCloudLending(", "const cloudSync ="), {
+    computerSharing: f.sharing, environmentsState: { environments: [f.env] },
+    installCloudLending, sharingController: () => f.sharing,
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localWorkspaceOnly: (_channel, handler) => handler, cloudPageAsking: () => true,
+    lendingSnapshot: async () => ({ available: true, screenAvailable: false, state: f.sharing.cloudState(f.env) }),
+    lendingTarget: { environment: () => f.env }, lendingDialogs: {},
+    usualFolders: async () => [], usualFolderPaths: () => [], app: {}, os: {},
+    validateSharedFolders: validate,
+  }, { filename: "main.mjs (lending fixture)" });
+  return handlers;
+}
+
+test("main Stop invalidates a pending save while the stored grant is off", async t => {
+  const f = await fixture(t);
+  const handlers = await mainLending(f);
+  await f.sharing.saveCloud(f.env, { folders: [], internet: true });
+  await f.polled;
+  await handlers.get("lending:stop")({});
+  const stopped = (await f.records())[f.env.id];
+  const held = f.holdIdentity();
+  const saving = handlers.get("lending:save")({}, { folders: [], internet: true, terminal: true });
+  await held.entered;
+  await handlers.get("lending:stop")({});
+  held.release();
+  assert.equal((await saving).state.enabled, false);
+  assert.deepEqual((await f.records())[f.env.id], stopped);
+  assert.equal(f.sharing.cloudState(f.env).terminal, false);
+  assert.equal(f.sharing.lendingToCloud(), false);
 });

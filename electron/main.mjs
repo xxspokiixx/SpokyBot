@@ -1535,7 +1535,7 @@ installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApp
 let hiddenStart = false;
 
 function stopLending() {
-  for (const env of environmentsState.environments) if (computerSharing?.cloudState(env).enabled) computerSharing.revoke(env);
+  for (const env of environmentsState.environments) computerSharing?.revoke(env);
 }
 
 async function openLendingSettings() {
