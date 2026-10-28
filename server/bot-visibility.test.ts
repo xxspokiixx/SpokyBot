@@ -423,6 +423,13 @@ describe("a Team Cloud's audiences", () => {
     expect(bodyThreadIds(null)).toEqual([]);
   });
 
+  it.each([false, true])("reads a request-sized threadIds array, nested: %s", (nested) => {
+    const threadIds = Array<string>(200_000).fill("");
+    threadIds[199_999] = "private-thread";
+    const body = nested ? { envelope: { threadIds } } : { threadIds };
+    expect(bodyThreadIds(body)).toEqual(threadIds);
+  });
+
   it("a bot sent to a member lists only the conversations that member may see", () => {
     const ben = new VisibleSet(open, openGroups, BOB, undefined, { of: audienceOf, person: BEN_KEY });
     const sent = memberBot({ id: "pub", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }], vpsAlias: "x" }, ben);

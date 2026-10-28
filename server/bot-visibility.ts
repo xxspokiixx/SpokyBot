@@ -301,8 +301,11 @@ export function bodyThreadIds(body: unknown, depth = 1): string[] {
   const ids: string[] = [];
   for (const [key, value] of Object.entries(body)) {
     if (typeof value === "string" && THREAD_FIELD.test(key)) ids.push(value);
-    else if (key === "threadIds" && Array.isArray(value)) ids.push(...value.filter((id): id is string => typeof id === "string"));
-    else if (depth > 0 && value && typeof value === "object") ids.push(...bodyThreadIds(value, depth - 1));
+    else if (key === "threadIds" && Array.isArray(value)) {
+      for (const id of value) if (typeof id === "string") ids.push(id);
+    } else if (depth > 0 && value && typeof value === "object") {
+      for (const id of bodyThreadIds(value, depth - 1)) ids.push(id);
+    }
   }
   return ids;
 }
