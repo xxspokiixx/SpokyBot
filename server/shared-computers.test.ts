@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerScopeRefusal } from "./shared-computers.ts";
-import { SharedComputerControl } from "./shared-computer-control.ts";
+import { hostScreenBusyText, SharedComputerControl } from "./shared-computer-control.ts";
 import { TurnResources } from "./turn-resources.ts";
 
 const secret = "a".repeat(64);
@@ -350,19 +350,35 @@ describe("server-side scope check (audit M1)", () => {
   });
 });
 
-it("shared screen calls respect local turns, human takeover, lease expiry and release", async () => {
+it("shared screen calls respect local turns, lease expiry and release, and say which bot holds the screen", async () => {
   vi.useFakeTimers();
-  const resources = new TurnResources(); let held = false;
-  const control = new SharedComputerControl(resources, () => held);
+  const resources = new TurnResources();
+  const control = new SharedComputerControl(resources, (owner) => (owner.threadId === "local" ? "Researcher" : undefined));
   const local = { threadId: "local", generation: "first" };
   resources.claim("computer:host", local);
-  expect(() => control.acquire("remote")).toThrow(/in use locally/);
-  resources.release(local); control.acquire("remote");
+  expect(control.acquire("remote")).toBe(hostScreenBusyText("Researcher"));
+  expect(control.acquire("remote")).toMatch(/^Another bot on this computer, Researcher, is using its screen right now, so this call was not performed\. It is not a person\./);
+  resources.release(local); expect(control.acquire("remote")).toBeUndefined();
   expect(resources.claim("computer:host", local)).toBe(false);
-  held = true; expect(() => control.acquire("remote")).toThrow(/held by a person/);
-  held = false; control.acquire("remote");
   await vi.advanceTimersByTimeAsync(40_001);
   expect(resources.claim("computer:host", local)).toBe(true);
-  resources.release(local); control.acquire("remote"); control.close();
+  resources.release(local); expect(control.acquire("remote")).toBeUndefined(); control.close();
   expect(resources.claim("computer:host", local)).toBe(true);
+  resources.release(local);
+  // A turn of a bot this server does not name (a waiting one, say) is still another bot, never a person.
+  resources.claim("computer:host", { threadId: "gone", generation: "g" });
+  expect(control.acquire("remote")).toBe(hostScreenBusyText());
+});
+
+it("a lent call's screen lock left behind by an earlier lent call frees itself for the next one", () => {
+  const resources = new TurnResources();
+  const control = new SharedComputerControl(resources);
+  const earlier = randomUUID(), next = randomUUID();
+  expect(control.acquire(earlier)).toBeUndefined();
+  // The desktop never released it (it crashed, or the release timed out): the next lent call still gets the screen.
+  expect(control.acquire(next)).toBeUndefined();
+  expect(resources.holder("computer:host")).toEqual({ threadId: `shared:${next}`, generation: next });
+  expect(control.acquire(next)).toBeUndefined();
+  control.release(next);
+  expect(resources.free("computer:host")).toBe(true);
 });

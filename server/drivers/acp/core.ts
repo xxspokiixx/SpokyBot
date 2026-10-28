@@ -59,7 +59,7 @@ import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts";
-import type { AcpAskFinish, AcpSession, AcpTurn } from "./turn-state.ts";
+import { trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
@@ -188,10 +188,12 @@ export interface AcpSupport {
   /** Do not retain stderr from providers that may place OAuth material there. */
   redactStderr?: boolean;
   /** The agent's own debug log, read while a prompt is quiet: a new line proves it alive and `parse`
-   * picks what to tell the person. Null when this process keeps none. */
+   * picks what to tell the person. Null when this process keeps none. A `shared` log holds every session's
+   * and process's lines, so its lines prove nothing about this turn and only `parse` reads them. */
   statusLog?: {
     path(env: Record<string, string | undefined>, sessionId: string): string | null;
-    parse(line: string): LogSignal | null;
+    parse(line: string, sessionId: string): LogSignal | null;
+    shared?: true;
   };
   /** Bound provider-native tool payloads before writing diagnostic logs. */
   sanitizeToolPayload?: boolean;
@@ -258,14 +260,6 @@ const SHARED_SESSIONS_MAX = 6, SHARED_SESSIONS_LIFETIME = 12;
 const HEALTHY_CLOSE = new Set(["idle", "reset", "contract", "stop", "stopAll", "dispose", "approval-unconfirmed"]);
 /** ACP agents may compact their history silently; re-send the full prompt after this many bare turns. */
 const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
-/** A `tool_call` without a status is pending (ACP's default); a `tool_call_update` without one leaves the call as it was. */
-function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknown; status?: unknown }, defaultStatus?: "pending"): void {
-  if (typeof update.toolCallId !== "string" || !update.toolCallId) return;
-  const status = update.status ?? defaultStatus;
-  if (status === "completed" || status === "failed") current.runningTools.delete(update.toolCallId);
-  else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
-}
-
 function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
   const reply = streamed.trim();
   const replay = chunk.trim();
@@ -528,9 +522,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const startQuietWatch = (threadId: string, session: AcpSession, current: AcpTurn) => {
         const noticeAfterMs = envOr("OMB_ACP_QUIET_NOTICE_MS", DEFAULT_QUIET_NOTICE_MS);
         const tickMs = envOr("OMB_ACP_QUIET_TICK_MS", 15_000);
-        const logPath = support.statusLog && session.sessionId
-          ? support.statusLog.path(session.env, session.sessionId)
-          : null;
+        const { sessionId } = session;
+        const logPath = support.statusLog && sessionId ? support.statusLog.path(session.env, sessionId) : null;
         const tail = logPath ? new LogTail(logPath) : null;
         tail?.read();
         let logged: { signal: LogSignal; at: number } | null = null;
@@ -543,18 +536,21 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let probing = false;
         let state: QuietState | null = null;
         const promptStartedAt = Date.now();
+        let readAt = promptStartedAt;
         const tick = async () => {
           if (probing || current.state.settled || session.current !== current) return;
           const now = Date.now();
           for (const line of tail?.read() ?? []) {
-            session.acp.touch();
-            const signal = support.statusLog!.parse(line);
+            if (!support.statusLog!.shared) session.acp.touch();
+            const signal = support.statusLog!.parse(line, sessionId!);
             if (signal?.kind === "context") context = { tokens: signal.tokens, threshold: signal.threshold };
-            else if (signal) logged = { signal, at: now };
+            // A shared row was written some time after the last read; date it then, so a reply since clears it.
+            else if (signal) logged = { signal, at: support.statusLog!.shared ? readAt : now };
           }
+          readAt = now;
           const quietMs = now - Math.max(promptStartedAt, session.acp.lastInboundAt);
           if (quietMs < noticeAfterMs || current.asks.size || current.runningTools.size) {
-            if (quietMs < noticeAfterMs) logged = null;
+            if (quietMs < noticeAfterMs && (!support.statusLog?.shared || session.acp.lastInboundAt > (logged?.at ?? 0))) logged = null;
             previous = null;
             shownKey = null;
             noSignsSince = null;

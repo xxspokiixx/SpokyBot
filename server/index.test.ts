@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type Server } from "node:http";
 import { connect, type Socket } from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -1189,6 +1189,8 @@ beforeAll(async () => {
   // Emulates only our temporary browser executable (also on Windows, where the marker is not executable).
   const browserPrelude = `data:text/javascript,${encodeURIComponent(`
     import childProcess from "node:child_process";
+    import fs from "node:fs";
+    import path from "node:path";
     import { syncBuiltinESMExports } from "node:module";
     const spawn = childProcess.spawn;
     const base = ${JSON.stringify(home)};
@@ -1201,6 +1203,20 @@ beforeAll(async () => {
         + 'process.exit(fs.existsSync(path.join(base, "browser-clear-fails")) ? 1 : 0);';
       return spawn(process.execPath, ["-e", program, ...args], options);
     };
+    const read = fs.read;
+    fs.read = Object.defineProperties(function(input, ...args) {
+      const gate = path.join(base, "browser-upload-read-gate");
+      if (!fs.existsSync(gate) || fs.fstatSync(input).ino !== fs.statSync(fs.readFileSync(gate, "utf8")).ino) {
+        return read(input, ...args);
+      }
+      fs.rmSync(gate);
+      fs.writeFileSync(gate + ".entered", "");
+      const timer = setInterval(() => {
+        if (!fs.existsSync(gate + ".release")) return;
+        clearInterval(timer);
+        read(input, ...args);
+      }, 10);
+    }, Object.getOwnPropertyDescriptors(read));
     syncBuiltinESMExports();
   `)}`;
   child = spawn(process.execPath, ["--import", browserPrelude, join(SERVER_DIR, "index.ts")], {
@@ -8114,7 +8130,7 @@ describe("harness HTTP API", () => {
 
       const rotated = await api("PUT", "/api/config", { box: { token: " box_route_rotated " } });
       expect(rotated.status).toBe(200);
-      expect(rotated.body.box).toEqual({ configured: true });
+      expect(rotated.body.box).toEqual({ configured: true, last4: "ated" });
       expect(JSON.stringify(rotated.body)).not.toContain("box_route_rotated");
 
       expect((await api("POST", "/api/computers/boxes/bx_23456789/delete", { confirmName: name })).status).toBe(202);
@@ -8151,7 +8167,7 @@ describe("harness HTTP API", () => {
       managedBoatRejectedTokens.delete("Bearer box_route_rotated");
       const rotated = await api("PUT", "/api/config", { box: { token: "box_route_rotated" } });
       expect(rotated.status).toBe(200);
-      expect(rotated.body.box).toEqual({ configured: true });
+      expect(rotated.body.box).toEqual({ configured: true, last4: "ated" });
       if (provisioned) {
         const journal = readFileSync(join(home, ".openmausbot", "box-create-requests.json"), "utf8");
         expect(journal).toContain(managedBoatCreateId);
@@ -9789,6 +9805,77 @@ describe("harness HTTP API", () => {
         expect(configCleanup.status, JSON.stringify(configCleanup.body)).toBe(200);
         expect(botCleanup.status, JSON.stringify(botCleanup.body)).toBe(200);
       }
+    }
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    { mode: "size", sizes: [25 * 1024 * 1024 + 1], message: "Uploads are limited to 25 MiB per file.", status: 200 },
+    { mode: "batch", sizes: Array(5).fill(21 * 1024 * 1024) as number[], message: "Uploads are limited to 100 MiB per batch.", status: 200 },
+    { mode: "changed", sizes: [1024], message: expect.stringContaining("changed while staging"), status: 200 },
+    { mode: "stop", sizes: [1024], message: "the internal turn capability has expired", status: 401 },
+    { mode: "disk", sizes: [1024], message: expect.stringMatching(/ENOTDIR|EEXIST/), status: 500 },
+  ])("returns the correct browser upload result for $mode", async ({ mode, sizes, message, status }) => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const gate = join(home, "browser-upload-read-gate");
+    const folder = join(home, ".openmausbot", "browser-uploads");
+    const backup = folder + ".backup";
+    let blockedFolder = false;
+    let pending: Promise<Response> | undefined;
+    try {
+      expect((await api("PATCH", "/api/config", {
+        features: { browser: true }, browserEngine: { engine: "chrome" },
+      })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        approvalMode: "auto", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      const workspace = join(home, ".openmausbot", "workspaces", bot.id);
+      mkdirSync(workspace, { recursive: true });
+      const files = sizes.map((size, i) => {
+        const file = join(workspace, `upload-${i}.bin`);
+        writeFileSync(file, "");
+        truncateSync(file, size);
+        return file;
+      });
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Upload the synthetic files." })).status).toBe(202);
+      const dump = await readJsonFileWhenReady(fakeClaudeDump) as {
+        mcpConfig: { mcpServers: { browser: { env: Record<string, string> } } };
+      };
+      if (mode === "disk") {
+        if (existsSync(folder)) renameSync(folder, backup);
+        writeFileSync(folder, "not a directory");
+        blockedFolder = true;
+      }
+      if (mode === "changed" || mode === "stop") writeFileSync(gate, files[0]!);
+      pending = fetch(`${BASE}/api/internal/browser/mcp`, {
+        method: "POST", headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${dump.mcpConfig.mcpServers.browser.env.OMB_MCP_TOKEN_BROWSER}`,
+        },
+        body: JSON.stringify({ method: "tools/call", params: { name: "agent_browser_upload", arguments: { files } } }),
+      });
+      if (mode === "changed" || mode === "stop") {
+        await expect.poll(() => existsSync(gate + ".entered")).toBe(true);
+        truncateSync(files[0]!, 0);
+        if (mode === "stop") expect((await api("POST", `/api/bots/${bot.id}/interrupt`, {})).status).toBe(200);
+        writeFileSync(gate + ".release", "");
+      }
+      const response = await pending;
+      const body = await response.json();
+      expect({ status: response.status, body }).toEqual({
+        status, body: status === 200 ? { result: { isError: true, content: [{ type: "text", text: message }] } } : { error: message },
+      });
+    } finally {
+      writeFileSync(gate + ".release", "");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await pending?.catch(() => undefined);
+      for (const file of [gate, gate + ".entered", gate + ".release"]) rmSync(file, { force: true });
+      if (blockedFolder) {
+        rmSync(folder, { force: true });
+        if (existsSync(backup)) renameSync(backup, folder);
+      }
+      await api("PATCH", "/api/config", { features: { browser: false }, browserEngine: { engine: "agent-browser" } }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
     }
   });
 
@@ -11693,7 +11780,7 @@ describe("harness HTTP API", () => {
     });
     expect(saved.status).toBe(200);
     expect(saved.body.composio).toEqual({ configured: true, mode: "self-hosted" });
-    expect(saved.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
+    expect(saved.body.opencodeGo).toEqual({ configured: true, last4: "rnal", providerKeys: [] });
     expect(saved.body.profile).toEqual({ name: "External Store", email: "", aboutMe: "" });
     expect(JSON.stringify(saved.body)).not.toContain("ak_good");
 
@@ -12272,11 +12359,11 @@ describe("harness HTTP API", () => {
   it("stores OpenCode Go credentials as a configured-only status", async () => {
     const put = await api("PUT", "/api/config", { opencodeGo: { apiKey: "opencode-secret" } });
     expect(put.status).toBe(200);
-    expect(put.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
+    expect(put.body.opencodeGo).toEqual({ configured: true, last4: "cret", providerKeys: [] });
     expect(JSON.stringify(put.body)).not.toContain("opencode-secret");
 
     const after = await api("GET", "/api/config");
-    expect(after.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
+    expect(after.body.opencodeGo).toEqual({ configured: true, last4: "cret", providerKeys: [] });
     expect(JSON.stringify(after.body)).not.toContain("opencode-secret");
   });
 
