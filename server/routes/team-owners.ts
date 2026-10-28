@@ -117,6 +117,8 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
       return json(res, 200, { bots: changed.bots.map((bot) => deps.publicBot(bot)) });
     }
 
+    const beforeRead = deps.store.bot(one![1]!);
+    if (!beforeRead || !deps.sees(auth, beforeRead.id)) return json(res, 404, { error: "no such bot" });
     const parsed = ownerBody.safeParse(await readBody(req));
     if (!parsed.success) return json(res, 400, { error: "Send the email of the person it reports to." });
     const bot = deps.store.bot(one![1]!);
