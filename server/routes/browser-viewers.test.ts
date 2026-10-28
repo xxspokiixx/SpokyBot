@@ -6,7 +6,7 @@ import { createServer, request, type IncomingMessage, type Server, type ServerRe
 import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserHostError, SETUP_COMMAND } from "../browser/chrome/host-setup.ts";
 import type { Audience } from "../audience.ts";
@@ -65,6 +65,7 @@ interface Fixture {
 const servers: Server[] = [];
 const folders: string[] = [];
 afterEach(async () => {
+  vi.unstubAllGlobals();
   for (const server of servers.splice(0)) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
@@ -313,8 +314,9 @@ describe("the v1 live view", () => {
 });
 
 describe("the page's file picker and downloads", () => {
-  it("passes uploaded files to the page's open picker, which only its current id answers", async () => {
+  it.each(["linux", "darwin", "win32"])("passes uploaded bytes to the page's open picker on %s, which only its current id answers", async (platform) => {
     const fixture = await serve();
+    vi.stubGlobal("process", { ...process, platform });
     const upload = (chooser: string) => {
       const body = new FormData();
       body.append("file", new File(["hello"], "notes.txt", { type: "text/plain" }));

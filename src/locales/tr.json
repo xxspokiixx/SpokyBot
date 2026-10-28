@@ -34,6 +34,7 @@
   "pro.name": "MausBot Cloud",
   "pro.fromPrice": "MausBot Cloud planları aylık {price} + vergiden başlar.",
   "pro.seePlans": "Planları karşılaştır",
+  "cloudBuy.includes": "Her plana dahil",
   "pro.reauthShort": "Cloud'u bu bilgisayarda kullanmak için tekrar giriş yapın. Planınız bundan etkilenmez.",
   "pro.openCloudSettings": "MausBot Cloud ayarları",
   "pro.settingsSummary": "Bu bilgisayar kapalıyken bile botlarınızı ve rutinlerinizi 7/24 çalışır durumda tutar.",

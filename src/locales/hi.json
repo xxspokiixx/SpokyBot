@@ -2,6 +2,7 @@
   "highlevel.unavailable": "यहाँ उपलब्ध नहीं।",
   "pro.fromPrice": "MausBot Cloud प्लान {price}/माह से, साथ में टैक्स।",
   "pro.seePlans": "प्लान की तुलना करें",
+  "cloudBuy.includes": "हर प्लान में शामिल",
   "pro.reauthShort": "इस कंप्यूटर पर Cloud इस्तेमाल करने के लिए फिर से साइन इन करें। आपके प्लान पर कोई असर नहीं पड़ता।",
   "pro.openCloudSettings": "MausBot Cloud सेटिंग्स",
   "pro.settingsSummary": "आपके बॉट और रूटीन 24/7 चलते रहते हैं, तब भी जब यह कंप्यूटर बंद हो।",

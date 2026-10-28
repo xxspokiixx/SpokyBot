@@ -2,6 +2,7 @@
   "highlevel.unavailable": "Тут недоступно.",
   "pro.fromPrice": "Плани MausBot Cloud від {price}/міс. + податки.",
   "pro.seePlans": "Порівняти плани",
+  "cloudBuy.includes": "У кожен план входить",
   "pro.reauthShort": "Увійдіть знову, щоб користуватися Cloud на цьому комп’ютері. Ваш план від цього не змінюється.",
   "pro.openCloudSettings": "Налаштування MausBot Cloud",
   "pro.settingsSummary": "Ваші боти й рутини працюють цілодобово, навіть коли цей комп’ютер вимкнено.",

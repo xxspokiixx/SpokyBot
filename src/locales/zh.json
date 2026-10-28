@@ -2,6 +2,7 @@
   "highlevel.unavailable": "这里不可用。",
   "pro.fromPrice": "MausBot Cloud 方案每月 {price} 起，另加税费。",
   "pro.seePlans": "比较方案",
+  "cloudBuy.includes": "所有方案均包含",
   "pro.reauthShort": "重新登录即可在这台电脑上使用 Cloud。你的方案不受影响。",
   "pro.openCloudSettings": "MausBot Cloud 设置",
   "pro.settingsSummary": "即使这台电脑关机，你的机器人和例行任务也会全天候运行。",
