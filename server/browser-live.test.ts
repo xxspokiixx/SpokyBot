@@ -77,6 +77,7 @@ beforeEach(() => {
     watch: vi.fn(() => () => {}),
     onIdleClose: vi.fn(),
     settled: vi.fn(async () => {}),
+    working: vi.fn(() => true),
     launchReady: vi.fn(async () => {}),
     launched: vi.fn(async () => {}),
     pageSizes: { resize: vi.fn(async () => {}) },
@@ -1084,6 +1085,32 @@ describe("opening a view while the bot holds the browser", () => {
     expect(types(res).slice(0, 3)).toEqual(["waiting", "waiting", "ready"]);
     expect(execute).toHaveBeenCalledTimes(3);
     expect(execute.mock.calls[0]?.[2]).toMatchObject({ timeout: 10_000, killSignal: "SIGKILL" });
+  });
+
+  it("resets an engine that stops answering while nothing works in it, says so, and reconnects to a fresh session (#3728)", async () => {
+    vi.mocked(runtime.working).mockReturnValue(false);
+    execute.mockRejectedValueOnce(busy());
+    const { res, opening } = start();
+    await opening;
+    expect(res.events("waiting")).toHaveLength(0);
+    expect(res.events("error")).toEqual([{ retryable: true, message: expect.stringMatching(/browser stopped responding/) }]);
+    expect(nativeClose).toHaveBeenCalledTimes(1);
+    expect(nativeClose).toHaveBeenCalledWith("/engine", expect.objectContaining({ AGENT_BROWSER_SESSION: "profile-a" }));
+    // The next view waits for that reset, then meets the fresh session.
+    const again = start();
+    await again.opening;
+    expect(again.res.events("ready")).toHaveLength(1);
+    expect(nativeClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps waiting, and resets nothing, while a bot call still works in the browser", async () => {
+    vi.useFakeTimers();
+    execute.mockRejectedValueOnce(busy()).mockResolvedValue(output(ready));
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await opening;
+    expect(types(res).slice(0, 2)).toEqual(["waiting", "ready"]);
+    expect(nativeClose).not.toHaveBeenCalled();
   });
 
   it("does not show a peer's control changes before it is ready", async () => {

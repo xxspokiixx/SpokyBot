@@ -831,6 +831,12 @@ export class BrowserRuntime {
 
   async settled(session: string): Promise<void> { await this.gates.get(session)?.idleClose; }
 
+  /** A bot call, a person's action or hold, or a close is under way in this session's browser. */
+  working(session: string): boolean {
+    const gate = this.gates.get(session);
+    return Boolean(gate && (gate.calls || gate.agents || gate.humans || gate.owner !== null || gate.closing || gate.releasing || this.lanes.held(session)));
+  }
+
   /** Told just before an idle close stops a session's browser. */
   onIdleClose(listener: (session: string) => void): void { this.idleCloseListeners.add(listener); }
 
@@ -845,7 +851,7 @@ export class BrowserRuntime {
     if (gate && !gate.spec && spec) gate.spec = { command: spec.command, args: [...spec.args ?? []], env: { ...spec.env } };
     const launch = gate?.spec;
     if (!gate || !launch || attachesToChrome(launch.env) || !(idleMs > 0) || Date.now() - gate.lastUsed < idleMs) return false;
-    if (gate.calls || gate.agents || gate.humans || gate.owner !== null || gate.closing || gate.releasing || this.lanes.held(session)) return false;
+    if (this.working(session)) return false;
     gate.closing = true;
     gate.ready = false;
     let finished!: () => void;
