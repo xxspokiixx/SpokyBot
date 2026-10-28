@@ -31,19 +31,20 @@ const registration = {
 };
 const fromPhone = (device = "d1") => ({ "x-openmausbot-companion": "1", "x-openmausbot-companion-device": device });
 
-async function setup(options: { auth?: RequestAuth; owner?: () => string | null } = {}) {
+async function setup(options: { auth?: RequestAuth; owner?: () => string | null; live?: () => boolean; afterBody?: () => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "phones-routes-"));
   dirs.push(dir);
   const registry = new PhoneRegistry(join(dir, "phones.json"));
   const jobs = new PhoneJobs();
   const auth = options.auth ?? ADMIN;
   const routes = [createPhoneRoutes({
-    registry, jobs, owner: options.owner ?? (() => "owner"), isAdmin: (a) => a.scopes.includes("admin"),
+    registry, jobs, owner: options.owner ?? (() => "owner"), isAdmin: (a) => a.scopes.includes("admin"), live: options.live ?? (() => true),
   })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody });
+      const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json,
+        readBody: async (request, max) => { const body = await readBody(request, max); options.afterBody?.(); return body; } });
       if (!handled) json(res, 404, { from: "inline routes" });
     } catch (error) {
       // index.ts turns an error carrying a status into JSON.
@@ -168,6 +169,26 @@ describe("phone routes", () => {
     await vi.waitFor(() => expect(jobs.polling("companion:d1")).toBe(true));
     jobs.drop("companion:d1", "This phone's access changed.");
     expect(await poll).toEqual({ status: 200, body: { job: null } });
+  });
+
+  it("rechecks the session before returning a pending poll's job", async () => {
+    let live = true;
+    const { call, jobs } = await setup({ auth: clientSession("s1"), live: () => live });
+    try {
+      await call("PUT", "/api/phones/self", registration);
+      const poll = call("GET", "/api/phones/self/jobs");
+      await vi.waitFor(() => expect(jobs.polling("session:s1")).toBe(true));
+      live = false;
+      void jobs.request("session:s1", "PHONE_CREATE_EVENT", { title: "Private appointment" }, { active: () => true, timeoutMs: 10_000, offlineText: "offline", online: () => true });
+      expect(await poll).toMatchObject({ status: 401, body: { error: expect.any(String) } });
+    } finally { jobs.close(); }
+  });
+
+  it("does not register a phone if its session ends while reading the body", async () => {
+    let live = true;
+    const { call, registry } = await setup({ auth: clientSession("s1"), live: () => live, afterBody: () => { live = false; } });
+    expect((await call("PUT", "/api/phones/self", registration)).status).toBe(401);
+    expect(registry.get("session:s1")).toBeUndefined();
   });
 
   it("a team Cloud offers no phones", async () => {
