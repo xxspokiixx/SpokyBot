@@ -12,7 +12,7 @@ import { isTypeaheadKey, TYPEAHEAD_RESET_MS, typeaheadMatch, typeaheadText, type
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
-import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
+import { ApiKeyHint, EngineSetup, EngineUpdateNotice, needsCli, needsSignIn, openKeysFor } from "./EngineSetup";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
@@ -442,7 +442,7 @@ export function ModelPicker({
 
   const openApiKeys = () => {
     close(false);
-    dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
+    dispatch(openKeysFor(railInstance));
   };
   const openEngines = () => {
     close(false);
@@ -723,14 +723,16 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex items-center gap-1.5 rounded-full border-[0.5px] border-ink/10 py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
+        "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
         contained
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
-          : cn("bg-composer shadow-(--shadow-float) disabled:text-ink-tertiary disabled:hover:bg-composer", ELEVATED_HOVER),
+          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
     >
-      {active && <InstanceProviderMark instance={active} size={14} className="group-disabled:opacity-50" />}
+      {active && (contained
+        ? <InstanceProviderMark instance={active} size={14} subtle />
+        : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={14} subtle /></span>)}
       {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
@@ -753,9 +755,9 @@ export function ModelPicker({
         )}
       </span>
       <ChevronDown
-        size={14}
+        size={12}
         className={cn(
-          "text-ink-secondary transition-transform",
+          "text-ink-tertiary transition-transform",
           open && "rotate-180",
           !contained && active && "@max-4xl/chathead:hidden",
         )}
@@ -768,7 +770,7 @@ export function ModelPicker({
         "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary disabled:cursor-not-allowed disabled:text-ink-tertiary",
         contained
           ? "transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
-          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink"),
+          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
       )}
     >
@@ -879,7 +881,7 @@ export function ModelPicker({
                   <ChatGptPlanStatus key={railInstance.instanceId} instanceId={railInstance.instanceId} />
                 )}
                 {railInstance.access === "api"
-                  ? <div className="mt-0.5 text-[12px] leading-4 text-ink-tertiary">{t("model.apiKeyHint")}</div>
+                  ? <ApiKeyHint instance={railInstance} />
                   : pane === "custom" && <div className="mt-0.5 text-[12px] leading-4 text-ink-tertiary">{t("model.localHint")}</div>}
               </div>
 
