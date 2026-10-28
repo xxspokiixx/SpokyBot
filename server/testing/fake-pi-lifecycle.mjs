@@ -14,9 +14,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (cmd.type === "get_available_models") {
     process.stdout.write(JSON.stringify({ type: "response", command: cmd.type, success: true, data: { models: [model] } }) + "\n", () => process.exit(0));
   }
-  if (["get_state", "new_session", "switch_session"].includes(cmd.type)) {
+  if (cmd.type === "get_state") {
     reply(cmd.type, { sessionFile: "fixture-session.jsonl", model });
   }
+  if (["new_session", "switch_session"].includes(cmd.type)) reply(cmd.type, { cancelled: false });
   if (cmd.type === "set_model") {
     dump({ setModel: cmd.modelId });
     if (cmd.modelId === "refused") send({ type: "response", command: cmd.type, success: false, error: "Model unavailable" });
@@ -26,6 +27,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     dump({ prompt: cmd.message, pid: process.pid });
     reply(cmd.type);
     send({ type: "tool_execution_start", toolCallId: "ready", toolName: "fixture" });
+    if (cmd.message.startsWith("usage:")) {
+      const stopReason = cmd.message === "usage:hold" ? "toolUse" : cmd.message.slice("usage:".length);
+      send({ type: "turn_end", message: { stopReason, usage: { input: 5, output: 1 } }, usage: { input: 5, output: 1 } });
+      if (cmd.message === "usage:hold") {
+        send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "usage-ready" } });
+        return;
+      }
+      send({ type: "turn_start" });
+      send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 2 } } });
+      send({ type: "agent_end", isTerminal: true });
+      send({ type: "agent_settled" });
+      return;
+    }
     if (cmd.message.startsWith("maintenance:")) {
       send({ type: "turn_end", message: { stopReason: "end_turn" } });
       const kind = cmd.message.slice("maintenance:".length);

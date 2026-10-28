@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,6 @@ const CLI = fileURLToPath(new URL("../testing/fake-pi-lifecycle.mjs", import.met
 let dir: string;
 let instance: ProviderInstance;
 let events: EventRecorder;
-let ownedPid: number | undefined;
 
 beforeEach(async () => {
   ensureDirs();
@@ -27,13 +26,16 @@ beforeEach(async () => {
     environment: { FAKE_PI_LIFECYCLE_DUMP: join(dir, "rpc.jsonl") },
   });
   events = recordEvents(instance.adapter);
-  ownedPid = undefined;
 });
 
 afterEach(async () => {
   await instance.dispose();
-  if (ownedPid) {
-    try { process.kill(ownedPid, "SIGKILL"); } catch {}
+  const dump = join(dir, "rpc.jsonl");
+  if (existsSync(dump)) {
+    const rows = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { pid?: number });
+    for (const { pid } of rows) {
+      if (pid) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    }
   }
   events.stop();
   await removeTempDir(dir);
@@ -43,7 +45,6 @@ it.each(["interrupt", "stopAll", "dispose"])("keeps ownership through %s until t
   await instance.adapter.sendTurn({ threadId: "cancel", text: "wait" });
   await events.until((event) => event.type === "item.started");
   const { pid } = JSON.parse(readFileSync(join(dir, "rpc.jsonl"), "utf8").trim()) as { pid: number };
-  ownedPid = pid;
   let runningAtCompletion = false;
   instance.adapter.onEvent((event) => {
     if (event.type !== "turn.completed") return;
@@ -81,7 +82,7 @@ it.each([
   expect(events.events.find((event) => event.type === "session.started")).toMatchObject({ model: confirmed });
 });
 
-it.each(["retry", "nonterminal", "compaction_start", "auto_compaction_start"])(
+it.each(["retry", "nonterminal", "compaction_start", "auto_compaction_start", "agent_start"])(
   "keeps a turn running beyond the completion grace after %s",
   async (kind) => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
@@ -109,4 +110,20 @@ it("retains the completion fallback when no continuation or maintenance arrives"
     vi.useRealTimers();
   }
   expect(await events.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true, stopReason: "end_turn" });
+});
+
+it.each(["toolUse", "tool_use", "tool_calls"])("accumulates usage across %s rounds without counting duplicate fields", async (reason) => {
+  await instance.adapter.sendTurn({ threadId: "usage", text: `usage:${reason}` });
+  expect(await events.until((event) => event.type === "turn.completed")).toMatchObject({
+    ok: true, usage: { input: 17, output: 3 },
+  });
+});
+
+it("keeps usage already consumed when Stop cancels a continuation", async () => {
+  await instance.adapter.sendTurn({ threadId: "usage-stop", text: "usage:hold" });
+  await events.until((event) => event.type === "content.delta" && event.delta === "usage-ready");
+  await instance.adapter.interruptTurn("usage-stop");
+  expect(await events.until((event) => event.type === "turn.completed")).toMatchObject({
+    ok: true, stopReason: "cancelled", usage: { input: 5, output: 1 },
+  });
 });

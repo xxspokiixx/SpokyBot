@@ -543,7 +543,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
       };
 
-      const settle = (ok: boolean, stopReason?: string | null, usage?: { input?: number; output?: number }): Promise<void> => {
+      const settle = (ok: boolean, stopReason?: string | null, usage = endUsage): Promise<void> => {
         if (completion) return completion;
         settled = true;
         if (agentEndTimer) {
@@ -750,10 +750,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
             const sr = evt.message?.stopReason;
+            const usage = evt.usage ?? evt.message?.usage;
+            if (usage) endUsage = { input: (endUsage?.input ?? 0) + (usage.input ?? 0), output: (endUsage?.output ?? 0) + (usage.output ?? 0) };
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
             endStopReason = sr;
-            endUsage = evt.usage ?? evt.message?.usage;
             endErrorMessage = evt.message?.errorMessage;
             // pi can schedule maintenance (overflow-recovery compaction) after the final turn_end;
             // only agent_end proves the session is done rewriting itself.
