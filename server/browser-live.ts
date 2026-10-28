@@ -60,6 +60,11 @@ export class BrowserBusyError extends BrowserLiveError {
   }
 }
 
+/** The engine left a status read unanswered with no bot or person working in it: it hung, and its session is being reset. */
+class BrowserUnresponsiveError extends BrowserLiveError {
+  constructor() { super("The browser stopped responding, so it is being restarted. The live view reconnects by itself.", 503); this.name = "BrowserUnresponsiveError"; }
+}
+
 /** A person's input or command went unanswered, but the engine answered a read queued behind it, so it has ended. */
 export class BrowserSlowActionError extends BrowserLiveError {
   readonly settled = true;
@@ -536,20 +541,25 @@ export class BrowserLive {
       console.warn("browser-live:", error);
       if (browserLaunchFailure(error)) {
         // A daemon holding a launch config Chrome cannot satisfy here (headed, no display) fails every command until killed, so discard the session once.
-        if (!this.sessionResets.has(viewer.session)) {
-          const reset = closeBrowserSession(viewer.spec.command, env).then((closed) => {
-            if (closed) console.warn(`browser-live: reset ${viewer.session} after a failed browser launch; reconnecting starts a fresh session`);
-            else console.warn(`browser-live: reset of ${viewer.session} after a failed browser launch did not finish; the next command retries it`);
-            return closed;
-          }, () => false);
-          this.sessionResets.set(viewer.session, reset);
-          void reset.finally(() => { if (this.sessionResets.get(viewer.session) === reset) this.sessionResets.delete(viewer.session); });
-        }
+        this.resetSession(viewer, "a failed browser launch");
         throw new BrowserLiveError("The browser could not start on this server. Reconnect to retry with a fresh browser session.", 503);
       }
       if (person && engineAnsweredFailure(error)) throw new BrowserActionFailedError(args);
       throw new BrowserLiveError("The browser could not complete this action. Check that the browser engine is installed, then reconnect.", 503);
     }
+  }
+
+  /** Discards the session's daemon once; connecting waits for it, then starts a fresh one. */
+  private resetSession(viewer: Viewer, why: string): void {
+    if (this.sessionResets.has(viewer.session)) return;
+    const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
+    const reset = closeBrowserSession(viewer.spec.command, env).then((closed) => {
+      if (closed) console.warn(`browser-live: reset ${viewer.session} after ${why}; reconnecting starts a fresh session`);
+      else console.warn(`browser-live: reset of ${viewer.session} after ${why} did not finish; the next command retries it`);
+      return closed;
+    }, () => false);
+    this.sessionResets.set(viewer.session, reset);
+    void reset.finally(() => { if (this.sessionResets.get(viewer.session) === reset) this.sessionResets.delete(viewer.session); });
   }
 
   private async connect(viewer: Viewer): Promise<number> {
@@ -560,7 +570,14 @@ export class BrowserLive {
     await this.runtime.launchReady(viewer.spec).catch((error: unknown) => {
       throw new BrowserLiveError(error instanceof Error ? error.message : "The browser is not ready yet.", 503);
     });
-    let status = await this.command(viewer, ["stream", "status"], STATUS_PROBE_MS);
+    let status: ObjectValue;
+    try { status = await this.command(viewer, ["stream", "status"], STATUS_PROBE_MS); }
+    catch (error) {
+      // Only a bot call or a person's action can hold the engine past this read; with neither, it has hung.
+      if (!(error instanceof BrowserBusyError) || this.runtime.working(viewer.session)) throw error;
+      this.resetSession(viewer, "a status read the browser never answered");
+      throw new BrowserUnresponsiveError();
+    }
     if (status.enabled !== true) {
       try { status = await this.command(viewer, ["stream", "enable"]); }
       catch (error) {
@@ -774,9 +791,11 @@ export class BrowserLive {
       viewer.heartbeat.unref();
     } catch (error) {
       console.warn("browser-live:", error);
+      if (error instanceof BrowserUnresponsiveError) this.startEvents(viewer);
       if (options.res.headersSent) {
         const busy = error instanceof BrowserBusyError;
-        this.send(viewer, { type: "error", retryable: !busy, message: busy ? error.message : "The browser stream could not start." });
+        const explained = busy || error instanceof BrowserUnresponsiveError;
+        this.send(viewer, { type: "error", retryable: !busy, message: explained ? error.message : "The browser stream could not start." });
         this.close(viewer); return;
       }
       this.close(viewer, options.res.headersSent);
