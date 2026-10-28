@@ -722,11 +722,11 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "flex items-center gap-1.5 rounded-full border-[0.5px] border-ink/10 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
+        "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
     >
-      {active && <InstanceProviderMark instance={active} size={14} />}
+      {active && <InstanceProviderMark instance={active} size={14} subtle />}
       {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
@@ -749,9 +749,9 @@ export function ModelPicker({
         )}
       </span>
       <ChevronDown
-        size={14}
+        size={12}
         className={cn(
-          "text-ink-secondary transition-transform",
+          "text-ink-tertiary transition-transform",
           open && "rotate-180",
           !contained && active && "@max-4xl/chathead:hidden",
         )}

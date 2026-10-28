@@ -449,7 +449,7 @@ export function SettingsModal() {
   const close = () => dispatch({ type: "toggleAppSettings", open: false });
   const searchField = (className: string, inputClassName: string) => (
     <div className={className}>
-      <Search size={advanced ? 14 : 15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      <Search size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
       <input
         data-settings-search
         value={query}
@@ -583,6 +583,7 @@ export function SettingsModal() {
     <div
       className="glass-popup-frame"
       data-settings-sheet
+      data-settings-look="advanced"
       style={glassPopupFrameStyle()}
       onMouseDown={(e) => e.target === e.currentTarget && close()}
     >
@@ -602,8 +603,8 @@ export function SettingsModal() {
             {t("settings.title")}
           </div>
           {searchField(
-            "mb-2 mt-1 flex min-h-8 shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus",
-            "w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
+            "mb-2 mt-1 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
+            "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none",
           )}
           {visibleSections.length === 0 && (
             <div className="px-2.5 py-4 text-[13px] leading-relaxed text-ink-secondary">
@@ -615,7 +616,7 @@ export function SettingsModal() {
             if (entries.length === 0) return null;
             return (
               <div key={group.id} role="group" aria-labelledby={`settings-group-${group.id}`} data-settings-group={group.id} className="flex flex-col gap-0.5 pb-2">
-                <div id={`settings-group-${group.id}`} className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">
+                <div id={`settings-group-${group.id}`} className="px-[9px] pb-1 pt-2 text-[12px] font-medium leading-4 text-ink-tertiary">
                   {t(group.labelKey)}
                 </div>
                 {entries.map(({ id, labelKey, icon: Icon }) => (
@@ -625,8 +626,8 @@ export function SettingsModal() {
                     onClick={() => openSection(id)}
                     aria-current={section === id ? "page" : undefined}
                     className={cn(
-                      "cursor-pointer flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
-                      section === id ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
+                      "flex h-8 shrink-0 cursor-pointer items-center gap-[9px] rounded-lg px-[9px] text-left text-[13px] text-ink transition-colors motion-reduce:transition-none",
+                      section === id ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
                     )}
                   >
                     <Icon size={15} className="shrink-0" />

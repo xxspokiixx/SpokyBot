@@ -314,10 +314,10 @@ describe("Settings in Simple mode", () => {
 describe("Settings in Advanced mode", () => {
   beforeEach(() => { fixture.advancedMode = true; });
 
-  it("keeps the grouped rail, the glass pop-up and General as it was, Advanced mode switch first", () => {
+  it("keeps the grouped rail and General, Advanced mode switch first, on the same Settings look as Simple", () => {
     const html = render();
     expect(html).toContain("glass-surface");
-    expect(html).not.toContain("data-settings-look");
+    expect(html).toContain('data-settings-look="advanced"');
     expect(html).not.toContain("data-settings-page=");
     expect([...html.matchAll(/data-settings-group="([^"]+)"/g)].map((match) => match[1])).toEqual(["you", "ai", "computers", "account"]);
     expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
