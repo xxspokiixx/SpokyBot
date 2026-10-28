@@ -6,7 +6,7 @@ import { createServer, request, type IncomingMessage, type Server, type ServerRe
 import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserHostError, SETUP_COMMAND } from "../browser/chrome/host-setup.ts";
 import type { Audience } from "../audience.ts";
@@ -52,6 +52,8 @@ interface Fixture {
   pickerChecks: number;
   /** The v1 views opened, by the view each asked to carry on from. */
   resumes: Array<string | null | undefined>;
+  /** The panel size each v1 view opened at. */
+  sizes: Array<{ width: number; height: number } | null | undefined>;
   /** Whose browser each view was opened on, and each check that the view still shows it. */
   opened: Audience[];
   checked: Audience[];
@@ -63,6 +65,7 @@ interface Fixture {
 const servers: Server[] = [];
 const folders: string[] = [];
 afterEach(async () => {
+  vi.unstubAllGlobals();
   for (const server of servers.splice(0)) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
@@ -73,7 +76,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
   download?: (id: string) => Download | undefined;
   audience?: (threadId: string | null) => Audience | null;
 } = {}): Promise<Fixture> {
-  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
+  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], sizes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
   const viewer = { id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, close: async () => {} } as unknown as Viewer;
   const service = {
@@ -92,6 +95,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
     viewers: {
       open: async (options) => {
         fixture.resumes.push(options.resume);
+        fixture.sizes.push(options.size);
         fixture.isCurrent = options.isCurrent;
         options.res.writeHead(204).end();
       },
@@ -299,11 +303,20 @@ describe("the v1 live view", () => {
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live`)).status).toBe(204);
     expect(fixture.resumes).toEqual(["old-viewer", null]);
   });
+
+  it("opens the view at the panel's size, and leaves a collapsed or missing one to the page", async () => {
+    const fixture = await serve();
+    for (const query of ["?width=365&height=686", "?width=365&height=40", "", "?width=wide&height=686"]) {
+      expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live${query}`)).status).toBe(204);
+    }
+    expect(fixture.sizes).toEqual([{ width: 365, height: 686 }, null, null, null]);
+  });
 });
 
 describe("the page's file picker and downloads", () => {
-  it("passes uploaded files to the page's open picker, which only its current id answers", async () => {
+  it.each(["linux", "darwin", "win32"])("passes uploaded bytes to the page's open picker on %s, which only its current id answers", async (platform) => {
     const fixture = await serve();
+    vi.stubGlobal("process", { ...process, platform });
     const upload = (chooser: string) => {
       const body = new FormData();
       body.append("file", new File(["hello"], "notes.txt", { type: "text/plain" }));
