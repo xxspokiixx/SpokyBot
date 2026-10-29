@@ -200,6 +200,9 @@ export function createHomeWindow(deps) {
   const state = () => account()?.state() ?? null;
   const wanted = (token) => token === opens;
   const cloudOrigin = () => (home.kind === "cloud" ? home.origin : null);
+  /** The Cloud at `origin` sleeps now: My Cloud by its gate (the Admin's word and its own answer), any other of the
+   * person's Clouds by the Admin's word in the Clouds list. A request to a sleeping one would wake it. */
+  const asleepAt = (origin) => (origin && origin === cloudOrigin() ? power.asleep() : account()?.powerOf?.(origin)?.state === "asleep");
   /** The origin of the place on screen, or on its way: a team's Cloud while one is shown, else My Cloud. */
   const placeOrigin = () => (otherPlace(shown) ? (signedOut() ? null : shown.origin) : cloudOrigin());
   const teamName = () => (otherPlace(opening) ? opening.name : null);
@@ -500,10 +503,10 @@ export function createHomeWindow(deps) {
       return typeof body?.version === "string" ? body.version : null;
     } catch { return null; }
   }
-  /** A newer page reloads at a quiet moment; an asleep My Cloud is never asked (that would start it). */
+  /** A newer page reloads at a quiet moment; a Cloud asleep is never asked (that would start it). */
   async function watchVersion() {
     const origin = placeOrigin();
-    if (!origin || !shows(origin) || (!otherPlace(shown) && power.asleep())) return;
+    if (!origin || !shows(origin) || asleepAt(origin)) return;
     const current = await version(origin);
     if (!current) return;
     if (!loaded) { loaded = current; return; }
@@ -535,6 +538,8 @@ export function createHomeWindow(deps) {
     view,
     /** My Cloud's origin while it is home, else null. */
     cloudOrigin,
+    /** Whether the Cloud at `origin` sleeps now (see `asleepAt`): nothing in the background asks it then. */
+    asleepAt,
     /** The origin of the place the window shows (a team's Cloud, or My Cloud), else null. */
     placeOrigin,
     /** Home as last worked out. */

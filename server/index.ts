@@ -9650,7 +9650,7 @@ let webhookIngressError: string | null = null;
 try {
   webhookIngress = await listenWebhookIngress(webhooks, {
     port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
-    claimRequest: () => { moveFreeze.assertTurns(); return workspaceMaintenance.request(); },
+    claimRequest: () => { cloudPower?.arrived("/hooks", {}); moveFreeze.assertTurns(); return workspaceMaintenance.request(); },
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
   console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
@@ -12726,7 +12726,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     return json(res, 400, { error: "invalid request URL" });
   }
   const path = url.pathname;
-  const method = req.method ?? "GET";
+  const method = req.method ?? "GET"; cloudPower?.arrived(path, req.headers); // a Cloud home's first request after a wake: what woke it
   let m: RegExpMatchArray | null = null;
   let releaseWorkspaceRequest: (() => void) | undefined;
   try {

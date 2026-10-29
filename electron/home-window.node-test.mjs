@@ -83,6 +83,7 @@ function world({ journal = done(), marker = null, state = connected(), power = n
   const account = {
     state: () => w.state,
     power: () => w.power,
+    powerOf: (origin) => (origin === CLOUD ? w.power : (w.state?.clouds ?? []).find((cloud) => cloud.origin === origin)?.power ?? null),
     async wakeHome() { w.wakes++; await w.cloud.wakeGate; if (w.cloud.wakes) w.power = { ...w.power, state: "awake" }; return "awake"; },
     setWaking: (on) => w.waking.push(on),
     async pairHome(cloudId = null) {
@@ -872,6 +873,27 @@ test("choosing another Cloud of the person's own opens it through the Admin's pa
   assert.equal(w.home.placeOrigin(), CLIENT);
   assert.equal(w.timers.length, 0, "its session lasts as My Cloud's does: nothing to renew");
   assert.deepEqual(w.home.view(), { screen: "opening", name: "Client A" });
+});
+
+test("another Cloud of the person's own that the Admin says is asleep is never asked for its version; once the Admin says it is awake, it is", async () => {
+  const w = world({ state: { ...connected(), clouds: [CLIENT_A] } });
+  await w.home.show({ place: { cloud: "c-a" } });
+  w.url = `${CLIENT}/`;
+  w.home.navigated(w.url);
+  await w.tick();
+  const versions = () => w.fetched.filter(([route]) => route === "client:/.well-known/openmausbot/environment");
+  const read = versions().length;
+  assert.ok(read > 0, "the shown Cloud's version is read while it is awake");
+  // The Clouds list says it sleeps (`power`, contract v1): any request reaching it would wake it.
+  w.state = { ...w.state, clouds: [{ ...CLIENT_A, power: { state: "asleep", since: 5, sleeps: true } }] };
+  await w.tick();
+  await w.tick();
+  assert.equal(versions().length, read, "a Cloud the Admin says is asleep is never asked");
+  assert.deepEqual([w.home.asleepAt(CLIENT), w.home.asleepAt(CLOUD)], [true, false], "and the quiet updater asks the same: only that Cloud sleeps");
+  w.state = { ...w.state, clouds: [{ ...CLIENT_A, power: { state: "awake", since: 6, sleeps: true } }] };
+  await w.tick();
+  assert.equal(versions().length, read + 1, "awake again, it is asked");
+  assert.deepEqual(versions().at(-1), ["client:/.well-known/openmausbot/environment", "1"], "as a background read");
 });
 
 test("another Cloud the Admin says is no longer theirs is dropped at once and My Cloud opens, with no line; one being set up shows its setup with its name", async () => {

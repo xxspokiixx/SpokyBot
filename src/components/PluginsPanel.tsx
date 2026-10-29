@@ -50,7 +50,7 @@ export interface ConnectorInventory {
   authoritative: boolean;
 }
 
-export function preloadConnectedApps(force = false): Promise<ConnectorInventory> {
+export function preloadConnectedApps(force = false, background = false): Promise<ConnectorInventory> { // background: src/state/api.ts
   if (!force && cachedConnectorStatus !== null && Date.now() - cachedConnectorStatusAt < CONNECTOR_STATUS_CACHE_MS) {
     return Promise.resolve({
       services: cachedConnectorStatus,
@@ -58,7 +58,7 @@ export function preloadConnectedApps(force = false): Promise<ConnectorInventory>
     });
   }
   if (connectorStatusRequest) return connectorStatusRequest;
-  connectorStatusRequest = api("/api/connectors/connected")
+  connectorStatusRequest = api("/api/connectors/connected", background ? { background: true } : undefined)
     .then((response: { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean }) => {
       const services: Record<string, ConnectorStatus> = response.services ?? {};
       if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {

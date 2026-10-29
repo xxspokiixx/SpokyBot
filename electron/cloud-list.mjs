@@ -1,6 +1,6 @@
 // The verified session's `clouds` (contract v1, additive): every Cloud this person owns and every team's Cloud they are
 // in, the account's primary Cloud first. Only the Admin lists a Cloud; a page never names one.
-import { CLOUD_SETUP_STEPS, homeOrigin } from "./cloud-home.mjs";
+import { CLOUD_SETUP_STEPS, homeOrigin, parseCloudPower } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 
 export const MAX_CLOUDS = 20;
@@ -55,9 +55,11 @@ function parseCloudEntry(input) {
   const setup = input.status === "setting_up" ? setupOf(input.setup) : null;
   const lastSeenAt = typeof input.lastSeenAt === "number" && Number.isSafeInteger(input.lastSeenAt) && input.lastSeenAt > 0 ? input.lastSeenAt : null;
   const version = typeof input.version === "string" && VERSION.test(input.version) ? input.version : null;
+  // Additive (Oct 30): as `cloud.power`, for a Ready Cloud whose plan sleeps; this app never reaches one the Admin says is asleep.
+  const power = input.status === "ready" ? parseCloudPower(input.power) : null;
   return { id: input.id, name, color: Object.hasOwn(CLOUD_SWATCH_COLORS, input.color) ? input.color : null, role: input.role,
     tier: typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : null, runsOn: input.runsOn, status: input.status, origin, teamId,
-    primary: input.primary, managed, ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}) };
+    primary: input.primary, managed, ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}), ...(power ? { power } : {}) };
 }
 
 /** An OpenMausBot release as the Admin names it ("0.1.130"), or null: anything else is no version at all. */

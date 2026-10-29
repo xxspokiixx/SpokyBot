@@ -88,6 +88,18 @@ test("the session's Clouds: each other own Cloud pairs with its id, and only a g
   assert.equal(f.delay, 15_000, "a Cloud of theirs being set up is checked every 15 s");
 });
 
+test("the Admin's word on each of the person's Clouds by its address: My Cloud's `cloud.power`, another's from the Clouds list", async t => {
+  const f = await admin(t);
+  f.session = { cloud: { state: "ready", origin: HOME, pairingAvailable: true, power: { state: "awake", since: 5, sleeps: true } },
+    clouds: [PRIMARY, entry({ power: { state: "asleep", since: 7, sleeps: true } }), entry({ id: "c-b", name: "Client B", origin: "https://omb-c-b.fly.dev" })] };
+  await f.client.start();
+  assert.deepEqual(f.client.powerOf(HOME), { state: "awake", since: 5, sleeps: true });
+  assert.deepEqual(f.client.powerOf(CLIENT_A), { state: "asleep", since: 7, sleeps: true });
+  assert.equal(f.client.powerOf("https://omb-c-b.fly.dev"), null, "a Cloud whose plan never sleeps");
+  assert.equal(f.client.powerOf(TEAM), null, "nothing the session lists");
+  assert.equal(f.client.powerOf(""), null);
+});
+
 test("buying another Cloud: the plan, the name and the swatch go to the Admin, its own checkout opens, and the session is followed every 3 s", async t => {
   const f = await admin(t);
   f.session = { ...f.session, clouds: [PRIMARY] };

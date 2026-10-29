@@ -30,6 +30,16 @@ test("the session's Clouds are read strictly: a malformed one is left out whole,
   assert.equal(parseCloudList([cloud({ status: "ready", setup: { step: "storage" } })])[0].setup, undefined, "only while it is set up");
 });
 
+test("each Cloud's `power` as the Admin says it of a Ready Cloud whose plan sleeps; anything malformed, or on a Cloud not Ready, is none", () => {
+  const power = { state: "asleep", since: 1_761_000_000_000, sleeps: true };
+  assert.deepEqual(parseCloudList([cloud({ power })])[0].power, power);
+  assert.deepEqual(parseCloudList([cloud({ power: { ...power, state: "waking", extra: 1 } })])[0].power, { ...power, state: "waking" });
+  for (const bad of [{ ...power, state: "dozing" }, { ...power, sleeps: false }, { ...power, since: -1 }, "asleep", null]) {
+    assert.equal(parseCloudList([cloud({ power: bad })])[0].power, undefined, JSON.stringify(bad));
+  }
+  assert.equal(parseCloudList([cloud({ status: "stopped", power })])[0].power, undefined, "only a Ready Cloud sleeps or wakes");
+});
+
 test("a server or computer of the person's own that signed in with their account: read with or without an address, and never a Cloud of theirs", () => {
   const mini = cloud({ id: "s-mini", name: "Mac mini", color: null, tier: null, runsOn: "server", managed: false, status: "offline", origin: null,
     lastSeenAt: 1_761_000_000_000, version: "0.1.118", kind: "desktop", reachable: { via: "tailscale" } });

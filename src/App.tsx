@@ -205,7 +205,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
 
   useEffect(() => {
     if (!state.connected) return;
-    void preloadConnectedApps().catch(() => {});
+    void preloadConnectedApps(false, true).catch(() => {}); // a background read: a reconnect is nobody using a Cloud home
   }, [state.connected]);
   useUsageSnapshot();
 

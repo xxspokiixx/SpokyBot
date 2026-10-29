@@ -585,6 +585,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     homeTarget,
     /** The Admin's last verified word on a Cloud whose plan sleeps, kept while a re-check fails; null for any other. */
     power: () => (value.status === "connected" ? value.machine?.power ?? null : null),
+    /** The same for the Cloud at `origin`: My Cloud's `cloud.power`, or another's from the Clouds list (contract v1, Oct 30). */
+    powerOf: origin => {
+      if (value.status !== "connected" || typeof origin !== "string" || !origin) return null;
+      if (value.machine?.origin === origin) return value.machine.power ?? null;
+      return (value.clouds ?? []).find(cloud => cloud.origin === origin)?.power ?? null;
+    },
     /** Starts a sleeping Cloud through the Admin (`awake` once started, `waking` if it is still starting), then reads the
      *  session again so Files and lending resume. Null when there is nothing to wake or the Admin can't say. */
     async wakeHome() {
