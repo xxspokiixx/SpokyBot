@@ -3,21 +3,23 @@
 // both answer through it.
 import { resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { TOOL_BRIDGE_ENV, createToolBridge } from "./agents-bridge.ts";
-import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
+import { availableTools, callableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
 import { sendToolReceipt } from "./agents-timing.ts";
 import type { Json } from "./agents-client.ts";
 import { capToolListResult, toolLimitFromEnv } from "../tool-count-limit.ts";
 
-/** What the agents server lists for `env`, before any tool limit. */
+/** What the agents server lists for `env`, before any tool limit, and what a call may reach: the listed tools, and the
+ * wait tools left off the list only for want of a wait (callableTools), which a bridge's find_tool does not search. */
 export function agentsToolList(env: NodeJS.ProcessEnv) {
-  const available = availableTools(catalogProfileFromEnv(env));
+  const profile = catalogProfileFromEnv(env);
+  const available = availableTools(profile);
   const bridge = env[TOOL_BRIDGE_ENV] === "1" ? createToolBridge(available) : undefined;
-  return { available, bridge, listed: bridge ? bridge.listed : available };
+  return { callable: callableTools(profile), bridge, listed: bridge ? bridge.listed : available };
 }
 
 export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json | undefined> {
-  const { available, bridge, listed } = agentsToolList(env);
+  const { callable, bridge, listed } = agentsToolList(env);
   const limit = toolLimitFromEnv(env);
   const context = toolCallContextFromEnv(env);
   const ok = (id: unknown, result: unknown): Json => ({ jsonrpc: "2.0", id, result } as Json);
@@ -50,7 +52,7 @@ export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json |
         const { name, arguments: args } = bridged ?? called;
         // An alias runs only where the tool it names is listed: never a way to a tool this turn was not given.
         const runs = resolveAgentsCall(name, args).name;
-        if (!available.some((t) => t.name === runs)) {
+        if (!callable.some((t) => t.name === runs)) {
           // A name written into use_tool fails the call, not the protocol: the chat runtime ends a turn on a protocol error.
           const unknown = `Unknown tool: ${name}`;
           return bridged ? textResult(id, unknown, true) : rpcErr(id, -32602, unknown);

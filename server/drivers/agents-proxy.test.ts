@@ -659,6 +659,7 @@ describe("agents-proxy MCP surface", () => {
       "trigger_info",
       "trigger",
       "delete_trigger",
+      "wait_until",
       "propose_profile",
       "propose_model",
       "propose_team_memory",

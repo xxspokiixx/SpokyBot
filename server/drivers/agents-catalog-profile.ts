@@ -22,8 +22,11 @@ export interface CatalogProfile {
   /** A person's own request that may pick its computer: select_computer is mounted. Every other turn (a hand-off, a
    * routine, a room, a continuation) is refused a selection, so it is not shown the tool. */
   computerSelection?: boolean;
-  /** A room's turn: the widget and page tools, which rooms refuse, are not mounted. */
+  /** A room's turn: the widget and page tools and wait_until and cancel_wait, which rooms refuse, are not mounted. */
   room?: boolean;
+  /** The bot has a wait in this chat that has not ended: list_waits and cancel_wait, which act only on this chat's
+   * waits, are mounted. Without one they still answer a call (agents-catalog.ts callableTools), but are not listed. */
+  activeWaits?: boolean;
 }
 
 /** Everything is off unless the harness says "1". */
@@ -42,5 +45,6 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     mausbot: env.OMB_MAUSBOT === "1",
     computerSelection: env.OMB_COMPUTER_SELECTION === "1",
     room: env.OMB_ROOM === "1",
+    activeWaits: env.OMB_ACTIVE_WAITS === "1",
   };
 }

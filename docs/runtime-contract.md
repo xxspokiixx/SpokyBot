@@ -122,7 +122,7 @@ Every turn that may hand work on, whatever started it, gets the same tools:
 - `raise_escalation(reason)` (only with `features.chiefEscalations` on): a bot parks itself on a gate only a person can lift and says so in one line; the Chief of Staff (or the person directly, `server/escalations.ts`) is told, the turn keeps running and the tool's answer says to end it and wait.
 - `list_bots`, `start_thread` (on yourself), `list_threads`, `close_thread`, `post_to_room`, `list_rooms`, the Chief tools and `retry_thread` are unchanged.
 
-Outside the teamwork tools, a turn is not listed what its server would refuse it: `select_computer` only on a person's own request that may pick its computer (`OMB_COMPUTER_SELECTION`), and no `show_widget` or `show_html` in a room's turn (`OMB_ROOM`).
+Outside the teamwork tools, a turn is not listed what its server would refuse it: `select_computer` only on a person's own request that may pick its computer (`OMB_COMPUTER_SELECTION`), and no `show_widget`, `show_html`, `wait_until` or `cancel_wait` in a room's turn (`OMB_ROOM`). Nor is it listed `list_waits` and `cancel_wait` while the bot has no wait in this chat that has not ended (`OMB_ACTIVE_WAITS`): both act only on the chat's own waits. They still answer a call then (a wait made this turn, a list read earlier), and the waits route scopes them to the chat.
 
 The old names (`delegate_bot`, `ask_bot`, `send_to_bot`, `check_delegation`, `wait_delegation`) stayed for one release as aliases with a deprecation line in their result and were removed in PR 5; `start_thread` opens a job on the bot itself.
 

@@ -17,8 +17,8 @@ export interface CloudPowerReport {
   v: 1; at: number; bootedAt: number; wokeAt: number;
   idle: boolean; busy: CloudPowerBusy[];
   lastActivityAt: number | null; lastWorkAt: number | null;
-  /** The earliest scheduled run (an enabled routine's next run or a queued run's retry), null when none: the Admin
-   * starts a sleeping home a minute before it. */
+  /** The earliest scheduled run (an enabled routine's next run or a queued run's retry, or 30 minutes on while a bot
+   * waits for something), null when none: the Admin starts a sleeping home a minute before it. */
   nextDueAt: number | null;
   /** The home said yes to a sleep request and has not been used or woken since. */
   sleeping: boolean;

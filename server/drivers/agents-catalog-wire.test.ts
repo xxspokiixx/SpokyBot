@@ -87,16 +87,16 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+voice": 58559,
   "skills+shared": 59878,
   "skills+shared+voice": 60659,
-  "non-chief": 45902,
-  "voice+non-chief": 46683,
-  "shared+non-chief": 48002,
-  "shared+voice+non-chief": 48783,
-  "skills+non-chief": 48721,
-  "skills+voice+non-chief": 49502,
-  "skills+shared+non-chief": 50821,
-  "skills+shared+voice+non-chief": 51602,
+  "non-chief": 46055,
+  "voice+non-chief": 46821,
+  "shared+non-chief": 48113,
+  "shared+voice+non-chief": 48879,
+  "skills+non-chief": 48818,
+  "skills+voice+non-chief": 49583,
+  "skills+shared+non-chief": 50876,
+  "skills+shared+voice+non-chief": 51641,
   "skills+shared+voice+cloud-home": 59740,
-  "skills+shared+voice+non-chief+cloud-home": 50683,
+  "skills+shared+voice+non-chief+cloud-home": 50741,
   "default+legacy-switches": 54959,
   "default+mausbot": 55610,
   "skills+shared+voice+mausbot": 61310,
@@ -185,6 +185,24 @@ describe("agents proxy tools/list golden", () => {
     const wire = wires[FULL]!;
     expect(JSON.parse(wire)).toEqual(golden);
     expect(wire).toBe(JSON.stringify(golden));
+  });
+
+  it("offers wait_until right after the trigger tools, outside a room, and list_waits and cancel_wait only to a bot with a wait", () => {
+    for (const [name, wire] of Object.entries(wires)) {
+      const names = toolsOf(wire).map((tool) => tool.name);
+      const at = names.indexOf("delete_trigger");
+      expect(at, name).toBeGreaterThan(-1);
+      const waits = PROFILES[name]!.env.OMB_ROOM === "1" ? [] : ["wait_until"];
+      expect(names.slice(at + 1, at + 1 + waits.length), name).toEqual(waits);
+      expect(names.filter((tool) => /wait/.test(tool) && tool !== "assignment_status"), name).toEqual(waits);
+    }
+    const waiting = (name: string) => availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "bot-golden", ...PROFILES[name]!.env, OMB_ACTIVE_WAITS: "1" }));
+    for (const name of Object.keys(PROFILES)) {
+      const names = waiting(name).map((tool) => tool.name);
+      const room = PROFILES[name]!.env.OMB_ROOM === "1";
+      expect(names.filter((tool) => /wait/.test(tool) && tool !== "assignment_status"), name).toEqual(room ? ["list_waits"] : ["wait_until", "list_waits", "cancel_wait"]);
+      expect(names.filter((tool) => tool !== "list_waits" && tool !== "cancel_wait"), name).toEqual(toolsOf(wires[name]!).map((tool) => tool.name));
+    }
   });
 
   it("every profile matches its pinned tool names, byte count and sha256", () => {
@@ -292,11 +310,12 @@ describe("agents proxy tools/list golden", () => {
     const names = (name: string) => toolsOf(wires[name]!).map((tool) => tool.name);
     expect(names("default+handoff")).toEqual(names("default").filter((tool) => tool !== "select_computer"));
     for (const name of ["default", "non-chief"]) {
-      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "show_widget", "show_html"].includes(tool)));
+      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "show_widget", "show_html", "wait_until", "cancel_wait"].includes(tool)));
     }
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(name).includes("select_computer"), name).toBe(profile.env.OMB_COMPUTER_SELECTION === "1");
       expect(names(name).includes("show_widget"), name).toBe(profile.env.OMB_ROOM !== "1");
+      expect(names(name).includes("wait_until"), name).toBe(profile.env.OMB_ROOM !== "1");
     }
   });
 

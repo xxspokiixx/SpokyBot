@@ -13,7 +13,7 @@ import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from ".
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { SetupCardFields } from "./setup-card.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
-import type { WebhookRequestCardData } from "./webhook-request.ts";
+import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
@@ -443,7 +443,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends HelperIntroField, SetupCardFields {
+export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLineField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
@@ -645,7 +645,7 @@ export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[
   return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
 }
 
-export interface OptionCardData {
+export interface OptionCardData extends WaitCardField {
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */

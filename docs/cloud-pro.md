@@ -1568,9 +1568,10 @@ its own nonces. `200`:
 
 `busy` holds fixed codes only: `turn`, `run`, `live-call`, `computer`,
 `maintenance`, `recent-activity`, `recent-work`, `just-woke`, `due-soon`.
-`nextDueAt` is the earliest enabled routine's next run or queued run's retry:
-the Admin starts a sleeping home a minute before it. `wokeAt` is the boot, or
-the last resume (noticed as a jump of the clock).
+`nextDueAt` is the earliest enabled routine's next run or queued run's retry,
+or, while a bot waits for something (`wait_until`), 30 minutes on, so its
+checks go on that often: the Admin starts a sleeping home a minute before it.
+`wokeAt` is the boot, or the last resume (noticed as a jump of the clock).
 
 **`POST /api/cloud/power/sleep`**, signed over its JSON body
 `{"v":1,"idleMinutes":10}`. `409 {"ok":false,"busy":[…]}` while not idle;

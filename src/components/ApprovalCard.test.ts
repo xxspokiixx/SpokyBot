@@ -789,4 +789,26 @@ describe("one approval, one card", () => {
     expect(panel).toContain("Send to Slack?");
     expect(panel).toContain("{&quot;text&quot;:&quot;hi&quot;}");
   });
+
+  it("shows a wait with a follow-up as one line with Cancel, and says how it ended with no Cancel and no Undone after", () => {
+    const message = (settled?: "fired" | "expired" | "cancelled"): Message => ({
+      id: "m1", at: 1, role: "bot", kind: "options",
+      card: {
+        title: "Waiting: the build", subtitle: "Then Pepper will: Deploy it.",
+        options: [], answered: "allow", dismissed: true, autoApplied: true, requestId: "w1", tool: "wait_until",
+        ...(settled === "cancelled" ? { undone: true } : {}),
+        waitRequest: { waitId: "w1", label: "the build", followUp: "Deploy it.", ...(settled ? { settled } : {}) },
+      },
+    });
+    const render = (settled?: "fired" | "expired" | "cancelled") =>
+      renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Pepper" }, message: message(settled), threadId: "t1" })).replace(/&#x27;/g, "'");
+    const open = render();
+    expect(open).toContain("Pepper is waiting for the build");
+    expect(open).toContain(">Cancel<");
+    for (const [settled, line] of [["fired", "Pepper finished waiting for the build"], ["expired", "Pepper stopped waiting for the build"], ["cancelled", "Pepper's wait for the build was cancelled"]] as const) {
+      const ended = render(settled);
+      expect(ended, settled).toContain(line);
+      expect(ended, settled).not.toMatch(/>Cancel<|is waiting for|Undone/);
+    }
+  });
 });
