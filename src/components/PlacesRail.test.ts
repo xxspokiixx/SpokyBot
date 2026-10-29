@@ -270,14 +270,17 @@ it("a server of the person's own on an older release than the newest has a quiet
   expect(host.querySelector('[data-rail-place="s-old"] [data-rail-dot]')).toBeTruthy();
 });
 
-it("the window's own rail: drawn at every width, the place on screen named under its circle, and its sheets cover the window while open", async () => {
+it("the window's own rail: drawn at every width, small circles named on hover, and its sheets cover the window while open", async () => {
   const expand = vi.fn(async () => {});
   Object.assign(window, { ogb: { workspaces, cloudAdd, rail: { expand, onSkin: () => () => {} } } });
   await mount(createElement(PlacesRail, { chrome: true }));
   const nav = host.querySelector("[data-places-rail]")!;
   expect(nav.className).toContain("flex h-full");
   expect(nav.className, "never hidden on a narrow window").not.toContain("hidden");
-  expect([...host.querySelectorAll("[data-rail-caption]")].map((caption) => caption.textContent)).toEqual(["My Cloud"]);
+  expect(nav.textContent, "no name under the place on screen: its circle's ring marks it").toBe("MCCAACBCCO");
+  expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("title")).toBe("My Cloud");
+  expect(host.querySelector('[data-rail-place="home"] span')?.getAttribute("style")).toContain("width: 32px; height: 32px");
+  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-8");
   expect(expand.mock.calls.at(-1)).toEqual([false]);
   await click(host.querySelector("[data-rail-add]"));
   expect(expand.mock.calls.at(-1), "＋'s sheet covers the window").toEqual([true]);

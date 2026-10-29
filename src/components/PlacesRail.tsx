@@ -20,7 +20,7 @@ import { SwatchRadios } from "./SwatchRadios";
 
 /** Circles before ⋯ opens the searchable list of every place. */
 export const RAIL_SHOWN = 8;
-const CIRCLE = 38;
+const CIRCLE = 32;
 
 /** A circle's words for its tooltip and a screen reader: the place, and what it is doing now. A server of the person's
  * own that signed in with their account says so, whether it is online, and why there is nothing to open when it is only
@@ -102,10 +102,10 @@ function PlaceCircle({ place, calm, canPair, onOpen, onMenu }: { place: RailPlac
         : acts ? "hover:ring-2 hover:ring-ink/15 hover:ring-offset-2 hover:ring-offset-panel" : cn("cursor-default", !place.offline && "opacity-75"))}>
     <PlaceMark place={place} />
     {place.progress !== undefined && <ProgressRing value={place.progress} waiting={place.waiting === true} />}
-    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-panel bg-danger" />}
-    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-panel bg-accent" />}
-    {place.server && <span aria-hidden="true" data-rail-server className="absolute -bottom-0.5 -right-0.5 grid size-4 place-items-center rounded-full border border-hairline bg-panel text-ink-secondary">
-      <Server size={9} strokeWidth={2.25} />
+    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-panel bg-danger" />}
+    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-panel bg-accent" />}
+    {place.server && <span aria-hidden="true" data-rail-server className="absolute -bottom-0.5 -right-0.5 grid size-3.5 place-items-center rounded-full border border-hairline bg-panel text-ink-secondary">
+      <Server size={8} strokeWidth={2.25} />
     </span>}
   </button>;
 }
@@ -190,7 +190,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     return () => window.removeEventListener("mousedown", away);
   }, [more, menu]);
   const covering = more || adding || connecting !== null || menu !== null;
-  useEffect(() => { if (chrome) void window.ogb?.rail?.expand(covering)?.catch(() => {}); }, [chrome, covering]);
+  useEffect(() => { if (chrome) void window.ogb?.rail?.expand?.(covering)?.catch(() => {}); }, [chrome, covering]);
   if (!state.places.length) return null;
   const bridge = window.ogb?.workspaces;
   const open = (place: RailPlace) => {
@@ -214,25 +214,21 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     className={cn("relative w-16 shrink-0 flex-col items-center bg-panel", chrome ? "flex h-full" : "hidden md:flex", calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50")}>
     {/* The macOS traffic lights sit over the rail's top; nothing here takes a click before they end. */}
     <div aria-hidden="true" className={macInset ? "h-[52px] shrink-0" : "h-3 shrink-0"} />
-    <ul className="flex min-h-0 flex-col items-center gap-2.5 overflow-y-auto px-1 py-1" style={noDrag}>
-      {shown.map((place) => <li key={place.id} className="flex flex-col items-center">
+    <ul className="flex min-h-0 flex-col items-center gap-2 overflow-y-auto px-1 py-1" style={noDrag}>
+      {shown.map((place) => <li key={place.id} className="flex">
         <PlaceCircle place={place} calm={calm} canPair={canPair} onOpen={open} onMenu={openMenu} />
-        {/* The place on screen, named: a server's own page may name it nowhere. */}
-        {place.active && <span aria-hidden="true" data-rail-caption className="mt-1 line-clamp-2 w-[60px] break-words text-center text-[11px] leading-tight text-ink-secondary">
-          {place.kind === "computer" ? t("rail.thisComputer") : place.name}
-        </span>}
       </li>)}
     </ul>
-    <div className="relative mt-2.5 flex flex-col items-center gap-2.5 pb-3" style={noDrag} ref={moreRef}>
+    <div className="relative mt-2 flex flex-col items-center gap-2 pb-3" style={noDrag} ref={moreRef}>
       {state.places.length > RAIL_SHOWN && <button type="button" aria-label={t("rail.more", { count: state.places.length })} title={t("rail.more", { count: state.places.length })}
         aria-haspopup="dialog" aria-expanded={more} data-rail-more-button onClick={() => setMore(!more)}
-        className="grid size-[38px] place-items-center rounded-full text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
-        <MoreHorizontal size={18} aria-hidden="true" />
+        className="grid size-8 place-items-center rounded-full text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
+        <MoreHorizontal size={16} aria-hidden="true" />
       </button>}
       {more && <MorePlaces places={state.places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
       {canAdd && <button type="button" aria-label={t("rail.add")} title={t("rail.add")} aria-haspopup="dialog" data-rail-add onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
-        className="grid size-[38px] place-items-center rounded-full border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-        <Plus size={18} aria-hidden="true" />
+        className="grid size-8 place-items-center rounded-full border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+        <Plus size={16} aria-hidden="true" />
       </button>}
     </div>
     {/* The list is read again while it is open: the menu shows the place as main lists it now. */}

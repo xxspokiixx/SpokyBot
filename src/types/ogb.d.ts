@@ -143,9 +143,9 @@ const __APP_VERSION__: string;
         cancel(): Promise<void>;
         onState(callback: (state: CompanyBackupState) => void): () => void;
       };
-      /** The window's own rail of places (its page at /rail): a sheet of its own covers the window while open; the skin
-       * of the page beside it comes from main. */
-      rail?: { expand(on: boolean): Promise<void>; onSkin(callback: (skin: string) => void): () => void };
+      /** The window's own rail of places: its page at /rail (a sheet of its own covers the window while open; the skin of
+       * the page beside it comes from main), and the button on the page beside it that hides and shows it. */
+      rail?: import("../../electron/chrome-rail.mjs").ChromeRailBridge;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
          * home is this Cloud, so there is nothing to switch to. */

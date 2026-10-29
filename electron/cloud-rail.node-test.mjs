@@ -143,6 +143,9 @@ test("the rail's channels: the list only for the rail's own page, a circle only 
   assert.deepEqual([r.opened, r.ran], [["a"], ["link"]]);
   r.installed.changed(); r.installed.changed();
   assert.deepEqual(r.sent, ["page:workspaces:changed", "rail:workspaces:changed"], "a signal only, to the page and the rail, and once per change");
+  r.w.beside = true;
+  r.installed.changed();
+  assert.deepEqual(r.sent.slice(2), ["page:workspaces:changed", "rail:workspaces:changed"], "the rail came beside the page (or went): the page reads it again");
 });
 
 test("buying another Cloud from a page: the plan must be on sale, the name is checked, and the page gets only what the sheet says", async () => {
