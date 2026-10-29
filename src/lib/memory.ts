@@ -205,13 +205,13 @@ export function capacityStatus(index: MemoryCapacity): CapacityStatus {
   const lineShare = index.maxLines ? index.lines / index.maxLines : 0;
   const byteShare = index.maxBytes ? index.bytes / index.maxBytes : 0;
   const level: CapacityLevel = index.truncated ? "over" : Math.max(lineShare, byteShare) >= 0.8 ? "near" : "ok";
-  const sentence = `${index.lines} of ${index.maxLines} lines · ${formatBytes(index.bytes)} of ${formatBytes(index.maxBytes)} — only the first ${index.maxLines} lines load each turn.`;
+  const sentence = `${index.lines} of ${index.maxLines} lines · ${formatBytes(index.bytes)} of ${formatBytes(index.maxBytes)}. Only the first ${index.maxLines} lines load each turn.`;
   let warning: string | null = null;
   if (index.truncated) {
     const missingLines = index.lines - index.loadedLines;
     warning = missingLines > 0
-      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation — ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
-      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation — the rest is not being loaded. Trim this file or move notes into a topic file.`;
+      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation. ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
+      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation. The rest is not being loaded. Trim this file or move notes into a topic file.`;
   }
   return { level, lineShare, byteShare, sentence, warning };
 }

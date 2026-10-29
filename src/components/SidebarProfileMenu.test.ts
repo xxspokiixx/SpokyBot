@@ -112,7 +112,7 @@ describe("updatePhase", () => {
 describe("updateLabel", () => {
   it("names the version it is ready to install", () => {
     expect(updateLabel("downloaded", state({ status: "downloaded", version: "0.2.0" }))).toBe(
-      "OpenMausBot 0.2.0 ready — restart",
+      "Restart to update to MausBot 0.2.0",
     );
   });
 
@@ -126,7 +126,7 @@ describe("updateLabel", () => {
     expect(updateLabel("installing", state({ status: "installing", message: "Restart is taking longer than expected." })))
       .toBe("Restart is taking longer than expected.");
     expect(updateLabel("downloaded", state({ status: "downloaded", version: "0.2.0", installMode: "handoff" })))
-      .toBe("OpenMausBot 0.2.0 ready — install");
+      .toBe("Install MausBot 0.2.0");
     expect(updateLabel("installing", state({ status: "installing", installMode: "handoff" })))
       .toBe("Opening a terminal…");
   });
@@ -135,7 +135,7 @@ describe("updateLabel", () => {
     expect(updateLabel("error", state({ status: "error", message: "Network unreachable" }))).toBe(
       "Network unreachable",
     );
-    expect(updateLabel("error", state({ status: "error" }))).toBe("Update failed — try again");
+    expect(updateLabel("error", state({ status: "error" }))).toBe("The update didn't finish. Try again.");
   });
 
   it("points a hand-off at the terminal that finishes it", () => {
@@ -446,7 +446,7 @@ describe("Simple mode's account menu", () => {
   });
 
   it("raises an update that is ready or failed to its own top row with a pill, and keeps it out of support", () => {
-    const update = { key: "update", label: "OpenMausBot 0.2.0 ready — restart", subtitle: "notes", attention: true, onSelect: noop };
+    const update = { key: "update", label: "Restart to update to MausBot 0.2.0", subtitle: "notes", attention: true, onSelect: noop };
     const items = build({ update, updateTop: { label: "Update ready", action: "Restart" } });
     expect(groups(items)[0]).toEqual(["update"]);
     expect(items[0]).toMatchObject({ label: "Update ready", subtitle: undefined, attention: false });
@@ -490,7 +490,7 @@ describe("Simple mode's account menu", () => {
 
   it("names the account button after the person and whatever its dot is raised for", () => {
     expect(accountLabel("You", { automationsNeedYou: false, update: null })).toBe("You");
-    expect(accountLabel("Ada", { automationsNeedYou: true, update: "Update failed — try again" })).toBe("Ada · Automations need you · Update failed — try again");
+    expect(accountLabel("Ada", { automationsNeedYou: true, update: "Update failed. Try again." })).toBe("Ada · Automations need you · Update failed. Try again.");
   });
 
   it("adds the move to My Cloud: a short warning once failing, shared with automations, and a quiet segment on its way", () => {

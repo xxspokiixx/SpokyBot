@@ -3,7 +3,7 @@ import type { AppSettingsSection } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { appVersion } from "@/lib/app-links";
 import type { LocaleKey } from "@/locales";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { AnalyticsRow } from "./AnalyticsRow";
 import { UpdatesConsentRow } from "./UpdatesConsent";
 import { OpenAtLoginRow } from "./OpenAtLoginRow";
@@ -172,7 +172,7 @@ export function SimpleBillingPage({ has, disclose, cloudAccount }: { has: Has; d
   );
 }
 
-const versionTitle = () => `${brand().name} ${appVersion()}`;
+const versionTitle = () => `${productName()} ${appVersion()}`;
 
 function ServerUpdatesRow() {
   const entry = useServerUpdateItem(true);

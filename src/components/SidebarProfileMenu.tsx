@@ -42,7 +42,7 @@ import { api, useStore, type Action } from "@/state/store";
 import { serverCheckPhase, serverUpdateRow, type ServerUpdateCheck, type ServerUpdatePhase } from "@/lib/server-update";
 import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { cloudColor } from "@/lib/cloud-look";
 import { cn } from "@/lib/cn";
 import { meterPercent, resetLine } from "@/lib/usage-meter";
@@ -106,8 +106,8 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
     case "downloaded":
       return (
         state?.installMode === "handoff"
-          ? t("sidebar.update.readyInstall", { app: brand().name, version: state?.version ?? "" })
-          : t("sidebar.update.ready", { app: brand().name, version: state?.version ?? "" })
+          ? t("sidebar.update.readyInstall", { app: productName(), version: state?.version ?? "" })
+          : t("sidebar.update.ready", { app: productName(), version: state?.version ?? "" })
       ).replace("  ", " ");
     case "installing":
       return (
