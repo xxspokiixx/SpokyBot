@@ -12,7 +12,7 @@ import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { SetupCardFields } from "./setup-card.ts";
-import type { RoutineRequestCardData } from "./routine-request.ts";
+import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
@@ -551,7 +551,7 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   requestPending?: boolean;
   /** The last assistant text item from a settled provider turn. */
   turnTerminal?: boolean;
-  turnCompletedAt?: number;
+  turnCompletedAt?: number; savedSteps?: SavedStepsMark;
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
   mime?: string;
