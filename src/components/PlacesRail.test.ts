@@ -24,7 +24,7 @@ const PLACES: RailPlace[] = [
 let host: HTMLDivElement, root: Root | null = null;
 let rail: RailState;
 const workspaces = { state: vi.fn(async () => ({ local: false, name: "My Cloud" })), menu: vi.fn(async () => {}), places: vi.fn(async () => rail),
-  open: vi.fn(async () => {}), add: vi.fn(async () => {}), onChanged: vi.fn(() => () => {}) };
+  open: vi.fn(async () => {}), add: vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined), onChanged: vi.fn(() => () => {}) };
 type Organizations = { canAdd: boolean; blocked?: "no_team_plan" | "limit" | "rate" | "off"; count: number; max: number };
 let organizations: Organizations | undefined;
 const cloudAdd = { state: vi.fn(async () => ({ signedIn: true, hasCloud: true, supported: false, canAdd: false, offer: null, count: 1, home: { name: "My Cloud", color: null },
@@ -106,21 +106,6 @@ it("past eight places, ⋯ opens every place, searchable; the place on screen st
   expect(matchingPlaces(many, "zzz")).toEqual([]);
 });
 
-it("＋ offers buying a Cloud or adding the person's own server; the server's three steps end in main's own pairing-link dialog", async () => {
-  await mount(createElement(PlacesRail));
-  await click(host.querySelector("[data-rail-add]"));
-  const sheet = document.querySelector("[data-place-add-sheet]")!;
-  expect([...sheet.querySelectorAll("[data-place-add-choice]")].map((choice) => choice.getAttribute("data-place-add-choice"))).toEqual(["cloud", "server"]);
-  await click(sheet.querySelector('[data-place-add-choice="server"]'));
-  const steps = document.querySelector('[data-place-add="own-server"]')!;
-  expect([...steps.querySelectorAll("[data-own-server-command]")].map((code) => code.textContent)).toEqual(["npx openmausbot start", 'npx openmausbot pair --label "My desktop"']);
-  expect(steps.textContent).toContain("Paste pairing link");
-  expect(steps.textContent).not.toContain("Enter its address instead");
-  await click([...steps.querySelectorAll("button")].find((button) => button.textContent === "Paste pairing link"));
-  expect(workspaces.add.mock.calls).toEqual([["link"]]);
-  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
-});
-
 const type = async (input: Element | null, value: string) => {
   expect(input).toBeTruthy();
   await act(async () => {
@@ -128,6 +113,46 @@ const type = async (input: Element | null, value: string) => {
     input!.dispatchEvent(new Event("input", { bubbles: true }));
   });
 };
+const submit = async (form: Element | null) => {
+  expect(form).toBeTruthy();
+  await act(async () => { (form as HTMLFormElement).requestSubmit(); await Promise.resolve(); await Promise.resolve(); });
+};
+
+it("＋ offers buying a Cloud or adding the person's own server: a box to paste its pairing link, sent to main's own Connect dialog", async () => {
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  const sheet = document.querySelector("[data-place-add-sheet]")!;
+  expect([...sheet.querySelectorAll("[data-place-add-choice]")].map((choice) => choice.getAttribute("data-place-add-choice"))).toEqual(["cloud", "server"]);
+  await click(sheet.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  expect(form.textContent).toContain("Paste pairing link");
+  expect(form.textContent, "no install commands: the server's Settings shows its link").not.toContain("npx");
+  expect(document.activeElement).toBe(form.querySelector("[data-own-server-link]"));
+  const connect = [...form.querySelectorAll("button")].find((button) => button.textContent === "Connect")!;
+  expect(connect.disabled, "nothing pasted yet").toBe(true);
+  await type(form.querySelector("[data-own-server-link]"), "  https://bots.example.test/#pair=abc  ");
+  await submit(form);
+  expect(workspaces.add.mock.calls).toEqual([["link", "https://bots.example.test/#pair=abc"]]);
+  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
+});
+
+it("a pasted link main can't open says so and keeps the sheet; cancelling main's Connect keeps it too", async () => {
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(document.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  await type(form.querySelector("[data-own-server-link]"), "not a link");
+  workspaces.add.mockRejectedValueOnce(new Error("Enter an HTTPS server address or a full pairing link."));
+  await submit(form);
+  expect(form.querySelector('[role="alert"]')?.textContent).toContain("isn't a pairing link");
+  expect(document.querySelector("[data-place-add-sheet]")).toBeTruthy();
+  await type(form.querySelector("[data-own-server-link]"), "https://bots.example.test/#pair=abc");
+  expect(form.querySelector('[role="alert"]'), "editing the link clears the error").toBeNull();
+  workspaces.add.mockResolvedValueOnce(false);
+  await submit(form);
+  expect(document.querySelector("[data-place-add-sheet]"), "the person cancelled Connect").toBeTruthy();
+});
+
 const createButton = () => [...document.querySelectorAll<HTMLButtonElement>('[data-place-add="organization"] button[type="submit"]')][0];
 
 it("＋ for the account a Team plan's organizations are billed to: New organization first; a name and a color add it at once, no checkout, and the sheet closes", async () => {
@@ -244,9 +269,10 @@ it("a server of the person's own that signed in: a small server mark, the offlin
   expect(workspaces.open.mock.calls).toHaveLength(1);
   const connect = document.querySelector('[data-place-add="connect-server"]')!;
   expect(connect.textContent).toContain("Connect Render VPS");
-  expect([...connect.querySelectorAll("[data-own-server-command]")].map((code) => code.textContent), "it runs OpenMausBot already: only its pairing link is left").toEqual(['npx openmausbot pair --label "My desktop"']);
-  await click([...connect.querySelectorAll("button")].find((button) => button.textContent === "Paste pairing link"));
-  expect(workspaces.add.mock.calls).toEqual([["link"]]);
+  expect(connect.textContent, "it runs OpenMausBot already: only its pairing link is left").not.toContain("npx");
+  await type(connect.querySelector("[data-own-server-link]"), "https://render.example.test/#pair=xyz");
+  await submit(connect);
+  expect(workspaces.add.mock.calls).toEqual([["link", "https://render.example.test/#pair=xyz"]]);
 });
 
 it("where no pairing link can be pasted here, a signed-in server not connected yet opens nothing", async () => {

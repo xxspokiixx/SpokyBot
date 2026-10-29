@@ -149,9 +149,11 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     if (!place) throw new Error("That place isn't here any more.");
     return open(place.id);
   });
-  listed("workspaces:add", (_event, choice) => {
+  // A link pasted on ＋'s sheet goes to main's own Connect dialog, which checks it and names its host before connecting.
+  listed("workspaces:add", (_event, choice, link) => {
     if (!CHOICES.includes(choice) || !add.choices()[choice]) throw new Error("That isn't something to add here.");
-    return add.run(choice);
+    const pasted = choice === "link" ? plain(link).trim().slice(0, 4096) : "";
+    return pasted ? add.run(choice, pasted) : add.run(choice);
   });
   handle("cloud-add:state", () => view());
   handle("cloud-add:start", async (_event, tier, name, color) => {
