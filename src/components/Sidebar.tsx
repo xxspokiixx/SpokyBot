@@ -1375,7 +1375,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       tabIndex={-1}
       aria-label={t("sidebar.aria")}
       data-native-view-overlay
-      data-sidebar data-cloud-sky={state.config?.cloudHome === true ? density === "icons" ? "rail" : advanced ? "advanced" : "simple" : undefined}
+      data-sidebar
       onClick={(event) => {
         // The phone's list covers the whole screen: choosing the bot that is already open has to dismiss it too.
         if (phone && open && event.target instanceof Element && !(event.target instanceof HTMLInputElement) && event.target.closest("[data-sidebar-bot-row], [data-sidebar-hero]")) onClose();
