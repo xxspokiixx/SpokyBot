@@ -2604,6 +2604,7 @@
   "task.deleteAllConversationsConfirm": "Delete all conversations ({count})?",
   "folder.settings": "Folder settings",
   "folder.markRead": "Mark folder as read",
+  "folder.showAll": "Show all",
   "folder.markingRead": "Marking folder as read…",
   "folder.markedRead": "Folder marked as read",
   "folder.namedSettings": "{name} settings",
