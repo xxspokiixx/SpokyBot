@@ -41,3 +41,4 @@ deploy/podman/.env
 deploy/podman/.env.*
 !deploy/podman/.env.example
 /.env
+openmausbot-test-debug.apk
