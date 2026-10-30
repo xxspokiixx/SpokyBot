@@ -21,7 +21,7 @@ export type LocalComputerConnection = {
   command: string;
   args: string[];
   env: Record<string, string>;
-  platform: "darwin" | "linux" | "win32";
+  platform: "darwin" | "linux" | "win32" | "android";
   generation?: string;
   scope: "local-computer";
 };
@@ -39,7 +39,10 @@ export function gatedLocalComputer(
       // Packaged, execPath is Electron: without this the MCP client relaunches OMB instead of the headless gate.
       ELECTRON_RUN_AS_NODE: "1",
       OMB_CUA_COMMAND: connection.command,
-      OMB_CUA_ARGS: JSON.stringify(connection.args),
+      // The android phone lane's command is the node runtime itself, whose first
+      // argument is the entry script, so the descriptor's "mcp" contract tag must
+      // not reach argv; the desktop CUA binary takes that tag as its subcommand.
+      OMB_CUA_ARGS: JSON.stringify(connection.platform === "android" ? connection.args.slice(1) : connection.args),
       OMB_CONTROL_URL: control.url,
       OMB_CONTROL_TOKEN: control.token,
     },
@@ -62,8 +65,9 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
   return Object.keys(value).length === expected.size && Object.keys(value).every((key) => expected.has(key));
 }
 
-function legacyPlatform(platform: NodeJS.Platform): "darwin" | "win32" | null {
-  if (platform === "darwin" || platform === "win32") return platform;
+/** The embedded-descriptor platforms; android's phone lane follows the same embedded shape, written by the app. */
+function legacyPlatform(platform: NodeJS.Platform): "darwin" | "win32" | "android" | null {
+  if (platform === "darwin" || platform === "win32" || platform === "android") return platform;
   return null;
 }
 
@@ -263,6 +267,22 @@ export function decodeLinuxDescriptor(value: LinuxConnectionDescriptor): LocalCo
   };
 }
 
+/** The embedded android node build ships no process.getuid; its single-user app sandbox
+ * makes the uid of the process's own home directory the same identity, so descriptor
+ * ownership checks keep working there. */
+export function descriptorUid(): number {
+  const getuid = process.getuid;
+  if (typeof getuid === "function") {
+    const uid = getuid.call(process);
+    if (uid >= 0) return uid;
+  }
+  try {
+    return statSync(homedir()).uid;
+  } catch {
+    return -1;
+  }
+}
+
 function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -280,7 +300,7 @@ export function validateLinuxDescriptorRuntime(
   descriptorFile: string,
   raw: LinuxConnectionDescriptor,
   {
-    uid = process.getuid?.() ?? -1,
+    uid = descriptorUid(),
     isProcessAlive = processAlive,
   }: { uid?: number; isProcessAlive?: (pid: number) => boolean } = {},
 ): boolean {
@@ -335,7 +355,7 @@ export function validateLinuxDescriptorRuntime(
 function validateLegacyDescriptorRuntime(
   descriptorFile: string,
   platform: NodeJS.Platform,
-  { uid = process.getuid?.() ?? -1 }: { uid?: number } = {},
+  { uid = descriptorUid() }: { uid?: number } = {},
 ): boolean {
   try {
     const stat = lstatSync(descriptorFile);

@@ -207,6 +207,7 @@ export function createBrief(deps: BriefDeps) {
         case "connection": return row(`${item.app} needs reconnecting`, clip(item.text, 140));
         case "place": return row("A bot couldn't reach its computer", "Open it to choose another place.");
         case "question": return row(`${deps.store.bot(item.botId)?.name ?? "A bot"} asked you`, clip(item.text, 140));
+        case "message": return row(`${item.from} sent you a message`, clip(item.text, 140));
       }
     });
   }

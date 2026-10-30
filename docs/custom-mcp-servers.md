@@ -1,7 +1,7 @@
 # Bring your own MCP servers
 
-Open **Plugins → MCP servers → Add server** to give your bots tools from an
-MCP server you trust. A server is one of two things:
+Open **Apps → MCP servers & plugins** to connect an MCP server and give its
+tools to selected bots. A server is one of two things:
 
 - **Run a command** — a local stdio server. Add the executable, put each
   argument on its own line, and add any environment variables as `KEY=value`.
@@ -16,6 +16,30 @@ advertises. Then turn it on. It becomes available to compatible bots on their
 next task; no app restart is needed.
 
 Tokens for URL servers go in headers, never in the address.
+
+## Available integrations
+
+The MCP tab includes curated Connect cards for Slack's hosted MCP, GitHub's
+hosted MCP, and Microsoft Agent 365 mail, calendar, and Copilot Chat endpoints.
+Connect creates or reuses the MCP entry, requests sign-in if required, tests
+the tools, and only then enables the server. Slack needs an OAuth client ID
+authorized for OpenMausBot's callback; workspace approval may be required.
+Microsoft Agent 365 requires a tenant ID and whatever consent that tenant
+requires. Review the linked source and requested access before connecting.
+
+The Cursor Marketplace section only shows plugins with a direct SpokyBot
+connection path. At present, that is GitHub: paste a fine-grained or classic
+personal access token (a leading `Bearer ` is removed automatically). If a
+saved token is rejected, enter its replacement in the GitHub card and reconnect;
+the provider's invalid-token response is shown without exposing the token.
+Cursor plugins whose service or OAuth identity is Cursor-specific are hidden
+there rather than offered as non-working Connect buttons. Their MCP configs can
+still be reviewed and imported manually when you have a compatible auth path.
+
+**Cursor or GitHub plugin config** opens Paste config. It accepts the standard
+`mcpServers` format and Cursor plugin OAuth fields; it imports only MCP servers,
+not Cursor-only commands or skills. Imported servers remain disabled until
+you test and enable them yourself.
 
 ### Whop
 
@@ -66,6 +90,15 @@ lists its tools.
   the server offers that, then forgets them.
 - **Refresh.** A token is refreshed shortly before it expires. If the server
   refuses the refresh, the server goes back to **Needs sign-in**.
+
+Bots can also use ordinary website versions of services through their own
+persistent browser profile. When a bot needs a human sign-in, it can call
+`request_sign_in`; the person completes the sign-in in that bot's Browser or
+Computer session and marks the card done. The bot then continues with the
+resulting browser session. This is separate from MCP/API authorization and
+does not make a Cursor-hosted MCP server usable. Browser availability depends
+on the selected engine and bot profile; the Android test build includes its
+own ARM64 Chromium browser.
 
 #### Signing in from another computer
 
@@ -154,10 +187,11 @@ it the same way, with the same header.
 
 **Paste config** accepts an `mcpServers` JSON block, a server-name map, or a
 single named entry — commands and URL servers alike, in the shape Claude Code,
-Cursor and Claude Desktop write. Import is all-or-nothing, refuses existing
-names, and adds servers switched off—even if the pasted config says enabled.
-It does not install, execute or connect to them. Test explicitly, then enable
-the servers you trust.
+Cursor and Claude Desktop write. Cursor plugin `auth.CLIENT_ID`,
+`auth.CLIENT_SECRET` and `auth.scopes` are mapped to OpenMausBot's OAuth
+settings. Import is all-or-nothing, refuses existing names, and adds servers
+switched off—even if the pasted config says enabled. It does not install,
+execute or connect to them. Test explicitly, then enable the servers you trust.
 
 The desktop app's first-run tour does the same for you in its **Bring what you
 already use** step (`server/setup-import.ts`). On the computer running

@@ -1,6 +1,6 @@
 // What `claude auth status --json` says about the account a Claude instance runs on.
 import type { ProviderSnapshot } from "../contracts.ts";
-import { execCli } from "../procs.ts";
+import { CLI_PROBE_TIMEOUT_MS, execCli } from "../procs.ts";
 
 /** Whether `claude` is signed in, per the CLI's own `auth status`: credential storage varies by
  * platform (Keychain, a JSON file) and presence checks accept stale credentials. A check that
@@ -11,7 +11,7 @@ export function claudeAuthStatus(
   run: typeof execCli = execCli,
 ): Promise<{ authenticated?: boolean; account?: ProviderSnapshot["account"] }> {
   return new Promise((resolve) => {
-    run(cli, ["auth", "status", "--json"], { timeout: 8000, maxBuffer: 65_536, env }, (error, stdout) => {
+    run(cli, ["auth", "status", "--json"], { timeout: CLI_PROBE_TIMEOUT_MS, maxBuffer: 65_536, env }, (error, stdout) => {
       if ((error as { killed?: boolean } | null)?.killed) return resolve({});
       try {
         const status: unknown = JSON.parse(stdout);

@@ -21,6 +21,8 @@ export interface ConfigStatus {
   openai?: { configured: boolean };
   openrouter?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
+  /** NVIDIA NIM provider for local CLI launchers (om-claude, om-opencode, om-codex). */
+  nvidiaNim?: { configured: boolean; baseUrl?: string };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
    * warning window or grace period. */

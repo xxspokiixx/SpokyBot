@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import {
   closeSync,
   fsyncSync,
-  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -13,6 +12,7 @@ import {
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 
+import { publishCandidate } from "../electron/atomic-publish.mjs";
 import { SERVER_ROOT } from "./proxy-paths.ts";
 
 export interface EnvironmentDescriptor {
@@ -86,16 +86,10 @@ export function loadEnvironmentId(dataDir: string): string {
     closeSync(descriptor);
     descriptor = undefined;
 
-    try {
-      // A hard link publishes atomically without replacing, unlike rename, which overwrites on POSIX.
-      linkSync(temporaryFile, file);
-      return id;
-    } catch (error) {
-      if (!hasCode(error, "EEXIST")) throw error;
-      const winner = readEnvironmentId(file);
-      if (winner) return winner;
-      throw new Error(`The environment identity at ${file} disappeared while it was being created.`);
-    }
+    if (publishCandidate(temporaryFile, file)) return id;
+    const winner = readEnvironmentId(file);
+    if (winner) return winner;
+    throw new Error(`The environment identity at ${file} disappeared while it was being created.`);
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
     try {

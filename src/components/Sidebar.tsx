@@ -49,6 +49,7 @@ import { lastNonReceipt } from "@/lib/receipts";
 import { botPreview, groupPreview } from "./sidebar-preview";
 import { activeLocale, t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
+import { useLongPressMenu } from "@/lib/use-long-press-menu";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
@@ -195,6 +196,7 @@ export function GroupListItem({
     wasSelected.current = selected;
   }, [selected]);
   const hasThreadList = (group.tasks?.length ?? 1) > 1 || Boolean(query);
+  const longPress = useLongPressMenu(({ x, y }) => onMenu({ groupId: group.id, x, y }));
   const expanded = !group.dm && threadsOpen && density !== "icons" && hasThreadList;
   const simpleRow = !advanced && density === "comfortable";
   const railTile = !advanced && density === "icons";
@@ -209,6 +211,7 @@ export function GroupListItem({
     <div className={cn("group relative", railTile && "mx-auto w-[52px]")}>
     <button
       data-sidebar-group-row={group.id}
+      {...longPress}
       aria-current={selected && !expanded ? "page" : undefined}
       onClick={() => dispatch({ type: "select", id: group.id })}
       onContextMenu={(e) => {
@@ -750,6 +753,10 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ projectId: string; left: number; top: number } | null>(null);
+  const folderLongPress = useLongPressMenu((point, element) => {
+    const projectId = element instanceof Element ? element.getAttribute("data-sidebar-folder-label") : null;
+    if (projectId) setFolderMenu({ projectId, left: point.x, top: point.y });
+  });
   const [markingRead, setMarkingRead] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [readStatus, setReadStatus] = useState("");
@@ -883,7 +890,7 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
               <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
             </button>
             <button type="button" aria-label={t("folder.iconNamed", { name: project.name })} title={t("folder.iconNamed", { name: project.name })} onClick={() => setEditingProject(project.id)} className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-raised"><FolderIcon emoji={project.emoji} size={14} /></button>
-            <button type="button" data-sidebar-folder-label={project.id} draggable={!reordering} aria-expanded={open} onClick={() => setCollapsed((previous) => {
+            <button type="button" data-sidebar-folder-label={project.id} {...folderLongPress} draggable={!reordering} aria-expanded={open} onClick={() => setCollapsed((previous) => {
               const next = new Set(previous);
               if (next.has(project.id)) next.delete(project.id); else next.add(project.id);
               return next;
@@ -1121,6 +1128,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       </div>
     </>
   );
+  const longPress = useLongPressMenu(({ x, y }) => onMenu({ botId: bot.id, x, y }));
   const onContextMenu = (event: React.MouseEvent) => {
     openBotContextMenu(onMenu, bot.id, event);
   };
@@ -1139,6 +1147,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       <div
         role={renaming ? undefined : "button"}
         tabIndex={renaming ? undefined : 0}
+        {...longPress}
         aria-label={
           !renaming && iconOnly
             ? deleting
@@ -1249,6 +1258,12 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     teamMenuReturn.current = returnTo;
     setTeamMenu({ name, x: Math.max(8, Math.min(x, window.innerWidth - 266)), y: Math.max(8, Math.min(y, window.innerHeight - 190)) });
   };
+  const sectionLongPress = useLongPressMenu((point, element) => {
+    if (!(element instanceof Element)) return;
+    const sectionName = element.getAttribute("data-section");
+    if (!sectionName) return;
+    openTeamMenu(sectionName, point.x, point.y, element.querySelector<HTMLElement>("button") ?? (element as HTMLElement));
+  });
   const renamedTeam = (oldName: string, newName: string) => {
     const replace = (ids: string[]) => [...new Set(ids.map(id => id === userSectionId(oldName) ? userSectionId(newName) : id))];
     setCollapsedSections(current => { const next = replace(current); saveCollapsedSections(next); return next; });
@@ -1849,6 +1864,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
                     line={simple}
+                    bind={!remoteClient && sectionName && (simple || layoutInteractive) ? sectionLongPress : undefined}
                     onMenu={simple && !remoteClient && sectionName ? (button) => {
                       const rect = button.getBoundingClientRect();
                       openTeamMenu(sectionName, rect.right - 256, rect.bottom + 4, button);
@@ -1966,6 +1982,15 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             <div className="min-w-0 flex-1">
               <SidebarProfileMenu />
             </div>
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              aria-label={t("sidebar.searchAria")}
+              title={t("sidebar.searchAria")}
+              className="flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised/50 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            >
+              <Search size={18} strokeWidth={2} />
+            </button>
             <SidebarBottomButtons />
           </div>
         )}

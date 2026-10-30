@@ -107,6 +107,65 @@ const EMPTY_DRAFT: McpDraft = {
   name: "", transport: "stdio", command: "", args: "", env: "", type: "http", url: "", headers: "",
   oauthClientId: "", oauthClientSecret: "", oauthScopes: "", oauthForgetSecret: false, resultBudget: "",
 };
+type AvailableMcpIntegration = {
+  name: string;
+  title: LocaleKey;
+  description: LocaleKey;
+  setup: LocaleKey;
+  url: string;
+  sourceUrl: string;
+  needsClientId?: boolean;
+  needsTenantId?: boolean;
+  needsGithubToken?: boolean;
+};
+
+const AVAILABLE_MCP_INTEGRATIONS: AvailableMcpIntegration[] = [
+  {
+    name: "slack",
+    title: "mcp.catalog.slack.title",
+    description: "mcp.catalog.slack.description",
+    setup: "mcp.catalog.slack.setup",
+    url: "https://mcp.slack.com/mcp",
+    sourceUrl: "https://github.com/slackapi/slack-skills-plugin",
+    needsClientId: true,
+  },
+  {
+    name: "github",
+    title: "mcp.catalog.github.title",
+    description: "mcp.catalog.github.description",
+    setup: "mcp.catalog.github.setup",
+    url: "https://api.githubcopilot.com/mcp/",
+    sourceUrl: "https://github.com/github/github-mcp-server",
+    needsGithubToken: true,
+  },
+  {
+    name: "m365-mail",
+    title: "mcp.catalog.microsoftMail.title",
+    description: "mcp.catalog.microsoftMail.description",
+    setup: "mcp.catalog.microsoft.setup",
+    url: "https://agent365.svc.cloud.microsoft/agents/tenants/{tenant_id}/servers/mcp_MailTools",
+    sourceUrl: "https://github.com/microsoft/mcp",
+    needsTenantId: true,
+  },
+  {
+    name: "m365-calendar",
+    title: "mcp.catalog.microsoftCalendar.title",
+    description: "mcp.catalog.microsoftCalendar.description",
+    setup: "mcp.catalog.microsoft.setup",
+    url: "https://agent365.svc.cloud.microsoft/agents/tenants/{tenant_id}/servers/mcp_CalendarTools",
+    sourceUrl: "https://github.com/microsoft/mcp",
+    needsTenantId: true,
+  },
+  {
+    name: "m365-copilot-chat",
+    title: "mcp.catalog.microsoftCopilot.title",
+    description: "mcp.catalog.microsoftCopilot.description",
+    setup: "mcp.catalog.microsoft.setup",
+    url: "https://agent365.svc.cloud.microsoft/agents/tenants/{tenant_id}/servers/mcp_M365Copilot",
+    sourceUrl: "https://github.com/microsoft/mcp",
+    needsTenantId: true,
+  },
+];
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
 
@@ -152,6 +211,10 @@ export function parseMcpHeaders(
     headers[key] = secret === "" && saved.has(key) ? true : secret;
   }
   return { ok: true, headers };
+}
+
+export function normalizeGithubToken(value: string): string {
+  return value.trim().replace(/^Bearer\s+/i, "").trim();
 }
 
 export function parseMcpOAuthClient(
@@ -229,6 +292,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
   const [completingSignIn, setCompletingSignIn] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [catalogCredentials, setCatalogCredentials] = useState<Record<string, { clientId: string; clientSecret: string; tenantId: string; githubToken: string }>>({});
   const loadGeneration = useRef(0);
   const mounted = useRef(true);
   const whopServer = servers?.find((server) => isRemoteMcpListing(server) && isWhopServer(server));
@@ -288,6 +352,33 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
   const closeEditor = () => {
     setEditing(null);
     setDraft(EMPTY_DRAFT);
+  };
+
+  const availableIntegrationServer = (integration: AvailableMcpIntegration) => {
+    const [tenantPrefix, tenantSuffix] = integration.url.split("{tenant_id}");
+    const sameEndpoint = servers?.filter((server): server is RemoteMcpListing => isRemoteMcpListing(server) && server.url === integration.url) ?? [];
+    if (integration.needsGithubToken) {
+      const authenticated = sameEndpoint.find((server) => server.headerKeys.some((key) => key.toLowerCase() === "authorization"));
+      if (authenticated) return authenticated;
+    }
+    return sameEndpoint.at(-1)
+      ?? (integration.needsTenantId
+        ? servers?.find((server) => server.name === integration.name && isRemoteMcpListing(server) && server.url.startsWith(tenantPrefix!) && server.url.endsWith(tenantSuffix!))
+        : undefined);
+  };
+  const availableIntegrationNeedsSetup = (integration: AvailableMcpIntegration) => {
+    const server = availableIntegrationServer(integration);
+    const credentials = catalogCredentials[integration.name] ?? { clientId: "", clientSecret: "", tenantId: "", githubToken: "" };
+    return Boolean(
+      integration.needsClientId && !(server && isRemoteMcpListing(server) && server.oauth?.clientId) && !credentials.clientId.trim()
+      || integration.needsTenantId && !server && !credentials.tenantId.trim()
+      || integration.needsGithubToken && !(server && isRemoteMcpListing(server) && server.headerKeys.some((key) => key.toLowerCase() === "authorization")) && !normalizeGithubToken(credentials.githubToken),
+    );
+  };
+  const focusAvailableSetup = (integration: AvailableMcpIntegration) => {
+    const card = document.querySelector<HTMLElement>(`[data-mcp-catalog-entry="${integration.name}"]`);
+    card?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    card?.querySelector<HTMLElement>("input")?.focus();
   };
 
   const draftBody = (
@@ -370,7 +461,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     }
   };
 
-  const test = async (server: McpServerListing) => {
+  const test = async (server: McpServerListing): Promise<ProbeResult | null> => {
     setBusy(`test:${server.name}`);
     loadGeneration.current += 1;
     setError(null);
@@ -382,17 +473,17 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     try {
       const result: ProbeResult = await api(`/api/mcp/servers/${server.name}/test`, { method: "POST" });
       setProbe((current) => ({ ...current, [server.name]: result }));
+      return result;
     } catch (cause) {
-      setProbe((current) => ({
-        ...current,
-        [server.name]: { ok: false, error: cause instanceof Error ? cause.message : String(cause) },
-      }));
+      const result = { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+      setProbe((current) => ({ ...current, [server.name]: result }));
+      return result;
     } finally {
       setBusy(null);
     }
   };
 
-  const signIn = async (server: McpServerListing) => {
+  const signIn = async (server: McpServerListing, activateAfterSignIn = false) => {
     const controller = new AbortController();
     signInAbort.current = controller;
     setSigningIn(server.name);
@@ -413,7 +504,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
       } });
       if (!mounted.current || controller.signal.aborted) return;
       if (result.phase === "succeeded") {
-        if (isRemoteMcpListing(server) && isWhopServer(server)) {
+        if ((isRemoteMcpListing(server) && isWhopServer(server)) || activateAfterSignIn) {
           setSignInFlow({ ...result, flowId: null, authorizationUrl: null });
           const tested = await signedInToolsCheck(server.name, api, controller.signal);
           if (controller.signal.aborted || !mounted.current) return;
@@ -423,7 +514,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
           if (!mounted.current) return;
           setServers(enabled.servers ?? []);
           updateMcpServers(enabled.servers ?? []);
-          setNotice({ key: "whop.connected" });
+          setNotice({ key: isRemoteMcpListing(server) && isWhopServer(server) ? "whop.connected" : "mcp.catalog.connected", params: { name: server.name } });
         } else setNotice({ key: "mcp.auth.done", params: { name: server.name } });
       } else if (result.phase !== "cancelled") {
         setProbe((current) => ({ ...current, [server.name]: { ok: false, error: result.message || t("mcp.auth.failed") } }));
@@ -441,6 +532,165 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
         setCallbackError(null);
         if (mounted.current) void load();
       }
+    }
+  };
+
+  const connectAvailable = async (integration: AvailableMcpIntegration) => {
+    if (!servers || busy !== null || signingIn !== null) return;
+    setError(null);
+    setNotice(null);
+    const fields = catalogCredentials[integration.name] ?? { clientId: "", clientSecret: "", tenantId: "", githubToken: "" };
+    let url = integration.url;
+    let server = availableIntegrationServer(integration);
+    if (integration.needsTenantId && url.includes("{tenant_id}")) {
+      if (server && isRemoteMcpListing(server)) {
+        url = server.url;
+      } else {
+        const tenantId = fields.tenantId.trim();
+        if (!tenantId) { setError(t("mcp.catalog.tenantRequired")); return; }
+        url = url.replace("{tenant_id}", encodeURIComponent(tenantId));
+      }
+    }
+    if (server && !isRemoteMcpListing(server)) {
+      setError(t("mcp.catalog.nameConflict", { name: integration.name }));
+      return;
+    }
+    if (server && isRemoteMcpListing(server) && server.url !== url) {
+      setError(t("mcp.catalog.nameConflict", { name: integration.name }));
+      return;
+    }
+
+    const githubToken = normalizeGithubToken(fields.githubToken);
+    const hasSavedGithubToken = Boolean(server && isRemoteMcpListing(server) && server.headerKeys.some((key) => key.toLowerCase() === "authorization"));
+    if (integration.needsGithubToken && !githubToken && !hasSavedGithubToken) {
+      setError(t("mcp.catalog.githubTokenRequired"));
+      return;
+    }
+    const clientId = server && isRemoteMcpListing(server) ? server.oauth?.clientId ?? "" : fields.clientId.trim();
+    if (integration.needsClientId && !clientId) { setError(t("mcp.catalog.clientIdRequired")); return; }
+    const oauth = clientId ? {
+      clientId,
+      ...(fields.clientSecret.trim()
+        ? { clientSecret: fields.clientSecret.trim() }
+        : server && isRemoteMcpListing(server) && server.oauth?.clientSecretConfigured
+          ? { clientSecret: true as const }
+          : {}),
+    } : undefined;
+    const headers = githubToken ? { Authorization: `Bearer ${githubToken}` } : {};
+
+    if (integration.needsGithubToken && githubToken && server && isRemoteMcpListing(server)) {
+      const authorizationKey = server.headerKeys.find((key) => key.toLowerCase() === "authorization") ?? "Authorization";
+      const headerLines = server.headerKeys
+        .filter((key) => key.toLowerCase() !== "authorization")
+        .map((key) => `${key}: `);
+      headerLines.push(`${authorizationKey}: Bearer ${githubToken}`);
+      const parsedHeaders = parseMcpHeaders(headerLines.join("\n"), server.headerKeys);
+      if (!parsedHeaders.ok) {
+        setError(parsedHeaders.error);
+        return;
+      }
+      setBusy(`catalog:${integration.name}`);
+      try {
+        const result = await api(`/api/mcp/servers/${encodeURIComponent(server.name)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            type: server.type,
+            url: server.url,
+            headers: parsedHeaders.headers,
+            ...(server.oauth ? { oauth: {
+              clientId: server.oauth.clientId,
+              scopes: server.oauth.scopes,
+              ...(server.oauth.clientSecretConfigured ? { clientSecret: true } : {}),
+            } } : {}),
+            enabled: server.enabled,
+            ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
+          }),
+        });
+        server = result.servers?.find((candidate: McpServerListing) => candidate.name === server?.name) ?? server;
+        setServers(result.servers ?? []);
+        updateMcpServers(result.servers ?? []);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return;
+      } finally {
+        setBusy(null);
+      }
+    }
+
+    if (server && oauth && isRemoteMcpListing(server) && !server.oauth?.clientId) {
+      if (server.headerKeys.length > 0) {
+        setEditing(server.name);
+        setDraft({ ...draftFor(server), oauthClientId: oauth.clientId, oauthClientSecret: fields.clientSecret });
+        setError(t("mcp.catalog.editExisting"));
+        return;
+      }
+      setBusy(`catalog:${integration.name}`);
+      try {
+        const result = await api(`/api/mcp/servers/${encodeURIComponent(server.name)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            type: server.type,
+            url: server.url,
+            headers,
+            oauth,
+            ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
+          }),
+        });
+        server = result.servers?.find((candidate: McpServerListing) => candidate.name === server?.name) ?? server;
+        setServers(result.servers ?? []);
+        updateMcpServers(result.servers ?? []);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return;
+      } finally {
+        setBusy(null);
+      }
+    }
+
+    if (!server) {
+      const used = new Set(servers.map((candidate) => candidate.name));
+      let name = integration.name;
+      for (let suffix = 2; used.has(name); suffix += 1) name = `${integration.name}-${suffix}`;
+      setBusy(`catalog:${integration.name}`);
+      loadGeneration.current += 1;
+      try {
+        const result = await api("/api/mcp/servers", {
+          method: "POST",
+          body: JSON.stringify({ name, type: "http", url, headers, ...(oauth ? { oauth } : {}) }),
+        });
+        server = result.servers?.find((candidate: McpServerListing) => candidate.name === name);
+        setServers(result.servers ?? []);
+        updateMcpServers(result.servers ?? []);
+        if (!server) throw new Error(t("mcp.catalog.createFailed"));
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return;
+      } finally {
+        setBusy(null);
+      }
+    }
+
+    const tested = await test(server);
+    if (!tested) return;
+    if (tested.auth === "required") {
+      await signIn(server, true);
+      return;
+    }
+    if (!tested.ok) return;
+    if (server.enabled) {
+      setNotice({ key: "mcp.catalog.connected", params: { name: server.name } });
+      return;
+    }
+    setBusy(`enable:${server.name}`);
+    try {
+      const result = await api(`/api/mcp/servers/${encodeURIComponent(server.name)}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) });
+      setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
+      setNotice({ key: "mcp.catalog.connected", params: { name: server.name } });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -624,7 +874,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
       <div className={embedded ? "" : "mx-auto max-w-[840px]"}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-[1_1_280px]">
-            <h3 id="mcp-servers-title" className="text-[15px] font-semibold text-ink">{t("mcp.title")}</h3>
+            <h3 id="mcp-servers-title" className="text-[15px] font-semibold text-ink">{t("mcp.catalog.panelTitle")}</h3>
             <p className="mt-1 max-w-[610px] break-words text-[12.5px] leading-relaxed text-ink-secondary">
               {t("mcp.subtitle")}
             </p>
@@ -671,6 +921,66 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
 
         {restricted && policy && <p role="status" className="mt-3 text-[12.5px] leading-relaxed text-ink-secondary">{t("policy.mcpRestricted", { organization: policy.organizationName })}</p>}
         <ClaudeCodeSwitches />
+
+        <section className="mt-5" aria-labelledby="mcp-catalog-title" data-mcp-catalog>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h4 id="mcp-catalog-title" className="text-[14px] font-semibold text-ink">{t("mcp.catalog.title")}</h4>
+            <p className="text-[11.5px] text-ink-secondary">{t("mcp.catalog.subtitle")}</p>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {AVAILABLE_MCP_INTEGRATIONS.map((integration) => {
+              const configuredServer = availableIntegrationServer(integration);
+              const connected = Boolean(configuredServer?.enabled && (!isRemoteMcpListing(configuredServer) || configuredServer.auth !== "needs-sign-in"));
+              const credentials = catalogCredentials[integration.name] ?? { clientId: "", clientSecret: "", tenantId: "", githubToken: "" };
+              const needsClientId = Boolean(integration.needsClientId && !(configuredServer && isRemoteMcpListing(configuredServer) && configuredServer.oauth?.clientId));
+              const needsTenantId = Boolean(integration.needsTenantId && !configuredServer);
+              const needsGithubToken = Boolean(integration.needsGithubToken);
+              const hasSavedGithubToken = Boolean(configuredServer && isRemoteMcpListing(configuredServer) && configuredServer.headerKeys.some((key) => key.toLowerCase() === "authorization"));
+              const missingSetup = availableIntegrationNeedsSetup(integration);
+              const testResult = configuredServer ? probe[configuredServer.name] : undefined;
+              return (
+                <article key={integration.name} data-mcp-catalog-entry={integration.name} className="flex min-w-0 flex-col rounded-xl border border-hairline/50 bg-card px-4 py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 text-[13.5px] font-medium text-ink">{t(integration.title)}</div>
+                    {configuredServer && <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10.5px]", connected ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>{t(connected ? "mcp.catalog.connectedBadge" : "mcp.catalog.added")}</span>}
+                  </div>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">{t(integration.description)}</p>
+                  <p className="mt-2 text-[11px] leading-relaxed text-warning">{t(integration.setup)}</p>
+                  {needsClientId && <div className="mt-3 grid gap-2">
+                    <label className="block text-[11px] font-medium text-ink-secondary">{t("mcp.catalog.clientId")}
+                      <input value={credentials.clientId} onChange={(event) => setCatalogCredentials((current) => ({ ...current, [integration.name]: { ...credentials, clientId: event.target.value } }))} autoComplete="off" spellCheck={false} className="mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-2.5 py-2 font-mono text-[11px] text-ink" />
+                    </label>
+                    <label className="block text-[11px] font-medium text-ink-secondary">{t("mcp.catalog.clientSecretOptional")}
+                      <input type="password" value={credentials.clientSecret} onChange={(event) => setCatalogCredentials((current) => ({ ...current, [integration.name]: { ...credentials, clientSecret: event.target.value } }))} autoComplete="new-password" className="mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-2.5 py-2 font-mono text-[11px] text-ink" />
+                    </label>
+                  </div>}
+                  {needsTenantId && <label className="mt-3 block text-[11px] font-medium text-ink-secondary">{t("mcp.catalog.tenantId")}
+                    <input value={credentials.tenantId} onChange={(event) => setCatalogCredentials((current) => ({ ...current, [integration.name]: { ...credentials, tenantId: event.target.value } }))} autoComplete="off" spellCheck={false} className="mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-2.5 py-2 font-mono text-[11px] text-ink" />
+                  </label>}
+                  {needsGithubToken && <label className="mt-3 block text-[11px] font-medium text-ink-secondary">{t(hasSavedGithubToken ? "mcp.catalog.githubTokenSaved" : "mcp.catalog.githubToken")}
+                    <input type="password" value={credentials.githubToken} onChange={(event) => setCatalogCredentials((current) => ({ ...current, [integration.name]: { ...credentials, githubToken: event.target.value } }))} autoComplete="new-password" className="mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-2.5 py-2 font-mono text-[11px] text-ink" />
+                  </label>}
+                  {testResult && <p role="status" className={cn("mt-2 text-[11px] leading-relaxed", testResult.ok ? "text-success" : testResult.auth === "required" ? "text-warning" : "text-danger")}>
+                    {testResult.auth === "required" ? t("mcp.auth.required") : testResult.ok ? `${t("mcp.probe.connected")} ${probeToolsLabel(testResult.tools, testResult.total)}` : testResult.error}
+                  </p>}
+                  <div className="mt-auto flex items-center justify-between gap-2 pt-3">
+                    <a href={integration.sourceUrl} target="_blank" rel="noreferrer" className="text-[11px] text-ink-secondary underline underline-offset-2 hover:text-ink">{t("mcp.catalog.source")}</a>
+                    <button
+                      type="button"
+                      disabled={busy !== null || signingIn !== null || servers === null || (restricted && !policy?.mcp.allowlist.length)}
+                      onClick={() => missingSetup ? focusAvailableSetup(integration) : void connectAvailable(integration)}
+                      className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-40"
+                    >
+                      {busy === `catalog:${integration.name}` || signingIn === configuredServer?.name || busy === `test:${configuredServer?.name}` || busy === `enable:${configuredServer?.name}`
+                        ? <Loader2 size={13} className="inline animate-spin" />
+                        : t(missingSetup ? "mcp.catalog.setupRequired" : connected ? "mcp.catalog.reconnect" : "mcp.catalog.connect")}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
 
         {importOpen && (
           <div className="mt-4 rounded-2xl border border-hairline/60 bg-card p-4 sm:p-5">
@@ -883,6 +1193,10 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
             </div>
           </div>
         )}
+
+        <div className="mt-6 border-t border-hairline/30 pt-5">
+          <h4 className="text-[14px] font-semibold text-ink">{t("mcp.yourServers")}</h4>
+        </div>
 
         {servers === null ? (
           <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" /> {t("mcp.loading")}</div>

@@ -39,6 +39,23 @@ describe("local computer routing", () => {
     ).toBe(true);
   });
 
+  it("mounts the android local computer only when a bot explicitly asks for it", () => {
+    expect(
+      shouldMountLocalComputer({
+        requested: "local",
+        hostPlatform: "android",
+        providerSupportsLocal: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldMountLocalComputer({
+        requested: undefined,
+        hostPlatform: "android",
+        providerSupportsLocal: true,
+      }),
+    ).toBe(false);
+  });
+
   it("never mounts the local desktop for explicit cloud/off or on an unsupported host", () => {
     for (const requested of ["cloud", "off"] as const) {
       expect(

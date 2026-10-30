@@ -575,6 +575,7 @@ export type BotSettingsSection =
   | "routines"
   | "access"
   | "model"
+  | "nvidiaNim"
   | "permissions"
   | "voice"
   | "visibility"
@@ -613,7 +614,7 @@ export interface AppState {
   webhookIngress: WebhookIngressStatus | null;
   settingsOpen: boolean;
   pluginsOpen: boolean;
-  pluginsSurface: "apps" | "mcp";
+  pluginsSurface: "apps" | "mcp" | "plugins";
   newBotOpen: boolean;
   botCreationPending: boolean;
   computerOpen: boolean;
@@ -810,7 +811,7 @@ export type Action =
   | { type: "notice"; notice: AppState["notice"] }
   | { type: "revealThread"; threadId: string }
   | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string }
-  | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
+  | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" | "plugins" }
   | { type: "toggleNewBot"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean; botId?: string }
   | { type: "openDataResult"; botId: string; cardId: string }
@@ -1944,7 +1945,7 @@ export const initialState: AppState = {
   webhookIngress: null,
   settingsOpen: false,
   pluginsOpen: false,
-  pluginsSurface: "apps",
+  pluginsSurface: "mcp",
   newBotOpen: false,
   botCreationPending: false,
   computerOpen: false,

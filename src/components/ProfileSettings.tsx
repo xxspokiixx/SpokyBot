@@ -80,6 +80,7 @@ function ProfilePhoto() {
     const profile = team
       ? await saveTeamProfile({ avatarUrl: next })
       : (await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ profile: { avatarUrl: next } }) })).profile;
+    if (next && profile?.avatarUrl !== next) throw new Error("The server did not save the profile photo");
     dispatch({ type: "profileSaved", profile: { avatarUrl: profile?.avatarUrl } });
   };
   const pick = (file: File | undefined) => {
@@ -103,12 +104,12 @@ function ProfilePhoto() {
         if (!next) throw new Error("avatar");
         return store(next);
       })
-      .then(() => replaceDraft(null), () => setError(t("settings.profile.avatar.saveError")))
+      .then(() => replaceDraft(null), (cause: unknown) => setError(`${t("settings.profile.avatar.saveError")}: ${cause instanceof Error ? cause.message : String(cause)}`))
       .finally(() => setBusy(false));
   };
   const remove = () => {
     setError(null);
-    void store("").catch(() => setError(t("settings.profile.avatar.saveError")));
+    void store("").catch((cause: unknown) => setError(`${t("settings.profile.avatar.saveError")}: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
 
   return (
@@ -134,7 +135,7 @@ function ProfilePhoto() {
         ) : avatarUrl ? <img src={avatarUrl} alt="" className="size-12 rounded-full object-cover" /> : <div className="size-12 rounded-full bg-raised" />}
         <label className="cursor-pointer rounded-lg bg-control px-3 py-2 text-[12px] text-ink hover:bg-raised-hover">
           {busy ? t("settings.profile.avatar.uploading") : t("settings.profile.avatar.choose")}
-          <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="sr-only" disabled={busy} onChange={(event) => {
+          <input type="file" accept="image/*" className="sr-only" disabled={busy} onChange={(event) => {
             const file = event.target.files?.[0];
             event.currentTarget.value = "";
             pick(file);

@@ -4,6 +4,7 @@ import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismi
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
+import { LONG_PRESS_MS } from "@/lib/use-long-press-menu";
 
 export const ACTION_ICON = { size: 17, strokeWidth: 1.5 } as const;
 
@@ -22,7 +23,6 @@ export type MessageMenuItem = {
 export const MESSAGE_ROW = "data-message-row";
 
 const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [contenteditable=true]";
-const LONG_PRESS_MS = 450;
 
 function focusVisible(target: EventTarget | null): boolean {
   try {

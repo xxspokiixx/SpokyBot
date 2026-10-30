@@ -32,6 +32,8 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_CLOUD_VOICE_TOKEN",
   "OMB_CLOUD_DECIDER_TOKEN",
   "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_CONNECTED_APPS_GRANT",
+  // NVIDIA NIM
+  "NVIDIA_NIM_API_KEY", "OMB_NVIDIA_NIM_API_KEY", "NVIDIA_NIM_BASE_URL",
   // Not credentials, but they point a shell-capable agent at app-owned state.
   "OMB_BROWSER_CONNECTION", "OMB_USER_DATA", "OMB_BOAT_API",
 ] as const;

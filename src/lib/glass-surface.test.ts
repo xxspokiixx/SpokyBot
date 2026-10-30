@@ -73,11 +73,17 @@ describe("glass surface", () => {
     expect(glassPopupTopInset("native")).toBe(24);
     for (const file of ["SettingsModal.tsx", "PluginsPanel.tsx"]) {
       const source = readFileSync(join(src, "components", file), "utf8");
-      expect(source, file).toContain('className="glass-popup-frame"');
+      expect(source, file).toContain("glass-popup-frame");
       expect(source, file).toContain("style={glassPopupFrameStyle()}");
       expect(source, file).toMatch(/className="glass-surface glass-popup /);
       expect(source, file).not.toMatch(/100dvh/);
     }
+    // On a touch primary pointer the pane fills the phone instead of the 24px gutters; a
+    // mouse-driven window keeps the window-button insets at every window size.
+    const modal = readFileSync(join(src, "components", "SettingsModal.tsx"), "utf8");
+    expect(modal).toContain('className="glass-popup-frame touch:p-0!"');
+    expect(modal).toMatch(/touch:h-dvh!/);
+    expect(modal).not.toMatch(/max-md:[^\s"]*dvh/);
   });
 
   it("lets the Apps contents reflow inside the pop-up rather than overflow it", () => {

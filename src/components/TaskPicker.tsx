@@ -3,6 +3,7 @@ import { Activity, Check, ChevronDown, FolderInput, Pencil, Pin, PinOff, Plus, S
 import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadsWorkingElsewhere } from "@/lib/room-threads";
+import { useLongPressMenu } from "@/lib/use-long-press-menu";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
@@ -214,6 +215,13 @@ function ConversationTaskPicker({
     !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || attentionOwnerName(entry).toLowerCase().includes(attentionNeedle));
   const looking = query.trim();
   const results = [...attentionRows.map((entry) => ({ kind: "attention" as const, entry })), ...visible.map((task) => ({ kind: "task" as const, task }))];
+  // The row button carries its thread id so a single hook instance can resolve the pressed task for every row.
+  const rowLongPress = useLongPressMenu((_point, element) => {
+    if (!(element instanceof Element)) return;
+    const threadId = element.getAttribute("data-task-picker-row");
+    const task = threadId ? visible.find((candidate) => candidate.threadId === threadId) : undefined;
+    if (task) startRename(task);
+  });
 
   return (
     <div className="relative" ref={ref}>
@@ -326,6 +334,8 @@ function ConversationTaskPicker({
                   ) : (
                     <button
                       type="button"
+                      data-task-picker-row={task.threadId}
+                      {...rowLongPress}
                       onClick={(e) => {
                         if (taskPickerPointerIntent("click", e.detail) !== "select") return;
                         if (!active) onSwitch(task.threadId);

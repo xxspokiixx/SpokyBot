@@ -60,7 +60,7 @@ const PAGE_ACTIONS: ReadonlySet<string> = new Set([
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
 const HANDSHAKE_TIMEOUT_MS = 1_000;
-const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"];
+const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "OMB_ANDROID_LINUX_DIR"];
 
 /** One env for MCP, viewer and cleanup so they share HOME/socket paths: OS plumbing, never provider credentials. */
 export function browserRuntimeEnv(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {

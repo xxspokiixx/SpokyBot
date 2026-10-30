@@ -10,7 +10,7 @@ import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
-import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import { brokerSocketPath, CLI_PROBE_TIMEOUT_MS, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
@@ -856,7 +856,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     let cliHelpVersion: string | null = null;
     const readCliVersion = (env: NodeJS.ProcessEnv): Promise<string | null> =>
       new Promise((resolve) => {
-        execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
+        execCli(config.cli, ["--version"], { timeout: CLI_PROBE_TIMEOUT_MS, env }, (err, stdout) =>
           resolve(err ? null : stdout.trim() || null),
         );
       });
@@ -871,7 +871,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const read = {
         version,
         done: new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
+          execCli(config.cli, ["--help"], { timeout: CLI_PROBE_TIMEOUT_MS, env }, (err, stdout) => resolve(err ? null : stdout));
         }).then((help) => {
           cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
           cliHelpVersion = version;

@@ -1,5 +1,18 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
+
+// Global error handlers to catch startup failures before server.listen()
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error("[FATAL] Unhandled promise rejection during startup:", reason);
+  console.error("Stack:", reason instanceof Error ? reason.stack : String(reason));
+  process.exit(1);
+});
+
+process.on("uncaughtException", (error: Error) => {
+  console.error("[FATAL] Uncaught exception during startup:", error);
+  console.error("Stack:", error.stack);
+  process.exit(1);
+});
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, realpathSync, rmSync } from "node:fs";
@@ -611,6 +624,7 @@ import { createAntigravityAccountRoutes } from "./routes/antigravity-accounts.ts
 import { createConfigRoutes } from "./routes/config.ts";
 import { createInstanceRoutes } from "./routes/instances.ts";
 import { createMcpServerRoutes } from "./routes/mcp-servers.ts";
+import { createPluginsCatalogRoutes } from "./routes/plugins-catalog.ts";
 import { teamAdminSummary } from "./cloud-team-admin.ts";
 import { createSetupImportRoutes } from "./routes/setup-import.ts";
 import { createComputerRoutes } from "./routes/computers.ts";
@@ -2603,6 +2617,13 @@ function phoneIntegration(botId: string, threadId: string, generation: string) {
   if (process.env.OMB_ADB_PATH) env.OMB_ADB_PATH = process.env.OMB_ADB_PATH;
   if (process.env.OMB_RESOURCES_PATH) env.OMB_RESOURCES_PATH = process.env.OMB_RESOURCES_PATH;
   if (process.env.PH_ANDROID_SERIAL) env.PH_ANDROID_SERIAL = process.env.PH_ANDROID_SERIAL;
+  // The phone build has no adb and no USB peer: its devices-apps MCP — the same
+  // tool surface over the app's granted AccessibilityService — replaces the
+  // proxy when the staged payload is present.
+  const deviceAppsScript = process.env.OMB_ANDROID_LINUX_DIR && join(process.env.OMB_ANDROID_LINUX_DIR, "android-device-phone.mjs");
+  if (process.platform === "android" && deviceAppsScript && existsSync(deviceAppsScript)) {
+    return { command: process.execPath, args: [deviceAppsScript], env };
+  }
   return { command: process.execPath, args: [phoneProxyPath], env };
 }
 
@@ -12619,6 +12640,7 @@ function configStatus() {
     decisions: { retentionDays: decisionRetentionDays(cfg.decisions?.retentionDays) },
     safetyFloor: { enabled: safetyFloorOn() },
     openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
+    nvidiaNim: { configured: Boolean(cfg.nvidiaNim?.key), baseUrl: cfg.nvidiaNim?.baseUrl ?? "" },
     composio: {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
@@ -13260,6 +13282,7 @@ ROUTES.push(createMcpServerRoutes({
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },
   mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog: chatAppsMcp, forgetPeople: (name) => teamConnections.forgetServer(name),
 }));
+ROUTES.push(createPluginsCatalogRoutes());
 ROUTES.push(createSetupImportRoutes({ local: DESKTOP_MANAGED && !CLOUD_HOME && !HOSTED_WORKSPACE, cfg, mcpPolicyRefusal, persistMcpServers,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } } }));
 ROUTES.push(createComputerRoutes({
@@ -16640,7 +16663,7 @@ if (CLOUD_HOME) registerCloudPower(cloudPower = createCloudPower({ dataDir: DATA
   liveCall: () => liveCalls.current() !== null, computer: () => cloudComputerPower.awake() || boatLifecycleBusyBots.size > 0, nextDueAt: () => routines?.nextDueAt() ?? null,
   maintenance: () => workspaceMaintenance.active || providerFleetReloading || providerAuthSessions.active || browserEngineInstall !== null } }));
 
-server.listen(PORT, "127.0.0.1", async () => {
+server.listen({ port: PORT, host: "127.0.0.1", exclusive: false }, async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   browserSweep.start(); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });

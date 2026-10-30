@@ -16,6 +16,7 @@ import { MemorySection } from "./bot-settings/MemorySection";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
 import { AccessSection } from "./bot-settings/AccessSection";
 import { ModelSection } from "./bot-settings/ModelSection";
+import { NvidiaNimSection } from "./bot-settings/NvidiaNimSection";
 import { PermissionsSection } from "./bot-settings/PermissionsSection";
 import { VoiceSection } from "./bot-settings/VoiceSection";
 import { HistorySection } from "./bot-settings/HistorySection";
@@ -134,6 +135,8 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         return <AccessSection bot={bot} derived={derived} />;
       case "model":
         return <ModelSection bot={bot} />;
+      case "nvidiaNim":
+        return <NvidiaNimSection configStatus={state.config ?? undefined} />;
       case "permissions":
         return <PermissionsSection bot={bot} derived={derived} />;
       case "voice":
@@ -216,7 +219,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
           />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           {visibleSections.length === 0 && (
             <div className="px-4 py-4 text-[12.5px] leading-relaxed text-ink-secondary">
               {t("botSettings.searchNone", { query: query.trim() })}

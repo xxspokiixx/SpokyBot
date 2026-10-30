@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { parseMcpArguments, parseMcpEnvironment, parseMcpHeaders, parseMcpOAuthClient } from "./McpServersPanel";
+import { normalizeGithubToken, parseMcpArguments, parseMcpEnvironment, parseMcpHeaders, parseMcpOAuthClient } from "./McpServersPanel";
 import { parseMcpResultBudget, withResultBudget } from "./McpResultBudgetField";
 import { setLocale, t } from "@/lib/i18n";
 
 afterEach(() => setLocale("en"));
 
 describe("MCP server form", () => {
+  it("normalizes a pasted GitHub bearer token before storing its Authorization header", () => {
+    expect(normalizeGithubToken("  ghp_example  ")).toBe("ghp_example");
+    expect(normalizeGithubToken("Bearer ghp_example")).toBe("ghp_example");
+    expect(normalizeGithubToken("bEaReR   github_pat_example")).toBe("github_pat_example");
+  });
+
   it("reads the result size limit: blank is the default, 0 never trims, grouping is fine", () => {
     expect(parseMcpResultBudget("")).toEqual({ ok: true, value: undefined });
     expect(parseMcpResultBudget("  ")).toEqual({ ok: true, value: undefined });

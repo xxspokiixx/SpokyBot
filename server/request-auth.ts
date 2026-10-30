@@ -136,10 +136,16 @@ export function fromBrowser(req: IncomingMessage): boolean {
 }
 
 const LOCAL_BROWSER_TRUST = "OMB_DEV_TRUST_LOCAL_BROWSER";
+const ANDROID_STANDALONE = "OMB_ANDROID_STANDALONE";
 
 /** Development only: a server run from a source checkout (`pnpm dev:server`, test fixtures) lets this machine's browsers in
- * as before, because Vite's dev proxy forwards them; a packaged, bundled, hosted or service-trust server ignores it. */
+ * as before, because Vite's dev proxy forwards them; a packaged, bundled, hosted or service-trust server ignores it.
+ * Also: Android standalone app (`OMB_ANDROID_STANDALONE=1`) trusts its local WebView for a fully offline experience. */
 function localBrowserTrust(env: NodeJS.ProcessEnv, fromSource: boolean, trust: LoopbackTrust): { trusted: boolean; warning?: string } {
+  // Android standalone app: trust the local WebView for a fully offline experience
+  if (env[ANDROID_STANDALONE] === "1") {
+    return { trusted: true, warning: `${ANDROID_STANDALONE}=1: local WebView trusted for standalone Android` };
+  }
   if (env[LOCAL_BROWSER_TRUST] !== "1") return { trusted: false };
   if (!fromSource || trust !== "owner") {
     return { trusted: false, warning: `${LOCAL_BROWSER_TRUST} is ignored: it applies only to a development server run from source with owner trust` };

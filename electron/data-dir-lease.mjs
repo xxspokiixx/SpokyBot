@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname, uptime } from "node:os";
 import { join } from "node:path";
+
+import { publishCandidate } from "./atomic-publish.mjs";
 
 const LEASE_NAME = "openmausbot-server.lease";
 const DELEGATED_CHILD_DIR = ".openmausbot-server-child";
@@ -226,13 +228,9 @@ function publishRecord(path, record, prepareMessage, acquireMessage) {
     throw leaseError(prepareMessage, error);
   }
   try {
-    try {
-      linkSync(candidatePath, path);
-      return true;
-    } catch (error) {
-      if (error?.code === "EEXIST") return false;
-      throw leaseError(acquireMessage, error);
-    }
+    return publishCandidate(candidatePath, path);
+  } catch (error) {
+    throw leaseError(acquireMessage, error);
   } finally {
     unlinkExact(candidatePath, "OpenMausBot could not remove its lease candidate.");
   }
@@ -414,13 +412,12 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
   try {
     for (;;) {
       try {
-        linkSync(candidatePath, leasePath);
-        acquired = true;
-        break;
-      } catch (error) {
-        if (error?.code !== "EEXIST") {
-          throw leaseError("OpenMausBot cannot acquire its data-directory lease.", error);
+        if (publishCandidate(candidatePath, leasePath)) {
+          acquired = true;
+          break;
         }
+      } catch (error) {
+        throw leaseError("OpenMausBot cannot acquire its data-directory lease.", error);
       }
 
       const current = readOwner(leasePath);

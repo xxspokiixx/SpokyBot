@@ -78,6 +78,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       body = rest;
       const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
       const settings = template.profile;
+  if (process.env.OMB_ANDROID_STANDALONE === "1" && settings.computer === undefined) settings.computer = "local";
       if (auth.kind === "session" && !auth.scopes.includes("admin")) {
         const field = clientBotPatchViolation(settings);
         if (field || body.preset !== undefined || template.skills.length || template.routines.length || Object.keys(template.memory).length) {

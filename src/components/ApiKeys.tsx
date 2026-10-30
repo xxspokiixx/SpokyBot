@@ -9,8 +9,8 @@ import type { LocaleKey } from "@/locales";
 import { SECTION_PROVIDER, type KeyResult, type KeyVia } from "@/lib/analytics-allowlist";
 import { keyRemoved, keySaved, keySaveFailure, keyTestResult, savedKeyResult } from "@/lib/product-events";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg" | "deepseek";
-export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg" | "deepseek" | "nvidiaNim";
+export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg" | "nvidiaNim";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -39,6 +39,7 @@ const SECTIONS: Record<
   openai: { body: (v) => ({ openai: { key: v } }), flag: (c) => c.openai?.configured ?? false },
   openrouter: { body: (v) => ({ openrouter: { key: v } }), flag: (c) => c.openrouter?.configured ?? false },
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
+  nvidiaNim: { body: (v) => ({ nvidiaNim: { key: v } }), flag: (c) => c.nvidiaNim?.configured ?? false },
   mistral: { body: (v) => ({ mistral: { key: v } }), flag: (c) => c.mistral?.configured ?? false },
   cerebras: { body: (v) => ({ cerebras: { key: v } }), flag: (c) => c.cerebras?.configured ?? false },
   groq: { body: (v) => ({ groq: { key: v } }), flag: (c) => c.groq?.configured ?? false },
@@ -191,6 +192,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.xai.desc",
     href: "https://console.x.ai",
     linkLabelKey: "keys.xai.link",
+    optional: true,
+  },
+  nvidiaNim: {
+    labelKey: "keys.nvidiaNim.label",
+    placeholderKey: "keys.nvidiaNim.placeholder",
+    descriptionKey: "keys.nvidiaNim.desc",
+    href: "https://www.nvidia.com/en-us/nim/",
+    linkLabelKey: "keys.nvidiaNim.link",
     optional: true,
   },
   treg: {

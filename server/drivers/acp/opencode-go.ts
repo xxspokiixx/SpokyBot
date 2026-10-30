@@ -721,11 +721,27 @@ function openCodeLoginsFingerprint(env: Record<string, string | undefined>): str
   }).join("|");
 }
 
+// The phone lane has no opencode on any PATH: its guest copy runs through the
+// same proot chain as the local computer (identity bind so HOME and the data
+// dir resolve inside the guest too; a writable /tmp for opencode's runtime).
+function phoneOpenCodeCli(): string {
+  const linux = process.env.OMB_ANDROID_LINUX_DIR?.trim();
+  if (!linux || process.platform !== "android") return "opencode";
+  const files = linux.slice(0, linux.lastIndexOf("/")) || linux;
+  return [
+    `${linux}/proot`,
+    "-R", `${linux}/rootfs`,
+    "-b", `${files}:${files}`,
+    "-b", `${linux}/tmp:/tmp`,
+    "/usr/local/bin/opencode",
+  ].join(" ");
+}
+
 const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   driverKind: "opencodeGo",
   displayName: "OpenCode",
   models: NO_MODELS,
-  defaultCli: "opencode",
+  defaultCli: phoneOpenCodeCli(),
   nativeSource: "opencode.acp",
   loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → API keys.",
   install: {

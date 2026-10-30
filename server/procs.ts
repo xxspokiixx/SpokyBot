@@ -126,6 +126,10 @@ export function spawnCli(
 
 const EXEC_KILL_GRACE_MS = 2_000;
 
+// Probe spawns (`<cli> --version`, `auth status`) pay a cold runtime start each; on the
+// embedded android build that PIE load plus TS type-stripping can outlast a desktop budget.
+export const CLI_PROBE_TIMEOUT_MS = process.platform === "android" ? 45_000 : 8_000;
+
 export function execCli(
   cli: string,
   args: string[],

@@ -1,5 +1,5 @@
 // Security: local browse only, with no registry and no network fetch, so an import is exactly the bytes pasted here.
-import { Search, X } from "lucide-react";
+import { Search, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
@@ -143,6 +143,27 @@ export function SkillsSection() {
     }
   };
 
+  const uninstall = async (skill: SkillsLibrarySkillWire) => {
+    if (busy.current) return;
+    if (!window.confirm(t("skills.library.uninstallConfirm", { name: skill.name }))) return;
+    busy.current = true;
+    setWorking(skill.name);
+    setError("");
+    try {
+      const response = await fetch(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
+        method: "DELETE",
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Could not uninstall this skill.");
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not uninstall this skill.");
+    } finally {
+      busy.current = false;
+      setWorking("");
+    }
+  };
+
   const view = async (skill: SkillsLibrarySkillWire, review = false) => {
     setError("");
     try {
@@ -248,6 +269,16 @@ export function SkillsSection() {
                       disabled={Boolean(working || importing)}
                       onClick={() => void toggle(skill)}
                     />
+                    <button
+                      type="button"
+                      aria-label={t("skills.library.uninstall", { skill: skill.name })}
+                      title={t("skills.library.uninstall", { skill: skill.name })}
+                      disabled={Boolean(working || importing)}
+                      onClick={() => void uninstall(skill)}
+                      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                    >
+                      <Trash size={12} />
+                    </button>
                   </div>
                   <LibrarySkillMeta skill={skill} />
                   {skill.warnings.length > 0 && (

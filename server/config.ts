@@ -25,7 +25,7 @@ import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig }
 import { roomContextSettings } from "./room-context-settings.ts";
 
 const optionalText = z.string().optional();
-const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$|^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
@@ -64,7 +64,7 @@ export function normalizeVpsConfig(raw: unknown): { sshAlias?: string } {
   const alias = (raw as Record<string, unknown>).sshAlias;
   if (alias === undefined || alias === "") return {};
   if (!isValidSshAlias(alias)) {
-    throw new Error("vps.sshAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore)");
+    throw new Error("vps.sshAlias must be a simple SSH config alias (letters, numbers, dot, dash, underscore, or user@host)");
   }
   return { sshAlias: alias };
 }
@@ -340,6 +340,8 @@ const appConfigSchema = z.object({
   meta: z.object({ key: optionalText, url: optionalText }).optional(),
   deepseek: z.object({ key: optionalText }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
+  /** NVIDIA NIM API key for local CLI launchers (om-claude, om-opencode, om-codex). */
+  nvidiaNim: z.object({ key: optionalText, baseUrl: optionalText }).optional(),
   /** Anthropic API key for Claude Code billed per token; `url` is for a proxy or test double. Never a login OAuth token. */
   anthropic: z.object({ key: optionalText, url: optionalText, everyClaudeBot: z.boolean().optional() }).optional(),
   /** OpenAI API key for the `openai` instance only; Codex keeps its own login. */
@@ -499,6 +501,8 @@ export interface AppConfig extends HelperConfig {
   safetyFloor?: { enabled?: boolean };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
+  /** NVIDIA NIM API key for local CLI launchers (om-claude, om-opencode, om-codex). */
+  nvidiaNim?: { key?: string; baseUrl?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   /** Boat token (ascii.dev renamed Box to Boat); config key "box", env BOX_TOKEN. */
   box?: { token?: string };
@@ -782,6 +786,9 @@ export function loadConfig(): AppConfig {
     }
   }
   // Env wins over the file for every credential: the desktop shell injects them as env at spawn.
+  cfg.nvidiaNim = { ...cfg.nvidiaNim };
+  if (process.env.NVIDIA_NIM_API_KEY !== undefined) cfg.nvidiaNim.key = process.env.NVIDIA_NIM_API_KEY;
+  if (process.env.NVIDIA_NIM_BASE_URL !== undefined) cfg.nvidiaNim.baseUrl = process.env.NVIDIA_NIM_BASE_URL;
   cfg.mistral = { ...cfg.mistral };
   if (process.env.MISTRAL_API_KEY !== undefined) cfg.mistral.key = process.env.MISTRAL_API_KEY;
   cfg.cerebras = { ...cfg.cerebras };
@@ -856,6 +863,7 @@ export function cacheUntilConfigChanges<T>(derive: (config: AppConfig) => T): ()
 /** Keeps process.env in step with a saved credential ("" drops the var), because loadConfig() prefers env. */
 export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "newBots">>): void {
   const secrets: Array<[value: string | undefined, name: string]> = [
+    [patch.nvidiaNim?.key, "NVIDIA_NIM_API_KEY"],
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.mistral?.key, "MISTRAL_API_KEY"],
     [patch.cerebras?.key, "CEREBRAS_API_KEY"], [patch.treg?.key, "OMB_TREG_KEY"],
@@ -883,6 +891,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     else delete process.env[name];
   }
   const settings: Array<[value: string | undefined, name: string]> = [
+    [patch.nvidiaNim?.baseUrl, "NVIDIA_NIM_BASE_URL"],
     [patch.openaiCompat?.url, "OPENAI_COMPAT_URL"],
     [patch.anthropic?.url, "OMB_ANTHROPIC_API_URL"],
     [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
@@ -971,7 +980,7 @@ export function saveConfig(
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "groq", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
+  for (const key of ["nvidiaNim", "xai", "anthropic", "mistral", "cerebras", "treg", "groq", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1168,6 +1177,8 @@ export function instanceOwnsRouting(
       return own(entry.environment?.GROQ_API_KEY) || ownUrl("https://api.groq.com/openai/v1", cfg.groq?.url);
     case "meta":
       return own(entry.environment?.META_API_KEY) || ownUrl("https://api.meta.ai/v1", cfg.meta?.url);
+     case "nvidia-nim":
+      return own(entry.environment?.NVIDIA_NIM_API_KEY) || ownUrl("https://integrate.api.nvidia.com/v1", cfg.nvidiaNim?.baseUrl);
     case "deepseekAgent":
       // A second DeepSeek Harness account brings its own key; the workspace key fills only an instance without one.
       return own(entry.environment?.DEEPSEEK_API_KEY);
@@ -1186,6 +1197,7 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   if (driver === "cerebras" && cfg.cerebras?.key) environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
+  if (driver === "nvidia-nim" && cfg.nvidiaNim?.key) environment.set("NVIDIA_NIM_API_KEY", cfg.nvidiaNim.key);
   if (driver === "deepseekAgent" && cfg.deepseek?.key) environment.set("DEEPSEEK_API_KEY", cfg.deepseek.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
   if (driver === "claudeAgent") for (const [name, value] of Object.entries(anthropicKeyEnv(cfg.anthropic, instanceId === CLAUDE_API_INSTANCE))) environment.set(name, value);
@@ -1244,6 +1256,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cerebras: { driver: "cerebras" },
     groq: { driver: "groq" },
     meta: { driver: "meta" },
+    nvidiaNim: { driver: "nvidia-nim" },
     deepseek: { driver: "deepseekAgent" },
     museCode: { driver: "museCode" },
     ...API_KEY_FLEET,
@@ -1266,6 +1279,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cerebras: { driver: "cerebras" },
     groq: { driver: "groq" },
     meta: { driver: "meta" },
+    nvidiaNim: { driver: "nvidia-nim" },
     deepseek: { driver: "deepseekAgent" },
     museCode: { driver: "museCode" },
     ...API_KEY_FLEET,

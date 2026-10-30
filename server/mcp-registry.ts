@@ -457,9 +457,22 @@ export function parseMcpServersImport(
     const record = entry as Record<string, unknown>;
     if (Object.hasOwn(servers, name)) return { ok: false, error: `"${rawName}" appears twice.` };
     // `enabled` from the paste is dropped so nothing runs before it was tested.
-    const result = parseMcpServerMutation(name, looksRemote(record)
-      ? pickEntry(record, ["type", "url", "headers", "resultBudget"])
-      : pickEntry(record, ["command", "args", "env", "resultBudget"]));
+    const importedEntry = looksRemote(record)
+      ? pickEntry(record, ["type", "url", "headers", "oauth", "resultBudget"])
+      : pickEntry(record, ["command", "args", "env", "resultBudget"]);
+    if (looksRemote(record) && !Object.hasOwn(importedEntry, "oauth") && Object.hasOwn(record, "auth")) {
+      const auth = record.auth && typeof record.auth === "object" && !Array.isArray(record.auth)
+        ? record.auth as Record<string, unknown>
+        : {};
+      importedEntry.oauth = {
+        clientId: auth.CLIENT_ID ?? auth.clientId,
+        ...(auth.CLIENT_SECRET !== undefined || auth.clientSecret !== undefined
+          ? { clientSecret: auth.CLIENT_SECRET ?? auth.clientSecret }
+          : {}),
+        ...(auth.scopes !== undefined ? { scopes: auth.scopes } : {}),
+      };
+    }
+    const result = parseMcpServerMutation(name, importedEntry);
     if (!result.ok) return { ok: false, error: `"${rawName}": ${result.error}` };
     servers[name] = result.server;
   }

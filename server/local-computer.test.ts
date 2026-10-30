@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -18,6 +18,7 @@ import {
   DRIVER_FILE_IDENTITY_KEYS,
   REQUIRED_LINUX_TOOLS,
   decodeLinuxDescriptor,
+  descriptorUid,
   gatedLocalComputer,
   readCuaConnection,
   readCuaUnavailableReason,
@@ -87,8 +88,23 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
   };
 }
 
-describe("local computer descriptor contract", () => {
-  it("wraps only the transport while preserving descriptor identity and original driver environment", () => {
+describe("descriptor ownership identity", () => {
+  it("falls back to the home directory's uid when process.getuid is missing (embedded android build)", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "getuid");
+    try {
+      Object.defineProperty(process, "getuid", { value: undefined, configurable: true });
+      expect(descriptorUid()).toBe(statSync(homedir()).uid);
+    } finally {
+      if (original) Object.defineProperty(process, "getuid", original);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("uses process.getuid when the runtime provides it", () => {
+    expect(descriptorUid()).toBe(process.getuid?.());
+  });
+});
+
+describe("local computer descriptor contract", () => {  it("wraps only the transport while preserving descriptor identity and original driver environment", () => {
     const connection = {
       command: "/trusted/cua-driver", args: ["mcp", "--socket", "/trusted/driver.sock"],
       env: { CUA_DRIVER_EMBEDDED: "1", DISPLAY: ":4" },
@@ -103,6 +119,19 @@ describe("local computer descriptor contract", () => {
   it("owns the helper's Node mode even when the daemon environment disagrees", () => {
     const gated = gatedLocalComputer({ command: "/trusted/cua-driver", args: ["mcp"], env: { ELECTRON_RUN_AS_NODE: "0" }, platform: "darwin", scope: "local-computer" }, { url: "http://127.0.0.1:1234/control", token: "fixture-token" });
     expect(gated.env.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+  it("drops the descriptor's mcp contract tag for the android runtime, keeping it for the CUA binary", () => {
+    const gate = { url: "http://127.0.0.1:1234/control", token: "fixture-token" };
+    const android = gatedLocalComputer(
+      { command: "/fixture/libnodeexec.so", args: ["mcp", "/fixture/android-local-computer.mjs"], env: {}, platform: "android", scope: "local-computer" },
+      gate,
+    );
+    expect(JSON.parse(android.env.OMB_CUA_ARGS)).toEqual(["/fixture/android-local-computer.mjs"]);
+    const desktop = gatedLocalComputer(
+      { command: "/trusted/cua-driver", args: ["mcp"], env: {}, platform: "darwin", scope: "local-computer" },
+      gate,
+    );
+    expect(JSON.parse(desktop.env.OMB_CUA_ARGS)).toEqual(["mcp"]);
   });
   it("stays synchronized with the Electron producer", () => {
     expect(DRIVER_FILE_IDENTITY_KEYS).toEqual([...ELECTRON_DRIVER_FILE_IDENTITY_KEYS]);
@@ -154,6 +183,36 @@ describe("local computer descriptor", () => {
       expect(readCuaConnection({ platform: "darwin", userData })).toBeNull();
       expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
     }
+  });
+
+  it.skipIf(process.platform === "win32")("mounts the android phone lane's embedded descriptor and rejects weakened ones", () => {
+    const userData = privateUserData("android-lane");
+    const file = join(userData, "cua-connection.json");
+    const connection = {
+      mode: "embedded",
+      socketPath: "/fixture/local-computer.sock",
+      mcpCommand: "/fixture/libnodeexec.so",
+      mcpArgs: ["mcp", "/fixture/android-local-computer.mjs"],
+      mcpEnv: { OMB_ANDROID_ROOTFS: "/fixture/rootfs" },
+      status: "ready",
+    };
+    writeFileSync(file, JSON.stringify(connection), { mode: 0o600 });
+    chmodSync(file, 0o600);
+    expect(readCuaConnection({ platform: "android", userData })).toEqual({
+      command: "/fixture/libnodeexec.so",
+      args: ["mcp", "/fixture/android-local-computer.mjs"],
+      env: { OMB_ANDROID_ROOTFS: "/fixture/rootfs" },
+      platform: "android",
+      scope: "local-computer",
+    });
+
+    writeFileSync(file, JSON.stringify({ ...connection, mcpArgs: ["run", "/fixture/mcp.mjs"] }), { mode: 0o600 });
+    chmodSync(file, 0o600);
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+
+    writeFileSync(file, JSON.stringify(connection), { mode: 0o600 });
+    chmodSync(file, 0o640);
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
   });
 
   it.skipIf(process.platform === "win32")("never substitutes a stale legacy descriptor for the packaged app's exact status", () => {

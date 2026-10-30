@@ -5,12 +5,14 @@ import { compile, type Config, type TopLevelSpec } from "vega-lite";
 
 import { vegaConfig, vegaSurface, type VegaTheme } from "../../shared/vega-config.ts";
 import { columnClass } from "./chart-compiler.ts";
-import { nativeRequire } from "./engine.ts";
-import type { ChartRenderer, DataColumn, RunResult } from "./types.ts";
+import { mobileRefusal, nativeRequire } from "./engine.ts";
+import { DataFailure, type ChartRenderer, type DataColumn, type RunResult } from "./types.ts";
 
 /** Required at first use from the staged tree: a static import would make esbuild bundle its .node file, which it cannot. */
 let resvgModule: { Resvg: typeof ResvgClass } | null = null;
 function loadResvg(): typeof ResvgClass {
+  const refusal = mobileRefusal();
+  if (refusal) throw new DataFailure({ code: "engine_unavailable", message: refusal });
   resvgModule ??= nativeRequire()("@resvg/resvg-js") as { Resvg: typeof ResvgClass };
   return resvgModule.Resvg;
 }

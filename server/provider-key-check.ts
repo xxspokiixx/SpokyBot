@@ -1,12 +1,12 @@
 // OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access. Keys go only over TLS (or loopback).
-export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta";
+export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "nvidiaNim";
 
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
   | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
 
-export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "meta"];
+export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "meta", "nvidiaNim"];
 
 const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   anthropic: "https://api.anthropic.com",
@@ -18,6 +18,7 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   cerebras: "https://api.cerebras.ai/v1",
   groq: "https://api.groq.com/openai/v1",
   meta: "https://api.meta.ai/v1",
+  nvidiaNim: "https://integrate.api.nvidia.com/v1",
 };
 
 const MAX_MODELS = 5;

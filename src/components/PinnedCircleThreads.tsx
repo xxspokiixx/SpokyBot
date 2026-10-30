@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
 import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
+import { useLongPressMenu } from "@/lib/use-long-press-menu";
 import { BotProjectDialog } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
@@ -117,12 +118,14 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const unread = bot.unread || activityTasks.some((task) => task.unread);
   const radius = avatarCropRadius(botAvatarProfile(bot).avatarCrop);
+  const longPress = useLongPressMenu(({ x, y }) => onMenu({ botId: bot.id, x, y }));
   return (
     <div className="flex w-full min-w-0 flex-col items-center">
       <button
         type="button"
         data-sidebar-bot-row={bot.id}
         data-sidebar-pinned-circle={bot.id}
+        {...longPress}
         draggable={Boolean(drag)}
         aria-current={selected ? "page" : undefined}
         aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}

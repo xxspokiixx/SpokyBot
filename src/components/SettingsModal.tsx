@@ -63,6 +63,7 @@ import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalP
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
+import { appVersion } from "@/lib/app-links";
 import { Select } from "./Select";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
@@ -500,6 +501,7 @@ function ToolCallsRow() {
 function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
   const skillAuthoring = skillAuthoringEnabled(state.config);
+  const skillsLibrary = skillsLibraryEnabled(state.config);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -511,6 +513,23 @@ function ExperimentalFeaturesRow() {
       const config: ConfigStatus = await api("/api/config", {
         method: "PATCH",
         body: JSON.stringify({ features: { skillAuthoring: next } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.experimental.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleSkillsLibrary = async (next: boolean) => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ features: { skillsLibrary: next } }),
       });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
@@ -534,6 +553,21 @@ function ExperimentalFeaturesRow() {
           aria-label={t("settings.experimental.skillAuthoringAria")}
           disabled={saving}
           onClick={() => void toggle(!skillAuthoring)}
+          className="disabled:cursor-wait disabled:opacity-50"
+        />
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillsLibrary")}</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            {t("settings.experimental.skillsLibraryDetail")}
+          </div>
+        </div>
+        <Switch
+          checked={skillsLibrary}
+          aria-label={t("settings.experimental.skillsLibraryAria")}
+          disabled={saving}
+          onClick={() => void toggleSkillsLibrary(!skillsLibrary)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
       </div>
@@ -667,6 +701,11 @@ export function SettingsModal() {
         return (
           <>
             <AdvancedModeRow />
+            <SettingRow title={t("settings.general.buildVersion")}>
+              <code className="block break-all font-mono text-[12px] text-ink-secondary">
+                {(window as Window & { ombAndroidCaps?: { buildVersion(): string } }).ombAndroidCaps?.buildVersion?.() ?? appVersion()}
+              </code>
+            </SettingRow>
             <DefaultBotSidebarRow />
 
             <ProSettingsCard />
@@ -744,6 +783,7 @@ export function SettingsModal() {
               <ApiKeyRow section="cerebras" testProvider="cerebras" />
               <ApiKeyRow section="groq" testProvider="groq" />
               <ApiKeyRow section="meta" testProvider="meta" />
+               <ApiKeyRow section="nvidiaNim" testProvider="nvidiaNim" />
               <ApiKeyRow section="deepseek" />
               <OtherOpenAiCompatServers />
               <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
@@ -810,7 +850,7 @@ export function SettingsModal() {
 
   return (
     <div
-      className="glass-popup-frame"
+      className="glass-popup-frame touch:p-0!"
       style={glassPopupFrameStyle()}
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
@@ -822,7 +862,7 @@ export function SettingsModal() {
         aria-modal="true"
         aria-labelledby="app-settings-title"
         tabIndex={-1}
-        className="glass-surface glass-popup animate-pop-in relative flex overflow-hidden rounded-[24px] outline-none"
+        className="glass-surface glass-popup animate-pop-in relative flex overflow-hidden rounded-[24px] outline-none touch:h-dvh! touch:rounded-none"
       >
         <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
         <nav className="glass-rail hidden min-h-0 w-[200px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/30 p-3 sm:flex">
@@ -951,7 +991,7 @@ export function SettingsModal() {
             </button>
           </div>
 
-          <div ref={scrollRef} className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-5 sm:pb-5">
+          <div ref={scrollRef} className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5 sm:pb-5">
             <LicenseExpiryBanner config={state.config} />
             {advanced ? (
               renderSection(section)

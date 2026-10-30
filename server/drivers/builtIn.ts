@@ -22,8 +22,10 @@ import { GroqDriver } from "./groq.ts";
 import { MetaDriver } from "./meta.ts";
 import { MuseCodeDriver } from "./muse-code.ts";
 import { MinimaxDriver } from "./minimax.ts";
+import { NvidiaNimDriver } from "./nvidia-nim.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
+  NvidiaNimDriver,
   GrokDriver,
   GrokAgentDriver,
   GeminiAgentDriver,

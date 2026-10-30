@@ -211,7 +211,7 @@ export const TRIGGER_PROMPT =
 export const AUTOMATION_REPLY_PROMPT =
   " Only your final reply leaves this run: it is posted in your chat with the person under this automation's name, and your steps stay here. Write it for them, in plain words. If nothing needs their attention this time, reply with just NOTHING NEW and nothing is posted. If you need something only they can give, such as a decision or a missing detail, end with a line that starts with NEEDS INPUT: and the question; they answer in that chat. Ask in words, not with show_widget: they do not see this conversation.";
 export const ROUTINE_EXECUTION_PROMPT =
-  " Execute this routine now: use coordinate_bots for required handoffs rather than merely announcing that you will wait; after an accepted hand-off, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible.";
+  " Execute this routine now: use coordinate_bots for required handoffs rather than merely announcing that you will wait; after an accepted hand-off, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible. If a browser tool reports the browser is closed or unreachable, restart or open the browser first, then retry the task.";
 export const LEARN_PROMPT =
   " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance." + APPLIED_RESULT_PROMPT;
 export const WEBHOOK_PROMPT =

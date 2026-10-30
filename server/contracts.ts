@@ -150,7 +150,7 @@ export interface SendTurnInput {
       command: string;
       args: string[];
       env: Record<string, string>;
-      platform?: "darwin" | "linux" | "win32";
+      platform?: "darwin" | "linux" | "win32" | "android";
       generation?: string;
       scope?: "local-computer";
     };

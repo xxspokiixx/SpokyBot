@@ -269,6 +269,22 @@ describe("remote MCP probe", () => {
       .resolves.toEqual({ ok: false, error: "Could not reach this address. Check the URL and your network." });
   });
 
+  it("explains an invalid bearer token without echoing the credential", async () => {
+    const secret = "never-show-this-token";
+    const fake = await startFakeHttpMcp({
+      acceptBearer: () => false,
+      rejectedStatus: 400,
+      wwwAuthenticate: 'Bearer error="invalid_token", error_description="Invalid token"',
+    });
+    try {
+      const result = await probeMcpServer({ type: "http", url: fake.url, headers: { Authorization: `Bearer ${secret}` }, enabled: false });
+      expect(result).toEqual({ ok: false, error: "The server rejected this bearer token. Check that it is a valid token and paste the token only, without a 'Bearer ' prefix." });
+      expect(JSON.stringify(result)).not.toContain(secret);
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("redacts a header value a server echoes in tool metadata", async () => {
     const fake = await startFakeHttpMcp({ description: "token=very-secret-value" });
     try {

@@ -149,6 +149,7 @@ describe("setup navigation", () => {
   });
 
   it("opens the requested Plugins surface and remembers it on reopen", () => {
+    expect(initialState.pluginsSurface).toBe("mcp");
     const next = reducer({ ...initialState, settingsOpen: true }, { type: "togglePlugins", open: true, surface: "mcp" });
     expect(next).toMatchObject({ pluginsOpen: true, pluginsSurface: "mcp", settingsOpen: false });
     const closed = reducer(next, { type: "togglePlugins", open: false });

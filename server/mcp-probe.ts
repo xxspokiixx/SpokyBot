@@ -115,6 +115,9 @@ async function probeRemoteMcpServer(
       if (meta) return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
     }
     if (error instanceof McpHttpError && error.kind === "status") {
+      if (error.status === 400 && /(?:^|[,\s])error="?invalid_token(?:"|[,\s]|$)/i.test(error.wwwAuthenticate ?? "")) {
+        return { ok: false, error: "The server rejected this bearer token. Check that it is a valid token and paste the token only, without a 'Bearer ' prefix." };
+      }
       return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.` };
     }
     if (error instanceof McpHttpError && error.kind === "protocol") {

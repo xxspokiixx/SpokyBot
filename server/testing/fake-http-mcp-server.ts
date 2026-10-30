@@ -15,6 +15,8 @@ export interface FakeHttpMcpOptions {
   requireHeader?: { name: string; value: string };
   /** accept a request only when this approves its Authorization header */
   acceptBearer?: (authorization: string | undefined) => boolean;
+  /** status used when requireHeader or acceptBearer rejects a request (default: 401) */
+  rejectedStatus?: number;
   /** WWW-Authenticate value sent with a 401 */
   wwwAuthenticate?: string;
   /** never answer tools/list (initialize still works) */
@@ -212,7 +214,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
       seenHeaders.push({ ...req.headers });
       if ((options.requireHeader && req.headers[options.requireHeader.name.toLowerCase()] !== options.requireHeader.value)
         || (options.acceptBearer && !options.acceptBearer(req.headers.authorization))) {
-        res.writeHead(401, {
+        res.writeHead(options.rejectedStatus ?? 401, {
           "content-type": "application/json",
           ...(options.wwwAuthenticate ? { "www-authenticate": options.wwwAuthenticate } : {}),
         }).end(JSON.stringify({ error: "unauthorized" }));

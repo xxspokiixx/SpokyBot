@@ -242,9 +242,20 @@ describe("Chat MCP session", () => {
   it("mounts only supported descriptors and preserves conversations with no tools", async () => {
     const controller = new AbortController();
     controllers.push(controller);
-    const session = await mountChatTools({ phone: { command: "must-not-launch", args: [], env: {} } }, controller.signal);
+    // hooks is a real integration field chat drivers never mount as a server.
+    const session = await mountChatTools({ hooks: { url: "http://127.0.0.1:1/hook", token: "t" } }, controller.signal);
     sessions.push(session);
     expect(session.definitions).toEqual([]);
+    await session.close();
+  });
+
+  it("mounts the phone integration's tools without computer-use", async () => {
+    const f = fixture("");
+    const controller = new AbortController();
+    controllers.push(controller);
+    const session = await mountChatTools({ phone: f.server }, controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toContain("phone_write");
     await session.close();
   });
 

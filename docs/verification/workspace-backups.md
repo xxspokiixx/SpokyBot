@@ -11,6 +11,10 @@ A hosted server must restart before its browser's **Retry** can finish recovery.
 No restore writes into a running Store. The native-button workflow is exercised
 by the [company-backup fixture](company-backups.md).
 
+Backups from a newer app version can be previewed and restored when their
+archive format is supported. Preview warns that settings unknown to the current
+app may not be recognized; review that warning before confirming replacement.
+
 The previous workspace is retained under `.backups/safety-<restore-id>/data`.
 Keep this copy until the restored workspace is checked. Do not publish it.
 The downloaded archive is encrypted; private staging and safety directories

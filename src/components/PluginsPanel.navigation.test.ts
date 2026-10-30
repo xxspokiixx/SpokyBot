@@ -111,19 +111,21 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Apps pop-up", () => {
-  it("connects Whop inside the apps grid without a Composio key or MCP detour", () => {
+  it("keeps the native Whop MCP connector on the primary MCP tab", () => {
     fixture.overrides.set(CONFIGURED, false);
+    fixture.surface = "mcp";
     const { html, nodes: tree } = render();
     expect(html).toContain("Connect Whop");
     expect(html).not.toContain("Set up Whop");
-    const grid = tree.find((node) => node.props["data-apps-grid"] !== undefined)!;
-    expect(nodes(grid).some((node) => node.props.whopCard === true)).toBe(true);
+    expect(html).toContain("MCP inventory");
+    expect(tree.some((node) => node.props.whopCard === true)).toBe(true);
+    expect(html).not.toContain("data-app-tile");
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
-  it("counts Whop among connected apps", () => {
+  it("keeps the MCP-native Whop connection out of the Composio app count", () => {
     fixture.overrides.set(18, true);
     const { html } = render();
-    expect(html).toContain("2 connected");
+    expect(html).toContain("1 connected");
   });
   it("shows the native HighLevel card in the grid and counts it once connected", () => {
     const { html, nodes: tree } = render();
@@ -429,21 +431,23 @@ describe("Apps pop-up", () => {
     expect(active).toBe(opener);
   });
 
-  it("is titled Apps and shows app tiles and the MCP servers section on one view", () => {
+  it("keeps the connected-app catalog separate from the MCP tab", () => {
     const { html } = render();
     expect(html).toContain(">Apps</h2>");
     expect(html).toContain("Connect an app or your own MCP server once. Then choose which bots may use it.");
+    expect(html).toContain("MCP servers and plugins are primary. Composio and built-in connected apps are optional.");
     expect(html).toContain("glass-surface");
     expect(html).toContain("@container");
     expect(html).toContain("grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2");
     for (const slug of ["gmail", "slack", "notion"]) expect(html).toContain(`data-app-tile="${slug}"`);
     expect(html.indexOf('data-app-tile="slack"')).toBeLessThan(html.indexOf('data-app-tile="gmail"'));
-    expect(html).toContain("MCP inventory");
-    expect(html).toContain('data-embedded="true"');
-    expect(html).not.toContain('role="tab"');
+    expect(html).not.toContain("MCP inventory");
+    expect(html).toContain('role="tab"');
+    expect(html).toContain("MCP servers &amp; plugins");
+    expect(html).toContain("Composio &amp; built-in apps");
   });
 
-  it("filters with chips, keeping the MCP chip on the store's surface", () => {
+  it("switches between the primary MCP view and connected apps", () => {
     const initial = render();
     expect(chip(initial.nodes, "all").props["aria-pressed"]).toBe(true);
     chip(initial.nodes, "mcp").props.onClick!();
@@ -451,10 +455,10 @@ describe("Apps pop-up", () => {
 
     fixture.surface = "mcp";
     const mcp = render();
-    expect(chip(mcp.nodes, "mcp").props["aria-pressed"]).toBe(true);
+    expect(chip(mcp.nodes, "mcp").props["aria-selected"]).toBe(true);
     expect(mcp.html).toContain("MCP inventory");
     expect(mcp.html).not.toContain("data-app-tile");
-    chip(mcp.nodes, "connected").props.onClick!();
+    mcp.nodes.find((node) => node.props["data-apps-surface"] === "apps")!.props.onClick!();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
   });
 
@@ -463,6 +467,7 @@ describe("Apps pop-up", () => {
     expect(render().html).not.toContain("MCP inventory");
     chip(render().nodes, "mcp").props.onClick!();
     expect(fixture.overrides.get(20)).toBeNull();
+    fixture.surface = "mcp";
     expect(render().html).toContain("MCP inventory");
   });
 
@@ -505,9 +510,8 @@ describe("Apps pop-up", () => {
     expect(fixture.overrides.get(20)).toBe("Productivity");
   });
 
-  it("pairs the search with an MCP servers pill and puts the connected count, with app icons, in the header", () => {
+  it("keeps the connected count and app icons in the optional connected-app tab", () => {
     const { html, nodes: tree } = render();
-    expect(chip(tree, "mcp").props["aria-pressed"]).toBe(false);
     const indicator = chip(tree, "connected");
     expect(indicator.props["aria-pressed"]).toBe(false);
     expect(html).toContain("1 connected");
@@ -515,7 +519,7 @@ describe("Apps pop-up", () => {
     expect(fixture.overrides.get(16)).toBe("connected");
   });
 
-  it("caps the unsearched catalog so the MCP servers stay a short scroll away", () => {
+  it("caps the unsearched connected-app catalog", () => {
     fixture.overrides.set(CARDS, Array.from({ length: APPS_PREVIEW_COUNT + 5 }, (_, index) => card(`app${index}`)));
     const { html } = render();
     expect(html.match(/data-app-tile=/g)).toHaveLength(APPS_PREVIEW_COUNT);

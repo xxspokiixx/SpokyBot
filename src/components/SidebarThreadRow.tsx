@@ -5,6 +5,7 @@ import type { Action, AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
+import { useLongPressMenu } from "@/lib/use-long-press-menu";
 import { nextRename } from "@/lib/rename";
 import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl } from "@/lib/thread-refs";
@@ -265,6 +266,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const tickable = isTickable(task);
   const choose = (event: React.MouseEvent) => { if (!selectMode) onSelect(task); else if (tickable) onToggleSelect?.(task, event.shiftKey); };
   const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
+  const longPress = useLongPressMenu(({ x, y }) => {
+    if (selectMode) return;
+    openMenu(x, y);
+  });
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
@@ -318,7 +323,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
-        type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
+        type="button" data-sidebar-thread-row={task.threadId} {...longPress} aria-current={current ? "page" : undefined}
         title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
         {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
         onClick={choose} onDoubleClick={selectMode ? undefined : startRename} onContextMenu={contextMenu}

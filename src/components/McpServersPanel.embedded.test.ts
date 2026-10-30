@@ -48,6 +48,25 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Your MCP servers inside the Apps pop-up", () => {
+  it("shows a curated provider list before the configured server list", () => {
+    const html = render(true);
+    expect(html.indexOf("Available MCP integrations")).toBeLessThan(html.indexOf("Your MCP servers"));
+    expect(html).toContain('data-mcp-catalog-entry="slack"');
+    expect(html).toContain('data-mcp-catalog-entry="github"');
+    expect(html).toContain('data-mcp-catalog-entry="m365-mail"');
+    expect(html).toContain('data-mcp-catalog-entry="m365-calendar"');
+    expect(html).toContain('data-mcp-catalog-entry="m365-copilot-chat"');
+    expect(html).toContain("Slack OAuth client ID");
+    expect(html).toContain("Microsoft Entra tenant ID");
+    expect(html).toContain(">Add credentials</button>");
+    const github = html.slice(html.indexOf('data-mcp-catalog-entry="github"'), html.indexOf("</article>", html.indexOf('data-mcp-catalog-entry="github"')));
+    expect(github).toContain("GitHub personal access token");
+    expect(github).toContain(">Add credentials</button>");
+    expect(github).not.toContain("disabled=\"\"");
+    expect(html).not.toContain(">Configure</button>");
+    expect(html).toContain("Replace {tenant_id}");
+  });
+
   it("lists each server with Test, Edit and an on/off switch, plus Paste config and Add MCP server", () => {
     const html = render(true);
     expect(html).toContain("Your MCP servers");
@@ -66,9 +85,9 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     fixture.servers = [{ name: "notes", type: "http", url: "http://127.0.0.1:9/mcp", headerKeys: [], enabled: true, oauth, runsOn: { environmentId: "env-1", label: "Milind's MacBook" } }];
     const html = render(true).replaceAll("&#x27;", "'");
     expect(html).toContain("Runs on Milind's MacBook, so it isn't started here.");
-    expect(html).not.toContain("Sign in");
+    expect(html).not.toContain("> Sign in</button>");
     fixture.servers = [{ name: "docs", type: "http", url: "https://mcp.example.com/mcp", headerKeys: [], enabled: true, oauth }];
-    expect(render(true)).toContain("Sign in");
+    expect(render(true)).toContain("> Sign in</button>");
   });
 
   it("keeps its own scroll and wording when shown on its own", () => {

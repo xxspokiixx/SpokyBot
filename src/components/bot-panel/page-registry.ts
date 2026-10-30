@@ -77,6 +77,7 @@ const SECTION_TARGET: Record<BotSettingsSection, PanelTarget> = {
   routines: { tab: "bot", page: "routines" },
   access: { tab: "computer" },
   model: { tab: "bot", anchor: "model" },
+  nvidiaNim: { tab: "bot", anchor: "nvidiaNim" },
   permissions: { tab: "bot", anchor: "approval" },
   voice: { tab: "bot" },
   visibility: { tab: "bot" },

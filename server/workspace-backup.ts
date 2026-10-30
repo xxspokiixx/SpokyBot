@@ -15,7 +15,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
 import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
-import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
+import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind, BackupSelection } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
 export const MAX_WORKSPACE_BACKUP_BYTES = 10 * 1024 ** 3;
@@ -54,6 +54,7 @@ type Entry = { path: string; type: "file" | "directory"; size: number; mode: num
 interface Manifest extends WorkspaceBackupPrivateMetadata {
   sourceDataDir: string;
   entries: Entry[];
+  selection: BackupSelection;
 }
 interface RestoreJournal {
   id: string;
@@ -64,6 +65,7 @@ interface RestoreJournal {
 export interface CreateWorkspaceBackupOptions {
   password: string;
   clientState?: WorkspaceBackupClientState;
+  selection?: BackupSelection;
   appVersion?: string;
 }
 type CreatedWorkspaceBackup = { id: string; path: string; summary: WorkspaceBackupSummary };
@@ -177,8 +179,8 @@ function assertLocalAuthOutsideSnapshot(dataDir: string): void {
   }
 }
 function passwordKey(password: string, salt: Buffer): Promise<Buffer> {
-  if (typeof password !== "string" || password.length < 12 || Buffer.byteLength(password) > 1024) {
-    throw new Error("Use a backup password of at least 12 characters (at most 1024 bytes).");
+  if (typeof password !== "string" || password.length === 0 || Buffer.byteLength(password) > 1024) {
+    throw new Error("Use a non-empty backup password of at most 1024 bytes.");
   }
   return new Promise((resolveKey, reject) => {
     scrypt(password, salt, 32, { N: 131_072, r: 8, p: 1, maxmem: 256 * 1024 ** 2 }, (error, key) => {
@@ -293,6 +295,7 @@ export async function createWorkspaceBackup(dataDir: string, options: CreateWork
 export async function createWorkspaceBackupSnapshot(dataDir: string, options: CreateWorkspaceBackupOptions, jobId?: string): Promise<CreatedWorkspaceBackup> {
   if (Object.hasOwn(options, "credentials")) throw new Error("Workspace backups do not transfer credentials.");
   assertLocalAuthOutsideSnapshot(dataDir);
+  const selection = options.selection ?? { history: true, skills: true, automations: true, savedLogins: true, apiKeys: true };
   const salt = randomBytes(16);
   const key = await passwordKey(options.password, salt);
   const job = newJob(dataDir, jobId);
@@ -305,6 +308,15 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   let skippedLinks = 0;
   let skippedDependencies = 0;
   let skippedWorkLinks = 0;
+
+  function shouldInclude(path: string): boolean {
+    if (path.startsWith("messages") || path.startsWith("bots.json") || path.startsWith("groups.json")) return selection.history;
+    if (path.startsWith("skills") || path.startsWith("claude-user-skills")) return selection.skills;
+    if (path.startsWith("routines.json") || path.startsWith("calendar-calls.json") || path.startsWith("app-triggers.json") || path.startsWith("delegations.json") || path.startsWith("browser-cleanups.json")) return selection.automations;
+    if (path === "config.json" || path === "webhooks.json" || path.startsWith("providers") || path.startsWith("mcp-servers")) return selection.savedLogins || selection.apiKeys;
+    return true; // Include unknown paths by default
+  }
+
   try {
     const root = realpathSync(dataDir);
     for (const [name, snapshotName] of Object.entries(SNAPSHOT_DATABASES)) {
@@ -325,6 +337,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
         if (!prefix && excluded(name)) continue;
         const path = prefix ? `${prefix}/${name}` : name;
         if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path)) continue;
+        if (!shouldInclude(path)) continue;
         // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
         if (!validRelative(path)) throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
@@ -394,7 +407,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
       exclusions: EXCLUSION_NOTES, warnings,
     };
     const manifest: Manifest = {
-      summary, sourceDataDir: resolve(dataDir), clientState: options.clientState ?? {}, entries,
+      summary, sourceDataDir: resolve(dataDir), clientState: options.clientState ?? {}, entries, selection,
     };
     writeJson(join(snapshot, "manifest.json"), manifest);
     validateManifest(privateJson(join(snapshot, "manifest.json")));
@@ -423,12 +436,17 @@ function validateManifest(value: unknown): Manifest {
     value.sourceDataDir.length > 4096 || value.sourceDataDir.includes("\0") ||
     value.sourceDataDir === posix.parse(value.sourceDataDir).root || value.sourceDataDir === win32.parse(value.sourceDataDir).root ||
     value.sourceDataDir.replaceAll("\\", "/").split("/").some((part) => part === "." || part === "..") ||
-    Object.keys(value).some((key) => !["summary", "sourceDataDir", "clientState", "entries"].includes(key)) ||
+    Object.keys(value).some((key) => !["summary", "sourceDataDir", "clientState", "entries", "selection"].includes(key)) ||
     Object.keys(value.summary).some((key) => !["format", "version", "id", "createdAt", "appVersion", "files", "directories", "bytes", "bots", "groups", "threads", "messages", "exclusions", "warnings"].includes(key)) || !record(value.clientState) ||
     !Object.values(value.clientState).every((item) => typeof item === "string") || !Array.isArray(value.entries) ||
     value.entries.length > MAX_WORKSPACE_BACKUP_FILES) throw new Error("Invalid or unsupported workspace backup metadata.");
   if (Object.keys(value.clientState).some((key) => !WORKSPACE_BACKUP_CLIENT_KEYS.includes(key as typeof WORKSPACE_BACKUP_CLIENT_KEYS[number])) ||
     Buffer.byteLength(JSON.stringify(value.clientState)) > 2 * 1024 ** 2) throw new Error("Invalid or oversized workspace client preferences.");
+  const selection = value.selection;
+  if (!record(selection) || typeof selection.history !== "boolean" || typeof selection.skills !== "boolean" ||
+    typeof selection.automations !== "boolean" || typeof selection.savedLogins !== "boolean" || typeof selection.apiKeys !== "boolean") {
+    throw new Error("Invalid backup selection in manifest.");
+  }
   for (const key of ["files", "directories", "bytes", "bots", "groups", "threads", "messages"] as const) {
     if (!Number.isSafeInteger(value.summary[key]) || (value.summary[key] as number) < 0) throw new Error("Invalid workspace backup summary.");
   }
@@ -577,10 +595,14 @@ export async function stageWorkspaceBackup(dataDir: string, archivePath: string,
     const manifest = validateStaged(staged, expected);
     const versions = [manifest.summary.appVersion, options.currentAppVersion ?? ""].map((version) => /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)?.slice(1).map(Number));
     if (versions[0] && versions[1]) {
+      let newer = false;
       for (let i = 0; i < 3; i++) {
-        if (versions[0][i] > versions[1][i]) throw new Error("This backup was made by a newer OpenMausBot version. Update the app before restoring it.");
+        if (versions[0][i] > versions[1][i]) { newer = true; break; }
         if (versions[0][i] < versions[1][i]) break;
       }
+      if (newer) manifest.summary.warnings.push(
+        `This backup was created by OpenMausBot ${manifest.summary.appVersion}, newer than this app (${options.currentAppVersion}). Some newer settings may not be recognized.`,
+      );
     }
     rmSync(plaintext);
     writeJson(join(job.directory, "ready.json"), { id: job.id, summary: manifest.summary });

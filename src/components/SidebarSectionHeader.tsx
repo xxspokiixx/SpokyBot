@@ -3,6 +3,7 @@ import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import type { LongPressProps } from "@/lib/use-long-press-menu";
 import {
   sidebarAttentionLabel,
   type SidebarSectionAttention,
@@ -24,6 +25,7 @@ export function SidebarSectionHeader({
   line = false,
   onMenu,
   menuOpen = false,
+  bind,
 }: {
   name: string;
   collapsed: boolean;
@@ -40,6 +42,7 @@ export function SidebarSectionHeader({
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
   menuOpen?: boolean;
+  bind?: LongPressProps;
 }) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const attentionLabel = attention ? sidebarAttentionLabel(attention) : "";
@@ -68,6 +71,7 @@ export function SidebarSectionHeader({
         data-sidebar-section-line=""
         tabIndex={onContextMenu ? -1 : undefined}
         onContextMenu={onContextMenu}
+        {...bind}
         draggable={reorderable || undefined}
         onDragStart={reorderable ? onDragStart : undefined}
         onDragEnd={reorderable ? onDragEnd : undefined}
@@ -112,7 +116,7 @@ export function SidebarSectionHeader({
   }
 
   return (
-    <div className="flex items-center gap-1 px-2 pb-1" data-section={name} tabIndex={onContextMenu ? -1 : undefined} onContextMenu={onContextMenu}>
+    <div className="flex items-center gap-1 px-2 pb-1" data-section={name} tabIndex={onContextMenu ? -1 : undefined} onContextMenu={onContextMenu} {...bind}>
       {onToggle ? (
         <button
           type="button"
