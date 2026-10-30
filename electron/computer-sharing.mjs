@@ -145,16 +145,16 @@ export function saidNo(record) {
 
 /** What each Cloud of the person's own gets by itself: the internet connection, their Chrome, apps and screen once
  * computer control works here (`screen`), and the home folder with editing (`home`, null when it can't be lent), on top
- * of the folders lent to it already (`kept`, which Files may keep copies of) and the project folders the move adds. Never
- * the terminal. At most 20 folders, the home folder first. */
-export function automaticGrant({ kept = [], home = null, screen = false, projects = [] }) {
+ * of the folders lent to it already (`kept`, which Files may keep copies of) and the project folders the move adds. The
+ * terminal only when the person turned it on (`terminal`). At most 20 folders, the home folder first. */
+export function automaticGrant({ kept = [], home = null, screen = false, projects = [], terminal = false }) {
   const byPath = new Map();
   const keptHome = home ? kept.find(folder => folder.path === home.path) : null;
   for (const folder of [...(home ? [keptHome ? { ...keptHome, write: true, home: true } : home] : []), ...kept, ...projects]) {
     const known = byPath.get(folder.path);
     byPath.set(folder.path, known ? { ...known, write: known.write || folder.write === true } : folder);
   }
-  return { folders: [...byPath.values()].slice(0, 20), screen: screen === true, internet: true, chrome: true, terminal: false };
+  return { folders: [...byPath.values()].slice(0, 20), screen: screen === true, internet: true, chrome: true, terminal: terminal === true };
 }
 
 const lentAs = folder => `${folder.path}\n${folder.write === true}`;
@@ -162,7 +162,7 @@ const lentAs = folder => `${folder.path}\n${folder.write === true}`;
 export function lendsAsWanted(record, wanted) {
   if (record?.enabled !== true || !record.cloud || !Array.isArray(record.folders)) return false;
   const have = new Set(record.folders.map(lentAs));
-  return record.internet === true && record.chrome === true && (record.computer === true) === wanted.screen && record.terminal !== true
+  return record.internet === true && record.chrome === true && (record.computer === true) === wanted.screen && (record.terminal === true) === wanted.terminal
     && have.size === wanted.folders.length && wanted.folders.every(folder => have.has(lentAs(folder)));
 }
 
@@ -194,10 +194,13 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const presence = createLentScreenPresence({ idleSeconds, now });
   let records = {};
   let paused = false;
+  /** The Cloud account that confirmed lending the terminal; another account signed in here gets none until it confirms. */
+  let terminalAccount = null;
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
     if (parsed?.version === 1 && parsed.records && typeof parsed.records === "object") records = parsed.records;
     paused = parsed?.automatic ? parsed.automatic.paused === true : Object.values(records).some(saidNo);
+    if (typeof parsed?.automatic?.terminalAccount === "string") terminalAccount = parsed.automatic.terminalAccount;
   } catch {}
   const running = new Map();
   const grantVersions = new Map();
@@ -220,6 +223,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       clouds: (paused ? ownClouds() : lent).map(env => env.name),
       using: using.map(env => env.name),
       paused,
+      terminal: terminalAccount !== null && terminalAccount === signedInAccount(),
       busy: executing ?? (browsing ? { env: browsing, action: "internet" } : null),
     };
   };
@@ -271,7 +275,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const store = next => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temporary = `${file}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify({ version: 1, records: next, automatic: { paused } }), { mode: 0o600 });
+    fs.writeFileSync(temporary, JSON.stringify({ version: 1, records: next, automatic: { paused, ...(terminalAccount ? { terminalAccount } : {}) } }), { mode: 0o600 });
     fs.chmodSync(temporary, 0o600);
     fs.renameSync(temporary, file); records = next;
   };
@@ -545,6 +549,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     const current = cloud(env);
     return current?.status === "connected" && current.accountId && current.origin === env.origin ? current : null;
   };
+  const signedInAccount = () => ownClouds().map(verifiedCloud).find(Boolean)?.accountId ?? null;
   /** The Cloud account and its machine must be verified now. A terminal (unrestricted commands as this user) only when
    * `input.terminal === true`. */
   const saveCloud = async (env, input, version = changeGrant(env.id)) => {
@@ -586,7 +591,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       const kept = records[env.id], current = verifiedCloud(env);
       if (closed || paused || !current) continue;
       const keptFolders = kept?.cloud?.accountId === current.accountId && Array.isArray(kept.folders) ? await lendable(kept.folders) : [];
-      const wanted = automaticGrant({ kept: keptFolders, home: homeFolder, screen: screenLent, projects: env.id === myCloud()?.id ? projectFolders : [] });
+      const wanted = automaticGrant({ kept: keptFolders, home: homeFolder, screen: screenLent, projects: env.id === myCloud()?.id ? projectFolders : [], terminal: terminalAccount === current.accountId });
       if (closed || paused || records[env.id] !== kept) continue;
       if (!lendsAsWanted(kept, wanted)) lendNow(env, current, kept, wanted);
       else if (!running.has(env.id) && validRecord(kept) && cloudLendingVerdict(kept.cloud, cloud(env), env).allow) run(env, kept);
@@ -672,6 +677,19 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
         const grant = records[env.id];
         if (grant?.cloud && !automatic.has(env.id) && validRecord(grant) && !running.has(env.id) && cloudLendingVerdict(grant.cloud, cloud(env), env).allow) run(env, grant);
       }
+      changed();
+      return lendAutomatically();
+    },
+    /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
+    lendTerminal(on) {
+      const account = on === true ? signedInAccount() : null;
+      if (closed || terminalAccount === account) return;
+      if (on === true && !account) throw new Error("Sign in to your Cloud before lending it the terminal.");
+      const before = terminalAccount;
+      terminalAccount = account;
+      try { store(records); } catch (error) { terminalAccount = before; throw error; }
+      // A Cloud the pass can't verify now keeps its grant until it can, so its commands stop here.
+      if (!account) for (const [id, grant] of Object.entries(records)) if (grant?.cloud && grant.terminal === true) stop(id);
       changed();
       return lendAutomatically();
     },
