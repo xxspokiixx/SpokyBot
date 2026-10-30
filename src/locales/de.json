@@ -396,7 +396,7 @@
   "settings.skin.title": "Design",
   "settings.skin.subtitle": "Wirkt sofort und wird auf diesem Rechner gemerkt.",
   "settings.roomTurns.title": "Gruppen-Züge",
-  "settings.roomTurns.label": "Maximale Zuglänge",
+  "settings.roomTurns.label": "Ohne Fortschritt stoppen nach",
   "settings.roomTurns.minutes": "Minuten",
   "settings.roomTurns.error": "Das Gruppen-Zeitlimit konnte nicht gespeichert werden.",
   "settings.roomTurns.range": "Gib eine ganze Zahl von 1 bis 1.440 ein.",

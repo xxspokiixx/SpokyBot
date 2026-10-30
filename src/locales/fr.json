@@ -316,7 +316,7 @@
   "settings.skin.title": "Thème",
   "settings.skin.subtitle": "S'applique aussitôt et reste mémorisé sur cet ordinateur.",
   "settings.roomTurns.title": "Tours en groupe",
-  "settings.roomTurns.label": "Durée maximale d'un tour",
+  "settings.roomTurns.label": "Arrêter sans progression après",
   "settings.roomTurns.minutes": "minutes",
   "settings.roomTurns.error": "Impossible d'enregistrer la limite de tour en groupe.",
   "settings.roomTurns.range": "Saisissez un nombre entier de 1 à 1 440.",
