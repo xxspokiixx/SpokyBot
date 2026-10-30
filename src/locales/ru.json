@@ -937,6 +937,7 @@
   "lending.action.listFiles": "Просмотрена папка",
   "lending.action.readFile": "Прочитан файл",
   "lending.action.writeFile": "Сохранён файл",
+  "lending.action.deleteFile": "Удалён файл",
   "lending.action.runCommand": "Выполнена команда",
   "lending.action.screenTools": "Проверены элементы управления приложения и экрана",
   "lending.action.screen": "Использованы приложения и экран",

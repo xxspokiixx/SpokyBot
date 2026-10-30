@@ -539,6 +539,7 @@
   "lending.action.listFiles": "列出資料夾內容",
   "lending.action.readFile": "讀取檔案",
   "lending.action.writeFile": "儲存檔案",
+  "lending.action.deleteFile": "刪除了一個檔案",
   "lending.action.runCommand": "執行指令",
   "lending.action.screenTools": "檢查應用程式與螢幕控制",
   "lending.action.screen": "使用應用程式與螢幕",

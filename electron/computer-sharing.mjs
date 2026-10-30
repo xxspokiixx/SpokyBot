@@ -105,8 +105,8 @@ export async function validateSharedFolders(folders, { homeEdits = false } = {})
   return result;
 }
 
-const JOB_KEYS = new Set(["computer_id", "action", "folder_id", "path", "content", "encoding", "expected_sha256", "command", "timeout_seconds", "tool_name", "arguments"]);
-const JOB_ACTIONS = new Set(["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"]);
+const JOB_KEYS = new Set(["computer_id", "action", "folder_id", "path", "content", "encoding", "expected_sha256", "old_text", "new_text", "command", "timeout_seconds", "tool_name", "arguments"]);
+const JOB_ACTIONS = new Set(["list_files", "read_file", "write_file", "edit_file", "append_file", "delete_file", "run_command", "computer_tools", "computer_call"]);
 const optionalText = (value, max) => value === undefined || (typeof value === "string" && value.length <= max);
 /** Refuses malformed input only; the grant still decides whether the operation is allowed. */
 export function validSharedOperation(operation, computerId) {
@@ -115,6 +115,7 @@ export function validSharedOperation(operation, computerId) {
     operation.computer_id === computerId && JOB_ACTIONS.has(operation.action) &&
     (operation.folder_id === undefined || uuid(operation.folder_id)) &&
     optionalText(operation.path, 2048) && optionalText(operation.content, 350_000) &&
+    optionalText(operation.old_text, 350_000) && optionalText(operation.new_text, 350_000) &&
     (operation.encoding === undefined || operation.encoding === "utf8" || operation.encoding === "base64") &&
     (operation.expected_sha256 === undefined || (typeof operation.expected_sha256 === "string" && /^[a-f0-9]{64}$/.test(operation.expected_sha256))) &&
     optionalText(operation.command, 8000) && validCommandSeconds(operation.timeout_seconds) && optionalText(operation.tool_name, 100) &&
@@ -318,21 +319,23 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       .catch(error => { throw error.status === 401 || error.status === 403 ? Object.assign(error, { problem: "connect-first" }) : error; });
     if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw Object.assign(new Error("Complete server pairing or sign-in first"), { problem: "connect-first" });
     if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
-    return { auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: descriptor.capabilities?.lendingDetails === true, link: descriptor.capabilities?.deviceLink === true, chrome: descriptor.capabilities?.myChromeLink === true, timeouts: descriptor.capabilities?.commandTimeouts === true };
+    return { auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: descriptor.capabilities?.lendingDetails === true, link: descriptor.capabilities?.deviceLink === true, chrome: descriptor.capabilities?.myChromeLink === true, timeouts: descriptor.capabilities?.commandTimeouts === true, edits: descriptor.capabilities?.fileEdits === true };
   };
   const identity = async env => {
     await requireEnabled();
-    const { info } = await describe(env);
+    const { info, edits } = await describe(env);
     await requireEnabled();
+    if (edits) supportsEdits.add(env.id); else supportsEdits.delete(env.id);
     return info;
   };
   const cloudIdentity = async env => {
-    const { auth, info, details, link, chrome: takesChrome, timeouts } = await describe(env);
+    const { auth, info, details, link, chrome: takesChrome, timeouts, edits } = await describe(env);
     if (auth.cloudHome !== true || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
     if (details) supportsDetails.add(env.id); else supportsDetails.delete(env.id);
     if (link) supportsLink.add(env.id); else supportsLink.delete(env.id);
     if (takesChrome) supportsChrome.add(env.id); else supportsChrome.delete(env.id);
     if (timeouts) supportsTimeouts.add(env.id); else supportsTimeouts.delete(env.id);
+    if (edits) supportsEdits.add(env.id); else supportsEdits.delete(env.id);
     return info;
   };
   const supportsDetails = new Set();
@@ -340,6 +343,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   /** The Clouds that take the person's Chrome over the device link. */
   const supportsChrome = new Set();
   const supportsTimeouts = new Set();
+  const supportsEdits = new Set();
   /** My Cloud's browsers reach the web through this computer while lending runs; never while My Cloud sleeps, so a
    * sleeping Cloud is never dialled. */
   const keepLink = async (env, grant, signal) => {
@@ -408,6 +412,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             ...(grant.cloud && supportsLink.has(env.id) ? { internet: lendsInternet(grant) } : {}),
             ...(grant.cloud && supportsChrome.has(env.id) ? { chrome: grant.chrome === true } : {}),
             ...(supportsTimeouts.has(env.id) ? { commandTimeouts: true } : {}),
+            ...(supportsEdits.has(env.id) ? { fileEdits: true } : {}),
           }, signal, grant.secret);
           if (signal.aborted) break;
           status.set(env.id, { connected: true });

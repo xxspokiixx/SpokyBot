@@ -913,6 +913,7 @@
   "lending.action.listFiles": "Ha elencato una cartella",
   "lending.action.readFile": "Ha letto un file",
   "lending.action.writeFile": "Ha salvato un file",
+  "lending.action.deleteFile": "Ha eliminato un file",
   "lending.action.runCommand": "Ha eseguito un comando",
   "lending.action.screenTools": "Ha controllato i comandi di app e schermo",
   "lending.action.screen": "Ha usato app e schermo",

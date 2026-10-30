@@ -931,6 +931,7 @@
   "lending.action.listFiles": "Wyświetlono folder",
   "lending.action.readFile": "Odczytano plik",
   "lending.action.writeFile": "Zapisano plik",
+  "lending.action.deleteFile": "Usunięto plik",
   "lending.action.runCommand": "Uruchomiono polecenie",
   "lending.action.screenTools": "Sprawdzono sterowanie aplikacjami i ekranem",
   "lending.action.screen": "Użyto aplikacji i ekranu",

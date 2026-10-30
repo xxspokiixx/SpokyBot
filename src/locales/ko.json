@@ -997,6 +997,7 @@
   "lending.action.listFiles": "폴더 목록 확인",
   "lending.action.readFile": "파일 읽기",
   "lending.action.writeFile": "파일 저장",
+  "lending.action.deleteFile": "파일 삭제",
   "lending.action.runCommand": "명령 실행",
   "lending.action.screenTools": "앱과 화면 제어 확인",
   "lending.action.screen": "앱과 화면 사용",

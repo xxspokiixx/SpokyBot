@@ -278,6 +278,7 @@
   "lending.action.listFiles": "एक फ़ोल्डर की सूची देखी",
   "lending.action.readFile": "एक फ़ाइल पढ़ी",
   "lending.action.writeFile": "एक फ़ाइल सहेजी",
+  "lending.action.deleteFile": "एक फ़ाइल हटाई",
   "lending.action.runCommand": "एक कमांड चलाई",
   "lending.action.screenTools": "ऐप और स्क्रीन के नियंत्रण जाँचे",
   "lending.action.screen": "ऐप और स्क्रीन इस्तेमाल किए",

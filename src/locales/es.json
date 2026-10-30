@@ -813,6 +813,7 @@
   "lending.action.listFiles": "Listó una carpeta",
   "lending.action.readFile": "Leyó un archivo",
   "lending.action.writeFile": "Guardó un archivo",
+  "lending.action.deleteFile": "Eliminó un archivo",
   "lending.action.runCommand": "Ejecutó un comando",
   "lending.action.screenTools": "Revisó los controles de apps y pantalla",
   "lending.action.screen": "Usó apps y la pantalla",

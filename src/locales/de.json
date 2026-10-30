@@ -358,6 +358,7 @@
   "lending.action.listFiles": "Einen Ordner aufgelistet",
   "lending.action.readFile": "Eine Datei gelesen",
   "lending.action.writeFile": "Eine Datei gespeichert",
+  "lending.action.deleteFile": "Eine Datei gelöscht",
   "lending.action.runCommand": "Einen Befehl ausgeführt",
   "lending.action.screenTools": "Die App- und Bildschirmsteuerung geprüft",
   "lending.action.screen": "Apps und Bildschirm verwendet",

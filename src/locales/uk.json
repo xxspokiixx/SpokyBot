@@ -369,6 +369,7 @@
   "lending.action.listFiles": "Переглянув вміст папки",
   "lending.action.readFile": "Прочитав файл",
   "lending.action.writeFile": "Зберіг файл",
+  "lending.action.deleteFile": "Видалив файл",
   "lending.action.runCommand": "Виконав команду",
   "lending.action.screenTools": "Перевірив керування застосунками й екраном",
   "lending.action.screen": "Використав застосунки й екран",

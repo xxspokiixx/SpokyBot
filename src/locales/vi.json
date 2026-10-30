@@ -574,6 +574,7 @@
   "lending.action.listFiles": "Đã liệt kê một thư mục",
   "lending.action.readFile": "Đã đọc một tệp",
   "lending.action.writeFile": "Đã lưu một tệp",
+  "lending.action.deleteFile": "Đã xóa một tệp",
   "lending.action.runCommand": "Đã chạy một lệnh",
   "lending.action.screenTools": "Đã kiểm tra quyền điều khiển ứng dụng và màn hình",
   "lending.action.screen": "Đã sử dụng ứng dụng và màn hình",

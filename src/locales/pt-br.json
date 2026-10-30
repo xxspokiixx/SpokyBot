@@ -858,6 +858,7 @@
   "lending.action.listFiles": "Listou uma pasta",
   "lending.action.readFile": "Leu um arquivo",
   "lending.action.writeFile": "Salvou um arquivo",
+  "lending.action.deleteFile": "Excluiu um arquivo",
   "lending.action.runCommand": "Executou um comando",
   "lending.action.screenTools": "Verificou os controles de apps e de tela",
   "lending.action.screen": "Usou apps e a tela",

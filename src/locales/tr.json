@@ -574,6 +574,7 @@
   "lending.action.listFiles": "Bir klasörü listeledi",
   "lending.action.readFile": "Bir dosyayı okudu",
   "lending.action.writeFile": "Bir dosyayı kaydetti",
+  "lending.action.deleteFile": "Bir dosyayı sildi",
   "lending.action.runCommand": "Bir komut çalıştırdı",
   "lending.action.screenTools": "Uygulama ve ekran kontrollerini denetledi",
   "lending.action.screen": "Uygulamaları ve ekranı kullandı",

@@ -447,6 +447,7 @@
   "lending.action.listFiles": "列出了一个文件夹",
   "lending.action.readFile": "读取了一个文件",
   "lending.action.writeFile": "保存了一个文件",
+  "lending.action.deleteFile": "删除了一个文件",
   "lending.action.runCommand": "运行了一条命令",
   "lending.action.screenTools": "检查了应用和屏幕控制",
   "lending.action.screen": "使用了应用和屏幕",
