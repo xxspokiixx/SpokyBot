@@ -114,7 +114,7 @@ export function SimpleAiPage({ has, disclose, connections }: { has: Has; disclos
       {has("engines") && <div data-settings-block="engines" className="flex scroll-mt-4 flex-col gap-7"><AdminOnly><EnginesSettings simple more={disclose("ai-more")} /></AdminOnly></div>}
       {has("connections") && (
         <AdminOnly>
-          <SettingsDisclosureRow title={t("settings.simple.ai.keys")} block="connections" {...disclose("ai-keys")}>
+          <SettingsDisclosureRow title={t("settings.section.connections")} block="connections" {...disclose("ai-keys")}>
             {connections}
           </SettingsDisclosureRow>
         </AdminOnly>
