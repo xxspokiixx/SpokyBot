@@ -476,6 +476,7 @@ import {
   startCompanion,
   stopCompanion,
 } from "./companion.mjs";
+import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
 
@@ -3107,10 +3108,9 @@ app.whenReady().then(async () => {
   }
   void cloudAccountStarted.then(() => { cloudSignInRestored = true; void oneHome.kick(); void homeWindow.refresh(); }); void ownHome?.kick();
   if (!desktopRemoteAccess && serverReady && companionEnabledAtRest() && !oneHome.away() && !ownHome?.away()) {
-    // Wait until a saved organisation policy is known: it may turn remote access off.
-    void (managedDesktop?.whenRestored() ?? Promise.resolve())
-      .then(() => startDesktopCompanion({ waitForHosted: false, remember: false }))
-      .catch(error => slog(`companion auto-start skipped: ${error?.message ?? error}`));
+    // Retries stop once the person turns the phone off, starts it by hand or quits.
+    const wanted = () => !desktopShutdownStarted && companionEnabledAtRest() && !companionRunning() && !oneHome.away() && !ownHome?.away();
+    void autoStartCompanion({ restored: managedDesktop?.whenRestored(), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }), wanted, log: slog });
   }
   setLocalOrigin(rendererOrigin());
   session.defaultSession.webRequest.onCompleted({ urls: ["https://*/api/*"] }, details => homeWindow.responded(details));
