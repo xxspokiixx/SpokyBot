@@ -16,10 +16,10 @@ import { BotAvatar } from "./Avatar";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
 
 export type AvatarPatch = Partial<
-  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody" | "mascotFaceColor">
+  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody">
 >;
 
-export const RESET_MASCOT_PATCH: AvatarPatch = { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null };
+export const RESET_MASCOT_PATCH: AvatarPatch = { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" };
 
 export const CROP_LABEL = {
   mascot: "Mascot",
@@ -98,7 +98,7 @@ export function AvatarFraming({
         onChange={(event) => onPatch({ avatarZoom: clampAvatarZoom(Number(event.target.value)) })}
         className="w-full accent-accent"
       />
-      <div className="mt-1.5 flex items-center justify-between gap-3 text-[12px] text-ink-secondary">
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-[11.5px] text-ink-secondary">
         <span>Drag the picture to reposition it. Scroll to zoom.</span>
         {framed && (
           <button

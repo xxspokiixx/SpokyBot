@@ -1,4 +1,3 @@
-import { liveToolIds, type LiveToolRun } from "./tool-liveness.js";
 import { failedTurnCause } from "../../shared/failed-turn.js";
 import { redactSecretsInText } from "../../shared/redact.js";
 
@@ -10,22 +9,18 @@ export interface TimelineMessage {
   tool?: { name: string; summary?: string; ok?: boolean };
   png?: string;
   at: number;
-  turnId?: string;
-  turnTerminal?: boolean;
-  turnCompletedAt?: number;
 }
 
 export interface TimelineEvent {
   id: string;
   at: number;
   label: string;
-  state: "running" | "complete" | "failed" | "observed" | "unverified";
+  state: "running" | "complete" | "failed" | "observed";
   kind: "task" | "tool" | "screen" | "result";
   command?: string;
 }
 
-export function timelineEvents(messages: TimelineMessage[], run?: LiveToolRun): TimelineEvent[] {
-  const live = liveToolIds(messages, run);
+export function timelineEvents(messages: TimelineMessage[]): TimelineEvent[] {
   const events: TimelineEvent[] = [];
   let sawUserInput = false;
   for (const message of messages) {
@@ -46,7 +41,7 @@ export function timelineEvents(messages: TimelineMessage[], run?: LiveToolRun): 
         at: message.at,
         label: redactSecretsInText(cause ?? message.tool.name),
         ...(message.tool.summary ? { command: redactSecretsInText(message.tool.summary) } : {}),
-        state: failed ? "failed" : message.tool.ok === true ? "complete" : live.has(message.id) ? "running" : "unverified",
+        state: failed ? "failed" : message.tool.ok === true ? "complete" : "running",
         kind: "tool",
       });
     } else if (message.kind === "screen") {

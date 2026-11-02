@@ -1,29 +1,31 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Settings, X } from "lucide-react";
+import { X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Bot, BotSettingsSection } from "@/state/store";
-import { ChatShareMenu } from "@/components/ChatMoreMenu";
+import { ChatMoreMenu } from "@/components/ChatMoreMenu";
 import { useCaptionChrome } from "../DesktopCapabilities";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { AvatarEditorCard } from "./AvatarEditorCard";
+import { BotTab } from "./BotTab";
 import { ComputerTab } from "./ComputerTab";
-import { DetailsTab } from "./DetailsTab";
-import { LibraryTab } from "./LibraryTab";
 import { PANEL_TABS, PAGES, TAB_LABEL, type PanelTab, type PanelTarget, type SimplePageId } from "./page-registry";
 import { PageBody, pageSurfaceCls } from "./pages";
 import { linkTarget, usePanelLink, type PanelLink } from "./panel-link";
 import { PanelHero } from "./PanelHero";
-import { PageHeader, roundButtonCls } from "./rows";
+import { PageHeader } from "./rows";
+
+const roundButtonCls = "flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink hover:bg-ink/[0.11]";
 
 function initialTarget(section: BotSettingsSection | null, link: PanelLink | null): PanelTarget {
-  return section ? linkTarget(section, link) : { tab: "details" };
+  return section ? linkTarget(section, link) : { tab: "bot" };
 }
 
-export function BotPanel({ bot, derived, linkedSection, onClose }: {
+export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose }: {
   bot: Bot;
   derived: ReturnType<typeof useBotSettingsDerived>;
+  headerClassName?: string;
   linkedSection: BotSettingsSection | null;
   onClose: () => void;
 }) {
@@ -72,7 +74,7 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
   }, [linkedSection, link]);
 
   useEffect(() => {
-    if (!anchor) return;
+    if (!anchor || page) return;
     bodyRef.current?.querySelector(`[data-panel-card="${anchor}"]`)?.scrollIntoView({ block: "start" });
     setAnchor(null);
   }, [anchor, page, tab]);
@@ -96,28 +98,17 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKeyDown}>
-      <div {...dragProps} className="flex h-[50px] shrink-0 items-start justify-end gap-2.5 px-[13px] pt-[13px]">
-        <ChatShareMenu bot={bot} className={roundButtonCls} />
-        <button
-          type="button"
-          data-panel-gear
-          aria-label={t("botPanel.page.settings")}
-          title={t("botPanel.page.settings")}
-          aria-current={page === "settings" ? "page" : undefined}
-          onClick={() => go({ tab: "details", page: "settings" })}
-          className={roundButtonCls}
-        >
-          <Settings size={16} className="pointer-events-none" />
-        </button>
+      <div {...dragProps} className={cn("flex h-[52px] shrink-0 items-center justify-end gap-2 px-3.5", headerClassName)}>
+        <ChatMoreMenu bot={bot} />
         <button type="button" onClick={onClose} aria-label={t("botSettings.simple.close")} className={roundButtonCls}>
           <X size={16} className="pointer-events-none" />
         </button>
       </div>
 
-      <div ref={bodyRef} className="@container relative min-h-0 flex-1 overflow-y-auto px-4 pb-7">
+      <div ref={bodyRef} className="@container relative min-h-0 flex-1 overflow-y-auto px-5 pb-7">
         {page === null ? (
           <>
-            <div className="relative mt-3.5" ref={editorRef}>
+            <div className="relative" ref={editorRef}>
               <PanelHero
                 bot={bot}
                 activeState={derived.activeState}
@@ -132,11 +123,7 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
                 </>
               )}
             </div>
-            <div
-              role="tablist"
-              aria-label={t("botSettings.simple.tabs")}
-              className="sticky top-0 z-[1] -mx-4 mt-[15px] flex justify-center gap-0.5 bg-app px-4 pb-2.5 pt-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-app after:to-transparent"
-            >
+            <div role="tablist" aria-label={t("botSettings.simple.tabs")} className="mt-4 flex justify-center gap-1">
               {PANEL_TABS.map((id) => (
                 <button
                   key={id}
@@ -146,8 +133,8 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
                   data-panel-tab={id}
                   onClick={() => openTab(id)}
                   className={cn(
-                    "h-[26px] min-w-0 shrink truncate rounded-full px-2 text-[13px] leading-[18px] transition-colors",
-                    tab === id ? "bg-ink/[0.07] text-ink" : "text-ink-secondary hover:text-ink",
+                    "min-w-0 truncate rounded-full px-[13px] py-1.5 text-[13.5px] transition-colors @max-[20rem]:px-2 @max-[20rem]:text-[12.5px]",
+                    tab === id ? "bg-ink/[0.07] font-medium text-ink" : "text-ink-secondary hover:text-ink",
                   )}
                 >
                   {t(TAB_LABEL[id])}
@@ -155,8 +142,15 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
               ))}
             </div>
             <div role="tabpanel">
-              {tab === "details" && <DetailsTab bot={bot} derived={derived} onOpen={openPage} />}
-              {tab === "library" && <LibraryTab bot={bot} onOpen={openPage} />}
+              {tab === "bot" && (
+                <BotTab
+                  bot={bot}
+                  derived={derived}
+                  editingInstructions={editingInstructions}
+                  onEditInstructions={setEditingInstructions}
+                  onOpen={openPage}
+                />
+              )}
               {tab === "computer" && <ComputerTab bot={bot} derived={derived} onOpen={openPage} />}
             </div>
           </>
@@ -170,14 +164,7 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
               onBack={back}
             />
             <div className={cn("mt-4", pageSurfaceCls)}>
-              <PageBody
-                page={page}
-                bot={bot}
-                derived={derived}
-                onOpen={openPage}
-                editingInstructions={editingInstructions}
-                onEditInstructions={setEditingInstructions}
-              />
+              <PageBody page={page} bot={bot} derived={derived} />
             </div>
           </div>
         )}

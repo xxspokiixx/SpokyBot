@@ -2,14 +2,13 @@ import type { EffectCallback } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialState, type Action, type AppState, type Bot } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], refs: [] as Array<{ current: unknown }>, refAt: 0, showThreads: true, api: vi.fn(), choice: null as string | null }));
+const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], refs: [] as Array<{ current: unknown }>, refAt: 0, showThreads: true, api: vi.fn() }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
   useRef: (initial: unknown) => { const at = fixture.refAt++; fixture.refs[at] ??= { current: initial }; return fixture.refs[at]; },
 }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
-vi.mock("@/lib/language-preference", async (original) => ({ ...await original<typeof import("@/lib/language-preference")>(), useLanguageChoice: () => fixture.choice }));
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(), api: fixture.api }));
 
 import { usePresence } from "./use-presence";
@@ -61,27 +60,9 @@ afterEach(() => {
   fixture.refs = [];
   fixture.refAt = 0;
   fixture.api.mockReset();
-  fixture.choice = null;
 });
 
 describe("usePresence", () => {
-  it("sends a newly picked language at once, without waiting for activity or the once-a-minute cooldown", async () => {
-    stubDom();
-    fixture.api.mockResolvedValue({ ok: true, returned: false });
-    const dispatch = vi.fn();
-    fixture.choice = "en";
-    render(loaded, dispatch);
-    await flush();
-    fixture.choice = "pt-br";
-    render(loaded, dispatch);
-    await flush();
-    const languages = fixture.api.mock.calls.map(([, init]) => JSON.parse((init as { body: string }).body).language);
-    expect(languages).toEqual(["en", "pt-br"]);
-    render(loaded, dispatch);
-    await flush();
-    expect(fixture.api).toHaveBeenCalledTimes(2);
-  });
-
   it("posts presence once the bots are loaded, and opens the Chief's chat when a card landed while away", async () => {
     stubDom();
     fixture.api.mockResolvedValue(toChief);
@@ -90,7 +71,7 @@ describe("usePresence", () => {
     expect(fixture.api).not.toHaveBeenCalled();
     render(loaded, dispatch);
     await flush();
-    expect(fixture.api).toHaveBeenCalledWith("/api/presence/active", { method: "POST", body: JSON.stringify({ source: "desktop", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, language: "en", threadId: "chief-main" }) });
+    expect(fixture.api).toHaveBeenCalledWith("/api/presence/active", { method: "POST", body: JSON.stringify({ source: "desktop", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
       { type: "select", id: "chief" },
       { type: "switchTask", botId: "chief", threadId: "chief-main" },

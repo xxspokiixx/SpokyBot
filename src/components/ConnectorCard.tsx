@@ -1,28 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, PlugZap, RefreshCw, X } from "lucide-react";
 
-import { api, type Bot, type Message } from "@/state/store";
-import { ApiError } from "@/state/api";
+import { api, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { AUTHORIZATION_LINK_MS, reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
 import { accountAliasTaken, requiresAccountAlias } from "@/lib/connector-status";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { cn } from "@/lib/cn";
-import { askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
-import { CardHint } from "./CardHint";
+import { ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
 
 const STATUS_CHECK_MS = 4_000;
 /** Composio marks an unfinished account EXPIRED shortly after its link lapses; the card keeps asking until it can say so. */
 const STATUS_WATCH_MS = AUTHORIZATION_LINK_MS + 2 * 60 * 1_000;
 
-export function ConnectorCard({ botId, color, threadId, message }: { botId: string; color?: Bot["color"]; threadId: string; message: Message }) {
+export function ConnectorCard({ botId, threadId, message }: { botId: string; threadId: string; message: Message }) {
   const connector = message.connector!;
-  const gone = connector.dismissed || connector.superseded;
-  const isMcp = connector.source === "mcp";
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | { key: LocaleKey } | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
   const [authorization, setAuthorization] = useState<(PendingAuthorization & { target: string }) | null>(null);
   const [label, setLabel] = useState("");
   const polling = useRef(false);
@@ -32,27 +27,26 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
   const target = `${endpoint}?threadId=${encodeURIComponent(threadId)}`;
   const currentTarget = useRef(target);
   currentTarget.current = target;
-  const pendingAuthorization = authorization?.target === target && connector.status !== "failed" && connector.status !== "connected" && !gone
+  const pendingAuthorization = authorization?.target === target && connector.status !== "failed" && connector.status !== "connected" && !connector.dismissed
     ? authorization : null;
   const authorizationUrl = reusableConnectionUrl(pendingAuthorization);
   useEffect(() => {
     setBusy(false);
     setLocalError(null);
-    setRefusal(null);
     setAuthorization(null);
     setLabel("");
     return () => {
       opening.current?.cancel();
       opening.current = null;
     };
-  }, [target, gone]);
+  }, [target, connector.dismissed]);
   const checkStatus = useCallback(async () => {
     const result = await api(`${endpoint}/status?threadId=${encodeURIComponent(threadId)}`);
     return Boolean(result.connected);
   }, [endpoint, threadId]);
 
   useEffect(() => {
-    if (connector.status !== "authorizing" || gone) return;
+    if (connector.status !== "authorizing" || connector.dismissed) return;
     polling.current = true;
     const startedAt = Date.now();
     const check = () => {
@@ -78,9 +72,9 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
       window.removeEventListener("focus", onReturn);
       document.removeEventListener("visibilitychange", onReturn);
     };
-  }, [checkStatus, gone, connector.status]);
+  }, [checkStatus, connector.dismissed, connector.status]);
 
-  if (gone) return null;
+  if (connector.dismissed) return null;
 
   const connect = async (alias?: string) => {
     if (busy || opening.current) return;
@@ -89,7 +83,6 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
     const isCurrent = () => opening.current === launch && currentTarget.current === target;
     setBusy(true);
     setLocalError(null);
-    setRefusal(null);
     try {
       const reusableUrl = alias ? null : reusableConnectionUrl(pendingAuthorization);
       const createdAt = reusableUrl ? pendingAuthorization!.createdAt : Date.now();
@@ -105,9 +98,7 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
         setLocalError({ key: "connectors.card.popupBlocked" });
       }
     } catch (error) {
-      if (!isCurrent()) return;
-      if (isMcp && error instanceof ApiError && error.status === 409) setRefusal(error.message);
-      else setLocalError(error instanceof Error ? error.message : String(error));
+      if (isCurrent()) setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
       launch.cancel();
       if (isCurrent()) {
@@ -178,7 +169,7 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
       tour="connector"
       ariaLabel={connector.label}
       icon={<PlugZap size={15} />}
-      title={isMcp ? t("connectors.card.signInTo", { label: connector.label }) : connector.label}
+      title={connector.label}
       explanation={connector.description}
       onDismiss={dismiss}
       dismissLabel={t("connectors.card.notNow")}
@@ -192,21 +183,19 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
             type="button"
             onClick={() => void connect(labelNeeded ? label.trim() : undefined)}
             disabled={busy || (labelNeeded && !label.trim())}
-            {...askPrimary(color)}
+            className={ASK_PRIMARY_BUTTON}
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : authorizing ? <RefreshCw size={14} /> : <PlugZap size={14} />}
             {authorizing
               ? t("connectors.card.openAgain")
               : connector.status === "failed"
                 ? t("connectors.card.tryAgain")
-                : t(isMcp ? "connectors.card.signIn" : "connectors.card.connectSecurely")}
+                : t("connectors.card.connectSecurely")}
           </button>
         </>
       }
     >
-      <CardHint id="spot.connector" />
-      <p className="text-[12px] text-ink-tertiary">{t(isMcp ? "connectors.card.mcpSignInHint" : "connectors.card.signInHint")}</p>
-      {refusal && <p role="status" className="mt-1.5 text-[12px] text-ink-secondary">{refusal}</p>}
+      <p className="text-[11.5px] text-ink-tertiary">{t("connectors.card.signInHint")}</p>
       {labelNeeded ? (
         <form
           className="mt-1.5"
@@ -224,7 +213,7 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
             onChange={(event) => setLabel(event.target.value)}
             placeholder={t("connectors.aliasPlaceholder")}
             aria-label={t("connectors.aliasAriaAnother", { service: connector.label })}
-            className="mt-1.5 h-8 w-full rounded-full bg-inset px-3 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+            className="mt-1.5 h-8 w-full rounded-full bg-inset px-3 text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </form>
       ) : error && <p role="alert" className="mt-1.5 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}

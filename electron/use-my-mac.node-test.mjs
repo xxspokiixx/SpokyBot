@@ -8,8 +8,7 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { createCloudPowerGate } from "./cloud-power.mjs";
-import { createComputerSharing, saidNo } from "./computer-sharing.mjs";
-import { createLendingTarget } from "./lending-target.mjs";
+import { createComputerSharing } from "./computer-sharing.mjs";
 import { autostartEntry, createOpenAtLogin, HIDDEN_ARG } from "./open-at-login.mjs";
 import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 
@@ -22,20 +21,17 @@ const until = async (check, what, ms = 5000) => {
   assert.fail(`timed out waiting for ${what}`);
 };
 
-/** My Cloud's HTTP side, as the poll sees it; `link` says whether it advertises the device link, `chrome` the lent
- * Chrome. `registered`: the lent computers it knows, which a restart forgets. */
-function cloudHome({ link = true, chrome = false } = {}) {
+/** My Cloud's HTTP side, as the poll sees it; `link` says whether it advertises the device link. */
+function cloudHome({ link = true } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, headers: { get: () => null }, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
-  const state = { environmentId: randomUUID(), sessionId: randomUUID(), connects: [], polls: 0, disconnects: 0, calls: [], registered: new Set() };
+  const state = { environmentId: randomUUID(), sessionId: randomUUID(), connects: [], polls: 0, disconnects: 0 };
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
-    state.calls.push(route);
     if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: ["admin", "client"], cloudHome: true });
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, ...(link ? { deviceLink: true } : {}), ...(chrome ? { myChromeLink: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, ...(link ? { deviceLink: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
-    if (route === "/api/shared-computers/connect") { state.connects.push(body); state.registered.add(body.id); return json({ ok: true }); }
+    if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
-      if (!state.registered.has(route.split("/")[3])) return json({ error: "Shared computer is disconnected or not authorized" }, 403);
       state.polls++;
       await delay(100, undefined, { signal: init?.signal }).catch(() => {});
       init?.signal?.throwIfAborted();
@@ -47,14 +43,14 @@ function cloudHome({ link = true, chrome = false } = {}) {
   return state;
 }
 
-/** The device link's WebSocket as the test drives it: every dial is kept, and opens unless `accept(url)` says no. */
-function fakeSockets(accept = () => true) {
+/** The device link's WebSocket as the test drives it: every dial is kept, and opens unless told otherwise. */
+function fakeSockets() {
   const made = [];
   class FakeSocket {
     constructor(url, init) {
       this.url = url; this.headers = init?.headers ?? {}; this.sent = []; this.closed = false;
       made.push(this);
-      setImmediate(() => { if (this.closed) return; if (accept(url)) this.onopen?.(); else this.end(1006, ""); });
+      setImmediate(() => { if (!this.closed) this.onopen?.(); });
     }
     send(frame) { this.sent.push(frame); }
     close() { this.end(1000, ""); }
@@ -64,25 +60,18 @@ function fakeSockets(accept = () => true) {
   return { FakeSocket, made, open: () => made.filter((socket) => !socket.closed) };
 }
 
-const SIGNED_IN = Object.freeze({ status: "connected", accountId: "acct_1", origin: ORIGIN });
-
-/** `myCloud`: this app knows which saved server is My Cloud and that it is the person's own, as the desktop app does, so
- * it lends itself to it by itself (its home folder doesn't exist here, so no folder). `signIn`: the verified Cloud sign-in
- * it starts with. */
-async function fixture(t, { link = true, chrome = false, adminWord = null, myCloud = false, signIn = SIGNED_IN } = {}) {
+async function fixture(t, { link = true, adminWord = null } = {}) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-use-my-mac-")));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const home = cloudHome({ link, chrome });
-  const sockets = fakeSockets((url) => home.registered.has(new URL(url).pathname.split("/")[3]));
+  const home = cloudHome({ link });
+  const sockets = fakeSockets();
   let word = adminWord;
-  let account = signIn;
   const power = createCloudPowerGate({ power: () => word, holdMs: 60_000 });
   const summaries = [];
   const connects = [];
-  const file = path.join(dir, "profile", "computer-sharing.json");
   const make = () => createComputerSharing({
-    file, fetch: home.fetch, environments: () => [env], enabled: async () => false, ...(myCloud ? { myCloud: () => env, ownClouds: () => [env] } : {}),
-    cloud: () => account, home: path.join(dir, "home"), cuaConnection: async () => null,
+    file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [env], enabled: async () => false,
+    cloud: () => ({ status: "connected", accountId: "acct_1", origin: ORIGIN }), home: path.join(dir, "home"), cuaConnection: async () => null,
     power, WebSocket: sockets.FakeSocket, linkHeaders: () => ({ cookie: "omb_session_fixture=token" }), onChange: (summary) => summaries.push(summary),
     egress: {
       interfaces: () => ({}),
@@ -92,8 +81,7 @@ async function fixture(t, { link = true, chrome = false, adminWord = null, myClo
   });
   let sharing = make();
   t.after(() => sharing.close());
-  return { dir, file, home, sockets, power, summaries, connects, get sharing() { return sharing; }, setWord: (next) => { word = next; power.changed(); },
-    signIn: (next) => { account = next; sharing.cloudChanged(); },
+  return { dir, home, sockets, power, summaries, connects, sharing, setWord: (next) => { word = next; power.changed(); },
     restart: () => { sharing.close(); sharing = make(); return sharing; } };
 }
 
@@ -164,7 +152,6 @@ test("the tray reads In use while My Cloud's browsing goes through this computer
   socket.deliver(frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.length));
   await until(() => summaries.at(-1)?.busy?.action === "internet", "In use");
   assert.equal(summaries.at(-1).busy.env, env.id);
-  assert.deepEqual(summaries.at(-1).using, ["My Cloud"], "the menu bar names the Cloud browsing through this computer");
 });
 
 test("each site opened through this computer is in its activity, refused ones too, once per site and outcome every 10 minutes", async (t) => {
@@ -200,27 +187,22 @@ test("a lent folder deleted since is left out, and the rest, the internet connec
   assert.equal(again.cloudState(env).link, "on");
 });
 
-test("Pause survives a restart: nothing is lent or dialled until Resume, which lends the same again", async (t) => {
-  const fixtureState = await fixture(t, { myCloud: true });
-  const { sockets, home, file } = fixtureState;
-  fixtureState.sharing.start();
+test("the person's own Off survives a restart: lending stays off, the link is never dialled, and why is kept", async (t) => {
+  const fixtureState = await fixture(t);
+  const { sockets, home } = fixtureState;
+  await fixtureState.sharing.saveCloud(env, { folders: [], screen: false, internet: true });
   await until(() => sockets.open().length === 1, "the device link to open");
-  fixtureState.sharing.pause();
+  fixtureState.sharing.revoke(env);
   await until(() => sockets.open().length === 0, "the link to end with lending");
-  assert.equal(JSON.parse(await readFile(file, "utf8")).automatic.paused, true);
   const connectsBefore = home.connects.length;
   const again = fixtureState.restart();
   again.start();
-  again.cloudChanged();
   await delay(300);
-  assert.equal(home.connects.length, connectsBefore, "a restart lends nothing while paused");
+  assert.equal(home.connects.length, connectsBefore, "a restart lends nothing the person turned off");
   assert.equal(sockets.made.length, 1);
-  assert.equal(again.paused(), true);
-  await again.resume();
-  await until(() => sockets.open().length === 1 && again.cloudState(env).link === "on", "lending to come back with Resume");
-  assert.equal(home.connects.at(-1).id, home.connects[0].id, "the same grant");
-  assert.equal(JSON.parse(await readFile(file, "utf8")).automatic.paused, false);
+  assert.deepEqual({ enabled: again.cloudState(env).enabled, reason: again.cloudState(env).stopped?.reason, internet: again.cloudState(env).internet }, { enabled: false, reason: "you", internet: true });
 });
+
 test("lending on opens the app at login, out of sight; off removes only the login item this app added", async (t) => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-login-item-")));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -281,243 +263,4 @@ test("an app started hidden at login runs with no window until the person opens 
   windows.length = 0;
   listeners.get("window-all-closed")();
   assert.equal(app.quits, 1);
-});
-
-test("lends Chrome only in a grant that says so, and tells only a Cloud that takes it", async (t) => {
-  const old = await fixture(t);
-  await old.sharing.saveCloud(env, { chrome: true, folders: [] });
-  await until(() => old.home.connects.length === 1, "the connect");
-  assert.equal("chrome" in old.home.connects[0], false, "a Cloud that does not know Chrome is not sent it");
-  const { home, sockets, sharing } = await fixture(t, { chrome: true });
-  await sharing.saveCloud(env, { chrome: true, folders: [] });
-  await until(() => sockets.open().length === 1 && sharing.cloudState(env).chromeLink === "on", "the device link to open");
-  assert.equal(home.connects[0].chrome, true);
-  assert.equal(sharing.cloudState(env).chrome, true);
-  await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: tmpdir(), write: false }], screen: false });
-  await until(() => home.connects.length === 2, "the second connect");
-  assert.equal(home.connects[1].chrome, false);
-  assert.equal(sharing.cloudState(env).chrome, false);
-});
-
-test("a Chrome-only grant keeps the device link open, and the link refuses web streams", async (t) => {
-  const { sockets, sharing } = await fixture(t, { chrome: true });
-  await sharing.saveCloud(env, { chrome: true, internet: false, folders: [] });
-  await until(() => sockets.open().length === 1, "the device link to open");
-  const socket = sockets.made[0];
-  socket.deliver(JSON.stringify({ t: "open", id: 1, host: "example.com", port: 443 }));
-  await until(() => socket.sent.some((frame) => typeof frame === "string" && JSON.parse(frame).id === 1), "an answer");
-  const answer = socket.sent.map((frame) => JSON.parse(frame)).find((frame) => frame.id === 1);
-  assert.deepEqual({ t: answer.t, reason: answer.reason }, { t: "refused", reason: "not-lent" });
-});
-
-test("who starts Paused, record by record: only someone who had said no to lending a Cloud of their own", () => {
-  const cloud = { accountId: "acct_1", origin: ORIGIN };
-  const cases = [
-    ["nothing kept", undefined, false],
-    ["lending on, internet connection included", { enabled: true, cloud, internet: true }, false],
-    ["lending on, kept from before the internet connection could be chosen", { enabled: true, cloud }, false],
-    ["lending on, internet connection unticked", { enabled: true, cloud, internet: false }, true],
-    ["turned off by the person", { enabled: false, cloud, internet: true, stopped: { reason: "you", at: 1 } }, true],
-    ["off, saved before the reason was kept", { enabled: false, cloud, folders: [], internet: true }, true],
-    ["stopped at a sign-out", { enabled: false, cloud, folders: [], internet: true, stopped: { reason: "signed-out", at: 1 } }, false],
-    ["stopped when another account signed in", { enabled: false, cloud, folders: [], internet: true, stopped: { reason: "account-changed", at: 1 } }, false],
-    ["stopped when My Cloud moved to a new machine", { enabled: false, cloud, folders: [], internet: true, stopped: { reason: "machine-changed", at: 1 } }, false],
-    ["Computer access lending to a server", { enabled: true, sessionId: randomUUID(), environmentId: randomUUID() }, false],
-    ["Computer access turned off by the person", { enabled: false, stopped: { reason: "you", at: 1 } }, false],
-  ];
-  for (const [what, record, paused] of cases) assert.equal(saidNo(record), paused, what);
-});
-test("a desktop signed in to its own Cloud lends itself by itself: the internet connection and Chrome, no terminal, no click, once, and again after a restart", async (t) => {
-  const state = await fixture(t, { myCloud: true });
-  const { home, sockets, summaries } = state;
-  state.sharing.start();
-  await until(() => sockets.open().length === 1 && state.sharing.cloudState(env).link === "on", "the device link to open with no click");
-  assert.equal(home.connects.length, 1);
-  const [lent] = home.connects;
-  assert.deepEqual({ folders: lent.folders, computer: lent.computer, terminal: lent.terminal, internet: lent.internet }, { folders: [], computer: false, terminal: false, internet: true },
-    "the internet connection; no terminal, and no screen while computer control can't work here");
-  assert.deepEqual(state.sharing.cloudState(env), { enabled: true, folders: [], screen: false, terminal: false, internet: true, link: "on", chrome: true, chromeLink: "unsupported", busy: false, connected: true });
-  assert.deepEqual(summaries.at(-1).clouds, ["My Cloud"], "the menu bar names the Cloud");
-  const saved = JSON.parse(await readFile(state.file, "utf8")).records[env.id];
-  assert.deepEqual({ internet: saved.internet, chrome: saved.chrome, folders: saved.folders, computer: saved.computer, terminal: saved.terminal, cloud: saved.cloud },
-    { internet: true, chrome: true, folders: [], computer: false, terminal: false, cloud: { accountId: "acct_1", origin: ORIGIN } });
-  state.sharing.cloudChanged();
-  await delay(150);
-  assert.equal(home.connects.length, 1, "a grant already made is never made again");
-  const again = state.restart();
-  again.start();
-  await until(() => home.connects.length === 2 && sockets.open().length === 1 && again.cloudState(env).link === "on", "the same grant to come back after the app restarts");
-  assert.equal(home.connects[1].id, lent.id);
-  assert.equal(sockets.made.at(-1).headers["x-omb-computer-secret"], sockets.made[0].headers["x-omb-computer-secret"]);
-});
-test("nothing is lent until this app is signed in to My Cloud itself, and only to My Cloud", async (t) => {
-  const state = await fixture(t, { myCloud: true, signIn: { status: "restoring", accountId: null, origin: null } });
-  state.sharing.start();
-  for (const signIn of [{ status: "signed-out", accountId: null, origin: null }, { status: "reauth-required", accountId: "acct_1", origin: null },
-    { status: "connected", accountId: null, origin: ORIGIN }, { status: "connected", accountId: "acct_1", origin: "https://omb-u-other.fly.dev" }]) state.signIn(signIn);
-  await delay(150);
-  assert.deepEqual(state.home.calls, [], "nothing called My Cloud");
-  await assert.rejects(readFile(state.file, "utf8"), { code: "ENOENT" }, "and nothing was kept");
-  state.signIn(SIGNED_IN);
-  await until(() => state.sharing.cloudState(env).link === "on", "lending to start once signed in to My Cloud");
-});
-
-test("a grant kept from before lending was automatic becomes the automatic one, its folders kept; one with the internet connection unticked starts Paused", async (t) => {
-  for (const [kept, paused] of [[undefined, false], [true, false], [false, true]]) {
-    const state = await fixture(t, { myCloud: true });
-    const folder = path.join(state.dir, "Plans");
-    await mkdir(folder);
-    const id = randomUUID();
-    await mkdir(path.dirname(state.file), { recursive: true });
-    await writeFile(state.file, JSON.stringify({ version: 1, records: { [env.id]: {
-      sessionId: null, environmentId: null, id, secret: "a".repeat(64), enabled: true, folders: [{ id: randomUUID(), path: folder, name: "Plans", write: false }],
-      terminal: true, computer: false, ...(kept === undefined ? {} : { internet: kept }), cloud: { accountId: "acct_1", origin: ORIGIN },
-    } } }));
-    const sharing = state.restart();
-    sharing.start();
-    if (paused) {
-      await delay(300);
-      assert.equal(sharing.paused(), true, "the person had unticked the internet connection");
-      assert.deepEqual([state.home.connects.length, state.sockets.made.length], [0, 0], "nothing lent, nothing dialled");
-      continue;
-    }
-    await until(() => state.home.connects.at(-1)?.internet === true && sharing.cloudState(env).link === "on", "the automatic grant to connect");
-    const last = state.home.connects.at(-1);
-    assert.deepEqual(last.folders.map((entry) => entry.name), ["Plans"], "its folders as they were");
-    assert.equal(last.terminal, true, "the terminal it lent, kept as the menu's switch");
-    sharing.cloudChanged();
-    await delay(100);
-    assert.equal(state.home.connects.at(-1), last, "nothing else is lent on top");
-  }
-});
-test("someone who had turned lending off starts Paused: no grant and no link after the sign-in changes or a restart, until Resume", async (t) => {
-  const state = await fixture(t, { myCloud: true });
-  await mkdir(path.dirname(state.file), { recursive: true });
-  await writeFile(state.file, JSON.stringify({ version: 1, records: { [env.id]: {
-    sessionId: null, environmentId: null, id: randomUUID(), secret: "b".repeat(64), enabled: false, folders: [], terminal: false, computer: false, internet: true,
-    cloud: { accountId: "acct_1", origin: ORIGIN }, stopped: { reason: "you", at: 1 },
-  } } }));
-  const sharing = state.restart();
-  sharing.start();
-  state.signIn({ ...SIGNED_IN });
-  const again = state.restart();
-  again.start();
-  again.cloudChanged();
-  await delay(300);
-  assert.deepEqual([state.home.connects.length, state.sockets.made.length], [0, 0], "nothing is lent or dialled");
-  assert.equal(again.paused(), true);
-  await again.resume();
-  await until(() => again.cloudState(env).link === "on", "Resume to lend it");
-  const third = state.restart();
-  third.start();
-  assert.equal(third.paused(), false, "a Resume is kept: the old Off never pauses it again");
-});
-test("lending a sign-out stopped comes back by itself once signed in again, with the folders it lent", async (t) => {
-  const state = await fixture(t, { myCloud: true });
-  const folder = path.join(state.dir, "Plans");
-  await mkdir(folder);
-  await state.sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folder, write: true }], screen: false, internet: true });
-  await until(() => state.sharing.cloudState(env).link === "on", "lending to connect");
-  state.signIn({ status: "signed-out", accountId: null, origin: null });
-  assert.equal(state.sharing.cloudState(env).enabled, false);
-  state.signIn(SIGNED_IN);
-  await until(() => state.home.connects.length === 2 && state.sharing.cloudState(env).link === "on", "lending to come back");
-  assert.deepEqual({ folders: state.home.connects[1].folders.map((entry) => [entry.name, entry.write]), internet: state.home.connects[1].internet }, { folders: [["Plans", true]], internet: true });
-});
-test("a Cloud asleep at sign-in: the automatic grant waits, calling nothing, and lends once My Cloud wakes", async (t) => {
-  const state = await fixture(t, { myCloud: true, adminWord: { state: "asleep", since: 1, sleeps: true } });
-  state.sharing.start();
-  await until(() => state.sharing.cloudState(env).problem === "asleep", "lending to wait for My Cloud");
-  await delay(300);
-  assert.equal(state.sharing.cloudState(env).enabled, true, "it is lent");
-  assert.deepEqual(state.home.calls, [], "nothing called a sleeping Cloud, which would wake it");
-  assert.equal(state.sockets.made.length, 0);
-  state.setWord({ state: "awake", since: 2, sleeps: true });
-  await until(() => state.sharing.cloudState(env).link === "on" && state.home.connects[0]?.internet === true, "the link to open once My Cloud is awake");
-});
-
-test("when My Cloud restarts and forgets this computer, lending registers again and the link comes back by itself", async (t) => {
-  const state = await fixture(t, { myCloud: true });
-  state.sharing.start();
-  await until(() => state.sockets.open().length === 1 && state.sharing.cloudState(env).link === "on", "the default link to open");
-  state.home.registered.clear();
-  state.sockets.made[0].end(1012, "restarting");
-  await until(() => state.home.connects.length === 2 && state.sockets.open().length === 1 && state.sharing.cloudState(env).link === "on", "lending and the link to come back", 20_000);
-  assert.equal(state.home.connects[1].id, state.home.connects[0].id);
-  assert.equal(state.home.connects[1].internet, true);
-});
-
-test("a person whose only Cloud is a Team Cloud lends nothing: lending is personal", async (t) => {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-team-cloud-")));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const team = { id: "team-cloud", name: "Acme", origin: "https://omb-t-acme.fly.dev" };
-  const account = { status: "connected", account: { id: "acct_1" }, teams: [{ id: "team-acme", name: "Acme", role: "member", machine: { status: "ready", origin: team.origin } }] };
-  const target = createLendingTarget({ account: () => ({ state: () => account }), environments: () => [team] });
-  const calls = [];
-  const sharing = createComputerSharing({
-    file: path.join(dir, "computer-sharing.json"), environments: () => [team], enabled: async () => false, cuaConnection: async () => null, home: path.join(dir, "home"),
-    fetch: async (url) => { calls.push(url); throw new Error("must not call a Team Cloud"); }, cloud: target.cloud, myCloud: target.environment, ownClouds: target.places,
-    WebSocket: class { constructor() { calls.push("dial"); } },
-  });
-  t.after(() => sharing.close());
-  sharing.start();
-  sharing.cloudChanged();
-  await delay(100);
-  assert.equal(target.environment(), null);
-  assert.deepEqual(calls, []);
-  assert.equal(sharing.cloudState(team).enabled, false);
-  await assert.rejects(readFile(path.join(dir, "computer-sharing.json"), "utf8"), { code: "ENOENT" });
-});
-
-test("another Cloud of the person's own going to sleep holds only its own link: My Cloud's keeps lending, and the sleeping one isn't dialled again at once", async (t) => {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-use-my-mac-")));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const OTHER = "https://omb-c-a.fly.dev";
-  const mine = env, other = { id: "client-a", name: "Client A", origin: OTHER, cloud: { id: "c-a", role: "owner" } };
-  const homes = { [ORIGIN]: cloudHome(), [OTHER]: cloudHome() };
-  const sockets = fakeSockets((url) => { const at = new URL(url.replace(/^wss:/, "https:")); return homes[at.origin].registered.has(at.pathname.split("/")[3]); });
-  const power = createCloudPowerGate({ power: () => null, holdMs: 60_000 });
-  const sharing = createComputerSharing({
-    file: path.join(dir, "profile", "computer-sharing.json"), fetch: (url, init) => homes[new URL(url).origin].fetch(url, init), environments: () => [mine, other],
-    enabled: async () => false, myCloud: () => mine, cloud: (place) => ({ status: "connected", accountId: "acct_1", origin: place?.cloud ? place.origin : ORIGIN }),
-    home: path.join(dir, "home"), cuaConnection: async () => null, power, WebSocket: sockets.FakeSocket, linkHeaders: () => ({}),
-  });
-  t.after(() => sharing.close());
-  await sharing.saveCloud(mine, { folders: [], screen: false, internet: true });
-  await sharing.saveCloud(other, { folders: [], screen: false, internet: true });
-  const to = (origin) => sockets.made.filter((socket) => socket.url.startsWith(origin.replace("https:", "wss:")));
-  await until(() => to(ORIGIN).some((socket) => !socket.closed) && to(OTHER).some((socket) => !socket.closed), "both links to open");
-  to(OTHER)[0].end(4001, "asleep");
-  await delay(400);
-  assert.equal(power.asleep(), false, "My Cloud's gate never holds for another Cloud");
-  assert.equal(to(OTHER).length, 1, "the Cloud going to sleep is not dialled again at once");
-  assert.equal(to(ORIGIN).filter((socket) => !socket.closed).length, 1, "My Cloud's link stays open");
-});
-
-test("another Cloud of the person's own that the Admin says is asleep is never dialled, even after its own hold ends, and lends once the Admin says it is awake", async (t) => {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-use-my-mac-")));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const OTHER = "https://omb-c-b.fly.dev";
-  const mine = env, other = { id: "client-b", name: "Client B", origin: OTHER, cloud: { id: "c-b", role: "owner" } };
-  const homes = { [ORIGIN]: cloudHome(), [OTHER]: cloudHome() };
-  const sockets = fakeSockets((url) => { const at = new URL(url.replace(/^wss:/, "https:")); return homes[at.origin].registered.has(at.pathname.split("/")[3]); });
-  // The Admin's word on each Cloud, as the session's Clouds list carries it (`power`): My Cloud awake, Client B asleep.
-  let words = { [ORIGIN]: { state: "awake", since: 1, sleeps: true }, [OTHER]: { state: "asleep", since: 1, sleeps: true } };
-  const power = createCloudPowerGate({ power: () => words[ORIGIN], holdMs: 60_000 });
-  const sharing = createComputerSharing({
-    file: path.join(dir, "profile", "computer-sharing.json"), fetch: (url, init) => homes[new URL(url).origin].fetch(url, init), environments: () => [mine, other],
-    enabled: async () => false, myCloud: () => mine, ownClouds: () => [mine, other], cloud: (place) => ({ status: "connected", accountId: "acct_1", origin: place?.cloud ? place.origin : ORIGIN }),
-    home: path.join(dir, "home"), cuaConnection: async () => null, power, WebSocket: sockets.FakeSocket, linkHeaders: () => ({}),
-    cloudPower: (origin) => words[origin] ?? null,
-  });
-  t.after(() => sharing.close());
-  sharing.start();
-  await until(() => sharing.cloudState(other).problem === "asleep" && sharing.cloudState(mine).link === "on", "My Cloud to lend and Client B to wait");
-  await delay(300);
-  assert.equal(sharing.cloudState(other).enabled, true, "it is lent");
-  assert.deepEqual(homes[OTHER].calls, [], "nothing called the Cloud the Admin says is asleep: any request reaching it wakes it");
-  // The Admin's word changing (a session read) lets it go on.
-  words = { ...words, [OTHER]: { state: "awake", since: 2, sleeps: true } };
-  sharing.cloudChanged();
-  await until(() => sharing.cloudState(other).link === "on" && homes[OTHER].connects.length === 1, "Client B's link to open once the Admin says it is awake");
 });

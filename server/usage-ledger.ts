@@ -1,5 +1,4 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
-import { personOf } from "./usage-attribution.ts";
 import { readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,14 +9,12 @@ import { billableFor, type PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
 
 /** `helper`: a job the helper model wrote for `botId`, kept apart from `bot` so its cost reads on its own. */
-/** `email` on an owner, routine, bot or helper row: the person it was spent for (`usage-attribution.ts`), such as the
- * person whose turn delegated to it. */
 export type UsageTrigger =
   | { kind: "user"; email?: string; label?: string }
-  | { kind: "owner"; email?: string }
-  | { kind: "routine"; routineId?: string; label?: string; runId?: string; email?: string }
-  | { kind: "bot"; botId?: string; email?: string }
-  | { kind: "helper"; botId?: string; job?: string; email?: string };
+  | { kind: "owner" }
+  | { kind: "routine"; routineId?: string; label?: string; runId?: string }
+  | { kind: "bot"; botId?: string }
+  | { kind: "helper"; botId?: string; job?: string };
 
 export interface UsageRow {
   at: string;
@@ -34,8 +31,6 @@ export interface UsageRow {
   costUsd: number | null;
   costSource?: CostSource;
   trigger: UsageTrigger;
-  /** The bot's department when the row was booked. */
-  section?: string;
   /** Trace fields, on rows booked since traces were recorded: older rows have none and show as untimed. */
   turnId?: string;
   startedAt?: string;
@@ -53,8 +48,8 @@ export interface UsageRow {
   usageStatus?: TraceUsageStatus;
 }
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";
-export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine", "department"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
+export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine"];
 
 export interface UsageGroup {
   key: string;
@@ -253,20 +248,14 @@ function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: st
       return { key: `bot:${row.botId}`, label: row.botName || row.botId };
     case "model":
       return { key: `model:${row.driverKind}/${row.model}`, label: row.model };
-    case "user": {
-      // A routine's or a teammate's work for a known person counts as theirs.
-      const email = personOf(row.trigger);
-      return email ? { key: `user:${email.toLowerCase()}`, label: email } : { key: triggerKey(row.trigger), label: triggerLabel(row.trigger) };
-    }
+    case "user":
+      return { key: triggerKey(row.trigger), label: triggerLabel(row.trigger) };
     case "day":
       return { key: `day:${row.at.slice(0, 10)}`, label: row.at.slice(0, 10) };
     case "routine":
       return row.trigger.kind === "routine"
         ? { key: triggerKey(row.trigger), label: row.trigger.label ?? row.trigger.routineId ?? "unknown" }
         : { key: "manual", label: "Not from a routine" };
-    case "department":
-      return { key: `department:${row.section ?? ""}`, label: row.section ?? "" };
-
     default:
       return { key: `engine:${row.driverKind}`, label: row.driverKind };
   }
@@ -330,7 +319,7 @@ export function csvCell(value: string | number | null): string {
 }
 
 export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): string {
-  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread", "department", "person"];
+  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push([
@@ -346,8 +335,6 @@ export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): str
       costSourceOf(row),
       ...(prices ? [billableFor(row, prices)] : []),
       row.threadId,
-      row.section ?? "",
-      personOf(row.trigger) ?? "",
     ].map(csvCell).join(","));
   }
   return lines.join("\n") + "\n";

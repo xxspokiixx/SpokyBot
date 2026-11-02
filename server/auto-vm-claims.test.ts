@@ -16,27 +16,7 @@ describe("startAutoVmClaim", () => {
     startAutoVmClaim(table, "t1", "gen-1");
     startAutoVmClaim(table, "t1", "gen-1");
     await table.get("t1")!.begin;
-    expect(claim).toHaveBeenCalledExactlyOnceWith(undefined);
-  });
-
-  it("hands the claim what the first screen call would open, so the person's question can name it", async () => {
-    const table: AutoVmClaimTable = new Map();
-    const claim = vi.fn(async () => undefined);
-    table.set("t1", slot(claim));
-    startAutoVmClaim(table, "t1", "gen-1", { app: "Chrome", site: "calendar.google.com" });
-    await table.get("t1")!.begin;
-    expect(claim).toHaveBeenCalledExactlyOnceWith({ app: "Chrome", site: "calendar.google.com" });
-  });
-
-  it("takes a person's No as an answer: the slot refuses later calls, and no failed turn is reported", async () => {
-    const table: AutoVmClaimTable = new Map();
-    const onRejected = vi.fn();
-    const declined = Object.assign(new Error("the person said no to using their own computer"), { declined: true });
-    table.set("t1", { ...slot(async () => { throw declined; }), onRejected });
-    startAutoVmClaim(table, "t1", "gen-1");
-    await table.get("t1")!.begin;
-    expect(table.get("t1")).toMatchObject({ failed: true, failure: "the person said no to using their own computer" });
-    expect(onRejected).not.toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledExactlyOnceWith();
   });
 
   it("refuses to fire for a different dispatch generation", () => {
@@ -59,13 +39,13 @@ describe("startAutoVmClaim", () => {
     expect(table.get("t1")!.owner.generation).toBe("gen-1");
     startAutoVmClaim(table, "t1", "gen-1");
     startAutoVmClaim(table, "t1", "gen-1");
-    expect(claim).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(claim).toHaveBeenCalledExactlyOnceWith();
     table.delete("t1");
     const next = vi.fn(async () => undefined);
     table.set("t1", slot(next, "gen-2"));
     startAutoVmClaim(table, "t1", "gen-2");
     await table.get("t1")!.begin;
-    expect(next).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(next).toHaveBeenCalledExactlyOnceWith();
     expect(table.get("t1")!.failed).toBeUndefined();
   });
 
@@ -77,7 +57,7 @@ describe("startAutoVmClaim", () => {
     await table.get("t1")!.begin;
     startAutoVmClaim(table, "t1", "gen-1");
     await Promise.resolve();
-    expect(claim).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(claim).toHaveBeenCalledExactlyOnceWith();
     expect(table.has("t1")).toBe(true);
   });
 

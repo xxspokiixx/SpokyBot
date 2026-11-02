@@ -44,7 +44,7 @@ export function parseAccountConsent(result) {
  * `pending` and is sent again on the next launch, sign-in or look at Settings.
  */
 export function createUpdatesConsent({ prefs, account, available, now = Date.now, onChange = () => {} }) {
-  let running = null, choices = 0;
+  let running = null;
   const client = () => account();
   const signedIn = () => {
     const current = client()?.state();
@@ -52,53 +52,38 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
   };
   const save = record => { prefs.setUpdatesConsent(record); onChange(); };
 
-  async function signedOutSync(local, sameAnswer) {
+  async function signedOutSync(local) {
     if (!local?.pending || local.account) return;
     if (local.status === "opted_in" && local.email) {
       const receipt = await client().updatesConsentByEmail({ email: local.email, installId: prefs.installId(), textVersion: local.version });
-      if (sameAnswer()) return save({ ...local, receipt, pending: false });
-      const latest = prefs.updatesConsent();
-      const sendsItsOwnOptIn = latest?.status === "opted_in" && latest.email;
-      if (latest && !latest.account && !latest.receipt && !sendsItsOwnOptIn) save({ ...latest, receipt });
+      save({ ...local, receipt, pending: false });
     } else if (local.status !== "opted_in" && local.receipt) {
       await client().withdrawUpdatesConsent({ status: local.status, receipt: local.receipt });
-      if (sameAnswer()) save({ ...local, pending: false });
+      save({ ...local, pending: false });
     } else save({ ...local, pending: false });
   }
 
-  async function reconcile(sameAnswer, fresh) {
-    const keep = record => { if (fresh()) save(record); };
+  async function reconcile() {
     if (!client() || !await available()) return;
     const local = prefs.updatesConsent(), who = signedIn();
-    if (!who) return signedOutSync(local, sameAnswer);
+    if (!who) return signedOutSync(local);
     if (local?.pending && local.account === who.id) {
       await client().recordUpdatesConsent(local.status, local.version);
-      keep({ ...local, pending: false });
+      save({ ...local, pending: false });
       return;
     }
     const remote = parseAccountConsent(await client().updatesConsent());
-    if (!fresh()) return;
     if (remote) {
       if (local?.status !== remote.status || local.account !== who.id || local.pending)
-        keep({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}) });
+        save({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}) });
       return;
     }
     if (!local) return;
     await client().recordUpdatesConsent(local.status, local.version);
-    keep({ ...local, account: who.id, pending: false });
+    save({ ...local, account: who.id, pending: false });
   }
 
-  async function settle() {
-    for (;;) {
-      const answer = choices, who = signedIn()?.id ?? null;
-      const sameAnswer = () => choices === answer;
-      const fresh = () => sameAnswer() && (signedIn()?.id ?? null) === who;
-      try { await reconcile(sameAnswer, fresh); } catch (error) { if (fresh()) throw error; }
-      if (fresh()) return;
-    }
-  }
-
-  const sync = () => running ??= settle().finally(() => { running = null; });
+  const sync = () => running ??= reconcile().finally(() => { running = null; });
 
   const snapshot = () => {
     const local = prefs.updatesConsent(), who = signedIn();
@@ -121,7 +106,6 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
     const who = signedIn(), previous = prefs.updatesConsent();
     const email = !who && status === "opted_in" ? typed ?? previous?.email ?? null : previous?.email ?? null;
     const newEmail = status === "opted_in" && email !== null;
-    choices++;
     save({ status, version: UPDATES_CONSENT_VERSION, at: now(), pending: true,
       ...(who ? { account: who.id } : {}), ...(email ? { email } : {}),
       ...(!who && previous?.receipt && !newEmail ? { receipt: previous.receipt } : {}) });

@@ -7,8 +7,7 @@ import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { api, type Bot, type Message } from "@/state/store";
-import { useStoreRef } from "@/state/store-ref";
+import { api, useStore, type Bot, type Message } from "@/state/store";
 
 const LABEL: Record<Reaction, LocaleKey> = {
   "👍": "chat.reaction.yes",
@@ -34,7 +33,7 @@ const newestTap = new Map<string, number>();
 let taps = 0;
 
 function useReaction(threadId: string, message: Message) {
-  const { dispatch } = useStoreRef();
+  const { dispatch } = useStore();
   const me = useReactor();
   const latest = useRef(message);
   useLayoutEffect(() => { latest.current = message; });
@@ -131,7 +130,7 @@ export function ReactAction({ threadId, message }: { threadId: string; message: 
           aria-label={t("chat.reactions")}
           onKeyDown={onKey}
           className={cn(
-            "popover-surface absolute bottom-full z-40 mb-1 flex animate-pop-in items-center gap-0.5 rounded-full border border-hairline/50 bg-menu p-1 shadow-2xl shadow-black/40",
+            "absolute bottom-full z-40 mb-1 flex animate-pop-in items-center gap-0.5 rounded-full border border-hairline/50 bg-menu p-1 shadow-2xl shadow-black/40",
             end ? "end-0" : "start-0",
           )}
         >
@@ -192,7 +191,7 @@ function Chips({ threadId, message, bots = [], align = "start", canReact = true 
         const face = (
           <>
             <span aria-hidden="true">{emoji}</span>
-            {people.length > 1 && <span aria-hidden="true" className="text-[12px] tabular-nums text-ink-secondary">{people.length}</span>}
+            {people.length > 1 && <span aria-hidden="true" className="text-[11.5px] tabular-nums text-ink-secondary">{people.length}</span>}
           </>
         );
         return canReact && Object.hasOwn(LABEL, emoji) ? (

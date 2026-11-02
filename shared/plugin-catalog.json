@@ -1,0 +1,3233 @@
+[
+  {
+    "id": "advisor",
+    "name": "Advisor",
+    "description": "Consult a stronger model at key checkpoints: before major decisions, when stuck on an error, and before declaring a task done. The advisor gets a full briefing plus the conversation transcript, returns guidance, and the main model keeps doing the work.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/advisor",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "advisor"
+    }
+  },
+  {
+    "id": "agent-compatibility",
+    "name": "Agent Compatibility",
+    "description": "CLI-backed repo compatibility scans plus agents that audit startup, validation, and docs against reality.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/agent-compatibility",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "agent-compatibility"
+    }
+  },
+  {
+    "id": "ahrefs",
+    "name": "Ahrefs",
+    "description": "Research keywords, backlinks, rankings, and site health.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://ahrefs.com/mcp",
+    "mcp": {
+      "url": "https://api.ahrefs.com/mcp/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "amplemarket",
+    "name": "Amplemarket",
+    "description": "Search people and companies, enrich leads, run sequences.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://knowledge.amplemarket.com/articles/8022685319-connecting-to-the-amplemarket-mcp-server",
+    "mcp": {
+      "url": "https://mcp.amplemarket.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:read",
+        "mcp:write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "apify",
+    "name": "Apify",
+    "description": "Run Apify Actors and read their datasets.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://docs.apify.com/platform/integrations/mcp",
+    "mcp": {
+      "url": "https://mcp.apify.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "full_api_access"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.apify.com/platform/integrations/mcp",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "asana",
+    "name": "Asana",
+    "description": "Read and update Asana tasks and projects.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://developers.asana.com/docs/using-asanas-mcp-server",
+    "mcp": {
+      "url": "https://mcp.asana.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "default"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://developers.asana.com/docs/using-asanas-mcp-server",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "ashby",
+    "name": "Ashby",
+    "description": "Search candidates, prep interviews, and manage pipeline tasks.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.ashbyhq.com/ashby-mcp-server-beta",
+    "mcp": {
+      "url": "https://mcp.ashbyhq.com/mcp/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "mcp",
+        "offline_access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "atlassian",
+    "name": "Atlassian",
+    "description": "Work across Jira, Confluence, and Bitbucket through the Atlassian Rovo MCP server.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://developer.atlassian.com/cloud/rovo-mcp/guides/getting-started/",
+    "mcp": {
+      "url": "https://mcp.atlassian.com/v2/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "read:me",
+        "read:account",
+        "offline_access",
+        "email",
+        "read:jira:agent-interface",
+        "write:jira:agent-interface",
+        "search:jira:agent-interface",
+        "delete:jira:agent-interface",
+        "manage:jira:agent-interface",
+        "read:confluence:agent-interface",
+        "write:confluence:agent-interface",
+        "search:confluence:agent-interface",
+        "search:rovo:agent-interface",
+        "search:code:agent-interface",
+        "read:jsm:agent-interface",
+        "write:jsm:agent-interface",
+        "read:all:twg",
+        "write:all:twg",
+        "read:goals:agent-interface",
+        "write:goals:agent-interface",
+        "read:projects:agent-interface",
+        "write:projects:agent-interface",
+        "read:bitbucket:agent-interface",
+        "write:bitbucket:agent-interface",
+        "read:loom:agent-interface",
+        "write:loom:agent-interface",
+        "read:talent:agent-interface",
+        "write:talent:agent-interface",
+        "read:jira-align:agent-interface",
+        "write:jira-align:agent-interface",
+        "read:teams:agent-interface",
+        "write:teams:agent-interface",
+        "read:artifacts:agent-interface",
+        "write:artifacts:agent-interface",
+        "read:capacity-planning:agent-interface",
+        "write:capacity-planning:agent-interface",
+        "read:focus:agent-interface",
+        "write:focus:agent-interface",
+        "read:assets:agent-interface",
+        "write:assets:agent-interface"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://developer.atlassian.com/cloud/rovo-mcp/guides/getting-started/",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "attio",
+    "name": "Attio",
+    "description": "Search and update CRM records, lists, notes, and tasks.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.attio.com/mcp/overview",
+    "mcp": {
+      "url": "https://mcp.attio.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp",
+        "offline_access",
+        "openid"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "beehiiv",
+    "name": "beehiiv",
+    "description": "Run your beehiiv newsletter from chat: draft and edit posts, organize subscribers with tags, custom fields, and segments, build automations, and review publication, post, and website performance.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.beehiiv.com/support/article/39255979546263-getting-started-with-the-beehiiv-mcp",
+    "mcp": {
+      "url": "https://mcp.beehiiv.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "read",
+        "write",
+        "openid",
+        "email"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "brevo",
+    "name": "Brevo",
+    "description": "Manage contacts, email and SMS campaigns, and CRM deals.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.brevo.com/docs/mcp-protocol",
+    "mcp": {
+      "url": "https://mcp.brevo.com/v1/brevo/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "all"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "brex",
+    "name": "Brex",
+    "description": "Query expenses, receipts, bills, cards, and travel.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.brex.com/docs/mcp",
+    "mcp": {
+      "url": "https://api.brex.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "offline_access",
+        "email",
+        "users.readonly",
+        "departments.readonly",
+        "locations.readonly",
+        "titles.readonly",
+        "legal_entities.readonly",
+        "cards.readonly",
+        "cards",
+        "companies.readonly",
+        "budgets.readonly",
+        "travel.trips.readonly",
+        "expenses.card.readonly",
+        "expenses.card",
+        "expenses.bill",
+        "accounts.cash.readonly",
+        "vendors.readonly",
+        "accounting.integration.read",
+        "accounting.record.read",
+        "fields.read",
+        "field_values.read"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "buffer",
+    "name": "Buffer",
+    "description": "Manage social media with Buffer: draft, schedule, and publish posts across connected channels, manage the queue and ideas, and review post performance.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.buffer.com/guides/integrations/mcp.html",
+    "mcp": {
+      "url": "https://mcp.buffer.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "posts:read",
+        "posts:write",
+        "ideas:read",
+        "ideas:write",
+        "account:read",
+        "account:write",
+        "insights:read",
+        "engagements:read",
+        "engagements:write",
+        "snippets:read",
+        "snippets:write",
+        "channels:write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "calendly",
+    "name": "Calendly",
+    "description": "Check availability and book, cancel, or reschedule.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.calendly.com/calendly-mcp-server",
+    "mcp": {
+      "url": "https://mcp.calendly.com/",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:scheduling:write",
+        "mcp:scheduling:read"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "canva",
+    "name": "Canva",
+    "description": "Find and edit Canva designs.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://www.canva.dev/docs/connect/mcp-server/",
+    "mcp": {
+      "url": "https://mcp.canva.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "profile:read",
+        "design:meta:read",
+        "design:content:write",
+        "design:content:read",
+        "folder:read",
+        "folder:write",
+        "brandtemplate:content:read",
+        "brandtemplate:meta:read",
+        "brandtemplate:content:write",
+        "comment:write",
+        "comment:read",
+        "asset:read",
+        "asset:write",
+        "brandkit:read",
+        "help:answers:read",
+        "help:answers:write"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://www.canva.dev/docs/connect/mcp-server/",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "circleback",
+    "name": "Circleback",
+    "description": "Search meetings, transcripts, action items, and emails.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://support.circleback.ai/en/articles/13249081-circleback-mcp",
+    "mcp": {
+      "url": "https://circleback.ai/api/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "user",
+        "user:write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "clay",
+    "name": "Clay",
+    "description": "Enrich people and companies, run AI research agents.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://university.clay.com/docs/connect-to-clay-mcp",
+    "mcp": {
+      "url": "https://api.clay.com/v3/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "cli-for-agent",
+    "name": "CLI for Agents",
+    "description": "Patterns for designing CLIs that coding agents can run reliably: non-interactive flags, layered help with examples, pipelines, actionable errors, idempotency, and dry-run.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/cli-for-agent",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "cli-for-agent"
+    }
+  },
+  {
+    "id": "cloudflare",
+    "name": "Cloudflare",
+    "description": "Manage Cloudflare account resources through Cloudflare’s hosted MCP server.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://developers.cloudflare.com/agents/model-context-protocol/",
+    "mcp": {
+      "url": "https://mcp.cloudflare.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "user:read",
+        "account:read"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://developers.cloudflare.com/agents/model-context-protocol/",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "coda",
+    "name": "Coda",
+    "description": "Search docs, read pages, and update tables.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://help.superhuman.com/hc/en-us/articles/46210076980365-Connect-to-the-Coda-MCP",
+    "mcp": {
+      "url": "https://docs.superhuman.com/apis/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:all"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "coinbase",
+    "name": "Coinbase",
+    "description": "Check balances, get quotes, and preview or place trades.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.cdp.coinbase.com/coinbase-for-agents/overview",
+    "mcp": {
+      "url": "https://agents.coinbase.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:portfolios:read",
+        "mcp:portfolios:update",
+        "mcp:accounts:read",
+        "mcp:orders:read",
+        "mcp:orders:create",
+        "mcp:orders:delete",
+        "mcp:trades:read",
+        "mcp:trades:create",
+        "mcp:transfers:create",
+        "mcp:products:read"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "continual-learning",
+    "name": "Continual Learning",
+    "description": "Incremental transcript-driven memory updates for AGENTS.md. Skills pack, not an MCP connector.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/continual-learning",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "continual-learning"
+    }
+  },
+  {
+    "id": "craft",
+    "name": "Craft",
+    "description": "Search, create, and update documents and daily notes.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.craft.do/imagine/guide/mcp",
+    "mcp": {
+      "url": "https://mcp.craft.do/my/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "create-plugin",
+    "name": "Create Plugin",
+    "description": "Scaffold and validate new agent plugins. Handles directory setup, manifest generation, and pre-submission quality checks for the marketplace.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "create-plugin"
+    }
+  },
+  {
+    "id": "cursor-sdk",
+    "name": "Cursor SDK",
+    "description": "Build apps, scripts, and automations with the TypeScript SDK.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/cursor-sdk",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "cursor-sdk"
+    }
+  },
+  {
+    "id": "cursor-team-kit",
+    "name": "Cursor Team Kit",
+    "description": "Internal engineering team workflows for CI, code review, shipping, control-cli, control-ui, verify-this, test reliability, code cleanup, and work summaries. Designed to work without requiring third-party service integrations.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "cursor-team-kit"
+    }
+  },
+  {
+    "id": "customer-io",
+    "name": "Customer.io",
+    "description": "Build campaigns, manage segments, and query people.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.customer.io/ai/mcp/",
+    "mcp": {
+      "url": "https://mcp.customer.io/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "configure",
+        "read",
+        "read:sensitive",
+        "write",
+        "write:live"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "daloopa",
+    "name": "Daloopa",
+    "description": "Pull source-linked fundamentals, KPIs, filings, and prices.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.daloopa.com/docs/daloopa-mcp",
+    "mcp": {
+      "url": "https://mcp.daloopa.com/server/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "databricks-genie-one",
+    "name": "Databricks Genie One",
+    "description": "Ask Databricks Genie questions about your workspace's data in plain language.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/databricks-genie-one"
+  },
+  {
+    "id": "docs-canvas",
+    "name": "Docs Canvas",
+    "description": "Render documentation as a navigable canvas.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/docs-canvas",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "docs-canvas"
+    }
+  },
+  {
+    "id": "docusign",
+    "name": "Docusign",
+    "description": "Manage envelopes, templates, workflows, and agreements.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.docusign.com/platform/mcp-server/",
+    "mcp": {
+      "url": "https://mcp.docusign.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "dyl-stack",
+    "name": "dyl-stack",
+    "description": "Dylan's agent style on top of pstack: root causes over symptom patches, The Algorithm before design, terse verified delivery, a PR review that fits in a paste, and Figma-to-UI with a visual judge.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/dyl-stack",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "dyl-stack"
+    }
+  },
+  {
+    "id": "etoro-trading",
+    "name": "etoro",
+    "description": "View your eToro portfolio, balances, positions, and watchlists, research instruments and traders, and prepare and place trades.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://api-portal.etoro.com/core/vibe-code/cursor",
+    "mcp": {
+      "url": "https://mcp.public-api.etoro.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": true,
+      "registrationDocsUrl": "https://api-portal.etoro.com/core/vibe-code/cursor",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "exa",
+    "name": "Exa",
+    "description": "Search and fetch pages with Exa.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://docs.exa.ai/",
+    "mcp": {
+      "url": "https://mcp.exa.ai/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:tools"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.exa.ai/",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "excalidraw",
+    "name": "Excalidraw",
+    "description": "Draw and export hand-drawn diagrams from chat.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/excalidraw/excalidraw-mcp",
+    "mcp": {
+      "url": "https://mcp.excalidraw.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "fathom",
+    "name": "Fathom",
+    "description": "Search meetings and pull transcripts and summaries.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.fathom.ai/mcp-docs",
+    "mcp": {
+      "url": "https://api.fathom.ai/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "feishu",
+    "name": "Feishu",
+    "description": "Search, create, and update Feishu docs, and read Feishu messages and groups.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_introduction",
+    "mcp": {
+      "url": "https://mcp.feishu.cn/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp-tool:common:fetch-file-v2",
+        "mcp-tool:common:get-user",
+        "mcp-tool:common:search-user",
+        "mcp-tool:docs:search-doc",
+        "mcp-tool:docs:create-doc",
+        "mcp-tool:docs:fetch-doc",
+        "mcp-tool:docs:update-doc",
+        "mcp-tool:docs:get-comments",
+        "mcp-tool:docs:add-comments",
+        "mcp-tool:docs:list-docs-v2",
+        "mcp-tool:im:search-groups",
+        "mcp-tool:im:get-group-members",
+        "mcp-tool:im:get-messages",
+        "mcp-tool:im:get-thread-messages",
+        "mcp-tool:im:search-messages",
+        "mcp-tool:im:get-read-status",
+        "offline_access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "figma",
+    "name": "Figma",
+    "description": "Read Figma files and design context.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://developers.figma.com/docs/figma-mcp-server/",
+    "mcp": {
+      "url": "https://mcp.figma.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:connect"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://developers.figma.com/docs/figma-mcp-server/",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "finance",
+    "name": "Finance",
+    "description": "Link your bank, card, and investment accounts through Plaid so Grok can answer questions about balances, spending, subscriptions, and investments. You'll share contact details, account and balance info, transactions, credit and loans, and investments. Grok syncs and stores your linked account data so the connector can work, and Grok Bot's privacy mode still controls whether your conversations are stored or used for training. Access is read-only, xAI never sees or stores your bank login, and you can unlink accounts anytime from cursor.com.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://grok.com/connectors",
+    "mcp": {
+      "url": "https://connectors-gateway.grok.com/gateway/v1/finance/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "finary",
+    "name": "Finary",
+    "description": "Read your net worth, accounts, holdings, spending, and budgets.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://finary.com/en/mcp",
+    "mcp": {
+      "url": "https://public-api.finary.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "profile",
+        "email"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "firecrawl",
+    "name": "Firecrawl",
+    "description": "Crawl and extract pages. No stable public OAuth MCP URL is documented, so add the server from Firecrawl’s docs.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://docs.firecrawl.dev"
+  },
+  {
+    "id": "fireflies",
+    "name": "Fireflies",
+    "description": "Search meeting transcripts, summaries, and action items.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.fireflies.ai/getting-started/mcp-configuration",
+    "mcp": {
+      "url": "https://api.fireflies.ai/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "profile",
+        "email"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "framer",
+    "name": "Framer",
+    "description": "Design, build, and edit your Framer sites, pages, and CMS content.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.framer.com",
+    "mcp": {
+      "url": "https://mcp.framer.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:project"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "gamma",
+    "name": "Gamma",
+    "description": "Generate presentations, documents, and webpages.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.gamma.app/mcp/gamma-mcp-server.md",
+    "mcp": {
+      "url": "https://mcp.gamma.app/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "generate",
+        "gamma:read"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "description": "Manage repos, issues, pull requests, and Actions.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.github.com/en/copilot/how-tos/context/use-mcp/use-the-github-mcp-server",
+    "mcp": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "repo",
+        "read:org",
+        "read:user",
+        "user:email",
+        "read:packages",
+        "write:packages",
+        "read:project",
+        "project",
+        "gist",
+        "notifications"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "gmail",
+    "name": "Gmail",
+    "description": "Search, read, draft, and manage email.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/gmail",
+    "mcp": {
+      "url": "https://gmailmcp.googleapis.com/mcp/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.drafts",
+        "https://www.googleapis.com/auth/gmail.drafts.create",
+        "https://www.googleapis.com/auth/gmail.drafts.readonly",
+        "https://www.googleapis.com/auth/gmail.labels",
+        "https://www.googleapis.com/auth/gmail.metadata",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.settings.basic"
+      ],
+      "clientId": "990275019107-584m2ummrr63q5audsv7iqbqv7krnofp.apps.googleusercontent.com",
+      "verified": true,
+      "registrationDocsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "godaddy",
+    "name": "GoDaddy",
+    "description": "Brainstorm domain names and check availability.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.godaddy.com/en/docs/api-users/mcp",
+    "mcp": {
+      "url": "https://api.godaddy.com/v1/domains/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "gong",
+    "name": "Gong",
+    "description": "Pull account summaries, deal insights, and call briefs.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://help.gong.io/docs/about-gong-mcp-server",
+    "mcp": {
+      "url": "https://mcp.gong.io/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:read",
+        "mcp:write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "google-ads",
+    "name": "Google Ads",
+    "description": "Report on campaigns, research keywords, and make previewed changes.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/google-ads"
+  },
+  {
+    "id": "google-calendar",
+    "name": "Google Calendar",
+    "description": "Search events and schedule meetings.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/google-calendar",
+    "mcp": {
+      "url": "https://calendarmcp.googleapis.com/mcp/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.acls",
+        "https://www.googleapis.com/auth/calendar.calendarlist",
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        "https://www.googleapis.com/auth/calendar.calendars",
+        "https://www.googleapis.com/auth/calendar.calendars.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.events.freebusy",
+        "https://www.googleapis.com/auth/calendar.events.readonly",
+        "https://www.googleapis.com/auth/calendar.freebusy",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.settings.readonly"
+      ],
+      "clientId": "990275019107-584m2ummrr63q5audsv7iqbqv7krnofp.apps.googleusercontent.com",
+      "verified": true,
+      "registrationDocsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "google-cloud-bigquery",
+    "name": "Google Cloud BigQuery",
+    "description": "Explore datasets and tables and run SQL queries.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.cloud.google.com/bigquery/docs/use-bigquery-mcp",
+    "mcp": {
+      "url": "https://bigquery.googleapis.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "https://www.googleapis.com/auth/bigquery"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "google-docs",
+    "name": "Google Docs",
+    "description": "Read, create, and edit documents.",
+    "category": "productivity",
+    "kind": "both",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/google-docs",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "third_party/google-docs"
+    },
+    "mcp": {
+      "url": "https://docsmcp.googleapis.com/mcp/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/documents.readonly",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/documents"
+      ],
+      "clientId": "990275019107-584m2ummrr63q5audsv7iqbqv7krnofp.apps.googleusercontent.com",
+      "verified": true,
+      "registrationDocsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "google-drive",
+    "name": "Google Drive",
+    "description": "Search, read, create, and share files.",
+    "category": "productivity",
+    "kind": "both",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/google-drive",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "third_party/google-drive"
+    },
+    "mcp": {
+      "url": "https://drivemcp.googleapis.com/mcp/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.file"
+      ],
+      "clientId": "990275019107-584m2ummrr63q5audsv7iqbqv7krnofp.apps.googleusercontent.com",
+      "verified": true,
+      "registrationDocsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "google-sheets",
+    "name": "Google Sheets",
+    "description": "Read, write, and append spreadsheet data.",
+    "category": "productivity",
+    "kind": "both",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/google-sheets",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "third_party/google-sheets"
+    },
+    "mcp": {
+      "url": "https://sheetsmcp.googleapis.com/mcp/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/spreadsheets"
+      ],
+      "clientId": "990275019107-584m2ummrr63q5audsv7iqbqv7krnofp.apps.googleusercontent.com",
+      "verified": true,
+      "registrationDocsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "google-slides",
+    "name": "Google Slides",
+    "description": "Create, edit, and render presentations.",
+    "category": "productivity",
+    "kind": "both",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/google-slides",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "third_party/google-slides"
+    },
+    "mcp": {
+      "url": "https://slidesmcp.googleapis.com/mcp/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/presentations.readonly",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/presentations"
+      ],
+      "clientId": "990275019107-584m2ummrr63q5audsv7iqbqv7krnofp.apps.googleusercontent.com",
+      "verified": true,
+      "registrationDocsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "gopuff",
+    "name": "Gopuff",
+    "description": "Shop Gopuff from Grok Bot through Gopuff's official MCP server. Sign in with your Gopuff account; Gopuff handles the sign-in, and your searches, carts, and orders go to Gopuff under that account, so any order you place is charged and delivered like a normal Gopuff order.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.gopuff.com",
+    "mcp": {
+      "url": "https://mcp.gopuff.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "greenhouse",
+    "name": "Greenhouse",
+    "description": "Search candidates, jobs, and applications, and review scorecards in Greenhouse Recruiting.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://support.greenhouse.io/hc/en-us/articles/52090956642075-Greenhouse-MCP",
+    "mcp": {
+      "url": "https://mcp.us.greenhouse.io/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "greenhouse:mcp_client"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "grok-voice",
+    "name": "Grok Voice",
+    "description": "Add Grok voice to an app: realtime speech-to-speech, speech-to-text dictation, text-to-speech read-aloud, and a log-driven fix loop for voice sessions.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/grok-voice",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "grok-voice"
+    }
+  },
+  {
+    "id": "guru",
+    "name": "Guru",
+    "description": "Search company knowledge and draft verified answers.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.getguru.com/docs/guru-mcp-server-overview",
+    "mcp": {
+      "url": "https://mcp.api.getguru.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "default"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "gusto",
+    "name": "Gusto",
+    "description": "Work with payroll, employees, contractors, time off, and reports.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.gusto.com/app-integrations/docs/mcp",
+    "mcp": {
+      "url": "https://mcp.api.gusto.com/",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "highlevel",
+    "name": "HighLevel",
+    "description": "Work with contacts, conversations, opportunities, calendars, and payments.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://help.leadconnectorhq.com/support/solutions/articles/155000008185",
+    "mcp": {
+      "url": "https://services.leadconnectorhq.com/mcp/cursor/v2",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "adPublishing.readonly",
+        "adPublishing.write",
+        "affiliate-manager.readonly",
+        "affiliate-manager.write",
+        "agent-studio.readonly",
+        "agent-studio.write",
+        "associations.write",
+        "associations.readonly",
+        "associations/relation.readonly",
+        "associations/relation.write",
+        "blogs/post.write",
+        "blogs/post-update.write",
+        "blogs/check-slug.readonly",
+        "blogs/category.readonly",
+        "blogs/author.readonly",
+        "blogs/posts.readonly",
+        "blogs/list.readonly",
+        "brand-boards/design-kit.readonly",
+        "brand-boards/design-kit.write",
+        "brand-boards/voices.readonly",
+        "brand-boards/voices.write",
+        "businesses.readonly",
+        "businesses.write",
+        "calendars.readonly",
+        "calendars.write",
+        "calendars/events.readonly",
+        "calendars/events.write",
+        "calendars/groups.readonly",
+        "calendars/groups.write",
+        "calendars/resources.readonly",
+        "calendars/resources.write",
+        "campaigns.readonly",
+        "chat-widget.readonly",
+        "chat-widget.write",
+        "clientportal-ai.readonly",
+        "clientportal-ai.write",
+        "contacts.readonly",
+        "contacts.write",
+        "conversation-ai.readonly",
+        "conversation-ai.write",
+        "conversations.readonly",
+        "conversations.write",
+        "conversations/message.readonly",
+        "conversations/message.write",
+        "conversations/reports.readonly",
+        "conversations/livechat.write",
+        "countdown-timer/timer.readonly",
+        "countdown-timer/timer.write",
+        "courses.write",
+        "courses.readonly",
+        "locations/customFields.readonly",
+        "locations/customFields.write",
+        "emails/builder.write",
+        "emails/builder.readonly",
+        "emails/schedule.readonly",
+        "emails/schedule.write",
+        "forms.readonly",
+        "forms.write",
+        "funnels/redirect.readonly",
+        "funnels/page.readonly",
+        "funnels/funnel.readonly",
+        "funnels/pagecount.readonly",
+        "funnels/redirect.write",
+        "invoices.readonly",
+        "invoices.write",
+        "invoices/schedule.readonly",
+        "invoices/schedule.write",
+        "invoices/template.readonly",
+        "invoices/template.write",
+        "invoices/estimate.readonly",
+        "invoices/estimate.write",
+        "knowledge-bases.write",
+        "knowledge-bases.readonly",
+        "lc-email.readonly",
+        "links.readonly",
+        "links.write",
+        "locations.readonly",
+        "locations/customValues.readonly",
+        "locations/customValues.write",
+        "locations/tasks.readonly",
+        "locations/tasks.write",
+        "recurring-tasks.readonly",
+        "recurring-tasks.write",
+        "locations/tags.readonly",
+        "locations/tags.write",
+        "locations/templates.readonly",
+        "charges.readonly",
+        "charges.write",
+        "managed-agents.readonly",
+        "managed-agents.write",
+        "marketplace-installer-details.readonly",
+        "medias.readonly",
+        "medias.write",
+        "objects/schema.readonly",
+        "objects/schema.write",
+        "objects/record.readonly",
+        "objects/record.write",
+        "opportunities.readonly",
+        "opportunities.write",
+        "pipelines.create",
+        "pipelines.readonly",
+        "pipelines.write",
+        "payments/orders.readonly",
+        "payments/orders.write",
+        "payments/orders.collectPayment",
+        "payments/integration.readonly",
+        "payments/integration.write",
+        "payments/transactions.readonly",
+        "payments/subscriptions.readonly",
+        "payments/coupons.readonly",
+        "payments/coupons.write",
+        "payments/custom-provider.readonly",
+        "payments/custom-provider.write",
+        "phonenumbers.read",
+        "phonenumbers.write",
+        "numberpools.read",
+        "products.readonly",
+        "products.write",
+        "products/prices.readonly",
+        "products/prices.write",
+        "products/collection.readonly",
+        "products/collection.write",
+        "projects/workspace.readonly",
+        "projects/workspace.write",
+        "projects/tasks.readonly",
+        "projects/tasks.write",
+        "projects/tasks.comments.readonly",
+        "projects/tasks.comments.write",
+        "projects/tasks.recurring.readonly",
+        "projects/tasks.recurring.write",
+        "documents_contracts/list.readonly",
+        "documents_contracts/sendLink.write",
+        "documents_contracts_template/sendLink.write",
+        "documents_contracts_template/list.readonly",
+        "saas/location.read",
+        "saas/location.write",
+        "socialplanner/oauth.readonly",
+        "socialplanner/oauth.write",
+        "socialplanner/post.readonly",
+        "socialplanner/post.write",
+        "socialplanner/account.readonly",
+        "socialplanner/account.write",
+        "socialplanner/csv.readonly",
+        "socialplanner/csv.write",
+        "socialplanner/category.readonly",
+        "socialplanner/tag.readonly",
+        "socialplanner/statistics.readonly",
+        "socialplanner/category.write",
+        "socialplanner/tag.write",
+        "socialplanner/watermarks.readonly",
+        "socialplanner/watermarks.write",
+        "store/shipping.readonly",
+        "store/shipping.write",
+        "store/setting.readonly",
+        "store/setting.write",
+        "surveys.readonly",
+        "twilioaccount.read",
+        "users.readonly",
+        "users.write",
+        "voice-ai-dashboard.readonly",
+        "voice-ai-agents.readonly",
+        "voice-ai-agents.write",
+        "voice-ai-agent-goals.readonly",
+        "voice-ai-agent-goals.write",
+        "wordpress.site.readonly",
+        "workflows.readonly",
+        "workflows.write",
+        "workflows.publish",
+        "workflows.delete",
+        "workflows.logs",
+        "emails/templates.readonly",
+        "emails/templates.write",
+        "emails/campaigns.readonly",
+        "emails/campaigns.write",
+        "emails/stats.readonly",
+        "files.readonly",
+        "socialplanner/comments.readonly",
+        "socialplanner/comments.write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "hubspot",
+    "name": "HubSpot",
+    "description": "Search HubSpot contacts, companies, and deals.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.hubspot.com/docs/guides/mcp/mcp-server",
+    "mcp": {
+      "url": "https://mcp.hubspot.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": true,
+      "registrationDocsUrl": "https://developers.hubspot.com/docs/guides/apps/public-apps/overview",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "hunter",
+    "name": "Hunter",
+    "description": "Find and verify emails, discover companies, and save leads.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://hunter.io/agents.md",
+    "mcp": {
+      "url": "https://mcp.hunter.io/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "interactive-brokers",
+    "name": "Interactive Brokers",
+    "description": "Review positions, balances, P&L, and draft trade instructions.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.interactivebrokers.com/en/trading/ai-integrations.php",
+    "mcp": {
+      "url": "https://api.ibkr.com/v1/api/mcp-public",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp.read",
+        "mcp.write",
+        "mcp.orders.submit"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "intercom",
+    "name": "Intercom",
+    "description": "Search conversations, contacts, and Help Center articles.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.intercom.com/docs/guides/mcp",
+    "mcp": {
+      "url": "https://mcp.intercom.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp",
+        "operator"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "jobber",
+    "name": "Jobber",
+    "description": "Work with clients, requests, quotes, jobs, visits, and invoices.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.getjobber.com/",
+    "mcp": {
+      "url": "https://mcp.getjobber.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "mcp:read_clients",
+        "mcp:write_clients",
+        "mcp:read_requests",
+        "mcp:write_requests",
+        "mcp:read_quotes",
+        "mcp:write_quotes",
+        "mcp:read_jobs",
+        "mcp:read_invoices",
+        "mcp:read_visits"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "jotform",
+    "name": "Jotform",
+    "description": "Create and edit forms, then read submissions.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.jotform.com/mcp/",
+    "mcp": {
+      "url": "https://mcp.jotform.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "readOnly",
+        "full"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "juicebox",
+    "name": "Juicebox",
+    "description": "Query recruiting analytics, shortlists, and sourcing agents.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.juicebox.ai/juicebox-mcp",
+    "mcp": {
+      "url": "https://mcp.juicebox.ai/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "analytics:read",
+        "agents:write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "klaviyo",
+    "name": "Klaviyo",
+    "description": "Manage profiles, segments, campaigns, and flows.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.klaviyo.com/en/docs/klaviyo_mcp_server",
+    "mcp": {
+      "url": "https://mcp.klaviyo.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "kraken",
+    "name": "Kraken",
+    "description": "Kraken trading. No public hosted MCP URL is documented, so add the server from Kraken’s docs.",
+    "category": "finance",
+    "kind": "connector",
+    "docsUrl": "https://docs.kraken.com"
+  },
+  {
+    "id": "lark",
+    "name": "Lark",
+    "description": "Search, create, and update Lark Suite docs, and read Lark messages and groups.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/mcp_integration/mcp_introduction",
+    "mcp": {
+      "url": "https://mcp.larksuite.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp-tool:common:fetch-file-v2",
+        "mcp-tool:common:get-user",
+        "mcp-tool:common:search-user",
+        "mcp-tool:docs:search-doc",
+        "mcp-tool:docs:create-doc",
+        "mcp-tool:docs:fetch-doc",
+        "mcp-tool:docs:update-doc",
+        "mcp-tool:docs:get-comments",
+        "mcp-tool:docs:add-comments",
+        "mcp-tool:docs:list-docs-v2",
+        "mcp-tool:im:search-groups",
+        "mcp-tool:im:get-group-members",
+        "mcp-tool:im:get-messages",
+        "mcp-tool:im:get-thread-messages",
+        "mcp-tool:im:search-messages",
+        "mcp-tool:im:get-read-status",
+        "offline_access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "linear",
+    "name": "Linear",
+    "description": "Find and update Linear issues, projects, and comments.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://linear.app/docs/mcp",
+    "mcp": {
+      "url": "https://mcp.linear.app/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://linear.app/docs/mcp",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "mailerlite",
+    "name": "MailerLite",
+    "description": "Manage subscribers, groups, campaigns, and automations.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.mailerlite.com/mcp",
+    "mcp": {
+      "url": "https://mcp.mailerlite.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "meltwater",
+    "name": "Meltwater",
+    "description": "Search media and social mentions and pull analytics.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.meltwater.com/guides/meltwater-mcp/overview",
+    "mcp": {
+      "url": "https://api.meltwater.com/v2/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "tools:read",
+        "tools:call"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "mem",
+    "name": "Mem",
+    "description": "Capture, search, and organize notes and collections.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.mem.ai/mcp/overview",
+    "mcp": {
+      "url": "https://mcp.mem.ai/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "content.read",
+        "content.write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "meta-ads",
+    "name": "Meta Ads",
+    "description": "Manage campaigns, ads, audiences, and catalogs, and pull performance insights.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.facebook.com/documentation/ads-commerce/ads-ai-connectors/ads-mcp-server/ads-mcp-server-get-started",
+    "mcp": {
+      "url": "https://mcp.facebook.com/ads",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "ads_management",
+        "ads_read",
+        "catalog_management",
+        "business_management",
+        "pages_show_list",
+        "pages_manage_ads",
+        "facebook_branded_content_ads_brand",
+        "instagram_basic",
+        "instagram_branded_content_ads_brand",
+        "ads_mcp_management"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "navan",
+    "name": "Navan",
+    "description": "Query expenses, travel bookings, policies, and cards.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.navan.com/mcp/",
+    "mcp": {
+      "url": "https://mcp.navan.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "description": "Search and update Notion pages and databases through Notion’s hosted MCP server.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://developers.notion.com/guides/mcp/get-started-with-mcp",
+    "mcp": {
+      "url": "https://mcp.notion.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "default"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://developers.notion.com/guides/mcp/get-started-with-mcp",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "onedrive",
+    "name": "OneDrive",
+    "description": "Browse, search, and read Microsoft OneDrive files. Uses Microsoft’s Work IQ MCP server (organizations sign-in, no tenant id) for mail, calendar, files, Teams, and Copilot.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/onedrive",
+    "mcp": {
+      "url": "https://workiq.svc.cloud.microsoft/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "fdcc1f02-fc51-4226-8753-f668596af7f7/WorkIQAgent.Ask"
+      ],
+      "clientId": "6bfa5a3d-30cd-4945-acff-4a925d2e9aa7",
+      "verified": true,
+      "registrationDocsUrl": "https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "orchestrate",
+    "name": "Orchestrate",
+    "description": "Fan a large task out across parallel cloud agents via the Cursor SDK: planners publish tasks, workers hand off back up, and a script reconciles the tree from disk and git.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/orchestrate",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "orchestrate"
+    }
+  },
+  {
+    "id": "origin-apps",
+    "name": "Origin Apps",
+    "description": "Skills for building on the Cursor Origin API. Fetch the live spec first, then follow the Origin rules for credentials, scopes, webhooks, paging, and errors. Includes a skill that plans the port of an existing GitHub App.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://cursor.com/docs/api/origin",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "origin-apps"
+    }
+  },
+  {
+    "id": "otter",
+    "name": "Otter.ai",
+    "description": "Search meeting history and pull full transcripts.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://help.otter.ai/hc/en-us/articles/35287607569687-Otter-MCP-Server",
+    "mcp": {
+      "url": "https://mcp.otter.ai/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "profile:read",
+        "conversations:read"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "outlook",
+    "name": "Outlook",
+    "description": "Search, read, and send Microsoft Outlook email, and look up contacts. Uses Microsoft’s Work IQ MCP server (organizations sign-in, no tenant id) for mail, calendar, files, Teams, and Copilot.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/outlook",
+    "mcp": {
+      "url": "https://workiq.svc.cloud.microsoft/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "fdcc1f02-fc51-4226-8753-f668596af7f7/WorkIQAgent.Ask"
+      ],
+      "clientId": "6bfa5a3d-30cd-4945-acff-4a925d2e9aa7",
+      "verified": true,
+      "registrationDocsUrl": "https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "outlook-calendar",
+    "name": "Outlook Calendar",
+    "description": "List, create, update, and cancel Microsoft Outlook calendar events. Uses Microsoft’s Work IQ MCP server (organizations sign-in, no tenant id) for mail, calendar, files, Teams, and Copilot.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/outlook-calendar",
+    "mcp": {
+      "url": "https://workiq.svc.cloud.microsoft/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "fdcc1f02-fc51-4226-8753-f668596af7f7/WorkIQAgent.Ask"
+      ],
+      "clientId": "6bfa5a3d-30cd-4945-acff-4a925d2e9aa7",
+      "verified": true,
+      "registrationDocsUrl": "https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "outreach",
+    "name": "Outreach",
+    "description": "Search sequences, prospects, and Kaia meetings.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.outreach.io/mcp-server",
+    "mcp": {
+      "url": "https://api.outreach.io/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "prospects.all"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "parallel",
+    "name": "Parallel",
+    "description": "Web search, extraction, deep research, and enrichment skills for parallel-cli. This is a skills pack, not an MCP connector.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://docs.parallel.ai/integrations/agent-skills",
+    "skills": {
+      "owner": "parallel-web",
+      "repo": "parallel-cursor-plugin",
+      "path": ""
+    }
+  },
+  {
+    "id": "pitchbook",
+    "name": "PitchBook",
+    "description": "Research private companies, deals, investors, and funds.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://pitchbook.com",
+    "mcp": {
+      "url": "https://premium.mcp.pitchbook.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "plaud",
+    "name": "Plaud",
+    "description": "Work with your Plaud recordings: list and search meetings and voice notes, read full transcripts with speaker labels, and pull AI summaries, action items, and key topics into your workflow.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.plaud.ai/plaud-mcp-cli/mcp",
+    "mcp": {
+      "url": "https://mcp.plaud.ai/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "playwright",
+    "name": "Playwright",
+    "description": "Navigate, click, screenshot, and test in a real browser.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/microsoft/playwright-mcp"
+  },
+  {
+    "id": "posthog-mcp",
+    "name": "PostHog MCP",
+    "description": "Work with PostHog from chat: query product analytics and run SQL, manage feature flags and experiments, triage error tracking issues, and review session replays, surveys, and dashboards (URL-only connector to PostHog's hosted MCP server).",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://posthog.com/docs/model-context-protocol",
+    "mcp": {
+      "url": "https://mcp.posthog.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "profile",
+        "email",
+        "introspection",
+        "action:read",
+        "action:write",
+        "access_control:read",
+        "access_control:write",
+        "account:read",
+        "account:write",
+        "activity_log:read",
+        "alert:read",
+        "alert:write",
+        "annotation:read",
+        "annotation:write",
+        "approvals:read",
+        "approvals:write",
+        "autoresearch:read",
+        "autoresearch:write",
+        "batch_export:read",
+        "batch_export:write",
+        "billing:read",
+        "business_knowledge:read",
+        "business_knowledge:write",
+        "canvas:read",
+        "canvas:write",
+        "cohort:read",
+        "cohort:write",
+        "comment:read",
+        "comment:write",
+        "conversation:read",
+        "cross_project_dashboard:read",
+        "customer_analytics:read",
+        "customer_analytics:write",
+        "customer_task:read",
+        "customer_task:write",
+        "data_catalog:read",
+        "data_catalog:write",
+        "data_catalog_approval:write",
+        "dashboard:read",
+        "dashboard:write",
+        "dashboard_template:read",
+        "dataset:read",
+        "dataset:write",
+        "early_access_feature:read",
+        "early_access_feature:write",
+        "endpoint:read",
+        "endpoint:write",
+        "engineering_analytics:read",
+        "error_tracking:read",
+        "error_tracking:write",
+        "evaluation:read",
+        "evaluation:write",
+        "element:read",
+        "event_definition:read",
+        "event_definition:write",
+        "experiment:read",
+        "experiment:write",
+        "experiment_holdout:read",
+        "experiment_holdout:write",
+        "experiment_saved_metric:read",
+        "experiment_saved_metric:write",
+        "external_data_source:read",
+        "external_data_source:write",
+        "feature_flag:read",
+        "feature_flag:write",
+        "group:read",
+        "health_issue:read",
+        "heatmap:read",
+        "heatmap:write",
+        "hog_flow:read",
+        "hog_flow:write",
+        "hog_function:read",
+        "hog_function:write",
+        "insight:read",
+        "insight:write",
+        "insight_variable:write",
+        "integration:read",
+        "integration:write",
+        "llm_analytics:read",
+        "llm_analytics:write",
+        "ai_observability_clusters:read",
+        "ai_observability_clusters:write",
+        "llm_prompt:read",
+        "llm_prompt:write",
+        "llm_provider_key:read",
+        "llm_skill:read",
+        "llm_skill:write",
+        "logs:read",
+        "logs:write",
+        "marketing_analytics:read",
+        "marketing_analytics:write",
+        "mcp_analytics:read",
+        "mcp_analytics:write",
+        "mcp_registry:read",
+        "metrics:read",
+        "notebook:read",
+        "notebook:write",
+        "offline_evaluation_ingestion:write",
+        "organization:read",
+        "organization:write",
+        "organization_member:read",
+        "person:read",
+        "person:write",
+        "product_enablement:write",
+        "project:read",
+        "project:write",
+        "property_definition:read",
+        "property_definition:write",
+        "query:read",
+        "replay_scanner:read",
+        "replay_scanner:write",
+        "review_hog:read",
+        "review_hog:write",
+        "session_recording:read",
+        "session_recording:write",
+        "session_recording_playlist:read",
+        "session_recording_playlist:write",
+        "signal_scout:read",
+        "signal_scout:write",
+        "stamphog:read",
+        "stamphog:write",
+        "streamlit_app:read",
+        "streamlit_app:write",
+        "subscription:read",
+        "subscription:write",
+        "survey:read",
+        "survey:write",
+        "tagger:read",
+        "ticket:read",
+        "ticket:write",
+        "task:read",
+        "task:write",
+        "tracing:read",
+        "field_note:read",
+        "field_note:write",
+        "uploaded_media:read",
+        "uploaded_media:write",
+        "usage_metric:read",
+        "usage_metric:write",
+        "user:read",
+        "user:write",
+        "vision_alert:read",
+        "vision_alert:write",
+        "visual_review:read",
+        "visual_review:write",
+        "warehouse_objects:write",
+        "warehouse_table:read",
+        "warehouse_table:write",
+        "warehouse_view:read",
+        "warehouse_view:write",
+        "web_analytics:read",
+        "web_analytics:write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "power-bi",
+    "name": "Power BI",
+    "description": "Browse Microsoft Power BI workspaces and render report pages.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/power-bi"
+  },
+  {
+    "id": "pr-review-canvas",
+    "name": "PR Review Canvas",
+    "description": "Render PR diffs as review canvases grouped by importance.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/pr-review-canvas",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "pr-review-canvas"
+    }
+  },
+  {
+    "id": "profound",
+    "name": "Profound",
+    "description": "Track AI visibility, sentiment, and citations.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.tryprofound.com/mcp/overview",
+    "mcp": {
+      "url": "https://mcp.tryprofound.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "pstack",
+    "name": "pstack",
+    "description": "Rigorous agent workflows you can parallelize. Skills pack (58 skills), not an MCP connector.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/pstack",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "pstack"
+    }
+  },
+  {
+    "id": "quickbooks-online",
+    "name": "QuickBooks Online",
+    "description": "QuickBooks turns your business's financial data into clear, decision-ready insights, and now takes action on it too. Analyze profitability, cash flow, and balance sheet health, and benchmark your performance against similar businesses in your industry and region. See who owes you money and which bills are coming due with A/R and A/P aging, and break down sales by customer or product to find what is driving revenue. Create, update, send, duplicate, and schedule invoices and estimates. Add customers and products, generate, and send payment links and reminders, always with a clear preview and your confirmation before anything is sent. Get fast read-only answers on payroll and QuickBooks Capital. Look up payroll details, and when you need to, add an employee or set base pay. Check your QuickBooks Capital loans and peer lending benchmarks.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/quickbooks-online",
+    "mcp": {
+      "url": "https://mcp-e2e.quickbooks.intuit.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "catalog.tools.item",
+        "catalog.tools.item.read",
+        "contact.tools.customer",
+        "contact.tools.customer.read",
+        "contact.tools.lead",
+        "contact.tools.lead.read",
+        "crm.tools.notes",
+        "crm.tools.notes.read",
+        "crm.tools.opportunities",
+        "crm.tools.opportunities.read",
+        "crm.tools.tasks",
+        "crm.tools.tasks.read",
+        "foundations.tools.bi-dashboard",
+        "foundations.tools.businessreports.read",
+        "foundations.tools.companyprofile.read",
+        "foundations.tools.companyprofile.write",
+        "foundations.tools.transactions.write",
+        "lending.tools.offers.read",
+        "lending.tools.servicing.read",
+        "money-onboarding.tools.application",
+        "payables.tools.bill.manage",
+        "payables.tools.bill.read",
+        "payables.tools.billpayment.read",
+        "payroll.tools.employee.manage",
+        "payroll.tools.employee.read",
+        "payroll.tools.employer.manage",
+        "payroll.tools.employer.read",
+        "payroll.tools.run.manage",
+        "payroll.tools.run.read",
+        "payroll.tools.tax.read",
+        "sales.tools.estimate",
+        "sales.tools.estimate.read",
+        "sales.tools.invoice",
+        "sales.tools.invoice.read",
+        "sales.tools.payment-link",
+        "sales.tools.payment-link.read",
+        "sales.tools.settings",
+        "sales.tools.settings.read",
+        "spend.tools.bill.manage",
+        "spend.tools.bill.read",
+        "spend.tools.expense.create",
+        "spend.tools.expense.delete",
+        "spend.tools.expense.read",
+        "spend.tools.expense.update",
+        "spend.tools.vendor.read",
+        "time-tracking.tools.timeentry.manage",
+        "time-tracking.tools.timeentry.read",
+        "worker-mgmt.tools.employee.manage",
+        "worker-mgmt.tools.employee.read"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "ralph-loop",
+    "name": "Ralph Loop",
+    "description": "Continuous self-referential AI loops for iterative development, implementing the Ralph Wiggum technique. Run the agent in a while-true loop with the same prompt until task completion.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "ralph-loop"
+    }
+  },
+  {
+    "id": "readwise",
+    "name": "Readwise",
+    "description": "Search highlights and Reader documents, save articles.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.readwise.io/tools/mcp",
+    "mcp": {
+      "url": "https://mcp2.readwise.io/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "read",
+        "write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "ringcentral-chat",
+    "name": "RingCentral Chat",
+    "description": "Read team chats and posts, send messages, and manage teams, tasks, and notes.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.ringcentral.com",
+    "mcp": {
+      "url": "https://mcp.labs.ringcentral.com/ringex/v1.1.0/team-chat",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "ReadAccounts",
+        "TeamMessaging"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "ringcentral-phone",
+    "name": "RingCentral Phone",
+    "description": "Read call activity, AI call notes, SMS, voicemail, and fax, and send SMS.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.ringcentral.com",
+    "mcp": {
+      "url": "https://mcp.labs.ringcentral.com/ringex/phone",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "ReadAccounts",
+        "ReadContacts",
+        "ReadCallLog",
+        "AI",
+        "ReadMessages",
+        "ReadPresence",
+        "SMS"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "robinhood",
+    "name": "Robinhood",
+    "description": "View portfolios, positions, orders, watchlists, and market data, and trade in a Robinhood Agentic account.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://robinhood.com/us/en/support/articles/agentic-trading-overview/",
+    "mcp": {
+      "url": "https://agent.robinhood.com/mcp/trading",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "internal"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "sp-global",
+    "name": "S&P Global",
+    "description": "Query S&P Capital IQ financials, prices, and transcripts.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.kensho.com/llmreadyapi/overview",
+    "mcp": {
+      "url": "https://kfinance.kensho.com/integrations/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "kensho:app:kfinance",
+        "offline_access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "salesforce",
+    "name": "Salesforce",
+    "description": "Query, create, and update records in your org.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/guide/cursor.html"
+  },
+  {
+    "id": "salesforce-headless-360",
+    "name": "Salesforce (Headless 360, Beta)",
+    "description": "Manage records, users, and org setup across Salesforce.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/references/reference/headless-360-mcp.html"
+  },
+  {
+    "id": "semrush",
+    "name": "Semrush",
+    "description": "Research keywords, backlinks, traffic, and competitors.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.semrush.com/api/v4/introduction/semrush-mcp/",
+    "mcp": {
+      "url": "https://mcp.semrush.com/v2/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp.access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "sentry",
+    "name": "Sentry",
+    "description": "Search issues and events in Sentry.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://docs.sentry.io/product/sentry-mcp/",
+    "mcp": {
+      "url": "https://mcp.sentry.dev/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "org:read",
+        "project:write",
+        "team:write",
+        "event:write",
+        "alerts:write"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.sentry.io/product/sentry-mcp/",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "servicenow",
+    "name": "ServiceNow",
+    "description": "Call the tools your admin publishes on a ServiceNow instance.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.servicenow.com/docs/r/australia/intelligent-experiences/exploring-mcp-server-console.html"
+  },
+  {
+    "id": "sharepoint",
+    "name": "SharePoint",
+    "description": "Search and read Microsoft SharePoint sites, document libraries, files, and lists. Uses Microsoft’s Work IQ MCP server (organizations sign-in, no tenant id) for mail, calendar, files, Teams, and Copilot.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/sharepoint",
+    "mcp": {
+      "url": "https://workiq.svc.cloud.microsoft/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "fdcc1f02-fc51-4226-8753-f668596af7f7/WorkIQAgent.Ask"
+      ],
+      "clientId": "6bfa5a3d-30cd-4945-acff-4a925d2e9aa7",
+      "verified": true,
+      "registrationDocsUrl": "https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "shopify-store",
+    "name": "Shopify",
+    "description": "Connect your Shopify store so Grok can answer questions about your products, orders, customers, inventory, and sales. You sign in with Shopify and approve the store access Grok requests; Grok keeps that authorization so the connector can work, and Grok Bot's privacy mode still controls whether your conversations are stored or used for training. xAI never sees or stores your Shopify password, and you can disconnect the store anytime from grok.com.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://grok.com/connectors",
+    "mcp": {
+      "url": "https://setup.shopify.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "read_all_orders",
+        "read_analytics",
+        "read_apps",
+        "read_companies",
+        "read_legal_policies",
+        "read_reports",
+        "read_rollouts",
+        "write_checkout_branding_settings",
+        "write_checkouts",
+        "write_collective.access",
+        "write_content",
+        "write_customers",
+        "write_digital_products_product",
+        "write_discounts",
+        "write_draft_orders",
+        "write_files",
+        "write_fulfillments",
+        "write_inventory",
+        "write_locales",
+        "write_locations",
+        "write_marketing_events",
+        "write_markets",
+        "write_merchant_managed_fulfillment_orders",
+        "write_metaobject_definitions",
+        "write_metaobjects",
+        "write_online_store_navigation",
+        "write_order_edits",
+        "write_orders",
+        "write_price_rules",
+        "write_products",
+        "write_publications",
+        "write_returns",
+        "write_shipping",
+        "write_themes",
+        "write_translations",
+        "write_validations"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "similarweb",
+    "name": "Similarweb",
+    "description": "Analyze website traffic, audiences, and competitors.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.similarweb.com/api-v5/similarweb-mcp",
+    "mcp": {
+      "url": "https://mcp.similarweb.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "read"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "skillmd",
+    "name": "SkillMD",
+    "description": "Search, inspect, and download safety-reviewed Agent Skills from skillmd.com.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://skillmd.com/docs/mcp",
+    "mcp": {
+      "url": "https://api.skillmd.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "dcr": false,
+      "scopes": [],
+      "verified": true,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "slack",
+    "name": "Slack",
+    "description": "Search and send Slack messages through Slack’s hosted MCP server.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://docs.slack.dev/ai/slack-mcp-server/",
+    "mcp": {
+      "url": "https://mcp.slack.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "canvases:read",
+        "canvases:write",
+        "channels:history",
+        "channels:read",
+        "channels:write",
+        "chat:write",
+        "emoji:read",
+        "files:read",
+        "files:write",
+        "groups:history",
+        "groups:read",
+        "groups:write",
+        "im:history",
+        "im:read",
+        "im:write",
+        "lists:read",
+        "lists:write",
+        "mpim:history",
+        "mpim:read",
+        "mpim:write",
+        "reactions:read",
+        "reactions:write",
+        "search:read.files",
+        "search:read.im",
+        "search:read.mpim",
+        "search:read.private",
+        "search:read.public",
+        "search:read.users",
+        "users:read",
+        "users:read.email"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.slack.dev/ai/slack-mcp-server/",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "smartsheet",
+    "name": "Smartsheet",
+    "description": "Query and update sheets, rows, and workspaces.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.smartsheet.com/ai-mcp/smartsheet/mcp-server",
+    "mcp": {
+      "url": "https://mcp.smartsheet.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "square",
+    "name": "Square",
+    "description": "Work with payments, orders, catalog, customers, and invoices.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.squareup.com/docs/mcp",
+    "mcp": {
+      "url": "https://mcp.squareup.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "stable",
+    "name": "Stable",
+    "description": "Find mail, read scanned documents, and call Stable API endpoints.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://usestable.com",
+    "mcp": {
+      "url": "https://mcp.usestable.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "statsig",
+    "name": "Statsig",
+    "description": "Inspect and manage feature gates, experiments, dynamic configs, and metrics.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.statsig.com/integrations/mcp/cursor",
+    "mcp": {
+      "url": "https://api.statsig.com/v3/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "stripe",
+    "name": "Stripe",
+    "description": "Read Stripe payments, customers, and subscriptions.",
+    "category": "finance",
+    "kind": "connector",
+    "docsUrl": "https://docs.stripe.com/mcp",
+    "mcp": {
+      "url": "https://mcp.stripe.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.stripe.com/mcp",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "tailscale",
+    "name": "Tailscale",
+    "description": "Let Grok Bot reach MCP servers on your private Tailscale network: connect your own tailnet, or your team's company tailnets turned on by a team admin, with each member using their own device.",
+    "category": "integrations",
+    "kind": "skills",
+    "docsUrl": "https://tailscale.com",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "third_party/tailscale"
+    }
+  },
+  {
+    "id": "tavily",
+    "name": "Tavily",
+    "description": "Search the web with Tavily.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://docs.tavily.com/documentation/mcp",
+    "mcp": {
+      "url": "https://mcp.tavily.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "offline_access"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.tavily.com/documentation/mcp",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "teaching",
+    "name": "Teaching",
+    "description": "Skill mapping, practice plans, and learning retrospectives. Builds personalized roadmaps with milestones and practice checkpoints, and runs periodic reviews to adjust based on progress.",
+    "category": "utilities",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "teaching"
+    }
+  },
+  {
+    "id": "teams",
+    "name": "Teams",
+    "description": "Search, read, and send Microsoft Teams chats and channel messages. Uses Microsoft’s Work IQ MCP server (organizations sign-in, no tenant id) for mail, calendar, files, Teams, and Copilot.",
+    "category": "productivity",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/teams",
+    "mcp": {
+      "url": "https://workiq.svc.cloud.microsoft/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "fdcc1f02-fc51-4226-8753-f668596af7f7/WorkIQAgent.Ask"
+      ],
+      "clientId": "6bfa5a3d-30cd-4945-acff-4a925d2e9aa7",
+      "verified": true,
+      "registrationDocsUrl": "https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "thermos",
+    "name": "Thermos",
+    "description": "Thermo-nuclear branch review: deep correctness and security audits plus harsh code-quality rubrics, parallel subagents, thermos orchestration, and optional take-the-wheel and FSD merge-ready flows.",
+    "category": "developer-tools",
+    "kind": "skills",
+    "docsUrl": "https://github.com/cursor/plugins",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "thermos"
+    }
+  },
+  {
+    "id": "tiktok-for-business",
+    "name": "TikTok for Business",
+    "description": "Manage TikTok ad campaigns, ad groups, ads, audiences, creatives, and reports.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://business-api.tiktok.com/portal/docs/tiktok-ads-mcp-server/v1.3",
+    "mcp": {
+      "url": "https://business-api.tiktok.com/open_mcp/tt-ads-mcp-layer",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "mcp:tt4b"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "tinyfish",
+    "name": "TinyFish",
+    "description": "Browse and automate the web with TinyFish: run multi-step web automations, search the web, extract clean page content, and drive remote stealth browser sessions.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.tinyfish.ai/mcp-integration",
+    "mcp": {
+      "url": "https://agent.tinyfish.ai/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "todoist",
+    "name": "Todoist",
+    "description": "Create, find, and complete tasks and projects.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/Doist/todoist-mcp",
+    "mcp": {
+      "url": "https://ai.todoist.net/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "data:read_write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "trello",
+    "name": "Trello",
+    "description": "Manage your Trello workspace from chat: browse and create boards, view and move lists, create, update, move, archive, and complete cards with labels and due dates, manage checklists, capture Inbox cards, schedule Planner focus time, and search across boards.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/atlassian/trello-mcp-server",
+    "mcp": {
+      "url": "https://mcp.trello.com/v1",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "offline_access",
+        "read:me",
+        "read:account",
+        "read:board:trello",
+        "write:board:trello",
+        "read:organization:trello",
+        "write:organization:trello",
+        "read:member:trello",
+        "read:member.inbox:trello",
+        "write:member.inbox:trello",
+        "read:member.planner:trello",
+        "write:member.planner:trello"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "typeform",
+    "name": "Typeform",
+    "description": "Build forms, analyze responses, and manage contacts.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.typeform.com/developers/get-started/mcp/",
+    "mcp": {
+      "url": "https://api.typeform.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "accounts:read",
+        "automations:read",
+        "automations:write",
+        "contacts:read",
+        "contacts:write",
+        "forms:read",
+        "forms:write",
+        "pages:read",
+        "pages:write",
+        "responses:read",
+        "responses:write",
+        "insights:read",
+        "packages:read",
+        "subscriptions:read",
+        "webhooks:read",
+        "webhooks:write",
+        "workspaces:read",
+        "workspaces:write"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "upwork",
+    "name": "Upwork",
+    "description": "Search talent, post jobs, and manage contracts.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.upwork.com/ai/mcp",
+    "mcp": {
+      "url": "https://mcp.upwork.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "vanta",
+    "name": "Vanta",
+    "description": "Query and remediate compliance tests, controls, frameworks, risks, and vulnerabilities in Vanta.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://www.vanta.com"
+  },
+  {
+    "id": "vercel",
+    "name": "Vercel",
+    "description": "Inspect projects, deployments, and logs on Vercel.",
+    "category": "developer-tools",
+    "kind": "connector",
+    "docsUrl": "https://vercel.com/docs/agent-resources/vercel-mcp",
+    "mcp": {
+      "url": "https://mcp.vercel.com",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "openid"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://vercel.com/docs/agent-resources/vercel-mcp",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "webull",
+    "name": "Webull",
+    "description": "View accounts, positions, orders, watchlists, and market data.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developer.webull.com/apis/docs/AI-friendly-Resources/mcp/",
+    "mcp": {
+      "url": "https://api.webull.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "account:read",
+        "order:read",
+        "order:write",
+        "market:read",
+        "instrument:read",
+        "instruction:all"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "whatsapp-business",
+    "name": "WhatsApp Business",
+    "description": "Send messages and manage templates, contacts, and phone numbers in WhatsApp Business.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/whatsapp-business"
+  },
+  {
+    "id": "whop",
+    "name": "Whop",
+    "description": "Products, checkout links, memberships, and payments through Whop’s official hosted MCP server.",
+    "category": "finance",
+    "kind": "connector",
+    "docsUrl": "https://github.com/whopio/whop-mcp-server",
+    "mcp": {
+      "url": "https://mcp.whop.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "admin"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://github.com/whopio/whop-mcp-server",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "workable",
+    "name": "Workable",
+    "description": "Search candidates, move pipelines, and manage HR records.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://workable.readme.io/reference/workable-mcp-server",
+    "mcp": {
+      "url": "https://mcp.workable.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": true,
+      "scopes": [
+        "r_candidates",
+        "w_candidates",
+        "r_jobs",
+        "w_jobs",
+        "r_offers",
+        "w_offers",
+        "r_requisitions",
+        "w_requisitions",
+        "w_comments",
+        "r_account",
+        "w_departments",
+        "w_members",
+        "r_employees",
+        "w_employees",
+        "r_timeoff",
+        "w_timeoff",
+        "r_time_tracking",
+        "w_time_tracking",
+        "r_reviews",
+        "w_reviews",
+        "r_reports",
+        "r_surveys",
+        "w_surveys"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "workday",
+    "name": "Workday",
+    "description": "Look up workers, organizations, time off, payroll, and recruiting data in Workday.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/workday"
+  },
+  {
+    "id": "wrike",
+    "name": "Wrike",
+    "description": "Search projects, create tasks, and post comments.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.wrike.com/docs/wrike-mcp-server-overview",
+    "mcp": {
+      "url": "https://mcp.wrike.com/v2",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "wsReadWrite"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "x",
+    "name": "X",
+    "description": "Search posts, read timelines, pull trends, explore Spaces and communities, manage lists and bookmarks, access X Chat, schedule X calls, and manage livestreams.",
+    "category": "integrations",
+    "kind": "both",
+    "docsUrl": "https://docs.x.com/tools/mcp",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "third_party/x"
+    },
+    "mcp": {
+      "url": "https://api.x.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "tweet.read",
+        "users.read",
+        "follows.read",
+        "space.read",
+        "mute.read",
+        "like.read",
+        "list.read",
+        "list.write",
+        "block.read",
+        "block.write",
+        "bookmark.read",
+        "bookmark.write",
+        "dm.read",
+        "dm.write",
+        "calls.read",
+        "calls.write",
+        "broadcast.read",
+        "broadcast.write",
+        "developer.billing.write",
+        "developer.write",
+        "media.write",
+        "offline.access"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://docs.x.com/tools/mcp",
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "x-ads",
+    "name": "X Ads",
+    "description": "Manage ad campaigns, create ads, track conversions, and pull performance stats.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://docs.x.com/x-ads-api/introduction",
+    "mcp": {
+      "url": "https://ads-api.x.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "ads.read",
+        "ads.write",
+        "media.write",
+        "offline.access"
+      ],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "x-money",
+    "name": "X Money",
+    "description": "Use your X Money Card, send money to users on X, manage your finances, view your balance and browse through your transaction history.",
+    "category": "integrations",
+    "kind": "both",
+    "docsUrl": "https://x.com/i/money",
+    "skills": {
+      "owner": "cursor",
+      "repo": "plugins",
+      "path": "third_party/x-money"
+    },
+    "mcp": {
+      "url": "https://mcp.money.x.com/mcp",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [],
+      "verified": false,
+      "probedAt": "2026-10-27"
+    }
+  },
+  {
+    "id": "xero",
+    "name": "Xero",
+    "description": "Read and write invoices, contacts, reports, and payroll.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/XeroAPI/xero-mcp-server"
+  },
+  {
+    "id": "zoho-books",
+    "name": "Zoho Books",
+    "description": "Work with contacts, invoices, estimates, and items in Zoho Books.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/zoho-books"
+  },
+  {
+    "id": "zoho-crm",
+    "name": "Zoho CRM",
+    "description": "Work with leads, contacts, accounts, deals, and other Zoho CRM records.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/zoho-crm"
+  },
+  {
+    "id": "zoho-desk",
+    "name": "Zoho Desk",
+    "description": "Work with tickets, contacts, tasks, and knowledge base articles in Zoho Desk.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://github.com/cursor/plugins/tree/main/third_party/zoho-desk"
+  },
+  {
+    "id": "zoom",
+    "name": "Zoom",
+    "description": "Search meetings, pull transcripts, and work with Zoom Docs.",
+    "category": "integrations",
+    "kind": "connector",
+    "docsUrl": "https://developers.zoom.us/docs/mcp/",
+    "mcp": {
+      "url": "https://mcp.zoom.us/mcp/zoom/streamable",
+      "transport": "http",
+      "auth": "oauth",
+      "dcr": false,
+      "scopes": [
+        "docs:read:export",
+        "agentic_search:read:search",
+        "my_notes:read:content",
+        "meeting:update:in_meeting_controls",
+        "docs:write:import",
+        "cloud_recording:read:content",
+        "docs:read:list_file_collaborators",
+        "docs:delete:collaborator",
+        "meeting:write:meeting",
+        "meeting:read:assets",
+        "agentic_search:read:ask",
+        "hub:read:content",
+        "meeting:read:search",
+        "meeting:delete:meeting",
+        "meeting:update:meeting",
+        "hub:write:content",
+        "docs:update:collaborator",
+        "cloud_recording:read:list_user_recordings",
+        "docs:write:collaborator",
+        "workflow:read:definition",
+        "workflow:write:definition",
+        "workflow:read:list_definitions"
+      ],
+      "verified": true,
+      "registrationDocsUrl": "https://developers.zoom.us/docs/mcp/",
+      "probedAt": "2026-10-27"
+    }
+  }
+]

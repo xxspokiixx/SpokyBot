@@ -1,5 +1,4 @@
 import type { WireBot } from "../../shared/wire.ts";
-import { freshLook } from "../bot-look.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { parseVisibility } from "../bot-visibility.ts";
@@ -11,11 +10,10 @@ import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import { journalMemoryWrite } from "../memory-journal.ts";
 import { resolveBotCreationDefaults } from "../new-bot-defaults.ts";
 import { PRESET_UNAVAILABLE_MESSAGE, applyPresetToBot, presetOffered, type OrgInstallStatus, type PresetStore } from "../presets.ts";
-import { adminOnlyBotSetting, clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
+import { clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
-import type { TeamPeople } from "../team-people.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -40,10 +38,6 @@ export interface BotCreateRouteDeps {
   checkedModelSelection(raw: unknown, current?: { selection: ModelSelection; busy: boolean }, requireAvailableModel?: boolean): ModelSelectionCheck;
   cloudOwnerSession(auth: RequestAuth): boolean;
   wireBot(bot: BotRecord): WireBot;
-  /** A Team Cloud: a new bot records who created it, and may name who it reports to. */
-  team?: { name: string; people: Pick<TeamPeople, "has"> } | null;
-  /** Starts writing personal answers for a new bot's setup card; never awaited. */
-  personaliseSetupCard?(bot: BotRecord): void;
 }
 
 const OWN_ID = /^[\w-]{8,128}$/;
@@ -63,12 +57,6 @@ export function keptBotIds(body: Record<string, unknown>, store: Pick<Store, "bo
   return { id, ...(threadId === undefined ? {} : { threadId }) };
 }
 
-/** The fields a request to make a bot asks for itself. The New bot defaults it may take are the host owner's choice. */
-function askedSettings(body: Record<string, unknown>): Record<string, unknown> {
-  const { id: _id, threadId: _threadId, useDefaults: _useDefaults, settings, ...asked } = body;
-  return { ...(settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {}), ...asked };
-}
-
 export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
   const {
     store, cfg, presetStore, orgInstallStatuses,
@@ -84,18 +72,13 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
       }
-      if (req.headers["x-openmausbot-companion"] === "1") {
-        const field = adminOnlyBotSetting(askedSettings(body));
-        if (field) {
-          return json(res, 403, { error: `forbidden: a paired device may say who a new bot is and how it looks, not "${field}"; set that on the host computer` });
-        }
-      }
       const kept = keptBotIds(body, store);
       if ("error" in kept) return json(res, kept.error.includes("already") ? 409 : 400, { error: kept.error });
       const { id: _id, threadId: _threadId, ...rest } = body;
       body = rest;
       const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
       const settings = template.profile;
+  if (process.env.OMB_ANDROID_STANDALONE === "1" && settings.computer === undefined) settings.computer = "local";
       if (auth.kind === "session" && !auth.scopes.includes("admin")) {
         const field = clientBotPatchViolation(settings);
         if (field || body.preset !== undefined || template.skills.length || template.routines.length || Object.keys(template.memory).length) {
@@ -158,15 +141,6 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           return json(res, 400, { error: "section must be at most 60 characters" });
         }
       }
-      const creator = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
-      let reportsTo: string | undefined;
-      if (body.reportsTo !== undefined && body.reportsTo !== null) {
-        if (!deps.team) return json(res, 400, { error: "Only a team's bots report to someone." });
-        if (typeof body.reportsTo !== "string" || !body.reportsTo.trim()) return json(res, 400, { error: "reportsTo must be an email" });
-        const email = body.reportsTo.trim().toLowerCase();
-        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, { error: `Choose someone in ${deps.team.name}.` });
-        reportsTo = email;
-      }
       let selection: ModelSelection;
       if (body.modelSelection === undefined) {
         selection = await defaultSelection();
@@ -185,11 +159,8 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (created && !created.ok) return json(res, 400, { error: created.error });
       // Checked again beside the synchronous write: an await above let another request take the same id.
       if (kept.id && "error" in keptBotIds(kept, store)) return json(res, 409, { error: "a bot with this id already exists here" });
-      // A bot moved in from another computer keeps its own look; a new one named no look starts in a fresh one.
-      const look = kept.id || settings.color || settings.mascotBody ? undefined : freshLook(store.bots);
       const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
-        toolScope: settings.toolScope ?? undefined, color: settings.color ?? look?.color, mascotBody: settings.mascotBody ?? look?.mascotBody,
-        ...(deps.team && creator ? { createdBy: creator } : {}), ...(reportsTo ? { reportsTo } : {}),
+        toolScope: settings.toolScope ?? undefined,
         ...(created?.ok ? { visibility: created.visibility } : {}) }, kept.id ? { ...kept, seedMessages: false } : {});
       const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
       try {
@@ -254,7 +225,6 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
         try { routines!.update(routine.id, { enabled: true }); }
         catch { warnings.push(`Bot created; routine ${routine.id} could not be activated.`); }
       }
-      deps.personaliseSetupCard?.(bot);
       return json(res, 201, {
         ...(warnings.length ? { warnings } : {}),
         bot: {

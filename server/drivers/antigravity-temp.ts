@@ -212,7 +212,7 @@ async function systemLeftovers(
   return found;
 }
 
-export async function folderBytes(directory: string, deadline = Infinity): Promise<{ bytes: number; complete: boolean }> {
+async function folderBytes(directory: string, deadline = Infinity): Promise<{ bytes: number; complete: boolean }> {
   let bytes = 0;
   const pending = [directory];
   while (pending.length) {

@@ -31,38 +31,12 @@ function parseBase(source) {
 /** Every `[data-skin="x"] { … }` block, as id → {token: value}, over the
  * inherited base so a skin is measured as it actually renders. */
 function parseSkins(source) {
-  const { desktop, phone } = splitPhone(source);
-  const base = parseBase(desktop);
+  const base = parseBase(source);
   const skins = new Map();
-  for (const [, id, body] of desktop.matchAll(/\[data-skin="([a-z-]+)"\]\s*\{([^}]*)\}/g)) {
+  for (const [, id, body] of source.matchAll(/\[data-skin="([a-z-]+)"\]\s*\{([^}]*)\}/g)) {
     skins.set(id, { ...base, ...declarations(body) });
   }
-  // The phone block re-declares some tokens of a skin under a width query, so
-  // that skin is measured twice: as it renders on desktop and as "<id> (phone)".
-  for (const [, id, body] of phone.matchAll(/\[data-skin="([a-z-]+)"\]\)?\s*\{([^}]*)\}/g)) {
-    skins.set(`${id} (phone)`, { ...skins.get(id), ...declarations(body) });
-  }
   return skins;
-}
-
-/** The `@media (max-width: 767.98px) { … }` block that re-declares skin tokens,
- * cut out of the source so its skin selectors are not mistaken for a second
- * definition of the skin. Other blocks under the same query hold layout only. */
-function splitPhone(source) {
-  for (const { index: start } of source.matchAll(/@media \(max-width: 767\.98px\)\s*\{/g)) {
-    let depth = 0;
-    let end = source.indexOf("{", start);
-    for (let i = end; i < source.length; i++) {
-      if (source[i] === "{") depth++;
-      else if (source[i] === "}" && --depth === 0) {
-        end = i + 1;
-        break;
-      }
-    }
-    const phone = source.slice(start, end);
-    if (phone.includes("[data-skin=")) return { desktop: source.slice(0, start) + source.slice(end), phone };
-  }
-  return { desktop: source, phone: "" };
 }
 
 function parseHex(value) {
@@ -76,43 +50,6 @@ function parseHex(value) {
     b: parseInt(full.slice(4, 6), 16),
     a: full.length === 8 ? parseInt(full.slice(6, 8), 16) / 255 : 1,
   };
-}
-
-const NAMED = { black: "#000000", white: "#ffffff" };
-
-/** A token's value with every var() replaced by the token it names, as the skin renders it. */
-function resolve(value, tokens, depth = 0) {
-  if (depth > 8) return value;
-  return value.replace(/var\((--[\w-]+)(?:,\s*([^()]+))?\)/g, (_, name, fallback) => resolve(tokens[name] ?? fallback ?? "", tokens, depth + 1));
-}
-
-const linear = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
-const gamma = (v) => Math.max(0, Math.min(255, Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055))));
-function toOklab({ r, g, b }) {
-  const [lr, lg, lb] = [linear(r), linear(g), linear(b)];
-  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
-  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
-  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
-  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
-}
-function fromOklab([L, A, B]) {
-  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3, m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3, s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
-  return { r: gamma(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), g: gamma(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
-    b: gamma(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s), a: 1 };
-}
-
-/** An opaque or translucent hex, a named colour, or color-mix() of two of them in oklab, as CSS mixes it. */
-function parseColor(value) {
-  const text = value.trim();
-  const named = NAMED[text.toLowerCase()];
-  if (named) return parseHex(named);
-  const mix = /^color-mix\(\s*in oklab\s*,\s*([^,]+?)(?:\s+([\d.]+)%)?\s*,\s*([^,]+?)(?:\s+([\d.]+)%)?\s*\)$/i.exec(text);
-  if (!mix) return parseHex(text);
-  const [first, second] = [parseColor(mix[1]), parseColor(mix[3])];
-  if (!first || !second || first.a !== 1 || second.a !== 1) return null;
-  const p2 = mix[4] !== undefined ? Number(mix[4]) / 100 : mix[2] !== undefined ? 1 - Number(mix[2]) / 100 : 0.5;
-  const [a, b] = [toOklab(first), toOklab(second)];
-  return fromOklab(a.map((value, i) => value * (1 - p2) + b[i] * p2));
 }
 
 /** Foreground alpha composited over an opaque background. */
@@ -134,9 +71,9 @@ function luminance({ r, g, b }) {
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
-function contrast(fgValue, bgValue) {
-  const bg = parseColor(bgValue);
-  const parsedFg = parseColor(fgValue);
+function contrast(fgHex, bgHex) {
+  const bg = parseHex(bgHex);
+  const parsedFg = parseHex(fgHex);
   if (!parsedFg || !bg || bg.a !== 1) return null;
   const fg = flatten(parsedFg, bg);
   const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
@@ -144,8 +81,7 @@ function contrast(fgValue, bgValue) {
 }
 
 // Pairs taken from what the components render.
-// The frame carries the sidebar's names, previews and times in a framed window.
-const SURFACES = ["--color-app", "--color-panel", "--color-frame", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset", "--color-composer", "--color-menu"];
+const SURFACES = ["--color-app", "--color-panel", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset", "--color-composer", "--color-menu"];
 const PAIRS = [
   ...SURFACES.map((s) => ["--color-ink", s, 4.5]),
   ...SURFACES.map((s) => ["--color-ink-secondary", s, 4.5]),
@@ -187,8 +123,6 @@ const PAIRS = [
   ["--color-inset", "--color-card", 1.04],
   ["--color-card", "--color-app", 1.04],
   ["--color-panel", "--color-app", 1.03],
-  // The app's card is told from the frame round it.
-  ["--color-frame", "--color-app", 1.05],
 ];
 
 const skins = parseSkins(css);
@@ -212,7 +146,7 @@ for (const [id, tokens] of skins) {
       missing.push(!tokens[fg] ? fg : bg);
       continue;
     }
-    const ratio = contrast(resolve(tokens[fg], tokens), resolve(tokens[bg], tokens));
+    const ratio = contrast(tokens[fg], tokens[bg]);
     if (ratio === null) {
       unmeasurable.push({ fg, bg, fgValue: tokens[fg], bgValue: tokens[bg] });
       continue;
@@ -233,22 +167,22 @@ for (const [id, tokens] of skins) {
     continue;
   }
   for (const { fg, bg, ratio } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
     if (floor === undefined || ratio < floor - BASELINE_DRIFT) skinFailed = true;
   }
   console.log(`${skinFailed ? "✗" : "~"} ${id}${skinFailed ? "" : " (known upstream gaps)"}`);
   for (const { fg, bg, ratio, min } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
     const baseline = floor === undefined ? "" : `; baseline ${floor.toFixed(2)}:1`;
     console.log(`    ${fg} on ${bg}: ${ratio.toFixed(2)}:1 (needs ${min}:1${baseline})`);
   }
   if (skinFailed) failed = true;
 }
 
-// The inverted bubbles (Daylight's ink-black, Pop's ink) have
+// The inverted bubbles (Daylight's ink-black, Meadow's green-black, Pop's ink) have
 // their own inherited context: the editor, labels, quotes and file chips
 // explicitly use these tokens, not parent color.
-for (const skinId of ["daylight", "pop"]) {
+for (const skinId of ["daylight", "meadow", "pop"]) {
   const scope = css.match(new RegExp(`@scope \\(\\[data-skin="${skinId}"\\]\\) to \\(\\[data-skin\\]\\)\\s*\\{\\s*\\.bg-bubble-user\\s*\\{([^}]*)\\}`))?.[1];
   if (!scope) {
     failed = true;
@@ -281,34 +215,6 @@ for (const skinId of ["daylight", "pop"]) {
     }
   }
   if (!bubbleFailed) console.log(`✓ ${skinId} bubble — editor, controls and paired fills above 4.5:1`);
-}
-
-// MausBot Cloud's night card paints its own sky in every skin: an indigo dusk in the light scheme, a deep night in the
-// dark one. Its text sits between the sky's first two stops; the close button's glyph also lands on the far stop.
-const night = [...css.matchAll(/:root\s*\{([^}]*)\}/g)].map(([, body]) => declarations(body)).find(tokens => tokens["--cloud-night-from"]);
-if (!night) {
-  failed = true;
-  console.log("✗ night card — no :root block defines --cloud-night-from");
-} else {
-  for (const [scheme, pick] of [["dusk", 1], ["night", 2]]) {
-    const value = (token) => /^light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/.exec(night[token] ?? "")?.[pick] ?? night[token] ?? "";
-    let schemeFailed = false;
-    for (const [fg, bg, min] of [
-      ["--cloud-night-ink", "--cloud-night-from", 4.5],
-      ["--cloud-night-ink", "--cloud-night-mid", 4.5],
-      ["--cloud-night-ink-quiet", "--cloud-night-from", 4.5],
-      ["--cloud-night-ink-quiet", "--cloud-night-mid", 4.5],
-      ["--cloud-night-ink-quiet", "--cloud-night-to", 3],
-    ]) {
-      const ratio = contrast(value(fg), value(bg));
-      if (ratio === null || ratio < min) {
-        failed = true;
-        schemeFailed = true;
-        console.log(`✗ night card (${scheme}) — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs ${min}:1)`);
-      }
-    }
-    if (!schemeFailed) console.log(`✓ night card (${scheme}) — its text and close button clear the sky behind them`);
-  }
 }
 
 process.exit(failed ? 1 : 0);

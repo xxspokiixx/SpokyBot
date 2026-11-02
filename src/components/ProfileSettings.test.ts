@@ -5,13 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigStatus } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ config: {} as Partial<ConfigStatus>, dispatch: vi.fn(), api: vi.fn() }));
+const fixture = vi.hoisted(() => ({ config: {} as Partial<ConfigStatus>, dispatch: vi.fn(), api: vi.fn(), upload: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   api: fixture.api,
   useStore: () => ({ state: { config: fixture.config }, dispatch: fixture.dispatch }),
 }));
 vi.mock("./AboutMeSettings", () => ({ AboutMeSettings: () => null }));
+vi.mock("@/lib/composer-attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/composer-attachments")>()),
+  imageAttachmentFromFile: fixture.upload,
+}));
 
 const { ProfileFields, profilePhotoFileProblem, profilePhotoSizeProblem } = await import("./ProfileSettings");
 const { InitialsAvatar } = await import("./Avatar");
@@ -24,6 +28,7 @@ const photo = "/api/attachments/5f0c2b1e-8a43-4c1d-9e7a-2b6f1d3c4e5a.webp";
 beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.api.mockReset();
+  fixture.upload.mockReset();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -58,6 +63,47 @@ describe("the profile photo", () => {
     await act(async () => remove.click());
     expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ profile: { avatarUrl: "" } }) });
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "profileSaved", profile: { avatarUrl: undefined } });
+  });
+
+  it("stores the cropped photo in local attachments before saving its profile address", async () => {
+    fixture.config = { profile: { name: "Ada", email: "" } };
+    fixture.upload.mockResolvedValue({ path: `/data/attachments/${photo.split("/").at(-1)}` });
+    fixture.api.mockResolvedValue({ profile: { name: "Ada", email: "", avatarUrl: photo } });
+    vi.stubGlobal("Image", class {
+      naturalWidth = 128;
+      naturalHeight = 128;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    });
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:profile-photo");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
+    Object.defineProperty(HTMLCanvasElement.prototype, "toBlob", {
+      configurable: true,
+      value: (callback: BlobCallback) => callback(new Blob(["webp"], { type: "image/webp" })),
+    });
+    try {
+      await act(async () => root.render(createElement(ProfileFields)));
+      const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+      Object.defineProperty(input, "files", { configurable: true, value: [new File(["source"], "portrait.png", { type: "image/png" })] });
+      await act(async () => {
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(host.textContent).toContain("Adjust your photo");
+      await act(async () => {
+        [...host.querySelectorAll("button")].find((button) => button.textContent === "Save photo")!.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(fixture.upload).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" }));
+      expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ profile: { avatarUrl: photo } }) });
+      expect(fixture.dispatch).toHaveBeenCalledWith({ type: "profileSaved", profile: { avatarUrl: photo } });
+      expect(host.querySelector('[role="alert"]')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 
   it("never sends the photo with a name or email save, so a stale copy cannot overwrite a newer one", async () => {

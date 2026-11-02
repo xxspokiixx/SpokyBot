@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Globe, Hand, Loader2, LockKeyhole, Moon, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
-import { usePageVisible } from "@/lib/page-visible";
 import { api, useStore, type Bot } from "@/state/store";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { ChromeRow, type BrowserNav, type BrowserTab } from "./browser/ChromeRow";
@@ -33,9 +32,9 @@ function tabsOf(value: unknown): BrowserTab[] {
 }
 
 /**
- * A bot's browser: the page fills the panel on either engine, streamed over the v2 WebSocket when the new engine runs
- * it, else over the v1 live view. Security: a new connection never replays old input. Only the server gives this view a
- * hold: one of the same person's, when none of their views uses it or when they take it over here.
+ * A bot's browser: the page fills the panel, streamed over the v2 WebSocket when the new engine runs it, else over the
+ * v1 live view. Security: a new connection never silently restores permission to type and never replays old input.
+ * Only the server returns a hold, and only to this panel's reconnect after its own v1 stream dropped.
  */
 export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserSignIn; page?: BrowserPage }) {
   const { state } = useStore();
@@ -58,10 +57,8 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const [showTyping, setShowTyping] = useState(false);
   const [masked, setMasked] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [maximized, setMaximized] = useState(false);
   const [passkeyDismissed, setPasskeyDismissed] = useState("");
   const floating = useBrowserPictureInPicture();
-  const pageVisible = usePageVisible();
   const panel = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
   const surface = useRef<StreamSurfaceHandle>(null);
@@ -115,7 +112,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     return createLiveStreamClient(bot.id, events, (body, viewerId) => api(withBrowserScope(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, scope), {
       // 120 s matches the server's browser requestTimeoutMs.
       method: "POST", body: JSON.stringify({ ...body, viewerId }), timeoutMs: 120_000,
-    }), resume.current, scope, { width: target.width, height: target.height });
+    }), resume.current, scope);
   }, [bot.id, bot.browserProfile, scopedThread, stream]);
 
   const interact = useCallback((input: PreviewStreamInput) => {
@@ -137,7 +134,6 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     const created = createBrowserControl({
       transport,
       owned: () => controlRef.current?.controller === "you",
-      mine: () => controlRef.current?.owned === true,
       onTakeStatus: setTakeStatus,
       onError: setError,
       onHalted: () => setError(t("browser.input.tooSlow")),
@@ -222,33 +218,9 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   }, []);
   const toggleFullscreen = () => {
     const leaving = Boolean(panel.current) && document.fullscreenElement === panel.current;
-    if (leaving && maximized) {
-      setMaximized(false);
-    }
     const request = leaving ? document.exitFullscreen() : panel.current?.requestFullscreen();
     void request?.catch(() => setError(leaving ? "Could not leave full screen. Press Esc instead." : "Full screen is unavailable in this browser."));
   };
-  const toggleMaximize = () => {
-    if (fullscreen && document.fullscreenElement === panel.current) {
-      void document.exitFullscreen().catch(() => {});
-    }
-    setMaximized((value) => !value);
-  };
-  // The maximized panel swallows its Escape (defaultPrevented) so the same press cannot close a dialog beneath.
-  // Capture: listeners registered before this panel must see the key already refused.
-  useEffect(() => {
-    if (!maximized) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      if (fullscreen && document.fullscreenElement === panel.current) {
-        void document.exitFullscreen().catch(() => {});
-      }
-      setMaximized(false);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [maximized, fullscreen]);
 
   const restart = () => {
     if (!window.confirm(t("browser.panel.confirmRestart"))) return;
@@ -267,20 +239,10 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const heldElsewhere = control?.controller === "another-viewer";
   const commandsReady = connected && !heldElsewhere;
   const you = control?.controller === "you";
-  // A page nobody can see keeps the stream off. A viewer holding the browser keeps it: their hold pauses the bot, so
-  // closing the view to save frames would hand the browser over while nobody watches.
-  const shown = pageVisible || you;
-  useEffect(() => {
-    if (shown) return;
-    setConnected(false);
-    setError("");
-  }, [shown]);
   const typingReady = connected && you;
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
-  return <div ref={panel} className={maximized
-    ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-card text-ink"
-    : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"}>
+  return <div ref={panel} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink" data-browser-transport={stream ? "stream" : "live"}>
     <ChromeRow
       ref={address}
       botName={bot.name}
@@ -289,11 +251,9 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       connected={connected}
       control={control}
       takeStatus={takeStatus}
-      hint={t(kept || signInOpen ? "browser.control.keptHint" : "browser.control.yoursHint", { name: bot.name })}
       commandsReady={commandsReady}
       profileName={profileName}
       fullscreen={fullscreen}
-      maximized={maximized}
       onCommand={interact}
       onAddress={(text) => {
         const url = resolveAddressBarInput(text);
@@ -303,7 +263,6 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       onTake={takeControl}
       onHandBack={handBack}
       onFullscreen={toggleFullscreen}
-      onMaximize={toggleMaximize}
       onProfiles={() => { browserControl.current?.handBack(); setShowProfiles(true); }}
       menu={<MoreMenu
         stream={stream}
@@ -325,24 +284,23 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     {takeStatus === "stale" && <div role="status" className="shrink-0 border-b border-hairline/30 px-3 py-1.5 text-[12px] text-accent-text">{t("browser.control.stale", { name: bot.name })}</div>}
     {passkeyWall && passkeyDismissed !== nav.url && <PasskeyNotice wall={passkeyWall} botName={bot.name} onDismiss={() => setPasskeyDismissed(nav.url)} />}
     <div className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
-      {shown ? (
-        <StreamSurface
-          key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
-          ref={surface}
-          connect={connect}
-          input={interact}
-          label={`${bot.name}’s browser page`}
-          onClient={onClient}
-          onControl={onControl}
-          onMessage={onMessage}
-          onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setGone(false); setError(""); } }}
-          onFirstFrame={() => setStarting(false)}
-          onUnauthorized={() => { if (stream) setFallback(true); else setGone(true); }}
-          onGone={() => setGone(true)}
-          onClose={(code, reason) => { if (code === 1013 && reason) setError(reason); }}
-          onLeave={() => address.current?.focus()}
-        />
-      ) : null}
+      <StreamSurface
+        key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
+        ref={surface}
+        connect={connect}
+        input={interact}
+        followSize={stream}
+        label={`${bot.name}’s browser page`}
+        onClient={onClient}
+        onControl={onControl}
+        onMessage={onMessage}
+        onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setGone(false); setError(""); } }}
+        onFirstFrame={() => setStarting(false)}
+        onUnauthorized={() => { if (stream) setFallback(true); else setGone(true); }}
+        onGone={() => setGone(true)}
+        onClose={(code, reason) => { if (code === 1013 && reason) setError(reason); }}
+        onLeave={() => address.current?.focus()}
+      />
       {asleep || heldElsewhere || gone || !connected || starting ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card/95 p-6 text-center text-[13px] text-ink-secondary">
           {asleep ? <Moon size={24} /> : heldElsewhere ? <Hand size={24} /> : gone ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}
@@ -364,7 +322,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         e.preventDefault(); const field = e.currentTarget.elements.namedItem("pageText") as HTMLInputElement;
         if (typingReady && field.value) { interact({ type: "text", text: field.value }); field.value = ""; setShowTyping(false); }
       }}><input key={masked ? "secret" : "text"} name="pageText" type={masked ? "password" : "text"} aria-label={masked ? t("browser.typeSecret.field") : t("browser.panel.typeTextField")} autoComplete={masked ? "new-password" : "off"} spellCheck={false} maxLength={4096} placeholder={masked ? "••••••••" : t("browser.panel.typeTextPlaceholder")} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
-        {masked && <p className="flex items-center gap-1 text-[12px] text-ink-tertiary"><LockKeyhole size={11} aria-hidden="true" />{t("browser.typeSecret.note")}</p>}
+        {masked && <p className="flex items-center gap-1 text-[11.5px] text-ink-tertiary"><LockKeyhole size={11} aria-hidden="true" />{t("browser.typeSecret.note")}</p>}
         <button disabled={!typingReady} className="self-end rounded-lg bg-accent px-4 py-2 text-[12px] text-accent-ink disabled:opacity-40">{t("browser.panel.typeButton")}</button></form>
     </dialog>
   </div>;
@@ -388,7 +346,7 @@ export function BrowserPanel({ bot, signIn, page }: { bot: Bot; signIn?: Browser
   if (engine?.kind === "engine" && !installing && !engine.installError) return <LiveBrowser key={bot.id} bot={bot} signIn={signIn} page={page} />;
   return <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-3 rounded-xl bg-card p-5">
     <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? t("browser.panel.installIncomplete") : t("browser.panel.engineNotInstalled")}</div>
-    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : engine?.installable && admin !== false ? t("browser.panel.engineNotInstalledHelp", { name: bot.name }) : browserUnavailableReason(state.config)}</p>
+    <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : browserUnavailableReason(state.config)}</p>
     {engine?.installable || engine?.kind === "engine" ? <button type="button" onClick={() => void install()} disabled={installing || admin !== true} className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-60">{installing ? t("browser.panel.installing") : engine?.kind === "engine" ? t("browser.panel.retryInstall") : t("browser.panel.installEngine")}</button> : null}
     {(engine?.installError || error) && <p role="alert" className="text-[12px] text-danger">{error ?? engine?.installError}</p>}
   </div>;

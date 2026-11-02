@@ -15,8 +15,6 @@ export interface GroupRouteDeps {
   threadStarters: Pick<ThreadStarters, "set">;
   createChannel(value: unknown): GroupRecord;
   publicGroupState(record: GroupRecord): WireGroup;
-  /** A room as this person has read it (a Team Cloud); the room itself anywhere else. */
-  groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
 }
 
 /** A room's default responder from a request body; null when it is not one, or names a bot outside the room. */
@@ -47,7 +45,6 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const visible = deps.visibleFor(auth);
-    const own = (group: WireGroup) => deps.groupFor?.(auth, group) ?? group;
     if (method === "POST" && path === "/api/groups") {
       const body = await readBody(req);
       const hiddenMember = Array.isArray(body?.memberIds) ? body.memberIds.find((id: unknown) => typeof id === "string" && store.bot(id) && !visible.bot(id)) : undefined;
@@ -55,7 +52,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
       const group = createChannel(body);
       // On a Cloud home whoever opens a room names it (cloudThreadRefusal).
       if (CLOUD_HOME && auth.kind === "session") threadStarters.set(group.threadId, actorKey(auth));
-      return json(res, 201, { group: { ...own(publicGroupState(group)), messages: [] } });
+      return json(res, 201, { group: { ...publicGroupState(group), messages: [] } });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/setup$/);
     if (m && method === "PATCH") {
@@ -67,7 +64,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
         return json(res, 400, { error: "action must be complete or skip" });
       }
       if (group.setupCompletedAt != null || group.setupSkippedAt != null) {
-        return json(res, 200, { group: own(publicGroupState(group)) });
+        return json(res, 200, { group: publicGroupState(group) });
       }
       if (store.messagesFor(group.threadId).length > 0) {
         return json(res, 409, { error: "room setup must be finished before the first message" });
@@ -90,7 +87,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
       }
       const updated = store.patchGroup(m[1], patch);
       if (!updated) return json(res, 404, { error: "no such room" });
-      return json(res, 200, { group: own(publicGroupState(updated)) });
+      return json(res, 200, { group: publicGroupState(updated) });
     }
     return PASS;
   };

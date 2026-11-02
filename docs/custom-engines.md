@@ -6,19 +6,17 @@ after editing (instance entries are read at boot).
 
 ## Provider icons
 
-Each instance shows its driver's mark. An OpenAI-compatible server shows the
-mark of whoever runs it, read from the host in its address: `api.deepseek.com`
-shows DeepSeek, `<resource>.openai.azure.com` Microsoft Azure,
-`dashscope-intl.aliyuncs.com` Qwen, `openrouter.ai` OpenRouter, and so on
-(the list is `SERVER_HOSTS` in `server/provider-icon.ts`). A server without a
-mark of its own, such as Groq, Together, Ollama or LM Studio, keeps the default.
+In **Settings → Engines**, expand an instance and choose its **Provider icon**.
+The built-in choices include OpenAI, Anthropic, Google Gemini, Microsoft Azure,
+Amazon Bedrock (AWS), xAI, DeepSeek, Meta, Mistral AI, Qwen, Moonshot AI,
+Cohere, and OpenRouter. You can also upload a PNG, JPEG, or WebP image up to
+128 KB and 1024 × 1024 pixels. **Reset** restores the default icon.
 
-An icon stored on the instance still wins: add
-`"icon": { "kind": "preset", "preset": "azure" }` alongside `driver` and
-`displayName`. The presets are OpenAI, Anthropic, Google Gemini, Microsoft
-Azure, Amazon Bedrock (AWS), xAI, DeepSeek, Meta, Mistral AI, Qwen, Moonshot
-AI, Cohere and OpenRouter. Custom images saved before v0.1.102 keep rendering;
-the app never fetches remote icon URLs.
+Each instance has its own icon, independent of its driver or API protocol.
+Changes made in Settings apply immediately without restarting the engine.
+For file-based configuration, add `"icon": { "kind": "preset", "preset": "azure" }`
+alongside `driver` and `displayName`. Custom uploads are stored as embedded image
+data; the app does not fetch remote icon URLs.
 
 ## Any ACP agent (a CLI you spawn)
 
@@ -45,15 +43,8 @@ instance at it:
   hint instead of failing at first message.
 - **Sign in first.** The driver has no auth flow of its own — run the CLI once
   in a terminal and log in there; OpenMausBot spawns it with your login intact.
-- **Choose models per bot.** Open the bot's model picker and use **Re-detect**
-  to load the models advertised by the agent. Select a model and, when offered,
-  its thinking level. Bot defaults and individual conversation overrides are
-  saved independently. **Agent default** leaves the native session's model
-  unchanged. An agent that does not advertise models still has this option.
-- **Choices come from the agent.** Discovery starts a temporary ACP session
-  without sending a prompt. Only confirmed, model-specific thinking options
-  are shown; a failed refresh keeps the last successful catalog. ZCode,
-  CodeBuddy, Qoder and other custom ACP engines use the same mechanism.
+- **Model choice stays inside the agent.** The picker shows a single
+  "Agent default" entry; whatever the CLI is configured to run is what runs.
 - **`environment`** is passed to the CLI child. Foreign provider keys
   (XAI_API_KEY, OPENAI_COMPAT_API_KEY, …) are deliberately stripped so a
   custom CLI can never bill against another engine's login.

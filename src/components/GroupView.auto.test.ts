@@ -11,8 +11,7 @@ vi.mock("@/state/store", async (original) => ({
 }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
-import { Transcript } from "./GroupView";
-import { DefaultResponderSelect } from "./RoomHeader";
+import { DefaultResponderSelect, Transcript } from "./GroupView";
 import { Select } from "./Select";
 import { RoutedByLine } from "./RoomQueueList";
 

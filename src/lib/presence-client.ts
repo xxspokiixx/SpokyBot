@@ -1,16 +1,7 @@
-import { knownLocales, resolveLocale } from "@/lib/i18n";
-import { effectiveLanguage, languageChoice } from "@/lib/language-preference";
-
 export const PRESENCE_MIN_INTERVAL_MS = 60_000;
 
-/** The pack the app shows, worked out as App does rather than read from i18n, which a first ping can reach before App applies it. */
-export function shownLanguage(serverDefault: string | undefined, choice: string | null = languageChoice()): string {
-  return resolveLocale(effectiveLanguage(choice, serverDefault) || globalThis.navigator?.language, knownLocales());
-}
-
-/** The language lets the brief the server writes match the app; the open chat lets the server get it ready to answer. */
-export function presenceBody(timeZone: string, language: string, threadId?: string): { source: "desktop"; timeZone?: string; language: string; threadId?: string } {
-  return { source: "desktop", ...(timeZone ? { timeZone } : {}), language, ...(threadId ? { threadId } : {}) };
+export function presenceBody(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): { source: "desktop"; timeZone?: string } {
+  return timeZone ? { source: "desktop", timeZone } : { source: "desktop" };
 }
 
 export function duePing(lastAt: number | null, now: number): boolean {

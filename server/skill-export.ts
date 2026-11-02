@@ -5,10 +5,7 @@ import { isSkillName } from "./skills.ts";
 import type { BotRecord } from "./store.ts";
 
 /** The skill side of bot and team package export: which names may be exported, and each bot's exportable copies. */
-export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "readBotSkillFile">) {
-  const { readBotSkillFile } = host;
-  // A skill the engine loads by itself from its own folder (the person's ~/.claude/skills, a project's) is never packed.
-  const listBotSkills = (bot: BotRecord) => host.listBotSkills(bot).filter((skill) => (skill as { origin?: string }).origin !== "native");
+export function skillExport({ listBotSkills, readBotSkillFile }: Pick<SkillsLibraryHost, "listBotSkills" | "readBotSkillFile">) {
   function checkedExportSkillNames(
     value: unknown,
     bots: readonly BotRecord[],

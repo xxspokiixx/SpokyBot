@@ -93,8 +93,6 @@ beforeAll(async () => {
   mkdirSync(data, { recursive: true });
   dumpFile = join(home, "quick-dump.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({
-    // These tests compare whole conversations; a setup card refreshing after a rename would change under them.
-    features: { smartSetupChoices: false },
     instances: {
       // answers at once; its dump is the only place to read the per-boot comms token the internal endpoints need
       quick: {
@@ -391,10 +389,8 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       const notified = stream.frames.filter((candidate) => candidate.kind === "notify").map((candidate) => candidate.notification);
       expect(notified.filter((notification) => notification?.botId === peer.id), JSON.stringify(notified)).toEqual([]);
       expect(notified.every((notification) => notification?.botId === asker.id && notification?.threadId === asker.threadId), JSON.stringify(notified)).toBe(true);
-      // The hand-off turn is not the end of the job: no "done" then. Results in, then one "done" with the reviewed answer.
-      expect(notified.map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["delegation-settled", "done"]);
-      expect(notified[0]).toMatchObject({ title: "Pen resumed with results", body: "Results in from Ink" });
-      expect(notified[1]).toMatchObject({ title: "Pen finished", body: expect.stringContaining("saw the result") });
+      expect(notified.map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["done", "delegation-settled"]);
+      expect(notified[1]).toMatchObject({ title: "Pen resumed with results", body: "Results in from Ink" });
     } finally {
       stream.close();
       await cleanup([], [asker.id, peer.id]);
@@ -521,8 +517,6 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
   it("still buzzes when a peer's turn stops to ask the person a question", async () => {
     const asker = await createBot("Quill", "quick");
     const peer = await createBot("Sage", "curious", "fake-model");
-    // On "Ask me first" a peer's question is the person's; at Full access its asker answers it instead.
-    for (const bot of [asker, peer]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {
       const asked = await api(

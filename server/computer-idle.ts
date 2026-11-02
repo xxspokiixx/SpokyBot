@@ -8,8 +8,6 @@ export class ComputerIdleTimer {
   private lastActivityAt = 0;
   private failures = 0;
   private busySeen = false;
-  /** Bumped by every cancel, so a stop still in flight from an earlier window neither re-arms nor reports. */
-  private generation = 0;
   private idleMs: number;
   private readonly isBusy: () => boolean;
   private readonly suspend: () => Promise<void | "busy">;
@@ -36,7 +34,6 @@ export class ComputerIdleTimer {
   }
 
   cancel(): void {
-    this.generation += 1;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -64,12 +61,9 @@ export class ComputerIdleTimer {
       this.touch();
       return;
     }
-    const generation = this.generation;
     try {
-      const outcome = await this.suspend();
-      if (generation === this.generation && outcome === "busy") this.touch();
+      if (await this.suspend() === "busy") this.touch();
     } catch (error) {
-      if (generation !== this.generation) return;
       this.failures += 1;
       const retryInMs = Math.min(this.idleMs * 2 ** (this.failures - 1), Math.max(this.idleMs, MAX_RETRY_MS));
       this.onFailure?.(error, retryInMs);

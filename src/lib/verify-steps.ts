@@ -6,7 +6,7 @@ export type RunStep = {
   id: string;
   command: string;
   label: string;
-  status: "running" | "passed" | "failed" | "unverified";
+  status: "running" | "passed" | "failed";
   dryRun: boolean;
   verified: boolean;
 };
@@ -197,14 +197,14 @@ export function askText(messages: Message[]): string | undefined {
   return line ? line.slice(0, 300) : undefined;
 }
 
-export function runSteps(messages: Message[], liveTools: ReadonlySet<string> = new Set()): RunStep[] {
+export function runSteps(messages: Message[]): RunStep[] {
   const steps: RunStep[] = [];
   for (const m of messages.slice(askIndex(messages) + 1)) {
     const command = commandOf(m);
     const parsed = command ? parseRunCommand(command) : undefined;
     if (!command || !parsed) continue;
     const ok = m.tool?.ok;
-    steps.push({ id: m.id, command, ...parsed, status: ok === undefined ? (liveTools.has(m.id) ? "running" : "unverified") : ok ? "passed" : "failed" });
+    steps.push({ id: m.id, command, ...parsed, status: ok === undefined ? "running" : ok ? "passed" : "failed" });
   }
   return steps;
 }
@@ -221,14 +221,13 @@ export function runSummary(steps: RunStep[]): {
   passed: number;
   failed: number;
   running: number;
-  unverified: number;
   dryRuns: number;
   label: string;
 } {
-  const counts = { total: steps.length, verified: 0, passed: 0, failed: 0, running: 0, unverified: 0, dryRuns: 0 };
+  const counts = { total: steps.length, verified: 0, passed: 0, failed: 0, running: 0, dryRuns: 0 };
   for (const step of steps) {
     if (step.verified) counts.verified += 1;
-    if (step.dryRun && ["passed", "failed"].includes(step.status)) counts.dryRuns += 1;
+    if (step.dryRun && step.status !== "running") counts.dryRuns += 1;
     else counts[step.status] += 1;
   }
   const label = [
@@ -236,7 +235,6 @@ export function runSummary(steps: RunStep[]): {
     counts.verified > 0 && t("chat.verify.verifiedCount", { count: counts.verified }),
     counts.failed > 0 && t("chat.verify.failed", { count: counts.failed }),
     counts.running > 0 && t("chat.verify.running", { count: counts.running }),
-    counts.unverified > 0 && t("chat.verify.unverified", { count: counts.unverified }),
     counts.dryRuns === 1 ? t("chat.verify.dryRunOne") : counts.dryRuns > 1 && t("chat.verify.dryRunMany", { count: counts.dryRuns }),
   ].filter(Boolean).join(" · ");
   return { ...counts, label };
@@ -256,7 +254,7 @@ export function runSkill(messages: Message[], steps: RunStep[]): RunSkill {
   return card.answered || card.dismissed || card.expired ? null : "pending";
 }
 
-const MARK = { passed: "✓", failed: "✗", running: "…", unverified: "?" } as const;
+const MARK = { passed: "✓", failed: "✗", running: "…" } as const;
 
 const stepLine = (step: RunStep) =>
   `${step.dryRun ? "[dry run]" : MARK[step.status]} ${step.label} — ${step.command}${step.verified ? " (verified)" : ""}`;

@@ -1,4 +1,3 @@
-import { t } from "./i18n";
 const KNOWN_LANGUAGES: Record<string, string> = {
   js: "JavaScript",
   javascript: "JavaScript",
@@ -95,7 +94,7 @@ export function countLines(code?: string | null): number {
 }
 
 export function formatLineCount(count: number): string {
-  return count === 1 ? t("code.lineOne") : t("code.lines", { count });
+  return count === 1 ? "1 line" : `${count} lines`;
 }
 
 const KNOWN_EXTENSIONS: Record<string, string> = {

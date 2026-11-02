@@ -97,7 +97,7 @@ describe("which engines a turn is bridged on", () => {
   // and everything else the engine reads about a tool's name can be read too.
   it.each([
     // the chat-completions runtime, by every driver that runs on it
-    ["openai-compat"], ["cerebras"], ["greenference"], ["grok"], ["groq"], ["meta"], ["minimax"], ["mistral"],
+    ["openai-compat"], ["cerebras"], ["grok"], ["groq"], ["meta"], ["minimax"], ["mistral"],
   ])("bridges %s", (driverKind) => {
     expect(engineBridgeRefusal(ON, { driverKind }, {}, HOST)).toBeNull();
     expect(agentsToolBridgeEnv(ON, bot, { driverKind }, {})).toEqual(on);
@@ -135,7 +135,7 @@ describe("which engines a turn is bridged on", () => {
 
   it.each([
     // ACP agents keep their own permissions, Grok among them
-    ["grokAgent"], ["geminiAgent"], ["qwenAgent"], ["kimiAgent"], ["droidAgent"], ["cursorAgent"], ["clineAgent"], ["copilotAgent"], ["hermesAgent"],
+    ["grokAgent"], ["geminiAgent"], ["qwenAgent"], ["kimiAgent"], ["droidAgent"], ["cursorAgent"], ["clineAgent"], ["hermesAgent"],
     ["opencodeGo"], ["antigravityAgent"], ["customAcp"],
     // not shown to qualify, and anything nobody has heard of
     ["museCode"], ["someFutureDriver"], [""],
@@ -152,10 +152,10 @@ describe("which engines a turn is bridged on", () => {
   it("sorts the default fleet the same way: its Claude and API-model engines, and none of Codex, Pi or its ACP agents", () => {
     const fleet = instanceConfigs({});
     const bridged = new Set(Object.entries(fleet).filter(([, instance]) => engineBridgeRefusal(ON, turnEngine({ instanceId: "any", driverKind: instance.driver }, { any: instance }, { version: "2.1.232 (Claude Code)" }, CLAUDE.cwd), {}, HOST) === null).map(([id]) => id));
-    for (const id of ["claude", "openaiCompat", "mistral", "cerebras", "groq", "greenference", "meta"]) expect(bridged.has(id), id).toBe(true);
+    for (const id of ["claude", "openaiCompat", "mistral", "cerebras", "groq", "meta"]) expect(bridged.has(id), id).toBe(true);
     // the default `grok` is the ACP agent, not the API-key driver
     for (const id of ["codex", "chatgpt", "pi", "grok", "kimi", "droid", "cursor", "antigravity", "opencodeGo", "museCode", "qwen", "hermes", "cline"]) expect(bridged.has(id), id).toBe(false);
-    for (const id of bridged) expect(["claudeAgent", "openai-compat", "cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral"], id).toContain(fleet[id]!.driver);
+    for (const id of bridged) expect(["claudeAgent", "openai-compat", "cerebras", "grok", "groq", "meta", "minimax", "mistral"], id).toContain(fleet[id]!.driver);
   });
 
   describe("Claude Code's exceptions", () => {
@@ -500,34 +500,6 @@ describe("which engines a turn is bridged on", () => {
   });
 });
 
-describe("a bot on a local model gets the bridge without the switch", () => {
-  const onOllama = { modelSelection: { model: "ollama::qwen3.5:4b" } };
-  const onServer = (url: string) => ({ driverKind: "openai-compat", config: { url } });
-
-  it.each(["http://127.0.0.1:1234/v1", "http://192.168.1.20:8080/v1", "http://mac-studio.local:11434/v1"])("on a server at %s", (url) => {
-    expect(agentsToolBridgeRefusal({}, {}, onServer(url), {})).toBeNull();
-  });
-
-  it("picked from a local server, on the chat engine", () => {
-    expect(agentsToolBridgeRefusal({}, onOllama, onServer("https://openrouter.ai/api/v1"), {})).toBeNull();
-  });
-
-  it("not on a hosted model", () => {
-    expect(agentsToolBridgeRefusal({}, { modelSelection: { model: "gpt-5" } }, onServer("https://openrouter.ai/api/v1"), {})).toBe("the switch is off");
-    expect(agentsToolBridgeRefusal({}, {}, { driverKind: "grok", config: { url: "http://127.0.0.1:1/v1" } }, {})).toBe("the switch is off");
-  });
-
-  it("not when the operator's variable says no", () => {
-    expect(agentsToolBridgeRefusal({}, onOllama, onServer("http://127.0.0.1:1234/v1"), { OMB_AGENTS_TOOL_BRIDGE: "0" })).toBe("the switch is off");
-  });
-
-  it("not past the rules everyone else keeps: a tool selection, or an engine that judges tools by name", () => {
-    expect(agentsToolBridgeRefusal({}, { ...onOllama, toolScope: { allow: ["native:read"] } }, onServer("http://127.0.0.1:1234/v1"), {})).toBe("the bot has a tool selection");
-    expect(agentsToolBridgeRefusal({}, onOllama, { driverKind: "codex" }, {})).toContain("Codex");
-    expect(agentsToolBridgeRefusal({}, onOllama, { driverKind: "piAgent" }, {})).toContain("Pi");
-  });
-});
-
 describe("which bots a turn is bridged for", () => {
   it("writes the switch on every turn, so a value inherited from the server's own environment cannot stand in", () => {
     expect(agentsToolBridgeEnv({}, bot, CLAUDE, {})).toEqual(off);
@@ -794,12 +766,12 @@ describe("the prompt of a bridged turn", () => {
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: {} })).toEqual(plain);
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, {})).toEqual(plain);
     expect(plain.text).not.toContain(FIND_TOOL);
-    expect(plain.sections.map((section) => section.id)).toEqual(["persona", "soul", "routine", "memory", "credential", "reply-habits"]);
+    expect(plain.sections.map((section) => section.id)).toEqual(["persona", "soul", "routine", "memory", "credential"]);
   });
 
   it("has the section only when this turn was asked to bridge, once, right after the soul", () => {
     const built = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, bridged);
-    expect(built.sections.map((section) => section.id)).toEqual(["persona", "soul", "tool-bridge", "routine", "memory", "credential", "reply-habits"]);
+    expect(built.sections.map((section) => section.id)).toEqual(["persona", "soul", "tool-bridge", "routine", "memory", "credential"]);
     const section = built.sections.find((entry) => entry.id === "tool-bridge")!;
     expect(section.text).toBe(AGENTS_TOOL_BRIDGE_PROMPT);
     expect(section.bytes).toBe(Buffer.byteLength(AGENTS_TOOL_BRIDGE_PROMPT, "utf8"));

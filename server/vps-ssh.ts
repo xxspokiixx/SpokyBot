@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { descriptorUid } from "./local-computer.ts";
 import { delimiter, join, resolve } from "node:path";
 
 export const VPS_SSH_DIR = "ssh";
@@ -12,8 +13,11 @@ function shellQuote(value: string): string {
 
 /** macOS caps Unix socket paths at 104 bytes and OpenSSH appends a temporary suffix, so a long data path cannot host the socket. */
 function controlDirectory(sshDir: string): string {
-  if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= 80) return sshDir;
-  const uid = process.getuid!();
+  // macOS caps Unix socket paths at 104 bytes and OpenSSH appends a temporary suffix; Linux (including Android's
+  // app sandbox, where /tmp is not writable) can host the socket in sshDir when it fits.
+  const limit = process.platform === "darwin" ? 80 : 100;
+  if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= limit) return sshDir;
+  const uid = descriptorUid();
   const id = createHash("sha256").update(resolve(sshDir)).digest("hex").slice(0, 12);
   // /tmp, not tmpdir(): macOS TMPDIR is often too long for a control socket. Validated first so a symlink or another user's dir cannot redirect it.
   const dir = `/tmp/omb-ssh-${uid}-${id}`;

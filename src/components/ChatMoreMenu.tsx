@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from "react";
-import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, Search, Share, SquarePen, UserRound } from "lucide-react";
+import { Bug, Copy, Download, Gauge, ListChecks, MessagesSquare, MoreHorizontal, Search, SquarePen } from "lucide-react";
 import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -14,16 +14,13 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
-import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
-import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 
-/** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
- * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
-export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: SidebarMenuItem[]; on: boolean } {
+/** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. */
+function useChatMoreItems(profile: Bot): { items: SidebarMenuItem[]; on: boolean } {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const messages = useMemo(() => visibleMessages(bot), [bot]);
   const { state, dispatch } = useStore();
@@ -36,37 +33,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const hasMessages = messages.length > 0;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
   const threads = showThreads ? [] : orderedThreadList((profile.tasks ?? []).filter((task) => !task.routineRunId));
-  const selection = profile.modelSelection;
-  const modelName = phoneHeader && selection
-    ? state.instances.find((candidate) => candidate.instanceId === selection.instanceId)?.models.options.find((option) => option.id === selection.model)?.label ?? selection.model
-    : "";
-  // On a phone the header drops the profile pill's click target, the model chip and the Bot's screen button; they live here.
-  const phoneItems: SidebarMenuItem[] = phoneHeader ? [
-    {
-      key: "profile",
-      label: t("chat.openProfile"),
-      icon: <UserRound size={16} />,
-      onSelect: () => dispatch({ type: "toggleSettings", open: true }),
-    },
-  ] : [];
-  const phoneScreen: SidebarMenuItem[] = phoneHeader ? [
-    ...(remoteClient ? [] : [{
-      key: "model",
-      label: t("model.simple.model"),
-      icon: <Cpu size={16} />,
-      value: modelName,
-      onSelect: () => openBotSettings(dispatch, "model"),
-    } satisfies SidebarMenuItem]),
-    {
-      key: "computer",
-      label: t("chat.computer"),
-      icon: <Monitor size={16} />,
-      active: state.computerOpen,
-      onSelect: () => dispatch({ type: "toggleComputer" }),
-    },
-  ] : [];
   const items: SidebarMenuItem[] = [
-    ...phoneItems,
     {
       key: "find",
       label: t("chat.find"),
@@ -75,7 +42,6 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       trailing: <ShortcutHint id="find-conversation" />,
       onSelect: () => requestChatFind(bot.threadId),
     },
-    ...phoneScreen,
     ...(showThreads ? [] : [{
       key: "new-thread",
       heading: t("task.list"),
@@ -122,7 +88,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       icon: <Gauge size={16} />,
       separatorBefore: true,
       trailing: <span title={usage.detail} data-testid="usage-chip" className={cn("tabular-nums text-[12px]", usage.tone === "danger" ? "text-danger" : usage.tone === "warning" ? "text-warning" : "text-ink-secondary")}>{usage.short}</span>,
-      onSelect: () => advanced ? openBotSettings(dispatch, "usage") : dispatch({ type: "toggleAppSettings", open: true, section: "usage" }),
+      onSelect: () => openBotSettings(dispatch, "usage"),
     } satisfies SidebarMenuItem] : []),
     ...(remoteClient ? [] : [{
       key: "activity",
@@ -144,9 +110,8 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   return { items, on: findOpen || state.inspectorOpen || state.activityOpen };
 }
 
-function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolean }) {
-  const { items, on } = useChatMoreItems(bot, phoneHeader);
-  const advanced = useAdvancedMode();
+function RoundChatMoreMenu({ bot }: { bot: Bot }) {
+  const { items, on } = useChatMoreItems(bot);
   return (
     <SidebarPopoverMenu
       items={items}
@@ -157,9 +122,7 @@ function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolea
         <span
           data-testid="chat-more"
           className={cn(
-            "flex size-8 items-center justify-center rounded-full",
-            advanced ? "bg-raised/50 transition-colors hover:bg-raised" : cn(ELEVATED_CONTROL, ELEVATED_HOVER, open && ELEVATED_OPEN),
-            "max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card",
+            "flex size-8 items-center justify-center rounded-full bg-raised/50 transition-colors hover:bg-raised",
             open || on ? "text-accent" : "text-ink",
           )}
         >
@@ -174,48 +137,9 @@ function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolea
  * The chat's ⋯ menu as a round button, for a spot outside the chat such as the bot panel's top bar: find in
  * conversation (opens the chat's find bar), threads the sidebar hides, share, usage, activity and the inspector.
  */
-export function ChatMoreMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHeader?: boolean }): JSX.Element {
+export function ChatMoreMenu({ bot }: { bot: Bot }): JSX.Element {
   // Keyed by thread so a "Copied" note never follows the panel into another conversation.
-  return <RoundChatMoreMenu key={bot.threadId} bot={bot} phoneHeader={phoneHeader} />;
-}
-
-export const EXPORT_ITEMS = ["copy", "download"];
-
-/** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation under
- * the ⋯ of its header; anywhere else a menu of those two. */
-export function ChatShareMenu({ bot, className }: { bot: Bot; className: string }): JSX.Element {
-  return useTeamName() ? <ShareBotButton bot={bot} className={className} headerMenu={<ExportMore key={bot.threadId} bot={bot} />} />
-    : <ShareMenu key={bot.threadId} bot={bot} className={className} />;
-}
-
-const exportItems = (items: SidebarMenuItem[]): SidebarMenuItem[] => items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => ({
-  ...item, heading: undefined, separatorBefore: false, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
-}));
-
-function ExportMore({ bot }: { bot: Bot }) {
-  const { items } = useChatMoreItems(bot);
-  return (
-    <SidebarPopoverMenu items={exportItems(items)} ariaLabel={t("chat.more")} align="end" triggerTitle={t("chat.more")}
-      triggerClassName="flex shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.06]"
-      renderTrigger={() => <MoreHorizontal size={16} aria-hidden="true" />} />
-  );
-}
-
-function ShareMenu({ bot, className }: { bot: Bot; className: string }) {
-  const { items } = useChatMoreItems(bot);
-  return (
-    <SidebarPopoverMenu
-      items={exportItems(items)}
-      ariaLabel={t("chat.export.heading")}
-      triggerClassName="rounded-full"
-      triggerTitle={t("chat.export.heading")}
-      renderTrigger={({ open }) => (
-        <span data-panel-share className={cn(className, open && ELEVATED_OPEN)}>
-          <Share size={16} aria-hidden="true" />
-        </span>
-      )}
-    />
-  );
+  return <RoundChatMoreMenu key={bot.threadId} bot={bot} />;
 }
 
 /** The same menu as the chat header's plain ⋯ in Advanced mode, opening on hover below the header. */
@@ -231,7 +155,7 @@ export function ChatHeaderMenu({ bot }: { bot: Bot }): JSX.Element {
         <span
           data-testid="chat-more"
           className={cn(
-            "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+            "flex rounded-md p-1.5 hover:bg-raised",
             open || on ? "text-accent" : "text-ink-secondary hover:text-ink",
           )}
           title={t("chat.more")}

@@ -3,12 +3,9 @@ import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { EVENTS_DIR } from "../config.ts";
-import { flushNativeLog } from "../drivers/native.ts";
 import { redactSecrets } from "../redact.ts";
-import { batchSaves } from "../save-batch.ts";
 import { capThreadLog, currentThreadLogCap } from "../thread-log-rotation.ts";
-import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
-import { LiveSteps } from "./live-steps.ts";
+import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
 import { ProgressGate } from "./progress-gate.ts";
 
 const INCOMPLETE_LOG_MESSAGE =
@@ -18,8 +15,8 @@ const DELTA_MERGE_MS = 50;
 
 const MAX_BATCH_LINES = 64;
 
-const MAX_QUEUED_EVENTS = 4096;
-const MAX_QUEUED_BYTES = 32 * 1024 * 1024;
+const MAX_QUEUED_EVENTS = 256;
+const MAX_QUEUED_BYTES = 1024 * 1024;
 
 export type EventLogAppend = (
   path: string,
@@ -37,9 +34,6 @@ function sameStream(a: TextDelta, b: TextDelta): boolean {
   return a.provider === b.provider && a.providerInstanceId === b.providerInstanceId && a.turnId === b.turnId &&
     a.itemId === b.itemId && a.streamKind === b.streamKind && a.synthetic === b.synthetic;
 }
-
-/** What changes the chat's status line, and so makes a waiting status report stale; a heartbeat or a token count does not. */
-const STATUS_LINE_EVENTS = new Set<RuntimeEvent["type"]>(["turn.started", "content.delta", "item.started", "item.completed", "request.opened"]);
 
 function isTerminalEvent(event: RuntimeEvent): boolean {
   if (event.type === "turn.completed" || event.type === "cap.exhausted" || event.type === "session.exited") {
@@ -65,48 +59,32 @@ export class EventBus {
     if (this.pendingText.has(event.threadId)) this.flushThread(event.threadId);
     this.deliver(event);
   });
-  private readonly adapters = new Map<string, ProviderAdapter>();
-  private readonly steps = new LiveSteps({
-    offer: (event) => this.progress.offer(event),
-    enginePid: (event) => this.adapters.get(event.providerInstanceId ?? "")?.enginePid?.(event.threadId),
-  });
 
-  private readonly gate?: (event: RuntimeEvent) => boolean;
-
-  /** `gate` sees each adapter event first; true means it took the event and publishes what it chooses. */
-  constructor(appendLog: EventLogAppend = defaultAppend, gate?: (event: RuntimeEvent) => boolean) {
+  constructor(appendLog: EventLogAppend = defaultAppend) {
     this.appendLog = appendLog;
-    this.gate = gate;
   }
 
   attach(instances: ProviderInstance[]) {
     for (const instance of instances) {
       this.detach(instance.instanceId);
-      this.adapters.set(instance.instanceId, instance.adapter);
       const unsub = instance.adapter.onEvent((event) => {
         // An adapter may only emit events for its own driver kind.
         if (event.provider !== instance.driverKind) {
           console.error(`bus: dropped cross-driver event from ${instance.instanceId}`);
           return;
         }
-        const stamped = { ...event, providerInstanceId: instance.instanceId };
-        if (!this.gate?.(stamped)) this.publish(stamped);
+        this.publish({ ...event, providerInstanceId: instance.instanceId });
       });
       this.unsubscribes.set(instance.instanceId, unsub);
     }
   }
 
-  publish(raw: RuntimeEvent) {
-    if (raw.type === "turn.progress") {
-      this.progress.offer(this.steps.progress(raw));
+  publish(event: RuntimeEvent) {
+    if (event.type === "turn.progress") {
+      this.progress.offer(event);
       return;
     }
-    if (raw.type === "item.output") {
-      this.steps.output(raw);
-      return;
-    }
-    const event = this.steps.observe(raw, isTerminalEvent(raw));
-    if (STATUS_LINE_EVENTS.has(event.type) || isTerminalEvent(event)) this.progress.supersede(event.threadId, isTerminalEvent(event));
+    this.progress.supersede(event.threadId, isTerminalEvent(event));
     const pending = this.pendingText.get(event.threadId);
     if (event.type === "content.delta") {
       if (pending && sameStream(pending.event, event)) {
@@ -121,7 +99,6 @@ export class EventBus {
     }
     if (pending) this.flushThread(event.threadId);
     this.write(event);
-    this.steps.announce(event);
   }
 
   flush(): Promise<void> {
@@ -155,9 +132,7 @@ export class EventBus {
     // Queue first, then deliver: a listener publishing during delivery queues after this, so the log keeps publication order.
     this.enqueue(event);
     this.deliver(event);
-    if (!isTerminalEvent(event)) return;
-    flushNativeLog(event.threadId);
-    void this.flushDisk();
+    if (isTerminalEvent(event)) void this.flushDisk();
   }
 
   private enqueue(event: RuntimeEvent) {
@@ -278,15 +253,13 @@ export class EventBus {
   }
 
   private deliver(event: RuntimeEvent) {
-    batchSaves(() => {
-      for (const listener of Array.from(this.listeners)) {
-        try {
-          listener(event);
-        } catch (e) {
-          console.error("bus: listener threw", e);
-        }
+    for (const listener of Array.from(this.listeners)) {
+      try {
+        listener(event);
+      } catch (e) {
+        console.error("bus: listener threw", e);
       }
-    });
+    }
   }
 
   subscribe(listener: RuntimeEventListener): () => void {
@@ -301,7 +274,6 @@ export class EventBus {
   detach(instanceId: string) {
     this.unsubscribes.get(instanceId)?.();
     this.unsubscribes.delete(instanceId);
-    this.adapters.delete(instanceId);
     void this.flush();
   }
 }

@@ -42,7 +42,7 @@ export function teamModelChoices(bots: readonly Bot[], instances: readonly Insta
     const engine = engineOf(bot, instances);
     if (!engine || seen.has(engine.instanceId)) continue;
     seen.add(engine.instanceId);
-    const ids = [engine.models.default, ...engine.models.options.filter((option) => !option.orgBlocked).map((option) => option.id)].filter((id) => id.trim());
+    const ids = [engine.models.default, ...engine.models.options.map((option) => option.id)].filter((id) => id.trim());
     for (const id of new Set(ids)) {
       const label = engine.models.options.find((option) => option.id === id)?.label ?? id;
       const entry = choices.get(id) ?? { id, label, engines: [] };
@@ -69,6 +69,7 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
     const engineName = engine?.displayName ?? bot.modelSelection.instanceId;
     if (change.kind === "approval") {
       if ([approvalModeFor(bot), ...threadApprovalModes(bot)].every((mode) => mode === change.mode)) return { bot, status: "unchanged" };
+      if (bot.busy || bot.tasks?.some((task) => task.busy)) return { bot, status: "skip", reason: t("teamSettings.skip.busy") };
       if (!teamModeOffered(engine?.driverKind, change.mode)) {
         return { bot, status: "skip", reason: t("teamSettings.skip.modeUnsupported", { engine: engineName }) };
       }
@@ -77,7 +78,7 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
     const current = bot.modelSelection;
     if (!engine) return { bot, status: "skip", reason: t("teamSettings.skip.engineMissing") };
     const model = change.model ?? current.model;
-    const offered = model === engine.models.default || engine.models.options.some((option) => option.id === model && !option.orgBlocked);
+    const offered = model === engine.models.default || engine.models.options.some((option) => option.id === model);
     if (!offered) return { bot, status: "skip", reason: t("teamSettings.skip.modelUnsupported", { engine: engineName, model }) };
     const next: ModelSelection = { instanceId: current.instanceId, model };
     if (current.variant && model === current.model) next.variant = current.variant;

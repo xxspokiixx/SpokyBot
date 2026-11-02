@@ -149,8 +149,7 @@ test("a writable folder never reaches git's configuration, hooks or login items 
     ],
   });
   for (const refused of results.slice(0, 3)) { assert.equal(refused.isError, true); assert.match(text(refused), /\.git/); }
-  assert.notEqual(results[3].isError, true, "an ordinary file is written, its missing folder made");
-  assert.equal(await readFile(path.join(repo, "src", "main.js"), "utf8"), "console.log('ok')");
+  assert.equal(results[3].isError, true, "src/ does not exist; a missing parent is an ordinary error");
   assert.equal(JSON.parse(text(results[4])).content, "[core]\n\tbare = false\n");
   assert.equal(await readFile(path.join(repo, ".git", "config"), "utf8"), "[core]\n\tbare = false\n");
   await assert.rejects(stat(path.join(repo, ".git", "hooks", "pre-commit")), { code: "ENOENT" });
@@ -285,9 +284,7 @@ test("malformed jobs are refused before anything runs, and the connector keeps s
   assert.equal(JSON.parse(text(results[4])).content, "fine");
   assert.equal(sharing.activity().filter(entry => entry.action === "invalid").length, 4);
   assert.equal(validSharedOperation({ computer_id: "x", action: "read_file" }, "x"), true);
-  assert.equal(validSharedOperation({ computer_id: "x", action: "delete_file", expected_sha256: "0".repeat(64) }, "x"), true);
-  assert.equal(validSharedOperation({ computer_id: "x", action: "rename_file" }, "x"), false);
-  assert.equal(validSharedOperation({ computer_id: "x", action: "edit_file", old_text: 5 }, "x"), false);
+  assert.equal(validSharedOperation({ computer_id: "x", action: "delete_file" }, "x"), false);
   assert.equal(validSharedOperation({ computer_id: "x", action: "read_file", encoding: "hex" }, "x"), false);
   assert.equal(validSharedOperation(null, "x"), false);
 });

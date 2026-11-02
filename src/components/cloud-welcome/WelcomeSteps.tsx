@@ -61,22 +61,25 @@ export function WelcomeEngine({ name, headingRef, onFinish }: { name: string; he
   </section>;
 }
 
-/** "folders": in the app on a Cloud of the person's own, this computer is lent to it by itself; from a browser or on a
- * Team Cloud, the desktop app shares folders through Files. */
+/** "folders": from a browser, the desktop app shares them; in the app on a Cloud page, this computer's app does; on My Cloud
+ * once it is home, its own Settings say what the person's computer shares. */
 export function WelcomeFiles({ name, headingRef, onFinish }: { name: string; headingRef: Ref<HTMLHeadingElement>; onFinish: () => void }) {
-  const { state, dispatch } = useStore();
-  const lent = Boolean(window.ogb?.cloudPlan) && !state.config?.team;
+  const { dispatch } = useStore();
+  const lending = window.ogb?.cloudLending;
+  const home = useCloudPlanSnapshot(window.ogb?.cloudPlan)?.home === true;
   const card = (id: string, icon: typeof Plug, title: string, body: string, action?: { label: string; run: () => void }) =>
     <div data-welcome-files={id} className={cn(CARD, CARD_IDLE)}>
       <CardIcon icon={icon} />
-      <span className="text-[15px] font-semibold text-ink">{title}</span>
-      <span className="text-[13px] leading-relaxed text-ink-secondary">{body}</span>
+      <span className="text-[14.5px] font-semibold text-ink">{title}</span>
+      <span className="text-[12.5px] leading-relaxed text-ink-secondary">{body}</span>
       {action && <span className="mt-1"><button type="button" className={SECONDARY} onClick={action.run}>{action.label}</button></span>}
     </div>;
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="files" className="flex flex-col gap-5">
     <StepHeading headingRef={headingRef} title={t("cloudWelcome.files.title")} aside={t("cloudWelcome.files.optional")} sub={t("cloudWelcome.files.sub")} />
     <div className="grid gap-3 @lg/step:grid-cols-2">
-      {card("folders", FolderOpen, t("cloudWelcome.files.folders"), t(lent ? "cloudWelcome.files.foldersLent" : "cloudWelcome.files.foldersDesktop", { name }))}
+      {card("folders", FolderOpen, t("cloudWelcome.files.folders"),
+        t(!lending ? "cloudWelcome.files.foldersDesktop" : home ? "cloudWelcome.files.foldersHome" : "cloudWelcome.files.foldersHint", { name }),
+        lending ? { label: t(home ? "cloudWelcome.files.foldersHomeAction" : "cloudWelcome.files.foldersAction"), run: () => void lending.open().catch(() => {}) } : undefined)}
       {card("apps", Plug, t("cloudWelcome.files.apps"), t("cloudWelcome.files.appsHint"),
         { label: t("cloudWelcome.files.appsAction"), run: () => dispatch({ type: "togglePlugins", open: true, surface: "apps" }) })}
     </div>

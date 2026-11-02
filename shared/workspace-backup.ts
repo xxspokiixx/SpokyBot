@@ -27,7 +27,16 @@ export interface WorkspaceLeftBehind {
 
 export type WorkspaceBackupClientState = Record<string, string>;
 
+export interface BackupSelection {
+  history: boolean;
+  skills: boolean;
+  automations: boolean;
+  savedLogins: boolean;
+  apiKeys: boolean;
+}
+
 export interface WorkspaceBackupPrivateMetadata {
   summary: WorkspaceBackupSummary;
   clientState: WorkspaceBackupClientState;
+  selection?: BackupSelection;
 }

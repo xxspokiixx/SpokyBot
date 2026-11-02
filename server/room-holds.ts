@@ -4,14 +4,11 @@
  */
 import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
 import type { RoomHold, RoomHeldMessage } from "../shared/wire.ts";
-import { isServerLine, serverLine } from "./server-lines.ts";
 
 const STOP_WINDOW = 2;
 const STOP_WORDS = new Set(["stop", "halt", "pause"]);
 const OBJECT_STARTERS = new Set(["this", "that", "these", "those", "the", "a", "an", "my", "our", "your", "his", "her", "their", "its"]);
 const OWN_WORK_OR_URGENCY = new Set(["now", "please", "right", "immediately", "asap", "work", "task", "job", "turn", "run", "reply"]);
-const STOP_COMMANDS = new Set(["stop", "halt", "cancel", "abort"]);
-const STOP_FILLERS = new Set(["now", "please", "right", "immediately", "asap", "it", "that", "this", "everything", "all"]);
 export const MAX_HELD_MESSAGES = 20;
 
 export type HoldDirective = {
@@ -84,11 +81,6 @@ function isBareResume(text: string): boolean {
   return words.length > 0 && words[0] === "resume" && words.slice(1).every((word) => ["all", "everyone", "please"].includes(word));
 }
 
-export function isStopCommand(text: string): boolean {
-  const words = maskQuotedAndCode(text).toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
-  return words.some((word) => STOP_COMMANDS.has(word)) && words.every((word) => STOP_COMMANDS.has(word) || STOP_FILLERS.has(word));
-}
-
 /** A stop word far from every mention changes nothing: re-dispatching a bot the person just stopped is the one mistake to avoid. */
 export function classifyHoldDirective(text: string, mentioned: readonly string[]): HoldDirective {
   const everyone = addressesEveryone(text);
@@ -148,11 +140,10 @@ export function rememberHeldMessage(
   return { ...heldMessages, [botId]: [...current, entry].slice(-MAX_HELD_MESSAGES) };
 }
 
-/** The room's status row for a held member, in the room's language; a coordinator reads it in English. */
-export function heldMemberLine(name: string, language?: string): string {
-  return serverLine(language, "server.rooms.held", { bot: name });
+export function heldMemberLine(name: string): string {
+  return `${name} is held (stopped by you) — @mention it or say resume`;
 }
 
 export function isHeldMemberLine(text: string): boolean {
-  return isServerLine("server.rooms.held", text);
+  return text.endsWith(" is held (stopped by you) — @mention it or say resume");
 }

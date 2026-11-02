@@ -16,7 +16,7 @@ const CLEO = { email: "cleo@acme.test", role: "member" as const };
 const DEE = { email: "dee@acme.test", role: "member" as const };
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const ADA_PHOTO = "/api/attachments/ada-photo.png";
-const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";`;
+const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";`;
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let ada = "", bob = "";
@@ -141,9 +141,9 @@ it("lets Bob's Settings → Profile change only Bob's, whichever route his app s
 it("names Bob, not the owner, in his private chat's system prompt, with his About you only", async () => {
   // A server profile naming someone who has not signed in yet waits, read by nobody's turn.
   const config = JSON.parse(readFileSync(configFile(), "utf8")) as Record<string, unknown>;
-  writeFileSync(configFile(), JSON.stringify({ ...config, profile: { name: "Imogen Owner", email: "imogen@acme.test", aboutMe: "Imogen likes sailing." } }));
+  writeFileSync(configFile(), JSON.stringify({ ...config, profile: { name: "Olive Owner", email: "olive@acme.test", aboutMe: "Olive likes sailing." } }));
   await team.relaunch();
-  expect(JSON.stringify(await you(bob))).not.toContain("Imogen");
+  expect(JSON.stringify(await you(bob))).not.toContain("Olive");
   const created = await team.as(ada, "POST", "/api/bots", { name: "Scout" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   bot = created.body.bot;
@@ -151,17 +151,16 @@ it("names Bob, not the owner, in his private chat's system prompt, with his Abou
   const bobs = await turn(bob, thread, "Who am I talking to?");
   expect(bobs.systemPrompt).toContain(JSON.stringify("Bob Builder"));
   expect(bobs.systemPrompt).toContain("payroll");
-  expect(bobs.systemPrompt).not.toContain('conversation is "Ada Lovelace"');
+  expect(bobs.systemPrompt).not.toContain("Ada Lovelace");
   expect(bobs.systemPrompt).not.toContain("like tea");
-  expect(bobs.systemPrompt).not.toContain("Imogen");
+  expect(bobs.systemPrompt).not.toContain("Olive");
   const adaThread = (await team.as(ada, "POST", `/api/bots/${bot.id}/tasks`, { title: "Ada and Scout" })).body.task.threadId as string;
   const adas = await turn(ada, adaThread, "And now?");
   expect(adas.systemPrompt).toContain(JSON.stringify("Ada Lovelace"));
   expect(adas.systemPrompt).toContain("like tea");
-  expect(adas.systemPrompt).not.toContain('conversation is "Bob Builder"');
-  expect(adas.systemPrompt).not.toContain("payroll");
-  expect(adas.systemPrompt).not.toContain("Imogen");
-  expect(serverProfile()).toMatchObject({ name: "Imogen Owner" });
+  expect(adas.systemPrompt).not.toContain("Bob Builder");
+  expect(adas.systemPrompt).not.toContain("Olive");
+  expect(serverProfile()).toMatchObject({ name: "Olive Owner" });
 }, hostTimeout(120_000));
 
 it("puts each speaker's own name on a group chat's lines, for the people and for the bot", async () => {

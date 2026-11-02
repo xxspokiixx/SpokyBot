@@ -8,7 +8,7 @@ import type { Bot } from "@/state/store";
 import type { TraceToolIcon } from "../../../shared/usage-trace";
 import { BotAvatar } from "../Avatar";
 import { loadAppCards } from "../bot-settings/useBotApps";
-import { ServiceIcon, type ToolkitCard } from "../ServiceIcon";
+import { ServiceIcon, type ToolkitCard } from "../PluginsPanel";
 
 const ICONS: Record<Exclude<TraceToolIcon, "app">, LucideIcon> = {
   search: Search, web: Globe, browser: Globe, computer: Monitor, phone: Smartphone, files: FileText, terminal: SquareTerminal,

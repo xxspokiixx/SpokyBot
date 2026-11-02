@@ -377,7 +377,7 @@ export class BrowserCleanupCoordinator {
 }
 
 /** Defaults for config.json's browserEngine.idleTimeoutMinutes (1-60); agent-browser's own backstop closes an idle daemon after an hour. */
-export const DEFAULT_BROWSER_IDLE_MINUTES = 10;
+export const DEFAULT_BROWSER_IDLE_MINUTES = 60;
 export const CLOUD_HOME_BROWSER_IDLE_MINUTES = 3;
 
 export function browserIdleMs(cfg: { browserEngine?: { idleTimeoutMinutes?: number } }, { cloudHome = false }: { cloudHome?: boolean } = {}): number {

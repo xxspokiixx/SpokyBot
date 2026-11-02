@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { folderToFollow, inMyFolderCwd, sharedProjectFolder, validateBotCwd } from "./bot-cwd.ts";
+import { sharedProjectFolder, validateBotCwd } from "./bot-cwd.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "omb-cwd-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -51,48 +51,5 @@ describe("sharedProjectFolder", () => {
     expect(sharedProjectFolder(join(dir, "gone"), data)).toBeUndefined();
     expect(sharedProjectFolder(null, data)).toBeUndefined();
     expect(sharedProjectFolder(undefined, data)).toBeUndefined();
-  });
-});
-
-describe("inMyFolderCwd", () => {
-  const data = join(dir, "omb-data");
-  const project = join(dir, "omb-data-site");
-  const privateFolder = join(data, "task-workspaces", "bot", "thread");
-
-  it("shares the sender's project folder outside a room unless asked not to", () => {
-    expect(inMyFolderCwd(undefined, true, project, data)).toEqual({ cwd: project });
-    expect(inMyFolderCwd(true, true, project, data)).toEqual({ cwd: project });
-    expect(inMyFolderCwd(false, true, project, data)).toEqual({});
-  });
-
-  it("stays silent when left out, and refuses an explicit true, where there is nothing to share", () => {
-    expect(inMyFolderCwd(undefined, false, project, data)).toEqual({});
-    expect(inMyFolderCwd(undefined, true, privateFolder, data)).toEqual({});
-    expect(inMyFolderCwd(true, false, project, data)).toEqual({ error: expect.stringMatching(/room/) });
-    expect(inMyFolderCwd(true, true, privateFolder, data)).toEqual({ error: expect.stringMatching(/no project folder/) });
-  });
-});
-
-describe("folderToFollow", () => {
-  const own = join(dir, "omb-data", "task-workspaces", "bot", "thread");
-  const bot = { id: "bot", cwd: join(dir, "omb-data-site") };
-  const folders = { worksInFolders: true, keepsPrivateFolder: false };
-
-  it("moves a thread from its own folder to the working folder its bot has been given", () => {
-    expect(folderToFollow(bot, "thread", own, folders)).toBe(bot.cwd);
-  });
-
-  it("leaves a thread where it is when the bot has no working folder or the thread is not in its own folder", () => {
-    expect(folderToFollow({ id: "bot" }, "thread", own, folders)).toBeUndefined();
-    expect(folderToFollow(bot, "thread", join(dir, "chosen"), folders)).toBeUndefined();
-    expect(folderToFollow(bot, "thread", bot.cwd, folders)).toBeUndefined();
-    expect(folderToFollow(bot, "thread", join(dir, "omb-data", "task-workspaces", "bot", "other-thread"), folders)).toBeUndefined();
-    expect(folderToFollow(bot, "thread", null, folders)).toBeUndefined();
-    expect(folderToFollow(bot, "thread", undefined, folders)).toBeUndefined();
-  });
-
-  it("never moves a conversation that keeps a private folder, or one on an engine that works in no folder", () => {
-    expect(folderToFollow(bot, "thread", own, { ...folders, keepsPrivateFolder: true })).toBeUndefined();
-    expect(folderToFollow(bot, "thread", own, { ...folders, worksInFolders: false })).toBeUndefined();
   });
 });

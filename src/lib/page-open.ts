@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, type MouseEvent } from "react";
+import { useCallback, useContext, useEffect, useRef, type MouseEvent } from "react";
 import { PAGE_ID } from "../../shared/published-page";
-import type { Bot } from "@/state/store";
-import { useOptionalStoreRef } from "@/state/store-ref";
+import { StoreContext, type Bot } from "@/state/store";
 import { openExternalLink } from "./app-links";
 import { browserAvailable, builtInBrowserEnabled, type FeatureFlagConfig } from "./feature-flags";
 
@@ -72,11 +71,11 @@ export function usePanelPage(botId: string, open: (page: PanelPage) => void): vo
  * anything else outside the chat. It never sends a message, starts a turn or opens a chat. */
 export function usePageOpener(): (url: string) => void {
   // Outside the app's store (a message drawn on its own) there is no panel: the page opens outside the chat.
-  const store = useOptionalStoreRef();
+  const store = useContext(StoreContext);
   const latest = useRef(store);
   latest.current = store;
   return useCallback((url: string) => {
-    const app = latest.current, state = app?.state();
+    const app = latest.current, state = app?.state;
     const botId = app && state ? pagePanelBot(url, { selectedId: state.selectedId, bots: state.bots ?? [], groups: state.groups ?? [], config: state.config, desktop: window.ogb }) : null;
     if (!app || !botId) { void openExternalLink(url).catch(() => {}); return; }
     requestPanelPage(botId, url);

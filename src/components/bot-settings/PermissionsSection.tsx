@@ -39,7 +39,7 @@ export function PermissionsSection({
   const applyFullEverywhere = () =>
     dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
   const setApprovalMode = (mode: ApprovalMode) => {
-    if (mode === approvalMode) return;
+    if (bot.busy || mode === approvalMode) return;
     if (mode === "full") {
       applyFullEverywhere();
       return;
@@ -70,7 +70,7 @@ export function PermissionsSection({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-medium text-ink">{t("permissions.chief.title")}</div>
-            <div className="text-[12px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
+            <div className="text-[11.5px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
           </div>
           <Switch
             checked={Boolean(bot.chiefOfStaff)}
@@ -103,28 +103,24 @@ export function PermissionsSection({
         {bot.chiefOfStaff && <ProposalStatus bot={bot} kind="owner" />}
       </div>}
 
-      {shows("peers") && <div className="rounded-xl bg-card p-4">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <div className="text-[15px] font-medium text-ink">{t("permissions.peers.title")}</div>
-            <div className="mt-0.5 text-[13px] text-ink-secondary">
-              {bot.approvePeerComms
-                ? t("permissions.peers.on")
-                : t("permissions.peers.off")}
-            </div>
-            <ProposalStatus bot={bot} kind="owner" />
+      {shows("peers") && <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
+        <div>
+          <div className="text-[15px] font-medium text-ink">{t("permissions.peers.title")}</div>
+          <div className="mt-0.5 text-[13px] text-ink-secondary">
+            {bot.approvePeerComms
+              ? t("permissions.peers.on")
+              : t("permissions.peers.off")}
           </div>
-          <Switch
-            checked={Boolean(bot.approvePeerComms)}
-            aria-label={t("permissions.peers.title")}
-            disabled={!bot.approvePeerComms && !canCoordinate}
-            onClick={() => patch({ approvePeerComms: !bot.approvePeerComms })}
-            title={!bot.approvePeerComms && !canCoordinate ? t("permissions.cannotCoordinate") : undefined}
-            className="disabled:cursor-not-allowed"
-          />
+          <ProposalStatus bot={bot} kind="owner" />
         </div>
-        {Array.isArray(bot.peers) && <PeersListNote peers={bot.peers} bots={state.bots}
-          onOpen={() => patch({ peers: null, acknowledgePeerScope: true })} />}
+        <Switch
+          checked={Boolean(bot.approvePeerComms)}
+          aria-label={t("permissions.peers.title")}
+          disabled={!bot.approvePeerComms && !canCoordinate}
+          onClick={() => patch({ approvePeerComms: !bot.approvePeerComms })}
+          title={!bot.approvePeerComms && !canCoordinate ? t("permissions.cannotCoordinate") : undefined}
+          className="disabled:cursor-not-allowed"
+        />
       </div>}
 
       {shows("approval") && <div className="rounded-xl bg-card p-4">
@@ -142,13 +138,13 @@ export function PermissionsSection({
             onSelect={setApprovalMode}
             menuDirection="down"
             wide
-            busy={Boolean(bot.busy)}
+            disabled={Boolean(bot.busy)}
             trustedModesAvailable={trustedModesAvailable}
             onManageCommandAllowlist={!draft && ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: bot.id, botName: bot.name }) : undefined}
           />
         </div>
         {!draft && approvalMode === "full" && <button
-          type="button"
+          type="button" disabled={Boolean(bot.busy)}
           className="mt-3 text-[13px] text-accent hover:underline disabled:opacity-40"
           onClick={applyFullEverywhere}
         >{t("permissions.approval.applyFull")}</button>}
@@ -175,16 +171,6 @@ export function PermissionsSection({
           dispatch({ type: "updateBot", botId: target, patch: { approvalMode: "auto", acknowledgeLocalAuto: true } });
         }}
       />
-    </div>
-  );
-}
-
-function PeersListNote({ peers, bots, onOpen }: { peers: readonly string[]; bots: readonly Bot[]; onOpen: () => void }) {
-  const names = peers.flatMap((id) => bots.find((other) => other.id === id && !other.hidden)?.name ?? []);
-  return (
-    <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-hairline/40 pt-3 text-[13px] text-ink-secondary">
-      <span>{names.length ? t("permissions.peers.limited", { names: names.join(", ") }) : t("permissions.peers.none")}</span>
-      <button type="button" className="text-accent hover:underline" onClick={onOpen}>{t("permissions.peers.everyone")}</button>
     </div>
   );
 }

@@ -26,14 +26,13 @@ vi.mock("react", async (original) => ({
   useLayoutEffect: () => {},
 }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./MenuMotion", () => ({
   useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "", exitProps: {} }),
   useHeldMenuMotion: (value: unknown) => ({ shown: value !== null, value, closing: false, className: "", exitProps: {} }),
 }));
 vi.mock("./DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("@/lib/desktop");
-  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
+  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }) };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
@@ -44,15 +43,11 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import { initialState } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
-import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
+import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
-import { PinnedBotRoster } from "./PinnedCircleThreads";
-import { SidebarFooter } from "./SidebarFooter";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
-import { SidebarTileGrid } from "./SidebarTiles";
-import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
+import { SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 
 const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
@@ -107,68 +102,28 @@ afterEach(() => {
 });
 
 describe("Simple-mode sidebar layout", () => {
-  it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with a count", () => {
+  it("lists ungrouped bots first with no heading, then Group chats and teams as thin lines", () => {
     const { tree } = render();
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
     const lines = headers(tree);
-    expect(lines.map((header) => [header.props.name, header.props.line, header.props.count])).toEqual([["Group chats", true, 1], ["Work", true, 1]]);
+    expect(lines.map((header) => header.props.name)).toEqual(["Group chats", "Work"]);
+    for (const header of lines) {
+      expect(header.props.line).toBe(true);
+      expect(header.props.onDelete).toBeUndefined();
+    }
     expect(lines[0]!.props.onMenu).toBeUndefined();
-    expect(lines[1]!.props.onDelete).toBeUndefined();
     expect(lines[1]!.props.onMenu).toBeTypeOf("function");
     expect(labelled(tree, "Add or remove bots in Work")).toBe(false);
-    expect(tree.some((node) => node.type === SidebarTileGrid)).toBe(false);
   });
 
-  it("shows the Chief and the pinned bots as tiles above the rows, with no Pinned or Bots heading", () => {
-    fixture.state = { ...fixture.state, bots: [bot("chief", { chiefOfStaff: true, pinned: true }), bot("atlas", { pinned: true }), bot("bea"), bot("dodo", { section: "Work", pinned: true })] };
+  it("names the bots with a thin line only when pinned bots sit above them", () => {
+    fixture.state = { ...fixture.state, bots: [bot("atlas", { pinned: true }), bot("bea"), bot("dodo", { section: "Work" })] };
     const { tree } = render();
-    const grid = tree.find((node) => node.type === SidebarTileGrid)!.props as Parameters<typeof SidebarTileGrid>[0];
-    expect(grid.primary?.id).toBe("chief");
-    expect(grid.pinned.map((candidate) => candidate.id)).toEqual(["atlas", "dodo"]);
-    expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
-    expect(listedBots(tree)).toEqual(["bea"]);
-    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Work"]);
-  });
-
-  it("fades the list's edges in both modes, with the top buttons and the tiles fixed above it", () => {
-    fixture.state = { ...fixture.state, bots: [bot("chief", { chiefOfStaff: true, pinned: true }), bot("atlas", { pinned: true }), bot("bea")] };
-    const simple = render();
-    expect(simple.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(true);
-    const head = simple.tree.find((node) => node.type === GlassBar && node.props.edge === "top")!;
-    expect(nodes(head.props.children).some((node) => node.type === SidebarTileGrid)).toBe(true);
-    const list = simple.tree.find((node) => node.type === GlassScroller)!;
-    expect(nodes(list.props.children).some((node) => node.type === SidebarTileGrid)).toBe(false);
-    expect(simple.root.props.className).toContain("max-md:[--scroll-fade-surface:var(--color-app)]");
-    fixture.advanced = true;
-    const advanced = render();
-    expect(advanced.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(true);
-    expect(advanced.root.props.className).toContain("max-md:[--scroll-fade-surface:var(--color-app)]");
-  });
-
-  it("keeps Advanced's Pinned heading and rows, with the Chief as a row", () => {
-    fixture.advanced = true;
-    fixture.state = { ...fixture.state, bots: [bot("chief", { chiefOfStaff: true }), bot("atlas", { pinned: true }), bot("bea")] };
-    const { tree } = render();
-    expect(tree.some((node) => node.type === SidebarTileGrid)).toBe(false);
-    expect(sectionOrder(tree)).toContain(PINNED_SECTION_ID);
-    expect(listedBots(tree)).toEqual(["chief", "bea"]);
-    const roster = tree.find((node) => node.type === PinnedBotRoster)!.props as Parameters<typeof PinnedBotRoster>[0];
-    expect(roster.bots.map((candidate) => candidate.id)).toEqual(["atlas"]);
-    expect(headers(tree).map((header) => header.props.name)).toContain("Pinned");
-  });
-
-  it("draws the same faint edge in both modes, with the Simple footer in Simple mode and Advanced's footer in Advanced", () => {
-    const footer = (tree: ReactElement<Props>[]) => (tree.find((node) => node.type === SidebarFooter)!.props as Parameters<typeof SidebarFooter>[0]).simple;
-    const simple = render();
-    expect(simple.root.props.className).toContain("border-r-[0.5px] border-edge");
-    expect(simple.root.props.className).not.toContain("border-hairline");
-    expect(footer(simple.tree)).toBe(true);
-    fixture.values = [];
-    fixture.advanced = true;
-    const advanced = render();
-    expect(advanced.root.props.className).toContain("border-r-[0.5px] border-edge");
-    expect(footer(advanced.tree)).toBe(false);
+    expect(sectionOrder(tree)).toEqual([PINNED_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    const lines = headers(tree);
+    expect(lines.map((header) => header.props.name)).toEqual(["Pinned", "Bots", "Group chats", "Work"]);
+    expect(lines.map((header) => header.props.reorderable)).toEqual([false, false, true, true]);
   });
 
   it("still offers Add bots under an empty team", () => {
@@ -207,29 +162,17 @@ describe("Simple-mode sidebar layout", () => {
     for (const action of ["onAddBots", "onRename", "onShare", "onDelete"] as const) expect(items[action]).toBeTypeOf("function");
   });
 
-  it("starts from the shared order for the departments, and a Simple move is saved for Simple only", () => {
-    fixture.state = { ...fixture.state, sections: ["Work", "Home"] };
-    const saved = [userSectionId("Home"), CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")];
+  it("keeps a saved order for the other sections and writes a Simple move back without moving Bots", () => {
+    const saved = [userSectionId("Work"), CHANNELS_SECTION_ID, BOTS_SECTION_ID];
     fixture.storage.set(SIDEBAR_SECTION_ORDER_KEY, JSON.stringify(saved));
-    expect(sectionOrder(render().tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Home"), userSectionId("Work")]);
-    const work = () => headers(render().tree).find((header) => header.props.name === "Work")!;
-    expect(work().props.reorderable).toBe(true);
-    work().props.onMove!(-1);
-    const moved = [BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work"), userSectionId("Home")];
-    expect(JSON.parse(fixture.storage.get(SIMPLE_SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(moved);
-    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual(saved);
-    expect(sectionOrder(render().tree)).toEqual(moved);
-  });
-
-  it("moves group chats above the bots, which then get their own heading, and leaves Advanced's order alone", () => {
-    const chats = () => headers(render().tree).find((header) => header.props.name === "Group chats")!;
-    expect(chats().props.reorderable).toBe(true);
-    chats().props.onMove!(-1);
-    const { tree } = render();
-    expect(sectionOrder(tree)).toEqual([CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")]);
-    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Bots", "Work"]);
-    expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
-    expect(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)).toBeUndefined();
+    expect(sectionOrder(render().tree)).toEqual([BOTS_SECTION_ID, userSectionId("Work"), CHANNELS_SECTION_ID]);
+    const channels = () => headers(render().tree).find((header) => header.props.name === "Group chats")!;
+    expect(channels().props.reorderable).toBe(true);
+    channels().props.onMove!(-1);
+    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual([CHANNELS_SECTION_ID, userSectionId("Work"), BOTS_SECTION_ID]);
+    expect(sectionOrder(render().tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    channels().props.onMove!(-1);
+    expect(JSON.parse(fixture.storage.get(SIDEBAR_SECTION_ORDER_KEY)!)).toEqual([CHANNELS_SECTION_ID, userSectionId("Work"), BOTS_SECTION_ID]);
   });
 
   it("never hides the heading-less bots behind a collapse saved in Advanced", () => {
@@ -260,10 +203,10 @@ describe("Simple-mode sidebar layout", () => {
     expect(listedBots(render().tree)).toHaveLength(3);
   });
 
-  it("opens at 280px in Simple and 320px in Advanced, each remembering its own resized width", () => {
+  it("opens at 288px in Simple and 320px in Advanced, each remembering its own resized width", () => {
     const width = () => render().root.props.style!["--sidebar-width"];
-    expect(width()).toBe("280px");
-    expect(render().root.props.className).toContain("w-[280px]");
+    expect(width()).toBe("288px");
+    expect(render().root.props.className).toContain("w-[288px]");
     fixture.values = [];
     fixture.advanced = true;
     expect(width()).toBe("320px");
@@ -275,13 +218,8 @@ describe("Simple-mode sidebar layout", () => {
     fixture.advanced = false;
     expect(width()).toBe("300px");
     const handle = render().tree.find((node) => node.type === SidebarResizeHandle)!.props as Parameters<typeof SidebarResizeHandle>[0];
-    expect(handle.sizing.defaultWidth).toBe(280);
+    expect(handle.sizing.defaultWidth).toBe(288);
     expect(handle.sizing.valueNow).toBe(300);
-    fixture.storage.set(SIMPLE_SIDEBAR_WIDTH_KEY, "460");
-    fixture.values = [];
-    expect(width()).toBe("400px");
-    fixture.storage.set(SIMPLE_SIDEBAR_WIDTH_KEY, "300");
-    fixture.values = [];
     fixture.advanced = true;
     render();
     for (const effect of fixture.effects) {
@@ -289,13 +227,11 @@ describe("Simple-mode sidebar layout", () => {
     }
     expect(width()).toBe("360px");
   });
-  const edge = (tree: ReactElement<Props>[]) => tree.find((node) => node.type === SidebarResizeHandle)?.props as Parameters<typeof SidebarResizeHandle>[0] | undefined;
-
-  it("becomes a rail when its edge is dragged narrow, keeping the Simple order with a hairline between sections", () => {
-    const handle = edge(render().tree)!;
-    expect(handle.avatars).toBe(false);
-    handle.onAvatars(true);
-    expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("avatars");
+  it("collapses to a rail from the edge bump, keeping the Simple order with a hairline between sections", () => {
+    const toggle = render().tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0];
+    expect(toggle.collapsed).toBe(false);
+    toggle.onToggle();
+    expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("icons");
     const { root, tree } = render();
     expect(root.props.className).toContain("w-[92px]");
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
@@ -303,32 +239,27 @@ describe("Simple-mode sidebar layout", () => {
     expect(headers(tree)).toEqual([]);
     expect(tree.filter((node) => node.type === SidebarRailSeparator)).toHaveLength(2);
     expect(tree.some((node) => node.type === SidebarSearchToggle)).toBe(false);
-    expect(edge(tree)?.avatars, "the rail keeps its edge, to drag it open again").toBe(true);
-    expect(edge(tree)?.avatarsWidth).toBe(92);
+    expect((tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0]).collapsed).toBe(true);
     expect(tree.some((node) => node.props["data-sidebar-top-buttons"] !== undefined)).toBe(false);
   });
 
-  it("puts round search and the same + menu at the top of the rail, and dragging its edge out opens it again", () => {
+  it("puts search and the same + menu at the foot of the rail, and the edge bump expands it again", () => {
     setSidebarDensity("icons");
-    const top = () => render().tree.find((node) => node.props["data-sidebar-rail-top"] !== undefined)!;
-    const plus = () => nodes(top().props.children).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
-    expect(plus().props.className).toEqual(expect.stringContaining("size-9"));
+    const footer = () => render().tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0];
+    const plus = () => nodes(footer().plus).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
     (plus().props.onClick as () => void)();
-    const menu = nodes(top().props.children).find((node) => /\bmin-w-\[200px\]/.test(node.props.className ?? ""))!;
-    expect(menu.props.className).toEqual(expect.stringContaining("left-full top-0"));
-    expect(menu.props.className).toEqual(expect.stringContaining("rounded-[var(--radius-menu)]"));
-    const item = (label: string) => nodes(top().props.children).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
-    expect(item("Create department"), "Simple makes a department from its bots, by dragging one onto another or from a bot's menu").toBeUndefined();
-    expect(item("New chat"), "a new conversation starts from the bot panel").toBeUndefined();
-    expect(item("New bot")).toBeDefined();
-    expect(item("New group chat")).toBeDefined();
-    expect(item("Templates")).toBeDefined();
-    edge(render().tree)!.onAvatars(false);
+    const menu = nodes(footer().plus).find((node) => /\bw-52\b/.test(node.props.className ?? ""))!;
+    expect(menu.props.className).toEqual(expect.stringContaining("bottom-0 left-full"));
+    const item = (label: string) => nodes(footer().plus).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
+    expect(item("Create department"), "Simple mode never asks the person to design a department").toBeUndefined();
+    expect(item("Templates")).toBeUndefined();
+    expect(item("New Bot")).toBeDefined();
+    (render().tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0]).onToggle();
     expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("comfortable");
     expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
   });
 
-  it("New Bot makes a bot at once in both modes, Chief of Staff or not; Advanced keeps Create department and Templates", () => {
+  it("New Bot opens the form in both modes, Chief of Staff or not; Advanced keeps Create department and Templates", () => {
     fixture.state = { ...fixture.state, bots: [bot("atlas", { chiefOfStaff: true }), bot("bea")] };
     const openMenu = () => {
       const plus = () => render().tree.find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
@@ -336,8 +267,8 @@ describe("Simple-mode sidebar layout", () => {
       const tree = render().tree;
       return (label: string) => tree.find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
     };
-    (openMenu()("New bot")!.props.onClick as () => void)();
-    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
+    (openMenu()("New Bot")!.props.onClick as () => void)();
+    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "toggleNewBot", open: true }]);
     fixture.dispatch.mockClear();
     fixture.values = [];
     fixture.advanced = true;
@@ -345,15 +276,13 @@ describe("Simple-mode sidebar layout", () => {
     expect(item("Create department")).toBeDefined();
     expect(item("Templates")).toBeDefined();
     (item("New Bot")!.props.onClick as () => void)();
-    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
+    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "toggleNewBot", open: true }]);
   });
-
-  const railSearch = (tree: ReactElement<Props>[]) => tree.find((node) => node.type === "button" && node.props["aria-label"] === "Search bots and messages")!.props.onClick as () => void;
 
   it("opens the search pill from the rail's search button by expanding the sidebar", () => {
     setSidebarDensity("icons");
     expect(render().tree.some((node) => node.type === SidebarSearchPill)).toBe(false);
-    railSearch(render().tree)();
+    (render().tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0]).onSearch();
     const { tree } = render();
     expect(tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
     expect(tree.some((node) => node.type === SidebarSearchPill)).toBe(true);
@@ -362,9 +291,9 @@ describe("Simple-mode sidebar layout", () => {
   it("opens the command palette instead when a side panel holds the sidebar collapsed", () => {
     const opened = vi.fn();
     window.addEventListener("omb:open-command-palette", opened);
-    const search = railSearch(render(true).tree);
-    expect(edge(render(true).tree), "no edge to drag while a side panel holds it collapsed").toBeUndefined();
-    search();
+    const footer = render(true).tree.find((node) => node.type === SimpleRailFooter)!.props as Parameters<typeof SimpleRailFooter>[0];
+    expect(render(true).tree.some((node) => node.type === SidebarEdgeToggle)).toBe(false);
+    footer.onSearch();
     expect(opened).toHaveBeenCalledOnce();
     expect(render(true).tree.some((node) => node.type === SimpleRailFooter)).toBe(true);
   });

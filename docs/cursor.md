@@ -19,8 +19,6 @@ key.
 
    Windows (native): `irm 'https://cursor.com/install?win32=true' | iex`
 
-   On Windows, OpenMausBot does not spawn cursor-agent.cmd (Node rejects a .cmd). It starts the powershell.exe -File launch from that shim’s sibling cursor-agent.ps1. After installing from the terminal, use Refresh engines so the version check runs again.
-
 2. Sign in with `cursor-agent login`, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`
    in the environment of the Cursor instance.
 
@@ -36,16 +34,11 @@ missing login shows as unauthenticated rather than crashing the fleet.
 
 ## Models
 
-The picker starts from a small static catalog and refreshes from the models an
-ACP session advertises: OpenMausBot opens `cursor-agent acp`, sends
-`initialize` and `session/new` in an empty folder, and stops, so the refresh
-sends no prompt. Each advertised model shows once under its plain slug
-(`grok-4.7[...]` as `grok-4.7`, `default[]` as `auto`). A static entry stays
-only when the session offers its model. `cursor-agent models` lists only `auto`
-on CLI 2026.10.22, so it answers only when no session opens (`slug - Label`,
-with `(default)` / `(current)` markers). Live ids are merged into the main cloud
-rail (not the local-models pane). A failed listing keeps the last usable
-catalog (then the static fallback) rather than emptying the rail.
+The picker starts from a small static catalog and refreshes from plain
+`cursor-agent models` output (`slug - Label`, with `(default)` / `(current)` markers).
+Live ids are merged into the main cloud rail (not the local-models pane). A
+failed listing keeps the last usable catalog (then the static fallback) rather
+than emptying the rail.
 
 `--model <id>` is passed as a global CLI flag before `acp`. Current CLIs
 (checked with 2026.09.28) ignore that flag in ACP sessions: every session

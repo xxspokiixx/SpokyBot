@@ -1,5 +1,5 @@
 import { useContext, useState, type ReactNode } from "react";
-import { Check, Clock3, ShieldCheck, Undo2, X } from "lucide-react";
+import { Check, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, StoreContext, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { shareLearnedSkillsMode } from "@/lib/feature-flags";
 import { cn } from "@/lib/cn";
@@ -13,11 +13,7 @@ import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/p
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import type { SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
-import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { yourComputerAsk } from "@/lib/your-computer";
-import { computerAskWords } from "@/lib/computer-ask";
 import { TriggerCard } from "./TriggerCard";
-import { CardHint } from "./CardHint";
 
 interface ToolLabels {
   [tool: string]: LocaleKey;
@@ -46,12 +42,6 @@ const AUTOMATION_APPLIED_LINE = {
   run_now: "approval.applied.automation.runNow",
   delete: "approval.applied.automation.delete",
 } as const;
-const WAIT_APPLIED_LINE = {
-  waiting: "approval.applied.wait",
-  fired: "approval.applied.waitFired",
-  expired: "approval.applied.waitExpired",
-  cancelled: "approval.applied.waitCancelled",
-} as const;
 
 const SKILL_APPLIED_LINE = {
   create: "approval.applied.skill.create",
@@ -71,14 +61,11 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 /** A routine card no one answered is from before Triggers v2 applied changes on their own: nothing can confirm it now. */
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
-/** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
-export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest);
-
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
-  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
-  if (card.expired === true || staleRoutineCard(card)) return t(isProposal || !card.tool ? "approval.status.expired" : "approval.status.timedOut");
+  if (card.expired === true || staleRoutineCard(card)) return t("approval.status.expired");
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
+  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest);
   if (card.answered !== "allow") return isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
   if (card.teamSetupRequest) return card.teamSetupRequest.deletion ? "Bot deleted" : "Team setup applied";
   const routineAction = card.routineRequest?.operation.action;
@@ -138,7 +125,7 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
   return scheduleLabel(schedule);
 }
 
-export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean; cancels?: boolean } | undefined {
+export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean } | undefined {
   const routine = card.routineRequest;
   if (routine) {
     const operation = routine.operation;
@@ -157,8 +144,6 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
             : false;
     return { line: t(AUTOMATION_APPLIED_LINE[operation.action], { name, title }), canUndo };
   }
-  const wait = card.waitRequest;
-  if (wait) return { line: t(WAIT_APPLIED_LINE[wait.settled ?? "waiting"], { name, title: wait.label }), canUndo: !wait.settled, cancels: true };
   const webhook = card.webhookRequest;
   if (webhook) {
     const target = webhook.operation.forBot ? ` · ${t("approval.applied.forBot", { target: `@${webhook.operation.forBot.name}` })}` : "";
@@ -211,7 +196,7 @@ function AppliedChangeLine({
   card: OptionCardData;
   name: string;
   threadId?: string;
-  summary: { line: string; canUndo: boolean; cancels?: boolean };
+  summary: { line: string; canUndo: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const [undoing, setUndoing] = useState(false);
@@ -220,10 +205,7 @@ function AppliedChangeLine({
   // Kept until the card's own patch arrives, so the Share button cannot come back in between.
   const [sharedNow, setSharedNow] = useState<{ requestId: string; shared: SkillShareRecord }>();
   const config = useContext(StoreContext)?.state.config ?? null;
-  const reviewsTeamMemory = useOwnerOrAdmin() !== false;
-  const canUndo = summary.canUndo && (!card.teamMemoryRequest || reviewsTeamMemory);
   const undone = card.undone === true;
-  const cancels = summary.cancels === true;
   const skill = card.skillRequest;
   const shared = skill?.shared ?? (sharedNow && sharedNow.requestId === card.requestId ? sharedNow.shared : undefined);
   const canShare = Boolean(skill && !shared && !undone && threadId && card.requestId)
@@ -248,17 +230,14 @@ function AppliedChangeLine({
     setError(undefined);
     api(`/api/threads/${threadId}/undo`, { method: "POST", body: JSON.stringify({ requestId: card.requestId }) })
       .catch((failure: unknown) => {
-        // A wait that had already ended answers 409, and its card then says how it ended.
-        if (cancels && failure instanceof ApiError && failure.status === 409) return;
         setError(failure instanceof ApiError && failure.body?.code === "changed-since"
           ? t("approval.applied.changedSince")
-          : cancels ? t("approval.applied.cancelFailed", { name })
-            : t("approval.applied.undoFailed", { error: failure instanceof Error ? failure.message : String(failure) }));
+          : t("approval.applied.undoFailed", { error: failure instanceof Error ? failure.message : String(failure) }));
       })
       .finally(() => setUndoing(false));
   };
   return (
-    <div className="w-full max-w-[840px] text-[13px] text-ink-tertiary" data-applied-change={name}>
+    <div className="w-full max-w-[840px] text-[12.5px] text-ink-tertiary" data-applied-change={name}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 leading-5">
         {undone ? <Undo2 size={13} className="shrink-0 self-center" /> : <Check size={13} className="shrink-0 self-center text-success/80" />}
         <span className="min-w-0 break-words">
@@ -266,16 +245,16 @@ function AppliedChangeLine({
           {shared && !undone && (
             <span> · {sharedNames.length ? t("approval.applied.sharedSkill", { names: sharedNames.join(", ") }) : t("approval.applied.sharedSkillNobody")}</span>
           )}
-          {undone && !cancels && <span> · {t("approval.applied.undone")}</span>}
+          {undone && <span> · {t("approval.applied.undone")}</span>}
         </span>
-        {!undone && canUndo && threadId && (
+        {!undone && summary.canUndo && threadId && (
           <button
             type="button"
             onClick={undo}
             disabled={undoing}
             className={cn(TEXT_ACTION, "text-accent disabled:opacity-60")}
           >
-            {cancels ? t(undoing ? "approval.applied.cancelling" : "common.cancel") : t(undoing ? "approval.applied.undoing" : "approval.applied.undo")}
+            {undoing ? t("approval.applied.undoing") : t("approval.applied.undo")}
           </button>
         )}
         {canShare && (
@@ -298,17 +277,17 @@ function AppliedChangeLine({
         </button>
       </div>
       {shared && !undone && skippedNames.length > 0 && (
-        <div className="mt-1 text-[13px] text-ink-tertiary">{t("approval.applied.shareSkipped", { names: skippedNames.join(", ") })}</div>
+        <div className="mt-1 text-[12.5px] text-ink-tertiary">{t("approval.applied.shareSkipped", { names: skippedNames.join(", ") })}</div>
       )}
       {!error && !shared && !undone && skill?.shareError && (
-        <div className="mt-1 text-[13px] text-warning">{t("approval.applied.shareFailed", { error: skill.shareError })}</div>
+        <div className="mt-1 text-[12.5px] text-warning">{t("approval.applied.shareFailed", { error: skill.shareError })}</div>
       )}
-      {error && <div role="alert" className="mt-1 text-[13px] text-warning">{error}</div>}
+      {error && <div role="alert" className="mt-1 text-[12.5px] text-warning">{error}</div>}
       {open && (
         <pre
           tabIndex={0}
           aria-label={t("approval.aria.appliedDetails")}
-          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink"
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink"
         >
           {card.subtitle}
         </pre>
@@ -318,7 +297,7 @@ function AppliedChangeLine({
 }
 
 export const APPROVAL_CODE_CHIP =
-  "inline-flex min-w-0 max-w-full items-baseline rounded-full bg-inset px-2 pb-px pt-[3px] font-mono text-[13px] leading-5 text-ink";
+  "inline-flex min-w-0 max-w-full items-baseline rounded-full bg-inset px-2 pb-px pt-[3px] font-mono text-[12.5px] leading-5 text-ink";
 
 const TEXT_ACTION =
   "inline-flex h-6 items-center rounded-full px-2 hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
@@ -335,7 +314,6 @@ function CompactApprovalRow({
   showDetailInline,
   outcome,
   allowed,
-  expired = false,
   byVoice,
   waiting,
   answeredBelow,
@@ -346,7 +324,6 @@ function CompactApprovalRow({
   showDetailInline: boolean;
   outcome?: string;
   allowed: boolean;
-  expired?: boolean;
   byVoice: ReactNode;
   waiting: boolean;
   answeredBelow: boolean;
@@ -371,9 +348,7 @@ function CompactApprovalRow({
           ? <ShieldCheck size={14} className="shrink-0 self-center text-accent" aria-hidden="true" />
           : allowed
             ? <Check size={14} className="shrink-0 self-center text-success" aria-hidden="true" />
-            : expired
-              ? <Clock3 size={14} className="shrink-0 self-center" aria-hidden="true" />
-              : <X size={14} className="shrink-0 self-center" aria-hidden="true" />}
+            : <X size={14} className="shrink-0 self-center" aria-hidden="true" />}
         <span className={cn("min-w-0 break-words", waiting && "text-ink")}>{header}</span>
         {summary && <span className="min-w-0 break-words">{waiting ? summary : `· ${summary}`}</span>}
         {detail && showDetailInline && (
@@ -406,7 +381,7 @@ function CompactApprovalRow({
         <pre
           tabIndex={0}
           aria-label={t("approval.aria.details")}
-          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
         >
           {detail}
         </pre>
@@ -438,7 +413,7 @@ export function ApprovalCard({
   const isRoutineRequest = Boolean(card.routineRequest);
   const isSkillRequest = Boolean(card.skillRequest);
   const isProfileRequest = Boolean(card.profileRequest);
-  const titled = titledCard(card);
+  const isTeamSetup = Boolean(card.teamSetupRequest);
   const routineAction = card.routineRequest?.operation.action;
   const skillAction = card.skillRequest?.action;
   const heldNote = tFromServer(card.heldCode, card.held);
@@ -460,40 +435,26 @@ export function ApprovalCard({
         })
     : undefined;
 
-  const turnOn = computerAskWords(card, bot?.name ?? t("approval.someone"));
-  if (turnOn) {
-    const state = card.computerAsk?.state;
-    const waiting = state === "asking" || state === "failed";
-    return (
-      <div data-computer-ask={state} className="w-full">
-        <CompactApprovalRow header={turnOn.line} summary={waiting ? turnOn.reason : undefined} detail="" showDetailInline={false} outcome={turnOn.outcome}
-          allowed={state === "on" || state === "turning-on"} byVoice={byVoice} waiting={waiting} answeredBelow={waiting && !card.dismissed} />
-      </div>
-    );
-  }
-  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !titled && !card.modelRequest) {
+  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !isTeamSetup && !card.modelRequest) {
     const waiting = !settled && !expired;
-    const ask = yourComputerAsk(card, bot?.name ?? t("approval.someone"));
-    const header = ask ? ask.line : outbound
+    const header = outbound
       ? waiting ? outbound.headline : outbound.headline.replace(/\s*[?？]$/, "")
       : bot
         ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
         : t("approval.card.wantsTo", { action: toolLabel(displayTool) });
-    const row = (
+    return (
       <CompactApprovalRow
         header={header}
         summary={outbound?.summary || undefined}
-        detail={ask?.detail ?? card.subtitle}
+        detail={card.subtitle}
         showDetailInline={!outbound}
         outcome={outcome}
         allowed={settled === "allow" && !expired}
-        expired={expired}
         byVoice={byVoice}
         waiting={waiting}
         answeredBelow={Boolean(card.requestId && card.tool && !card.dismissed)}
       />
     );
-    return waiting && card.requestId && card.tool ? <div className="flex w-full flex-col gap-1">{row}<CardHint id="spot.approval" /></div> : row;
   }
 
   return (
@@ -506,7 +467,7 @@ export function ApprovalCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
-          {titled ? card.title : outbound ? outbound.headline : profileHeader ?? (
+          {isTeamSetup ? card.title : outbound ? outbound.headline : profileHeader ?? (
             <>
               {bot
                 ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
@@ -514,7 +475,7 @@ export function ApprovalCard({
             </>
           )}
         </div>
-        {displayTool && !titled && !outbound && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
+        {displayTool && !isTeamSetup && !outbound && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
       </div>
       {outbound?.summary && <div className="mt-0.5 text-[13px] text-ink-secondary">{outbound.summary}</div>}
 
@@ -529,7 +490,7 @@ export function ApprovalCard({
                 ? t("approval.aria.profileChange")
                 : t("approval.aria.details")
         }
-        className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[13px] leading-relaxed text-ink"
+        className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
       >
         {card.subtitle}
       </pre>
@@ -537,7 +498,7 @@ export function ApprovalCard({
       {card.skillRequest && <SkillRequestPreview request={card.skillRequest} />}
 
       {heldNote && (
-        <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[13px] text-warning">
+        <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
           {heldNote}
         </div>
       )}
@@ -551,7 +512,7 @@ export function ApprovalCard({
         ) : (
           <>
             <ShieldCheck size={14} className="text-accent" />
-            {isRoutineRequest || isSkillRequest || isProfileRequest || titled
+            {isRoutineRequest || isSkillRequest || isProfileRequest || isTeamSetup
               ? t("approval.status.waitingConfirmation")
               : t("approval.status.waitingAnswer")}
           </>

@@ -7,7 +7,7 @@ tool output.
 
 ## What is included
 
-- Better Auth 1.7.7 with email OTP, signed bearer sessions, hashed OTP storage,
+- Better Auth 1.7.1 with email OTP, signed bearer sessions, hashed OTP storage,
   and D1-backed IP plus recipient rate limits.
 - A Cloudflare Email Sending binding that produces both HTML and plain-text OTP
   messages. Authentication responses remain generic even when delivery fails;
@@ -46,11 +46,7 @@ or by a Worker deployed before it, keep their account) and moves capacity
 state to one row per account (`managed_endpoint_account_capacity`, seeded from
 the `0006` row, which stays but is no longer written). Endpoint rows
 deliberately do not cascade away with a hard installation deletion: losing the
-tunnel and DNS IDs would make operator cleanup impossible. `0011` drops
-`account.issuer` and its unique index: `0001` created them for Better Auth
-1.7.1, and from 1.7.3 Better Auth never writes the column, so it would refuse
-any new account row. Apply `0011` before deploying a Worker on Better Auth
-1.7.7.
+tunnel and DNS IDs would make operator cleanup impossible.
 
 ## API surface
 
@@ -612,10 +608,7 @@ Setup, once:
 2. Put the client id in `vars.HIGHLEVEL_CLIENT_ID` (it is public: it appears in the
    authorization URL). Keep `HIGHLEVEL_REDIRECT_URL` and `HIGHLEVEL_SCOPES` in step
    with the app.
-3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009 and 0010).
-   On a running Worker, apply 0010 before deploying a Worker built from this
-   code: its callback marks the flow in `callback_at`. An older Worker
-   ignores the column.
+3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009).
 4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. It is
    deliberately not in `secrets.required`: until it exists the routes answer
    `503 highlevel_unavailable`.

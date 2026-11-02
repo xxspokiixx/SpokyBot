@@ -53,7 +53,6 @@ function keyProviders(config: ConfigStatus): KeyProvider[] {
     [config.mistral?.configured, "mistral"],
     [config.cerebras?.configured, "cerebras"],
     [config.groq?.configured, "groq"],
-    [config.greenference?.configured, "greenference"],
     [config.meta?.configured, "meta"],
     [config.box?.configured && config.box.included !== true, "boat"],
     [config.composio?.configured && config.composio.mode === "self-hosted", "composio"],

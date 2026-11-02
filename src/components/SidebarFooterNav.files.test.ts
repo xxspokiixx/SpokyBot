@@ -19,11 +19,11 @@ const dispatch = vi.fn(), off = vi.fn();
 function bridge(phase: CloudFilesState["phase"]) {
   window.ogb = { cloudAccount: { files: { state: vi.fn().mockResolvedValue(files(phase)), onState: (callback: typeof emit) => { emit = callback; return off; } } } } as unknown as typeof window.ogb;
 }
-async function render(density: SidebarDensity = "comfortable", state: Partial<AppState> = {}, rail = false) {
+async function render(density: SidebarDensity = "comfortable", state: Partial<AppState> = {}) {
   const store = { state: { ...initialState, ...state }, dispatch } as unknown as ReturnType<typeof useStore>;
   act(() => root.unmount());
   root = createRoot(host);
-  await act(async () => root.render(createElement(BotEditorStore, { value: store, children: createElement(SidebarFooterNav, { density, rail }) })));
+  await act(async () => root.render(createElement(BotEditorStore, { value: store, children: createElement(SidebarFooterNav, { density }) })));
 }
 const row = () => host.querySelector<HTMLButtonElement>('[data-sidebar-nav="files"]');
 
@@ -34,24 +34,18 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); delete window.ogb; });
 
-it("leaves Files out of Simple mode's footer and rail, since the account menu holds it", async () => {
+it.each(["comfortable", "compact", "icons"] as const)("shows Files in Simple mode once My Cloud is Ready, and opens it (%s)", async (density) => {
   bridge("idle");
-  await render("comfortable");
-  expect(row()).toBeNull();
-  await render("icons", {}, true);
-  expect(row()).toBeNull();
-});
-
-it("shows Files in Simple mode's icon column once My Cloud is Ready, and opens it", async () => {
-  bridge("idle");
-  await render("icons");
-  expect(row()!.getAttribute("aria-label")).toBe("Files");
+  await render(density);
+  expect(row()).toBeTruthy();
+  expect(host.textContent).not.toContain("Tools");
+  if (density !== "icons") expect(row()!.textContent).toBe("Files");
+  else expect(row()!.getAttribute("aria-label")).toBe("Files");
   await act(async () => row()!.click());
   expect(dispatch).toHaveBeenCalledWith({ type: "showFiles" });
 });
 
 it("hides Files without a Ready My Cloud, and shows it when main says My Cloud is Ready", async () => {
-  mode.advanced = true;
   bridge("unavailable");
   await render();
   expect(row()).toBeNull();
@@ -65,7 +59,6 @@ it("hides Files without a Ready My Cloud, and shows it when main says My Cloud i
 });
 
 it("keeps Files while signed out or offline, so the page can say what to do", async () => {
-  mode.advanced = true;
   bridge("signed-out");
   await render();
   expect(row()).toBeTruthy();

@@ -68,8 +68,8 @@ describe("PlaceChip composer trigger", () => {
       onPin: () => {},
     } satisfies ComponentProps<typeof PlaceChip>));
     expect(html).toContain('data-testid="place-chip"');
-    expect(html).toContain('aria-label="Where this conversation works: This computer"');
-    expect(html).toContain("This computer — From this bot&#x27;s Works on setting");
+    expect(html).toContain('aria-label="Where this conversation works: Private Desktop"');
+    expect(html).toContain("Private Desktop — From this bot&#x27;s Works on setting");
     expect(html).not.toMatch(/<span class="truncate">This computer<\/span>/);
   });
 });
@@ -107,7 +107,7 @@ describe("the menu's first row", () => {
 
   it("keeps following the bot's setting when the bot works on a specific place", () => {
     const { html, rows: menu } = rows({ bot: { ...bot, computer: "local" } });
-    expect(menu[0]).toEqual({ checked: true, text: "Follow this bot's setting Currently This computer" });
+    expect(menu[0]).toEqual({ checked: true, text: "Follow this bot's setting Currently Private Desktop" });
     expect(html).not.toContain("Picks the right place for each task");
   });
 });

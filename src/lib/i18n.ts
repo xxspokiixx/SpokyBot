@@ -1,5 +1,4 @@
-import { productName } from "@/lib/brand";
-import { en, loadLocalePack, localeChoices, localePacks, locales, type LocaleKey, type LocalePack } from "@/locales";
+import { en, localeChoices, locales, type LocaleKey, type LocalePack } from "@/locales";
 
 export function resolveLocale(tag: string | undefined, available: ReadonlySet<string>): string {
   if (!tag) return "en";
@@ -15,26 +14,8 @@ export function resolveLocale(tag: string | undefined, available: ReadonlySet<st
 
 const RTL_LANGUAGES = new Set(["ar", "fa", "he", "ur"]);
 
-/** Every tag a pack is shown for, loaded or not. */
-export function knownLocales(): Set<string> {
-  return new Set([...Object.keys(localePacks), ...Object.keys(locales)]);
-}
-
-/** Shows `tag`'s language when its pack is loaded (loadLocale), English otherwise; returns the locale that took effect. */
 export function setLocale(tag: string | undefined): string {
-  switches += 1;
-  return show(resolveLocale(tag, new Set(Object.keys(locales))));
-}
-
-/** Loads `tag`'s pack and shows it, unless another language was asked for meanwhile; until then the page keeps the
- * language it shows. Resolves to the locale shown. */
-export async function loadLocale(tag: string | undefined): Promise<string> {
-  const asked = ++switches;
-  await loadLocalePack(resolveLocale(tag, knownLocales())).catch(() => undefined);
-  return asked === switches ? show(resolveLocale(tag, new Set(Object.keys(locales)))) : active;
-}
-
-function show(resolved: string): string {
+  const resolved = resolveLocale(tag, new Set(Object.keys(locales)));
   activePack = locales[resolved] ?? en;
   active = resolved;
   // Screen readers choose pronunciation from <html lang>, and index.html ships "en".
@@ -47,8 +28,8 @@ function show(resolved: string): string {
 }
 
 export function documentLanguage(code: string): string {
-  const pack = localePacks[code];
-  const shown = (pack && localeChoices.find((choice) => localePacks[choice.code] === pack)?.code) || code;
+  const pack = locales[code];
+  const shown = localeChoices.find((choice) => locales[choice.code] === pack)?.code ?? code;
   return shown
     .split("-")
     .map((part, index) =>
@@ -66,17 +47,16 @@ export function activeLocale(): string {
 
 let active = "en";
 let activePack: LocalePack = en;
-let switches = 0;
+setLocale(globalThis.navigator?.language);
 
 export function tFromServer(key: string | undefined, fallback: string | undefined): string | undefined {
   return key && Object.hasOwn(en, key) ? t(key as LocaleKey) : fallback;
 }
 
-/** `{app}` is the product's name as a person reads it (productName) unless `params` names it. */
 export function t(key: LocaleKey, params?: Record<string, string | number>): string {
   const template = activePack[key] ?? en[key];
-  if (!params && !template.includes("{app}")) return template;
+  if (!params) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    params && name in params ? String(params[name]) : name === "app" ? productName() : match,
+    name in params ? String(params[name]) : match,
   );
 }

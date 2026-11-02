@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
-import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), "connector-proxy.ts");
 let child: ChildProcessWithoutNullStreams | null = null;
@@ -167,45 +166,6 @@ describe("connector MCP bridge", () => {
     expect(received).toHaveLength(3);
   });
 
-  it("tells the bot which of the person's auth configs a card connects with, when the app names one", async () => {
-    const harness = await listen((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({
-          messageIds: ["m1"],
-          authConfigNote: "xero connects with the person's own Composio auth config ac_xero1234, the most recently created of their 2 enabled ones.",
-        }));
-      });
-    });
-    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "bridge-secret", OMB_BOT_ID: "bot-1", OMB_THREAD_ID: "thread-1" });
-    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { toolkits: ["xero"] } } })}\n`);
-    expect((await nextJson(lines)).result.content[0].text).toBe(
-      "OpenMausBot showed the user a secure connection card for xero. xero connects with the person's own Composio auth config "
-      + "ac_xero1234, the most recently created of their 2 enabled ones. End this turn now. The app will continue the task "
-      + "automatically after the connection finishes.",
-    );
-  });
-
-  it("offers auth_config_id on COMPOSIO_MANAGE_CONNECTIONS, whose Composio schema has none", async () => {
-    const manage = {
-      name: "COMPOSIO_MANAGE_CONNECTIONS",
-      inputSchema: { type: "object", properties: { toolkits: { type: "array", items: { type: "string" } } }, required: ["toolkits"] },
-    };
-    const upstream = await listen((request, response) => {
-      request.resume();
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ jsonrpc: "2.0", id: 5, result: { tools: [manage, { name: "COMPOSIO_SEARCH_TOOLS" }] } }));
-    });
-    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
-    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/list", params: {} })}\n`);
-    const [listed, search] = (await nextJson(lines)).result.tools;
-    expect(listed.inputSchema.required).toEqual(["toolkits"]);
-    expect(Object.keys(listed.inputSchema.properties)).toEqual(["toolkits", "auth_config_id"]);
-    expect(listed.inputSchema.properties.auth_config_id).toMatchObject({ type: "string", description: expect.stringContaining("(ac_…)") });
-    expect(search).toEqual({ name: "COMPOSIO_SEARCH_TOOLS" });
-  });
-
   it("answers initialize locally so a missing or failing upstream cannot fail the MCP handshake", async () => {
     const lines = start({});
     child!.stdin.write(`${JSON.stringify({
@@ -335,17 +295,6 @@ describe("connector MCP bridge", () => {
     expect(search).toEqual(tools[0]);
     expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
     expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
-  });
-
-  it("lists no more connected-app tools than its share of the model's tool limit", async () => {
-    const tools = ["COMPOSIO_SEARCH_TOOLS", "GMAIL_SEND", "GMAIL_FETCH"].map((name) => ({ name, inputSchema: { type: "object" } }));
-    const upstream = await listen((_request, response) => {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ jsonrpc: "2.0", id: 4, result: { tools } }));
-    });
-    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, [TOOL_LIMIT_ENV]: "2" });
-    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} })}\n`);
-    expect((await nextJson(lines)).result.tools).toEqual(tools.slice(0, 2));
   });
 
   it("tells the bot to reconnect an app whose sign-in ended, and leaves successful results alone", async () => {
@@ -507,87 +456,5 @@ describe("connector MCP bridge", () => {
       await new Promise<void>((resolve) => server!.close(() => resolve()));
       server = null;
     }
-  });
-});
-describe("connected-app tools by name", () => {
-  const upstreamFor = (calls: any[]) => listen((request, response) => {
-    let body = "";
-    request.on("data", (chunk) => { body += chunk; });
-    request.on("end", () => {
-      const frame = JSON.parse(body);
-      calls.push(frame);
-      response.writeHead(200, { "content-type": "application/json" });
-      if (frame.method === "tools/list") {
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { tools: [{ name: "COMPOSIO_MULTI_EXECUTE_TOOL", description: "Run app tools", inputSchema: { type: "object" } }] } }));
-        return;
-      }
-      const slug = frame.params?.arguments?.tools?.[0]?.tool_slug;
-      const text = JSON.stringify({ successful: true, data: { results: [{ tool_slug: slug, response: { successful: true, data: { messages: [{ messageId: "m1", subject: "Q3" }] } } }] } });
-      response.end(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { content: [{ type: "text", text }] } }));
-    });
-  });
-
-  it("lists the app tools after the upstream's, under the spelling the engine asked for", async () => {
-    for (const [style, names] of [["dotted", ["gmail.search_emails", "gmail.read_email_thread"]], ["", ["gmail_search_emails", "gmail_read_email_thread"]]] as const) {
-      const upstream = await upstreamFor([]);
-      const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, OMB_CONNECTOR_APP_TOOLS: JSON.stringify(["gmail.search_emails", "gmail.read_email_thread", "not.a_tool"]), ...(style ? { OMB_CONNECTOR_APP_TOOL_NAMES: style } : {}) });
-      child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
-      const listed = await nextJson(lines);
-      expect(listed.result.tools.map((tool: { name: string }) => tool.name)).toEqual(["COMPOSIO_MULTI_EXECUTE_TOOL", ...names]);
-      expect(listed.result.tools[1].annotations).toEqual({ readOnlyHint: true });
-      child!.kill("SIGKILL");
-      await new Promise<void>((resolve) => server!.close(() => resolve()));
-      server = null;
-    }
-  });
-
-  it("runs a call by either name as its Composio tool through the multi-execute tool, and answers with that tool's data", async () => {
-    const calls: any[] = [];
-    const upstream = await upstreamFor(calls);
-    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, OMB_CONNECTOR_APP_TOOLS: JSON.stringify(["gmail.search_emails"]) });
-    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "gmail_search_emails", arguments: { query: "from:ada" } } })}\n`);
-    const reply = await nextJson(lines);
-    expect(calls.at(-1).params).toEqual({ name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { user_id: "me", query: "from:ada", max_results: 10, include_payload: false, verbose: false } }] } });
-    expect(reply).toEqual({ jsonrpc: "2.0", id: 4, result: { content: [{ type: "text", text: JSON.stringify({ messages: [{ messageId: "m1", subject: "Q3" }] }) }] } });
-  });
-  it("fits a call's arguments to the schema its tool listed, and on a refusal says how to call again and which apps are connected", async () => {
-    const SEARCH = { type: "object", properties: { queries: { type: "array", items: { type: "object", properties: { use_case: { type: "string" } }, required: ["use_case"] } } }, required: ["queries"] };
-    const WORKBENCH = { type: "object", properties: { code_to_execute: { type: "string" } }, required: ["code_to_execute"] };
-    const calls: any[] = [];
-    const upstream = await listen((request, response) => {
-      let body = "";
-      request.on("data", (chunk) => { body += chunk; });
-      request.on("end", () => {
-        const rpc = JSON.parse(body);
-        calls.push(rpc);
-        response.writeHead(200, { "content-type": "application/json" });
-        if (rpc.method === "tools/list") {
-          return response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: [
-            { name: "COMPOSIO_SEARCH_TOOLS", inputSchema: SEARCH }, { name: "COMPOSIO_REMOTE_WORKBENCH", inputSchema: WORKBENCH }] } }));
-        }
-        if (rpc.params.name === "COMPOSIO_SEARCH_TOOLS") {
-          return response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { results: [{ tool_slug: "GEMINI_GENERATE_IMAGE" }] } }) }] } }));
-        }
-        // What Composio answers a call whose arguments do not fit, as a Team trial's bot got it.
-        const refusal = { successful: false, data: {}, error: 'Invalid request for COMPOSIO_REMOTE_WORKBENCH: Validation error: Required at "code_to_execute"', log_id: "log_1" };
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }], isError: true } }));
-      });
-    });
-    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, OMB_CONNECTOR_SERVICE_SLUGS: JSON.stringify(["gemini", "gmail"]) });
-    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })}\n`);
-    await nextJson(lines);
-
-    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "COMPOSIO_SEARCH_TOOLS", arguments: { job: "generate an image" } } })}\n`);
-    const searched = await nextJson(lines);
-    expect(calls.at(-1).params.arguments).toEqual({ queries: [{ use_case: "generate an image" }] });
-    expect(searched.result.content[0].text).toContain("GEMINI_GENERATE_IMAGE");
-    expect(searched.result.content[1].text).toBe('OpenMausBot note: COMPOSIO_SEARCH_TOOLS\'s arguments were read with job as queries, queries as [{"use_case": …}]. Send them in that shape next time.');
-
-    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "COMPOSIO_REMOTE_WORKBENCH", arguments: { script: "print(1)", note: "x" } } })}\n`);
-    const refused = await nextJson(lines);
-    expect(calls.at(-1).params.arguments).toEqual({ script: "print(1)", note: "x" });
-    expect(refused.result.isError).toBe(true);
-    expect(refused.result.content[1].text).toContain('Call it again with the arguments its schema names, for example {"code_to_execute":"…"} with your own values.');
-    expect(refused.result.content[1].text).toContain("it says nothing about which apps or tools exist, so do not tell the person a tool is missing. Connected apps you can use: gemini, gmail.");
   });
 });

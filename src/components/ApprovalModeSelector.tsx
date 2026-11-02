@@ -1,10 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ListChecks } from "lucide-react";
+import { Check, ListChecks } from "lucide-react";
 
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
-import { MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { APPROVAL_LEVELS_URL, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import {
@@ -30,7 +29,7 @@ export function ApprovalModeSelector({
   align = "left",
   menuDirection = "up",
   wide = false,
-  busy = false,
+  disabled = false,
   trustedModesAvailable = true,
   trustedModesNotice,
   onManageCommandAllowlist,
@@ -43,7 +42,7 @@ export function ApprovalModeSelector({
   align?: "left" | "right";
   menuDirection?: "up" | "down";
   wide?: boolean;
-  busy?: boolean;
+  disabled?: boolean;
   trustedModesAvailable?: boolean;
   trustedModesNotice?: string;
   onManageCommandAllowlist?: () => void;
@@ -81,7 +80,8 @@ export function ApprovalModeSelector({
   }, [open]);
 
   const CurrentIcon = current.Icon;
-  const modesDisabled = requiresLocalDesktop;
+  const triggerDisabled = disabled && !onManageCommandAllowlist;
+  const modesDisabled = disabled || requiresLocalDesktop;
   const allowlistAction = onManageCommandAllowlist && (
     <button
       type="button"
@@ -91,9 +91,9 @@ export function ApprovalModeSelector({
         triggerRef.current?.focus();
         onManageCommandAllowlist();
       }}
-      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink hover:bg-menu-hover"
+      className="flex items-center gap-3 border-t border-hairline/20 px-4 py-3 text-left text-[14px] text-ink hover:bg-raised-hover"
     >
-      <ListChecks size={16} className="shrink-0 text-ink-secondary" />
+      <ListChecks size={18} className="shrink-0 opacity-80" />
       {t("commandAllowlist.title")}
     </button>
   );
@@ -105,12 +105,14 @@ export function ApprovalModeSelector({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("approvalMode.triggerAria", { mode: current.label, provider: providerName })}
-        title={wide ? undefined : current.chip}
+        disabled={triggerDisabled}
+        title={disabled ? t("approvalMode.busy") : wide ? undefined : current.chip}
         onClick={() => setOpen((value) => !value)}
         className={cn(
           wide
             ? "flex h-10 w-full items-center justify-between rounded-lg border border-hairline/40 bg-inset px-3.5 text-[13px] text-ink hover:bg-raised"
             : "flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink",
+          triggerDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-ink-secondary",
         )}
       >
         {wide ? (
@@ -121,7 +123,7 @@ export function ApprovalModeSelector({
         ) : (
           <CurrentIcon size={16} className="shrink-0 opacity-80" />
         )}
-        {wide && <ChevronDown size={14} aria-hidden className="shrink-0 text-ink-secondary" />}
+        {wide && <span aria-hidden className="text-[11px] text-ink-secondary">⌄</span>}
       </button>
 
       {motion.shown && (
@@ -130,18 +132,17 @@ export function ApprovalModeSelector({
           aria-label={t("approvalMode.menuAria", { provider: providerName })}
           {...motion.exitProps}
           className={cn(
-            "absolute z-40 w-[340px] overflow-hidden", MENU_SHEET,
+            "absolute z-40 w-[340px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl",
             menuDirection === "up" ? "bottom-full mb-2" : "top-full mt-2",
             align === "right" ? "right-0" : "left-0",
             wide && "w-full min-w-[340px]",
             motion.className,
           )}
         >
-          <div className="px-2 pb-1 pt-1.5">
+          <div className="border-b border-hairline/20 px-4 py-3">
             <div className="text-[14px] font-medium text-ink">
               {t("approvalMode.question", { provider: providerName })}
             </div>
-            {busy && <p role="status" className="mt-1 text-[12px] leading-snug text-ink-secondary">{t("approvalMode.whileWorking")}</p>}
             <button
               type="button"
               onClick={() => void openExternalLink(APPROVAL_LEVELS_URL)}
@@ -150,8 +151,7 @@ export function ApprovalModeSelector({
               {t("approvalMode.learnMore")}
             </button>
           </div>
-          <div role="separator" className={MENU_ITEM_SEPARATOR} />
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col py-1.5">
             {visibleOptions.map((option) => {
               const selected = option.mode === mode;
               const Icon = option.Icon;
@@ -162,24 +162,26 @@ export function ApprovalModeSelector({
                     role="menuitemradio"
                     aria-checked={selected}
                     disabled={modesDisabled}
-                    title={requiresLocalDesktop ? t("approvalMode.customLocalOnly") : undefined}
+                    title={
+                      disabled ? t("approvalMode.busy") : requiresLocalDesktop ? t("approvalMode.customLocalOnly") : undefined
+                    }
                     onClick={() => {
                       if (modesDisabled) return;
                       onSelect(option.mode);
                       setOpen(false);
                     }}
                     className={cn(
-                      "flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-menu-hover",
+                      "flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover",
                       modesDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
                     )}
                   >
-                    <Icon size={16} className="mt-px shrink-0 text-ink-secondary" />
+                    <Icon size={18} className="mt-0.5 shrink-0 opacity-80" />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="flex items-center justify-between gap-3 text-[14px] text-ink">
                         {option.label}
-                        {selected && <Check size={14} className="shrink-0" />}
+                        {selected && <Check size={15} className="shrink-0" />}
                       </span>
-                      <span className="text-[13px] leading-snug text-ink-secondary">
+                      <span className="text-[12.5px] leading-snug text-ink-secondary">
                         {option.description}
                       </span>
                     </span>
@@ -190,7 +192,7 @@ export function ApprovalModeSelector({
             })}
             {!visibleOptions.some((option) => option.mode === "full") && allowlistAction}
             {!trustedModesAvailable && (trustedModesNotice || driverKind === "codex" || requiresLocalDesktop) && (
-              <div className="px-2 py-1.5 text-[12px] leading-snug text-ink-tertiary">
+              <div className="border-t border-hairline/20 px-4 py-2.5 text-[11.5px] leading-snug text-ink-secondary">
                 {trustedModesNotice ?? t("approvalMode.customLocalOnlyDot")}
               </div>
             )}

@@ -2,7 +2,6 @@
 export {
   acquireDataDirLease,
   acquireDataDirLeaseForProcess,
-  clearRecordsFromOtherMachines,
   DataDirLeaseError,
 } from "../electron/data-dir-lease.mjs";
 

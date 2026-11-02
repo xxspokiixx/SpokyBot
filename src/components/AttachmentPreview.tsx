@@ -33,7 +33,6 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FilePreviewButton } from "./FilePreviewButton";
-import { ImageLoading } from "./ImageLoading";
 
 export interface PreviewImage {
   src: string;
@@ -550,7 +549,7 @@ export function AttachmentPreviewDialog({
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-black/45 px-4 py-3">
           <div className="min-w-0">
             <div className="truncate text-[13px] font-medium text-white">{current.name}</div>
-            <div className="text-[11px] text-white/50">
+            <div className="text-[10.5px] text-white/50">
               {items.length > 1
                 ? t("attach.position", { index: index + 1, count: items.length })
                 : t("attach.imagePreview")}
@@ -677,14 +676,19 @@ export function AttachmentThumbnail({
       style={ratio ? { aspectRatio: String(ratio) } : undefined}
       className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}
     >
-      {state === "loading" && <ImageLoading name={image.name} className="absolute inset-0 bg-raised/65" />}
+      {state === "loading" && (
+        <span className="absolute inset-0 flex animate-pulse items-center justify-center bg-raised/65" role="status">
+          <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
+          <span className="sr-only">Loading {image.name}</span>
+        </span>
+      )}
       {state === "failed" ? (
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-ink-secondary" role="alert">
           <ImageOff size={22} />
           {outsideWorkspace ? (
-            <span className="max-w-full text-[12px]">{t("attach.imageOutsideWorkspace")}</span>
+            <span className="max-w-full text-[11.5px]">{t("attach.imageOutsideWorkspace")}</span>
           ) : (
-            <span className="max-w-full truncate text-[12px]">{t("attach.imageUnavailable")}</span>
+            <span className="max-w-full truncate text-[11.5px]">{t("attach.imageUnavailable")}</span>
           )}
           {!outsideWorkspace && <span
             role="button"
@@ -875,7 +879,10 @@ export function MarkdownImagePreview({
         ) : visibleSource ? (
           <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager explainRefusal={localMessageImage} />
         ) : (
-          <ImageLoading name={name} className="aspect-[4/3] max-h-96 rounded-xl border border-hairline/40 bg-inset" />
+          <span className="flex aspect-[4/3] max-h-96 animate-pulse items-center justify-center rounded-xl border border-hairline/40 bg-inset" role="status">
+            <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
+            <span className="sr-only">Loading {name}</span>
+          </span>
         )}
         {openUrl && (
           <a href={openUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] text-accent hover:underline">
@@ -904,7 +911,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
       <div title={t("attach.legacyFile", { name: file.name })} className={cn("flex max-w-[280px] items-center gap-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 px-2.5 py-2 text-[12px] text-ink-secondary", className)}>
         <FileText size={14} className="shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
-        <span className="text-[11px]">{t("attach.unavailable")}</span>
+        <span className="text-[10.5px]">{t("attach.unavailable")}</span>
       </div>
     );
   }
@@ -943,7 +950,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
         <div
           role={failed ? "alert" : "status"}
           className={cn(
-            "border-t border-hairline/30 px-2.5 py-1.5 text-[11px]",
+            "border-t border-hairline/30 px-2.5 py-1.5 text-[10.5px]",
             failed ? "text-danger" : save.state === "saved" ? "text-success" : "text-ink-secondary",
           )}
         >
@@ -980,7 +987,7 @@ function CompactFileChip({ file, message, linked, save, className }: {
       <span title={t("attach.legacyFile", { name: file.name })} className={cn(FILE_CHIP, "gap-1.5 px-2.5", className)}>
         <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
         {name}
-        <span className="shrink-0 text-[12px]">{t("attach.unavailable")}</span>
+        <span className="shrink-0 text-[11.5px]">{t("attach.unavailable")}</span>
       </span>
     );
   }
@@ -1012,7 +1019,7 @@ function CompactFileChip({ file, message, linked, save, className }: {
         <FilePreviewButton path={file.path} name={file.name} message={message} />
       </span>
       {save.state !== "idle" && save.state !== "saved" && (
-        <span role={failed ? "alert" : "status"} className={cn("px-2.5 text-[12px]", failed ? "text-danger" : "text-ink-secondary")}>
+        <span role={failed ? "alert" : "status"} className={cn("px-2.5 text-[11.5px]", failed ? "text-danger" : "text-ink-secondary")}>
           {save.state === "saving" ? t("attach.downloading") : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
             <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.path} /></span>

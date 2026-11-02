@@ -36,7 +36,6 @@ export function showNotification(
   avatarUrl?: string | null,
   visibleThreadId?: string | null,
 ) {
-  if (typeof Notification === "undefined") return;
   if (frame.kind === "done" && !finishedNotificationsEnabled()) return;
   const spend = frame.kind === "spend";
   if (!spend && document.hasFocus() && visibleThreadId === frame.threadId) return;
@@ -45,14 +44,23 @@ export function showNotification(
     window.focus();
     onOpen({ botId: frame.botId, threadId: frame.threadId });
   };
+  const title = placeName ? `${placeName} · ${frame.title}` : frame.title;
 
-  if (Notification.permission === "granted") {
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
     const options: NotificationOptions = {
       body: frame.body,
       ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
       ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
       ...(notificationSoundsEnabled() ? {} : { silent: true }),
     };
-    new Notification(placeName ? `${placeName} · ${frame.title}` : frame.title, options).onclick = open;
+    new Notification(title, options).onclick = open;
+    return;
+  }
+
+  // A plain WebView defines no web Notification API (and never grants one); the
+  // phone test shell delivers the same messages through its injected bridge.
+  const bridge = (window as Window & { ombAndroidCaps?: { notify(title: string, body: string): void } }).ombAndroidCaps;
+  if (bridge) {
+    bridge.notify(title, frame.body);
   }
 }

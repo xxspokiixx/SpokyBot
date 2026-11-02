@@ -1,0 +1,40 @@
+#!/usr/bin/env node
+import { spawn } from 'node:child_process';
+import { startProxyServer } from '../server/proxy/http-proxy.js';
+
+async function main() {
+  const args = process.argv.slice(2);
+
+  try {
+    const port = await startProxyServer();
+    console.log(`[om-claude] Proxy running on http://127.0.0.1:${port}`);
+
+    const apiKey = process.env.NVIDIA_NIM_API_KEY || process.env.OMB_NVIDIA_NIM_API_KEY || 'dummy-key';
+
+    const env = {
+      ...process.env,
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/v1`,
+      ANTHROPIC_API_KEY: apiKey,
+    };
+
+    const child = spawn('claude', args, {
+      stdio: 'inherit',
+      env,
+      shell: process.platform === 'win32',
+    });
+
+    child.on('error', (err) => {
+      console.error('[om-claude] Failed to spawn claude:', err.message);
+      process.exit(1);
+    });
+
+    child.on('exit', (code) => {
+      process.exit(code ?? 0);
+    });
+  } catch (error) {
+    console.error('[om-claude] Error:', error instanceof Error ? error.message : 'Unknown error');
+    process.exit(1);
+  }
+}
+
+main();

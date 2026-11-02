@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  MENU_MIN_WIDTH,
+  ANCHORED_MENU_WIDTH,
   SidebarPopoverMenu,
   anchoredMenuPosition,
   nextMenuIndex,
@@ -13,7 +13,7 @@ import {
 } from "./SidebarPopoverMenu";
 
 const viewport = { width: 1280, height: 800 };
-const menu = { width: 280, height: 300 };
+const menu = { width: ANCHORED_MENU_WIDTH, height: 300 };
 const wideRow = { left: 12, right: 288, top: 740, bottom: 784 };
 const avatar = { left: 14, right: 58, top: 740, bottom: 784 };
 
@@ -21,13 +21,6 @@ describe("anchoredMenuPosition", () => {
   it("opens above the trigger on its start edge, the same for a row and a lone avatar", () => {
     expect(anchoredMenuPosition(wideRow, menu, viewport)).toEqual({ left: 12, top: 740 - 6 - 300 });
     expect(anchoredMenuPosition(avatar, menu, viewport)).toEqual({ left: 14, top: 434 });
-  });
-
-  it("opens a choice at a row's end below it on its end edge, and above when it would run off the window", () => {
-    const end = { left: 700, right: 800, top: 200, bottom: 230 };
-    expect(anchoredMenuPosition(end, menu, viewport, false, "end")).toEqual({ left: 800 - 280, top: 236 });
-    expect(anchoredMenuPosition(end, menu, viewport, true, "end")).toEqual({ left: 700, top: 236 });
-    expect(anchoredMenuPosition({ ...end, top: 740, bottom: 770 }, menu, viewport, false, "end")).toEqual({ left: 520, top: 434 });
   });
 
   it("anchors to the trigger's right edge in RTL, and stays inside the window", () => {
@@ -109,19 +102,19 @@ describe("the anchored menu in a document", () => {
     host.remove();
   });
 
-  it("portals one sheet, at least 237px wide, to the body, with the group divider and the trailing value and chevron", async () => {
+  it("portals one 280px sheet to the body, with the group divider and the trailing value and chevron", async () => {
     await act(async () => trigger().click());
     const menu = sheet()!;
     expect(menu.parentElement).toBe(document.body);
     expect(menu.style.position).toBe("fixed");
-    expect(menu.style.minWidth).toBe(`${MENU_MIN_WIDTH}px`);
+    expect(menu.style.width).toBe(`${ANCHORED_MENU_WIDTH}px`);
     expect(menu.getAttribute("role")).toBe("menu");
     expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
     expect(menu.textContent).toContain("Pro");
     const support = [...menu.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent?.includes("Help and support"))!;
     expect(support.getAttribute("aria-haspopup")).toBe("menu");
     expect(support.querySelector("svg")).not.toBeNull();
-    expect(menu.querySelector('[role="menuitem"]')!.className).toContain("text-[14px]");
+    expect(menu.querySelector('[role="menuitem"]')!.className).toContain("text-[15px]");
   });
 
   it("opens from the keyboard on the first item and walks the items", async () => {
@@ -148,47 +141,6 @@ describe("the anchored menu in a document", () => {
     expect(submenu()).toBeNull();
     expect(sheet()).not.toBeNull();
     expect(document.activeElement).toBe(support);
-  });
-
-  describe("hovering a row with a submenu", () => {
-    const wait = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
-    const rows = () => [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-    const hover = (to: Element, from: Element | null, y: number) => act(async () => {
-      from?.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: to, clientX: 100, clientY: y }));
-      to.dispatchEvent(new MouseEvent("pointerover", { bubbles: true, relatedTarget: from, clientX: 100, clientY: y }));
-    });
-
-    it("does not open it when the pointer only passes over the row", async () => {
-      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
-      const [usage, support, settings] = rows();
-      await hover(support!, usage!, 60);
-      await wait(100);
-      expect(submenu()).toBeNull();
-      await hover(settings!, support!, 90);
-      await wait(400);
-      expect(submenu()).toBeNull();
-      expect(support!.getAttribute("aria-expanded")).toBe("false");
-    });
-
-    it("opens it after the pointer rests on the row, and closes it the moment a sibling row takes the pointer", async () => {
-      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
-      const [usage, support, settings] = rows();
-      await hover(support!, usage!, 60);
-      await wait(320);
-      expect(submenu()).not.toBeNull();
-      expect(support!.classList.contains("bg-menu-hover")).toBe(false);
-      await hover(settings!, support!, 90);
-      expect(submenu()).toBeNull();
-    });
-
-    it("opens it at once on a click, without moving focus into it", async () => {
-      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
-      const support = rows()[1]!;
-      await act(async () => support.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
-      await flush();
-      expect(submenu()).not.toBeNull();
-      expect(submenu()!.contains(document.activeElement)).toBe(false);
-    });
   });
 
   it("runs a submenu item and closes everything", async () => {

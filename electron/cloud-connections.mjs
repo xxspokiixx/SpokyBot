@@ -54,8 +54,7 @@ export function parseConnections(value) {
       ...(typeof item.account === "string" && item.account.length <= 120 ? { account: item.account } : {}),
       ...(typeof item.installationId === "string" && INSTALLATION.test(item.installationId) ? { installationId: item.installationId } : {}),
     }));
-  return { computer: { environmentId, label: label.trim().slice(0, 120) }, connections, engines: strings(value.engines, ENGINE, 200), commands: strings(value.commands, LAUNCHER, 40),
-    ...(value.managedApps === false ? { managedApps: false } : {}) };
+  return { computer: { environmentId, label: label.trim().slice(0, 120) }, connections, engines: strings(value.engines, ENGINE, 200), commands: strings(value.commands, LAUNCHER, 40) };
 }
 
 /** This computer's connections, by name only, and the computer they are on. */
@@ -118,11 +117,8 @@ async function letGo(local, target, item, digest) {
  * are connected keeps them, and says which apps connected here it lacks (`missing`).
  * `here` and `there`: the "composio" connection of this computer and of My Cloud (null when My Cloud has none yet).
  */
-export async function adoptComposioId(target, { local, here, there, managedApps = true }) {
+export async function adoptComposioId(target, { local, here, there }) {
   if (here.account && there?.account === here.account) return { shared: true };
-  if (here.mode === "managed" && !managedApps) {
-    throw new ConnectionMoveError("no_service", "Your connected apps stay on this computer: that server has no connected-apps service of its own. Connect them again there in Apps.", true);
-  }
   const listed = await local.json("/api/connectors/connected").catch(() => null);
   const apps = Object.entries(record(listed?.services) ? listed.services : {}).filter(([slug, state]) => SLUG.test(slug) && record(state) && state.connected === true)
     .map(([slug]) => slug).slice(0, 200);
@@ -220,7 +216,7 @@ export async function sendConnections(collected, target, { local, release = true
       if (result.kept.length === kept) done(item);
     },
     async composio(item) {
-      const outcome = await adoptComposioId(target, { local, here: item, there: cloud.connections.find((theirs) => theirs.id === "composio") ?? null, managedApps: cloud.managedApps !== false });
+      const outcome = await adoptComposioId(target, { local, here: item, there: cloud.connections.find((theirs) => theirs.id === "composio") ?? null });
       if (outcome.kept) {
         result.kept.push({ id: item.id, label: item.label });
         result.missing.push(...outcome.missing.map((slug) => ({ slug })));

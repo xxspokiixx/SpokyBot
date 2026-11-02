@@ -55,15 +55,6 @@ describe("OverviewSection", () => {
     expect(markup).not.toContain(">Identity</span>");
   });
 
-  it("says in its own words that a bot can reach every bot, and whose departments a Chief is in charge of", () => {
-    const markup = render(createElement(OverviewSection, {
-      overview: { ...sentences, reaches: ["Can talk to all 7 other bots, in any department.", "Also in charge of these departments: Dev, Sales."] },
-      prompt: null, onOpen: vi.fn(),
-    }));
-    expect(markup).toContain("Can talk to all 7 other bots, in any department.");
-    expect(markup).toContain("Also in charge of these departments: Dev, Sales.");
-  });
-
   it("shows Loading… before the overview arrives", () => {
     const markup = render(
       createElement(OverviewSection, { overview: null, prompt: null, onOpen: vi.fn() }),
@@ -105,7 +96,7 @@ describe("OverviewSection", () => {
       createElement(OverviewSection, { overview: sentences, refreshError: true, prompt, onOpen: vi.fn() }),
     );
 
-    expect(markup).toContain("Couldn’t refresh. Showing the last loaded overview.");
+    expect(markup).toContain("Couldn’t refresh — showing the last loaded overview.");
     for (const line of sentences.wont) {
       expect(markup).toContain(line);
     }

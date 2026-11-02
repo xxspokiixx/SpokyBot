@@ -17,7 +17,7 @@ import {
   isMessageFileDownload,
 } from "./routes.ts";
 import { sendTunnelJson } from "./tunnel-gzip.ts";
-import { CompanionViewerRelay, requestTarget } from "./viewer-relay.ts";
+import { CompanionViewerRelay } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
 export interface ProxyOptions {
@@ -92,9 +92,6 @@ const readJson = (req: IncomingMessage, limit = 64 * 1024): Promise<Record<strin
       }
     });
   });
-
-const isPlainValue = (value: unknown): value is string | number | null | undefined =>
-  value == null || typeof value === "string" || typeof value === "number";
 
 const PRIVATE_RESPONSE_HEADERS = {
   "cache-control": "private, no-store",
@@ -265,8 +262,6 @@ export function createProxyHandler(options: ProxyOptions) {
   const viewers = new CompanionViewerRelay({ checkControl: harnessControlCheck(options) });
   const capabilityStreams = new Map<string, Set<() => void>>();
   const handle = function handle(req: IncomingMessage, res: ServerResponse): void {
-    const target = requestTarget(req.url);
-    if (!target) return sendJson(res, 400, { error: "invalid request target" });
     const path = (req.url ?? "/").split("?")[0];
     const method = req.method ?? "GET";
 
@@ -322,12 +317,8 @@ export function createProxyHandler(options: ProxyOptions) {
     if (method === "POST" && path === "/api/pair") {
       readJson(req).then(
         (body) => {
-          const credential = body.credential ?? body.code;
-          if (!isPlainValue(credential) || !isPlainValue(body.deviceName)) {
-            return sendJson(res, 400, { error: "invalid pairing request" });
-          }
           const result = options.redeem(
-            String(credential ?? ""),
+            String(body.credential ?? body.code ?? ""),
             body.deviceName,
             body.pairRequestId,
           );
@@ -347,10 +338,7 @@ export function createProxyHandler(options: ProxyOptions) {
           return sendJson(res, 201, response);
         },
         (error: Error) => sendJson(res, 400, { error: error.message }),
-      ).catch((error: unknown) => {
-        console.error("companion: pairing failed", error);
-        sendJson(res, 500, { error: "could not complete the pairing" });
-      });
+      );
       return;
     }
 
@@ -573,7 +561,7 @@ export function createProxyHandler(options: ProxyOptions) {
               path,
               parsed,
               device?.id,
-              target.searchParams.get("controlLeaseId"),
+              new URL(req.url ?? "/", "http://companion.invalid").searchParams.get("controlLeaseId"),
             );
             text = JSON.stringify(scrub(parsed));
           } catch {
@@ -643,7 +631,6 @@ export function createProxyHandler(options: ProxyOptions) {
     const device = options.authenticate(token);
     viewers.handleUpgrade(req, socket, head, device);
   };
-  handle.closeViewers = (): void => viewers.closeAll();
   handle.disconnectDevice = (deviceId: string): void => {
     viewers.closeDevice(deviceId);
     // Revoking a capability closes the streams it already granted.

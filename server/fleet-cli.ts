@@ -89,12 +89,13 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const request = JSON.parse(fs.readFileSync(0, "utf8"));
 const { uid, gid, home, file, action, content, mode } = request;
-if (process.getuid() === 0) {
+const currentUid = typeof process.getuid === "function" ? process.getuid() : -1;
+if (currentUid === 0) {
   process.setgroups([]);
   process.setgid(gid);
   process.setuid(uid);
 }
-if (process.getuid() !== uid || process.getgid() !== gid || uid === 0 || gid === 0) throw Error("could not drop fleet file privileges");
+if ((typeof process.getuid === "function" ? process.getuid() : uid) !== uid || process.getgid() !== gid || uid === 0 || gid === 0) throw Error("could not drop fleet file privileges");
 const limit = 4 * 1024 * 1024;
 const check = (stat, directory) => {
   if (stat.uid !== uid || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)) throw Error("unsafe workspace file or directory");

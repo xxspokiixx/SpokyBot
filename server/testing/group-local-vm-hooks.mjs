@@ -31,14 +31,6 @@ registerHooks({
         if (status.container === 'running') await stop();
         return rescueFirefoxProfile(status.runtime, target);
       }
-      export async function keepInstalledAppsBeforeRemove(target, status, _stop) {
-        if (!status.runtime || status.container === 'missing' || !status.managed || status.imageMatches) return 'none';
-        const state = JSON.parse(readFileSync(file, 'utf8'));
-        if (state.failAppRescue) throw new Error("could not copy installed desktop apps: fixture refused");
-        state.appRescues = [...(state.appRescues ?? []), target.key];
-        writeFileAtomic(file, JSON.stringify(state), { durable: false });
-        return 'rescued';
-      }
     ` };
     if (url === mock) return { format: 'module', shortCircuit: true, source: `
       export * from ${JSON.stringify(actual)};
@@ -118,7 +110,7 @@ registerHooks({
     if (url.endsWith('/turn-watchdog.ts')) {
       return { ...result, source: `import { readFileSync as readVmWatch } from 'node:fs';\n` +
         String(result.source).replace('this.opts = opts;', 'this.opts = { ...opts, checkMs: 30 };')
-          .replace('at - turn.lastEventAt < silentMs', `at - turn.lastEventAt < (JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stall ? 0 : JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stallThread === turn.threadId ? 100 : silentMs)`) };
+          .replace('at - turn.lastEventAt < this.opts.stallMs', `at - turn.lastEventAt < (JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stall ? 0 : JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stallThread === turn.threadId ? 100 : this.opts.stallMs)`) };
     }
     if (url.endsWith('/turn-dispatch-guard.ts')) {
       // wedgeClear parks a room turn inside waitForClear; the clearwait marker proves it got there.
@@ -128,8 +120,8 @@ registerHooks({
     }
     if (url.endsWith('/room-turn-timeout.ts')) {
       return { ...result, source: `import { readFileSync as readVmDeadline } from 'node:fs';\n` +
-        String(result.source).replace('this.limitMs = roomTurnTimeoutMs(minutes);',
-          `this.limitMs = JSON.parse(readVmDeadline(${JSON.stringify(state)}, 'utf8')).timeout ? 5000 : roomTurnTimeoutMs(minutes);`) };
+        String(result.source).replace('this.remainingMs = roomTurnTimeoutMs(minutes);',
+          `this.remainingMs = JSON.parse(readVmDeadline(${JSON.stringify(state)}, 'utf8')).timeout ? 5000 : roomTurnTimeoutMs(minutes);`) };
     }
     return result;
   },

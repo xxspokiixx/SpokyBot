@@ -1,5 +1,4 @@
 // The time rides each turn's text, never the system prompt (whose stable half must stay byte-identical); engines add the date at most.
-import { plainTimeZone } from "../shared/plain-time-zone.ts";
 
 export function hostTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -33,8 +32,7 @@ export function turnClockLine(at: number, timeZone: string): string {
   const { part } = read;
   // longOffset spells UTC as a bare "GMT", and some ICU builds write the minus sign as U+2212.
   const offset = part("timeZoneName").replace(/^GMT/, "").replace("\u2212", "-") || "+00:00";
-  const plain = plainTimeZone(read.timeZone);
-  return `${TURN_CLOCK_LEAD}${part("weekday")}, ${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")} ${read.timeZone} (${plain === read.timeZone ? "" : `${plain}, `}UTC${offset}).`;
+  return `${TURN_CLOCK_LEAD}${part("weekday")}, ${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")} ${read.timeZone} (UTC${offset}).`;
 }
 
 /** Not for an empty text or a slash command: a prefix would turn an engine's own command into prose. */

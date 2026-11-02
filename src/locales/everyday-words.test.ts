@@ -10,8 +10,6 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   ],
   "notifications and alerts": ["attention.", "notifications.", "error.", "readyBots.", "app.loading."],
   "the sidebar and the switcher": ["sidebar."],
-  "the rail of Clouds and its ＋": ["rail."],
-  "a place's color, in Settings": ["placeLook."],
   "the bot panel": [
     "botPanel.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
   ],
@@ -20,9 +18,9 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
     "computer.screen.", "vm.cloud.", "browser.",
   ],
   "MausBot Cloud: buying it, setting it up, moving to it and sharing with it": [
-    "cloudBuy.", "cloudIntro.", "cloudTrial.", "cloudCancel.", "cloudSetup.", "cloudIntent.", "cloudNotice.", "cloudHowTo.", "whatsNew.",
+    "cloudBuy.", "cloudIntro.", "cloudTrial.", "cloudSetup.", "cloudIntent.", "cloudNotice.", "cloudHowTo.", "cloudScene.", "cloudProPopup.",
     "cloudCredit.", "cloudPower.", "cloudSignIn.", "cloudAdd.", "cloudHome.", "cloudPhone.", "cloudAccount.", "pro.", "lending.",
-    "files.", "usageMeter.", "roomCard.",
+    "files.",
   ],
   "routines and automations": ["routines.", "automations."],
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],
@@ -64,12 +62,10 @@ type Word = { word: string; pattern: RegExp; say: string };
 const INTERNAL_WORDS: readonly Word[] = [
   { word: "engine", pattern: /\bengines?\b/i, say: "AI" },
   { word: "instance", pattern: /\binstances?\b/i, say: "AI account" },
-  // "Your own server" is the person's own word for a computer they run OpenMausBot on (the rail's ＋).
-  { word: "server", pattern: /(?<!(?:Discord|Slack|MCP|own) )\bservers?\b/i, say: "the app, the Cloud when it is hosted, or your own server" },
+  { word: "server", pattern: /(?<!(?:Discord|Slack|MCP) )\bservers?\b/i, say: "the app, or the Cloud when it is hosted" },
   { word: "Composio", pattern: /composio/i, say: "connected apps" },
   { word: "Cloud computer", pattern: /\bcloud computers?\b/i, say: "cloud desktop" },
   { word: "VPS", pattern: /\bVPS\b/, say: "your own machine" },
-  { word: "Local VM", pattern: /\bLocal VMs?\b/i, say: "private desktop" },
   { word: "workspace", pattern: /\bworkspaces?\b/i, say: "installation, or leave it out" },
 ];
 
@@ -84,10 +80,12 @@ const ALLOWED: Record<string, string> = {
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",
-  "sidebar.update.howOther": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
-  "sidebar.update.howOtherRestart": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
   "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
+  "lending.viaAccess": "points at the Settings → Servers page by its label",
+  "lending.viaAccessTerminal": "points at the Settings → Servers page by its label",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",
+  "apps.integrationHint": "the connector's own name in the marketplace hint",
+  "apps.tab.connected": "the connector's own name in the connected tab",
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();
@@ -116,11 +114,11 @@ describe("everyday screens", () => {
   it("catch each internal word, and let placeholders, commands, MCP servers and Discord or Slack servers through", () => {
     for (const bad of [
       "Switch to another engine", "Add an instance", "Restart the server", "Connect apps through Composio",
-      "Start the cloud computer", "Self-hosted VPS", "Create Local VM", "Choose a workspace",
+      "Start the cloud computer", "Self-hosted VPS", "Choose a workspace",
     ]) expect(wordsIn(bad), bad).not.toEqual([]);
     for (const good of [
-      "Switch this bot to another AI", "Pick a Discord server", "Post in your Slack servers", "Copy to {server}", "Add your own server",
-      "Run `openmausbot server start`", "Open the Cloud", "Start the cloud desktop", "Your MCP servers", "Add MCP server", "Private desktop",
+      "Switch this bot to another AI", "Pick a Discord server", "Post in your Slack servers", "Copy to {server}",
+      "Run `openmausbot server start`", "Open the Cloud", "Start the cloud desktop", "Your MCP servers", "Add MCP server", "Create Local VM", "Private Desktop",
     ]) expect(wordsIn(good), good).toEqual([]);
   });
 

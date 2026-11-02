@@ -127,11 +127,11 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
-  it("defaults to three parallel threads and validates a configurable maximum of sixteen", () => {
+  it("defaults to three parallel threads and validates a configurable maximum of ten", () => {
     expect(maxConcurrentBotThreads({})).toBe(3);
-    expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 16 } })).toEqual({ threads: { maxConcurrentPerBot: 16 } });
+    expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 10 } })).toEqual({ threads: { maxConcurrentPerBot: 10 } });
     expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
-    for (const value of [0, -1, 17, 1.5, "10", null]) {
+    for (const value of [0, -1, 11, 1.5, "10", null]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: value } })).toThrow("threads.maxConcurrentPerBot");
     }
   });
@@ -700,29 +700,6 @@ describe("a config.json saved with a byte order mark", () => {
         mcpServers: { notes: { command: "npx", args: ["notes-mcp"] } },
         budgets: { monthlyUsd: 25, warnAtPercent: 70 },
       });
-    } finally {
-      rmSync(path, { force: true });
-    }
-  });
-});
-
-describe("loadConfig between changes", () => {
-  it("hands every caller its own copy, and sees a save or an edit made outside the app", () => {
-    const path = join(DATA_DIR, "config.json");
-    mkdirSync(DATA_DIR, { recursive: true });
-    const settle = () => { const past = new Date(Date.now() - 60_000); utimesSync(path, past, past); };
-    writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 10, warnAtPercent: 50 } }));
-    settle();
-    try {
-      const first = loadConfig();
-      first.budgets!.monthlyUsd = 999;
-      expect(loadConfig().budgets).toEqual({ monthlyUsd: 10, warnAtPercent: 50 });
-      saveConfig({ budgets: { monthlyUsd: 20, warnAtPercent: 50 } });
-      settle();
-      expect(loadConfig().budgets).toEqual({ monthlyUsd: 20, warnAtPercent: 50 });
-      writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 30, warnAtPercent: 50 } }));
-      settle();
-      expect(loadConfig().budgets).toEqual({ monthlyUsd: 30, warnAtPercent: 50 });
     } finally {
       rmSync(path, { force: true });
     }
@@ -2225,8 +2202,6 @@ describe("a value derived from config.json", () => {
     const derive = vi.fn(members);
     const read = cacheUntilConfigChanges(derive);
     read();
-    // Linux stamps ctime from a clock that ticks every 1 to 10 ms, so a chmod in the write's own tick keeps its ctime.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     // chmod and chown leave the size, the time and the file the same.
     chmodSync(path, 0o600);
     read();

@@ -34,8 +34,8 @@ function render(embedded: boolean, whopCard = false) {
 }
 
 /** useState order in McpServersPanel: the server whose sign-in is open, then its flow. */
-const SIGNING_IN = 6;
-const SIGN_IN_FLOW = 7;
+const SIGNING_IN = 7;
+const SIGN_IN_FLOW = 8;
 
 beforeEach(() => {
   vi.stubGlobal("window", {});
@@ -48,9 +48,29 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Your MCP servers inside the Apps pop-up", () => {
-  it("lists each server with Test, Edit and an on/off switch, plus one Add MCP server", () => {
+  it("shows a curated provider list before the configured server list", () => {
+    const html = render(true);
+    expect(html.indexOf("Available MCP integrations")).toBeLessThan(html.indexOf("Your MCP servers"));
+    expect(html).toContain('data-mcp-catalog-entry="slack"');
+    expect(html).toContain('data-mcp-catalog-entry="github"');
+    expect(html).toContain('data-mcp-catalog-entry="m365-mail"');
+    expect(html).toContain('data-mcp-catalog-entry="m365-calendar"');
+    expect(html).toContain('data-mcp-catalog-entry="m365-copilot-chat"');
+    expect(html).toContain("Slack OAuth client ID");
+    expect(html).toContain("Microsoft Entra tenant ID");
+    expect(html).toContain(">Add credentials</button>");
+    const github = html.slice(html.indexOf('data-mcp-catalog-entry="github"'), html.indexOf("</article>", html.indexOf('data-mcp-catalog-entry="github"')));
+    expect(github).toContain("GitHub personal access token");
+    expect(github).toContain(">Add credentials</button>");
+    expect(github).not.toContain("disabled=\"\"");
+    expect(html).not.toContain(">Configure</button>");
+    expect(html).toContain("Replace {tenant_id}");
+  });
+
+  it("lists each server with Test, Edit and an on/off switch, plus Paste config and Add MCP server", () => {
     const html = render(true);
     expect(html).toContain("Your MCP servers");
+    expect(html).toContain("Paste config");
     expect(html).toContain("Add MCP server");
     expect(html.match(/role="switch"/g)?.length).toBeGreaterThanOrEqual(3); // two servers + the Claude Code switch
     expect(html).toMatch(/aria-label="Turn notes off" type="button" role="switch" aria-checked="true"/);
@@ -65,9 +85,9 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     fixture.servers = [{ name: "notes", type: "http", url: "http://127.0.0.1:9/mcp", headerKeys: [], enabled: true, oauth, runsOn: { environmentId: "env-1", label: "Milind's MacBook" } }];
     const html = render(true).replaceAll("&#x27;", "'");
     expect(html).toContain("Runs on Milind's MacBook, so it isn't started here.");
-    expect(html).not.toContain("Sign in");
+    expect(html).not.toContain("> Sign in</button>");
     fixture.servers = [{ name: "docs", type: "http", url: "https://mcp.example.com/mcp", headerKeys: [], enabled: true, oauth }];
-    expect(render(true)).toContain("Sign in");
+    expect(render(true)).toContain("> Sign in</button>");
   });
 
   it("keeps its own scroll and wording when shown on its own", () => {
@@ -81,7 +101,7 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     const html = render(true, true);
     expect(html).toContain('data-app-tile="whop"');
     expect(html).toContain('aria-label="Connect Whop"');
-    expect(html).toContain("No API key needed");
+    expect(html).toContain("no API key needed");
     expect(html).toContain("admin access across businesses");
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain("Your MCP servers");

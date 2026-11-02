@@ -42,49 +42,14 @@ function ensureBuilt() {
   buildSpeechHelper();
 }
 
-const RELEASE_MODIFIERS = ["control", "option", "shift", "command"];
-const PAGE_GONE = ["render-process-gone", "did-navigate"];
-
-function speechTarget(target) {
-  if (typeof target?.transcript === "function") return {
-      owner: target,
-      transcript: (line) => target.transcript(line),
-      end: (info) => target.end(info),
-      replaced: () => target.replaced(),
-      whenGone: () => () => {},
-    };
-  const send = (channel, body) => {
-    if (!target.isDestroyed()) target.webContents.send(channel, body);
-  };
-  return {
-    owner: target,
-    transcript: (line) => send("speech:transcript", line),
-    end: (info) => send("speech:end", info),
-    replaced: () => {},
-    whenGone: (listener) => {
-      // Electron: a destroyed BrowserWindow throws when its webContents is read.
-      const contents = target.webContents;
-      target.on("closed", listener);
-      for (const event of PAGE_GONE) contents.on(event, listener);
-      return () => {
-        target.removeListener("closed", listener);
-        for (const event of PAGE_GONE) contents.removeListener(event, listener);
-      };
-    },
-  };
+function sendEnd(win, info) {
+  if (!win.isDestroyed()) win.webContents.send("speech:end", info);
 }
 
-export function speechBusy() {
-  return child !== null;
-}
-
-export function startSpeech(target, options = {}) {
-  const running = child;
+export function startSpeech(win, options = {}) {
   stopSpeech();
-  running?.target.replaced();
-  const sink = speechTarget(target);
   if (process.platform !== "darwin") {
-    sink.end({ code: 2, reason: "unsupported-platform" });
+    sendEnd(win, { code: 2, reason: "unsupported-platform" });
     return;
   }
   const requested = Number(options?.endpointMs);
@@ -92,14 +57,11 @@ export function startSpeech(target, options = {}) {
     ? Math.min(5_000, Math.max(250, Math.round(requested)))
     : 0;
   const args = endpointMs ? ["--endpoint-ms", String(endpointMs)] : [];
-  const release = [...new Set(Array.isArray(options?.finishOnRelease) ? options.finishOnRelease : [])]
-    .filter((name) => RELEASE_MODIFIERS.includes(name));
-  if (release.length) args.push("--finish-on-release", release.join(","));
 
   try {
     ensureBuilt();
   } catch {
-    sink.end({ code: 1, reason: "helper-build-failed" });
+    sendEnd(win, { code: 1, reason: "helper-build-failed" });
     return;
   }
 
@@ -136,16 +98,12 @@ export function startSpeech(target, options = {}) {
     );
   } catch {
     rmSync(sessionDir, { recursive: true, force: true });
-    sink.end({ code: 1, reason: "helper-start-failed" });
+    sendEnd(win, { code: 1, reason: "helper-start-failed" });
     return;
   }
 
-  const speechSession = {
-    proc, outputPath, errorPath, stopPath, finishPath, sessionDir,
-    owner: sink.owner, target: sink,
-  };
+  const speechSession = { proc, outputPath, errorPath, stopPath, finishPath, sessionDir };
   child = speechSession;
-  const forgetWindow = sink.whenGone(() => stopSpeech(sink.owner));
   let buf = "";
   let offset = 0;
   let reportedError = null;
@@ -172,7 +130,9 @@ export function startSpeech(target, options = {}) {
         if (typeof parsed.error === "string") reportedError = parsed.error;
         if (parsed.partial === false && typeof parsed.text === "string") completed = true;
         // A stopped or replaced helper can flush one last chunk: never into the session that replaced it.
-        if (child === speechSession) sink.transcript(transcript(parsed));
+        if (child === speechSession && !win.isDestroyed()) {
+          win.webContents.send("speech:transcript", transcript(parsed));
+        }
       } catch {
       }
     }
@@ -183,7 +143,6 @@ export function startSpeech(target, options = {}) {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
-    forgetWindow();
     unwatchFile(outputPath, drain);
     rmSync(sessionDir, { recursive: true, force: true });
   };
@@ -194,25 +153,23 @@ export function startSpeech(target, options = {}) {
     if (child !== speechSession) return;
     child = null;
     if (reportedError) {
-      sink.end({ code: 1, reason: reportedError });
+      sendEnd(win, { code: 1, reason: reportedError });
     } else if (completed && code === 0) {
-      sink.end({ code: 0, reason: "completed" });
+      sendEnd(win, { code: 0, reason: "completed" });
     } else {
-      sink.end({ code: 1, reason: "helper-exited" });
+      sendEnd(win, { code: 1, reason: "helper-exited" });
     }
   });
   proc.on("error", () => {
     cleanup();
     if (child !== speechSession) return;
     child = null;
-    sink.end({ code: 1, reason: "helper-start-failed" });
+    sendEnd(win, { code: 1, reason: "helper-start-failed" });
   });
 }
 
-const ownedBy = (owner) => child !== null && (owner === undefined || child.owner === owner);
-
-export function stopSpeech(owner) {
-  if (!ownedBy(owner)) return;
+export function stopSpeech() {
+  if (!child) return;
   const speechSession = child;
   child = null;
   try {
@@ -220,8 +177,8 @@ export function stopSpeech(owner) {
   } catch {}
 }
 
-export function finishSpeech(owner) {
-  if (!ownedBy(owner)) return;
+export function finishSpeech() {
+  if (!child) return;
   try {
     writeFileSync(child.finishPath, "finish");
   } catch {}

@@ -1,6 +1,5 @@
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { requestTooLargeModel } from "../../shared/request-too-large";
 
 const UNREACHABLE = /^(?:TypeError:\s*)?(?:Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed|fetch failed)$/i;
 const TIMED_OUT = /^(?:TimeoutError:\s*)?(?:The operation was aborted due to timeout|signal timed out|The operation timed out\.?)$/i;
@@ -15,7 +14,7 @@ const TECHNICAL: RegExp[] = [
   /\b(?:E(?:CONNRESET|CONNREFUSED|CONNABORTED|NOTFOUND|AI_AGAIN|TIMEDOUT|PIPE|ACCES|PERM|NOENT|ADDRINUSE|HOSTUNREACH|NETUNREACH)|ERR_[A-Z_]{3,})\b/,
   /^(?:[\w-]+ ){0,2}(?:API Error|HTTP|status(?: code)?)[:\s]+\d{3}\b/i,
   /Unexpected token .* in JSON|is not valid JSON|Unexpected end of JSON input/,
-  /^\S+(?: \S+){0,2} exited (?:with code )?(?:-?\d+|null|SIG[A-Z0-9]+)\b/,
+  /^\S+ exited (?:with code )?-?\d+\b/,
   /^[a-z]+(?:_[a-z0-9]+)+$/,
 ];
 
@@ -42,8 +41,6 @@ const STATUS_PREFIX = /^(?:[\w-]+ ){0,2}(?:API Error|HTTP|status(?: code)?)[:\s]
 const REASON_PHRASE = /^(?:[A-Z][a-z]+ ?){1,4}\.?$/;
 
 export function plainErrorLine(raw: string): string | undefined {
-  const tooLargeFor = requestTooLargeModel(raw);
-  if (tooLargeFor) return t("chat.error.requestTooLarge", { model: tooLargeFor });
   if (!isTechnicalError(raw)) return undefined;
   const text = raw.trim();
   const rest = text.replace(STATUS_PREFIX, "").trim();

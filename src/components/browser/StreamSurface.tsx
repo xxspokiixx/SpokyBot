@@ -171,6 +171,8 @@ export function StreamSurface(props: {
   readonly connect: SurfaceConnect;
   /** Page input and toolbar commands, through the panel's control rules. */
   readonly input: (input: PreviewStreamInput) => void;
+  /** Sends the surface size, so the page fills it. */
+  readonly followSize?: boolean;
   readonly label?: string;
   readonly onClient?: (client: PreviewStreamClient | null) => void;
   readonly onControl?: (control: PreviewStreamControl | null) => void;
@@ -186,7 +188,7 @@ export function StreamSurface(props: {
   readonly className?: string;
   readonly ref?: Ref<StreamSurfaceHandle>;
 }) {
-  const { connect, ref } = props;
+  const { connect, followSize = true, ref } = props;
   const propsRef = useRef(props);
   propsRef.current = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -315,7 +317,7 @@ export function StreamSurface(props: {
       const previous = sizeRef.current;
       if (previous?.width === size.width && previous.height === size.height) return;
       sizeRef.current = size;
-      clientRef.current?.send({ type: "resize", ...size });
+      if (followSize) clientRef.current?.send({ type: "resize", ...size });
       // Outgrowing the cap restarts the screencast, so grow it once the size settles rather than on every throttled
       // resize of a drag.
       if (capTimer !== null) clearTimeout(capTimer);
@@ -333,7 +335,7 @@ export function StreamSurface(props: {
       if (timer !== null) clearTimeout(timer);
       if (capTimer !== null) clearTimeout(capTimer);
     };
-  }, []);
+  }, [followSize]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -356,7 +358,7 @@ export function StreamSurface(props: {
       if (next?.dialog?.message !== previous?.dialog?.message || next?.dialog?.defaultValue !== previous?.dialog?.defaultValue) setPromptText(next?.dialog?.defaultValue ?? "");
       if (next?.controller !== "you") {
         setSelect(null);
-      } else if (previous?.controller !== "you" && sizeRef.current) {
+      } else if (previous?.controller !== "you" && followSize && sizeRef.current) {
         clientRef.current?.send({ type: "resize", ...sizeRef.current });
       }
       if (!operable(next)) {
@@ -440,7 +442,7 @@ export function StreamSurface(props: {
       setAgentCursor(null);
       clearInput();
     };
-  }, [capKnown, clearInput, connect, hostSetup, notify]);
+  }, [capKnown, clearInput, connect, followSize, hostSetup, notify]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

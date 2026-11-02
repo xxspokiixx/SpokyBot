@@ -162,3 +162,19 @@ it("accepts drafts between 1 and 2 MiB and enforces the preference cap in UTF-8 
   expect(archive.create).toHaveBeenCalledOnce();
   expect(readdirSync(join(dataDir, ".backups"))).toHaveLength(1);
 });
+
+it("accepts a one-character export password and rejects an empty one", async () => {
+  expect((await post("/api/workspace-backup/export", { password: "x" })).status).toBe(200);
+  const empty = await post("/api/workspace-backup/export", { password: "" });
+  expect(empty.status).toBe(400);
+  expect(await empty.json()).toMatchObject({ error: "Enter a backup password." });
+  expect(archive.create).toHaveBeenCalledOnce();
+});
+
+it("downloads the export only when it carries the session that created it", async () => {
+  const exported = await post("/api/workspace-backup/export", { password: "x" }).then((response) => response.json()) as { id: string };
+  expect((await fetch(`${url}/api/workspace-backup/download/${exported.id}`)).status).toBe(404);
+  const download = await fetch(`${url}/api/workspace-backup/download/${exported.id}`, { headers: { cookie: `fixture=${admin.token}` } });
+  expect(download.status).toBe(200);
+  expect(await download.text()).toBe("fixture encrypted bytes");
+});

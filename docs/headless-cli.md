@@ -196,7 +196,7 @@ openmausbot engine list
 ```
 
 KIND is `claude`, `openai`, `openrouter`, `openai-compatible` (needs
-`--base-url`), `xai`, `groq`, `greenference`, `mistral` or `cerebras`. The key comes from an
+`--base-url`), `xai`, `groq`, `mistral` or `cerebras`. The key comes from an
 environment variable (`--key-env`) or a file (`--key-file`), is written once
 through the same setting the Settings screen uses, and is never printed or
 read back. An engine that already has a key is left alone unless `--rotate`,
@@ -255,7 +255,7 @@ is the confirmation.
 version: 1                                  # required
 engines:                                    # optional; needs full access
   claude: { key: SECRET, baseUrl: URL | SECRET, everyClaudeBot: true, install: false }
-  openai | openrouter | xai | groq | greenference | mistral | cerebras: { key: SECRET }
+  openai | openrouter | xai | groq | mistral | cerebras: { key: SECRET }
   openaiCompatible: { key: SECRET, baseUrl: URL | SECRET }
   # SECRET is { env: NAME } or { file: PATH }. A key written in the file is refused.
 defaults: BOT FIELDS                        # every bot gets these unless it sets its own
@@ -270,7 +270,7 @@ bots:                                       # at least one
     title: Launch rehearsal lead
     description: TEXT
     chief: true                             # Chief of Staff of its team (one per team); false removes it
-    manages: [Support]                      # other teams this Chief is also in charge of (every bot reaches every bot anyway)
+    manages: [Support]                      # other teams this Chief may hand work to
     soul: TEXT | { file: PATH }             # standing instructions, at most 24,000 bytes
     model: claude/claude-sonnet-5-5         # INSTANCE/MODEL; openmausbot models lists them
     effort: none | low | medium | high | xhigh | max

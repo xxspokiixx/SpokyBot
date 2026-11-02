@@ -19,8 +19,6 @@ allowBuilds:
 onlyBuiltDependencies:
   - electron
   - esbuild
-# Transitive packages whose parents still allow a release with a published advisory: mermaid allows an older dompurify
-# and ajv an older fast-uri. Force the patched releases.
+# mermaid 12.1 still allows dompurify 3.4.13. Force the patched release.
 overrides:
-  dompurify: 3.4.17
-  fast-uri: 3.1.9
+  dompurify: 3.4.16

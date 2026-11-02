@@ -1,9 +1,6 @@
 import { z } from "zod";
 
-import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
-
-export { importedMcpServerName } from "../shared/mcp-name.ts";
 
 /** The computer a server runs on when its program, files or address are that computer's own: kept with its entry so a
  * bot can reach it through that computer, and never started anywhere else. */
@@ -20,9 +17,6 @@ export interface StoredStdioMcpServer extends StdioMcpSpec {
   /** Characters of one tool result allowed into context; 0 = never trim, absent = OMB_MCP_RESULT_BUDGET, else 8,000. */
   resultBudget?: number;
   runsOn?: McpRunsOn;
-  /** The id of the bot whose own server this is: its program or files are in that bot's folder, so it starts only for
-   * that bot. Absent: every bot's. */
-  bot?: string;
   /** "Show its apps in chat": stored only as `false`; on by default. */
   apps?: false;
 }
@@ -52,7 +46,6 @@ export interface StdioMcpServerListing {
   resultBudget?: number;
   runsOn?: McpRunsOn;
   apps: boolean;
-  bot?: string;
 }
 export interface RemoteMcpServerListing {
   name: string;
@@ -69,11 +62,6 @@ export type McpServerListing = StdioMcpServerListing | RemoteMcpServerListing;
 
 export function isRemoteMcpServer(server: McpServerSpec): server is RemoteMcpSpec {
   return "url" in server;
-}
-
-/** Whether `botId` may start this server: every bot may start one that is no bot's own. */
-export function mcpServerServes(server: object & { bot?: string }, botId: string | undefined): boolean {
-  return !server.bot || server.bot === botId;
 }
 
 export const MAX_MCP_SERVERS = 20;
@@ -132,7 +120,18 @@ function urlError(value: string): string | null {
   return null;
 }
 
-const BOT_ID = /^[A-Za-z0-9_-]{1,128}$/u;
+const RESERVED_MCP_NAMES = new Set([
+  "ogb",
+  "computer",
+  "agents",
+  "composio",
+  "data",
+  "browser",
+  "phone",
+  "dweb",
+  "openmausbot_connectors",
+  "openmausbot_phone",
+]);
 
 const runsOnSchema = z.object({
   environmentId: z.string().regex(/^[\w-]{1,128}$/u),
@@ -147,10 +146,9 @@ const stdioEntrySchema = z.object({
   resultBudget: resultBudgetSchema.optional(),
   runsOn: runsOnSchema.optional(),
   apps: z.boolean().optional(),
-  bot: z.string().regex(BOT_ID).optional(),
 }).strict();
 
-/** `runsOn: null` says it runs here after all; left out, an edit keeps the computer it runs on and the bot it is for. */
+/** `runsOn: null` says it runs here after all; left out, an edit keeps the computer it runs on. */
 const stdioMutationSchema = stdioEntrySchema.extend({
   env: z.record(z.string(), z.union([z.string().max(16_384), z.literal(true)])).optional(),
   runsOn: runsOnSchema.nullable().optional(),
@@ -267,14 +265,8 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       ...(parsed.data.resultBudget !== undefined ? { resultBudget: parsed.data.resultBudget } : {}),
       ...runsOnFor(parsed.data.runsOn, mutation, existing),
       ...appsFor(parsed.data.apps, mutation, existing),
-      ...botFor(parsed.data.bot, mutation, existing),
     },
   };
-}
-
-function botFor(value: string | undefined, mutation: boolean, existing?: StoredMcpServer): { bot?: string } {
-  const bot = value ?? (mutation && existing && !isRemoteMcpServer(existing) ? existing.bot : undefined);
-  return bot ? { bot } : {};
 }
 
 function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer): Parsed {
@@ -415,7 +407,6 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
       ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
       ...(server.runsOn ? { runsOn: server.runsOn } : {}),
       apps: server.apps !== false,
-      ...(server.bot ? { bot: server.bot } : {}),
     }];
   });
 }
@@ -466,12 +457,35 @@ export function parseMcpServersImport(
     const record = entry as Record<string, unknown>;
     if (Object.hasOwn(servers, name)) return { ok: false, error: `"${rawName}" appears twice.` };
     // `enabled` from the paste is dropped so nothing runs before it was tested.
-    const result = parseMcpServerMutation(name, looksRemote(record)
-      ? pickEntry(record, ["type", "url", "headers", "resultBudget"])
-      : pickEntry(record, ["command", "args", "env", "resultBudget"]));
+    const importedEntry = looksRemote(record)
+      ? pickEntry(record, ["type", "url", "headers", "oauth", "resultBudget"])
+      : pickEntry(record, ["command", "args", "env", "resultBudget"]);
+    if (looksRemote(record) && !Object.hasOwn(importedEntry, "oauth") && Object.hasOwn(record, "auth")) {
+      const auth = record.auth && typeof record.auth === "object" && !Array.isArray(record.auth)
+        ? record.auth as Record<string, unknown>
+        : {};
+      importedEntry.oauth = {
+        clientId: auth.CLIENT_ID ?? auth.clientId,
+        ...(auth.CLIENT_SECRET !== undefined || auth.clientSecret !== undefined
+          ? { clientSecret: auth.CLIENT_SECRET ?? auth.clientSecret }
+          : {}),
+        ...(auth.scopes !== undefined ? { scopes: auth.scopes } : {}),
+      };
+    }
+    const result = parseMcpServerMutation(name, importedEntry);
     if (!result.ok) return { ok: false, error: `"${rawName}": ${result.error}` };
     servers[name] = result.server;
   }
   return { ok: true, servers };
 }
 
+/** What Paste config names a server another tool calls `raw`; a name OpenMausBot keeps for itself gets an mcp- prefix. */
+export function importedMcpServerName(raw: string): string {
+  const slug = slugMcpName(raw);
+  return RESERVED_MCP_NAMES.has(slug) ? `mcp-${slug}`.slice(0, 32) : slug;
+}
+
+function slugMcpName(raw: string): string {
+  const slug = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+  return /^[a-z]/.test(slug) ? slug : slug ? `mcp-${slug}`.slice(0, 32) : "";
+}

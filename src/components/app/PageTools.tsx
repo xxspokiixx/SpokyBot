@@ -27,7 +27,7 @@ export function pageVersions(app: AppPayload): { first: number; last: number } {
   return { first: Math.max(0, last - (app.history?.length ?? 0)), last };
 }
 
-/** Which version the card shows (null: the newest), and the "Updated" flash when show_html replaces it. */
+/** Which version the card shows (null: the newest), and the "Updated" flash when update_html replaces it. */
 export function usePageVersion(app: AppPayload): { rev: number; first: number; last: number; latest: boolean; flash: boolean; show(rev: number | null): void } {
   const { first, last } = pageVersions(app);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -131,7 +131,7 @@ export function PageToolbar({ version, point, share, ready, fullScreen, classNam
   const busy = share.share.kind === "busy";
   return (
     <div data-page-tools className={cn("flex flex-wrap items-center gap-x-1.5 gap-y-2", className)}>
-      <div className="flex items-center gap-0.5 text-[13px] text-ink-secondary">
+      <div className="flex items-center gap-0.5 text-[12.5px] text-ink-secondary">
         <button type="button" className={TOOL} aria-label={t("chat.preview.older")} title={t("chat.preview.older")} disabled={version.rev <= version.first}
           onClick={() => version.show(version.rev - 1)}><ChevronLeft size={15} /></button>
         <span data-page-version className="min-w-6 text-center tabular-nums">{label}</span>

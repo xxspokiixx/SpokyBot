@@ -1,14 +1,12 @@
-/** workersai: Cloudflare's Clef on Workers AI, Jev-compatible. */
-export type DeciderProvider = "jev" | "workersai" | "openrouter";
+export type DeciderProvider = "jev" | "openrouter";
 
 /** chat: a chat model asked for strict JSON; decisions: OpenRouter's Decisions API (output modality `decisions`). */
 export type OpenRouterApi = "chat" | "decisions";
 
-export type DeciderJob = "roomRouting" | "inboxTriage";
-export const DECIDER_JOBS: readonly DeciderJob[] = ["roomRouting", "inboxTriage"];
+export type DeciderJob = "roomRouting";
+export const DECIDER_JOBS: readonly DeciderJob[] = ["roomRouting"];
 
-/** botDecide: a bot's own `decide` tool call. */
-export type DeciderSeam = DeciderJob | "keyCheck" | "botDecide";
+export type DeciderSeam = DeciderJob | "keyCheck";
 
 /** Every failure means "use today's rule". */
 export type DeciderFailure =
@@ -26,8 +24,6 @@ export type DeciderFailure =
   | "rate_limited"
   /** 529 or 503 */
   | "overloaded"
-  /** 413: the request is over what the relay or the model takes. Never retried: it would be refused again. */
-  | "too_large"
   | "http_error"
   | "malformed";
 
@@ -93,8 +89,6 @@ export interface AskOptions {
   /** Hard ceiling for the whole call, body included. */
   timeoutMs?: number;
   signal?: AbortSignal;
-  /** A hard case: Workers AI answers with Clef rather than Clef-flash. */
-  careful?: boolean;
 }
 
 /** One call to a backend. The key is passed in and never kept. */
@@ -104,11 +98,6 @@ export interface BackendRequest {
   model?: string;
   /** Which OpenRouter API that model is served by; absent is `chat`. */
   api?: OpenRouterApi;
-  /** Workers AI only: the Cloudflare account the token belongs to. */
-  accountId?: string;
-  careful?: boolean;
-  /** Set only for the included relay, which is told the seam in a header. */
-  relaySeam?: DeciderSeam;
   state: unknown;
   questions: Record<string, DeciderQuestion>;
   signal: AbortSignal;

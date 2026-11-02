@@ -8,7 +8,6 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   state: {} as Record<string, unknown>,
   toolsLayout: "rows" as SidebarToolsLayout,
-  panels: [] as { id: string; name: string; url: string }[],
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) }));
@@ -16,7 +15,6 @@ vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
   useSidebarToolsLayout: () => fixture.toolsLayout,
 }));
-vi.mock("@/lib/web-panel-preferences", () => ({ useWebPanels: () => fixture.panels }));
 vi.mock("./UpdateIndicator", () => ({ UpdateIndicator: () => null }));
 import { SidebarAppsButton, SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
 
@@ -41,15 +39,14 @@ beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.state = { activeView: "chat", routineRuns: [], pluginsOpen: false };
   fixture.toolsLayout = "rows";
-  fixture.panels = [];
   vi.stubGlobal("window", {});
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("sidebar footer places", () => {
-  it("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead", () => {
+  it.each(["comfortable", "compact"] as const)("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead (%s)", (density) => {
     fixture.advanced = true;
-    const { html } = render("comfortable");
+    const { html } = render(density);
     const order = ["automations", "team-map"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -59,24 +56,17 @@ describe("sidebar footer places", () => {
     expect(html).not.toContain('data-sidebar-nav="apps"');
   });
 
-  it("leaves no places in Simple mode's sidebar while Files is off: Automations and Team map are in the bottom bar", () => {
-    expect(render("comfortable").html).toBe("");
+  it.each(["comfortable", "compact"] as const)("leaves no places in Simple mode's sidebar while Files is off: Automations and Team map are in the bottom bar (%s)", (density) => {
+    expect(render(density).html).toBe("");
   });
 
-  it.each([false, true])("puts Automations on the avatars-only density ahead of Apps, with Team map (advanced: %s)", (advanced) => {
+  it.each([false, true])("puts Automations on the avatars-only rail ahead of Apps, with Team map (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
-    const html = render("icons").html;
-    expect(html).toContain('aria-label="Automations" title="Automations"');
-    expect(html).toContain('aria-label="Team map" title="Team map"');
-    expect(html.indexOf('data-sidebar-nav="automations"')).toBeLessThan(html.indexOf('data-sidebar-nav="apps"'));
-  });
-
-  it("keeps only Apps on Simple mode's rail: Automations and Team map are in its account menu", () => {
-    const html = renderToStaticMarkup(createElement(() => SidebarFooterNav({ density: "icons", rail: true })));
-    expect(html).toContain('aria-label="Apps" title="Apps"');
-    expect(html).toContain('data-tour="tools"');
-    expect(html).not.toContain('data-sidebar-nav="automations"');
-    expect(html).not.toContain('data-sidebar-nav="team-map"');
+    for (const html of [render("icons").html, renderToStaticMarkup(createElement(() => SidebarFooterNav({ density: "icons", rail: true })))]) {
+      expect(html).toContain('aria-label="Automations" title="Automations"');
+      expect(html).toContain('aria-label="Team map" title="Team map"');
+      expect(html.indexOf('data-sidebar-nav="automations"')).toBeLessThan(html.indexOf('data-sidebar-nav="apps"'));
+    }
   });
 
   it("opens the Automations page through the store, and marks it current while open", () => {
@@ -86,29 +76,6 @@ describe("sidebar footer places", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines", view: "list" });
     fixture.state.activeView = "routines";
     expect(render("comfortable").html).toMatch(/data-sidebar-nav="automations"[^>]*aria-current="page"/);
-  });
-
-  it("adds a row per pinned web panel after Team map, in Advanced mode only", () => {
-    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
-    fixture.state = { ...fixture.state, activeView: "web-panel", webPanelId: "panel-1" };
-    expect(render("comfortable").html).toBe("");
-    fixture.advanced = true;
-    const { html, nodes: tree } = render("comfortable");
-    expect(html.indexOf('data-sidebar-nav="web-panel-panel-1"')).toBeGreaterThan(html.indexOf('data-sidebar-nav="team-map"'));
-    expect(html).toContain(">Fleet board</span>");
-    expect(html).toMatch(/aria-current="page"[^>]*>[\s\S]*Fleet board/);
-    const row = tree.find((node) => node.props.id === "web-panel-panel-1" && typeof node.props.onClick === "function")!;
-    (row.props.onClick as () => void)();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showWebPanel", id: "panel-1" });
-  });
-
-  it("shows a pinned panel as an icon with its name as the label in the toolbar layout", () => {
-    fixture.advanced = true;
-    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
-    const { html } = render("comfortable", { toolsLayout: "toolbar" });
-    expect(html).toContain('data-sidebar-nav="web-panel-panel-1"');
-    expect(html).not.toContain(">Fleet board</span>");
-    expect(html).toContain('aria-label="Fleet board"');
   });
 
   it("keeps the guided tour's anchors on the rows", () => {
@@ -148,9 +115,9 @@ describe("sidebar footer places", () => {
 });
 
 describe("Tools header", () => {
-  it("labels the places with a Tools header, expanded by default", () => {
+  it.each(["comfortable", "compact"] as const)("labels the places with a Tools header, expanded by default (%s)", (density) => {
     fixture.advanced = true;
-    const { html } = render("comfortable");
+    const { html } = render(density);
     expect(html).toContain(">Tools<");
     expect(html).toContain('aria-expanded="true"');
     expect(html.indexOf(">Tools<")).toBeLessThan(html.indexOf('data-sidebar-nav="automations"'));
@@ -210,13 +177,42 @@ function renderBottom() {
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
+const press = (tree: ReactElement<Props>[], id: string) =>
+  (tree.find((node) => node.props.id === id && typeof node.props.onClick === "function")!.props.onClick as () => void)();
+
 describe("the bottom bar beside the profile", () => {
-  it.each([false, true])("carries Apps alone: Automations and Team map are Tools rows in Advanced and account menu items in Simple (advanced: %s)", (advanced) => {
-    fixture.advanced = advanced;
+  it("carries Automations and Team map as icons with tooltips in Simple mode, ahead of Apps", () => {
+    const { html } = renderBottom();
+    for (const label of ["Automations", "Team map"]) {
+      expect(html).toContain(`aria-label="${label}" title="${label}"`);
+      expect(html).not.toContain(`>${label}</span>`);
+    }
+    const order = ["automations", "team-map", "apps"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(html).toMatch(/data-tour="nav-automations" data-sidebar-nav="automations"/);
+  });
+
+  it("leaves Automations and Team map to the Tools rows in Advanced mode", () => {
+    fixture.advanced = true;
     const { html } = renderBottom();
     expect(html).not.toContain('data-sidebar-nav="automations"');
     expect(html).not.toContain('data-sidebar-nav="team-map"');
     expect(html).toContain('data-sidebar-nav="apps"');
+  });
+
+  it("opens Automations and Team map, marks the open one, and carries the failed-run dot on Automations", () => {
+    press(renderBottom().nodes, "automations");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines", view: "list" });
+    press(renderBottom().nodes, "team-map");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showTeamMap" });
+    fixture.state.activeView = "team-map";
+    expect(renderBottom().html).toMatch(/data-sidebar-nav="team-map"[^>]*aria-current="page"/);
+    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1 }];
+    const html = renderBottom().html;
+    const dot = html.indexOf('data-testid="routines-attention"');
+    expect(dot).toBeGreaterThan(html.indexOf('data-sidebar-nav="automations"'));
+    expect(dot).toBeLessThan(html.indexOf('data-sidebar-nav="team-map"'));
   });
 });
 
@@ -234,9 +230,9 @@ describe("Apps beside the profile", () => {
 });
 
 describe("toolbar tools layout", () => {
-  it("toolbar renders the places as icon buttons with labels", () => {
+  it.each(["comfortable", "compact"] as const)("toolbar renders the places as icon buttons with labels (%s)", (density) => {
     fixture.advanced = true;
-    const { html } = render("comfortable", { toolsLayout: "toolbar" });
+    const { html } = render(density, { toolsLayout: "toolbar" });
     expect(html).toContain('class="flex flex-row gap-1"');
     expect(html).not.toContain("flex-col");
     for (const label of ["Automations", "Team map"]) {

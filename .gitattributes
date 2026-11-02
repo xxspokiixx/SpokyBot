@@ -7,9 +7,6 @@ shared/mascot-bodies.ts text eol=lf
 # git runs hooks through sh; a CRLF shebang line is "/bin/sh^M: bad interpreter" on every platform.
 scripts/git-hooks/* text eol=lf
 deploy/podman/*.sh text eol=lf
-# install.sh is piped to sh on a customer's server, and the AppArmor profile is loaded as it is.
-connector/**/*.sh text eol=lf
-connector/profiles/* text eol=lf
 # Vendor patch hashes and original notices must survive Windows checkout
 # byte-for-byte. Do not let core.autocrlf rewrite these reviewed inputs.
 third_party/browser/** text eol=lf
@@ -36,6 +33,4 @@ Dockerfile text eol=lf
 # line against the body after it; the phone apps copy it byte for byte. A CRLF
 # checkout on Windows fails both for a reason that has nothing to do with the page.
 shared/app-frame/app-host.html text eol=lf
-
-# Imported by a vitest test: a CRLF checkout of its first lines broke the import on Windows.
-scripts/tighten-ratchets.mjs text eol=lf
+openmausbot-test-debug.apk filter=lfs diff=lfs merge=lfs -text

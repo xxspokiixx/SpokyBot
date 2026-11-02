@@ -22,8 +22,7 @@ async function internal(handler: ReturnType<typeof createPagesInternalRoutes>, i
   const { sent, json, res } = sink();
   const post = vi.fn(() => "message-1");
   const out = await handler({ method: input.method ?? "POST", path: input.path ?? "/api/internal/pages/publish", res, json, botId: "bot-1", threadId: "thread-1",
-    readBody: async () => input.body ?? {}, folders: async () => ({ roots: ["/work/bot-1"], vmWorkspace: input.vmWorkspace ?? null }), post,
-    requireActive: () => {}, signal: new AbortController().signal });
+    readBody: async () => input.body ?? {}, folders: async () => ({ roots: ["/work/bot-1"], vmWorkspace: input.vmWorkspace ?? null }), post });
   return { out, post, ...sent };
 }
 
@@ -39,7 +38,7 @@ describe("the page tools' internal routes", () => {
     const answer = await internal(handler, { body: { path: "site", title: "Bake sale", page_id: "abcdefghijklmnopqrstuvwxyz", botId: "someone-else" } });
     expect(answer).toMatchObject({ status: 200, body: { ok: true, text: expect.stringContaining("Published") } });
     expect(publisher.publish).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-1", threadId: "thread-1", path: "site", title: "Bake sale",
-      pageId: "abcdefghijklmnopqrstuvwxyz", roots: ["/work/bot-1"], call: expect.objectContaining({ assertActive: expect.any(Function) }) }));
+      pageId: "abcdefghijklmnopqrstuvwxyz", roots: ["/work/bot-1"] }));
   });
 
   it("reads a path inside the bot's private desktop as the same file on this computer", async () => {
@@ -61,7 +60,7 @@ describe("the page tools' internal routes", () => {
     const publisher = fakePublisher(), handler = createPagesInternalRoutes(publisher);
     const answer = await internal(handler, { path: "/api/internal/pages/unpublish", body: { path: "site" } });
     expect(answer).toMatchObject({ status: 200, body: { ok: true, text: "Unpublished." } });
-    expect(publisher.unpublish).toHaveBeenCalledWith({ path: "site", botId: "bot-1", roots: ["/work/bot-1"], call: expect.anything() });
+    expect(publisher.unpublish).toHaveBeenCalledWith({ path: "site", botId: "bot-1", roots: ["/work/bot-1"] });
   });
 });
 

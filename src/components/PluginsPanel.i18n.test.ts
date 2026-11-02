@@ -6,7 +6,7 @@ import { setLocale, t } from "@/lib/i18n";
 import { locales } from "@/locales";
 import { connectedInventoryCopy, connectorActionLabel } from "@/lib/connector-status";
 import { disconnectAccountConfirmation } from "./PluginsPanel";
-import { rowsBody, secretRow } from "./mcp-draft";
+import { parseMcpEnvironment } from "./McpServersPanel";
 import { ConnectorCard } from "./ConnectorCard";
 
 afterEach(() => {
@@ -41,7 +41,7 @@ describe("plugins modal translation", () => {
 
   it("translates an MCP environment parse error without touching the offending line", () => {
     setLocale("de");
-    expect(rowsBody([secretRow({ name: "NOT A KEY", value: "value" })], "env")).toEqual({
+    expect(parseMcpEnvironment("NOT A KEY=value")).toEqual({
       ok: false,
       error: { key: "mcp.env.invalidName", params: { key: "NOT A KEY" } },
     });

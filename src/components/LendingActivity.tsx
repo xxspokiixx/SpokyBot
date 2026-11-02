@@ -5,15 +5,11 @@ const ACTIONS: Record<string, LocaleKey> = {
   list_files: "lending.action.listFiles",
   read_file: "lending.action.readFile",
   write_file: "lending.action.writeFile",
-  edit_file: "lending.action.writeFile",
-  append_file: "lending.action.writeFile",
-  delete_file: "lending.action.deleteFile",
   run_command: "lending.action.runCommand",
   computer_tools: "lending.action.screenTools",
   computer_call: "lending.action.screen",
   invalid: "lending.action.invalid",
   internet: "lending.action.website",
-  chrome: "lending.action.chrome",
 };
 
 /** Security: Electron main keeps this record; a server cannot write to it. */

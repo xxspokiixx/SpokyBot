@@ -22,6 +22,7 @@ release
 !cloudflare/control-plane/.dev.vars.example
 cloudflare/composio-broker/worker-configuration.d.ts
 cloudflare/control-plane/worker-configuration.d.ts
+android-test/
 .claude/worktrees/
 .vercel/
 .pi/
@@ -40,3 +41,4 @@ deploy/podman/.env
 deploy/podman/.env.*
 !deploy/podman/.env.example
 /.env
+openmausbot-test-debug.apk

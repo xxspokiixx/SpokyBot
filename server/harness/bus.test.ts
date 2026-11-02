@@ -8,8 +8,6 @@ import type { RuntimeEvent } from "../contracts.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { EventBus } from "./bus.ts";
 
-const QUEUE_LIMIT = 4096;
-
 const testEvent = (over: Partial<RuntimeEvent> = {}): RuntimeEvent =>
   ({
     eventId: "ev-1",
@@ -240,31 +238,15 @@ describe("EventBus", () => {
     const bus = new EventBus(append);
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
-    for (let i = 0; i < QUEUE_LIMIT + 4; i++) bus.publish(testEvent({ eventId: `e${i}` }));
+    for (let i = 0; i < 260; i++) bus.publish(testEvent({ eventId: `e${i}` }));
     await bus.flush();
 
     expect(seen.filter((event) => event.type === "runtime.error")).toHaveLength(1);
     const lines = writes.flatMap((chunk) => chunk.trim().split("\n").map((line) => JSON.parse(line) as { eventId: string; type: string }));
     const kept = lines.filter((line) => /^e\d+$/.test(line.eventId)).map((line) => line.eventId);
-    expect(kept).toEqual(Array.from({ length: QUEUE_LIMIT }, (_, i) => `e${i}`));
+    expect(kept).toEqual(Array.from({ length: 256 }, (_, i) => `e${i}`));
     expect(lines.some((line) => line.type === "runtime.error")).toBe(true);
-    expect(kept).not.toContain(`e${QUEUE_LIMIT}`);
-  });
-
-  it("logs large tool results from bots working together on a healthy disk, without a gap warning", async () => {
-    const bus = new EventBus();
-    const seen: RuntimeEvent[] = [];
-    bus.subscribe((event) => seen.push(event));
-    const output = "x".repeat(320_000);
-    for (let i = 0; i < 5; i++) {
-      bus.publish(testEvent({ eventId: `result-${i}`, threadId: `worker-${i}`, type: "item.completed", item: { id: `tool-${i}`, kind: "tool", output } } as Partial<RuntimeEvent>));
-    }
-    await bus.flush();
-
-    expect(seen.filter((event) => event.type === "runtime.error")).toEqual([]);
-    for (let i = 0; i < 5; i++) {
-      expect(readFileSync(join(EVENTS_DIR, `worker-${i}.ndjson`), "utf8")).toContain(`"eventId":"result-${i}"`);
-    }
+    expect(kept).not.toContain("e256");
   });
 
   it("keeps publication order in the log when a listener publishes from inside delivery", async () => {
@@ -287,7 +269,7 @@ describe("EventBus", () => {
   it("never drops a turn's end when the log buffer is full, and marks the gap right before it", async () => {
     const writes: string[] = [];
     const bus = new EventBus((_path: string, data: string) => { writes.push(data); });
-    for (let i = 0; i < QUEUE_LIMIT + 4; i++) bus.publish(testEvent({ eventId: `e${i}` }));
+    for (let i = 0; i < 260; i++) bus.publish(testEvent({ eventId: `e${i}` }));
     bus.publish(testEvent({ eventId: "done", type: "turn.completed", ok: true } as Partial<RuntimeEvent>));
     bus.publish(testEvent({ eventId: "other-done", threadId: "thread-2", type: "turn.completed", ok: true } as Partial<RuntimeEvent>));
     bus.publish(testEvent({ eventId: "error-end", threadId: "thread-3", type: "runtime.error", message: "boom", terminal: true } as Partial<RuntimeEvent>));
@@ -295,8 +277,8 @@ describe("EventBus", () => {
 
     const lines = writes.flatMap((chunk) => chunk.trim().split("\n").map((line) => JSON.parse(line) as { eventId: string; threadId: string; type: string; message?: string }));
     const first = lines.filter((line) => line.threadId === "thread-1");
-    expect(first.slice(0, QUEUE_LIMIT).map((line) => line.eventId)).toEqual(Array.from({ length: QUEUE_LIMIT }, (_, i) => `e${i}`));
-    expect(first.slice(QUEUE_LIMIT).map((line) => line.type)).toEqual(["runtime.error", "turn.completed"]);
+    expect(first.slice(0, 256).map((line) => line.eventId)).toEqual(Array.from({ length: 256 }, (_, i) => `e${i}`));
+    expect(first.slice(256).map((line) => line.type)).toEqual(["runtime.error", "turn.completed"]);
     expect(first.at(-1)!.eventId).toBe("done");
     expect(lines.filter((line) => line.threadId === "thread-2").map((line) => line.eventId)).toEqual(["other-done"]);
     expect(lines.filter((line) => line.threadId === "thread-3").map((line) => line.eventId)).toEqual(["error-end"]);
@@ -321,15 +303,15 @@ describe("EventBus", () => {
       writes.push(data);
       if (writes.length === 1) return new Promise<void>(resolve => { release = resolve; });
     });
-    for (let i = 0; i < QUEUE_LIMIT + 4; i++) bus.publish(testEvent({ eventId: `e${i}` }));
+    for (let i = 0; i < 260; i++) bus.publish(testEvent({ eventId: `e${i}` }));
     await Promise.resolve(); // The active batch frees room for another event.
     bus.publish(testEvent({ eventId: "after-gap" }));
     release();
     await bus.flush();
     const lines = writes.flatMap(chunk => chunk.trim().split("\n").map(line => JSON.parse(line)));
-    expect(lines.slice(0, QUEUE_LIMIT).map(event => event.eventId)).toEqual(Array.from({ length: QUEUE_LIMIT }, (_, i) => `e${i}`));
-    expect(lines[QUEUE_LIMIT].type).toBe("runtime.error");
-    expect(lines[QUEUE_LIMIT + 1].eventId).toBe("after-gap");
+    expect(lines.slice(0, 256).map(event => event.eventId)).toEqual(Array.from({ length: 256 }, (_, i) => `e${i}`));
+    expect(lines[256].type).toBe("runtime.error");
+    expect(lines[257].eventId).toBe("after-gap");
   });
 
   it("does not put an overflow marker before accepted events already in the active batch", async () => {
@@ -342,7 +324,7 @@ describe("EventBus", () => {
     bus.publish(testEvent({ threadId: "other", eventId: "blocking" }));
     bus.publish(testEvent({ eventId: "before-gap" }));
     await Promise.resolve();
-    for (let i = 0; i < QUEUE_LIMIT; i++) bus.publish(testEvent({ threadId: "other", eventId: `e${i}` }));
+    for (let i = 0; i < 256; i++) bus.publish(testEvent({ threadId: "other", eventId: `e${i}` }));
     bus.publish(testEvent({ eventId: "dropped" }));
     bus.publish(testEvent({ eventId: "done", type: "turn.completed", ok: true }));
     release();
@@ -556,52 +538,5 @@ describe("EventBus status-line progress", () => {
     bus.publish(progress(1024, { threadId: "b" }));
     expect(seen.map((event) => event.threadId)).toEqual(["a", "b"]);
     await bus.flush();
-  });
-
-  it("keeps a waiting report through a heartbeat or a token count, which the status line does not act on", async () => {
-    const bus = new EventBus();
-    const seen: RuntimeEvent[] = [];
-    bus.subscribe((event) => seen.push(event));
-    bus.publish(progress(2048));
-    bus.publish(progress(4096));
-    bus.publish(testEvent({ type: "item.updated", itemType: "tool", turnId: "turn-1" } as Partial<RuntimeEvent>));
-    bus.publish(testEvent({ type: "thread.token-usage.updated", input: 10, output: 5, turnId: "turn-1" } as Partial<RuntimeEvent>));
-    vi.advanceTimersByTime(1000);
-    expect(shown(seen)).toEqual(["progress:2048", "item.updated", "thread.token-usage.updated", "progress:4096"]);
-    await bus.flush();
-  });
-
-  it("names a tool call's step in a frame after its start, past the engine's token count, and logs the step with the start", async () => {
-    const bus = new EventBus();
-    const seen: RuntimeEvent[] = [];
-    bus.subscribe((event) => seen.push(event));
-    const command = "cd ~/acme && python3 scrape.py --pages 40";
-    bus.publish(progress(0, { threadId: "steps", activity: "command", file: undefined, itemId: "toolu_9" }));
-    bus.publish(testEvent({ threadId: "steps", type: "item.started", itemType: "tool", itemId: "toolu_9", turnId: "turn-1", title: "Bash",
-      summary: command, input: JSON.stringify({ command }) } as Partial<RuntimeEvent>));
-    bus.publish(testEvent({ threadId: "steps", type: "thread.token-usage.updated", input: 10, output: 5, turnId: "turn-1" } as Partial<RuntimeEvent>));
-    vi.advanceTimersByTime(1000);
-    const frame = seen.at(-1) as Extract<RuntimeEvent, { type: "turn.progress" }>;
-    expect(frame).toMatchObject({ type: "turn.progress", itemId: "toolu_9", activity: "command", target: "scrape.py", detail: command });
-    await bus.flush();
-    const logged = readFileSync(join(EVENTS_DIR, "steps.ndjson"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    expect(logged.find((event) => event.type === "item.started")?.step).toEqual({ activity: "command", target: "scrape.py", detail: command });
-    expect(logged.some((event) => event.type === "turn.progress")).toBe(false);
-  });
-
-  it("folds a command's streamed output into its frame's last lines and neither logs nor forwards the output itself", async () => {
-    const bus = new EventBus();
-    const seen: RuntimeEvent[] = [];
-    bus.subscribe((event) => seen.push(event));
-    bus.publish(testEvent({ threadId: "out", type: "item.started", itemType: "tool", itemId: "cmd_1", turnId: "turn-1", title: "pnpm test",
-      summary: "pnpm test", input: JSON.stringify({ command: "pnpm test" }) } as Partial<RuntimeEvent>));
-    vi.advanceTimersByTime(1000);
-    bus.publish(testEvent({ threadId: "out", type: "item.output", itemType: "tool", itemId: "cmd_1", turnId: "turn-1", text: "✓ a.test.ts\n✓ b.test.ts\n" } as Partial<RuntimeEvent>));
-    vi.advanceTimersByTime(1000);
-    expect(seen.some((event) => event.type === "item.output")).toBe(false);
-    expect(seen.at(-1)).toMatchObject({ type: "turn.progress", itemId: "cmd_1", target: "pnpm test", tail: ["✓ a.test.ts", "✓ b.test.ts"] });
-    await bus.flush();
-    const logged = readFileSync(join(EVENTS_DIR, "out.ndjson"), "utf8").trim().split("\n").map((line) => JSON.parse(line).type);
-    expect(logged).toEqual(["item.started"]);
   });
 });

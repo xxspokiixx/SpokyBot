@@ -9,7 +9,6 @@ import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { createQuotaSwitch, NOT_NOW, quotaSwitchEnabled, type QuotaRequest, type QuotaSwitch, type QuotaSwitchDeps, type QuotaSwitchEngine } from "./quota-switch.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
-import { toolFailureMessage } from "./drivers/tool-failure.ts";
 
 const QUOTA = "You've hit your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)";
 const defaultSelection = (): ModelSelection => ({ instanceId: "claude", model: "claude-default" });
@@ -47,7 +46,7 @@ describe("quotaSwitchEnabled", () => {
   });
 });
 
-describe("quota switch", () => {
+describe("quota-switch card", () => {
   let store: Store;
   let bot: BotRecord;
   let engines: QuotaSwitchEngine[];
@@ -80,33 +79,12 @@ describe("quota switch", () => {
     requests.set(threadId, { generations: new Set([id]), turnId: `turn-${id}`, origin: { kind: "user", request: "asked" }, ...record });
     return { id, event: { threadId, turnId: `turn-${id}`, ok: false, stopReason: "quota" } };
   };
-  /** The fold's report of that turn, broken on `why`: the module decides what carries on. */
-  const ranOut = (turn: ReturnType<typeof begin>, why = QUOTA, internal = false, on = thread()) => {
+  /** The fold's report of that turn, broken on `why`. */
+  const fails = (turn: ReturnType<typeof begin>, why = QUOTA, internal = false, on = thread()) => {
     cause = why;
     return quota.turnFailed(on, turn.event, internal);
   };
-  /** The quota card an earlier version left open for that turn: the other engines here, then Not now. */
-  const fails = async (turn: ReturnType<typeof begin>, _why = QUOTA, _internal = false, on = thread()) => {
-    const others = engines.filter((candidate) => candidate.instanceId !== on.modelSelection.instanceId).slice(0, 3);
-    const offered = others.map((candidate, index) => {
-      const name = candidate.displayName || candidate.driverKind;
-      const taken = name === NOT_NOW || others.slice(0, index).some((other) => (other.displayName || other.driverKind) === name);
-      return { instanceId: candidate.instanceId, name: taken ? `${name} (${candidate.instanceId})` : name };
-    });
-    if (!offered.length) return null;
-    const messageId = requests.get(turn.event.threadId)?.messageId;
-    const original = store.activePath(turn.event.threadId).find((m) => m.id === messageId && m.role === "user" && m.kind === "text" && m.text && !m.peerAsk);
-    return store.appendMessage(turn.event.threadId, {
-      role: "bot", kind: "options",
-      card: {
-        title: "Claude is out of quota",
-        subtitle: original ? "Continue this conversation with another AI?" : "Switch this conversation to another AI? Send your message again afterwards.",
-        options: [...offered.map((offer) => offer.name), NOT_NOW], requestId: `card-${turn.id}`, fixedOptions: true,
-        quotaSwitch: { engines: offered, ...(original ? { messageId: original.id } : {}), rootId: turn.id },
-      },
-    });
-  };
-  /** A turn that failed and handed nothing on (its own end settles its root), with the card left open for it. */
+  /** A turn that failed and handed nothing on: its own end settles its root. */
   const failed = (why = QUOTA, record: Partial<QuotaRequest> = {}) => {
     const turn = begin(bot.threadId, record);
     coordinator.endTurn(turn.id, { ok: false, text: why });
@@ -173,119 +151,103 @@ describe("quota switch", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
-  describe("carrying on by itself", () => {
-    let told: Array<{ botId: string; from: ModelSelection; facts: unknown }>;
-    let moves: Array<{ threadId: string; from: ModelSelection; to: ModelSelection; resetsAt?: number }>;
-    let backups: ModelSelection[];
-    let flags: { limit?: "engine" | "model" | "credits"; limitResetsAt?: number } | undefined;
-    const CODEX = { instanceId: "codex", model: "codex-default" }, CURSOR = { instanceId: "cursor", model: "cursor-default" };
-    beforeEach(() => {
-      told = [];
-      moves = [];
-      backups = [CODEX, CURSOR];
-      flags = undefined;
-      deps.turnStops = { failureCause: () => cause, read: () => (flags ? { flags } : undefined) };
-      deps.takeover = {
-        backups: () => backups, tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return null; },
-        moved: (_botId, threadId, from, to, resetsAt) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}) }); },
-      };
-      quota = createQuotaSwitch(deps);
+  describe("what is offered", () => {
+    it("offers the other engines that can run now, never the current one, and takes no free text", async () => {
+      const messageId = said("how's the weather");
+      const card = await failed(QUOTA, { messageId });
+      expect(card?.card).toMatchObject({
+        title: "Claude is out of quota",
+        subtitle: "Continue this conversation with another AI?",
+        options: ["Codex", "Cursor", NOT_NOW],
+        fixedOptions: true,
+        // the failed request's own root in the job runtime rides the card
+        quotaSwitch: { engines: [{ instanceId: "codex", name: "Codex" }, { instanceId: "cursor", name: "Cursor" }], messageId, rootId: "g1" },
+      });
+      expect(card!.card!.requestId).toBeTruthy();
+      expect(card!.card!.tool).toBeUndefined();
+      expect(pending()?.id).toBe(card!.id);
     });
-    /** The person's request that the AI's usage limit refused. */
-    const limited = async (record: Partial<QuotaRequest> = {}, why = QUOTA) => {
-      const turn = begin(bot.threadId, record);
-      coordinator.endTurn(turn.id, { ok: false, text: why });
-      return ranOut(turn, why);
-    };
 
-    it("moves the request to the first AI that can take it, sends the same message again there, offers no card and says so once", async () => {
-      const quoted = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "It will rain on Friday." }).id;
-      const messageId = said("how's the weather", { dataContext: { cardId: "sales" }, replyToId: quoted });
-      expect(await limited({ messageId })).toBeNull();
+    it("offers at most three engines, then Not now", async () => {
+      engines.push(engine("grok", "grokAgent", "Grok"), engine("gemini", "geminiAgent", "Gemini"));
+      expect((await failed())!.card!.options).toEqual(["Codex", "Cursor", "Grok", NOT_NOW]);
+    });
 
+    it("raises no second card in a thread while one is pending", async () => {
+      expect(await failed()).toBeTruthy();
+      expect(await failed()).toBeNull();
+      expect(cards()).toHaveLength(1);
+    });
+
+    it("raises one card when two failures of the same thread are read at once", async () => {
+      const raised = await Promise.all([failed(), failed()]);
+      expect(raised.filter(Boolean)).toHaveLength(1);
+      expect(cards()).toHaveLength(1);
+    });
+
+    it("raises no card for an error that is not a quota or usage limit", async () => {
+      expect(await failed("500 internal server error")).toBeNull();
+      expect(await failed("Not logged in · Please run /login")).toBeNull();
       expect(cards()).toHaveLength(0);
-      expect(gate.mock.calls[0]![1]).toEqual(CODEX);
-      expect(thread().modelSelection).toEqual(CODEX);
-      expect(store.bot(bot.id)!.modelSelection, "the bot's own model and its other conversations stay").toEqual(defaultSelection());
-      expect(resend).toHaveBeenCalledTimes(1);
-      const [, , message, replyTo, spoken] = resend.mock.calls[0]!;
-      expect(message).toMatchObject({ id: messageId, text: "how's the weather", dataContext: { cardId: "sales" } });
-      expect(replyTo).toMatchObject({ id: quoted });
-      expect(spoken).toEqual({});
-      expect(notices()).toContainEqual({ name: "notice: continuing on Codex after hitting the usage limit", ok: true });
-      expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine", backup: CODEX } }]);
-      expect(moves, "so it goes back once the limit resets").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX }]);
     });
 
-    it("never takes a failed tool call for the AI's usage limit, whatever the tool is called", async () => {
-      const turn = begin(bot.threadId, { messageId: said("export the quota report") });
-      coordinator.endTurn(turn.id, { ok: false, text: "tool failed" });
-      cause = toolFailureMessage(["mcp__billing__get-quota"], []);
-      expect(await quota.turnFailed(thread(), { ...turn.event, stopReason: "tool_error" }, false)).toBeNull();
-      expect(thread().modelSelection).toEqual(defaultSelection());
-      expect(told).toEqual([]);
-      expect(resend).not.toHaveBeenCalled();
+    it("raises no card when no other engine is configured", async () => {
+      engines = [engines[0]!];
+      expect(await failed()).toBeNull();
     });
 
-    it("goes by the engine's own limit flag and its reset when it gives them", async () => {
-      flags = { limit: "engine", limitResetsAt: 1_900_000_000_000 };
-      await limited({ messageId: said("hi") }, "This Claude account has reached its 5-hour limit, which resets Oct 28 at 2:00 PM.");
-      expect(thread().modelSelection).toEqual(CODEX);
-      expect(told[0]!.facts).toEqual({ resetsAt: 1_900_000_000_000, scope: "engine", backup: CODEX });
-      expect(moves).toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX, resetsAt: 1_900_000_000_000 }]);
+    it("never offers an engine that cannot run a turn when the card is built", async () => {
+      engines = [
+        engines[0]!,
+        engine("gone", "codex", "Uninstalled", { snapshot: async () => ({ state: "unavailable", reason: "not installed" }) }),
+        engine("out", "codex", "Signed out", { snapshot: async () => ({ state: "available", authenticated: false }) }),
+        engine("off", "codex", "Switched off", { enabled: false }),
+        engine("broken", "codex", "Broken", { snapshot: async () => { throw new Error("probe failed"); } }),
+        engine("empty", "codex", "No model", { models: { default: "", options: [] } }),
+        engine("barred", "codex", "Barred"),
+        engine("codex", "codex", "Codex"),
+      ];
+      deps.refusal = (candidate) => candidate.instanceId === "barred" ? "Your organisation does not allow this engine." : undefined;
+      expect((await failed())!.card!.options).toEqual(["Codex", NOT_NOW]);
     });
 
-    it("for one model's own limit carries on with the same AI's other model", async () => {
-      engines[0] = engine("claude", "claudeAgent", "Claude", { models: { default: "claude-default", options: [{ id: "claude-default", label: "Default" }, { id: "claude-plan", label: "Plan" }] } });
-      flags = { limit: "credits" };
-      backups = [{ instanceId: "claude", model: "claude-plan" }];
-      await limited({ messageId: said("hi") });
-      expect(thread().modelSelection).toEqual({ instanceId: "claude", model: "claude-plan" });
-      expect(resend).toHaveBeenCalledTimes(1);
-      expect(notices()).toContainEqual({ name: "notice: continuing on Claude claude-plan after hitting the usage limit", ok: true });
-      expect(told[0]!.facts).toEqual({ scope: "credits", backup: { instanceId: "claude", model: "claude-plan" } });
+    it("offers a custom endpoint whatever its sign-in state says: it brings its own credential", async () => {
+      engines = [engines[0]!, engine("local", "codex", "Local model", { snapshot: async () => ({ state: "available", authenticated: false }) })];
+      deps.access = (instanceId) => instanceId === "local" ? "custom" : "subscription";
+      expect((await failed())!.card!.options).toEqual(["Local model", NOT_NOW]);
     });
 
-    it.each<[string, () => void]>([
-      ["one that cannot run a turn now", () => { engines[1] = engine("codex", "codex", "Codex", { snapshot: async () => ({ state: "unavailable", reason: "signed out" }) }); }],
-      ["one the model-switch gate refuses", () => { gate.mockImplementationOnce(() => ({ ok: false, error: "the bot is working" })); }],
-      ["one that does not support this AI's tools", () => { engines[0] = engine("claude", "claudeAgent", "Claude", { adapter: { capabilities: caps({ agentsMcp: true }) } }); engines[2] = engine("cursor", "cursorAgent", "Cursor", { adapter: { capabilities: caps({ agentsMcp: true }) } }); }],
-    ])("skips %s and carries on with the next", async (_name, arrange) => {
-      arrange();
-      await limited({ messageId: said("hi") });
-      expect(thread().modelSelection).toEqual(CURSOR);
-      expect(resend).toHaveBeenCalledTimes(1);
-      expect(told[0]!.facts).toMatchObject({ backup: CURSOR });
-    });
-
-    it("skips an AI that does not say how it is in time", async () => {
+    it("builds the card without an engine that does not say how it is in time", async () => {
       engines[1] = silent("codex", "Codex");
-      const going = limited({ messageId: said("hi") });
-      await vi.waitFor(() => expect(timers.filter((timer) => !timer.cancelled).map((timer) => timer.ms)).toEqual([PROBE_TIMEOUT_MS]));
-      timers.find((timer) => !timer.cancelled)!.fire();
-      await going;
-      expect(thread().modelSelection).toEqual(CURSOR);
+      const raising = failed(QUOTA, { messageId: said("hi") });
+      // Codex was asked first; its wait is the one an engine probe gets elsewhere.
+      expect(timers[0]).toMatchObject({ ms: PROBE_TIMEOUT_MS, cancelled: false });
+      timers[0]!.fire();
+      expect((await raising)!.card!.options).toEqual(["Cursor", NOT_NOW]);
+      // an engine that answered stopped its clock
+      expect(timers[1]).toMatchObject({ cancelled: true });
     });
 
-    it("never moves to an AI known to be at its own limit, until a turn on it works again", async () => {
+    it("raises no card when every other engine is unavailable", async () => {
+      engines = engines.map((candidate) => candidate.instanceId === "claude" ? candidate
+        : { ...candidate, snapshot: async () => ({ state: "unavailable" as const }) });
+      expect(await failed()).toBeNull();
+    });
+
+    it("never offers an engine known to be at its own limit, and offers it again once a turn on it succeeds", async () => {
       const codexThread = store.createTask(bot.id, undefined, false)!.threadId;
-      store.switchTaskModel(bot.id, codexThread, CODEX, false, false);
+      store.switchTaskModel(bot.id, codexThread, { instanceId: "codex", model: "codex-default" }, false, false);
       const onCodex = store.projectBotForTask(bot.id, codexThread)!;
-      await ranOut(begin(codexThread), "usage limit reached", true, onCodex);
-      await limited({ messageId: said("hi") });
-      expect(thread().modelSelection).toEqual(CURSOR);
+      // Codex runs out in another conversation; that one is offered Claude and Cursor.
+      const elsewhere = await fails(begin(codexThread), "usage limit reached", false, onCodex);
+      expect(elsewhere!.card!.options).toEqual(["Claude", "Cursor", NOT_NOW]);
+      // Now Claude runs out here: Codex is known to be limited, so only Cursor is offered.
+      const first = (await failed())!;
+      expect(first.card!.options).toEqual(["Cursor", NOT_NOW]);
+      await answer(first, NOT_NOW);
+      // A turn on Codex completes: it works again.
       quota.turnSucceeded(onCodex, codexThread);
-      store.switchTaskModel(bot.id, bot.threadId, defaultSelection(), false, false);
-      await limited({ messageId: said("hi again") });
-      expect(thread().modelSelection).toEqual(CODEX);
-    });
-
-    it("says it waits when no AI can take it, and moves nothing", async () => {
-      backups = [];
-      await limited({ messageId: said("hi") });
-      expect(thread().modelSelection).toEqual(defaultSelection());
-      expect(resend).not.toHaveBeenCalled();
-      expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine" } }]);
+      expect((await failed())!.card!.options).toEqual(["Codex", "Cursor", NOT_NOW]);
     });
 
     it.each<[string, { internal?: boolean; record?: Partial<QuotaRequest> | null }]>([
@@ -294,113 +256,87 @@ describe("quota switch", () => {
       ["a request whose record names another provider turn", { record: { turnId: "another-turn" } }],
       ["a request the person stopped", { record: { stopped: true } }],
       ["a turn with no request record", { record: null }],
-    ])("sends nothing again for %s and only says what carries on", async (_name, { internal = false, record = {} }) => {
-      const turn = begin(bot.threadId, record ?? {});
-      if (record === null) requests.delete(bot.threadId);
-      await ranOut(turn, QUOTA, internal);
-      expect(thread().modelSelection).toEqual(defaultSelection());
-      expect(resend).not.toHaveBeenCalled();
-      expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine", backup: CODEX } }]);
+    ])("raises no card for %s, and still remembers that its engine ran out", async (_name, { internal = false, record = {} }) => {
+      const codexThread = store.createTask(bot.id, undefined, false)!.threadId;
+      store.switchTaskModel(bot.id, codexThread, { instanceId: "codex", model: "codex-default" }, false, false);
+      const turn = begin(codexThread, record ?? {});
+      if (record === null) requests.delete(codexThread);
+      expect(await fails(turn, QUOTA, internal, store.projectBotForTask(bot.id, codexThread)!)).toBeNull();
+      expect(store.messagesFor(codexThread)).toEqual([]);
+      expect((await failed())!.card!.options).toEqual(["Cursor", NOT_NOW]);
     });
 
-    it("never sends again a line a bot delivered", async () => {
-      await limited({ messageId: said("Do the quarterly numbers", { peerAsk: { botId: "chief", name: "Chief" } }) });
-      expect(resend).not.toHaveBeenCalled();
-      expect(told).toHaveLength(1);
+    it("raises no card when the engine the thread runs on is no longer here: there is nothing to check a backup against", async () => {
+      engines = engines.filter((candidate) => candidate.instanceId !== "claude");
+      expect(await failed()).toBeNull();
+      expect(cards()).toHaveLength(0);
     });
 
-    it("does nothing for an error that is not a usage limit", async () => {
-      await limited({ messageId: said("hi") }, "500 internal server error");
-      await limited({ messageId: said("hi") }, "Not logged in · Please run /login");
-      expect(told).toEqual([]);
-      expect(resend).not.toHaveBeenCalled();
-    });
-
-    it("only says what happens when it is switched off", async () => {
-      enabled = false;
-      await limited({ messageId: said("hi") });
-      expect(thread().modelSelection).toEqual(defaultSelection());
-      expect(told).toHaveLength(1);
-    });
-
-    it("leaves a conversation that went on while the next AI was being read", async () => {
+    it("posts no card for a thread that went on while the engines were being read", async () => {
+      // Codex takes a while to say how it is; meanwhile the person's next turn works.
       let known!: (snapshot: ProviderSnapshot) => void;
-      engines[1] = engine("codex", "codex", "Codex", { snapshot: () => new Promise((resolve) => { known = resolve; }) });
-      const going = limited({ messageId: said("hi") });
-      await vi.waitFor(() => expect(known).toBeTypeOf("function"));
+      const slow = () => engine("codex", "codex", "Codex", { snapshot: () => new Promise((resolve) => { known = resolve; }) });
+      engines[1] = slow();
+      const raising = failed(QUOTA, { messageId: said("hi") });
       quota.turnSucceeded(thread(), bot.threadId);
       known({ state: "available", authenticated: true });
-      await going;
-      expect(thread().modelSelection).toEqual(defaultSelection());
-      expect(resend).not.toHaveBeenCalled();
+      expect(await raising).toBeNull();
+      expect(cards()).toHaveLength(0);
+      // a turn that works in another thread makes nothing stale here
+      engines[1] = slow();
+      const again = failed(QUOTA, { messageId: said("hi again") });
+      const otherThread = store.createTask(bot.id, undefined, false)!.threadId;
+      quota.turnSucceeded(store.projectBotForTask(bot.id, otherThread)!, otherThread);
+      known({ state: "available", authenticated: true });
+      expect(await again).toBeTruthy();
     });
 
-    it("moves a request the job runtime still holds but sends nothing again: the runtime resumes it", async () => {
-      const turn = begin(bot.threadId, { messageId: said("ask the team for the numbers") });
-      const mate = store.createBot();
-      coordinator.enqueue({ botId: bot.id, threadId: bot.threadId }, turn.id, undefined, { botId: mate.id, threadId: mate.threadId }, "Pull the quarter's numbers");
-      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
-      await ranOut(turn);
-      expect(thread().modelSelection).toEqual(CODEX);
-      expect(resend).not.toHaveBeenCalled();
-      expect(notices()).toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", ok: true }]);
+    it("offers only engines that pass the backup check: the same tools, the same workspace", async () => {
+      engines = [
+        engine("claude", "claudeAgent", "Claude", { adapter: { capabilities: caps({ agentsMcp: true, images: true }) } }),
+        engine("bare", "codex", "No team tools", { adapter: { capabilities: caps({ images: true }) } }),
+        // an API model has no working folder (supportsWorkspaceFiles)
+        engine("api", "openai-compat", "API model", { adapter: { capabilities: caps({ agentsMcp: true, images: true }) } }),
+        engine("codex", "codex", "Codex", { adapter: { capabilities: caps({ agentsMcp: true, images: true, browserMcp: true }) } }),
+      ];
+      expect((await failed())!.card!.options).toEqual(["Codex", NOT_NOW]);
     });
 
-    describe("an AI that is signed out", () => {
-      const SIGNED_OUT = "Not logged in · Please run /login";
-      const NOTICE = "Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it.";
-      let scopes: unknown[];
-      beforeEach(() => {
-        scopes = [];
-        deps.takeover = {
-          backups: (_botId, _from, scope) => { scopes.push(scope); return backups; },
-          tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return told.length === 1 ? NOTICE : null; },
-          moved: (_botId, threadId, from, to, resetsAt, scope) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}), ...(scope ? { scope } : {}) } as never); },
-        };
-        quota = createQuotaSwitch(deps);
-      });
-      /** The person's request that met their AI signed out. */
-      const signedOut = (record: Partial<QuotaRequest> = {}, why = SIGNED_OUT) => {
-        const turn = begin(bot.threadId, record);
-        coordinator.endTurn(turn.id, { ok: false, text: why });
-        cause = why;
-        return quota.turnFailed(thread(), { ...turn.event, stopReason: "auth_required" }, false);
-      };
+    it("never offers an engine this conversation's approval level cannot move to", async () => {
+      // Auto-accept edits exists on Claude and Grok, not on Codex or Cursor.
+      store.patchTask(bot.id, bot.threadId, { approvalMode: "edits", autoApprove: false });
+      engines.push(engine("grok", "grokAgent", "Grok"));
+      expect((await failed())!.card!.options).toEqual(["Grok", NOT_NOW]);
+    });
 
-      it("says once in this conversation how to sign in again, then carries the request on with a backup the person chose", async () => {
-        backups = [CODEX];
-        const messageId = said("plan the launch");
-        await signedOut({ messageId });
-        expect(notices()).toEqual([
-          { name: `notice: ${NOTICE}`, ok: true, setup: true },
-          { name: "notice: continuing on Codex while Claude is signed out", ok: true },
-        ]);
-        expect(scopes).toEqual(["signed-out"]);
-        expect(thread().modelSelection).toEqual(CODEX);
-        expect(resend).toHaveBeenCalledTimes(1);
-        expect(resend.mock.calls[0]![2]).toMatchObject({ id: messageId });
-        expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "signed-out" } }]);
-        expect(moves, "so it goes back once Claude is signed in again").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX, scope: "signed-out" }]);
-      });
+    it("tells two engines with the same name apart", async () => {
+      engines = [engines[0]!, engine("work", "codex", "Codex"), engine("home", "codex", "Codex")];
+      const card = (await failed())!;
+      expect(card.card!.options).toEqual(["Codex", "Codex (home)", NOT_NOW]);
+      await answer(card, "Codex (home)");
+      expect(thread().modelSelection).toEqual({ instanceId: "home", model: "home-default" });
+    });
 
-      it("with no backup chosen moves nothing, and a second refusal adds no notice", async () => {
-        backups = [];
-        await signedOut({ messageId: said("hi") });
-        await signedOut({ messageId: said("hi again") });
-        expect(notices()).toEqual([{ name: `notice: ${NOTICE}`, ok: true, setup: true }]);
-        expect(thread().modelSelection).toEqual(defaultSelection());
-        expect(resend).not.toHaveBeenCalled();
-      });
+    it("raises nothing when it is switched off", async () => {
+      enabled = false;
+      expect(await failed()).toBeNull();
+      expect(cards()).toHaveLength(0);
+    });
 
-      it("takes an account out of credit that stopped the same way for no sign-out", async () => {
-        await signedOut({ messageId: said("hi") }, "Your Grok account is out of credits. Add credits with Grok, then run it again.");
-        expect(scopes).not.toContain("signed-out");
-        expect(notices().filter((tool) => tool.setup)).toEqual([]);
-      });
+    it("says on the card to send the message again when there is none to resend", async () => {
+      const card = (await failed(QUOTA, { messageId: undefined }))!;
+      expect(card.card!.subtitle).toBe("Switch this conversation to another AI? Send your message again afterwards.");
+      expect(card.card!.quotaSwitch!.messageId).toBeUndefined();
+    });
+
+    it("raises no card for a turn that answered a bot's line, which is never the person's to send again", async () => {
+      const peerLine = said("Do the quarterly numbers", { peerAsk: { botId: "chief", name: "Chief" } });
+      expect(await failed(QUOTA, { messageId: peerLine })).toBeNull();
+      expect(cards()).toHaveLength(0);
     });
   });
 
-  describe("answering a card an earlier version left open", () => {
+  describe("the person's answer", () => {
     it("switches this conversation through the model-switch gate and resends the exact message that failed", async () => {
       const quoted = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "It will rain on Friday." }).id;
       const messageId = said("how's the weather", { dataContext: { cardId: "sales" }, replyToId: quoted });
@@ -633,7 +569,7 @@ describe("quota switch", () => {
       const card = (await failed(QUOTA, { messageId: said("hi") }))!;
       const codexThread = store.createTask(bot.id, undefined, false)!.threadId;
       store.switchTaskModel(bot.id, codexThread, { instanceId: "codex", model: "codex-default" }, false, false);
-      await ranOut(begin(codexThread), QUOTA, true, store.projectBotForTask(bot.id, codexThread)!);
+      await fails(begin(codexThread), QUOTA, true, store.projectBotForTask(bot.id, codexThread)!);
 
       await answer(card, "Codex");
 

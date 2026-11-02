@@ -74,11 +74,6 @@ export type RoutineAccess = "read-and-draft";
 /** Where a routine's results go. `brief`: they become rows of the main agent's brief, not chat lines of their own. */
 export type RoutineDelivery = "brief";
 
-/** Why OpenMausBot paused a routine by itself, after its owner left: no AI of theirs is signed in here any more, they
- * removed every connected app and server, or the plan was cancelled. It turns back on once that changes. */
-export type RoutineHoldCause = "plan_cancelled" | "no_engine" | "no_connections";
-export const ROUTINE_HOLD_CAUSES: readonly RoutineHoldCause[] = ["plan_cancelled", "no_engine", "no_connections"];
-
 /** What a finished run left in the chat it reports to: nothing, because it
  * found nothing to tell; a report waiting for a turn there to end; or the bot
  * message it wrote. */
@@ -98,9 +93,8 @@ export type RoutineRunStatus =
 
 /** Why a run started a second time by itself: its engine stalled, OpenMausBot
  * restarted while it ran, the provider rate-limited it or failed for a moment,
- * it waited for its engine's usage limit to reset, or it failed some other way.
- * A run gets one. */
-export type RoutineRetryCause = "stalled" | "restarted" | "rate_limited" | "provider" | "usage_limit" | "failed";
+ * or it waited for its engine's usage limit to reset. A run gets one. */
+export type RoutineRetryCause = "stalled" | "restarted" | "rate_limited" | "provider" | "usage_limit";
 
 /** The statuses both failure indicators count: a run that went wrong and has
  * not been acknowledged. */
@@ -150,8 +144,6 @@ export interface Routine {
   weekRuns?: { ok: number; total: number };
   /** A plain sentence when the routine names a path that cannot exist on the computer that runs it. */
   warning?: string;
-  /** Set while OpenMausBot keeps it paused because its owner left; turning it on or off clears it. */
-  heldFor?: RoutineHoldCause;
   attachments?: RoutineContextAttachment[];
   sourceThreadId?: string;
   resultsThreadId?: string;
@@ -177,8 +169,8 @@ export interface RoutineRun {
   status: RoutineRunStatus;
   manual: boolean;
   triggerSource?: RoutineRunTrigger;
-  /** "app": a connected-app event started it; "wait": a wait's follow-up did. triggerSource is then "webhook" (an outside event). */
-  eventSource?: "app" | "wait";
+  /** "app": a connected-app event started it; triggerSource is then "webhook" (an outside event). */
+  eventSource?: "app";
   webhookId?: string;
   deliveryId?: string;
   /** Room task created for a team-goal run. */

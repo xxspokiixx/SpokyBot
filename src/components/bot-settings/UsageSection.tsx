@@ -1,4 +1,3 @@
-import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore, type Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -25,16 +24,16 @@ export function UsageSection({ bot, bare = false }: { bot: Bot; bare?: boolean }
           onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "usage" })}
           className="text-[12px] text-ink-secondary hover:text-ink"
         >
-          {t("usage.allBots")} <ChevronRight size={14} aria-hidden="true" className="inline align-[-2px] rtl:-scale-x-100" />
+          {t("usage.allBots")} →
         </button>
       </div>}
       <div className={cn("grid grid-cols-3 gap-3 text-[13px]", !bare && "mt-3")}>
         <div>
-          <div className="text-[12px] uppercase tracking-wide text-ink-secondary">{t("usage.colTurns")}</div>
+          <div className="text-[11.5px] uppercase tracking-wide text-ink-secondary">{t("usage.colTurns")}</div>
           <div className="mt-0.5 tabular-nums text-ink">{usage.turns}</div>
         </div>
         <div>
-          <div className="text-[12px] uppercase tracking-wide text-ink-secondary">{tokensColumnLabel(usage)}</div>
+          <div className="text-[11.5px] uppercase tracking-wide text-ink-secondary">{tokensColumnLabel(usage)}</div>
           <div
             className="mt-0.5 tabular-nums text-ink"
             title={usageDetail(usage)}
@@ -43,7 +42,7 @@ export function UsageSection({ bot, bare = false }: { bot: Bot; bare?: boolean }
           </div>
         </div>
         <div>
-          <div className="text-[12px] uppercase tracking-wide text-ink-secondary">{t("usage.colCost")}</div>
+          <div className="text-[11.5px] uppercase tracking-wide text-ink-secondary">{t("usage.colCost")}</div>
           <div className="mt-0.5 tabular-nums text-ink">
             {hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd) : "—"}
           </div>

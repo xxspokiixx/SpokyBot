@@ -1,7 +1,11 @@
 import { createECDH, createHash, type webcrypto } from "node:crypto";
 
-import { desktopCredentialSlot, isCredentialTargetId } from "../shared/credential-request.ts";
-import type { CipherSuite } from "@hpke/core";
+import {
+  Aes256Gcm,
+  CipherSuite,
+  DhkemP256HkdfSha256,
+  HkdfSha256,
+} from "@hpke/core";
 
 export const PHONE_SECRET_PROTOCOL_VERSION = 1 as const;
 export const PHONE_SECRET_INFO = "OpenMausBot phone credential v1";
@@ -55,12 +59,11 @@ export class PhoneSecretError extends Error {
   }
 }
 
-let hpkeSuite: Promise<CipherSuite> | undefined;
-const suite = () => hpkeSuite ??= import("@hpke/core").then(({ Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256 }) => new CipherSuite({
+const suite = new CipherSuite({
   kem: new DhkemP256HkdfSha256(),
   kdf: new HkdfSha256(),
   aead: new Aes256Gcm(),
-}));
+});
 const INFO = new TextEncoder().encode(PHONE_SECRET_INFO);
 
 const decodeBase64URL = (value: unknown, expectedBytes?: number): Uint8Array | null => {
@@ -137,10 +140,6 @@ export function assertPhoneSecretRequestMatches(
   // Phone entry hands a key to the desktop's settings; the 1Password token goes to Logins, which a phone cannot reach.
   if (expected.target === "onePasswordToken") {
     throw new PhoneSecretError("Paste the 1Password token in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
-  }
-  // An AI provider key lives in the server's settings, which only the computer's own app writes.
-  if (isCredentialTargetId(expected.target) && !desktopCredentialSlot(expected.target)) {
-    throw new PhoneSecretError("Paste this key in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
   }
   if (
     context.deviceId !== authenticatedDeviceId ||
@@ -284,7 +283,7 @@ async function importIdentity(message: Record<string, unknown>): Promise<PhoneSe
   } catch {
     throw new PhoneSecretError("The desktop credential key is invalid", 503);
   }
-  const imported = await (await suite()).kem.importKey("jwk", {
+  const imported = await suite.kem.importKey("jwk", {
     kty: "EC",
     crv: "P-256",
     x: privateKey.x,
@@ -352,27 +351,18 @@ export class PhoneSecretBridge {
   }
 
   async provide(context: PhoneSecretContext): Promise<void> {
-    await this.withinLimit(async () => this.save(context, await this.openWithinLimit(context)));
-  }
-
-  /** The value a paired phone sealed for this computer, for a secret this server keeps itself and never sends on. */
-  async open(context: PhoneSecretContext): Promise<string> {
-    return this.withinLimit(() => this.openWithinLimit(context));
-  }
-
-  private async withinLimit<T>(work: () => Promise<T>): Promise<T> {
     if (this.active >= this.maximumPending) {
       throw new PhoneSecretError("Another secure credential is still being saved. Try again.", 429);
     }
     this.active += 1;
     try {
-      return await work();
+      await this.provideWithinLimit(context);
     } finally {
       this.active -= 1;
     }
   }
 
-  private async openWithinLimit(context: PhoneSecretContext): Promise<string> {
+  private async provideWithinLimit(context: PhoneSecretContext): Promise<void> {
     if (!this.identity) {
       throw new PhoneSecretError(
         "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
@@ -402,7 +392,7 @@ export class PhoneSecretBridge {
 
     let opened: ArrayBuffer;
     try {
-      opened = await (await suite()).open(
+      opened = await suite.open(
         { recipientKey: identity.privateKey, enc: encapsulatedKey, info: INFO },
         ciphertext,
         phoneSecretAAD(context),
@@ -423,10 +413,7 @@ export class PhoneSecretBridge {
     if (!value || Buffer.byteLength(value) > PHONE_SECRET_MAX_BYTES) {
       throw new PhoneSecretError("The credential must be between 1 and 4096 bytes");
     }
-    return value;
-  }
 
-  private async save(context: PhoneSecretContext, value: string): Promise<void> {
     const requestId = phoneSecretOperationId(context);
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {

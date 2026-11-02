@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   createReadStream,
-  linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -9,15 +8,17 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { link, open, unlink } from "node:fs/promises";
+import { open, unlink } from "node:fs/promises";
 import { join, extname } from "node:path";
-import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+import { publishCandidate } from "../electron/atomic-publish.mjs";
 import { DATA_DIR } from "./config.ts";
 
-export { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Below Cloudflare's transport ceiling; a local inbox, not unbounded storage. */
+export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 export const DEFAULT_ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
 /** A person's own Cloud is the only home of everything their computers held, on a volume a move grows to fit. */
@@ -110,6 +111,16 @@ export function extensionForMime(mime: string | undefined): string | null {
 
 export function ensureAttachmentsDir(): void {
   mkdirSync(ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
+}
+
+function unlinkPartialSync(path: string): void {
+  try { unlinkSync(path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+}
+
+async function unlinkPartial(path: string): Promise<void> {
+  try { await unlink(path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 }
 
 export function validateAttachmentUploadId(value: string | undefined): string | undefined {
@@ -214,12 +225,8 @@ class AttachmentReservation {
   }
 
   private reserveAtLeast(required: number, preferred: number): void {
-    let available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
-    if (available < required) {
-      // People free space by deleting attachments outside the app, which the cache never sees.
-      invalidateAttachmentAccounting();
-      available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
-    }
+    const used = committedBytes();
+    const available = ATTACHMENTS_MAX_BYTES - used - reservedAttachmentBytes;
     if (available < required) {
       throw statusError(
         507,
@@ -432,22 +439,17 @@ export async function saveFile(
       if (bytes === 0) throw statusError(400, "empty file");
       await file.close();
       closed = true;
-      try {
-        const accountingVersion = attachmentAccountingVersion;
-        await link(partialPath, path);
+      const accountingVersion = attachmentAccountingVersion;
+      if (publishCandidate(partialPath, path)) {
         addCommittedBytes(bytes, accountingVersion);
-        await unlink(partialPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        if (statSync(path).size !== bytes || await digestFile(path) !== await digestFile(partialPath)) {
-          throw statusError(409, "uploadId was already used for different file bytes");
-        }
-        await unlink(partialPath);
+      } else if (statSync(path).size !== bytes || await digestFile(path) !== await digestFile(partialPath)) {
+        throw statusError(409, "uploadId was already used for different file bytes");
       }
+      await unlinkPartial(partialPath);
       return { path, name, mime: normalized, bytes };
     } catch (error) {
       if (file && !closed) await file.close().catch(() => undefined);
-      await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
+      await unlinkPartial(partialPath).catch(() => { partialCleanupFailed = true; });
       throw error;
     } finally {
       activePartials.delete(partialPath);
@@ -484,16 +486,12 @@ export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Ui
     await file.close();
     file = undefined;
     const accountingVersion = attachmentAccountingVersion;
-    try { await link(partialPath, path); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return { stored: false };
-      throw error;
-    }
+    if (!publishCandidate(partialPath, path)) return { stored: false };
     addCommittedBytes(bytes, accountingVersion);
     return { stored: true };
   } finally {
     if (file) await file.close().catch(() => undefined);
-    await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
+    await unlinkPartial(partialPath).catch(() => { partialCleanupFailed = true; });
     activePartials.delete(partialPath);
     if (partialCleanupFailed) invalidateAttachmentAccounting();
     reservation.release();
@@ -529,21 +527,19 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
   let partialCleanupFailed = false;
   try {
     writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
-    try {
-      linkSync(partialPath, path);
+    if (publishCandidate(partialPath, path)) {
       addCommittedBytes(bytes.byteLength);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    } else {
       const saved = readFileSync(path);
       if (!saved.equals(bytes)) {
         throw statusError(409, "uploadId was already used for different image bytes");
       }
     }
-    unlinkSync(partialPath);
+    unlinkPartialSync(partialPath);
     return { path, mime: mime.split(";")[0]!.trim().toLowerCase(), bytes: bytes.byteLength };
   } catch (error) {
     try {
-      unlinkSync(partialPath);
+      unlinkPartialSync(partialPath);
     } catch {
       partialCleanupFailed = true;
     }
@@ -583,21 +579,19 @@ export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
   let partialCleanupFailed = false;
   try {
     writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
-    try {
-      linkSync(partialPath, path);
+    if (publishCandidate(partialPath, path)) {
       addCommittedBytes(bytes.byteLength);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    } else {
       const saved = readFileSync(path);
       if (!saved.equals(bytes)) {
         throw Object.assign(new Error("audio destination already exists with different bytes"), { status: 409 });
       }
     }
-    unlinkSync(partialPath);
+    unlinkPartialSync(partialPath);
     return { path, mime: format.mime, bytes: bytes.byteLength };
   } catch (error) {
     try {
-      unlinkSync(partialPath);
+      unlinkPartialSync(partialPath);
     } catch {
       partialCleanupFailed = true;
     }

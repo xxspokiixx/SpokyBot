@@ -93,26 +93,6 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text?.includes("QA sent") || message.text?.includes("Release QA complete"))).toBe(false);
 }), 60_000);
 
-it("lets a teammate answer a one-way ask in the thread that asked, with a notice and nothing more", () => fixture(async f => {
-  const asking = f.chief.activeTaskId;
-  f.plan[f.chief.id] = { steps: [{ arguments: {
-    bot_ids: [f.lead.id], message: `Ask the person which day suits, then tell me in thread ${asking}.`, thread: "new", reply: "none",
-  } }], reply: "Asked Engineering", byPrompt: [{ promptIncludes: "Tuesday suits", plan: { reply: "Got Tuesday from Engineering" } }] };
-  f.plan[f.lead.id] = { steps: [
-    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits, please plan for it", thread: asking }, expectError: true },
-    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits", thread: asking, reply: "none" } },
-  ], reply: "Told Clive" };
-  await f.start();
-  const sends = () => f.evidence().find((turn: any) => turn.botId === f.lead.id)?.evidence.filter((entry: any) => entry.step?.arguments?.thread === asking);
-  await expect.poll(() => sends()?.length, { timeout: 15_000 }).toBe(2);
-  const [work, notice] = sends().map((entry: any) => entry.response.result);
-  expect(JSON.stringify(work)).toContain("handed you work: answer it there with reply");
-  expect(notice.isError).toBeFalsy();
-  expect(JSON.parse(notice.content[0].text).receipts[0]).toMatchObject({ threadId: asking });
-  await expect.poll(async () => (await f.messages(asking)).some((message: any) => message.text === "Got Tuesday from Engineering"), { timeout: 15_000 }).toBe(true);
-  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks.filter((task: any) => task.title?.includes("Tuesday"))).toEqual([]);
-}), 60_000);
-
 it("marks a failed one-way send so restart recovery cannot duplicate its notice", () => fixture(async f => {
   // The failed send reports an incident to Clive, the lead's Chief; answering it must not send the task again.
   f.plan[f.chief.id] = { steps: [{ arguments: {
@@ -133,27 +113,19 @@ it("marks a failed one-way send so restart recovery cannot duplicate its notice"
   expect((await failureNotice())?.tool?.handoffId).toEqual(expect.any(String));
 }), 45_000);
 
-it("lets a bot ask a bot in another department directly, with nothing set up first", () => fixture(async f => {
-  // Engineering lead and Clive, the Chief in Leadership: different departments, no peers list, no grant either way.
-  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
+it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
   f.plan[f.lead.id] = {
-    steps: [{ arguments: { bot_ids: ["Clive"], message: "Can we upgrade to the latest PHP version?", consult: true } }],
-    reply: "Asked Clive", resumeReply: "Clive says yes: the latest PHP is fine for us.",
+    steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], message: "Contact the Chief without a shared room" } }],
+    reply: "The direct request was refused",
   };
-  f.plan[f.chief.id] = { reply: "Yes, the latest PHP version is fine for us." };
   f.save();
-  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Please ask Clive if we can upgrade to the latest PHP version");
+  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Check the direct peer boundary");
   expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
-  const asked = f.evidence().find((turn: any) => turn.botId === f.lead.id);
-  expect(asked.system).toContain("You can reach every other bot on this team, in every department");
-  expect(asked.system).toContain("Clive — General assistant (Leadership) [Chief of Staff]");
-  const response = asked.evidence.find((entry: any) => entry.step).response;
-  expect(response.result.isError).toBeFalsy();
-  const child = f.nodes().find((node: any) => node.parentId);
-  expect(child).toMatchObject({ botId: f.chief.id, mode: "consult", status: "completed" });
-  const said = await f.messages(f.lead.activeTaskId);
-  expect(said.some((message: any) => message.tool?.name === "Sent to Clive")).toBe(true);
-  expect(said.some((message: any) => message.text === "Clive says yes: the latest PHP is fine for us.")).toBe(true);
+  expect(f.nodes().filter((node: any) => node.parentId)).toEqual([]);
+  const response = f.evidence().find((turn: any) => turn.botId === f.lead.id).evidence.find((entry: any) => entry.step).response;
+  expect(response.result.isError).toBe(true);
+  expect(response.result.content[0].text).toContain("sender's section boundary");
+  expect((await f.api("/api/bots")).groups).toEqual([]);
 }), 45_000);
 
 it.each([false, true])("starts independent work immediately and frees the Chief while waiting (source fails: %s)", fail => fixture(async f => {
@@ -384,19 +356,6 @@ it("opens a fresh thread on a teammate with coordinate_bots thread \"new\" and g
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied" && message.tool.output === "NEW_THREAD_RESULT verified")).toBe(true);
 }), 45_000);
 
-it("names a fresh teammate thread with coordinate_bots title", () => fixture(async f => {
-  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "TITLED_BRIEF verify the CSV export yourself", thread: "new", title: "CSV export: verify" } }],
-    reply: "Opened a titled thread", resumeReply: "The titled thread reported back" };
-  f.plan[f.lead.id] = { reply: "TITLED_RESULT verified" };
-  await f.start();
-  expect((await f.wait()).status).toBe("settled");
-  const answered = f.evidence()[0].evidence.find((entry: any) => entry.step?.arguments?.title).response.result;
-  expect(answered.isError).toBeFalsy();
-  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
-  const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
-  expect(lead.tasks.find((task: any) => task.threadId === child.threadId)).toMatchObject({ title: "CSV export: verify", openedBy: { botId: f.chief.id, name: "Clive" } });
-}), 45_000);
-
 it("lets the opener find and close the completed task", () => fixture(async f => {
   await f.start();
   expect((await f.wait()).status).toBe("settled");
@@ -570,14 +529,15 @@ it("continues one recipient thread for every follow-up from the same conversatio
 it.each<[string, NodeJS.ProcessEnv]>([
   ["a headless server", {}],
   ["the desktop app", { OMB_TEST_DESKTOP_OWNER_TOKEN: randomBytes(32).toString("base64url") }],
-])("on %s, hands a follow-up sent while the teammate still works to its running turn, and one result comes back", (_where, env) => fixture(async f => {
+])("on %s, holds a follow-up sent while the teammate still works and runs it next in the same thread", (_where, env) => fixture(async f => {
   expect((await f.api("/.well-known/openmausbot/environment", undefined, "GET")).capabilities.selfUpdate)
     .toBe(env.OMB_TEST_DESKTOP_OWNER_TOKEN ? "desktop-managed" : "operator");
   const gate = join(f.session.info.dataDir, "first-request.gate");
-  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented, with the header row" }] };
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented" }, { reply: "Header row added" }] };
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
     { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Also add a header row to that export" } }], reply: "Sent the change" },
+    { reply: "Reviewed" },
     { reply: "Reviewed" },
   ] };
   const chiefTurns = () => f.evidence().filter((turn: any) => turn.botId === f.chief.id);
@@ -588,16 +548,18 @@ it.each<[string, NodeJS.ProcessEnv]>([
   await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Change of plan: the export also needs a header row.", threadId: f.chief.activeTaskId });
   await expect.poll(() => chiefTurns().length, { timeout: 20_000 }).toBe(2);
   expect(told(chiefTurns()[1])).toContain("send the change to the same teammate with coordinate_bots");
-  const [running, ...others] = f.nodes().filter((node: any) => node.botId === f.lead.id);
-  expect(others, "the change started no second job").toEqual([]);
-  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "injected", threadId: running.threadId, requestId: running.id });
-  expect((await f.messages(running.threadId)).filter((message: any) => message.peerAsk?.name === "Clive" && message.text === "Also add a header row to that export"))
-    .toHaveLength(1);
+  const [running, followUp] = f.nodes().filter((node: any) => node.botId === f.lead.id);
+  expect(followUp.threadId).toBe(running.threadId);
+  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "queued", threadId: running.threadId });
+  // It waits for the request already running there; never beside it.
+  await new Promise(resolve => setTimeout(resolve, 1_500));
+  expect(f.nodes().find((node: any) => node.id === followUp.id).status).toBe("queued");
+  expect(f.nodes().find((node: any) => node.id === running.id).status).toBe("running");
   writeFileSync(gate, "go");
   expect((await f.wait()).status).toBe("settled");
   await expect.poll(() => f.nodes().filter((node: any) => node.parentId).every((node: any) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
   const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
-  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId]]);
+  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId], [1, running.threadId]]);
   expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
   await stream.until(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
     && frame.bot.tasks?.find((task: any) => task.threadId === running.threadId)?.closedBy);
@@ -832,16 +794,13 @@ it("runs a teammate's hand-off to the Chief in the Chief's work thread for that 
 }), 60_000);
 
 it("stops a waiting source without reaching into the teammate already working", () => fixture(async f => {
-  const childGate = join(f.session.info.dataDir, "child-ready");
-  f.plan[f.lead.id] = { gateFile: childGate, reply: "Finished after the source was stopped" };
+  f.plan[f.lead.id] = { delayMs: 4000, reply: "Finished after the source was stopped" };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
-  await assigningTurnEnded(f);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.chief.activeTaskId });
 
   await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status).toBe("cancelled");
   expect(f.nodes().find((node: any) => node.parentId).status).toBe("running");
-  writeFileSync(childGate, "finish after the source was stopped");
   expect((await f.wait()).status).toBe("settled");
   const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name?.startsWith("Stopped here"));
   expect(chip.tool.name).toContain("Engineering lead");
@@ -880,15 +839,15 @@ it("deleting the waiting source cancels its tree and never recreates the deleted
   }
 }), 45_000);
 
-it("withholds direct results when the sender's peers list cuts the teammate off mid-turn", () => fixture(async f => {
+it("withholds direct results when the owner's cross-team grant is revoked", () => fixture(async f => {
   // Revoke while the teammate's engine is inside its turn: a "running" record is written at dispatch, before setup.
   const ready = join(f.session.info.dataDir, "private-work.ready");
   const gate = join(f.session.info.dataDir, "private-work.gate");
   f.plan[f.lead.id] = { readyFile: ready, gateFile: gate, reply: "PRIVATE_ENGINEERING_RESULT" };
   await f.start();
   await expect.poll(() => existsSync(ready), { timeout: 15_000 }).toBe(true);
-  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
-  writeFileSync(gate, "finish the private work after the teammate was cut off");
+  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
+  writeFileSync(gate, "finish the private work after the grant went");
   expect((await f.wait()).status).toBe("settled");
   const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
   expect(JSON.stringify(resumed), told(resumed).slice(-1_500)).not.toContain("PRIVATE_ENGINEERING_RESULT");
@@ -897,7 +856,7 @@ it("withholds direct results when the sender's peers list cuts the teammate off 
   expect(resumed.prompt.message.content).toContain("Result withheld");
 }), 45_000);
 
-it("retains returned direct reports for follow-up turns but rechecks reach before replay", () => fixture(async f => {
+it("retains returned direct reports for follow-up turns but rechecks access before replay", () => fixture(async f => {
   f.plan[f.lead.id] = { reply: "PRIVATE_ENGINEERING_FACT_8347" };
   f.plan[f.chief.id].resumeReply = "Finished";
   await f.start(); expect((await f.wait()).status).toBe("settled");
@@ -912,7 +871,7 @@ it("retains returned direct reports for follow-up turns but rechecks reach befor
   await f.api(`/api/bots/${f.chief.id}/messages/${followup.id}/edit`, { threadId: f.chief.activeTaskId, text: "Check the earlier engineering report" });
   expect((await f.wait()).status).toBe("settled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).prompt.message.content).toContain("PRIVATE_ENGINEERING_FACT_8347");
-  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
+  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
   f.plan[f.chief.id] = { reply: "Access removed", expectContextIncludes: ["Teammate result withheld"] };
   f.save();
   const edited = (await f.messages(f.chief.activeTaskId)).findLast((message: any) => message.role === "user");
@@ -925,28 +884,27 @@ it("retains returned direct reports for follow-up turns but rechecks reach befor
 
 it("runs the owed direct follow-up while the same bot works in another thread", () => fixture(async f => {
   const gate = join(f.session.info.dataDir, "hold-gate");
-  // The hold's turn starts while the assigning turn is still open, so each turn picks its plan by its own text.
-  f.plan[f.chief.id] = { script: [
-    { key: "assign", match: ["Assign the check, then open an independent job"], steps: [
+  f.plan[f.chief.id] = { turns: [
+    { steps: [
       { tool: "coordinate_bots", arguments: { bot_ids: [f.specialist.id], message: "Independently verify the CSV export" } },
       { tool: "start_thread", arguments: { title: "Independent hold", message: "Run the long independent check." } },
     ], reply: "Assigned the check and opened the hold" },
-    { key: "hold", match: ["Run the long independent check."], gateFile: gate, reply: "The hold finished" },
-    { key: "resume", match: ["Your downstream room requests have settled."], reply: "The follow-up ran while the hold worked" },
+    { gateFile: gate, reply: "The follow-up ran while the hold worked" },
+    // The hold's completion races the resume's plan read: the resume lands on slot 1 or 2, and both settle the same reply.
+    { reply: "The follow-up ran while the hold worked" },
   ] };
   f.save();
   await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Assign the check, then open an independent job that runs long.");
   const chiefTasks = async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks;
-  const holdBusy = async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy;
   // The self-opened job stays mid-turn at its gate, so the whole-bot busy flag stays up for an unrelated thread.
-  await expect.poll(holdBusy, { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy, { timeout: 20_000 }).toBe(true);
   const root = () => f.nodes().find((node: any) => !node.parentId);
-  await expect.poll(() => root()?.status, { timeout: 15_000 }).toBe("completed");
-  expect(await holdBusy()).toBe(true);
+  await expect.poll(() => root()?.status, { timeout: 10_000 }).toBe("running");
+  writeFileSync(gate, "");
+  await expect.poll(() => root()?.status, { timeout: 10_000 }).toBe("completed");
   const tasks = await chiefTasks();
   expect(tasks.find((task: any) => task.threadId === f.chief.activeTaskId).busy).toBe(false);
-  writeFileSync(gate, "");
-  await expect.poll(holdBusy, { timeout: 10_000 }).toBe(false);
+  await expect.poll(async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy, { timeout: 10_000 }).toBe(false);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The follow-up ran while the hold worked")).toBe(true);
 }), 45_000);
 
@@ -976,8 +934,6 @@ it("gives a teammate each request once, never also as a bare assistant line", ()
 async function onLoopbackEngine(f: any, answer: (res: ServerResponse) => void): Promise<() => Promise<void>> {
   const llm = createServer(async (req, res) => {
     for await (const _ of req) {}
-    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not, and that is no model call.
-    if (req.url?.endsWith("/api/version")) { res.statusCode = 404; res.end(); return; }
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     answer(res);
   });
@@ -992,7 +948,7 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
   let calls = 0;
   const close = await onLoopbackEngine(f, res => {
     // Never a final answer: one more tool call, every round.
-    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: JSON.stringify({ attempt: calls }) } }] };
+    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: "{}" } }] };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: call, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
   });

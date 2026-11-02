@@ -35,12 +35,6 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         winKeys: ["Ctrl", "1–9"],
       },
       {
-        id: "toggle-sidebar",
-        description: "Collapse or expand the sidebar",
-        macKeys: ["⌘", "\\"],
-        winKeys: ["Ctrl", "\\"],
-      },
-      {
         id: "switch-bot",
         description: "Switch to previous / next bot",
         macKeys: ["⌘", "⇧", "[ / ]"],
@@ -68,12 +62,6 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         description: "Insert new line without sending",
         macKeys: ["⇧", "Return"],
         winKeys: ["Shift", "Enter"],
-      },
-      {
-        id: "send-follow-up",
-        description: "While a bot works: queue instead of steering, or the other way round",
-        macKeys: ["⌘", "Return"],
-        winKeys: ["Ctrl", "Enter"],
       },
       {
         id: "edit-last-message",
@@ -134,27 +122,21 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 type Keys = Pick<ShortcutItem, "macKeys" | "winKeys">;
 const ENTER: Keys = { macKeys: ["Return"], winKeys: ["Enter"] };
 const SHIFT_ENTER: Keys = { macKeys: ["⇧", "Return"], winKeys: ["Shift", "Enter"] };
-const MOD_ENTER: Keys = { macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] };
-const SEND_ROWS: Record<Exclude<SendKey, "enter">, [Keys, Keys, Keys]> = {
-  "shift-enter": [SHIFT_ENTER, ENTER, MOD_ENTER],
-  "mod-enter": [MOD_ENTER, ENTER, { macKeys: ["⌘", "⇧", "Return"], winKeys: ["Ctrl", "Shift", "Enter"] }],
+const SEND_ROWS: Record<Exclude<SendKey, "enter">, [Keys, Keys]> = {
+  "shift-enter": [SHIFT_ENTER, ENTER],
+  "mod-enter": [{ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] }, ENTER],
 };
 
 export function shortcutGroupsFor(sendKey: SendKey): readonly ShortcutGroup[] {
   if (sendKey === "enter") return SHORTCUT_GROUPS;
-  const [send, newLine, followUp] = SEND_ROWS[sendKey];
+  const [send, newLine] = SEND_ROWS[sendKey];
   return SHORTCUT_GROUPS.map((group) => ({
     ...group,
     items: group.items.map((item) =>
       item.id === "send-message" ? { ...item, ...send }
         : item.id === "new-line" ? { ...item, ...newLine }
-          : item.id === "send-follow-up" ? { ...item, ...followUp }
-            : item),
+          : item),
   }));
-}
-
-export function isSidebarToggle(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented">): boolean {
-  return !event.defaultPrevented && event.key === "\\" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey;
 }
 
 export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {

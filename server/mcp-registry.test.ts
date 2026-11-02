@@ -216,6 +216,28 @@ describe("parseMcpServersImport", () => {
     expect(parseMcpServersImport("not json")).toMatchObject({ ok: false, error: expect.stringMatching(/JSON/i) });
     expect(parseMcpServersImport("[]")).toMatchObject({ ok: false });
   });
+
+  it("imports Cursor plugin OAuth client settings into the MCP OAuth shape", () => {
+    expect(parseMcpServersImport(JSON.stringify({
+      mcpServers: {
+        slack: {
+          url: "https://mcp.slack.com/mcp",
+          auth: { CLIENT_ID: "slack-app-id", scopes: ["search:read.public", "chat:write"] },
+        },
+      },
+    }))).toEqual({
+      ok: true,
+      servers: {
+        slack: {
+          type: "http",
+          url: "https://mcp.slack.com/mcp",
+          headers: {},
+          oauth: { clientId: "slack-app-id", scopes: ["search:read.public", "chat:write"] },
+          enabled: false,
+        },
+      },
+    });
+  });
 });
 
 describe("remote (url) MCP servers", () => {

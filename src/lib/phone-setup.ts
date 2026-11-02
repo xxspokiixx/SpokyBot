@@ -11,6 +11,7 @@ export interface PhoneSetupFlowState {
   baselineDeviceIds: string[];
   pairingAttempted: boolean;
   pairedDeviceName: string | null;
+  skipped: boolean;
 }
 
 export type PhoneSetupEvent =
@@ -20,6 +21,7 @@ export type PhoneSetupEvent =
   | { type: "use-tailscale" }
   | { type: "pairing-opened"; deviceIds: string[] }
   | { type: "paired"; deviceName: string }
+  | { type: "skip" }
   | { type: "reset" };
 
 export const initialPhoneSetupFlowState: PhoneSetupFlowState = {
@@ -29,6 +31,7 @@ export const initialPhoneSetupFlowState: PhoneSetupFlowState = {
   baselineDeviceIds: [],
   pairingAttempted: false,
   pairedDeviceName: null,
+  skipped: false,
 };
 
 /** User intent lives here so a refresh cannot turn a secure setup into local-only pairing. */
@@ -46,6 +49,7 @@ export function phoneSetupReducer(
         baselineDeviceIds: [...event.deviceIds],
         pairingAttempted: false,
         pairedDeviceName: null,
+        skipped: false,
       };
     case "use-local":
       return {
@@ -71,6 +75,8 @@ export function phoneSetupReducer(
       };
     case "paired":
       return { ...state, active: true, pairedDeviceName: event.deviceName };
+    case "skip":
+      return { ...initialPhoneSetupFlowState, skipped: true };
     case "reset":
       return initialPhoneSetupFlowState;
   }

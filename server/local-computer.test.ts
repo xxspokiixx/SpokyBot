@@ -10,18 +10,18 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DRIVER_FILE_IDENTITY_KEYS,
   REQUIRED_LINUX_TOOLS,
-  cuaUnavailableReason,
-  decodeCuaConnection,
   decodeLinuxDescriptor,
+  descriptorUid,
   gatedLocalComputer,
   readCuaConnection,
+  readCuaUnavailableReason,
   validateLinuxDescriptorRuntime,
 } from "./local-computer.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -88,8 +88,23 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
   };
 }
 
-describe("local computer descriptor contract", () => {
-  it("wraps only the transport while preserving descriptor identity and original driver environment", () => {
+describe("descriptor ownership identity", () => {
+  it("falls back to the home directory's uid when process.getuid is missing (embedded android build)", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "getuid");
+    try {
+      Object.defineProperty(process, "getuid", { value: undefined, configurable: true });
+      expect(descriptorUid()).toBe(statSync(homedir()).uid);
+    } finally {
+      if (original) Object.defineProperty(process, "getuid", original);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("uses process.getuid when the runtime provides it", () => {
+    expect(descriptorUid()).toBe(process.getuid?.());
+  });
+});
+
+describe("local computer descriptor contract", () => {  it("wraps only the transport while preserving descriptor identity and original driver environment", () => {
     const connection = {
       command: "/trusted/cua-driver", args: ["mcp", "--socket", "/trusted/driver.sock"],
       env: { CUA_DRIVER_EMBEDDED: "1", DISPLAY: ":4" },
@@ -97,20 +112,26 @@ describe("local computer descriptor contract", () => {
     };
     const gated = gatedLocalComputer(connection, { url: "http://127.0.0.1:1234/control", token: "fixture-token" });
     expect(gated).toMatchObject({ command: process.execPath, args: ["--experimental-strip-types", SPAWNED_PROXIES.localComputer], platform: "linux", scope: "local-computer", generation: connection.generation });
-    expect(gated.env).toEqual({ ...connection.env, ELECTRON_RUN_AS_NODE: "1", OMB_CUA_COMMAND: connection.command, OMB_CUA_ARGS: JSON.stringify(connection.args), OMB_CUA_PLATFORM: "linux", OMB_CONTROL_URL: "http://127.0.0.1:1234/control", OMB_CONTROL_TOKEN: "fixture-token", OMB_COMPUTER_JOURNAL: "0" });
+    expect(gated.env).toEqual({ ...connection.env, ELECTRON_RUN_AS_NODE: "1", OMB_CUA_COMMAND: connection.command, OMB_CUA_ARGS: JSON.stringify(connection.args), OMB_CONTROL_URL: "http://127.0.0.1:1234/control", OMB_CONTROL_TOKEN: "fixture-token" });
     expect(gated.args.join(" ")).not.toContain("fixture-token");
     expect(connection.env).not.toHaveProperty("OMB_CONTROL_TOKEN");
-  });
-  it("records computer calls for saved steps only when the mount asks", () => {
-    const connection = { command: "/trusted/cua-driver", args: ["mcp"], env: { OMB_COMPUTER_JOURNAL: "1" }, platform: "darwin" as const, scope: "local-computer" as const };
-    const control = { url: "http://127.0.0.1:1234/control", token: "fixture-token" };
-    expect(gatedLocalComputer({ ...connection, env: {} }, control, true).env.OMB_COMPUTER_JOURNAL).toBe("1");
-    expect(gatedLocalComputer({ ...connection, env: {} }, control).env.OMB_COMPUTER_JOURNAL).toBe("0");
-    expect(gatedLocalComputer(connection, control, false).env.OMB_COMPUTER_JOURNAL).toBe("0");
   });
   it("owns the helper's Node mode even when the daemon environment disagrees", () => {
     const gated = gatedLocalComputer({ command: "/trusted/cua-driver", args: ["mcp"], env: { ELECTRON_RUN_AS_NODE: "0" }, platform: "darwin", scope: "local-computer" }, { url: "http://127.0.0.1:1234/control", token: "fixture-token" });
     expect(gated.env.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+  it("drops the descriptor's mcp contract tag for the android runtime, keeping it for the CUA binary", () => {
+    const gate = { url: "http://127.0.0.1:1234/control", token: "fixture-token" };
+    const android = gatedLocalComputer(
+      { command: "/fixture/libnodeexec.so", args: ["mcp", "/fixture/android-local-computer.mjs"], env: {}, platform: "android", scope: "local-computer" },
+      gate,
+    );
+    expect(JSON.parse(android.env.OMB_CUA_ARGS)).toEqual(["/fixture/android-local-computer.mjs"]);
+    const desktop = gatedLocalComputer(
+      { command: "/trusted/cua-driver", args: ["mcp"], env: {}, platform: "darwin", scope: "local-computer" },
+      gate,
+    );
+    expect(JSON.parse(desktop.env.OMB_CUA_ARGS)).toEqual(["mcp"]);
   });
   it("stays synchronized with the Electron producer", () => {
     expect(DRIVER_FILE_IDENTITY_KEYS).toEqual([...ELECTRON_DRIVER_FILE_IDENTITY_KEYS]);
@@ -137,19 +158,17 @@ afterEach(() => {
 });
 
 describe("local computer descriptor", () => {
-  it("reports an unavailable reason without making that record mountable", () => {
+  it.skipIf(process.platform === "win32")("reports a private unavailable reason without making that descriptor mountable", () => {
+    const userData = privateUserData("mac-unavailable");
+    const file = join(userData, "cua-connection.json");
     const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
-    const record = { mode: "unavailable", reason };
-    expect(decodeCuaConnection(record, { platform: "darwin" })).toBeNull();
-    expect(cuaUnavailableReason(record, "darwin")).toBe(reason);
-    expect(cuaUnavailableReason(record, "linux")).toBeNull();
-    expect(cuaUnavailableReason({ mode: "unavailable", reason: { message: reason } }, "darwin")).toBeNull();
-    expect(cuaUnavailableReason({ mode: "unavailable", reason, mcpCommand: "/fixture/driver" }, "darwin")).toBeNull();
-  });
-
-  it("reads only the record it is pointed at, never a guessed home folder", () => {
-    expect(readCuaConnection({ platform: "darwin" })).toBeNull();
-    expect(readCuaConnection({ platform: "darwin", userData: "" })).toBeNull();
+    writeFileSync(file, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    expect(readCuaConnection({ platform: "darwin", userData })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBe(reason);
+    writeFileSync(file, JSON.stringify({ mode: "unavailable", reason: { message: reason } }));
+    expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBeNull();
+    writeFileSync(file, JSON.stringify({ mode: "unavailable", reason, mcpCommand: "/fixture/driver" }));
+    expect(readCuaUnavailableReason({ platform: "darwin", userData })).toBeNull();
   });
 
   it("rejects an explicitly unavailable or malformed status on an otherwise complete connection", () => {
@@ -164,6 +183,75 @@ describe("local computer descriptor", () => {
       expect(readCuaConnection({ platform: "darwin", userData })).toBeNull();
       expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
     }
+  });
+
+  it.skipIf(process.platform === "win32")("mounts the android phone lane's embedded descriptor and rejects weakened ones", () => {
+    const userData = privateUserData("android-lane");
+    const file = join(userData, "cua-connection.json");
+    const connection = {
+      mode: "embedded",
+      socketPath: "/fixture/local-computer.sock",
+      mcpCommand: "/fixture/libnodeexec.so",
+      mcpArgs: ["mcp", "/fixture/android-local-computer.mjs"],
+      mcpEnv: { OMB_ANDROID_ROOTFS: "/fixture/rootfs" },
+      status: "ready",
+    };
+    writeFileSync(file, JSON.stringify(connection), { mode: 0o600 });
+    chmodSync(file, 0o600);
+    expect(readCuaConnection({ platform: "android", userData })).toEqual({
+      command: "/fixture/libnodeexec.so",
+      args: ["mcp", "/fixture/android-local-computer.mjs"],
+      env: { OMB_ANDROID_ROOTFS: "/fixture/rootfs" },
+      platform: "android",
+      scope: "local-computer",
+    });
+
+    writeFileSync(file, JSON.stringify({ ...connection, mcpArgs: ["run", "/fixture/mcp.mjs"] }), { mode: 0o600 });
+    chmodSync(file, 0o600);
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+
+    writeFileSync(file, JSON.stringify(connection), { mode: 0o600 });
+    chmodSync(file, 0o640);
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+  });
+
+  it.skipIf(process.platform === "win32")("never substitutes a stale legacy descriptor for the packaged app's exact status", () => {
+    const userData = privateUserData("exact-mac-user-data");
+    const home = join(userData, "fixture-home");
+    const legacy = join(home, "Library", "Application Support", "OpenMausBot");
+    mkdirSync(legacy, { recursive: true, mode: 0o700 });
+    const legacyFile = join(legacy, "cua-connection.json");
+    writeFileSync(legacyFile, JSON.stringify({
+      mode: "embedded", socketPath: "/fixture/stale.sock", mcpCommand: "/fixture/stale-driver",
+      mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+
+    const exactFile = join(userData, "cua-connection.json");
+    const reason = "Screen Recording required; grant access in System Settings and restart OpenMausBot";
+    writeFileSync(exactFile, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    expect(readCuaConnection({ platform: "darwin", userData, home })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", userData, home })).toBe(reason);
+
+    writeFileSync(legacyFile, JSON.stringify({ mode: "unavailable", reason: "stale legacy failure" }));
+    writeFileSync(exactFile, JSON.stringify({ mode: "embedded" }));
+    expect(readCuaConnection({ platform: "darwin", userData, home })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", userData, home })).toBeNull();
+  });
+
+  it.skipIf(process.platform === "win32")("treats the first present legacy descriptor as authoritative", () => {
+    const root = privateUserData("legacy-mac-home");
+    const first = join(root, "Library", "Application Support", "OpenMausBot");
+    const stale = join(root, "Library", "Application Support", "OpenGrokBot");
+    mkdirSync(first, { recursive: true, mode: 0o700 });
+    mkdirSync(stale, { recursive: true, mode: 0o700 });
+    const reason = "Accessibility required; grant access in System Settings and restart OpenMausBot";
+    writeFileSync(join(first, "cua-connection.json"), JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    writeFileSync(join(stale, "cua-connection.json"), JSON.stringify({
+      mode: "embedded", socketPath: "/fixture/stale.sock", mcpCommand: "/fixture/stale-driver",
+      mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    expect(readCuaConnection({ platform: "darwin", home: root, userData: "" })).toBeNull();
+    expect(readCuaUnavailableReason({ platform: "darwin", home: root, userData: "" })).toBe(reason);
   });
 
   it("accepts only the exact certified Linux X11 descriptor", () => {

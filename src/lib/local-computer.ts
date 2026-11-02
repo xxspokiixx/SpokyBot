@@ -1,4 +1,3 @@
-import { t } from "./i18n";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 export function instanceSupportsLocalComputer(
@@ -20,12 +19,9 @@ export function localComputerSelectable({
 }): boolean {
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
-  // The desktop app's own computer can't serve bots running on another server; no permission fixes that.
-  if (capabilities.localComputer.reasonCode === "remote-server") return false;
   return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
-/** Why a bot can't use this computer, in words for the person: what to do, never the parts underneath. */
 export function localComputerDisabledReason({
   capabilities,
   providerSupportsLocal,
@@ -33,18 +29,29 @@ export function localComputerDisabledReason({
   capabilities: DesktopCapabilities;
   providerSupportsLocal: boolean;
 }): string | null {
-  if (!providerSupportsLocal) return t("computer.problem.localAiCannot");
-  if (capabilities.localComputer.available) return null;
-  if (capabilities.localComputer.reasonCode === "remote-server") return t("computer.problem.localRemoteServer");
-  if (capabilities.host.platform === "linux") {
-    if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") return t("computer.problem.localWaylandBlocked");
-    if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") return t("computer.problem.localWaylandDesktop");
-    if (!capabilities.localComputer.enabled) return t("computer.problem.localTurnOn");
-    return capabilities.localComputer.message ?? t("computer.problem.localNotReady");
+  if (!providerSupportsLocal) {
+    return "The selected provider cannot request approvals for local computer actions.";
   }
-  if (capabilities.host.label === "Browser") return t("computer.problem.localNeedsApp");
-  if (capabilities.host.platform === "win32") return t("computer.problem.localWindows");
-  return t("computer.problem.localMac");
+  if (capabilities.localComputer.available) return null;
+  if (capabilities.host.platform === "linux") {
+    if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") {
+      return "Local computer control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.";
+    }
+    if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") {
+      return "Wayland local control is currently limited to GNOME. Xorg remains available on supported desktops.";
+    }
+    if (!capabilities.localComputer.enabled) {
+      return "Enable the local control beta and complete the Cua Driver checks first.";
+    }
+    return capabilities.localComputer.message ?? "Cua Driver is not ready for local control.";
+  }
+  if (capabilities.host.label === "Browser") {
+    return "Local computer control requires the desktop app.";
+  }
+  if (capabilities.host.platform === "win32") {
+    return "The bundled Cua Driver could not start. Restart OpenMausBot and check Diagnostics if it still fails.";
+  }
+  return "CUA Driver is not ready for local computer control.";
 }
 
 export type BoatPanelAction =

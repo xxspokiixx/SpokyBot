@@ -2,11 +2,9 @@ import { t } from "./i18n";
 import { MAUS_COLORS, type MausColor } from "./mascot";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { personTagAt, personTagNames } from "../../shared/person-mention";
-import { devsTagAt } from "../../shared/devs-mention";
 
-/** A name the @ list offers: a bot's, or (`person`) a teammate's on a Team Cloud. */
-export type MentionPeer = { name: string; hidden?: boolean; color?: MausColor; person?: true };
-export type MentionRange = { start: number; end: number; color?: string; you?: true; person?: true };
+export type MentionPeer = { name: string; hidden?: boolean; color?: MausColor };
+export type MentionRange = { start: number; end: number; color?: string; you?: true };
 export type MentionPerson = { profileName?: string | null };
 
 export function sameMentionPerson(a?: MentionPerson, b?: MentionPerson): boolean {
@@ -55,11 +53,10 @@ export function mentionRowDescription(detail: MentionRowDetail): string {
 }
 
 export function mentionRanges(text: string, peers: readonly MentionPeer[], everyone = false, person?: MentionPerson): MentionRange[] {
-  // The longest name wins; a teammate wins a tie with a bot of the same name, as the server reads it.
   const candidates = peers.filter((p) => !p.hidden && p.name.trim())
-    .sort((a, b) => b.name.length - a.name.length || Number(Boolean(b.person)) - Number(Boolean(a.person)));
+    .sort((a, b) => b.name.length - a.name.length);
   const personNames = person ? personTagNames(person.profileName) : [];
-  const botNames = candidates.filter((peer) => !peer.person).map(({ name }) => name);
+  const botNames = candidates.map(({ name }) => name);
   const ranges: MentionRange[] = [];
   let at = -1;
   while ((at = text.indexOf("@", at + 1)) !== -1) {
@@ -75,18 +72,18 @@ export function mentionRanges(text: string, peers: readonly MentionPeer[], every
       at += you;
       continue;
     }
-    const length = all ? 8 : peer?.name.length ?? devsTagAt(rest, botNames);
+    const length = all ? 8 : peer?.name.length;
     if (length === undefined) continue;
     // Only palette values enter CSS.
     const color = !all && peer?.color && Object.hasOwn(MAUS_COLORS, peer.color) ? MAUS_COLORS[peer.color] : undefined;
-    ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}), ...(!all && peer?.person ? { person: true as const } : {}) });
+    ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}) });
     at += length;
   }
   return ranges;
 }
 
-export function mentionClassName(range: Pick<MentionRange, "you" | "person">): string {
-  return range.you ? "mention-highlight mention-you" : range.person ? "mention-highlight mention-person" : "mention-highlight";
+export function mentionClassName(range: Pick<MentionRange, "you">): string {
+  return range.you ? "mention-highlight mention-you" : "mention-highlight";
 }
 
 type MarkdownNode = {

@@ -1320,10 +1320,11 @@ export function expandSkillCommandTurnText(botId: string, text: string, assigned
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
   const own = listSkills(botId);
-  if (assignedLibrary === undefined) return own; // the library is off: no every-bot skills either
+  if (!assignedLibrary?.length) return own;
   const ownNames = new Set(own.map((skill) => skill.name));
   const assigned = new Set(assignedLibrary);
-  return [...own, ...listLibrarySkills().filter((skill) => (skill.everyBot || assigned.has(skill.name)) && !ownNames.has(skill.name))];
+  const fromLibrary = listLibrarySkills().filter((skill) => assigned.has(skill.name) && !ownNames.has(skill.name));
+  return [...own, ...fromLibrary];
 }
 
 export interface BotSkillWithOrigin extends SkillListing {
@@ -1337,11 +1338,11 @@ export function listBotSkillsWithOrigin(
   const own = listSkills(botId);
   const ownNames = new Set(own.map((skill) => skill.name));
   const assigned = new Set(assignedLibrary ?? []);
-  const skills = resolveBotSkills(botId, assignedLibrary ?? []).map((skill) => ({
+  const skills = resolveBotSkills(botId, assignedLibrary).map((skill) => ({
     ...skill,
     origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
   }));
-  const library = listLibrarySkills().filter((entry) => !ownNames.has(entry.name) && !entry.everyBot && !assigned.has(entry.name));
+  const library = listLibrarySkills().filter((entry) => !ownNames.has(entry.name) && !assigned.has(entry.name));
   return { skills, library };
 }
 

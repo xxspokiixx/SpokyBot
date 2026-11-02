@@ -7,7 +7,7 @@ import { join, relative, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { writeFileAtomic } from "./atomic.ts";
 import { TRASH_DAYS, foldKey, safeFolderName, skipped, validWirePath } from "../electron/cloud-sync-rules.mjs";
-import { lentRoot, syncRoot } from "./cloud-sync-paths.ts";
+import { syncRoot } from "./cloud-sync-paths.ts";
 
 export interface SyncFolder {
   id: string;
@@ -20,9 +20,6 @@ export interface SyncFolder {
   threadId?: string;
   /** A bot folder: when it last changed (the folder and what sits directly in it). */
   newestMs?: number;
-  /** A copy of a folder lent to My Cloud: kept in the data folder, out of every bot's box, so only shared_computer
-   * reaches it, with lending's own rules (server/lent-copies.ts). */
-  lent?: boolean;
   createdAt?: number;
 }
 
@@ -74,7 +71,7 @@ export function* walk(root: string, prefix = ""): Generator<{ path: string; size
   }
 }
 
-export function readFolders(dataDir: string): SyncFolder[] {
+function readFolders(dataDir: string): SyncFolder[] {
   try {
     const value: unknown = JSON.parse(readFileSync(join(dataDir, "sync", "folders.json"), "utf8"));
     return Array.isArray(value)
@@ -83,11 +80,9 @@ export function readFolders(dataDir: string): SyncFolder[] {
   } catch { return []; }
 }
 
-/** For the Cloud prompt: each synced PC folder bots read where it is, and where that is here. A lent folder's copy is not
- * one: bots reach it through shared_computer. */
+/** For the Cloud prompt: each synced PC folder and where it is here. */
 export function syncedFolders(dataDir: string): Array<{ computerName: string; pcPath: string; cloudPath: string }> {
-  return readFolders(dataDir).filter((folder) => folder.lent !== true)
-    .map((folder) => ({ computerName: folder.computerName ?? "", pcPath: folder.pcPath ?? "", cloudPath: folder.cloudPath }));
+  return readFolders(dataDir).map((folder) => ({ computerName: folder.computerName ?? "", pcPath: folder.pcPath ?? "", cloudPath: folder.cloudPath }));
 }
 
 export class CloudSyncStore {
@@ -100,7 +95,7 @@ export class CloudSyncStore {
     this.dataDir = options.dataDir;
     this.root = options.root ?? syncRoot(options.dataDir);
     this.now = options.now ?? Date.now;
-    for (const dir of [this.syncDir(), join(this.syncDir(), "uploads"), join(this.syncDir(), "trash"), this.root, this.lentRoot()]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    for (const dir of [this.syncDir(), join(this.syncDir(), "uploads"), join(this.syncDir(), "trash"), this.root]) mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(join(this.syncDir(), "index.db"));
     this.db.exec(`CREATE TABLE IF NOT EXISTS files(folder TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime REAL NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(folder, path));
       CREATE TABLE IF NOT EXISTS trash(id TEXT PRIMARY KEY, folder TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, deleted_at INTEGER NOT NULL, cloud_path TEXT);`);
@@ -109,7 +104,6 @@ export class CloudSyncStore {
   }
 
   syncDir(): string { return join(this.dataDir, "sync"); }
-  lentRoot(): string { return lentRoot(this.dataDir); }
   close(): void { this.db.close(); }
 
   pcFolders(): SyncFolder[] { return readFolders(this.dataDir); }
@@ -139,7 +133,7 @@ export class CloudSyncStore {
   folders(): SyncFolder[] { return [...this.pcFolders(), ...this.botFolders()]; }
   folder(id: string): SyncFolder | undefined { return this.folders().find((folder) => folder.id === id); }
 
-  register(input: { computerId: string; computerName: string; pcPath: string; name: string; lent?: boolean }): SyncFolder {
+  register(input: { computerId: string; computerName: string; pcPath: string; name: string }): SyncFolder {
     let folders = this.pcFolders();
     const existing = folders.find((folder) => folder.computerId === input.computerId && pcKey(folder.pcPath ?? "") === pcKey(input.pcPath));
     if (existing && lstatSync(existing.cloudPath, { throwIfNoEntry: false })?.isDirectory()) return existing;
@@ -148,17 +142,14 @@ export class CloudSyncStore {
       folders = folders.filter((folder) => folder.id !== existing.id);
       this.db.prepare("DELETE FROM files WHERE folder = ?").run(existing.id);
     }
-    // A copy kept already (shared from the Files page before it was lent) stayed where it is, above: nothing is sent again.
-    const lent = input.lent === true;
-    const root = lent ? this.lentRoot() : this.root;
-    const sibling = [existing, ...folders].find((folder) => folder?.computerId === input.computerId && folder.cloudPath.startsWith(root + sep));
+    const sibling = existing ?? folders.find((folder) => folder.computerId === input.computerId);
     const computerDir = sibling
-      ? relative(root, sibling.cloudPath).split(sep)[0]!
-      : safeFolderName(input.computerName, new Set(names(root).map(foldKey)));
-    const name = safeFolderName(input.name, new Set(names(join(root, computerDir)).map(foldKey)));
+      ? relative(this.root, sibling.cloudPath).split(sep)[0]!
+      : safeFolderName(input.computerName, new Set(names(this.root).map(foldKey)));
+    const name = safeFolderName(input.name, new Set(names(join(this.root, computerDir)).map(foldKey)));
     const folder: SyncFolder = {
       id: randomUUID(), kind: "pc", computerId: input.computerId, computerName: input.computerName, pcPath: input.pcPath,
-      cloudPath: join(root, computerDir, name), createdAt: this.now(), ...(lent ? { lent: true } : {}),
+      cloudPath: join(this.root, computerDir, name), createdAt: this.now(),
     };
     mkdirSync(folder.cloudPath, { recursive: true, mode: 0o700 });
     this.saveFolders([...folders, folder]);

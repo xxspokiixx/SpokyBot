@@ -1,10 +1,10 @@
-import { createContext, use, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, Copy, Ellipsis, Reply, X } from "lucide-react";
 import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
+import { LONG_PRESS_MS } from "@/lib/use-long-press-menu";
 
 export const ACTION_ICON = { size: 17, strokeWidth: 1.5 } as const;
 
@@ -18,18 +18,11 @@ export type MessageMenuItem = {
   onSelect: () => void;
   title?: string;
   disabled?: boolean;
-  /** Offered only while the chat's turn is not running. */
-  idleOnly?: boolean;
 };
-
-/** Whether the chat's turn is running, apart from the row values every message reads: a turn starting or ending
- * re-renders only the few rows that show it, not every message. */
-export const ChatBusyContext = createContext(false);
 
 export const MESSAGE_ROW = "data-message-row";
 
 const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [contenteditable=true]";
-const LONG_PRESS_MS = 450;
 
 function focusVisible(target: EventTarget | null): boolean {
   try {
@@ -43,7 +36,7 @@ export function MessageActions({
   side,
   forceOpen = false,
   className,
-  menu: items = [],
+  menu = [],
   children,
 }: {
   side: "user" | "bot";
@@ -57,13 +50,10 @@ export function MessageActions({
   const moreRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
-  const [menuOpen, setMenuOpen] = useState(false);
-  // use() may run conditionally: a closed menu has no reason to follow the turn.
-  const busy = menuOpen && items.some((item) => item.idleOnly) ? use(ChatBusyContext) : false;
-  const menu = busy ? items.filter((item) => !item.idleOnly) : items;
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [tapped, setTapped] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [menuAbove, setMenuAbove] = useState(false);
   const [menuFlipped, setMenuFlipped] = useState(false);
   const mirrored = side === "user";
@@ -204,7 +194,7 @@ export function MessageActions({
           aria-label={t("chat.messageActions")}
           onKeyDown={moveFocus}
           className={cn(
-            "absolute z-40 min-w-52 max-w-[calc(100vw-2rem)] overflow-hidden", MENU_SHEET,
+            "absolute z-40 min-w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50",
             menuAbove ? "bottom-full mb-1" : "top-full mt-1",
             mirrored !== menuFlipped ? "end-0" : "start-0",
           )}
@@ -221,9 +211,9 @@ export function MessageActions({
                 setMenuOpen(false);
                 moreRef.current?.focus();
               }}
-              className={cn(MENU_ITEM, "text-start text-ink hover:bg-menu-hover focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60")}
+              className="flex w-full items-center gap-3 px-3.5 py-2 text-start text-[14px] text-ink hover:bg-raised/70 focus-visible:bg-raised/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <span className="flex size-4 shrink-0 items-center justify-center text-ink-secondary [&>svg]:size-4" aria-hidden="true">{item.icon}</span>
+              <span className="flex size-5 shrink-0 items-center justify-center text-ink-secondary" aria-hidden="true">{item.icon}</span>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
             </button>
           ))}

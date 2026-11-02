@@ -7,8 +7,6 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { Select } from "./Select";
-import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
-import { openKeySettings } from "./keys/key-focus";
 
 const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
 /** The room decision budget in server/decider/room-routing.ts; slower falls back to the lead. */
@@ -45,38 +43,8 @@ const OPENROUTER_FAILURES: Record<string, LocaleKey> = {
   malformed: "decider.openrouter.error.malformed",
 };
 
-const WORKERS_AI_FAILURES: Record<string, LocaleKey> = {
-  ...FAILURES,
-  rejected: "decider.workersAi.error.rejected",
-  unreachable: "decider.workersAi.error.unreachable",
-  timeout: "decider.workersAi.error.timeout",
-  rate_limited: "decider.workersAi.error.rateLimited",
-  overloaded: "decider.workersAi.error.overloaded",
-  malformed: "decider.workersAi.error.malformed",
-};
-
-const BY: Record<"jev" | "workersai" | "openrouter", LocaleKey> = {
-  jev: "decider.status.byJev", workersai: "decider.status.byWorkersAi", openrouter: "decider.status.byOpenRouter",
-};
-
-/** Who decides and who reads, in a word each: the person's own key, the Cloud plan's, or nothing yet. */
-export function helpersStatusLine(config: ConfigStatus | null): string {
-  const decider = config?.decider;
-  const extraction = config?.helpers?.extraction;
-  const decisions = !decider?.configured ? t("decider.status.notSetUp")
-    : decider.included ? t("decider.status.byCloud") : t(BY[decider.provider] ?? BY.jev);
-  const reading = !extraction?.provider ? t("decider.status.notSetUp")
-    : extraction.included ? t("decider.status.byCloud") : t(BY[extraction.provider]);
-  return t("decider.status.line", { decisions, extraction: reading });
-}
-
 /** A fixed sentence per failure: the vendor's own body never reaches the UI. */
-export function deciderFailureText(result: { reason: string; status?: number }, included = false, provider: Provider | "workersai" = "jev"): string {
-  if (provider === "workersai") {
-    if (result.reason === "http_error") return t("decider.workersAi.error.http", { status: String(result.status ?? "?") });
-    const key = WORKERS_AI_FAILURES[result.reason];
-    return key ? t(key) : t("decider.error.other");
-  }
+export function deciderFailureText(result: { reason: string; status?: number }, included = false, provider: Provider = "jev"): string {
   if (provider === "openrouter") {
     // 402 is OpenRouter's answer for an account with no credits left.
     if (result.reason === "http_error" && result.status === 402) return t("decider.openrouter.error.credits");
@@ -204,9 +172,7 @@ export function DecisionModelSettings() {
     <>
       <section className="space-y-2 px-4">
         <p className="text-[13px] leading-relaxed text-ink-secondary">{t("decider.intro")}</p>
-        <p role="status" data-testid="helpers-status" className="text-[13px] font-medium text-ink">{helpersStatusLine(state.config)}</p>
       </section>
-      <WorkersAiKeyCard failureText={(result) => deciderFailureText(result, false, "workersai")} />
       <SettingRow title={t("decider.provider.label")}>
         <Select className="w-48"
           data-testid="decider-provider"
@@ -281,7 +247,7 @@ export function DecisionModelSettings() {
                 <button
                   type="button"
                   data-testid="decider-manage-keys"
-                  onClick={() => dispatch(openKeySettings("openrouter"))}
+                  onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
                   className="cursor-pointer text-accent hover:underline"
                 >
                   {t("decider.openrouter.key.manageLink")}

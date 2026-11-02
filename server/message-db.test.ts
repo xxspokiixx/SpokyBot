@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import { closeMessageDb,
@@ -14,8 +14,8 @@ import { closeMessageDb,
   lastRowAt,
   latestPersonLineAts,
   logNotification,
-  openRescueMessages,
   latestSaidByBot,
+  markAllNotificationLogRead,
   markNotificationLogRead,
   markThreadNotificationLogRead,
   readMessageText,
@@ -64,19 +64,6 @@ describe("message-db", () => {
     expect(thread.activeLeafId).toBe("m2");
   });
 
-  it("finds the first-reply rescue rows that never settled or ended", () => {
-    const rescue = (id: string, state: Record<string, true> = {}) => msg(id, "", {
-      role: "bot", kind: "activity",
-      tool: { name: "notice: Maus hasn't heard back from OpenCode yet.", ok: true,
-        rescue: { botId: "b", threadId: "t1", turnId: id, instanceId: "opencodeGo", ai: "OpenCode", ...state } },
-    });
-    insertMessage("t1", rescue("open"));
-    insertMessage("t1", rescue("settled", { settled: true }));
-    insertMessage("t1", rescue("over", { over: true }));
-    insertMessage("t1", msg("plain", "", { role: "bot", kind: "activity", tool: { name: "notice: something else", ok: true } }));
-    expect(openRescueMessages().map((hit) => [hit.threadId, hit.message.id])).toEqual([["t1", "open"]]);
-  });
-
   it("imports a legacy JSON thread file exactly once", () => {
     writeFileSync(
       legacy("t2"),
@@ -109,22 +96,6 @@ describe("message-db", () => {
     new Store(selection);
     expect(searchMessages("unopened legacy")).toMatchObject([{ threadId: bot.threadId, messageId: "old" }]);
     expect(existsSync(`${legacy(bot.threadId)}.imported`)).toBe(true);
-  });
-
-  // Windows will not delete a file SQLite holds open.
-  it.skipIf(process.platform === "win32")("opens the database again when its file was deleted under it, looking at most once a second", () => {
-    const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
-    try {
-      insertMessage("t-gone", msg("m1", "before"));
-      for (const suffix of ["", "-wal", "-shm"]) rmSync(join(DATA_DIR, `messages.db${suffix}`), { force: true });
-      clock.mockReturnValue(now + 1_000);
-      insertMessage("t-gone", msg("m2", "after"));
-      expect(existsSync(join(DATA_DIR, "messages.db"))).toBe(true);
-      expect(readThread("t-gone", legacy("t-gone")).messages.map((m) => m.id)).toEqual(["m2"]);
-    } finally {
-      clock.mockRestore();
-    }
   });
 
   it("stores transcripts with owner-only permissions", () => {
@@ -535,18 +506,6 @@ describe("notification_log", () => {
     expect(recentNotificationLog()).toEqual([logged]);
   });
 
-  it("keeps the one person a notification is for, in a feed made before that was recorded too", () => {
-    closeMessageDb();
-    for (const suffix of ["", "-wal", "-shm"]) rmSync(join(DATA_DIR, `messages.db${suffix}`), { force: true });
-    const old = new DatabaseSync(join(DATA_DIR, "messages.db"));
-    old.exec("CREATE TABLE notification_log (id TEXT PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL, bot_id TEXT NOT NULL, bot_name TEXT NOT NULL, thread_id TEXT NOT NULL, group_id TEXT, title TEXT NOT NULL, body TEXT NOT NULL, avatar_url TEXT, read INTEGER NOT NULL DEFAULT 0)");
-    old.exec("INSERT INTO notification_log VALUES ('before', 1, 'done', 'bot-1', 'Scout', 'thread-1', NULL, 'Scout finished', 'Done', NULL, 0)");
-    old.close();
-    const tagged = logNotification({ kind: "mention", botId: "bot-1", botName: "Scout", threadId: "thread-1", title: "Ada mentioned you", body: "@Bob look", forPerson: "p_bobbobbobbobbobbobbobb" });
-    expect(recentNotificationLog()).toEqual([tagged, expect.objectContaining({ id: "before" })]);
-    expect(recentNotificationLog()[1]).not.toHaveProperty("forPerson");
-  });
-
   it("forgets a thread's notifications when the thread is deleted", () => {
     insertNotificationLog(entry("n1", 1000));
     insertNotificationLog(entry("n2", 2000, { threadId: "thread-2" }));
@@ -554,20 +513,19 @@ describe("notification_log", () => {
     expect(recentNotificationLog().map((r) => r.id)).toEqual(["n2"]);
   });
 
-  it("marking read never deletes a row: it flips only the named entries' flag", () => {
+  it("marking read never deletes a row: read-one and read-all only flip the flag", () => {
     insertNotificationLog(entry("n1", 1000));
     insertNotificationLog(entry("n2", 2000));
-    insertNotificationLog(entry("n3", 3000));
-    markNotificationLogRead(["n1"]);
+    markNotificationLogRead("n1");
     let rows = recentNotificationLog();
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(2);
     expect(rows.find((r) => r.id === "n1")?.read).toBe(true);
     expect(rows.find((r) => r.id === "n2")?.read).toBe(false);
 
-    markNotificationLogRead(["n1", "n2"]);
+    markAllNotificationLogRead();
     rows = recentNotificationLog();
-    expect(rows).toHaveLength(3);
-    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.read)).toBe(true);
   });
 
   it("reading a conversation reads only its own notifications, a pending question's included", () => {

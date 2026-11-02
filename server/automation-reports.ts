@@ -6,11 +6,8 @@
 // that delivers to the brief posts no line: its answer goes to the brief, which reads it as a small JSON result.
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
-import { signInWaits } from "../shared/sign-in-request.ts";
-import { intlLocale } from "./language.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
-import { serverLine } from "./server-lines.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 
@@ -29,44 +26,31 @@ export function readRunReply(text: string, attached = false): RunReply {
   return { quiet: false, text: [...lines.slice(0, at), lines[at]!.replace(NEEDS_INPUT, ""), ...lines.slice(at + 1)].join("\n").trim(), question };
 }
 
-function inHostZone(at: number, locale: string, options: Intl.DateTimeFormatOptions): string {
-  const format = (timeZone: string) => new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(at);
+function localTime(at: number): string {
+  const format = (timeZone: string) => new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).format(at).replace(",", "");
   try { return format(hostTimeZone()); } catch { return format("UTC"); }
-}
-
-const localTime = (at: number) =>
-  inHostZone(at, "en-CA", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).replace(",", "");
-
-// ICU 72+ puts a narrow no-break space (U+202F) before AM/PM.
-const clockTime = (at: number, language?: string) =>
-  inHostZone(at, intlLocale(language), { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).replace(/\s/g, " ");
-
-/** The line a run with nothing new posts when the automation's line before it in the chat said a run failed, in the
- * language of the chat's person. */
-export function recoveredText(name: string, at: number, language?: string): string {
-  return serverLine(language, "server.runs.recovered", { name, time: clockTime(at, language) });
 }
 
 /** How the chat's own session reads an automation's line: as its own report, named and dated. */
 export function automationContextText(line: AutomationLine, at: number, text: string): string {
-  const what = line.failed ? "could not finish" : line.needsYou ? "asked" : line.recovered ? "recovered" : "reported";
+  const what = line.failed ? "could not finish" : line.needsYou ? "asked" : "reported";
   return `[Your automation ${JSON.stringify(line.name)} ${what} at ${localTime(at)}:]\n${text}`;
 }
 
-/** A sign-in, connection or credential card still waiting on the person, in plain words in their language; null once
- * it is settled. */
-export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">, language?: string): string | null {
+/** A sign-in, connection or credential card still waiting on the person, in plain words; null once it is settled. */
+export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">): string | null {
   const { signIn, connector, secret } = message;
-  if (message.kind === "signin" && signIn && signInWaits(signIn) && !signIn.resumed && !signIn.stopped) {
+  if (message.kind === "signin" && signIn && !signIn.done && !signIn.cancelled && !signIn.superseded && !signIn.resumed && !signIn.stopped) {
     const reason = signIn.reason?.trim();
-    return reason ? serverLine(language, "server.connect.signInWhy", { site: signIn.site, reason: /[.!?]$/.test(reason) ? reason : `${reason}.` })
-      : serverLine(language, "server.connect.signIn", { site: signIn.site });
+    return `I need you to sign in to ${signIn.site}${reason ? `: ${reason}${/[.!?]$/.test(reason) ? "" : "."}` : "."}`;
   }
   if (message.kind === "connector" && connector && connector.status !== "connected" && !connector.dismissed && !connector.resumed && !connector.stopped) {
-    return serverLine(language, "server.connect.app", { app: connector.label });
+    return `I need you to connect ${connector.label}.`;
   }
   if (message.kind === "secret" && secret && !secret.provided && !secret.dismissed && !secret.superseded && !secret.resumed && !secret.stopped) {
-    return serverLine(language, "server.connect.secret", { label: secret.label });
+    return `I need your ${secret.label}.`;
   }
   return null;
 }
@@ -88,13 +72,11 @@ export interface AutomationReportDeps {
   routines(): Pick<RoutineManager, "listRuns" | "noteReport" | "runForThread"> | null;
   /** A turn runs or settles in this conversation. */
   busy(botId: string, threadId: string): boolean;
-  /** After a line this conversation's session did not write: it reaches the next turn. The chat is marked unread here. */
+  /** After a line this conversation's session did not write: it marks the chat unread and reaches the next turn. */
   wrote(bot: BotRecord, threadId: string): void;
   notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string): void;
   /** A run that delivers to the brief completed: its answer is the brief's to read. */
   brief?(run: RoutineRun, turnId?: string): void;
-  /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
-  threadLanguage?(threadId: string): string | undefined;
 }
 
 export function createAutomationReports(deps: AutomationReportDeps) {
@@ -109,7 +91,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     return bot && task && !task.routineRunId ? { bot, threadId: task.threadId } : null;
   };
 
-  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "recovered" | "copyOf">): AutomationLine => ({
+  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "copyOf">): AutomationLine => ({
     routineId: run.routineId, runId: run.id, name: run.routineName, trigger: run.eventSource ?? run.triggerSource ?? (run.manual ? "manual" : "schedule"),
     executionThreadId: run.threadId!, scheduledFor: run.scheduledFor, ...extra,
   });
@@ -123,30 +105,18 @@ export function createAutomationReports(deps: AutomationReportDeps) {
 
   const read = (message: Message | undefined) => readRunReply(message?.text ?? "", Boolean(message?.attachments?.length));
 
-  /** The automation's line before this run's in the chat, written or still waiting ahead of it, says a run failed. */
-  const lastSaidFailed = (run: RoutineRun, threadId: string): boolean => {
-    let queued: Waiting | undefined;
-    for (const [key, line] of waiting) {
-      if (key === run.id) break;
-      if (line.kind !== "card" && line.run.routineId === run.routineId && destination(line.run)?.threadId === threadId) queued = line;
-    }
-    if (queued) return queued.kind === "failure";
-    const newest = store.messagesFor(threadId).findLast((message) => message.automation?.routineId === run.routineId && !message.automation.copyOf);
-    return newest?.automation?.failed === true;
-  };
-
   const copyOf = (run: RoutineRun, threadId: string, originalId: string) =>
     store.messagesFor(threadId).find((message) => message.automation?.runId === run.id && message.automation.copyOf === originalId);
 
   /** An option card is copied whole and answered through its request; any other card the run waits on is named. */
   const writeCopy = (line: Extract<Waiting, { kind: "card" }>, target: { bot: BotRecord; threadId: string }) => {
     const original = store.messagesFor(line.threadId).find((message) => message.id === line.messageId);
-    const named = original ? waitingCardText(original, deps.threadLanguage?.(target.threadId)) : null;
+    const named = original ? waitingCardText(original) : null;
     if (!original || (!named && !liveCardKind(original.card))) return;
     const automation = lineOf(line.run, { needsYou: true, copyOf: original.id });
     store.appendMessage(target.threadId, named ? { role: "bot", kind: "text", text: named, automation } : { role: "bot", kind: "options", card: { ...original.card! }, automation });
     if (named) deps.wrote(target.bot, target.threadId);
-    store.patchTask(target.bot.id, target.threadId, { unread: true });
+    else store.patchTask(target.bot.id, target.threadId, { unread: true });
   };
 
   /** False while the chat it goes to is busy. */
@@ -169,24 +139,20 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       return true;
     }
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
-    const language = deps.threadLanguage?.(target.threadId);
-    const said: RunReply = line.kind === "reply" ? read(source)
-      : { quiet: false, text: line.detail ? serverLine(language, "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
-    const recovered = said.quiet && lastSaidFailed(run, target.threadId);
-    if (said.quiet && !recovered) {
+    const reply: RunReply = line.kind === "reply" ? read(source)
+      : { quiet: false, text: line.detail ? `This run didn't finish: ${line.detail}` : "This run didn't finish." };
+    if (reply.quiet) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
       return true;
     }
-    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now(), language) } : said;
     const posted = store.appendMessage(target.threadId, {
       role: "bot", kind: "text", text: reply.text,
-      ...(source?.attachments?.length && !recovered ? { attachments: source.attachments } : {}),
-      automation: lineOf(run, line.kind === "failure" ? { failed: true } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
+      ...(source?.attachments?.length ? { attachments: source.attachments } : {}),
+      automation: lineOf(run, line.kind === "failure" ? { failed: true } : reply.question ? { needsYou: true } : {}),
     });
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);
-    store.patchTask(target.bot.id, target.threadId, { unread: true });
-    if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
+    if (line.kind === "reply") deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
     return true;
   };
 
@@ -246,21 +212,17 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
       const reply = read(said);
       const bot = store.bot(run.botId);
-      const target = destination(run);
-      if (target && (!reply.quiet || lastSaidFailed(run, target.threadId))) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });
-      else if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
+      if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
+      else if (destination(run)) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });
       else if (bot) deps.notify("done", bot, run.threadId, reply.text);
     },
     /** A run failed in a way the person is told about: one line says so where its reports go. */
     runFailed(run: RoutineRun, detail: string): void {
       if (run.target === "bot" && run.status === "failed" && run.deliver !== "brief" && run.threadId && destination(run)) hold(run.id, { kind: "failure", run, detail });
     },
-    /** This run's result, questions and failure come to its bot's chat as lines of their own, or through the brief.
-     * A missed run, or one that failed before it had a conversation, has no line to say so, and keeps its card,
-     * unless it delivers to the brief, which lists it as missed. */
+    /** This run's result, questions and failure come to its bot's chat as lines of their own. */
     speaksFor(run: RoutineRun): boolean {
-      return run.target === "bot" && destination(run) !== null
-        && (run.deliver === "brief" || (run.status !== "missed" && (run.status !== "failed" || Boolean(run.threadId))));
+      return run.target === "bot" && destination(run) !== null;
     },
     /** This conversation is a run's own, and only its last reply reaches the chat the run reports to. */
     reportsElsewhere(threadId: string): boolean {

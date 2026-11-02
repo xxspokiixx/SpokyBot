@@ -180,9 +180,6 @@ export interface SessionStoreOptions {
   emailScopes?: EmailScopesResolver;
   emailScopesSnapshot?: () => EmailScopesResolver;
   portalMembership?: boolean;
-  /** Between membershipChanged() calls, the hot paths (each request, stream frame and liveness check) recheck email
-   * membership at most this often. Default 0: every call. */
-  recheckMs?: number;
 }
 
 export class SessionRegistry {
@@ -192,14 +189,13 @@ export class SessionRegistry {
   private failures = new Map<string, { count: number; windowStart: number; lockedUntil: number }>();
   private replays: Array<{ codeHash: string; attemptId: string; browser: boolean; result: ExchangeResult; expiresAt: number }> = [];
   private readonly onRevoked = new Set<(sessionId: string) => void>();
-  private readonly onIssued = new Set<(session: Pick<SessionRecord, "id" | "scopes" | "email" | "teamRole" | "membershipAuthority">) => void>();
+  private readonly onIssued = new Set<(session: Pick<SessionRecord, "id" | "scopes">) => void>();
   private lastSeenWrites = new Map<string, number>();
   private readonly now: () => number;
   private readonly options: SessionStoreOptions;
   private readonly openMarker: string;
   private closed = false;
   private adminOnly: string | null = null;
-  private membershipCheckedAt = -Infinity;
 
   // No parameter properties: Node's strip-only TypeScript mode only erases types.
   constructor(options: SessionStoreOptions) {
@@ -261,7 +257,7 @@ export class SessionRegistry {
   }
 
   private prune(): void {
-    this.recheckMembership();
+    this.revalidateEmailSessions();
     const now = this.now();
     this.pairings = this.pairings.filter((p) => p.expiresAt > now);
     this.replays = this.replays.filter((r) => r.expiresAt > now);
@@ -278,7 +274,7 @@ export class SessionRegistry {
   }
 
   /** Every session opened from now on, by pairing or sign-in. */
-  onSessionIssued(listener: (session: Pick<SessionRecord, "id" | "scopes" | "email" | "teamRole" | "membershipAuthority">) => void): () => void {
+  onSessionIssued(listener: (session: Pick<SessionRecord, "id" | "scopes">) => void): () => void {
     this.onIssued.add(listener);
     return () => this.onIssued.delete(listener);
   }
@@ -512,21 +508,9 @@ export class SessionRegistry {
     this.failures.delete(source);
   }
 
-  /** The sign-in lists may have changed: the next recheckMembership() reads them. */
-  membershipChanged(): void {
-    this.membershipCheckedAt = -Infinity;
-  }
-
-  /** revalidateEmailSessions(), unless one ran within `recheckMs` and membershipChanged() has not been called since. */
-  recheckMembership(): void {
-    if (this.now() - this.membershipCheckedAt < (this.options.recheckMs ?? 0)) return;
-    this.revalidateEmailSessions();
-  }
-
   /** Email membership is live: losing any scope revokes the token and its streams; promotions never widen existing credentials. */
   revalidateEmailSessions(): void {
     if (this.closed) throw new Error("Session registry is closed.");
-    this.membershipCheckedAt = this.now();
     // A team session's membership is the Admin's signed claim, checked at each pairing (cloud-team.ts), never the sign-in list.
     const eligible = this.sessions.filter(session => session.email !== undefined && session.membershipAuthority !== "team" && !(this.options.portalMembership && session.membershipAuthority === "portal"));
     if (!eligible.length) return;
@@ -558,7 +542,7 @@ export class SessionRegistry {
 
   authenticate(token: string | undefined): SessionRecord | null {
     if (!token) return null;
-    this.recheckMembership();
+    this.revalidateEmailSessions();
     const hash = sha256(token);
     const now = this.now();
     const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
@@ -574,7 +558,7 @@ export class SessionRegistry {
 
   /** Call only after origin and scope checks pass; never revives an expired session. */
   renew(sessionId: string): boolean {
-    this.recheckMembership();
+    this.revalidateEmailSessions();
     const record = this.sessions.find((s) => s.id === sessionId);
     const now = this.now();
     if (!record || record.expiresAt <= now) return false;
@@ -605,19 +589,12 @@ export class SessionRegistry {
     return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
   }
 
-  /** Every code a member made for a phone stops working, and every phone such a code opened signs out. Never an Admin-signed pairing (an app). */
-  closeMemberPhones(): number {
-    this.pairings = this.pairings.filter((pairing) => !(pairing.member && pairing.memberCheckedAt !== undefined));
-    return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
-  }
-
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs
-   * can open another. With `keepRole` (the Admin vouched for them at that role), only those at another role end. Returns
-   * how many sessions ended. */
-  revokeMember(email: string, keepRole?: TeamRole): number {
+   * can open another. Returns how many sessions ended. */
+  revokeMember(email: string): number {
     const address = email.trim().toLowerCase();
-    this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address || pairing.member.role === keepRole);
-    const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address && (keepRole === undefined || session.teamRole !== keepRole));
+    this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address);
+    const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address);
     for (const session of ended) this.revoke(session.id);
     return ended.length;
   }

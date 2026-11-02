@@ -28,7 +28,6 @@ describe("describeTool", () => {
     expect(describeTool("GOOGLESHEETS_BATCH_UPDATE")).toEqual({ app: "Google Sheets", label: "Batch update" });
     expect(describeTool("mcp__highlevel__HIGHLEVEL_ADD_NOTE")).toEqual({ app: "HighLevel", label: "Add note" });
     expect(describeTool("HIGHLEVEL_UPDATE_CONTACT")).toEqual({ app: "HighLevel", label: "Update contact" });
-    expect(describeTool("mcp__device__PHONE_CREATE_EVENT")).toEqual({ app: "Phone", label: "Create event" });
   });
 
   it("treats the bot's computer and its teammates as apps too", () => {
@@ -127,16 +126,6 @@ describe("readBotActivity", () => {
     expect(read().map((row) => [row.tool, row.outcome])).toEqual([
       ["WebSearch", "running"],
       ["Bash", "failed"],
-    ]);
-  });
-
-  it("shows each run's step under it, the words the working line used, with the run's turn to open it at", () => {
-    event("t1", "2026-09-07T09:00:00.000Z", { type: "item.started", itemType: "tool", itemId: "i1", title: "Bash",
-      step: { activity: "command", target: "scrape.py", detail: "cd ~/acme && python3 scrape.py --pages 40" } });
-    event("t1", "2026-09-07T09:01:00.000Z", { type: "item.started", itemType: "tool", itemId: "i2", title: "WebFetch", step: { activity: "fetch", target: "linkedin.com" } });
-    expect(read().map((row) => [row.label, row.summary, row.turnId])).toEqual([
-      ["Fetched a page", "linkedin.com", "turn-1"],
-      ["Ran a command", "cd ~/acme && python3 scrape.py --pages 40", "turn-1"],
     ]);
   });
 

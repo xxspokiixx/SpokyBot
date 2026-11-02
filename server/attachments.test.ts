@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   truncateSync,
@@ -13,24 +14,29 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { link, unlink } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...fs, link: vi.fn(fs.link), unlink: vi.fn(fs.unlink) };
+  return { ...fs, unlink: vi.fn(fs.unlink) };
 });
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   return { ...fs, unlinkSync: vi.fn(fs.unlinkSync), writeFileSync: vi.fn(fs.writeFileSync) };
 });
+vi.mock("../electron/atomic-publish.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../electron/atomic-publish.mjs")>();
+  return { ...actual, publishCandidate: vi.fn(actual.publishCandidate) };
+});
+import { publishCandidate } from "../electron/atomic-publish.mjs";
 const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
-const realLink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).link;
+const realPublishCandidate = (await vi.importActual<typeof import("../electron/atomic-publish.mjs")>("../electron/atomic-publish.mjs")).publishCandidate;
 const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
 const realWriteFileSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).writeFileSync;
 afterEach(() => {
   vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
-  vi.mocked(link).mockReset().mockImplementation(realLink);
+  vi.mocked(publishCandidate).mockReset().mockImplementation(realPublishCandidate);
   vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
   vi.mocked(writeFileSync).mockReset().mockImplementation(realWriteFileSync);
 });
@@ -118,6 +124,16 @@ describe("saveImage", () => {
     const back = readAttachment(name);
     expect(back?.bytes.toString()).toBe("gif!");
     expect(back?.mime).toBe("image/gif");
+  });
+
+  it("saves a photo when Android publishes its completed partial with rename", () => {
+    vi.mocked(publishCandidate).mockImplementationOnce((partial, path) => {
+      renameSync(partial, path);
+      return true;
+    });
+    const saved = saveImage(Buffer.from("photo-bytes"), "image/webp", UPLOAD_A);
+    expect(readFileSync(saved.path)).toEqual(Buffer.from("photo-bytes"));
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}.webp`]);
   });
 
   it("rejects unsupported mimes, empty bodies, and oversize bodies", () => {
@@ -361,16 +377,6 @@ describe("aggregate attachment storage", () => {
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
   });
 
-  it("frees quota for a file deleted outside the app once the store looks full", () => {
-    const first = saveImage(Buffer.from("x"), "image/png");
-    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
-    __resetAttachmentAccountingForTests();
-    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
-
-    realUnlinkSync(first.path);
-    expect(saveImage(Buffer.from("yyy"), "image/png").bytes).toBe(3);
-  });
-
   it.each([1, 2])("counts a committed upload after %i partial-cleanup failures and an idempotent retry", async (failures) => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
@@ -412,38 +418,17 @@ describe("aggregate attachment storage", () => {
     expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
   });
 
-  it("does not count an in-flight commit twice when cleanup failure causes a rescan", async () => {
+  it("reserves quota across simultaneous uploads", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
-    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 5);
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 4);
     __resetAttachmentAccountingForTests();
-    let markLinked!: () => void;
-    let finishCommit!: () => void;
-    const linked = new Promise<void>((resolve) => { markLinked = resolve; });
-    const finishing = new Promise<void>((resolve) => { finishCommit = resolve; });
-    vi.mocked(link).mockImplementationOnce(async (...args) => {
-      await realLink(...args);
-      markLinked();
-      await finishing;
+    const upload = (uploadId: string) => saveFile((async function* () { yield Buffer.from("xxx"); })(), "pending.txt", "text/plain", {
+      uploadId, expectedBytes: 3,
     });
-    const pending = saveFile((async function* () { yield Buffer.from("xx"); })(), "pending.txt", "text/plain", {
-      uploadId: UPLOAD_A, expectedBytes: 2,
-    });
-    try {
-      await linked;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        vi.mocked(unlinkSync).mockImplementationOnce(() => {
-          throw Object.assign(new Error("partial file is locked"), { code: "EPERM" });
-        });
-      }
-      expect(() => saveImage(Buffer.from("x"), "image/png", UPLOAD_B)).toThrow("partial file is locked");
-      // This scan sees the linked file while its commit callback is pending.
-      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
-    } finally {
-      finishCommit();
-      await pending;
-    }
-    await saveImageUpload(Buffer.from("x"), "image/png", UPLOAD_B);
-    expect(() => saveImage(Buffer.from("yy"), "image/png")).not.toThrow();
+    const results = await Promise.allSettled([upload(UPLOAD_A), upload(UPLOAD_B)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
     expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
   });
 

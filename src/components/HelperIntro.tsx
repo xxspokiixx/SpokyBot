@@ -1,34 +1,17 @@
 import { X } from "lucide-react";
 
 import { t } from "@/lib/i18n";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import type { LocaleKey } from "@/locales";
 import { useStore, type Message } from "@/state/store";
 import { HelperSetup } from "./HelperSetup";
-import { SimpleHelperIntro } from "./SimpleHelperIntro";
 
 export const HELPER_ASK_KEYS: readonly LocaleKey[] = [
   "helperIntro.ask.overview", "helperIntro.ask.inbox", "helperIntro.ask.routine", "helperIntro.ask.howto",
 ];
 
-interface IntroProps {
-  botId: string;
-  threadId: string;
-  message: Message;
-  /** The person wrote after it, or dismissed it: its asks and setup go. */
-  answered: boolean;
-  /** Its follow-up after the look around (helperFollowup), drawn under it in Simple mode. */
-  followup?: Message;
-}
-
-/** MausBot's first message: Simple mode's few short bubbles and follow-up, or Advanced mode's one bubble with asks. */
-export function HelperIntro(props: IntroProps) {
-  return useAdvancedMode() ? <AdvancedHelperIntro {...props} /> : <SimpleHelperIntro {...props} />;
-}
-
-/** Advanced mode's intro, in the viewer's language. Its asks go once one is tapped, it is dismissed, or the person writes
- * anything after it. */
-function AdvancedHelperIntro({ botId, threadId, message, answered }: IntroProps) {
+/** MausBot's first message, in the viewer's language. Its asks go once one is tapped, it is dismissed, or the person
+ * writes anything after it (`asksDone`). */
+export function HelperIntro({ botId, threadId, message, asksDone }: { botId: string; threadId: string; message: Message; asksDone: boolean }) {
   const { state, dispatch } = useStore();
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const name = bot?.name ?? "MausBot";
@@ -39,12 +22,12 @@ function AdvancedHelperIntro({ botId, threadId, message, answered }: IntroProps)
       <div className="w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
         <p className="font-medium">{t("helperIntro.title", { name })}</p>
         <p className="mt-1">{t("helperIntro.body")}</p>
-        {bot?.chiefOfStaff ? <p className="mt-1">{t("helperIntro.chief")}</p> : bot?.defaultBot && !bot.defaultBot.person && <p className="mt-1">{t("helperIntro.watch")}</p>}
+        {bot?.chiefOfStaff && <p className="mt-1">{t("helperIntro.chief")}</p>}
         {team && <p className="mt-1">{t("helperIntro.team", { team })}</p>}
-        {!answered && <p className="mt-1 text-ink-secondary">{t("helperIntro.try")}</p>}
+        {!asksDone && <p className="mt-1 text-ink-secondary">{t("helperIntro.try")}</p>}
       </div>
-      {!answered && <HelperSetup />}
-      {!answered && (
+      {!asksDone && <HelperSetup />}
+      {!asksDone && (
         <div role="group" aria-label={t("helperIntro.asks")} className="flex max-w-full flex-wrap items-center gap-1.5">
           {HELPER_ASK_KEYS.map((key) => (
             <button

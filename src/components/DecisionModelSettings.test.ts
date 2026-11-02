@@ -84,8 +84,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("DecisionModelSettings", () => {
   it("explains itself, then the switch, the key, and what it decides", () => {
     const view = render();
-    const order = ["Small, fast models that sort and read things for your bots", "Decisions: not set up · Extraction: not set up", "Cloudflare Workers AI (free tier)",
-      "Use fast decisions and extraction", "Jev API key", "What it decides", "Who answers in rooms"]
+    const order = ["A fast decision model that picks things for your bots", "Use Jev for fast decisions", "Jev API key", "What it decides", "Who answers in rooms"]
       .map((text) => view.html.indexOf(text));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -233,7 +232,7 @@ describe("DecisionModelSettings", () => {
   it("maps every failure to a fixed sentence", () => {
     expect(deciderFailureText({ reason: "rejected" }, false, "jev")).toBe("Jev rejected this key. Check it at typesafe.ai.");
     expect(deciderFailureText({ reason: "overloaded" })).toBe("Jev is overloaded right now. Try again shortly.");
-    expect(deciderFailureText({ reason: "http_error", status: 500 })).toBe("Jev sent back an error (500). Try again in a moment.");
+    expect(deciderFailureText({ reason: "http_error", status: 500 })).toBe("Jev returned an unexpected error (HTTP 500).");
     expect(deciderFailureText({ reason: "something-new" })).toBe("The test did not finish. Try again.");
   });
 
@@ -440,15 +439,15 @@ describe("DecisionModelSettings", () => {
       const text = (result: { reason: string; status?: number }) => deciderFailureText(result, false, "openrouter");
       expect(text({ reason: "rejected", status: 401 })).toBe("OpenRouter rejected this key. Check it at openrouter.ai/keys.");
       expect(text({ reason: "http_error", status: 402 })).toBe("Your OpenRouter account is out of credits. Add some at openrouter.ai/credits.");
-      expect(text({ reason: "http_error", status: 500 })).toBe("OpenRouter sent back an error (500). Try again in a moment.");
+      expect(text({ reason: "http_error", status: 500 })).toBe("OpenRouter returned an unexpected error (HTTP 500).");
       expect(text({ reason: "rate_limited" })).toBe("OpenRouter is limiting requests right now. Try again in a moment.");
       expect(text({ reason: "overloaded" })).toBe("The model is overloaded right now. Try again shortly.");
-      expect(text({ reason: "malformed" })).toBe("The model sent an answer MausBot could not read. Try another model.");
+      expect(text({ reason: "malformed" })).toBe("The model sent an answer OpenMausBot could not read. Try another model.");
       expect(text({ reason: "unreachable" })).toBe("Could not reach OpenRouter. Check your connection.");
       expect(text({ reason: "timeout" })).toBe("OpenRouter did not answer in time. Try again.");
       expect(text({ reason: "no_key" })).toBe("Paste a key or save one first.");
       expect(text({ reason: "something-new" })).toBe("The test did not finish. Try again.");
-      expect(deciderFailureText({ reason: "http_error", status: 402 })).toBe("Jev sent back an error (402). Try again in a moment.");
+      expect(deciderFailureText({ reason: "http_error", status: 402 })).toBe("Jev returned an unexpected error (HTTP 402).");
     });
   });
 });

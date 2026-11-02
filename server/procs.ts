@@ -9,16 +9,14 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
-import { closeSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
 import type { BoxRequest } from "./bot-box/plan.ts";
 import { engineMemory } from "./engine-memory.ts";
-import { engineHomes } from "./engine-homes/engine-homes.ts";
-import type { HomedSpawn } from "./engine-homes/layout.ts";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
-import { spawnBotWork } from "./oom-score.ts";
+import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -51,88 +49,6 @@ export function assertSafeCliArgv(
 const cliGroups = new WeakSet<ChildProcess>();
 const stopping = new WeakMap<ChildProcess, Promise<boolean>>();
 
-type LinuxProcess = { pid: number; parent: number; start: string; state: string };
-const linuxTrees = new WeakMap<ChildProcess, Map<number, string>>();
-
-function linuxProcess(pid: number): LinuxProcess | null {
-  let stat: string;
-  try {
-    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-  } catch (error) {
-    if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
-    throw error;
-  }
-  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-  const start = fields[19];
-  const state = fields[0];
-  const parent = Number(fields[1]);
-  if (!start || !state || !Number.isInteger(parent)) throw new Error("Unreadable Linux process identity");
-  return { pid, parent, start, state };
-}
-
-/** Linux sandbox helpers can leave the CLI's process group and reparent during a protocol interrupt. */
-export function captureCliTree(child: ChildProcess): void {
-  if (process.platform !== "linux" || !cliGroups.has(child) || !child.pid) return;
-  let tree = linuxTrees.get(child);
-  if (!tree) {
-    tree = new Map();
-    linuxTrees.set(child, tree);
-  }
-  const snapshot = new Map<number, LinuxProcess>();
-  let entries: string[];
-  try { entries = readdirSync("/proc"); } catch { return; }
-  for (const entry of entries) {
-    if (!/^\d+$/.test(entry)) continue;
-    const pid = Number(entry);
-    try {
-      const current = linuxProcess(pid);
-      if (current) snapshot.set(pid, current);
-    } catch {}
-  }
-  const parents = new Set([...tree].filter(([pid, start]) => snapshot.get(pid)?.start === start).map(([pid]) => pid));
-  let discovered: boolean;
-  do {
-    discovered = false;
-    for (const current of snapshot.values()) {
-      if (current.pid === process.pid || !parents.has(current.parent) || tree.get(current.pid) === current.start) continue;
-      tree.set(current.pid, current.start);
-      parents.add(current.pid);
-      discovered = true;
-    }
-  } while (discovered);
-}
-
-function linuxDescendantsStopped(child: ChildProcess): boolean {
-  for (const [pid, start] of linuxTrees.get(child) ?? []) {
-    if (pid === child.pid) continue;
-    try {
-      const current = linuxProcess(pid);
-      if (current?.start === start && current.state !== "Z" && current.state !== "X") return false;
-    } catch { return false; }
-  }
-  return true;
-}
-
-function linuxRootIdentityMatches(child: ChildProcess): boolean | undefined {
-  const start = child.pid && linuxTrees.get(child)?.get(child.pid);
-  if (!child.pid || process.platform !== "linux" || !cliGroups.has(child)) return true;
-  if (!start) return undefined;
-  try {
-    const current = linuxProcess(child.pid);
-    return !current || current.start === start;
-  } catch { return undefined; }
-}
-
-function signalLinuxDescendants(child: ChildProcess, value: NodeJS.Signals): void {
-  for (const [pid, start] of [...(linuxTrees.get(child) ?? [])].reverse()) {
-    if (pid === child.pid || pid <= 1 || pid === process.pid) continue;
-    try {
-      const current = linuxProcess(pid);
-      if (current?.start === start && current.state !== "Z" && current.state !== "X") process.kill(pid, value);
-    } catch {}
-  }
-}
-
 const MAX_ENDED_SESSIONS = 4_096;
 const engineSessions = { live: new Set<number>(), ended: new Set<number>() };
 
@@ -160,21 +76,15 @@ export type CliOwner = "bot" | "openmausbot";
 /** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more
  * paths or the host's network, and `false` keeps a spawn out of it. */
 export interface BoxSpawnOptions {
-  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "allowEnv">;
-  /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
-  engineHome?: boolean;
-  /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`
-   * spawn (oom-score.ts), with no box and no engine tracking. */
-  botWork?: boolean;
+  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId">;
 }
 export type CliSpawnOptions = SpawnOptions & BoxSpawnOptions;
 
-/** The box for this spawn, or null when it runs as is. A spawn in an engine home has that home in place of HOME. */
-export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner: CliOwner, homed: HomedSpawn | null = null): WrappedSpawn | null {
+/** The box for this spawn, or null when it runs as is. */
+export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner: CliOwner): WrappedSpawn | null {
   if (opts.box === false || (owner !== "bot" && !opts.box)) return null;
   const request = typeof opts.box === "object" ? opts.box : {};
-  const home = homed ? { home: homed.home, shared: homed.shared } : {};
-  return botBox.wrap({ command: resolved.command, args: resolved.args, cwd: typeof opts.cwd === "string" ? opts.cwd : undefined, env: opts.env ?? process.env, ...request, ...home });
+  return botBox.wrap({ command: resolved.command, args: resolved.args, cwd: typeof opts.cwd === "string" ? opts.cwd : undefined, env: opts.env ?? process.env, ...request });
 }
 
 export function spawnCli(
@@ -185,10 +95,8 @@ export function spawnCli(
 ): ChildProcessByStdio<Writable, Readable, Readable> {
   const resolved = resolveCli(cli, args);
   assertSafeCliArgv(resolved);
-  const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
-  const options: CliSpawnOptions = homed ? { ...opts, env: homed.env } : opts;
-  const boxed = boxedSpawn(resolved, options, owner, homed);
-  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = options;
+  const boxed = boxedSpawn(resolved, opts, owner);
+  const { box: _box, ...spawnOpts } = opts;
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
@@ -199,21 +107,13 @@ export function spawnCli(
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
   let child: ChildProcessByStdio<Writable, Readable, Readable>;
   try {
-    child = owner === "bot" || botWork ? spawnBotWork(start) : start();
+    child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
   } finally {
     for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
   }
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
   if (process.platform !== "win32") cliGroups.add(child);
-  if (process.platform === "linux" && child.pid) {
-    const tree = new Map<number, string>();
-    try {
-      const root = linuxProcess(child.pid);
-      if (root) tree.set(root.pid, root.start);
-    } catch {}
-    linuxTrees.set(child, tree);
-  }
   if (process.platform !== "win32" && owner === "bot") {
     rememberEngineSession(child);
     engineMemory.track(child);
@@ -225,6 +125,10 @@ export function spawnCli(
 }
 
 const EXEC_KILL_GRACE_MS = 2_000;
+
+// Probe spawns (`<cli> --version`, `auth status`) pay a cold runtime start each; on the
+// embedded android build that PIE load plus TS type-stripping can outlast a desktop budget.
+export const CLI_PROBE_TIMEOUT_MS = process.platform === "android" ? 45_000 : 8_000;
 
 export function execCli(
   cli: string,
@@ -252,19 +156,6 @@ export function execCli(
   }
 }
 
-/** Concurrent probes on a busy machine can outlast the timeout, so a CLI that answered before keeps its last version. */
-export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
-  let last: string | null = null;
-  return (err, stdout) => {
-    const version = err ? "" : stdout.trim();
-    if (version) return { version: (last = version) };
-    const failure = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
-    const timedOut = failure?.killed === true && typeof failure.code !== "string";
-    if (timedOut && last) return { version: last };
-    return { reason: timedOut ? `\`${cli}\` took longer than 8 seconds to answer --version. The machine may be busy; check again.` : `\`${cli}\` CLI not found` };
-  };
-}
-
 /** Node reports a missing cwd as the CLI's own ENOENT, so pass `cwd` to tell a moved folder from a missing CLI. */
 type SpawnFailure = { message: string; setup: boolean };
 
@@ -284,7 +175,7 @@ export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string, cw
   return { message: `spawn failed: ${err.message}`, setup: false };
 }
 
-/** timeoutMs is the TERM grace; SIGKILL gets one more second. Linux also stops captured detached descendants. */
+/** timeoutMs is the TERM grace; SIGKILL gets one more second. Helpers that detach into another group are not covered. */
 export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boolean> {
   const existing = stopping.get(child);
   if (existing) return existing;
@@ -292,7 +183,6 @@ export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boo
   if (!pid) return Promise.resolve(true);
   if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return Promise.resolve(false);
 
-  captureCliTree(child);
   const run = stopCliTree(child, pid, Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 5_000);
   stopping.set(child, run);
   // Remember success, so a delayed caller cannot signal a reused PID/group.
@@ -305,9 +195,8 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
   if (process.platform !== "win32") {
     const group = cliGroups.has(child);
     const settled = () => {
-      if (!exited() || !linuxDescendantsStopped(child)) return false;
-      if (!group || linuxRootIdentityMatches(child) === false) return true;
-      if (linuxRootIdentityMatches(child) === undefined) return false;
+      if (!exited()) return false;
+      if (!group) return true;
       try {
         process.kill(-pid, 0);
         return false;
@@ -317,15 +206,11 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
       }
     };
     const signal = (value: NodeJS.Signals) => {
-      captureCliTree(child);
-      signalLinuxDescendants(child, value);
       try {
-        if (group && (!exited() || linuxRootIdentityMatches(child) === true)) process.kill(-pid, value);
-        else if (!group && !exited()) child.kill(value);
+        if (group) process.kill(-pid, value);
+        else child.kill(value);
       } catch {
-        if (!exited()) {
-          try { child.kill(value); } catch {}
-        }
+        try { child.kill(value); } catch {}
       }
     };
     const wait = async (ms: number) => {

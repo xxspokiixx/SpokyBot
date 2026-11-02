@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Loader2, Upload } from "lucide-react";
-import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
+import type { WorkspaceBackupSummary, BackupSelection } from "../../shared/workspace-backup";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { applyWorkspaceClientState, collectWorkspaceClientState, WORKSPACE_RESTORE_MARKER } from "@/lib/workspace-backup-client";
@@ -9,7 +9,23 @@ import { Card } from "./SettingsPrimitives";
 type BackupStatus = { busy: boolean; pendingRestore?: boolean; lastRestoreId?: string };
 const inputClass = "w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink disabled:opacity-50";
 const buttonClass = "cursor-pointer inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
-const validPassword = (value: string) => value.length >= 12 && value.length <= 1024;
+const validPassword = (value: string) => value.length >= 1 && value.length <= 1024;
+
+const defaultBackupSelection: BackupSelection = {
+  history: true,
+  skills: true,
+  automations: true,
+  savedLogins: true,
+  apiKeys: true,
+};
+
+const backupSelectionOptions = [
+  { key: "history", label: "backup.select.history" },
+  { key: "skills", label: "backup.select.skills" },
+  { key: "automations", label: "backup.select.automations" },
+  { key: "savedLogins", label: "backup.select.savedLogins" },
+  { key: "apiKeys", label: "backup.select.apiKeys" },
+] as const;
 
 /** A renderer reload cannot apply a restore; the owning server must restart. */
 export function WorkspaceBackupRestartNotice({ onRetry }: { onRetry?: () => void } = {}) {
@@ -65,7 +81,8 @@ export function WorkspaceBackupSettings() {
   const [uploadedId, setUploadedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ id: string; summary: WorkspaceBackupSummary } | null>(null);
   const [confirmation, setConfirmation] = useState("");
-  const [download, setDownload] = useState<{ url: string; filename: string } | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [backupSelection, setBackupSelection] = useState<BackupSelection>(defaultBackupSelection);
 
   const refresh = async () => {
     try {
@@ -94,18 +111,26 @@ export function WorkspaceBackupSettings() {
   const exportBackup = () => perform("export", async () => {
     if (!validPassword(exportPassword) || exportPassword !== confirmPassword) return;
     const result: { id: string; filename: string } = await api("/api/workspace-backup/export", {
-      method: "POST", body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState() }),
+      method: "POST", body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState(), selection: backupSelection }),
     });
     if (alive.current) { setExportPassword(""); setConfirmPassword(""); }
     if (!alive.current) return;
     const url = `/api/workspace-backup/download/${encodeURIComponent(result.id)}`;
-    setDownload({ url, filename: result.filename });
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = result.filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
+    const bridge = (window as Window & { ombAndroidCaps?: { saveBackup(url: string, filename: string): void } }).ombAndroidCaps;
+    if (bridge) {
+      bridge.saveBackup(url, result.filename);
+    } else {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      if (alive.current) setExportStatus(t("backup.downloadStarted", { filename: result.filename }));
+    }
+    if (alive.current) {
+      window.setTimeout(() => { if (alive.current) setExportStatus(null); }, 6000);
+    }
   });
 
   const previewBackup = () => perform("preview", async () => {
@@ -154,16 +179,34 @@ export function WorkspaceBackupSettings() {
         <p className="text-[13px] leading-relaxed text-ink-secondary">{t("backup.excluded")}</p>
         <p className="text-[13px] leading-relaxed text-ink-secondary">{t("backup.privacy")}</p>
     </section>
+    <section className="space-y-2 px-4">
+        <h3 className="text-[13px] font-semibold text-ink">{t("backup.selectData")}</h3>
+        <div className="grid grid-cols-2 gap-2">
+          {backupSelectionOptions.map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={backupSelection[key]}
+                onChange={(e) => setBackupSelection((prev) => ({ ...prev, [key]: e.target.checked }))}
+                disabled={disabled}
+                className="size-4 rounded border-hairline/50 bg-inset text-accent focus:ring-accent"
+              />
+              <span className="text-[13px] text-ink">{t(label)}</span>
+            </label>
+          ))}
+        </div>
+    </section>
+    <section className="space-y-2 px-4">
         <div className="flex flex-col gap-4">
             {error && <p role="alert" className="break-words px-4 text-[13px] text-danger">{error}</p>}
             {status?.pendingRestore ? <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-ink"><WorkspaceBackupRestartNotice /></div> : <>
             {(!status || status.busy) && <div role="status" className="flex items-center gap-3 px-4 text-[13px] text-ink-secondary"><span>{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}</span><button type="button" onClick={() => void refresh()} className="cursor-pointer underline">{t("connectors.action.retry")}</button></div>}
             <Card title={t("backup.export")} subtitle={t("backup.passwordHint")}>
                 <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void exportBackup(); }}>
-                <label className="text-[13px] text-ink">{t("backup.exportPassword")}<input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
-                <label className="text-[13px] text-ink">{t("backup.confirmPassword")}<input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
+                <label className="text-[13px] text-ink">{t("backup.exportPassword")}<input type="password" autoComplete="off" minLength={1} maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
+                <label className="text-[13px] text-ink">{t("backup.confirmPassword")}<input type="password" autoComplete="off" minLength={1} maxLength={1024} required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
                 <button type="submit" disabled={disabled || !validPassword(exportPassword) || exportPassword !== confirmPassword} className={buttonClass}>{busy === "export" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Download aria-hidden="true" size={15} />}{busy === "export" ? t("backup.exporting") : t("backup.export")}</button>
-                {download && <a href={download.url} download={download.filename} className="break-all text-[13px] text-accent-text underline">{t("backup.downloadAgain", { filename: download.filename })}</a>}
+                {exportStatus && <p className="text-[13px] text-ink-secondary">{exportStatus}</p>}
                 </form>
             </Card>
             <Card title={t("backup.import")} subtitle={t("backup.importHint")}>
@@ -182,7 +225,8 @@ export function WorkspaceBackupSettings() {
             </>
             }
         </div>
-    </>
+    </section>
+  </>
   ;
 }
 

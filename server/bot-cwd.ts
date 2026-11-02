@@ -2,8 +2,6 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 
-import { isOwnThreadFolder } from "../shared/thread-folder.ts";
-
 export type CwdValidation = { ok: true; cwd: string | null } | { ok: false; error: string };
 
 export function validateBotCwd(input: unknown): CwdValidation {
@@ -24,14 +22,6 @@ export function validateBotCwd(input: unknown): CwdValidation {
   return { ok: true, cwd };
 }
 
-/** The working folder a thread moves to on this turn: its bot's, while the thread is still in its own folder. Never for a
- * conversation that keeps a private folder (a Cloud guest's), nor for an engine that works in no folder. */
-export function folderToFollow(bot: { id: string; cwd?: string }, threadId: string, threadCwd: string | null | undefined,
-  opts: { worksInFolders: boolean; keepsPrivateFolder: boolean }): string | undefined {
-  if (!bot.cwd || !opts.worksInFolders || opts.keepsPrivateFolder) return undefined;
-  return isOwnThreadFolder(threadCwd, bot.id, threadId) ? bot.cwd : undefined;
-}
-
 /** A conversation's folder a teammate may be sent to: one that still exists, outside OpenMausBot's own data (a bot's private workspace). */
 export function sharedProjectFolder(cwd: string | null | undefined, dataDir: string): string | undefined {
   const checked = cwd ? validateBotCwd(cwd) : undefined;
@@ -40,11 +30,10 @@ export function sharedProjectFolder(cwd: string | null | undefined, dataDir: str
   return inside === "" || (!inside.startsWith("..") && !isAbsolute(inside)) ? undefined : checked.cwd;
 }
 
-/** coordinate_bots' in_my_folder: the sender's project folder for the teammate threads it opens outside a room, or why an explicit true cannot be honoured. Omitted means on whenever there is a folder to share. */
-export function inMyFolderCwd(wanted: boolean | undefined, outsideRoom: boolean, senderCwd: string | null | undefined, dataDir: string): { cwd?: string; error?: string } {
-  if (wanted === false) return {};
-  if (!outsideRoom) return wanted ? { error: "in_my_folder does not apply in a room: the room's folder governs there. Leave it out." } : {};
+/** coordinate_bots' in_my_folder: the sender's project folder for a new thread outside a room, or why it cannot be used. */
+export function inMyFolderCwd(wanted: boolean | undefined, fresh: boolean, senderCwd: string | null | undefined, dataDir: string): { cwd?: string; error?: string } {
+  if (!wanted) return {};
+  if (!fresh) return { error: 'in_my_folder works only with thread "new", outside a room. Leave it out, or use thread "new".' };
   const cwd = sharedProjectFolder(senderCwd, dataDir);
-  if (cwd) return { cwd };
-  return wanted ? { error: "This conversation has no project folder to share (it works in its own private folder), so in_my_folder cannot be used. Leave it out; do not retry it." } : {};
+  return cwd ? { cwd } : { error: "This conversation has no project folder to share (it works in its own private folder), so in_my_folder cannot be used. Leave it out; do not retry it." };
 }

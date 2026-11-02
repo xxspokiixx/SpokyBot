@@ -1,5 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { loadLocale } from "@/lib/i18n";
+import { useSyncExternalStore } from "react";
 
 export const LANGUAGE_KEY = "omb-language";
 
@@ -99,17 +98,4 @@ export function setLanguageChoice(language: string): void {
 
 export function useLanguageChoice(): string | null {
   return useSyncExternalStore(subscribe, languageChoice, () => null);
-}
-
-/** The person's own language, loaded before a page first draws, so they never see another one first. */
-export function loadPageLanguage(): Promise<string> {
-  return loadLocale(effectiveLanguage(languageChoice(), undefined) || globalThis.navigator?.language);
-}
-
-/** Shows `language` (the system's when empty) once its pack has loaded, and draws the caller again then. */
-export function usePageLanguage(language: string): void {
-  const [, setShown] = useState(0);
-  useEffect(() => {
-    void loadLocale(language || globalThis.navigator?.language).then(() => setShown((shown) => shown + 1));
-  }, [language]);
 }

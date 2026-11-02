@@ -5,7 +5,6 @@ import { basename, extname, isAbsolute, join, relative, resolve, sep } from "nod
 import { PAGE_FILE_EXTENSIONS, PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../../shared/published-page.ts";
 import { guestWorkspaceToHost } from "../bot-attachment.ts";
 import { VM_WORKSPACE_GUEST } from "../container-computer.ts";
-import { inSecretFolder, SECRET_FILE_REFUSAL } from "../secret-folder.ts";
 
 export interface PageFile {
   path: string;
@@ -65,7 +64,6 @@ async function locate(requested: string, roots: readonly string[]): Promise<{ ta
       continue;
     }
     const root = allowed.find((each) => containedBy(each, target));
-    if (root && inSecretFolder(target)) throw new PageBundleError(SECRET_FILE_REFUSAL, 403);
     if (root) return { target, root };
     outside = true;
   }
@@ -96,7 +94,7 @@ export async function readPageBundle(requested: string, roots: readonly string[]
       if (name.startsWith(".")) continue;
       const full = join(folder, name), own = await lstat(full);
       const real = own.isSymbolicLink() ? await realpath(full).catch(() => null) : full;
-      if (!real || !containedBy(root, real) || inSecretFolder(real)) continue;
+      if (!real || !containedBy(root, real)) continue;
       const entry = own.isSymbolicLink() ? await stat(real) : own;
       const path = relative(target, full).split(sep).join("/");
       if (entry.isDirectory()) {
@@ -127,11 +125,4 @@ export async function readBotPageBundle(requested: string, folders: BotFolders):
   const { roots, vmWorkspace } = await folders();
   const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
   return readPageBundle(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
-}
-
-/** A file inside a bot's own folders (or its Local VM's workspace), by the same rules as a page: the `extract` tool's. */
-export async function botFileSource(requested: string, folders: BotFolders): Promise<string> {
-  const { roots, vmWorkspace } = await folders();
-  const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
-  return pageSource(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
 }

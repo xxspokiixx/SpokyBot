@@ -2,7 +2,7 @@
 // surface's policy changed; pair an intentional change with an update here so the diff says so.
 import { describe, expect, it } from "vitest";
 
-import { admit, roomTurnHolds } from "./admission.ts";
+import { admit } from "./admission.ts";
 
 describe("admission golden tables", () => {
   it("direct-busy: steers plain text into a capable engine, parks everything else", () => {
@@ -12,13 +12,6 @@ describe("admission golden tables", () => {
     expect(admit("direct-busy", { ...plain, pendingComputerSelection: true })).toEqual({ action: "queue" });
     expect(admit("direct-busy", { ...plain, engineCanSteer: false })).toEqual({ action: "queue" });
     expect(admit("direct-busy", {})).toEqual({ action: "queue" });
-    expect(admit("direct-busy", { ...plain, followUp: "steer" })).toEqual({ action: "steer" });
-    expect(admit("direct-busy", { ...plain, followUp: "queue" })).toEqual({ action: "queue", chose: "queue" });
-    expect(admit("direct-busy", { ...plain, followUp: "restart" })).toEqual({ action: "queue", chose: "restart" });
-    // A turn that cannot be steered queues whatever was asked; only restart still ends it.
-    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "steer" })).toEqual({ action: "queue" });
-    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "queue" })).toEqual({ action: "queue" });
-    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "restart" })).toEqual({ action: "queue", chose: "restart" });
   });
 
   it("direct-busy: attachments steer into an engine that takes images mid-turn", () => {
@@ -39,26 +32,6 @@ describe("admission golden tables", () => {
     expect(admit("direct", {}, { threadBusy: true, groupTurn: true })).toEqual({ action: "queue", reason: "group-turn" });
     expect(admit("direct", {}, { parksBehindCoordination: true, groupTurn: true })).toEqual({ action: "queue", reason: "group-turn" });
     expect(admit("direct", {}, { botBusy: true })).toEqual({ action: "start" });
-  });
-
-  it("a room turn holds a person's own send only on the room's own thread", () => {
-    const room = { threadId: "room-thread" };
-    expect(roomTurnHolds(room, "person-thread", true)).toBe(false);
-    expect(roomTurnHolds(room, "room-thread", true)).toBe(true);
-    expect(roomTurnHolds(null, "person-thread", true)).toBe(false);
-    expect(roomTurnHolds(undefined, "room-thread", false)).toBe(false);
-    // Delegations, opened threads, incidents and routines still wait for any room turn of the bot.
-    expect(roomTurnHolds(room, "person-thread", false)).toBe(true);
-  });
-
-  it("direct: capacity, the landing thread and coordination still queue a person's send beside a room turn", () => {
-    const elsewhere = { groupTurn: roomTurnHolds({ threadId: "room-thread" }, "person-thread", true) };
-    expect(admit("direct", {}, elsewhere)).toEqual({ action: "start" });
-    expect(admit("direct", {}, { ...elsewhere, atCapacity: true })).toEqual({ action: "queue", reason: "capacity" });
-    expect(admit("direct", {}, { ...elsewhere, threadBusy: true })).toEqual({ action: "queue" });
-    expect(admit("direct", {}, { ...elsewhere, parksBehindCoordination: true })).toEqual({ action: "queue" });
-    expect(admit("direct", {}, { groupTurn: roomTurnHolds({ threadId: "room-thread" }, "room-thread", true) }))
-      .toEqual({ action: "queue", reason: "group-turn" });
   });
 
   it("room: a working channel always queues; it never auto-steers", () => {

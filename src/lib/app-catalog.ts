@@ -10,14 +10,11 @@ export const INLINE_CATEGORY_COUNT = 5;
 export const CATEGORY_SECTION_COUNT = 3;
 export const CATEGORY_SECTION_SIZE = 4;
 
-/** Categories by how many apps they hold; `keep` ones (an app of OpenMausBot's own lives there) always show inline. */
-export function rankCategories(cards: readonly CatalogCard[], inline = INLINE_CATEGORY_COUNT, keep: readonly string[] = []): { inline: string[]; more: string[] } {
+export function rankCategories(cards: readonly CatalogCard[], inline = INLINE_CATEGORY_COUNT): { inline: string[]; more: string[] } {
   const counts = new Map<string, number>();
   for (const card of cards) for (const category of new Set(card.categories ?? [])) counts.set(category, (counts.get(category) ?? 0) + 1);
   const ranked = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name);
-  const kept = keep.filter((name) => ranked.indexOf(name) >= inline);
-  const shown = [...ranked.slice(0, Math.max(0, inline - kept.length)), ...kept];
-  return { inline: shown, more: ranked.filter((name) => !shown.includes(name)) };
+  return { inline: ranked.slice(0, inline), more: ranked.slice(inline) };
 }
 
 export function inCategory(card: CatalogCard, category: string | null): boolean {
@@ -55,7 +52,6 @@ const APP_CATEGORY_COPY: Record<string, string> = {
   design: "design",
   marketing: "marketing",
   analytics: "analytics",
-  social: "social",
 };
 
 const CONNECTOR_COPY: Record<string, string> = {

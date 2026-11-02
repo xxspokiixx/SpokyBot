@@ -15,8 +15,8 @@ import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 import { TraceView } from "./usage/TraceView";
 import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";
-const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "department", "day", "engine", "routine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
+const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "day", "engine", "routine"];
 
 export interface UsageGroup {
   key: string;
@@ -41,7 +41,6 @@ const GROUP_LABEL_KEYS: Record<UsageGroupBy, LocaleKey> = {
   day: "usage.history.byDay",
   engine: "usage.history.byEngine",
   routine: "usage.history.byRoutine",
-  department: "usage.history.byDepartment",
 };
 
 const PERIOD_LABEL_KEYS: Record<UsagePeriod, LocaleKey> = {
@@ -56,7 +55,6 @@ const LIVE_REFRESH_MS = 2_000;
 
 export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "key" | "label">): string {
   if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
-  if (groupBy === "department") return group.label || t("usage.history.noDepartment");
   if (groupBy !== "user") return group.label;
   if (group.key === "owner") return t("usage.history.owner");
   if (group.key === "bot") return t("usage.history.botToBot");
@@ -78,8 +76,10 @@ function useUsageGroups(range: { from: string; to: string }, groupBy: UsageGroup
 
 export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: readonly UsageGroup[] }) {
   const { state } = useStore();
-  const top = [...groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).slice(0, 6);
-  const max = Math.max(...top.map(headlineTokens), 0);
+  const priced = groups.some((group) => hasFiniteCost(group.costUsd) && group.costUsd > 0);
+  const value = (group: UsageGroup) => priced ? group.costUsd ?? 0 : headlineTokens(group);
+  const top = [...groups].sort((a, b) => value(b) - value(a)).slice(0, 6);
+  const max = Math.max(...top.map(value), 0);
   if (!top.length || max <= 0) return <p className="text-[13px] text-ink-secondary">{t("usage.page.whereEmpty")}</p>;
   return (
     <ul className="flex flex-col gap-2.5">
@@ -92,11 +92,10 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
               <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
             <span className="h-2 overflow-hidden rounded-full bg-raised">
-              <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
+              <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (value(group) / max) * 100)}%` }} />
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
-              {formatTokens(headlineTokens(group))}
-              {hasFiniteCost(group.costUsd) && group.costUsd > 0 && ` · ${formatCost(group.costUsd)}`}
+              {priced ? formatCost(group.costUsd) : formatTokens(headlineTokens(group))}
             </span>
           </li>
         );
@@ -158,12 +157,12 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
           })}
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-[14px] text-ink">{title}</span>
+          <span className="block truncate text-[13.5px] text-ink">{title}</span>
           <span className="block truncate text-[12px] text-ink-tertiary">{startedLabel(root.startedAt)} · {root.bots.map((bot) => bot.name).join(", ")}</span>
         </span>
-        <span className="flex items-center gap-3 text-[13px] tabular-nums text-ink-secondary">
+        <span className="flex items-center gap-3 text-[12.5px] tabular-nums text-ink-secondary">
           {root.running && <LiveBadge />}
-          {root.errors > 0 && <span className="rounded-md bg-danger/12 px-1.5 py-0.5 text-[12px] font-medium text-danger">{t("trace.groupErrors", { count: String(root.errors) })}</span>}
+          {root.errors > 0 && <span className="rounded-md bg-danger/12 px-1.5 py-0.5 text-[11.5px] font-medium text-danger">{t("trace.groupErrors", { count: String(root.errors) })}</span>}
           {root.timed ? <span className="hidden min-w-[3.5rem] text-right sm:inline">{formatDuration(root.durationMs)}</span>
             : <span className="hidden rounded bg-raised px-1.5 text-[11px] sm:inline">{t("trace.notTimed")}</span>}
           <span className="min-w-[3.5rem] text-right text-ink">{formatCost(root.costUsd)}</span>
@@ -226,7 +225,7 @@ export function UsageSection() {
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       {open ? (
         <TraceView id={open.id} at={open.at} actions={(
-          <button type="button" onClick={() => setOpen(null)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">
+          <button type="button" onClick={() => setOpen(null)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink">
             <ArrowLeft size={13} />{t("trace.back")}
           </button>
         )} />
@@ -247,7 +246,7 @@ export function UsageSection() {
               {list?.roots.map((root) => <RunRow key={root.id} root={root} onOpen={() => setOpen({ id: root.id, at: root.startedAt })} />)}
             </ul>
             {list?.next !== undefined && (
-              <button type="button" onClick={more} className="m-2 rounded-lg px-3 py-1.5 text-[13px] text-accent hover:bg-raised/50">{t("usage.page.more")}</button>
+              <button type="button" onClick={more} className="m-2 rounded-lg px-3 py-1.5 text-[12.5px] text-accent hover:bg-raised/50">{t("usage.page.more")}</button>
             )}
             {untimed && <p className="px-3 pb-3 pt-1 text-[12px] text-ink-tertiary">{t("usage.page.untimedNote")}</p>}
           </section>

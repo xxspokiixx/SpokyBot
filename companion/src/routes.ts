@@ -112,9 +112,6 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
-  // Set me up under a new bot's greeting and the x on its chip: no more than a typed /setup.
-  { method: "POST", path: /^\/api\/bots\/[\w-]+\/setup-request$/ },
-  { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/setup-request$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
@@ -123,9 +120,6 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/overview$/ },
   // Read-only: no settings reachable through it.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/activity$/ },
-  // Names and on/off only. The MCP settings list, which carries commands and
-  // addresses, stays closed.
-  { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
   // Team memory edits are content, not execution policy. The section rides as
   // a query string.
   { method: "GET", path: /^\/api\/team-memory$/ },
@@ -162,7 +156,6 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
 
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
-  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
   // An app row's document is transcript data, scoped to its thread. `rpc` reaches only the app's own MCP
   // server, under the bot's tool selection and approval rules; `context` is bounded text.
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
@@ -193,13 +186,6 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/live\/call\/end$/ },
   { method: "GET", path: /^\/api\/live\/call$/ },
   { method: "PATCH", path: /^\/api\/live\/settings$/ },
-
-  // The phone's own apps as bot tools: it registers, long-polls for jobs, leases and answers them.
-  { method: "PUT", path: /^\/api\/phones\/self$/ },
-  { method: "GET", path: /^\/api\/phones\/self$/ },
-  { method: "DELETE", path: /^\/api\/phones\/self$/ },
-  { method: "GET", path: /^\/api\/phones\/self\/jobs$/ },
-  { method: "POST", path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
 
   // The harness records only the owner's activation; a guest's is answered and
   // dropped.

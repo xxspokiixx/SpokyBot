@@ -238,7 +238,6 @@ const shutdown = async (signal: string): Promise<void> => {
   watcher.stop();
   await mdns.stop().catch(() => {});
   // close() waits for open connections, and an SSE stream never ends on its own.
-  proxy.closeViewers();
   companion.closeAllConnections?.();
   control.closeAllConnections?.();
   managedOrigin?.closeAllConnections?.();

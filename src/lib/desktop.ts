@@ -1,3 +1,23 @@
+/** The phone test shell injects `ombAndroidCaps` into the WebView before page scripts run:
+ * a plain WebView has no Electron preload bridge to report desktop capabilities, so this
+ * one stands in for `window.ogb` and reports the phone's own Linux environment as the
+ * local computer ("This PC"). */
+interface AndroidCapsBridge {
+  platform(): string;
+  capabilitiesJson(): string;
+}
+
+function androidCapabilities(): DesktopCapabilities | null {
+  if (typeof window === "undefined") return null;
+  const bridge = (window as Window & { ombAndroidCaps?: AndroidCapsBridge }).ombAndroidCaps;
+  if (!bridge) return null;
+  try {
+    return JSON.parse(bridge.capabilitiesJson()) as DesktopCapabilities;
+  } catch {
+    return null;
+  }
+}
+
 const browserCapabilities: DesktopCapabilities = {
   host: {
     platform: "other",
@@ -30,6 +50,8 @@ let cached: DesktopCapabilities | null = null;
 let cacheRevision = 0;
 
 export function initialDesktopCapabilities(): DesktopCapabilities {
+  const android = androidCapabilities();
+  if (android) return android;
   const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
@@ -53,6 +75,11 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
 
 export async function loadDesktopCapabilities(): Promise<DesktopCapabilities> {
   if (cached) return cached;
+  const android = androidCapabilities();
+  if (android) {
+    cached = android;
+    return cached;
+  }
   if (!window.ogb?.getCapabilities) return browserCapabilities;
   const revisionAtStart = cacheRevision;
   let loaded: DesktopCapabilities;

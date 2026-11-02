@@ -4,7 +4,7 @@
 //   POST /api/team/my-connections/apps/:slug/connect            → { url }   their own sign-in to the app (a new tab)
 //   DELETE /api/team/my-connections/apps/:slug
 //   POST /api/team/my-connections/mcp/:name/sign-in             → { auth }  their own sign-in to the server (a new tab)
-//   PUT /api/team/my-connections/mcp/:name/key { value, url? }              their own key, never read back
+//   PUT /api/team/my-connections/mcp/:name/key { value }                    their own key, never read back
 //   DELETE /api/team/my-connections/mcp/:name
 // The Admin's Cloud page calls these with a session it opened for the person asking (a User's is a client session).
 // Every one acts on the session's own person only, and none answers with a key, a token or a path of an address.
@@ -29,8 +29,6 @@ export interface TeamConnectionRouteDeps {
   composio: Pick<typeof Composio, "configured" | "connectedServices" | "authorizeService" | "removeService">;
   /** This server's own https address, where a member's MCP sign-in comes back. */
   publicOrigin: string | null;
-  /** The team's rules: an app or server they don't allow can't be connected by anyone. */
-  policy?: { appRefusal(slug: string): string | undefined; mcpRefusal(name: string, url?: string): string | undefined };
   /** An admin's change, for the team's admin activity. */
   record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
 }
@@ -108,8 +106,6 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         return json(res, 409, { error: `${appLabel(slug)} is ${team.name}'s, connected once for everyone by an admin.` });
       }
       if (app[2] && method === "POST") {
-        const refused = deps.policy?.appRefusal(slug);
-        if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
         const access = await deps.host.people.ensureAppsAccess(person, email);
         if (!access) return json(res, 503, { error: "Connected apps aren't available on this Cloud right now. Try again in a minute." });
         try {
@@ -134,10 +130,6 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         return json(res, 409, { error: `${name} is ${team.name}'s, connected once for everyone by an admin.` });
       }
       deps.host.people.remember(person, email);
-      if ((mcp[2] === "/sign-in" || mcp[2] === "/key") && method !== "DELETE") {
-        const refused = deps.policy?.mcpRefusal(name, stored.url);
-        if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
-      }
       if (mcp[2] === "/sign-in" && method === "POST") {
         const origin = mcpCallbackOrigin(provesSameOrigin(req) ? requestOrigin(req) : null, [deps.publicOrigin]);
         try {
@@ -154,11 +146,8 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         const body = await readBody(req, 4096);
         const value = typeof body?.value === "string" ? body.value.trim() : "";
         if (value.length < 8 || value.length > 512 || !/^[\x21-\x7e]+(?: [\x21-\x7e]+)?$/.test(value)) return json(res, 400, { error: "Paste the key alone." });
-        if (body?.url !== undefined && (typeof body.url !== "string" || !body.url)) return json(res, 400, { error: "Send the MCP server address as text." });
-        const current = server(name);
-        if (!current || !isRemoteMcpServer(current) || (body?.url !== undefined && current.url !== body.url)) return json(res, 409, { error: "The MCP server address changed. Reload the server and try again." });
-        const headerKeys = Object.keys(current.headers);
-        deps.host.people.putKey(person, email, name, { url: current.url, ...personKeyHeader(headerKeys, value) });
+        const headerKeys = Object.keys(stored.headers);
+        deps.host.people.putKey(person, email, name, { url: stored.url, ...personKeyHeader(headerKeys, value) });
         return json(res, 200, { ok: true });
       }
       if (!mcp[2] && method === "DELETE") {

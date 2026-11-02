@@ -13,7 +13,7 @@ const RETIRED: ReadonlyArray<readonly [string, RegExp, string]> = [
   ["OpenMausBot Cloud", /OpenMausBot Cloud/i, "MausBot Cloud"],
   ["MausBot Pro", /MausBot Pro\b/, "MausBot Cloud"],
   // \b before "_" fails, so environment names such as OMB_PUBLIC_IPV4 pass.
-  ["OMB", /\bOMB\b/, "MausBot"],
+  ["OMB", /\bOMB\b/, "OpenMausBot"],
   ["Cloud box", /Cloud box/i, "cloud desktop"],
   ["Hosted desktop", /Hosted desktop/i, "cloud desktop"],
   ["Cloud VM", /Cloud VM/i, "cloud desktop"],
@@ -27,8 +27,7 @@ const RETIRED: ReadonlyArray<readonly [string, RegExp, string]> = [
   ["T3", /\bT3\b/, "no other app's name"],
 ];
 
-// Boat makes the cloud desktops and is credited where they appear ("from Boat", "by Boat"); it never names one desktop.
-const OWN_KEY = /Boat (?:API key|account|key|token|plan|provider|credentials|setup|is not configured|is not connected|is a paid service)|boat\.dev|\b(?:Connect|Configure) Boat\b|\b(?:from|by) Boat\b/g;
+const OWN_KEY = /Boat (?:API key|account|key|token|plan|provider|credentials|setup|is not configured|is not connected|is a paid service)|boat\.dev|\b(?:Connect|Configure) Boat\b/g;
 const BOAT = /\bBoats?\b/;
 
 function retiredIn(text: string, boat: RegExp = BOAT): string[] {
@@ -40,11 +39,9 @@ function retiredIn(text: string, boat: RegExp = BOAT): string[] {
 const PENDING_KEY_PREFIXES: string[] = [];
 const EN_ALLOWED: Record<string, string> = {
   "botAccess.cloud.boat": "the own-key provider picker names its two providers, Boat and a VPS",
+  "botAccess.cloud.hostedDescription": "the own-key provider picker names its two providers, Boat and a VPS",
   "botAccess.cloud.hostedBackendDescription": "the own-key provider picker names its two providers, Boat and a VPS",
   "botAccess.cloud.vpsAutoDescription": "the own-key provider picker's VPS line names its Cloud choice",
-  "boatOffer.title": "Boat's credit offer names Boat, whose credit and plan it is",
-  "boatOffer.body": "Boat's credit offer names Boat, whose credit and plan it is",
-  "boatOffer.get": "Boat's credit offer names Boat, whose credit and plan it is",
 };
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -57,7 +54,6 @@ const isSource = (name: string) => /\.(?:ts|tsx|mjs|cjs|js)$/.test(name) && !/\.
 const ALLOWED: ReadonlyArray<{ file: string; snippet?: string; why: string }> = [
   { file: "shared/credential-request.ts", snippet: "when Boat is selected", why: "the card that asks for a person's own Boat key" },
   { file: "server/boat-create-idempotency.ts", snippet: "unnamed Boat", why: "own-key repair: boat.dev's own name for a machine" },
-  { file: "src/lib/boat-offer.ts", snippet: "MausBot introduced me", why: "the email a person sends Boat to claim its credit" },
   { file: "server/workspace-backup.ts", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
   { file: "electron/company-backups.mjs", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
 ];
@@ -153,6 +149,7 @@ describe("one name per thing", () => {
   it("copy that points at a control names it exactly as the control is labelled", () => {
     const e = en as Record<string, string>;
     const source = (file: string) => readFileSync(join(ROOT, file), "utf8");
+    const settings = `Settings → ${e["settings.section.cloudAccount"]}`;
     const myCloud = /CLOUD_HOME_NAME = "([^"]+)"/.exec(source("electron/cloud-home.mjs"))?.[1];
     const thisComputer = /id: "workspace-local", label: "([^"]+)"/.exec(source("electron/environments.cjs"))?.[1];
     const serverMenuLocal = /\{ label: "([^"]+)", type: "radio", checked: !active/.exec(source("electron/menu.mjs"))?.[1];
@@ -160,6 +157,11 @@ describe("one name per thing", () => {
     const pointers: Array<[string, string[]]> = [
       ["cloudHome.connectHelp", [e["place.local"]!]],
       ["cloudPhone.step1", [myCloud!]],
+      ["lending.status.connectFirst", [e["cloudHome.connect"]!]],
+      ["computer.worksOnHintCloudHome", [e["lending.title.computer"]!, settings]],
+      ["lending.cloudSide.empty", [e["lending.title.computer"]!, settings]],
+      ["browser.passkey.lendPc", [e["lending.title.pc"]!, settings]],
+      ["lending.explain", [e["lending.more"]!]],
       ["cloudAccount.onCloudSignIn", [e["cloudAccount.signInAgain"]!]],
       ["cloudAccount.storageFailed", [e["cloudAccount.signOut"]!]],
       ["cloudAccount.codeExpired", [e["cloudAccount.signIn"]!]],
@@ -181,7 +183,6 @@ describe("one name per thing", () => {
       "Sign in to MausBot Cloud", "Pro active · verified by MausBot Cloud", "Restart OpenMausBot", "locked by another OpenMausBot process",
       "set OMB_PUBLIC_IPV4", "Open My Cloud", "Open the Cloud", "Choose Cloud desktop to wake", "Auto, Cloud desktop or Browser",
       "Included with your Cloud plan", "Add a Boat API key in Settings → API keys", "Connect Boat", "Check boat.dev",
-      "Bots here can get their own cloud desktops from Boat, a paid service", "Cloud desktops by Boat",
       "Local VM", "Open your Plan page",
     ]) expect(retiredIn(good), good).toEqual([]);
   });

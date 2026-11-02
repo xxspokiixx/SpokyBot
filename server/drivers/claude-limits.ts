@@ -1,5 +1,5 @@
 import { hostTimeZone } from "../turn-clock.ts";
-import { engineFailureMessage, limitResetTime, type EngineFailureKind } from "./engine-errors.ts";
+import { engineFailureMessage, type EngineFailureKind } from "./engine-errors.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 
 export interface ClaudeLimit {
@@ -57,14 +57,6 @@ export function claudeEngineReset(limit: ClaudeLimit | null | undefined): { limi
   return { limitResetsAt: limit.resetsAt * 1000 };
 }
 
-/** The runtime error's facts for a usage limit: what it refuses, and when that resets when Claude said. A model's own
- * window resets that model alone; extra usage credits name only the billing period's end, which is no countdown. */
-export function claudeLimitFacts(limit: ClaudeLimit | null | undefined): { limit: "engine" | "model" | "credits"; limitResetsAt?: number } {
-  if (limit?.credits) return { limit: "credits" };
-  if (modelWindow(limit?.window)) return { limit: "model", ...(limit?.resetsAt ? { limitResetsAt: limit.resetsAt * 1000 } : {}) };
-  return { limit: "engine", ...claudeEngineReset(limit) };
-}
-
 export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now = Date.now(), timeZone = hostTimeZone()): string {
   if (limit?.credits) {
     return "Claude refused this turn because this model runs on extra usage for your account, and those credits are used up. " +
@@ -73,20 +65,16 @@ export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now
   const name = limit?.window && Object.hasOwn(CLAUDE_LIMIT_NAMES, limit.window) ? CLAUDE_LIMIT_NAMES[limit.window] : "usage limit";
   const meanwhile = modelWindow(limit?.window) ? "choose another model for this bot" : "switch this bot to another AI or Claude account";
   if (limit?.resetsAt && limit.resetsAt * 1000 > now) {
-    return `This Claude account has reached its ${name}, which resets ${limitResetTime(limit.resetsAt * 1000, timeZone)}. Until then, ${meanwhile}.`;
+    let resets: string;
+    try {
+      resets = `${new Date(limit.resetsAt * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`;
+    } catch {
+      resets = `${new Date(limit.resetsAt * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    }
+    return `This Claude account has reached its ${name}, which resets ${resets}. Until then, ${meanwhile}.`;
   }
   const words = said?.trim().replace(/[.\s]+$/, "");
   return `This Claude account has reached its ${name}${words ? ` (Claude says: "${words}")` : ""}. For now, ${meanwhile}.`;
-}
-
-/** The API refusing a model newer than the installed CLI, relayed as an api-error frame ("Claude
- * Code 2.1.268 does not support this model; version 2.1.280 or newer is required…"); it names no model. */
-export function claudeVersionTooOld(
-  frame: { error?: unknown; is_api_error_message?: unknown },
-  text: string,
-): boolean {
-  if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
-  return /\bClaude Code v?\d+(?:\.\d+)+ does not support this model\b/i.test(text);
 }
 
 /** Claude Code 2.1.295's api-error kinds (the assistant frame's `error`) that say the cause outright. */

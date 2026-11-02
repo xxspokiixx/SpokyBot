@@ -445,8 +445,7 @@ the six-digit code from another desktop app, not a self-hosted server's
 Server menu to switch back until the server is updated.
 
 After pairing, **Share this computer?** offers **Choose access** or **Not now**.
-Nothing is shared automatically, unless you make the server your bots' home
-(below). In **Settings → Servers → Computer
+Nothing is shared automatically. In **Settings → Servers → Computer
 access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
 dialog. They can access information outside the selected folders. Share only
@@ -455,36 +454,12 @@ A folder read takes a file of up to 2 MiB and a write at most 256 KiB;
 transfers do not follow links or delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
 
-**Make the server your bots' home.** Bots work together only within one
-place: bots on this computer can't reach bots on the server. To bring them
-together, right-click the server's circle at the window's left edge and choose
-**Make <server> my home**. The app moves this computer's bots, chats, memory,
-skills, logins, apps and keys, and routines there the way it moves them to My
-Cloud: everything is copied while you keep working, then at a quiet moment this
-computer stops for good, the rest goes, both sides are checked, and the server
-switches on what was on here, so no routine ever runs twice. The account area
-says how it goes, and after a day of failing it says the move needs you, with
-Try again. Afterwards the server is what the window opens, and this computer
-works for it by itself as it does for My Cloud: no access dialog, only the
-menu bar's item with Pause.
-
-Until then, a bot that asks for a teammate living in your other place says where
-that teammate lives and how to bring them together, instead of only that it
-can't reach it: the app tells each place of yours the names of the bots your
-other places have, and nothing more.
-
-This is offered only for a server that is yours alone: you paired with it as an
-admin, and its sign-in list names no members and no other admin (Settings →
-People). A server other people sign in to keeps the explicit **Share this
-computer?** flow above, and its bots stay where they are. Both sides need this
-release: an older server says to update it first.
-
-To move by hand instead, export a backup from this computer in **Settings →
-Backups → Export backup**, then import it on the server in **Settings → Backups
-→ Import backup**. API keys, engine sign-ins and paired devices stay where they
-are on both sides; routines arrive paused. An older desktop app's **Copy this
-computer here** is answered with "Update OpenMausBot to bring your bots here by
-itself."
+**Bring this computer's bots and chats.** Export a backup from this computer in
+**Settings → Backups → Export backup**, then import it on the server in
+**Settings → Backups → Import backup**. API keys, engine sign-ins and paired
+devices stay where they are on both sides; routines arrive paused. An older
+desktop app's **Copy this computer here** is answered with "Update OpenMausBot
+to bring your bots here by itself."
 
 Only conversations you start yourself on that server can use what you share;
 other people's bots, routines and webhooks there cannot. Keys and sign-in
@@ -745,13 +720,13 @@ alone.
   recorded in the admin activity log.
 - **Departments.** A department (sidebar section) is listed to a user only when it
   holds a bot or room they can see.
-- **Bots working together.** A bot reaches any teammate, in any department
-  (`coordinate_bots`, its roster and `list_bots`, @mentions, a Chief's team),
-  but only when exactly the same people can see both: otherwise one bot's
-  thread could carry the other's answers to people who cannot see it. Bots nobody restricted all
+- **Bots working together.** A bot reaches a teammate (`coordinate_bots`,
+  its roster and `list_bots`, @mentions, a Chief's team) only when exactly
+  the same people can see both: otherwise one bot's thread could carry the
+  other's answers to people who cannot see it. Bots nobody restricted all
   share "everyone", so nothing changes until an admin restricts one. A bot a
   Chief creates (directly, or in a reviewed team setup) gets exactly the
-  Chief's audience, and a copy of the Chief's connected apps.
+  Chief's audience.
 - **Who sees everything.** Admin sessions, the owner on this machine, and a
   session-less local service (the Slack worker under `service` trust) see
   every bot. A pairing-code device with no email sees only bots everyone
@@ -898,96 +873,20 @@ current month to date.
 
 ### When an engine runs out
 
-When a turn ends on a usage limit (a subscription's 5-hour or weekly limit,
-one model's own weekly window, a model's extra usage credits), the bot carries
-on by itself with another AI the person has set up until that limit resets,
-and the person hears it once for that stretch of the limit, as a notification:
-"Codex reached its limit until 14:00, so Kai is using Claude meanwhile." With
-no AI to carry on, it says the bot waits instead. Nobody is asked.
+When a person's turn ends on its engine's quota or usage limit (a
+subscription's weekly limit, an API key out of credit), the conversation gets
+one card offering up to three other engines that can take over, and "Not
+now". An engine is offered only if it can run a turn now (installed, signed
+in, allowed by your organisation), has the tools and the working folder the
+current one has, and can run the conversation's approval level as it stands.
+Nothing changes until the person picks one: that conversation alone moves to
+the engine's default model, the bot's own model and its other conversations
+stay where they are, and their message is sent again. Turns nobody typed
+(routines, webhooks, a teammate's work) get no card.
 
-- **Which AI.** For one model's own limit, the same AI's default model first;
-  then the backups chosen for the bot or in Automatic recovery; then the AI a
-  new bot would get. Only an AI that can run a turn now (installed, signed in,
-  allowed by your organisation, not limited itself) with the tools and the
-  working folder the current one has, and one the conversation's approval level
-  can move to without asking (Auto-accept edits stays on an AI that has it).
-  Never another sign-in to the same subscription, which would rotate accounts
-  around the provider's limit; a pay-per-use API key on the same AI is fine.
-- **What moves.** The person's message that met the limit is sent again on that
-  AI, in that conversation alone; the bot's own model and its other
-  conversations stay where they are. While the limit lasts, every new turn and
-  conversation of every bot that uses the limited AI (a person's, a routine's,
-  a webhook's) goes straight to that AI without asking the limited one first,
-  and a routine run the limit stopped starts again on it.
-- **How long.** The limited AI is held until the reset it named, or for an hour
-  when it named none or named one already past; the next turn after that hour
-  checks it again. One model's own limit holds that model alone, and for at
-  most six hours before it is tried again. The holds are saved
-  (`limit-holds.json`, `limit-takeover-holds.json`), so a restart, an update or
-  a sleep the Cloud was stopped for keeps them. A conversation that moved goes
-  back once its AI's limit has reset, with one line saying so.
-
-An engine that posts the provider's raw error as its whole reply instead of
-failing the turn (omp's ACP mode sends `429 {"type":"error",…} retry-after-ms=…`
-that way) has that turn count as failed, not as a reply, and the person reads
-it in plain words. It is a usage limit when its words say so, or when it is a
-429 whose wait runs past two minutes, and is then held until that wait ends;
-a shorter wait is a rate limit to try again after. A reply that only quotes
-such an error among other words stays a reply.
-
-This is on by default. Start the server with `OMB_QUOTA_SWITCH=0` to switch it
-off: then only the backups Automatic recovery names take over, and the
-notification says the bot waits. Any other value, or none, leaves it on. It
-has no setting in `config.json` yet.
-
-### When an engine is signed out
-
-When a turn stops because its AI is signed out (its sign-in expired or was
-revoked), the person hears it once, in that conversation and as a
-notification: "Claude is signed out on the Cloud. Sign in again in Settings →
-AI to keep using it.", with a Sign in button that opens those settings. Each
-later refused turn still shows that it failed, with no second notice; its
-Chief gets one incident, not one a turn. An account out of credit, which some
-engines stop the same way, is no sign-out.
-
-The backups a turn its AI never started would get carry on meanwhile (the
-bot's own backup AIs, or else the app-wide backup while Automatic recovery is
-on), by the same rules as a usage limit (another sign-in to the same AI is fine
-here, since nothing is rotated around a limit): the person's message is sent
-again there, every new turn and conversation starts there, and a conversation
-that moved goes back once the AI is signed in again in the app, or a turn on it
-works. No AI is picked for a sign-out by itself, so with no such backup nothing
-moves. A new turn tries the signed-out AI again an hour after its last refusal,
-unless its status still says signed out.
-
-### Which engine a new bot uses
-
-A saved default model (Settings, `openmausbot setup`, or the New Bot
-defaults) always wins. Without one, new bots get the first engine that can
-run, in this order: a Claude account, a ChatGPT plan, Gemini, Grok, then the
-rest in the order of `instances`; OpenCode running only Zen's free no-login
-models comes last.
-
-The server picks at once at start, then sends the person's own engines one
-tiny test message each in the background ("Reply with the single word OK",
-90 seconds at most), best first, stopping at the first that answers. One
-miss alone doesn't move the default: that engine is tried again two minutes
-later. Two misses in a row move the default to the best engine that
-answered; the engine is tried again ten minutes later, then once an hour.
-An engine that already answered (for example one the welcome checked) can
-take the default after a single miss. An organization's models and the
-trial credit are never tested this way. Results are kept for a day per
-engine and sign-in in `<data dir>/providers/ai-checks.json`, so a restart
-doesn't send them again. On a later start, where the engines are read one at
-a time, nothing is tested or moved until that read ends: never on the status
-the last run recorded.
-
-The first bot the app made follows the default until someone writes to it
-or picks a model for it or one of its conversations: it moves only after a
-test result, only to an engine that answered, and only away from one whose
-latest test missed or that is signed out or turned off, or up to a better
-one. A status read that timed out moves nothing. No other bot ever moves. To stop the
-background test messages, start the server with `OMB_AI_CHECKS=0`.
+The offer is on by default. To switch it off, start the server with
+`OMB_QUOTA_SWITCH=0`; any other value, or none, leaves it on. It has no
+setting in `config.json` yet.
 
 ### The decision log
 
@@ -1234,35 +1133,12 @@ The note needs an engine that accepts a message in the middle of a turn
 only the stop, and only if you set it. The note and the stop do not cover bots
 on API models or turns in a room yet.
 
-Bots on API models (xAI, Mistral, Groq, Greenference, Cerebras, Meta, MiniMax or an
+Bots on API models (xAI, Mistral, Groq, Cerebras, Meta, MiniMax or an
 OpenAI-compatible endpoint) end a turn as failed when a tool call failed and
 the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 (0-5, default 0) and such a bot is sent back to re-run the failed call up to
 that many times first; the turn counts as done only if the tools it runs after
 that succeed. A tool call that was denied is never sent back.
-
-## A turn that goes silent
-
-The server stops a turn that has sent it nothing for 20 minutes
-(`OMB_TURN_STALL_MS`) and says why in the chat. Engines report a tool only
-when it starts and when it ends, so while one of the turn's tools is still
-running the turn may stay silent for up to `OMB_TOOL_STALL_MS` (default 2
-hours). Any event from the turn starts the silence over, and time spent waiting
-on a person or a computer never counts. Either way the turn stops with "no
-activity for N minutes".
-
-Both take whole milliseconds. `OMB_TURN_STALL_MS` is never below 60000 (one
-minute) and `OMB_TOOL_STALL_MS` never below `OMB_TURN_STALL_MS`. A value that
-is not a positive finite number (empty, `65m`, `0`, a negative number,
-`Infinity`, `1e309`) leaves the default. Set them in the server's environment
-and restart it; the restart stops every running turn.
-
-A turn in a room also has a limit of its own, `rooms.turnTimeoutMinutes` in
-`config.json` (default 5 minutes, 1-1440, which one conversation can replace).
-It stops a member's turn that shows no progress for that long. While one of the
-turn's tools runs, the turn may show nothing for up to 60 minutes (the longest
-an MCP call can be set to take) or the room's limit if that is longer. These two
-settings do not change it.
 
 ## Updating
 

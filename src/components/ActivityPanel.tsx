@@ -11,7 +11,6 @@ import {
   type ChipTone,
 } from "@/lib/activity";
 import { listenLiveFrames } from "@/lib/live-events";
-import { useActivityFocus } from "@/lib/activity-focus";
 import { t } from "@/lib/i18n";
 
 const LIMIT = 300;
@@ -25,7 +24,7 @@ const TONE_CLASS: Record<ChipTone, string> = {
 
 export function ActivityPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
-  const { dragProps } = useCaptionChrome();
+  const { padClass, dragProps } = useCaptionChrome();
   const [rows, setRows] = useState<ActivityRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadAbort = useRef<AbortController | null>(null);
@@ -56,8 +55,10 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
     return () => loadAbort.current?.abort();
   }, [load]);
 
-  const threadKey = [bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)].join("\n");
-  const threadIds = useMemo(() => new Set(threadKey.split("\n")), [threadKey]);
+  const threadIds = useMemo(
+    () => new Set([bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)]),
+    [bot.threadId, bot.tasks],
+  );
   useEffect(() => {
     let settle: ReturnType<typeof setTimeout> | null = null;
     const stopLive = listenLiveFrames({
@@ -85,12 +86,6 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
   }, [threadIds, load]);
 
   const days = useMemo(() => (rows ? groupActivityByDay(rows, new Date()) : []), [rows]);
-  const focus = useActivityFocus(bot.id);
-  const list = useRef<HTMLDivElement>(null);
-  const focused = (row: ActivityRow) => Boolean(focus?.turnId && row.turnId === focus.turnId && row.threadId === focus.threadId);
-  useEffect(() => {
-    list.current?.querySelector("[data-activity-focused]")?.scrollIntoView({ block: "nearest" });
-  }, [rows, focus]);
 
   const jump = (row: ActivityRow) => {
     if (row.threadId !== bot.threadId && threadIds.has(row.threadId)) {
@@ -100,7 +95,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
 
   return (
     <aside aria-label={t("activity.panel.aria", { name: bot.name })} className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30">
-      <div {...dragProps} className="flex items-center justify-between px-4 py-3">
+      <div {...dragProps} className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <ListChecks size={16} className="text-ink-secondary" /> {t("activity.panel.title")}
         </span>
@@ -128,7 +123,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
         {t("activity.panel.subtitle", { name: bot.name })}
       </p>
 
-      <div ref={list} className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {error && <div className="px-4 py-3 text-[13px] text-danger">{t("activity.panel.error", { message: error })}</div>}
         {rows && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-[13px] text-ink-secondary">
@@ -142,7 +137,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
               {day.label}
             </h3>
             {day.rows.map((row) => (
-              <ActivityLine key={`${row.threadId}:${row.at}:${row.tool}:${row.requestId ?? ""}`} row={row} current={row.threadId === bot.threadId} focused={focused(row)} onJump={() => jump(row)} />
+              <ActivityLine key={`${row.threadId}:${row.at}:${row.tool}:${row.requestId ?? ""}`} row={row} current={row.threadId === bot.threadId} onJump={() => jump(row)} />
             ))}
           </section>
         ))}
@@ -151,15 +146,13 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
   );
 }
 
-function ActivityLine({ row, current, focused, onJump }: { row: ActivityRow; current: boolean; focused: boolean; onJump: () => void }) {
+function ActivityLine({ row, current, onJump }: { row: ActivityRow; current: boolean; onJump: () => void }) {
   const chip = outcomeChip(row.outcome);
   return (
     <button
       type="button"
       onClick={onJump}
-      aria-current={focused || undefined}
-      data-activity-focused={focused ? "" : undefined}
-      className={cn("flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-left hover:bg-raised/60", focused && "bg-raised/60")}
+      className="flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-left hover:bg-raised/60"
       title={current ? row.tool : t("activity.panel.openOtherTask", { tool: row.tool })}
     >
       <span className="mt-[2px] shrink-0 tabular-nums text-[11px] text-ink-secondary">{formatActivityTime(row.at)}</span>
@@ -173,7 +166,7 @@ function ActivityLine({ row, current, focused, onJump }: { row: ActivityRow; cur
           <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-secondary">{row.summary}</span>
         )}
       </span>
-      <span className={cn("mt-[2px] shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium", TONE_CLASS[chip.tone])}>
+      <span className={cn("mt-[2px] shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium", TONE_CLASS[chip.tone])}>
         {chip.text}
       </span>
     </button>

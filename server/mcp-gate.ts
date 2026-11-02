@@ -14,7 +14,6 @@ import { fitToolList } from "./mcp-tool-schema.ts";
 import { DEFAULT_RESULT_BUDGET, type HeldResult, trimResultText, trimStructured } from "./mcp-trim.ts";
 import { killCliTree } from "./procs.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
-import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 
 type Json = Record<string, unknown>;
 
@@ -45,7 +44,6 @@ const SPILL_MAX_AGE_MS = 24 * 60 * 60_000;
 const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
 const DIRECTORY = gateEnv.OMB_GATE_DIRECTORY === "1";
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
-const TOOL_LIMIT = toolLimitFromEnv(process.env);
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
@@ -288,13 +286,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       || (params.arguments !== undefined && !isRecord(params.arguments))) {
       return rejectRequest(message.id, -32602, "Invalid tool call");
     }
-    // Security: should a bridged agents server answer here, use_tool is also judged by the tool it names. Each target
-    // is judged with its own arguments, which say which action of an agents action tool runs.
-    const inner = isRecord(params.arguments) ? params.arguments.arguments : undefined;
-    const called = callTarget(params.name, params.arguments);
-    const targets: Array<[string | undefined, unknown]> = [[called, called === params.name ? params.arguments : inner],
-      ...(NAME === "agents" ? [[bridgedCallTarget(params.name, params.arguments), inner] as [string | undefined, unknown]] : [])];
-    if (targets.some(([target, args]) => target !== undefined && !allowsTool(scope, { kind: "mcp", server: NAME, name: target }, args ?? {}))) {
+    // Security: should a bridged agents server answer here, use_tool is also judged by the tool it names.
+    const targets = [callTarget(params.name, params.arguments), ...(NAME === "agents" ? [bridgedCallTarget(params.name, params.arguments)] : [])];
+    if (targets.some((target) => target !== undefined && !allowsTool(scope, { kind: "mcp", server: NAME, name: target }))) {
       return rejectRequest(message.id, -32602, "Tool selection excludes this tool. Check the bot's Access settings.");
     }
   }
@@ -375,9 +369,6 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   }
   if (BUDGET > 0 && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools) && result.nextCursor === undefined) {
     result.tools = [...result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME), QUERY_TOOL];
-  }
-  if (TOOL_LIMIT !== undefined && request?.kind === "list" && message.error === undefined && isRecord(result)) {
-    message.result = capToolListResult(result, TOOL_LIMIT, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
   if (request?.kind === "call" && observer && message.error === undefined) observer.returned(request.params, result);
   if (request?.kind === "call" && request.trim && isRecord(result)) {

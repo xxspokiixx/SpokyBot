@@ -1,7 +1,6 @@
 // Inline rows and URLs are refused: rows always come from the card's SQL and bind as the dataset "table".
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { None, logger, parse, View } from "vega";
-import { expressionInterpreter } from "vega-interpreter";
 import { compile, type TopLevelSpec } from "vega-lite";
 import vegaLiteSchema from "vega-lite/vega-lite-schema.json" with { type: "json" };
 
@@ -69,7 +68,7 @@ export const validateVegaLite: VegaLiteValidator = async (input) => {
 
   try {
     const { spec: runtime } = compile(spec as unknown as TopLevelSpec, { logger: silent });
-    const view = new View(parse(runtime, undefined, { ast: true }), { renderer: "none", expr: expressionInterpreter }).logger(silent);
+    const view = new View(parse(runtime), { renderer: "none" }).logger(silent);
     try {
       await view.runAsync();
     } finally {

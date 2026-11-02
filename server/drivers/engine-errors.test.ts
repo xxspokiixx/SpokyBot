@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { engineFailureKind, engineFailureMessage, errorReplyFailure, httpStatusOf, plainFailureMessage, providerReason, stopCause } from "./engine-errors.ts";
+import { engineFailureKind, engineFailureMessage, httpStatusOf, plainFailureMessage, providerReason, stopCause } from "./engine-errors.ts";
 import { classifyError } from "./retry.ts";
 
 const reason = (text: string) => classifyError({ text }).reason;
@@ -105,68 +105,6 @@ describe("a provider refusing a tool's schema", () => {
   });
 });
 
-describe("errorReplyFailure", () => {
-  const NOW = Date.parse("2026-10-27T06:12:46Z");
-  const anthropic = (status: number, type: string, message: string) =>
-    `${status} {"type":"error","error":{"type":"${type}","message":"${message}"},"request_id":"req_011CgY35mSFzqEa1NBU5nq8i"}`;
-
-  it("names a usage limit and its reset from a 429's retry-after, in the zone given", () => {
-    const reply = `${anthropic(429, "rate_limit_error", "[1308][Usage limit reached for 5 hour. Your limit will reset at 2026-10-27 15:22:19][2026]")} retry-after-ms=4171000`;
-    expect(errorReplyFailure("omp", reply, NOW, "UTC")).toEqual({
-      message: 'This omp account has reached its usage limit (omp says: "[1308][Usage limit reached for 5 hour"), which resets Oct 27, 7:22 AM (UTC). Until then, switch this bot to another AI.',
-      stopReason: "quota",
-      limit: "engine",
-      limitResetsAt: NOW + 4_171_000,
-    });
-  });
-
-  it("reads a 429 without a wait by its words, and an OpenAI-style body too", () => {
-    const limit = errorReplyFailure("omp", anthropic(429, "rate_limit_error", "You've reached your 5-hour usage limit."), NOW);
-    expect(limit).toMatchObject({ stopReason: "quota", limit: "engine" });
-    expect(limit).not.toHaveProperty("limitResetsAt");
-    expect(errorReplyFailure("omp", '429 {"error":{"message":"Rate limit reached for requests","type":"requests","code":"rate_limit_exceeded"}}'))
-      .toEqual({ message: 'omp hit a rate limit (HTTP 429; omp says: "Rate limit reached for requests"). Wait a minute, then run it again.', stopReason: "rpc_error" });
-    expect(errorReplyFailure("omp", '  529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n'))
-      .toEqual({ message: "omp is overloaded right now (HTTP 529). This is usually temporary, so try again in a few minutes.", stopReason: "rpc_error" });
-  });
-
-  it("keeps a 429 whose wait an engine retries on its own a rate limit, and reads a longer one as a usage limit", () => {
-    const perMinute = anthropic(429, "rate_limit_error", "This request would exceed your organization's rate limit of 30,000 input tokens per minute.");
-    const rateLimit = { message: `omp hit a rate limit (HTTP 429; omp says: "This request would exceed your organization's rate limit of 30,000 input tokens per minute"). Wait a minute, then run it again.`, stopReason: "rpc_error" };
-    expect(errorReplyFailure("omp", `${perMinute} retry-after-ms=20000`, NOW)).toEqual(rateLimit);
-    expect(errorReplyFailure("omp", `${perMinute} retry-after-ms=120000`, NOW)).toEqual(rateLimit);
-    expect(errorReplyFailure("omp", `${perMinute} retry-after-ms=120001`, NOW)).toMatchObject({ stopReason: "quota", limit: "engine", limitResetsAt: NOW + 120_001 });
-  });
-
-  it("never reads another status's wait as a usage limit", () => {
-    expect(errorReplyFailure("omp", `${anthropic(529, "overloaded_error", "Overloaded")} retry-after-ms=300000`, NOW))
-      .toEqual({ message: "omp is overloaded right now (HTTP 529). This is usually temporary, so try again in a few minutes.", stopReason: "rpc_error" });
-  });
-
-  it("asks for the person's setup on an account out of credits, as the same failure thrown does, whatever its wait", () => {
-    const outOfCredits = {
-      message: 'Your omp account is out of credits (omp says: "Your credit balance is too low to access the Anthropic API"). Add credits with omp, then run it again.',
-      stopReason: "auth_required",
-      setup: true,
-    };
-    expect(errorReplyFailure("omp", anthropic(402, "billing_error", "Your credit balance is too low to access the Anthropic API."), NOW)).toEqual(outOfCredits);
-    expect(errorReplyFailure("omp", `${anthropic(429, "billing_error", "Your credit balance is too low to access the Anthropic API.")} retry-after-ms=300000`, NOW))
-      .toEqual(outOfCredits);
-  });
-
-  it("leaves any other text a reply: an error quoted in words, a success status, a body that is no error", () => {
-    for (const text of [
-      `Here is what came back: ${anthropic(403, "permission_error", "OAuth authentication is currently not allowed for this organization.")}`,
-      `${anthropic(403, "permission_error", "refused")} and then I stopped`,
-      '200 {"type":"error","error":{"type":"x","message":"y"}}',
-      '403 {"type":"message","content":[]}',
-      '403 {"error":"refused"}',
-      "403 {not json}",
-      `${anthropic(429, "rate_limit_error", "slow down")} retry-after-ms=soon`,
-    ]) expect(errorReplyFailure("omp", text), text).toBeNull();
-  });
-});
-
 describe("stopCause", () => {
   it("never lets a bare stop token stand alone as the cause, and keeps the token so its class still reads", () => {
     for (const token of ["stop_sequence", "api_error", "rpc_error", "error"]) {
@@ -176,43 +114,5 @@ describe("stopCause", () => {
     expect(stopCause("provider crashed")).toBe("provider crashed");
     expect(stopCause("  ")).toBeUndefined();
     expect(stopCause(null)).toBeUndefined();
-  });
-
-  it("says in plain words what an ACP stop reason that names its cause means, with the advice that fits it", () => {
-    // no cause carries another reason's actions whole: the advice is per reason, not one shared line
-    const advice: Record<string, RegExp[]> = {
-      refusal: [/again|retry/, /reword/, /switch/],
-      max_tokens: [/continue/, /shorter/],
-      max_turn_requests: [/carry on/, /split/],
-    };
-    for (const [token, own] of Object.entries(advice)) {
-      const cause = stopCause(token)!;
-      expect(cause, token).toContain(`(stop reason: ${token})`);
-      for (const action of own) expect(cause, `${token} advises ${action}`).toMatch(action);
-      for (const [other, others] of Object.entries(advice)) {
-        if (other === token) continue;
-        expect(others.some((action) => !action.test(cause)), `${token} does not read as ${other}`).toBe(true);
-      }
-    }
-    for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
-      const cause = stopCause(token)!;
-      expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
-      expect(engineFailureKind(cause)).toBeNull();
-    }
-    expect(stopCause("constructor")).toBe("The engine stopped without saying why (stop reason: constructor).");
-  });
-
-  it("names the AI when the caller knows it, and still classifies like the bare token", () => {
-    expect(stopCause("refusal")).toMatch(/^The AI refused\b/);
-    expect(stopCause("refusal", "Gemini")).toMatch(/^Gemini refused to go on with this request \(stop reason: refusal\)\./);
-    expect(stopCause("max_tokens", "OpenCode")).toMatch(/^OpenCode's reply reached its maximum length/);
-    expect(stopCause("refusal", "  ")).toMatch(/^The AI refused\b/);
-    for (const provider of ["Gemini", "Qwen", "OpenCode", "Cursor", "Grok", "DeepSeek", "Cline"]) {
-      for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
-        const cause = stopCause(token, provider)!;
-        expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
-        expect(engineFailureKind(cause)).toBeNull();
-      }
-    }
   });
 });

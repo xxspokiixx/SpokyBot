@@ -371,7 +371,6 @@ const support: AcpSupport = {
     "_x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
     "x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
   },
-  askTool: "ask_user_question",
   displayName: "Grok",
   images: true,
   acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
@@ -428,7 +427,7 @@ const support: AcpSupport = {
       const available = new Set([
         ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
         ...(turn.integrations?.browser ? ["browser"] : []), ...(turn.integrations?.localComputer ? ["computer"] : []),
-        ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.highlevel ? ["highlevel"] : []), ...(turn.integrations?.device ? ["device"] : []),
+        ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.highlevel ? ["highlevel"] : []),
         ...Object.keys(turn.integrations?.custom ?? {}),
       ].filter((name) => canUseMcpServer(turn.toolScope, name)));
       const deadline = Date.now() + 10_000;
@@ -453,10 +452,13 @@ const support: AcpSupport = {
         await delay(50);
       }
     }
-    // Repeating set_model can rebuild the harness, dropping its MCP catalog, or reject a valid resumed profile.
-    if (!turn.model || currentModelId === turn.model) return;
+    if (!turn.model) return;
     if (narrowsNativeTools(turn.toolScope)) {
-      throw new Error("Grok could not confirm the selected model without replacing its tool profile. Start a new conversation or choose a model with a supported Grok profile. No prompt was sent.");
+      if (currentModelId !== turn.model) {
+        throw new Error("Grok could not confirm the selected model without replacing its tool profile. Start a new conversation or choose a model with a supported Grok profile. No prompt was sent.");
+      }
+        // Repeating set_model can rebuild the harness or reject a valid resumed profile.
+      return;
     }
     try {
       await request("session/set_model", { sessionId, modelId: turn.model });
@@ -487,7 +489,7 @@ const support: AcpSupport = {
     }
   },
 
-  pickAuthMethod: (methods) => ["cached_token", "grok.com"].find((id) => methods.some((m) => m.id === id)) ?? null,
+  pickAuthMethod: (methods) => (methods.some((m) => m.id === "cached_token") ? "cached_token" : null),
   authFailure: "fail",
   isAuthenticated: (env) => grokSignedIn(env),
 

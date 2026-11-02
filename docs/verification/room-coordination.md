@@ -99,9 +99,8 @@ handoff loop inside those turns.
 The tools are `list_room_targets` and `coordinate_bots`. Discovery includes
 reachable bots as well as rooms. The latter addresses 1–4 existing bots in this
 room (default), or — in ordinary direct chat without a room — the sender's one
-thread with each recipient for that conversation. Every bot can reach every
-other bot, in any department; a Chief's authority over other departments is a
-separate grant ([Chief authority](team-access.md)).
+thread with each recipient for that conversation. A Chief can reach additional teams only
+after the owner grants that access in [team settings](team-access.md).
 A multi-recipient room request posts its brief once, addressed to all accepted
 recipients. Each recipient still has a separate execution and result. An
 identical retry does not post again; different briefs remain separate. Requests
@@ -110,7 +109,7 @@ in direct conversations keep their individual messages.
 Recipients run sequentially per room, with their own models, permissions and
 working environments. Busy recipients queue. Once all requested results arrive,
 the sender resumes in the original conversation. A lead can consult its own
-specialists; it never inherits the parent Chief's authority or permissions.
+specialists; it never inherits the parent Chief's cross-team access or permissions.
 Advice is not a verification
 receipt: the lead must ask the reviewer to run the requested checks.
 
@@ -139,14 +138,8 @@ Outside a room, a conversation has one thread with each recipient, titled
 “@Clive · work”. The first request opens it; every later request from that
 conversation — a follow-up, a change of plan, rework — goes into it, so the
 recipient has the earlier work in its own history. If the recipient is still
-working there on what the sender handed it before, the request goes into that
-work: it reaches the running turn, which reads it at its next step, or answers
-the question that work waits on, and the work's one result comes back once.
-Only when the recipient's engine cannot take a message mid-turn does the
-request wait and run next; a second request from the same turn always does.
-The same work never runs twice in parallel. A request can also name, by its
-thread id, any thread the sender opened on that recipient (`thread`), and goes
-there. A different conversation of the sender gets its own thread.
+working there, the request waits and runs next; the same work never runs twice
+in parallel. A different conversation of the sender gets its own thread.
 Successful reported work closes in the sidebar but remains readable, and
 reopens when the next request arrives; failed or withheld work remains
 visible. Each receipt names the thread the request went into. Within the
@@ -161,8 +154,7 @@ receiving conversation. Same-room receipts have no unnecessary navigation.
 Receipts remain visible when tool calls are hidden. Files are not copied between
 computers: briefs must include accessible absolute paths or the required content.
 Returned reports stay available to subsequent model turns behind the compact
-receipt, subject to the bounded retention and a fresh reach check (peers list,
-archived bots, audiences).
+receipt, subject to the bounded retention and fresh peer/section access checks.
 Direct-chat receipts use the existing avatar/thread pill, opening the exact
 recipient task without changing other tasks.
 
@@ -262,17 +254,19 @@ with the second job queued in the first member's thread. After release it
 checks three result cards and three "Sent to" lines in the room, the
 first member's two turns in one thread, and one resume of the Lead.
 
-### Rooms that mix departments
+### Rooms containing a supervising Chief
 
-A room's members can come from any department, a Chief that manages none of
-them included: they list each other with `list_room_targets` and hand each
-other work with `coordinate_bots` like any room. A bot's own peers list still
-narrows what it can address, and a revoked peer is refused before queued work
-starts. On a Team Cloud, nothing from a member's private chat is handed into a
-room or posted in one.
+A section bot can list and post to its room when an out-of-section Chief in
+that room has an owner-reviewed `managedSections` grant for the bot's section.
+This includes a Chief in General (no section). In that same conversation,
+`list_room_targets` advertises the Chief and section peers, and `coordinate_bots`
+can address them by ID. The exception does not grant direct-chat access or
+access to the Chief in another room. Other cross-section members, unmanaged
+Chiefs, and peer restrictions still block work. Revoking supervision before
+queued work starts prevents dispatch.
 
 ```sh
-pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/peer-allowlist.e2e.test.ts server/cloud-team-open-reach.e2e.test.ts
+pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/peer-allowlist.e2e.test.ts
 ```
 
 The coordination suites use `launchVerificationServer`, `control-omb`, and the
@@ -282,31 +276,6 @@ handoff state, the destination conversation, and absence of dispatch after
 revocation. They cover both named-section and sectionless Chiefs; the posting
 suite independently checks room listing and transcript writes. These are
 server workflow checks, not UI or live-model verification.
-
-### Work for a bot outside the room
-
-Work a bot hands into a room (`coordinate_bots` in the room, or with that
-room's `group_id`) for a bot that isn't one of its members is not refused: it
-goes to that bot directly, in its standing work thread with the sender (a fresh
-one with `thread: "new"`), as a hand-off from outside a room would. Membership
-does not change, so nobody new reads the room and the bot's turn gets only the
-brief. The sender's conversation shows "Sent to <bot> directly: it isn't in
-this room." (naming the room when sent from elsewhere), linking to that thread,
-the receipt says so, and the reply resumes the sender as any direct hand-off's
-does. A Team Cloud private chat and a room whose setup is unfinished keep their
-refusals, and a member who left a room's job thread still stops. Nothing asks
-the person to add the bot; `manage_room` stays limited to rooms in the Chief's
-own department.
-
-```sh
-pnpm exec vitest run server/host/room-access.test.ts server/room-coordination.e2e.test.ts
-```
-
-The e2e test has a Chief in a room create three bots in its department and hand
-them work with the room as `group_id`: each runs in a thread of its own without
-the room's bulletin, the room's members stay the same, the room shows the three
-notes and three result cards, the Chief resumes once, and no card waits on the
-person.
 
 ### Parallel threads in one room
 
@@ -346,7 +315,7 @@ no recipient starts until all are allowed. It does not claim model judgment or a
 The direct-chat suite exercises Clive → lead → specialist → lead → Clive with
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
 checks that follow-ups from one conversation continue one recipient thread
-(into the running work, never in parallel), that another conversation
+(queued behind running work, never in parallel), that another conversation
 gets its own thread, thread titles, work that closes itself and reopens, recipient model/permission
 defaults, idempotency without extra tasks, capacity-bound queues, dispatch to a
 spare recipient thread while unrelated work remains active, pinned parent
@@ -417,7 +386,7 @@ preview/server processes afterward; retain evidence without credentials.
 
 ## Limits and safety
 
-Peer lists and peer approvals still apply; departments never limit who works with whom.
+Existing peer allow-lists/approvals and every room reader's section still apply.
 Every turn — a chat, a room, a routine run, a webhook run, a goal run, a Cloud
 guest's turn, a standing external runtime — hands teammate work on with the
 one `coordinate_bots` tool (work, a question with `consult`, a one-way notice

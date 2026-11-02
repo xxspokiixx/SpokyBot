@@ -18,12 +18,11 @@ const fixture = vi.hoisted(() => {
     view,
     ogb,
     platform: "darwin" as "darwin" | "win32" | "linux",
-    localComputer: {} as Record<string, unknown>,
     values: [] as unknown[],
     index: 0,
     own: 0,
     seed: {} as Record<string, unknown>,
-    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean; last4?: string } },
+    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean } },
     instances: [] as InstanceInfo[],
     android: false,
     dispatch: (() => {}) as (...args: unknown[]) => void,
@@ -69,7 +68,7 @@ vi.mock("./DesktopCapabilities", () => ({
       windowChrome: "native",
       screenPreview: { available: false, interaction: "none" },
       dictation: { available: false, engine: "none", onDevice: false },
-      localComputer: fixture.localComputer,
+      localComputer: { available: true, support: "supported", enabled: true, status: "ready" },
     },
   }),
 }));
@@ -105,7 +104,7 @@ const { ComputerPanel } = await import("./ComputerPanel");
 const { ComputerFilesPane } = await import("./ComputerFilesPane");
 const { CloudBackendPicker } = await import("./CloudBackendPicker");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
-const { KeyRow } = await import("./keys/KeyRow");
+const { ApiKeyRow } = await import("./ApiKeys");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -172,7 +171,6 @@ beforeEach(() => {
   fixture.advanced = false;
   fixture.view.current = "computer";
   fixture.platform = "darwin";
-  fixture.localComputer = { available: true, support: "supported", enabled: true, status: "ready" };
   fixture.values = [];
   fixture.index = 0;
   fixture.own = 0;
@@ -375,11 +373,6 @@ describe("Where the bot works", () => {
     expect(placeLine(rendered)).not.toMatch(/Local VM|Boat|cloud box/i);
   });
 
-  it("leaves This Mac out on another server's page, where this computer can never be a bot's place", () => {
-    fixture.localComputer = { available: false, support: "unsupported", enabled: false, status: "unavailable", reasonCode: "remote-server" };
-    expect(grid(render(makeBot())).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud desktop", "Private desktop", "Browser", "Off"]);
-  });
-
   it("says what Auto does on My Cloud, where it starts a cloud computer by itself", () => {
     fixture.config = { ...fixture.config, cloudHome: true };
     expect(placeLine(render(makeBot()))).toBe("Uses the built-in browser. In a chat, it starts its cloud desktop by itself when a task needs desktop apps.");
@@ -422,7 +415,7 @@ describe("Where the bot works", () => {
   it("offers the one next action for the chosen place, and a User is told to ask an Admin", () => {
     fixture.config = { ...fixture.config, box: { configured: false } };
     const rendered = render(makeBot({ computer: "cloud" }));
-    expect(placeLine(rendered)).toBe("Bots here can get their own cloud desktops from Boat, a paid service.Connect Boat");
+    expect(placeLine(rendered)).toBe("A cloud desktop here needs your own Boat key, a paid service.Add Boat key");
     (rendered.nodes.find((node) => node.props["data-testid"] === "place-action")!.props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
 
@@ -430,30 +423,15 @@ describe("Where the bot works", () => {
     fixture.values = [];
     phaseIndex = -1;
     const user = render(makeBot({ computer: "cloud" }));
-    expect(placeLine(user)).toBe("Bots here can get their own cloud desktops from Boat, a paid service. Ask an Admin to change it.");
+    expect(placeLine(user)).toBe("A cloud desktop here needs your own Boat key, a paid service. Ask an Admin to change it.");
     expect(user.nodes.some((node) => node.props["data-testid"] === "place-action")).toBe(false);
   });
 
   it("saves a Boat key pasted into the panel as one from the Computer panel", () => {
     fixture.config = { ...fixture.config, box: { configured: false } };
     fixture.seed = { phase: "unconfigured", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "box" } };
-    const rows = render(makeBot({ computer: "cloud" })).nodes.filter((node) => node.type === KeyRow);
-    expect(rows.map((node) => ({ id: node.props.id, via: node.props.via }))).toEqual([{ id: "box", via: "computer_panel" }]);
-  });
-
-  it("keeps a Boat key saved in the panel in view, masked and connected, after the panel moves on", () => {
-    fixture.config = { ...fixture.config, box: { configured: false } };
-    fixture.seed = { phase: "unconfigured", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "box" } };
-    const before = render(makeBot({ computer: "cloud" }));
-    const saved = before.nodes.find((node) => node.type === KeyRow)!.props.onSaved as (configured: boolean) => void;
-    saved(true);
-    fixture.values[phaseIndex] = "checking";
-    fixture.config = { ...fixture.config, box: { configured: true, last4: "c3d4" } };
-    const after = render(makeBot({ computer: "cloud" }));
-    expect(after.nodes.filter((node) => node.type === KeyRow).map((node) => node.props.id)).toEqual(["box"]);
-    expect(after.html).toContain("••••••••c3d4");
-    expect(after.html).toContain(">Connected<");
-    expect(after.html).toContain("data-key-replace");
+    const rows = render(makeBot({ computer: "cloud" })).nodes.filter((node) => node.type === ApiKeyRow);
+    expect(rows.map((node) => ({ section: node.props.section, via: node.props.via }))).toEqual([{ section: "box", via: "computer_panel" }]);
   });
 
   it("dispatches exactly what the Advanced picker dispatches for each place", () => {

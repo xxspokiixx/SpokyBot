@@ -52,13 +52,14 @@ const controller = (over: Partial<PhoneSetupController>): PhoneSetupController =
   cancel: noop,
   refreshCode: noop,
   finish: noop,
+  skip: noop,
   act: async () => {},
   accountAct: async () => {},
   ...over,
 });
 
 const render = (over: Partial<PhoneSetupController>) =>
-  renderToStaticMarkup(createElement(PhoneSetupFlowView, { controller: controller(over) }));
+  renderToStaticMarkup(createElement(PhoneSetupFlowView, { controller: controller(over), variant: "settings" }));
 
 describe("the Wi-Fi pairing panel on a Windows Public network", () => {
   it("says to set that network to Private", () => {

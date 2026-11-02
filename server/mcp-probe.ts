@@ -6,7 +6,7 @@ import {
 } from "./config.ts";
 import { createLineSplitter } from "./mcp-bridge.ts";
 import { UI_EXTENSION, withUiExtension } from "./mcp-app-observer.ts";
-import { MAX_REMOTE_MCP_BYTES, McpHttpError, McpRpcError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
+import { MAX_REMOTE_MCP_BYTES, McpHttpError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
 import { discoverMcpAuth } from "./mcp-oauth-discovery.ts";
 import { isRemoteMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
@@ -16,27 +16,15 @@ export interface McpProbeTool {
   description?: string;
 }
 
-/** Why a test failed, when the person can act on it: `keys` the server refused the headers it was sent (HTTP 401 or 403
- * with no sign-in to offer, or an MCP "unauthorized" error); `unreachable` and `timeout` may pass on a second try. */
-export type McpProbeFailure = "keys" | "unreachable" | "timeout";
-
 export type McpProbeResult =
   | { ok: true; tools: McpProbeTool[]; total?: number }
-  | { ok: false; error: string; auth?: "required"; reason?: McpProbeFailure; status?: number };
+  | { ok: false; error: string; auth?: "required" };
 
 export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
-/** How MCP servers word a refused key in a JSON-RPC error when they answer it with HTTP 200. */
-const UNAUTHORIZED = /unauthori[sz]ed|forbidden|not authenticated|authentication (?:failed|required)|invalid (?:api[ _-]?)?(?:key|token|credentials)/i;
 
 export interface McpProbeOptions {
   extension?: boolean;
   observe?(info: { tools: unknown[]; uiExtension: "ok" | "refused" | "unknown" }): void;
-  /** Start a command server as a bot's turn would: in the bot box where turns are boxed, its configured environment
-   * passing the box's allow-list, from the bot's own folder when the server is one bot's (`id`). */
-  asBot?: { id?: string; cwd?: string };
-  /** Reach a URL server as a bot's turn does: at `url` with `fetch` and no headers of its own (the credential broker adds
-   * them, server/bot-box/broker-probe.ts). A sign-in is still looked for at the server's own address. */
-  via?: { url: string; fetch: typeof fetch };
 }
 
 const MAX_STDOUT_BYTES = MAX_REMOTE_MCP_BYTES;
@@ -107,9 +95,7 @@ async function probeRemoteMcpServer(
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-  const client = options.via
-    ? new RemoteMcpClient({ ...server, url: options.via.url, headers: {} }, { maxBytes: MAX_REMOTE_MCP_BYTES, fetch: options.via.fetch })
-    : new RemoteMcpClient(server, { maxBytes: MAX_REMOTE_MCP_BYTES });
+  const client = new RemoteMcpClient(server, { maxBytes: MAX_REMOTE_MCP_BYTES });
   try {
     await client.initialize("OpenMausBot", combined, options.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {});
     const result = await client.request("tools/list", {}, combined);
@@ -120,7 +106,7 @@ async function probeRemoteMcpServer(
     return { ok: true, ...publicTools(tools, secrets) };
   } catch (error) {
     if (signal?.aborted) return { ok: false, error: publicProbeError("cancelled") };
-    if (timeout.signal.aborted) return { ok: false, error: publicProbeError("timeout"), reason: "timeout" };
+    if (timeout.signal.aborted) return { ok: false, error: publicProbeError("timeout") };
     if (error instanceof McpHttpError && error.status === 401) {
       const discovery = AbortSignal.timeout(5_000);
       const meta = await discoverMcpAuth(server.url, error.wwwAuthenticate ?? null, {
@@ -128,19 +114,16 @@ async function probeRemoteMcpServer(
       }).catch(() => null);
       if (meta) return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
     }
-    if (error instanceof McpHttpError && error.kind === "status" && (error.status === 401 || error.status === 403)) {
-      return { ok: false, error: `The server didn't accept the keys (HTTP ${error.status}). Check the header values.`, reason: "keys", status: error.status };
-    }
-    if (error instanceof McpRpcError && UNAUTHORIZED.test(error.detail)) {
-      return { ok: false, error: "The server didn't accept the keys. Check the header values.", reason: "keys" };
-    }
     if (error instanceof McpHttpError && error.kind === "status") {
-      return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.`, ...(error.status !== undefined && error.status >= 500 ? { reason: "unreachable" as const } : {}) };
+      if (error.status === 400 && /(?:^|[,\s])error="?invalid_token(?:"|[,\s]|$)/i.test(error.wwwAuthenticate ?? "")) {
+        return { ok: false, error: "The server rejected this bearer token. Check that it is a valid token and paste the token only, without a 'Bearer ' prefix." };
+      }
+      return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.` };
     }
     if (error instanceof McpHttpError && error.kind === "protocol") {
       return { ok: false, error: "The server did not return a valid MCP tools list." };
     }
-    return { ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" };
+    return { ok: false, error: "Could not reach this address. Check the URL and your network." };
   } finally {
     clearTimeout(timer);
     await client.close().catch(() => {});
@@ -165,10 +148,9 @@ function probeStdioMcpServer(
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(server.command, server.args, {
-        ...(options.asBot ? (options.asBot.cwd ? { cwd: options.asBot.cwd } : {}) : { cwd: process.cwd() }),
+        cwd: process.cwd(),
         env: probeEnvironment(server),
         stdio: ["pipe", "pipe", "pipe"],
-        ...(options.asBot ? { box: { ...(options.asBot.id ? { botId: options.asBot.id } : {}), allowEnv: Object.keys(server.env) } } : {}),
       });
     } catch {
       resolve({ ok: false, error: publicProbeError("spawn") });
@@ -228,7 +210,7 @@ function probeStdioMcpServer(
     });
 
     timer = setTimeout(() => {
-      finish({ ok: false, error: publicProbeError("timeout"), reason: "timeout" });
+      finish({ ok: false, error: publicProbeError("timeout") });
     }, timeoutMs);
     signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (chunk: Buffer) => {

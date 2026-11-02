@@ -1,5 +1,5 @@
 import type { PeerAction } from "./peer-approval-key.ts";
-import { hasAuthority, peerAllowed, peerName } from "./peer-roster.ts";
+import { canAccessTeam, peerAllowed, peerName } from "./peer-roster.ts";
 
 export type EscalationKind = "peer-approval" | "needs-input" | "raised";
 
@@ -9,8 +9,6 @@ export interface EscalationBot {
   section?: string;
   chiefOfStaff?: boolean;
   managedSections?: string[];
-  createdBy?: string;
-  reportsTo?: string;
   hidden?: boolean;
   peers?: string[];
   visibility?: unknown;
@@ -37,12 +35,12 @@ const fold = (text: string, max: number): string => {
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 };
 
-// The same authority retry_thread demands, so an escalation never widens what a Chief sees.
+// The same reach retry_thread demands, so an escalation never widens what a Chief sees.
 export function escalationDeliverable(
-  chief: EscalationBot,
+  chief: Pick<EscalationBot, "section" | "chiefOfStaff" | "managedSections" | "peers" | "visibility">,
   bot: EscalationBot,
 ): boolean {
-  return hasAuthority(chief, bot) && peerAllowed(chief, bot);
+  return canAccessTeam(chief, bot.section) && peerAllowed(chief, bot);
 }
 
 export const ESCALATION_HARD_LIMIT = 3;

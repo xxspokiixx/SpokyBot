@@ -28,7 +28,7 @@ export function isServerPairingLink(input: string): boolean {
   }
 }
 
-export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhenUnavailable?: boolean }) {
+export function RemoteComputerSection() {
   const bridge = window.ogb?.remoteClient;
   const environments = window.ogb?.environments;
   const [state, setState] = useState<DesktopRemoteClientState>({ active: bridge?.active === true });
@@ -96,8 +96,6 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
     }
   };
 
-  if (!bridge && !environments && hideWhenUnavailable) return null;
-
   return (
     <Card
       title={state.active ? t("remote.client.active") : t("remote.client.idle")}
@@ -116,7 +114,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
               <div className="mt-1 break-all text-[12px] text-ink-secondary">{state.endpoint}</div>
             </div>
           </div>
-          <p className="text-[13px] leading-relaxed text-ink-secondary">
+          <p className="text-[12.5px] leading-relaxed text-ink-secondary">
             {t("remote.client.mode")}
           </p>
           <button
@@ -150,19 +148,12 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
           ) : null}
           {serverMode ? (
             <>
-              <p className="text-[13px] leading-relaxed text-ink-secondary">
+              <p className="text-[12.5px] leading-relaxed text-ink-secondary">
                 {t("remote.client.server.hint")}
               </p>
-              {/* A chat-only link cannot pass the ownership check behind "Make … my home", so full access comes first. */}
-              <div data-pair-access="full" className="flex flex-col gap-1">
-                <p className="text-[12px] font-medium text-ink">{t("remote.client.server.fullTitle")}</p>
-                <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">npx openmausbot pair</code>
-              </div>
-              <div data-pair-access="client" className="flex flex-col gap-1">
-                <p className="text-[12px] font-medium text-ink">{t("remote.client.server.clientTitle")}</p>
-                <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">npx openmausbot pair --client</code>
-                <p className="text-[12px] leading-relaxed text-ink-secondary">{t("remote.client.server.clientNote")}</p>
-              </div>
+              <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">
+                npx openmausbot pair --client
+              </code>
               <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
                 {t("remote.client.server.pairingLink")}
                 <input
@@ -177,13 +168,13 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
                   className={inputClass}
                 />
               </label>
-              <p className="text-[12px] leading-relaxed text-ink-secondary">
+              <p className="text-[11.5px] leading-relaxed text-ink-secondary">
                 {t("remote.client.server.domainHint")}
               </p>
             </>
           ) : (
             <>
-              <p className="text-[13px] leading-relaxed text-ink-secondary">
+              <p className="text-[12.5px] leading-relaxed text-ink-secondary">
                 {t("remote.client.companion.hint")}
               </p>
               <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
@@ -213,7 +204,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
               </label>
             </>
           )}
-          {error ? <p role="alert" className="text-[13px] text-danger">{error}</p> : null}
+          {error ? <p role="alert" className="text-[12.5px] text-danger">{error}</p> : null}
           <button
             type="submit"
             disabled={busy || (serverMode ? !serverLink.trim() : endpoint.trim() === "" || code.length !== 6)}
@@ -222,12 +213,12 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Laptop size={14} />}
             {serverMode ? t("remote.client.server.connect") : t("remote.client.pair")}
           </button>
-          <p className="text-[12px] leading-relaxed text-ink-secondary">
+          <p className="text-[11.5px] leading-relaxed text-ink-secondary">
             {serverMode ? t("remote.client.server.switchNote") : t("remote.client.restartNote")}
           </p>
         </form>
       )}
-      {state.active && error ? <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p> : null}
+      {state.active && error ? <p role="alert" className="mt-3 text-[12.5px] text-danger">{error}</p> : null}
     </Card>
   );
 }

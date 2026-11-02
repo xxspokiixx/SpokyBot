@@ -1,7 +1,6 @@
 import type { ModelCatalog } from "./contracts.ts";
 import { contextWindowFor } from "./context-budget.ts";
 import { sessionIdlePolicy } from "./drivers/session-idle.ts";
-import { serverLine } from "./server-lines.ts";
 
 export const DEFAULT_ROOM_COMPACT_AT = 0.9;
 
@@ -25,8 +24,10 @@ export type RoomContextClock = {
 
 type RoomReset = { reason: "requested" | "threshold"; percent: number };
 
-export function roomResetNote(name: string, reset: RoomReset, language?: string): string {
-  return serverLine(language, reset.reason === "requested" ? "server.rooms.compactedRequested" : "server.rooms.compactedThreshold", { bot: name, percent: reset.percent });
+export function roomResetNote(name: string, reset: RoomReset): string {
+  return reset.reason === "requested"
+    ? `compacted ${name}'s context (${reset.percent}% full): fresh session with the room's recent messages`
+    : `${name}'s context was ${reset.percent}% full: compacted to a fresh session with the room's recent messages`;
 }
 
 export class RoomContextTracker {

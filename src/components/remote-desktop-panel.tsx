@@ -13,7 +13,6 @@ import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
-import { productName } from "@/lib/brand";
 
 function viewerAddress(raw: unknown): string {
   if (typeof raw !== "string" || !raw) throw new Error("The host did not return a live desktop link");
@@ -63,7 +62,7 @@ function nextRunLabel(at: number | null) {
 
 export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const { dragProps } = useCaptionChrome();
+  const { padClass, dragProps } = useCaptionChrome();
   const panelRef = useComputerPanelEntry(bot.id);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -191,7 +190,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         `${bot.name}'s live desktop`,
         bot.id,
       );
-      if (!opened) throw new Error(`${productName()} could not open the live desktop`);
+      if (!opened) throw new Error("OpenMausBot could not open the live desktop");
     } catch (cause) {
       if (tookControl) {
         await api(`/api/bots/${bot.id}/computer/control`, {
@@ -211,7 +210,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
 
   return (
     <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
-      <div {...dragProps} className="flex items-center justify-between border-b border-hairline px-5 py-4">
+      <div {...dragProps} className={cn("flex items-center justify-between border-b border-hairline px-5 py-4", padClass)}>
         <div>
           <div className="text-[14px] font-medium text-ink">{bot.name}&apos;s computer</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">
@@ -342,8 +341,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
                 >
                   <span className={cn("size-1.5 shrink-0 rounded-full", routine.enabled ? "bg-success" : "bg-ink-secondary/40")} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium text-ink">{routine.name}</span>
-                    <span className="block truncate text-[11px] text-ink-secondary">
+                    <span className="block truncate text-[12.5px] font-medium text-ink">{routine.name}</span>
+                    <span className="block truncate text-[10.5px] text-ink-secondary">
                       {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? " · runs on VM" : ""}
                     </span>
                   </span>

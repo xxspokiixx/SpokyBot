@@ -1,93 +1,88 @@
+import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
+import type { CloudHomeConfig } from "../cloud-home.ts";
+import type { AppConfig } from "../config.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
-import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
-import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, mcpServerBody, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer } from "../mcp-registry.ts";
-import { personKey } from "../person-key.ts";
-import { toolBudgetOf } from "../tool-budgets.ts";
+import { McpOAuthError, McpSignInError, mcpCallbackOrigin, withMcpSignIn, type McpOAuthManager } from "../mcp-oauth.ts";
+import { probeMcpServer } from "../mcp-probe.ts";
+import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn } from "../mcp-registry.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
+import type { SessionRegistry } from "../sessions.ts";
+import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
-import type { json } from "../harness/http.ts";
-import { sessionMember } from "./team-phone.ts";
 
-type ListedMcpServer = { name: string; enabled: boolean; bot?: string; offFor?: readonly string[] };
-
-// Security: built field by field, never spread. The settings list carries commands, arguments and addresses that can
-// hold secrets, so it stays closed to phones and this is what they get instead.
-function botMcpServers(listed: readonly ListedMcpServer[], bot: { id: string; mcpServers?: readonly string[] | null }) {
-  return listed.filter((server) => mcpServerServes(server, bot.id)).map((server) => ({
-    name: server.name,
-    enabled: server.enabled,
-    on: server.enabled && (!bot.mcpServers || bot.mcpServers.includes(server.name)),
-    ...(server.offFor?.includes(bot.id) ? { offFor: true as const } : {}),
-  }));
-}
-
-export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "savedCustomDomain" | "appCatalog"> {
-  config: McpConfig;
-  bot(id: string): { id: string; mcpServers?: readonly string[] | null } | null;
+export interface McpServerRouteDeps {
+  cfg: Pick<AppConfig, "mcpServers">;
+  sessions: Pick<SessionRegistry, "isLive">;
+  mcpOAuth: McpOAuthManager;
+  cloudHome: Pick<CloudHomeConfig, "publicOrigin"> | null;
+  fallbackPublicUrl: string | null;
+  mcpConfigBusy: BusyFlag;
   /** Secrets as booleans, sign-in state attached. */
-  mcpServerResponse(): { servers: readonly ListedMcpServer[] };
+  mcpServerResponse(): Record<string, unknown>;
+  mcpPolicyRefusal(name: string, server: object): string | undefined;
+  persistMcpServers(next: Record<string, unknown>): void;
+  savedCustomDomain(): string | null;
+  appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
+  /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
+  forgetPeople?(name: string): void;
 }
+
+/** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
+const runsElsewhere = (runsOn: McpRunsOn) => `This server runs on ${runsOn.label}, so it isn't started here.`;
 
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
-  const withServerDetails = <T,>(body: T): T => {
+  const withHasApps = <T,>(body: T): T => {
     const hasApps = deps.appCatalog?.hasApps;
     const servers = (body as { servers?: unknown }).servers;
-    if (!Array.isArray(servers)) return body;
-    const personal = deps.teamConnections.personMcp();
+    if (!hasApps || !Array.isArray(servers)) return body;
     return {
       ...body,
       servers: servers.map((server: { name?: unknown }) => {
-        const known = typeof server?.name === "string" ? hasApps?.(server.name) : undefined;
-        return { ...server, scope: typeof server.name === "string" && personal.includes(server.name) ? "person" : "team",
-          ...(known === undefined ? {} : { hasApps: known }) };
+        const known = typeof server?.name === "string" ? hasApps(server.name) : undefined;
+        return known === undefined ? server : { ...server, hasApps: known };
       }),
     };
   };
   const {
-    cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL,
-    mcpServerResponse, savedCustomDomain, config,
+    cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
+    mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog, forgetPeople,
   } = deps;
-  const answer = (res: Parameters<typeof json>[0], send: typeof json, result: McpConfigResult) => "body" in result
-    ? send(res, result.status, withServerDetails(result.body))
-    : send(res, result.status, { error: result.error, ...(result.code ? { code: result.code } : {}) });
+  const MAX_CONCURRENT_MCP_PROBES = 2;
+  let mcpProbesInFlight = 0;
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method === "GET" && path === "/api/mcp/servers") {
-      return json(res, 200, withServerDetails(mcpServerResponse()));
-    }
-
-    const budgetOf = /^\/api\/bots\/([\w-]+)\/tool-budget$/.exec(path);
-    if (method === "GET" && budgetOf) {
-      if (!deps.bot(budgetOf[1]!)) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, { budget: toolBudgetOf(budgetOf[1]!) ?? null });
-    }
-
-    const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
-    if (method === "GET" && ofBot) {
-      const bot = deps.bot(ofBot[1]!);
-      if (!bot) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, { servers: botMcpServers(mcpServerResponse().servers, bot) });
+      return json(res, 200, withHasApps(mcpServerResponse()));
     }
 
     const mcpTest = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/test$/.exec(path);
     if (method === "POST" && mcpTest) {
+      const raw = cfg.mcpServers?.[mcpTest[1]];
+      if (raw === undefined) return json(res, 404, { error: "MCP server not found." });
+      const parsed = parseStoredMcpServer(mcpTest[1], raw);
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      if (parsed.server.runsOn) return json(res, 409, { error: runsElsewhere(parsed.server.runsOn) });
+      if (mcpProbesInFlight >= MAX_CONCURRENT_MCP_PROBES) {
+        return json(res, 429, { error: "Two MCP connection tests are already running." });
+      }
       const controller = new AbortController();
       const disconnect = () => {
         if (!res.writableEnded) controller.abort();
       };
       res.once("close", disconnect);
+      mcpProbesInFlight += 1;
       try {
-        const name = mcpTest[1]!;
-        const result = await config.test(name, {
-          signal: controller.signal,
-          person: (url) => {
-            const member = auth.kind === "session" ? sessionMember(auth.session) : null;
-            return member ? deps.teamConnections.people.connection(personKey({ id: "", email: member.member.email }), name, url) : null;
-          },
-        });
-        return answer(res, json, result);
+        const name = mcpTest[1];
+        let target = parsed.server;
+        if (isRemoteMcpServer(target) && mcpOAuth.authState(name, target.url) === "signed-in") {
+          const signedIn = (await withMcpSignIn({ [name]: target }, mcpOAuth))[name];
+          if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
+        }
+        const result = await probeMcpServer(target, undefined, controller.signal, appCatalog?.probeOptions(name, parsed.server) ?? {});
+        if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) mcpOAuth.markNeedsSignIn(name, target.url);
+        return json(res, 200, result);
       } finally {
         res.off("close", disconnect);
+        mcpProbesInFlight -= 1;
       }
     }
 
@@ -102,7 +97,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       const url = parsed.server.url;
       if (action === "sign-out" && method === "POST" && !flowId) {
         await mcpOAuth.signOut(name!, url);
-        return json(res, 200, withServerDetails(mcpServerResponse()));
+        return json(res, 200, withHasApps(mcpServerResponse()));
       }
       const owner = auth.kind === "session" ? auth.session.id : "loopback";
       res.setHeader("Cache-Control", "no-store");
@@ -150,11 +145,26 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      const body = await readBody(req);
-      const name = typeof body?.name === "string" ? body.name : "";
-      const parsed = parseMcpServerMutation(name, mcpServerBody(body));
-      if (!parsed.ok) return json(res, 400, { error: parsed.error });
-      return answer(res, json, config.add(name, parsed.server));
+      if (mcpConfigBusy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
+      mcpConfigBusy.set(true);
+      try {
+        const body = await readBody(req);
+        const name = typeof body?.name === "string" ? body.name : "";
+        const current = cfg.mcpServers ?? {};
+        if (Object.hasOwn(current, name)) return json(res, 409, { error: "An MCP server with that name already exists." });
+        if (Object.keys(current).length >= MAX_MCP_SERVERS) {
+          return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
+        }
+        const parsed = parseMcpServerMutation(name, mcpServerBody(body));
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        const refusal = mcpPolicyRefusal(name, parsed.server);
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
+        persistMcpServers({ ...current, [name]: parsed.server });
+        appCatalog?.serverChanged(name);
+        return json(res, 201, withHasApps(mcpServerResponse()));
+      } finally {
+        mcpConfigBusy.set(false);
+      }
     }
 
     // The {"mcpServers": {...}} block other agent tools write; imported servers stay disabled until enabled.
@@ -162,16 +172,33 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      return answer(res, json, await config.addMany(async () => {
+      if (mcpConfigBusy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
+      mcpConfigBusy.set(true);
+      try {
         const body = await readBody(req);
         const text = typeof body?.json === "string" ? body.json : "";
         if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
-          return { status: 401, error: "unauthorized: this session has expired or was revoked" };
+          return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
         }
-        if (!text.trim()) return { status: 400, error: "Paste the JSON block first." };
+        if (!text.trim()) return json(res, 400, { error: "Paste the JSON block first." });
         const parsed = parseMcpServersImport(text);
-        return parsed.ok ? { servers: parsed.servers } : { status: 400, error: parsed.error };
-      }));
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        const current = cfg.mcpServers ?? {};
+        const names = Object.keys(parsed.servers);
+        const taken = names.filter((name) => Object.hasOwn(current, name));
+        if (taken.length) {
+          return json(res, 409, { error: `Already added: ${taken.join(", ")}. Remove or rename ${taken.length === 1 ? "it" : "them"} first.` });
+        }
+        if (Object.keys(current).length + names.length > MAX_MCP_SERVERS) {
+          return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
+        }
+        const refused = names.filter(name => mcpPolicyRefusal(name, parsed.servers[name] as object));
+        if (refused.length) return json(res, 403, { error: `${mcpPolicyRefusal(refused[0]!, parsed.servers[refused[0]!] as object)} Not approved: ${refused.join(", ")}.`, code: "managed_policy" });
+        persistMcpServers({ ...current, ...parsed.servers });
+        return json(res, 201, { ...withHasApps(mcpServerResponse()), added: names });
+      } finally {
+        mcpConfigBusy.set(false);
+      }
     }
 
     const mcpServerRoute = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})$/.exec(path);
@@ -179,23 +206,55 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (method !== "DELETE" && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      const name = mcpServerRoute[1]!;
-      if (method === "DELETE") return answer(res, json, config.remove(name));
-      const body = await readBody(req);
-      const current = cfg.mcpServers ?? {};
-      if (!Object.hasOwn(current, name)) return json(res, 404, { error: "MCP server not found." });
-      const existing = parseStoredMcpServer(name, current[name]);
-      if (!existing.ok) return json(res, 400, { error: existing.error });
-      if (method === "PATCH") {
-        const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
-        if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
-          return json(res, 400, { error: "Only an enabled or apps boolean can be changed here." });
+      if (mcpConfigBusy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
+      mcpConfigBusy.set(true);
+      try {
+        const name = mcpServerRoute[1];
+        const current = cfg.mcpServers ?? {};
+        if (!Object.hasOwn(current, name)) return json(res, 404, { error: "MCP server not found." });
+        if (method === "DELETE") {
+          const next = { ...current };
+          delete next[name];
+          persistMcpServers(next);
+          mcpOAuth.forget(name);
+          forgetPeople?.(name);
+          appCatalog?.forgetServer(name);
+          return json(res, 200, withHasApps(mcpServerResponse()));
         }
-        return answer(res, json, key === "enabled" ? config.setEnabled(name, body.enabled) : config.setApps(name, body.apps));
+
+        const existing = parseStoredMcpServer(name, current[name]);
+        if (!existing.ok) return json(res, 400, { error: existing.error });
+        const body = await readBody(req);
+        if (method === "PATCH") {
+          const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
+          if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
+            return json(res, 400, { error: "Only an enabled or apps boolean can be changed here." });
+          }
+          const { apps: _apps, ...rest } = existing.server;
+          persistMcpServers({ ...current, [name]: key === "enabled" ? { ...existing.server, enabled: body.enabled } : { ...rest, ...(body.apps ? {} : { apps: false }) } });
+          if (body[key] === true) appCatalog?.serverChanged(name);
+          return json(res, 200, withHasApps(mcpServerResponse()));
+        }
+
+        const parsed = parseMcpServerMutation(name, body, existing.server);
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        const refusal = mcpPolicyRefusal(name, parsed.server);
+        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
+        persistMcpServers({ ...current, [name]: parsed.server });
+        appCatalog?.forgetServer(name);
+        appCatalog?.serverChanged(name);
+        // A sign-in belongs to one address: a token never follows the entry elsewhere.
+        const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
+        const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;
+        // ...and to one sign-in app with its scopes; a new secret for the same app keeps it.
+        const app = (server: typeof existing.server) => isRemoteMcpServer(server) && server.oauth
+          ? JSON.stringify([server.oauth.clientId, server.oauth.scopes ?? []]) : null;
+        if (before !== after || app(existing.server) !== app(parsed.server)
+          || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
+        return json(res, 200, withHasApps(mcpServerResponse()));
+      } finally {
+        mcpConfigBusy.set(false);
       }
-      const parsed = parseMcpServerMutation(name, body, existing.server);
-      if (!parsed.ok) return json(res, 400, { error: parsed.error });
-      return answer(res, json, config.replace(name, parsed.server));
     }
     return PASS;
   };

@@ -39,13 +39,6 @@ it("an Admin, who also sees members' private chats, gets only one the server say
   expect(ownChatOf(bot, MEMBER), "a Member sees only their own: their newest").toBe("ada-chat");
 });
 
-it("opens the person's inbox, their chat with their Chief where everything for them arrives, before a newer chat", () => {
-  const bot = scout([{ threadId: "inbox", private: true, inbox: true, createdAt: 2 }, { threadId: "newer", private: true, createdAt: 3, updatedAt: 9 }]);
-  expect(ownChatOf(bot, MEMBER)).toBe("inbox");
-  expect(ownChatOf(bot, { ...ADMIN, opened: ["newer"] }), "made after the session was read").toBe("inbox");
-  expect(ownChatOf(scout([{ threadId: "inbox", private: true, inbox: true, archivedAt: 4 }, { threadId: "newer", private: true, createdAt: 3 }]), MEMBER)).toBe("newer");
-});
-
 it("with none yet, a click makes one through the server's new-conversation route, opens it and keeps it; a second click while it is made makes no second", async () => {
   setTeamChats({ teamId: "team-gamma", member: false });
   const dispatch = vi.fn();
@@ -79,16 +72,4 @@ it("a Member's existing conversation opens with no request; a refusal shows as a
   openBot(dispatch, scout([{ threadId: "ada-chat", private: true, createdAt: 5 }]), false);
   expect(dispatch.mock.calls.map(([action]) => action), "the bot's main chat, as before").toEqual([{ type: "select", id: "scout" }]);
   expect(openOwnTeamChat(dispatch, scout([]), () => {})).toBe(false);
-});
-
-it("opens the main chat of a bot this person can only view, without trying to start a conversation of their own", async () => {
-  setTeamChats(MEMBER);
-  const dispatch = vi.fn();
-  const viewOnly = { ...scout([]), yourAccess: "view" };
-  expect(openOwnTeamChat(dispatch, viewOnly, () => {})).toBe(false);
-  await settle();
-  expect(server.calls).toEqual([]);
-  const opened = vi.fn();
-  expect(openOwnTeamChat(dispatch, { ...scout([{ threadId: "bob-own", private: true, createdAt: 5 }]), yourAccess: "view" }, opened)).toBe(true);
-  expect(opened).toHaveBeenCalledWith("bob-own");
 });

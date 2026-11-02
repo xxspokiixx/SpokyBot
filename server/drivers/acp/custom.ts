@@ -4,9 +4,8 @@
 //       "displayName": "My Agent",
 //       "config": { "cli": "my-agent acp" } } } }
 // `cli` is the whole command ("npx -y some-agent acp" works). No auth step: the CLI is signed in from
-// a terminal. Model selection uses ACP, never -m on argv, since conventions differ per CLI.
+// a terminal. One passthrough model id and never -m on argv, since -m conventions differ per CLI.
 import { createAcpDriver, type AcpSupport } from "./core.ts";
-import { resolveCustomAcpModels } from "./custom-model-catalog.ts";
 
 const CONFIGURE_HINT =
   'a custom ACP engine needs its command — add "config": { "cli": "<your-agent> acp" } to this instance in config.json, or use Settings → Engines → Set CLI…';
@@ -15,15 +14,11 @@ const support: AcpSupport = {
   driverKind: "customAcp",
   displayName: "Custom (ACP)",
   access: "custom",
-  models: { default: "agent-default", options: [{ id: "agent-default", label: "Agent default", custom: true }] },
+  models: { default: "agent-default", options: [{ id: "agent-default", label: "Agent default" }] },
   defaultCli: "",
   nativeSource: "custom.acp",
   loginNote: CONFIGURE_HINT,
   spawnArgs: () => [],
-  resolveModels: resolveCustomAcpModels,
-  resolveModelsOnCreate: false,
-  selectModel: { configId: "model", agentDefault: "agent-default", allowLegacy: true },
-  modelVariants: true,
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: () => true,
@@ -40,8 +35,6 @@ export const CustomAcpDriver: typeof base = {
   },
   async create(input) {
     if (!input.config.cli.trim()) throw new Error(CONFIGURE_HINT);
-    // What the person reads names their agent ("My Agent"), never "Custom (ACP)".
-    const name = input.displayName?.trim();
-    return (name ? createAcpDriver({ ...support, displayName: name }) : base).create(input);
+    return base.create(input);
   },
 };

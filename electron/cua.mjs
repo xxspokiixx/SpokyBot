@@ -11,8 +11,6 @@ import net from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
-import { createLocalComputerGrant } from "./local-computer-grant.mjs";
-import { driverFailure } from "./cua-failure.mjs";
 
 const { localOnly } = localOriginModule;
 
@@ -28,7 +26,7 @@ const {
   reapStaleAppImageCuaBundles,
   stageAppImageCuaBundle,
 } = require("./cua-linux-bundle.cjs");
-const { driverBlocked, linuxLocalControlSupport } = require("./capabilities.cjs");
+const { linuxLocalControlSupport } = require("./capabilities.cjs");
 
 const INSTALLED_DRIVER = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
 const STANDALONE_SOCKET = path.join(
@@ -47,10 +45,6 @@ const WIN_INSTALLED_DRIVERS = [
 ];
 let embeddedHost = null;
 let startupAbort = null;
-/** On Windows a start that failed for a reason that passes (a slow first start while the system scans the new helper)
- * is tried again by itself after these waits; a blocked or missing helper is not. */
-const RETRY_AFTER_MS = [15_000, 60_000];
-let retryTimer = null;
 let lifecycleGeneration = 0;
 let macRetry = null;
 let linuxRuntime = null;
@@ -58,10 +52,6 @@ let linuxBundleStage = null;
 let stateListener = () => {};
 const connectionStore = createCuaConnectionStore({
   getUserData: () => app.getPath("userData"),
-});
-const localComputerGrant = createLocalComputerGrant({
-  connection: () => connectionStore.get(),
-  log: (line) => console.error(`[cua] ${line}`),
 });
 
 function ensureLinuxRuntime() {
@@ -76,7 +66,7 @@ function ensureLinuxRuntime() {
         clearPreference: true,
         reasonCode: support.reasonCode,
         message: support.message,
-        onChange: (connection) => notifyState(connection),
+        onChange: (connection) => stateListener(connection),
       });
       return linuxRuntime;
     }
@@ -95,27 +85,17 @@ function ensureLinuxRuntime() {
         getUserData: () => app.getPath("userData"),
         connectionStore,
         bundledDriverPath,
-        onChange: (connection) => notifyState(connection),
+        onChange: (connection) => stateListener(connection),
       });
     } catch (error) {
       console.error("[cua] Bundled Linux driver failed integrity validation:", error);
       linuxRuntime = createUnavailableLinuxRuntime({
         connectionStore,
-        onChange: (connection) => notifyState(connection),
+        onChange: (connection) => stateListener(connection),
       });
     }
   }
   return linuxRuntime;
-}
-
-/** The app's own server child gets the driver connection, and every change to it, over its private port. */
-export function grantLocalComputer(proc, isCurrent) {
-  localComputerGrant.attach(proc, isCurrent);
-}
-
-function notifyState(connection) {
-  localComputerGrant.changed();
-  stateListener(connection);
 }
 
 export function setCuaStateListener(listener) {
@@ -124,7 +104,7 @@ export function setCuaStateListener(listener) {
 
 function persistAndNotify(next) {
   const connection = connectionStore.persist(next);
-  notifyState(connection);
+  stateListener(connection);
   return connection;
 }
 
@@ -264,10 +244,8 @@ async function startEmbedded(binary, signal) {
   }
 }
 
-export async function startCua({ attempt = 0 } = {}) {
+export async function startCua() {
   if (process.platform === "linux") return ensureLinuxRuntime().initialize();
-  clearTimeout(retryTimer);
-  retryTimer = null;
   lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = new AbortController();
@@ -295,13 +273,13 @@ export async function startCua({ attempt = 0 } = {}) {
         signal.throwIfAborted();
         nextConnection = {
           mode: "unavailable",
-          reason: `embedded host failed: ${driverFailure(err)}; standalone launch failed: ${standaloneError?.message ?? standaloneError}`,
+          reason: `embedded host failed: ${err?.message ?? err}; standalone launch failed: ${standaloneError?.message ?? standaloneError}`,
         };
       }
       if (!nextConnection) {
         nextConnection = {
           mode: "unavailable",
-          reason: `embedded host failed: ${driverFailure(err)}`,
+          reason: `embedded host failed: ${err?.message ?? err}`,
         };
       }
     }
@@ -323,10 +301,6 @@ export async function startCua({ attempt = 0 } = {}) {
   }
 
   signal.throwIfAborted();
-  if (process.platform === "win32" && nextConnection.mode === "unavailable" && !driverBlocked(nextConnection.reason) && attempt < RETRY_AFTER_MS.length) {
-    retryTimer = setTimeout(() => { retryTimer = null; void startCua({ attempt: attempt + 1 }).catch(() => {}); }, RETRY_AFTER_MS[attempt]);
-    retryTimer.unref?.();
-  }
   return persistAndNotify(nextConnection);
 }
 
@@ -348,8 +322,6 @@ export async function cuaPermissionsStatus() {
 }
 
 export async function stopCua() {
-  clearTimeout(retryTimer);
-  retryTimer = null;
   lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = null;

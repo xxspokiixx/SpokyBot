@@ -13,7 +13,7 @@ const ADMIN_STATES = Object.freeze({
 const CODE = /^[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/;
 const MAX_GRANT_MS = 10 * 60_000;
 
-export function homeOrigin(value) {
+function homeOrigin(value) {
   if (typeof value !== "string" || value.length > 300) return null;
   try {
     const url = new URL(value);
@@ -111,37 +111,6 @@ export function parseCloudCredit(input) {
   if (!record(input) || !["active", "used_up"].includes(input.state) || !dollars(input.grantedUsd) || input.grantedUsd <= 0 ||
     !dollars(input.remainingUsd) || input.remainingUsd > input.grantedUsd) return null;
   return { grantedUsd: input.grantedUsd, remainingUsd: input.remainingUsd, state: input.state };
-}
-
-export const CLOUD_USAGE_KINDS = Object.freeze(["computerHours", "voice", "decisions", "x", "research", "storage"]);
-const amount = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1e12;
-/** Display only, never an entitlement. */
-export function parseCloudUsage(input) {
-  if (!record(input) || typeof input.tier !== "string" || !TIER.test(input.tier) || !moment(input.resetsAt) || !Array.isArray(input.meters)) return null;
-  const meters = input.meters.slice(0, 20).flatMap(meter => record(meter) && CLOUD_USAGE_KINDS.includes(meter.kind) && amount(meter.used) && amount(meter.max) && meter.max > 0
-    ? [{ kind: meter.kind, used: meter.used, max: meter.max, ...(meter.usedUp === true ? { usedUp: true } : {}) }] : []);
-  const kinds = new Set(), unique = meters.filter(meter => !kinds.has(meter.kind) && kinds.add(meter.kind));
-  const upgrades = (Array.isArray(input.upgrades) ? input.upgrades.slice(0, 10) : []).flatMap(plan => record(plan) && PLAN_TIERS.includes(plan.tier) && plan.tier !== input.tier
-    && Number.isSafeInteger(plan.amount) && plan.amount >= 1 && plan.amount <= 10_000_000 ? [{ tier: plan.tier, amount: plan.amount }] : []);
-  return { tier: input.tier, resetsAt: input.resetsAt, ...(moment(input.trialEndsAt) ? { trialEndsAt: input.trialEndsAt } : {}), meters: unique, upgrades };
-}
-
-const ROOM_ID = /^[A-Za-z0-9-]{1,64}$/;
-const whole = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max;
-/** The session's `cloud.room` (contract v1, additive): the Cloud this account pays for is short on room. Display only: the
- * plan it names is moved to through the usual upgrade, which main allows only for a plan `usage` lists. */
-export function parseCloudRoom(input) {
-  if (!record(input) || typeof input.id !== "string" || !ROOM_ID.test(input.id) || !record(input.cause)) return null;
-  const { cause } = input;
-  const memory = cause.kind === "memory" && whole(cause.waits, 1e6) && whole(cause.waitMinutes, 1e6) && whole(cause.stopped, 1e6);
-  const disk = cause.kind === "disk" && amount(cause.usedGb) && whole(cause.capGb, 1e5) && cause.capGb > 0;
-  if (!memory && !disk) return null;
-  const plan = input.plan, sizes = record(plan) && ["memoryMb", "fromMemoryMb", "diskGb", "fromDiskGb"].every(key => whole(plan[key], 1e7));
-  const offered = sizes && PLAN_TIERS.includes(plan.tier) && Number.isSafeInteger(plan.amount) && plan.amount >= 1 && plan.amount <= 10_000_000
-    ? { tier: plan.tier, amount: plan.amount, memoryMb: plan.memoryMb, fromMemoryMb: plan.fromMemoryMb, diskGb: plan.diskGb, fromDiskGb: plan.fromDiskGb } : null;
-  if (!offered && input.tip !== true) return null;
-  return { id: input.id, cause: memory ? { kind: "memory", waits: cause.waits, waitMinutes: cause.waitMinutes, stopped: cause.stopped }
-    : { kind: "disk", usedGb: cause.usedGb, capGb: cause.capGb }, ...(offered ? { plan: offered } : { tip: true }) };
 }
 
 const days = (value, max) => Number.isSafeInteger(value) && value >= 1 && value <= max ? value : null;

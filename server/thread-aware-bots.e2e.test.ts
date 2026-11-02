@@ -185,8 +185,6 @@ beforeAll(async () => {
     `await import(${JSON.stringify(pathToFileURL(FAKE_CLAUDE).href)});`,
   ].join("\n"), { mode: 0o700 });
   writeFileSync(join(data, "config.json"), JSON.stringify({
-    // These tests compare whole conversations; a setup card refreshing after a rename would change under them.
-    features: { smartSetupChoices: false },
     threads: { maxConcurrentPerBot: 2 },
     instances: {
       gated: {
@@ -439,11 +437,10 @@ describe("coordinate_bots on a teammate", () => {
       const send = (botIds: string[]) => api("POST", "/api/internal/coordinate-bots", { botIds, message: "Check it." }, token);
       const outside = await send([other.id]);
       expect(outside.status).toBe(403);
-      expect(outside.body.error).toContain("Other is not one of the bots Pam is set to talk to");
+      expect(outside.body.error).toContain("section boundary");
       const unlisted = await send([far.id]);
       expect(unlisted.status).toBe(403);
-      expect(unlisted.body.error).toContain("Far is not one of the bots Pam is set to talk to");
-      expect(unlisted.body.error).toContain("in Pam's settings, under Permissions");
+      expect(unlisted.body.error).toContain("allowed peer");
       expect((await send([near.id, far.id])).status).toBe(403);
       expect((await send([near.id, far.id, other.id, pm.id, "fifth"])).status).toBe(400);
       for (const bot of [other, far]) expect((await botState(bot.id)).tasks).toHaveLength(1);
@@ -522,8 +519,6 @@ describe("coordinate_bots on a teammate", () => {
   it("still buzzes when a coordinated thread asks the person a question, deep-linked to that thread", async () => {
     const pm = await createBot("Pam", "gated");
     const sage = await createBot("Sage", "curious", "fake-model");
-    // On "Ask me first" a teammate's question is the person's; at Full access the bot that handed the work on answers it.
-    for (const bot of [pm, sage]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {
       const token = await heldTurn(pm, "Ask Sage.");

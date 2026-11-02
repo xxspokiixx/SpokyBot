@@ -170,39 +170,6 @@ it("recovers once on the same thread with its history and permissions, leaving t
   });
 }, 90_000);
 
-it("keeps a Set me up request a setup turn on the backup, and an edit of it too", async () => {
-  await withRecoveryFixture({}, async ({ api, control, calls, backupPrompts, backupReceipt, evidence }) => {
-    const { bot } = await control("new-bot", "--name", "Recover setup");
-    const threadId = bot.activeTaskId;
-    const route = `/api/bots/${bot.id}/tasks/${threadId}`;
-    const wait = () => control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
-    const userText = (prompt: unknown) => JSON.stringify(prompt);
-    await api("PATCH", route, { modelSelection: primary, updateBotDefault: true });
-    await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId });
-    await control("send", "--bot", bot.id, "--task", threadId, "--text", "sort my inbox every morning");
-    expect((await wait()).status).toBe("settled");
-    expect(calls().filter((call) => call.method === "initialize.error")).toHaveLength(1);
-    expect(backupPrompts()).toHaveLength(1);
-    const pressed = backupReceipt();
-    expect(pressed.systemPrompt).toContain("The user explicitly asked you to set yourself up");
-    expect(userText(pressed.prompt)).toContain("Set yourself up for this job: sort my inbox every morning");
-    const messages = async () => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
-    const line = (await messages()).find((message) => message.role === "user");
-    expect(line).toMatchObject({ text: "sort my inbox every morning", setupRequest: true });
-
-    // The edit runs on the primary again, which fails again: the backup must still read it as setup.
-    await api("PATCH", route, { modelSelection: primary });
-    await api("POST", `/api/bots/${bot.id}/messages/${line.id}/edit`, { text: "sort my inbox and my calendar", threadId }, 202);
-    expect((await wait()).status).toBe("settled");
-    expect(calls().filter((call) => call.method === "initialize.error")).toHaveLength(2);
-    expect(backupPrompts()).toHaveLength(2);
-    const edited = backupReceipt();
-    expect(edited.systemPrompt).toContain("The user explicitly asked you to set yourself up");
-    expect(userText(edited.prompt)).toContain("Set yourself up for this job: sort my inbox and my calendar");
-    evidence.push({ pressed, edited, messages: await messages() });
-  });
-}, 120_000);
-
 it("recovers a coordinated specialist and returns its result to the Chief exactly once", async () => {
   await withRecoveryFixture({ scripted: true }, async ({ api, control, calls, dataDir, evidence }) => {
     const { bot: chief } = await control("new-bot", "--name", "Recovery Chief", "--section", "Leadership");
@@ -262,8 +229,8 @@ it("recovers a coordinated specialist and returns its result to the Chief exactl
   });
 }, 90_000);
 
-it.each([true, false])("uses the ordered bot list only for proven pre-prompt failures and leaves defaults and siblings unchanged (Automatic recovery on: %s)", async (enabled) => {
-  await withRecoveryFixture({ enabled }, async ({ api, control, calls, backupPrompts, evidence }) => {
+it("uses the ordered bot list only for proven pre-prompt failures and leaves defaults and siblings unchanged", async () => {
+  await withRecoveryFixture({}, async ({ api, control, calls, backupPrompts, evidence }) => {
     const { bot } = await control("new-bot", "--name", "Ordered startup fallback");
     const threadId = bot.activeTaskId;
     await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
@@ -287,16 +254,16 @@ it.each([true, false])("uses the ordered bot list only for proven pre-prompt fai
 }, 90_000);
 
 it.each([
-  { name: "disabled and the bot has no backups of its own", enabled: false, ownBackups: false },
+  { name: "disabled", enabled: false },
   { name: "prompt already accepted", method: "session/prompt" },
   { name: "partial output", method: "session/prompt", afterOutput: true },
   { name: "authentication failure", error: { code: -32603, message: "Authentication required: invalid API key" } },
-])("does not automatically replay when $name", async ({ name: _name, ownBackups = true, ...options }) => {
+])("does not automatically replay when $name", async ({ name: _name, ...options }) => {
   await withRecoveryFixture(options, async ({ api, control, calls, backupPrompts }) => {
     const { bot } = await control("new-bot", "--name", "No replay");
     const threadId = bot.activeTaskId;
     await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
-    if (ownBackups) await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "secondary", model: primary.model }, backup] });
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "secondary", model: primary.model }, backup] });
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "DO_NOT_REPLAY_THIS_9S");
     expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status)
       .toBe(options.afterOutput ? "settled" : "failed");

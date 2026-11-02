@@ -24,8 +24,7 @@
   "include": [
     "server",
     "companion",
-    "enterprise",
-    "connector"
+    "enterprise"
   ],
   "exclude": [
     "server/drivers/pi-mcp-extension.ts"

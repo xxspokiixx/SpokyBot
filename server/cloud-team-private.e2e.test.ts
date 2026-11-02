@@ -6,7 +6,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { personKey } from "./person-key.ts";
@@ -16,15 +15,15 @@ const OWNER = { email: "olive@acme.test", role: "owner" as const };
 const ADMIN = { email: "ari@acme.test", role: "admin" as const };
 const BOB = { email: "bob@acme.test", role: "member" as const };
 const ENGINE = `import { readFileSync as readToolCalls } from "node:fs";
-process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";
-try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json", "utf8"); } catch {}`;
+process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";
+try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.HOME + "/tool-calls.json", "utf8"); } catch {}`;
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const bobKey = personKey({ id: "", email: BOB.email });
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let owner = "", admin = "", bob = "";
 let bot: { id: string; mainThreadId: string };
-let bobThread = "", bobFile = "", bobDoc = "", bobUnsent = "", adminThread = "";
+let bobThread = "", bobFile = "", adminThread = "";
 
 const dump = () => JSON.parse(readFileSync(join(team.home, "dump.json"), "utf8")) as { systemPrompt: string };
 const scriptToolCalls = (calls: unknown[] | null) => {
@@ -83,14 +82,8 @@ beforeAll(async () => {
   const upload = await fetch(`${team.base}/api/attachments`, { method: "POST", headers: { ...fx.edge, authorization: `Bearer ${bob}`, "content-type": "image/png" }, body: PNG });
   expect(upload.status).toBe(201);
   bobFile = ((await upload.json()) as { path: string }).path.split(/[\\/]/).pop()!;
-  const doc = await fetch(`${team.base}/api/files?name=offer.txt`, { method: "POST", headers: { ...fx.edge, authorization: `Bearer ${bob}`, "content-type": "text/plain" }, body: "Offer letter" });
-  expect(doc.status).toBe(201);
-  const docPath = ((await doc.json()) as { path: string }).path;
-  bobDoc = docPath.split(/[\\/]/).pop()!;
-  const unsent = await fetch(`${team.base}/api/attachments`, { method: "POST", headers: { ...fx.edge, authorization: `Bearer ${bob}`, "content-type": "image/png" }, body: PNG });
-  bobUnsent = ((await unsent.json()) as { path: string }).path.split(/[\\/]/).pop()!;
   scriptToolCalls([{ name: "memory_update", server: "agents", input: { action: "append", text: "Bob is interviewing at Kumquat Labs" } }]);
-  await turn(bob, bobThread, `I am interviewing at Kumquat Labs next week. ![offer](/api/attachments/${bobFile}) <attached-file path="${docPath}" name="offer.txt"/>`);
+  await turn(bob, bobThread, `I am interviewing at Kumquat Labs next week. ![offer](/api/attachments/${bobFile})`);
   scriptToolCalls(null);
 }, hostTimeout(180_000));
 
@@ -108,39 +101,9 @@ it("Bob reads and writes his own private chat, with its words, its file, his sea
   expect(JSON.stringify((await team.as(bob, "GET", "/api/search?q=Kumquat")).body)).toContain(bobThread);
   expect((await team.as(bob, "PATCH", `/api/bots/${bot.id}/tasks/${bobThread}`, { title: "Bob's plans" })).status).toBe(200);
   expect(readFileSync(dataDir("workspaces", `${bot.id}--member-${bobKey}`, "MEMORY.md"), "utf8")).toContain("Kumquat Labs");
-  // A file he took off a message before sending is his alone to discard, and one a message uses stays.
-  const discard = await fetch(`${team.base}/api/attachments`, { method: "POST", headers: { ...fx.edge, authorization: `Bearer ${bob}`, "content-type": "image/png" }, body: PNG });
-  const discarded = ((await discard.json()) as { path: string }).path.split(/[\\/]/).pop()!;
-  expect((await team.as(admin, "DELETE", `/api/attachments/${discarded}`)).status).toBe(404);
-  expect((await team.as(bob, "DELETE", `/api/attachments/${bobFile}`)).status).toBe(409);
-  expect((await team.as(bob, "DELETE", `/api/attachments/${discarded}`)).status).toBe(200);
-  expect(existsSync(dataDir("attachments", discarded))).toBe(false);
-  // He changes no team bot's look, which everyone sees; his own MausBot's he does.
-  const recolour = await team.as(bob, "PATCH", `/api/bots/${bot.id}`, { color: "blue" });
-  expect(recolour.status).toBe(403);
-  expect(recolour.body.error).toContain("\"color\"");
-  const mausBot = ((await team.as(bob, "GET", "/api/bots")).body.bots as Array<{ id: string; name: string }>).find((entry) => entry.name === "MausBot")!;
-  expect((await team.as(bob, "PATCH", `/api/bots/${mausBot.id}`, { color: "blue" })).status).toBe(200);
   // The session says which conversations are his.
   expect((await team.as(bob, "GET", "/api/auth/session")).body.openedThreads).toContain(bobThread);
 }, hostTimeout(60_000));
-
-it("Bob opens, edits and deletes what the bot remembers about him, and nobody else reaches it", async () => {
-  const mine = `/api/bots/${bot.id}/memory/mine`;
-  expect((await team.as(bob, "GET", `/api/bots/${bot.id}/memory`)).status, "the team's notes stay an admin's").toBe(403);
-  const overview = await team.as(bob, "GET", mine);
-  expect(overview.status, JSON.stringify(overview.body)).toBe(200);
-  const index = await team.as(bob, "GET", `${mine}/file?path=MEMORY.md`);
-  expect(index.body.text).toContain("Kumquat Labs");
-  for (const token of [owner, admin]) expect(JSON.stringify((await team.as(token, "GET", `${mine}/file?path=MEMORY.md`)).body)).not.toContain("Kumquat");
-  const saved = await team.as(bob, "PUT", `${mine}/file`, { path: "memory/food.md", text: "- Bob's favourite fruit is durian\n" });
-  expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-  expect(readFileSync(dataDir("workspaces", `${bot.id}--member-${bobKey}`, "memory", "food.md"), "utf8")).toContain("durian");
-  expect(((await team.as(bob, "GET", mine)).body.topics as Array<{ path: string }>).map((topic) => topic.path)).toContain("memory/food.md");
-  expect((await team.as(bob, "DELETE", `${mine}/file?path=memory/food.md`)).status).toBe(200);
-  expect(existsSync(dataDir("workspaces", `${bot.id}--member-${bobKey}`, "memory", "food.md"))).toBe(false);
-  expect(existsSync(dataDir("workspaces", bot.id, "memory", "food.md")), "never the team's folder").toBe(false);
-}, hostTimeout(30_000));
 
 it("the Owner and an Admin never see Bob's chat: not by id, not in lists, counts, search, files, notifications or traces", async () => {
   // The bot's selected conversation is the server's one choice for everyone: Bob's, now.
@@ -208,25 +171,6 @@ it("the Owner and an Admin cannot write in it, rename, delete, stop or answer an
   expect(bobs.find((entry) => entry.id === bot.id)!.tasks.find((task) => task.threadId === bobThread)?.title).toBe("Bob's plans");
 }, hostTimeout(60_000));
 
-it("the Owner and an Admin cannot mark Bob's notifications read, one by one or all at once", async () => {
-  const bobsUnread = () => {
-    const db = new DatabaseSync(dataDir("messages.db"), { readOnly: true });
-    try {
-      return (db.prepare("SELECT id FROM notification_log WHERE thread_id = ? AND read = 0 ORDER BY id").all(bobThread) as Array<{ id: string }>).map((row) => row.id);
-    } finally {
-      db.close();
-    }
-  };
-  await turn(bob, bobThread, "Remind me to water the bees.");
-  await until(() => bobsUnread().length > 0);
-  const unread = bobsUnread();
-  for (const token of [owner, admin]) {
-    expect((await team.as(token, "POST", `/api/notifications/${unread[0]}/read`)).status).toBe(404);
-    expect((await team.as(token, "POST", "/api/notifications/read-all")).status).toBe(200);
-  }
-  expect(bobsUnread()).toEqual(unread);
-}, hostTimeout(90_000));
-
 it("never streams Bob's chat to the Owner or an Admin, live or replayed, while Bob's stream has it", async () => {
   const ownerStream = await listen(owner), adminStream = await listen(admin), bobStream = await listen(bob);
   await turn(bob, bobThread, "Remember the quince jam recipe for me.");
@@ -285,21 +229,13 @@ it("when Bob leaves the team, his private chats and everything only his are dele
   const adminsLayer = dataDir("workspaces", `${bot.id}--member-${personKey({ id: "", email: ADMIN.email })}`);
   expect(existsSync(layer)).toBe(true);
   expect(existsSync(adminsLayer)).toBe(true);
-  for (const file of [bobFile, bobDoc, bobUnsent]) expect(existsSync(dataDir("attachments", file))).toBe(true);
-  const bobsMausBot = ((await team.as(bob, "GET", "/api/bots")).body.bots as Array<{ id: string; threadId: string; name: string }>).find((entry) => entry.name === "MausBot")!;
-  expect(bobsMausBot).toBeDefined();
-  const room = (await team.as(owner, "POST", "/api/groups", { name: "Desk", memberIds: [bot.id], setup: { bulletin: "", defaultResponder: { kind: "everyone" } } })).body.group as { id: string; threadId: string };
-  expect((await team.as(owner, "POST", `/api/groups/${room.id}/messages`, { text: "@Scout hello" })).status).toBe(202);
-  await until(async () => await idle(owner) && ((await messages(owner, room.threadId)).body.messages as unknown[]).length >= 2);
-  for (const token of [bob, owner]) expect((await team.as(token, "POST", `/api/groups/${room.id}/read`)).status).toBe(200);
-  const roomReads = () => readFileSync(dataDir("room-reads.json"), "utf8");
-  expect(roomReads()).toContain(bobKey);
+  expect(existsSync(dataDir("attachments", bobFile))).toBe(true);
   // Only the Admin's signed request, and only on a team.
   expect((await fetch(`${team.base}/api/cloud/team/member-left`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: BOB.email }) })).status).toBe(401);
   expect((await team.signed("POST", "/api/cloud/team/member-left", { email: "not an address" })).status).toBe(400);
   const left = await team.signed("POST", "/api/cloud/team/member-left", { email: BOB.email });
   expect(left.status, JSON.stringify(left.body)).toBe(200);
-  expect(left.body).toMatchObject({ ok: true, chats: 2, layers: 1, files: 3, bots: 1 });
+  expect(left.body).toMatchObject({ ok: true, chats: 1, layers: 1, files: 1 });
   expect(left.body.sessions).toBeGreaterThanOrEqual(1);
   // His sessions end at once.
   expect((await team.as(bob, "GET", "/api/auth/session")).status).toBe(401);
@@ -317,17 +253,8 @@ it("when Bob leaves the team, his private chats and everything only his are dele
     }
   }
   expect(existsSync(layer)).toBe(false);
-  for (const file of [bobFile, bobDoc, bobUnsent]) expect(existsSync(dataDir("attachments", file))).toBe(false);
+  expect(existsSync(dataDir("attachments", bobFile))).toBe(false);
   expect(existsSync(dataDir("people", bobKey))).toBe(false);
-  expect(roomReads(), "where he read up to in each room goes too").not.toContain(bobKey);
-  expect((await team.as(owner, "DELETE", `/api/groups/${room.id}`)).status).toBe(200);
-  expect(roomReads(), "a deleted room's read lines go with it").not.toContain(room.id);
-  // His own MausBot and its chat go with him.
-  for (const token of [owner, admin]) {
-    expect(((await team.as(token, "GET", "/api/bots")).body.bots as Array<{ id: string }>).map((entry) => entry.id)).not.toContain(bobsMausBot.id);
-    expect((await messages(token, bobsMausBot.threadId)).status).toBe(404);
-  }
-  expect(existsSync(dataDir("workspaces", bobsMausBot.id))).toBe(false);
   // The team's own things stay: the bot, its main chat, and the Admin's own chat and notes.
   expect((await messages(owner, bot.mainThreadId)).status).toBe(200);
   expect((await messages(admin, adminThread)).status).toBe(200);

@@ -1,6 +1,6 @@
 import { useRef, useState, type Ref } from "react";
 import { Check, Laptop, Loader2, Sparkles, Users } from "lucide-react";
-import { TeamLibraryPanel } from "@/components/lazy-screens";
+import { TeamLibraryPanel } from "@/components/TeamLibraryPanel";
 import { cn } from "@/lib/cn";
 import { listOf } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
@@ -33,8 +33,8 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
   const teamButton = useRef<HTMLButtonElement>(null);
   const freshBody = <>
     <CardIcon icon={Sparkles} />
-    <span className="text-[15px] font-semibold text-ink">{t("cloudWelcome.bring.fresh")}</span>
-    <span className="text-[13px] leading-relaxed text-ink-secondary">{t(advanced ? "cloudWelcome.bring.freshHint" : "cloudWelcome.bring.freshChief")}</span>
+    <span className="text-[14.5px] font-semibold text-ink">{t("cloudWelcome.bring.fresh")}</span>
+    <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t(advanced ? "cloudWelcome.bring.freshHint" : "cloudWelcome.bring.freshChief")}</span>
   </>;
   const library = teams && <TeamLibraryPanel returnFocusRef={teamButton} onClose={() => setTeams(false)}
     onImported={() => { onTeam(); setTeams(false); onFinish("team"); }} />;
@@ -71,15 +71,15 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
     {cloudHasWork
       ? <div data-bring-here className={cn(CARD, CARD_IDLE)}>
           <CardIcon icon={Users} />
-          <span className="text-[15px] font-semibold text-ink">{t("cloudWelcome.bring.hereTitle")}</span>
-          <span className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.hereBody", { name })}</span>
+          <span className="text-[14.5px] font-semibold text-ink">{t("cloudWelcome.bring.hereTitle")}</span>
+          <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.hereBody", { name })}</span>
         </div>
       : <div className="grid gap-3 @lg/step:grid-cols-2">
           <div data-bring-choice="fresh" className={cn(CARD, CARD_PICKED)}>{freshBody}</div>
           {!desktop && <div data-bring-desktop className={cn(CARD, "border-dashed border-hairline/60 bg-transparent")}>
             <CardIcon icon={Laptop} />
-            <span className="text-[15px] font-semibold text-ink">{t("cloudWelcome.bring.desktopTitle")}</span>
-            <span className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.desktopOnly")}</span>
+            <span className="text-[14.5px] font-semibold text-ink">{t("cloudWelcome.bring.desktopTitle")}</span>
+            <span className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.desktopOnly")}</span>
           </div>}
         </div>}
     <Footer>{actions}</Footer>

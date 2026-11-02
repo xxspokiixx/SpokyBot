@@ -14,7 +14,6 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
-import { withAnswer } from "./testing/your-computer.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
@@ -64,8 +63,6 @@ async function loopbackModel() {
   const model = createServer(async (req, res) => {
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     let body = "";
-    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
-    if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
     const sent = JSON.parse(body) as { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
     const text = (message: { content?: unknown }) => typeof message.content === "string" ? message.content
@@ -78,7 +75,7 @@ async function loopbackModel() {
     const reply = (out: ServerResponse, given: ModelAnswer) => {
       out.writeHead(200, { "content-type": "text/event-stream" });
       out.end("say" in given ? frame({ content: given.say }, "stop") + "data: [DONE]\n\n"
-        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: JSON.stringify({ round: callSerial }) } }] }, "tool_calls") + "data: [DONE]\n\n");
+        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: "{}" } }] }, "tool_calls") + "data: [DONE]\n\n");
     };
     reply(res, answer(request));
   });
@@ -443,13 +440,12 @@ itHost("T7 queues a root on the computer seat at the wait ceiling and continues 
       driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
       environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile },
     } } }));
-    const proc = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href,
-      "--import", pathToFileURL(join(ROOT, "server/testing/desktop-parent.mjs")).href, join(ROOT, "server/index.ts")], {
+    const proc = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
       cwd: ROOT, env: {
         PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
         HOME: home, USERPROFILE: home, OMB_DATA_DIR: data, APPDATA: join(home, "appdata"), LOCALAPPDATA: join(home, "localappdata"),
         TEMP: home, TMP: home, TMPDIR: home, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
-        OMB_TEST_DESKTOP_CUA_CONNECTION: join(home, "user-data", "cua-connection.json"), OMB_COMPUTER_CALL_WAIT_MS: "4000", OMB_COMPUTER_CALL_ACT_WITHIN_MS: "1000",
+        OMB_USER_DATA: join(home, "user-data"), OMB_COMPUTER_CALL_WAIT_MS: "4000", OMB_COMPUTER_CALL_ACT_WITHIN_MS: "1000",
         OMB_COMPUTER_WAIT_MAX_MS: String(CEILING_MS),
       }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -465,13 +461,12 @@ itHost("T7 queues a root on the computer seat at the wait ceiling and continues 
     const { task: held } = await apiOk("POST", `/api/bots/${holder.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the screen slowly.", threadId: held.threadId });
     await until(() => taskOf(holder.id, held.threadId), (task) => task?.busy === true);
-    // On Auto the person is asked once before each turn first uses their computer.
-    expect(await withAnswer(base, held.threadId, gate(await dumpFor(holder.id)))).toEqual({ held: false, helpOpen: false });
+    expect(await gate(await dumpFor(holder.id))).toEqual({ held: false, helpOpen: false });
     const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter" });
     const { task: wait } = await apiOk("POST", `/api/bots/${waiter.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${waiter.id}/messages`, { text: "T7-JOB: use the screen too.", threadId: wait.threadId });
     await until(() => taskOf(waiter.id, wait.threadId), (task) => task?.busy === true);
-    const contested = await withAnswer(base, wait.threadId, gate(await dumpFor(waiter.id)));
+    const contested = await gate(await dumpFor(waiter.id));
     expect(contested.held).toBe(true);
     const root = (await until(() => roots().find((row) => row.assignee?.destination?.threadId === wait.threadId), (row) => row?.status === "queued"))!;
     expect(root).toMatchObject({ status: "queued", executions: 1, continuation: { note: expect.stringContaining(SEAT_FREE), count: 1 } });
@@ -485,7 +480,7 @@ itHost("T7 queues a root on the computer seat at the wait ceiling and continues 
     const { task: wait2 } = await apiOk("POST", `/api/bots/${second.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${second.id}/messages`, { text: "T7-JOB-2: use the screen as well.", threadId: wait2.threadId });
     await until(() => taskOf(second.id, wait2.threadId), (task) => task?.busy === true);
-    expect((await withAnswer(base, wait2.threadId, gate(await dumpFor(second.id)))).held).toBe(true);
+    expect((await gate(await dumpFor(second.id))).held).toBe(true);
     const root2 = (await until(() => roots().find((row) => row.assignee?.destination?.threadId === wait2.threadId), (row) => row?.status === "queued"))!;
     expect(root2).toMatchObject({ status: "queued", executions: 1, continuation: { note: expect.stringContaining(SEAT_FREE), count: 1 } });
     expect(root2.createdAt).toBeGreaterThan(root.createdAt);
@@ -659,7 +654,6 @@ it("T10 parks a teammate's turn on its credential card, tells the Chief at once,
   const brief = "T10-BRIEF: set up the Grok model for the export; ask for the key you need.";
   f.script(f.clive.id,
     { key: "C0", match: ["T10-JOB"], steps: [{ arguments: { bot_ids: [mira.id], message: brief } }], reply: "C0: Mira is on it." },
-    { key: "C-WAITS", match: ["[OpenMausBot note from @Mira", "T10-JOB"], reply: "C-WAITS: Mira waits on the key; nothing else is open." },
     { key: "C1", match: [SETTLED, REPORT_FROM_MIRA, "T10-RESULT"], reply: "T10-FINAL: the export model is set up." });
   f.script(mira.id,
     { key: "M2", match: ["T10-BRIEF", SECRET_PROVIDED], reply: "T10-RESULT: the key is in and the export runs." },
@@ -676,11 +670,8 @@ it("T10 parks a teammate's turn on its credential card, tells the Chief at once,
   expect(f.eventsOf(child.id)).toContain("parked");
   await expect.poll(async () => (await f.chips(job, "needs your input")).length, { timeout: 15_000 }).toBe(1);
   expect(chipText((await f.chips(job, "needs your input"))[0])).toContain("provide");
-  // At Full access the Chief hears of it at once and carries on; the teammate's work stays parked on the card.
-  await expect.poll(() => f.turns(f.clive.id).map((record: any) => record.planKey), { timeout: 30_000 }).toEqual(["C0", "C-WAITS"]);
-  expect(f.own(f.turn("C-WAITS"))).toContain("it is already in front of them: do not ask them again");
-  await expect.poll(() => f.roots()[0].status, { timeout: 15_000 }).toBe("waiting");
-  expect(children()[0]).toMatchObject({ status: "needs_input", cards: [card.id] });
+  expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["C0"]);
+  expect(f.roots()[0].status).toBe("waiting");
   expect((await f.task(mira.id, work)).busy).toBe(false);
   expect((await f.api("PUT", "/api/config", { xai: { key: "xai-fixture-key" } })).status).toBe(200);
   const provided = await f.api("POST", `/api/bots/${mira.id}/secret-cards/${card.id}/provided`, { threadId: work });
@@ -691,7 +682,7 @@ it("T10 parks a teammate's turn on its credential card, tells the Chief at once,
   expect(f.eventsOf(child.id)).toEqual(expect.arrayContaining(["parked", "answered", "started", "settled"]));
   expect(f.turns(mira.id).map((record: any) => record.planKey)).toEqual(["M1", "M2"]);
   expect(f.own(f.turn("M2"))).toContain(SECRET_PROVIDED);
-  expect(f.roots()[0]).toMatchObject({ status: "completed", executions: 3 });
+  expect(f.roots()[0]).toMatchObject({ status: "completed", executions: 2 });
   expect((await f.messages(work)).find((message: any) => message.id === card.id).secret).toMatchObject({ provided: true, resumed: true });
   expect(await f.chips(job, "needs your input")).toHaveLength(1);
 }), hostTimeout(90_000));
