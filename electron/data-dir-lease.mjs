@@ -319,6 +319,16 @@ function publishRecord(path, record, prepareMessage, acquireMessage) {
       return true;
     } catch (error) {
       if (error?.code === "EEXIST") return false;
+      // Android and some filesystems don't support hard links; fall back to renameSync (atomic on POSIX)
+      if (error?.code === "EACCES" || error?.code === "EPERM" || error?.code === "EXDEV") {
+        try {
+          renameSync(candidatePath, path);
+          return true;
+        } catch (renameError) {
+          if (renameError?.code === "EEXIST") return false;
+          throw leaseError(acquireMessage, renameError);
+        }
+      }
       throw leaseError(acquireMessage, error);
     }
   } finally {
@@ -509,7 +519,21 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
         break;
       } catch (error) {
         if (error?.code !== "EEXIST") {
-          throw leaseError("OpenMausBot cannot acquire its data-directory lease.", error);
+          // Android and some filesystems don't support hard links; fall back to renameSync (atomic on POSIX)
+          if (error?.code === "EACCES" || error?.code === "EPERM" || error?.code === "EXDEV") {
+            try {
+              renameSync(candidatePath, leasePath);
+              acquired = true;
+              break;
+            } catch (renameError) {
+              if (renameError?.code !== "EEXIST") {
+                throw leaseError("OpenMausBot cannot acquire its data-directory lease.", renameError);
+              }
+              // EEXIST from renameSync means another process won the race, continue loop
+            }
+          } else {
+            throw leaseError("OpenMausBot cannot acquire its data-directory lease.", error);
+          }
         }
       }
 

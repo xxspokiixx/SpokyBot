@@ -5,7 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -20,7 +23,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -79,7 +84,7 @@ class NodeHostService : Service() {
         super.onDestroy()
     }
 
-    private fun runBoot() {
+    private suspend fun runBoot() {
         Log.d(TAG, "runBoot starting")
         val bootUnderway = NodeState.samePhase(
             NodeState.Phase.Extracting,
@@ -109,9 +114,11 @@ class NodeHostService : Service() {
                 postNotification(getString(R.string.notif_bundle_missing), withStop = false, withResume = true)
                 return
             }
-            val node = File(applicationInfo.nativeLibraryDir, NODE_LIB)
-            Log.d(TAG, "runBoot: node exists=${node.exists()} path=${node.absolutePath}")
-            if (!node.exists()) {
+            // Use the manually extracted node runtime (more reliable than nativeLibraryDir)
+            val nodeRuntime = extractNodeRuntime()
+            val node = nodeRuntime ?: File(applicationInfo.nativeLibraryDir, NODE_LIB)
+            Log.d(TAG, "runBoot: node exists=${node.exists()} path=${node.absolutePath} size=${node.length()}")
+            if (!node.exists() || node.length() < 1_000_000) {
                 NodeState.update(NodeState.Phase.RuntimeMissing, detail = getString(R.string.status_runtime_missing))
                 postNotification(getString(R.string.notif_runtime_missing), withStop = false, withResume = true)
                 return
@@ -437,6 +444,58 @@ class NodeHostService : Service() {
             return "asset extraction failed: ${e.message}"
         }
         File(target, "VERSION").writeText(version)
+        // Also extract the native node runtime (libnodeexec.so) from the APK
+        extractNodeRuntime()
+        return null
+    }
+
+    /** Extracts libnodeexec.so from the APK's native library directory to the app's files directory.
+     * Android doesn't reliably extract native libraries at runtime (especially executables),
+     * so we do it manually using PackageManager. */
+    private fun extractNodeRuntime(): File? {
+        val destDir = File(filesDir, "node-runtime")
+        destDir.mkdirs()
+        val destFile = File(destDir, NODE_LIB)
+        if (destFile.exists() && destFile.length() > 1_000_000) {
+            Log.d(TAG, "Node runtime already extracted at ${destFile.absolutePath} (${destFile.length()} bytes)")
+            return destFile
+        }
+        try {
+            val pm = packageManager
+            val appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_SHARED_LIBRARY_FILES)
+            val nativeLibDir = File(appInfo.nativeLibraryDir)
+            val sourceFile = File(nativeLibDir, NODE_LIB)
+            if (sourceFile.exists()) {
+                Log.d(TAG, "Copying node runtime from $sourceFile to $destFile")
+                sourceFile.copyTo(destFile)
+                destFile.setExecutable(true, false)
+                Log.d(TAG, "Node runtime extracted successfully (${destFile.length()} bytes)")
+                return destFile
+            } else {
+                Log.w(TAG, "Native library not found at $sourceFile, nativeLibDir=$nativeLibDir")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract node runtime from nativeLibraryDir: ${e.message}")
+        }
+        // Fallback: try to find it in the APK's lib directory via PackageManager
+        try {
+            val pm = packageManager
+            val appInfo = pm.getApplicationInfo(packageName, 0)
+            // On some Android versions, nativeLibraryDir points to the unextracted APK location
+            val nativeLibDir = File(appInfo.nativeLibraryDir)
+            if (nativeLibDir.exists()) {
+                val sourceFile = File(nativeLibDir, NODE_LIB)
+                if (sourceFile.exists()) {
+                    Log.d(TAG, "Copying node runtime from fallback $sourceFile to $destFile")
+                    sourceFile.copyTo(destFile)
+                    destFile.setExecutable(true, false)
+                    Log.d(TAG, "Node runtime extracted from fallback (${destFile.length()} bytes)")
+                    return destFile
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Fallback extraction also failed: ${e.message}")
+        }
         return null
     }
 
@@ -455,12 +514,15 @@ class NodeHostService : Service() {
     }
 
     private fun startNode(nodePath: String) {
+        Log.d(TAG, "startNode: ENTERED nodePath=$nodePath")
         val home = File(filesDir, "home").apply { mkdirs() }
         File(filesDir, "tmp").mkdirs()
         val install = File(filesDir, INSTALL_DIR)
         val serverDir = File(install, SERVER_DIR)
         val entry = File(serverDir, SERVER_ENTRY)
+        Log.d(TAG, "startNode: install=$install serverDir=$serverDir entry=$entry entryExists=${entry.exists()}")
         if (!entry.exists()) {
+            Log.e(TAG, "startNode: bundle entry missing at $entry")
             NodeState.update(NodeState.Phase.BundleMissing, detail = "bundle entry missing: $SERVER_ENTRY")
             return
         }
@@ -472,14 +534,21 @@ class NodeHostService : Service() {
             detail = "spawning Node runtime",
             logTail = previousTail,
         )
-        val process = ProcessBuilder(nodePath, entry.absolutePath)
+        Log.d(TAG, "startNode: nodePath=$nodePath entry=$entry serverDir=$serverDir")
+        val pb = ProcessBuilder(nodePath, entry.absolutePath)
             .directory(serverDir)
             .redirectErrorStream(true)
-            .apply {
-                environment().clear()
-                environment().putAll(processEnv(home, install))
-            }
-            .start()
+        pb.environment().clear()
+        pb.environment().putAll(processEnv(home, install))
+        Log.d(TAG, "startNode: environment=${pb.environment().keys.joinToString(",")}")
+        val process = try {
+            pb.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "startNode: failed to start process: ${e.message}", e)
+            NodeState.update(NodeState.Phase.Failed, detail = "failed to start node: ${e.message}")
+            return
+        }
+        Log.d(TAG, "startNode: process started hash=${process.hashCode()}")
         nodeProcess = process
         restarts = 0
         scope.launch { tailProcess(process, logFile) }
@@ -527,6 +596,7 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
     }
 
     private fun tailProcess(process: Process, logFile: File) {
+        Log.d(TAG, "tailProcess: started for hash=${process.hashCode()}")
         try {
             process.inputStream.bufferedReader().forEachLine { line ->
                 runCatching {
@@ -535,14 +605,18 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
                 }
                 NodeState.status.update { it.copy(logTail = tail(it.logTail, line)) }
             }
-        } catch (_: IOException) {
+        } catch (e: IOException) {
+            Log.w(TAG, "tailProcess: IOException reading output: ${e.message}")
         }
+        Log.d(TAG, "tailProcess: output stream closed, waiting for exit")
         val exit = try {
             process.waitFor()
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
+            Log.w(TAG, "tailProcess: interrupted")
             return
         }
+        Log.d(TAG, "tailProcess: process hash=${process.hashCode()} exited with code=$exit")
         if (stopping) return
         val phase = NodeState.status.value.phase
         when {
@@ -554,7 +628,7 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
             restarts < MAX_RESTARTS -> {
                 restarts++
                 NodeState.status.update { it.copy(detail = "node exited (code $exit); restarting") }
-                runBoot()
+                scope.launch { runBoot() }
             }
             else -> {
                 NodeState.update(
@@ -567,23 +641,21 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
     }
 
     private fun tail(current: String, line: String): String = (current + "\n" + line).takeLast(LOG_TAIL_CHARS)
-    private fun pollServer() {
-        scope.launch {
-            if (!pollUntilAnswering()) return@launch
-            NodeState.update(NodeState.Phase.Running, detail = "port answering")
-            if (!waitEnvironment()) {
-                NodeState.update(
-                    NodeState.Phase.Failed,
-                    detail = "no 200 with environmentId from /.well-known/openmausbot/environment within 30 s",
-                )
-                postNotification(getString(R.string.notif_failed), withStop = false, withResume = true)
-                return@launch
-            }
-            restarts = 0
-            NodeState.update(NodeState.Phase.Ready, detail = "harness ready")
-            postNotification(getString(R.string.notif_ready))
-            pairWebView()
+    private suspend fun pollServer() {
+        if (!pollUntilAnswering()) return
+        NodeState.update(NodeState.Phase.Running, detail = "port answering")
+        if (!waitEnvironment()) {
+            NodeState.update(
+                NodeState.Phase.Failed,
+                detail = "no 200 with environmentId from /.well-known/openmausbot/environment within 30 s",
+            )
+            postNotification(getString(R.string.notif_failed), withStop = false, withResume = true)
+            return
         }
+        restarts = 0
+        NodeState.update(NodeState.Phase.Ready, detail = "harness ready")
+        postNotification(getString(R.string.notif_ready))
+        pairWebView()
     }
 
     private suspend fun pollUntilAnswering(): Boolean {
@@ -846,6 +918,7 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
                 .flatMap { it.value }
             RawResponse(status, text, cookies)
         } catch (e: IOException) {
+            Log.w(TAG, "http $method ${url} failed: ${e.javaClass.simpleName}: ${e.message}")
             null
         } finally {
             connection?.disconnect()
