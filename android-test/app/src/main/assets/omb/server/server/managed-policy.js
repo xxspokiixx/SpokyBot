@@ -1,0 +1,145 @@
+import { z } from "zod";
+/** Received only over Electron's private port and held in memory: never merged into config.json, and adds no prompts. */
+const policySchema = z.object({
+    organizationId: z.string().uuid(),
+    organizationName: z.string().trim().min(1).max(100),
+    expiresAt: z.number().int().positive(),
+    version: z.number().int().min(0).max(2_147_483_647),
+    companyModelsOnly: z.boolean(),
+    allowedEngines: z.union([z.literal("all"), z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9-]{0,63}$/)).max(64)]),
+    mcp: z.object({ allowCustom: z.boolean(), allowlist: z.array(z.string().trim().min(1).max(200)).max(100) }).strict(),
+    // "box" is Boat's historical key in the org-policy schema shared with the desktop parent.
+    computers: z.object({ thisComputer: z.boolean(), localVm: z.boolean(), box: z.boolean(), vps: z.boolean() }).strict(),
+    remoteAccess: z.boolean(),
+}).strict();
+const computerLabels = { thisComputer: "this computer", localVm: "local virtual machines", box: "cloud computers", vps: "VPS computers" };
+export function parseManagedPolicy(raw, now = Date.now()) {
+    if (raw === null)
+        return null;
+    const parsed = policySchema.safeParse(raw);
+    if (!parsed.success)
+        throw new Error("Invalid organisation policy from the desktop parent.");
+    return parsed.data.expiresAt > now ? parsed.data : null;
+}
+/** `*` stands for one or more whole labels, never part of one. */
+function hostMatches(pattern, host) {
+    if (!pattern.length)
+        return !host.length;
+    if (pattern[0] === "*") {
+        for (let taken = 1; taken <= host.length - (pattern.length - 1); taken++)
+            if (hostMatches(pattern.slice(1), host.slice(taken)))
+                return true;
+        return false;
+    }
+    return host.length > 0 && pattern[0] === host[0] && hostMatches(pattern.slice(1), host.slice(1));
+}
+/** An address entry (https:// only) matches without credentials, on the same port, label by label; unparsable never matches. */
+export function mcpEntryMatches(entry, name, url) {
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(entry))
+        return entry.toLowerCase() === name.toLowerCase();
+    if (!url)
+        return false;
+    let pattern, target;
+    try {
+        pattern = new URL(entry);
+        target = new URL(url);
+    }
+    catch {
+        return false;
+    }
+    if (pattern.protocol !== "https:" || target.protocol !== "https:" || pattern.username || pattern.password || target.username || target.password ||
+        pattern.search || pattern.hash || pattern.port !== target.port)
+        return false;
+    const labels = pattern.hostname.split(".");
+    if (labels.some(label => !label || (label !== "*" && label.includes("*"))) || labels.every(label => label === "*"))
+        return false;
+    if (!hostMatches(labels, target.hostname.split(".")))
+        return false;
+    const path = pattern.pathname.split("*").map(part => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+    return new RegExp(`^${path}$`).test(target.pathname);
+}
+export function computerKindForResource(resource) {
+    if (resource === "computer:host")
+        return "thisComputer";
+    if (resource.startsWith("computer:vm:"))
+        return "localVm";
+    // computer:box: and computer:box-bot: are Boat's historical resource prefixes.
+    if (resource.startsWith("computer:box:") || resource.startsWith("computer:box-bot:"))
+        return "box";
+    if (resource.startsWith("computer:vps:"))
+        return "vps";
+}
+export class ManagedDesktopPolicy {
+    policy = null;
+    timer;
+    now;
+    onChange;
+    constructor(options = {}) {
+        this.now = options.now ?? Date.now;
+        this.onChange = options.onChange ?? (() => { });
+    }
+    apply(raw) {
+        const next = parseManagedPolicy(raw, this.now());
+        const changed = JSON.stringify(next) !== JSON.stringify(this.policy);
+        this.policy = next;
+        clearTimeout(this.timer);
+        // The last applied policy holds only as long as the device credential.
+        if (next) {
+            this.timer = setTimeout(() => this.apply(null), Math.min(2_147_483_647, Math.max(1, next.expiresAt - this.now())));
+            this.timer.unref?.();
+        }
+        if (changed)
+            this.onChange();
+    }
+    current() {
+        return this.policy && this.policy.expiresAt > this.now() ? this.policy : null;
+    }
+    close() { clearTimeout(this.timer); this.policy = null; }
+    modelRefusal(instance, company) {
+        const policy = this.current();
+        if (!policy)
+            return;
+        if (policy.companyModelsOnly && !company)
+            return `${policy.organizationName} allows only company models on this computer. Choose a Company model for this bot.`;
+        if (policy.allowedEngines !== "all" && !policy.allowedEngines.includes(instance.driverKind)) {
+            return `${policy.organizationName} does not allow the ${instance.displayName ?? instance.driverKind} engine on this computer. Choose another model for this bot.`;
+        }
+    }
+    mcpAllowed(name, url) {
+        const policy = this.current();
+        return !policy || policy.mcp.allowCustom || policy.mcp.allowlist.some(entry => mcpEntryMatches(entry, name, url));
+    }
+    filterMcp(servers) {
+        if (!this.restrictsMcp())
+            return servers;
+        return Object.fromEntries(Object.entries(servers).filter(([name, server]) => this.mcpAllowed(name, "url" in server && typeof server.url === "string" ? server.url : undefined)));
+    }
+    restrictsMcp() { const policy = this.current(); return Boolean(policy && !policy.mcp.allowCustom); }
+    mcpRefusal(name, url) {
+        const policy = this.current();
+        if (!policy || this.mcpAllowed(name, url))
+            return;
+        return `${policy.organizationName} allows only MCP servers it has approved. Ask your administrator to add this server to the approved list.`;
+    }
+    computerAllowed(kind) { return this.current()?.computers[kind] ?? true; }
+    computerRefusal(kind) {
+        const policy = this.current();
+        if (!policy || policy.computers[kind])
+            return;
+        return `${policy.organizationName} does not allow bots to use ${computerLabels[kind]}.`;
+    }
+    remoteAccessRefusal() {
+        const policy = this.current();
+        if (!policy || policy.remoteAccess)
+            return;
+        return `${policy.organizationName} does not allow remote access to this computer.`;
+    }
+    /** Read-only view for the renderer; carries nothing secret. */
+    summary() {
+        const policy = this.current();
+        if (!policy)
+            return null;
+        const { organizationId: _id, expiresAt: _expires, ...visible } = policy;
+        return visible;
+    }
+}

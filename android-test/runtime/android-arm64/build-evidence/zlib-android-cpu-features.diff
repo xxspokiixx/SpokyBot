@@ -1,0 +1,12 @@
+--- /home/xxspokiixx/nodebuild/patches/zlib.gyp.orig	2026-10-23 10:02:26.804673029 -0700
++++ deps/zlib/zlib.gyp	2026-10-23 10:02:26.832531069 -0700
+@@ -244,6 +244,9 @@
+                 ['target_arch=="arm64"', {
+                   'defines': [ 'INFLATE_CHUNK_READ_64LE' ],
+                 }],
++                ['OS=="android"', {
++                  'sources': [ '<(ZLIB_ROOT)/cpu-features.c' ],
++                }],
+               ],
+             }],
+           ],
