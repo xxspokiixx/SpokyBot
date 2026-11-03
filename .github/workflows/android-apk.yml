@@ -69,10 +69,12 @@ jobs:
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 35
-          ndk-version: r27c
           cmdline-tools-version: latest
-          emulator: false
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+            ndk;27.1.12297006
 
       - name: Install system dependencies
         run: |
