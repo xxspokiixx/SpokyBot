@@ -1,0 +1,15 @@
+
+> openmausbot@0.3391.3 dev:server C:\Users\xxspokiixx\Documents\GitHub\cloudmaus
+> node --experimental-strip-types server/dev-server.ts
+
+bot box: off (not-cloud)
+openmausbot webhook receiver on http://127.0.0.1:8800
+openmausbot open-source edition (enterprise layer present but OMB_LICENSE_KEY is not set)
+local requests: owner trust (self-hosted default)
+local requests: OMB_DEV_TRUST_LOCAL_BROWSER=1: browsers on this machine act as the owner (development only)
+brand: default
+openmausbot server on http://127.0.0.1:8799
+memory upkeep: moved 1 entry from MEMORY.md into topic files for Ledger 3
+memory upkeep: tidied Ledger 3 — 0 expired, 0 duplicate(s), 0 contradicted
+memory upkeep: moved 2 entries from MEMORY.md into topic files for MeanMachine
+memory upkeep: tidied MeanMachine — 0 expired, 0 duplicate(s), 0 contradicted
