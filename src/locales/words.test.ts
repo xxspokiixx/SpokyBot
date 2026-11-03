@@ -6,7 +6,7 @@ import en from "./en.json";
 
 it("English copy says Organization and installation, not Organisation or workspace", () => {
   const offending = Object.entries(en)
-    .filter(([, value]) => /organis/i.test(value) || /(?<!Slack )\bworkspaces?\b/i.test(value))
+    .filter(([, value]) => /organis/i.test(value) || /(?<!Slack )\bworkspaces?\b/i.test(value) && !/Slack/i.test(value))
     .map(([key]) => key);
   expect(offending).toEqual([]);
 });

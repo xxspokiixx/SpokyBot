@@ -13942,6 +13942,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           source!.selected = option.surface;
           source!.previousSurface = store.taskByThread(bot.id, bot.threadId)?.surface;
+
+          // True mid-turn surface switching: if the driver supports queueing (steering)
+          // AND the target surface is ready, steer a surface-switch message into the
+          // running turn instead of returning "pending".
+          const instance = runningTurnInstance(bot, internalCapability.threadId);
+          const steer = instance?.adapter.steer;
+          const canSteer = Boolean(bot.busy && instance?.adapter.capabilities.queueing && steer && option.ready);
+          if (canSteer && instance && steer) {
+            const steerText = `The computer has been switched to ${option.label}. Continue the user's original request using the tools for this surface.`;
+            const steerOutcome = await steer(internalCapability.threadId, steerText).catch((): SteerOutcome => "indeterminate");
+            if (steerOutcome === "steered" || steerOutcome === "indeterminate") {
+              store.patchTask(bot.id, internalCapability.threadId, { surface: option.surface, surfaceSource: "auto" });
+              return json(res, 200, { status: "switched", surface: option.surface, message: steerText });
+            }
+            // If steer was refused, fall through to "pending" behavior.
+          }
         }
         return json(res, 200, { status: "pending", surface: option.surface,
           message: `End this turn now without using the previous computer tools. OpenMausBot will continue the original request on ${option.label} with a fresh tool connection.` });

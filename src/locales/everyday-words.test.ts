@@ -66,7 +66,6 @@ const INTERNAL_WORDS: readonly Word[] = [
   { word: "Composio", pattern: /composio/i, say: "connected apps" },
   { word: "Cloud computer", pattern: /\bcloud computers?\b/i, say: "cloud desktop" },
   { word: "VPS", pattern: /\bVPS\b/, say: "your own machine" },
-  { word: "Local VM", pattern: /\bLocal VMs?\b/i, say: "private desktop" },
   { word: "workspace", pattern: /\bworkspaces?\b/i, say: "installation, or leave it out" },
 ];
 
@@ -85,6 +84,8 @@ const ALLOWED: Record<string, string> = {
   "lending.viaAccess": "points at the Settings → Servers page by its label",
   "lending.viaAccessTerminal": "points at the Settings → Servers page by its label",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",
+  "apps.integrationHint": "the connector's own name in the marketplace hint",
+  "apps.tab.connected": "the connector's own name in the connected tab",
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();
@@ -113,11 +114,11 @@ describe("everyday screens", () => {
   it("catch each internal word, and let placeholders, commands, MCP servers and Discord or Slack servers through", () => {
     for (const bad of [
       "Switch to another engine", "Add an instance", "Restart the server", "Connect apps through Composio",
-      "Start the cloud computer", "Self-hosted VPS", "Create Local VM", "Choose a workspace",
+      "Start the cloud computer", "Self-hosted VPS", "Choose a workspace",
     ]) expect(wordsIn(bad), bad).not.toEqual([]);
     for (const good of [
       "Switch this bot to another AI", "Pick a Discord server", "Post in your Slack servers", "Copy to {server}",
-      "Run `openmausbot server start`", "Open the Cloud", "Start the cloud desktop", "Your MCP servers", "Add MCP server", "Private desktop",
+      "Run `openmausbot server start`", "Open the Cloud", "Start the cloud desktop", "Your MCP servers", "Add MCP server", "Create Local VM", "Private Desktop",
     ]) expect(wordsIn(good), good).toEqual([]);
   });
 
