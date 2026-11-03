@@ -7,6 +7,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -101,8 +102,21 @@ export function loadEnvironmentId(dataDir: string): string {
     descriptor = undefined;
 
     try {
-      // A hard link publishes atomically without replacing, unlike rename, which overwrites on POSIX.
-      linkSync(temporaryFile, file);
+      // A hard link publishes atomically without replacing; on Android / some filesystems
+      // hard links are not supported, so fall back to rename which is also atomic on POSIX.
+      // If rename also fails (e.g., cross-device), fall back to copy+unlink.
+      try {
+        linkSync(temporaryFile, file);
+      } catch {
+        try {
+          renameSync(temporaryFile, file);
+        } catch {
+          // Last resort: copy then unlink
+          const content = readFileSync(temporaryFile, "utf8");
+          writeFileSync(file, content, { mode: 0o600 });
+          unlinkSync(temporaryFile);
+        }
+      }
       return id;
     } catch (error) {
       if (!hasCode(error, "EEXIST")) throw error;

@@ -698,6 +698,9 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
     }
 
     private suspend fun pollUntilAnswering(): Boolean {
+        // Give the Node server time to start listening on port 8799.
+        // The process spawns immediately but server.listen() fires ~3s later on Android.
+        delay(4000)
         val deadline = System.currentTimeMillis() + 60_000
         while (System.currentTimeMillis() < deadline && !stopping) {
             // Increased timeout from 800ms to 3000ms for Android cold start
