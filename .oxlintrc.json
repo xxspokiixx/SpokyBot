@@ -19,9 +19,6 @@
     "release/**",
     "third_party/**",
     "electron/resources/**",
-    "android-test/app/build/**",
-    "android-test/app/.gradle/**",
-    "android-test/app/.cxx/**",
-    "android-test/app/src/main/assets/**"
+    "android-test/**"
   ]
 }
