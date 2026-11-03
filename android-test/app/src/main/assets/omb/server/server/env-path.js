@@ -1,0 +1,298 @@
+// A macOS app launched from Finder inherits a bare PATH (no ~/.local/bin, /opt/homebrew/bin or nvm/volta/asdf shims),
+// so every agent CLI spawn goes through augmentedPath().
+import { execFile } from "node:child_process";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, delimiter, dirname, extname, join } from "node:path";
+function nvmBinDirs() {
+    try {
+        const base = join(homedir(), ".nvm", "versions", "node");
+        return readdirSync(base)
+            .filter((v) => v.startsWith("v"))
+            .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+            .map((v) => join(base, v, "bin"));
+    }
+    catch {
+        return [];
+    }
+}
+/** A sealed test fixture sees only its own PATH, OMB_EXTRA_PATH, app-managed dirs and its temporary home, never this machine's CLIs or keychain. */
+export function sealedFixture() {
+    return process.env.OMB_TEST_SEALED_PATH === "1";
+}
+function knownDirs() {
+    const home = homedir();
+    return [
+        join(home, ".local", "bin"), // claude installer default
+        join(home, ".npm-global", "bin"), // npm prefix ~/.npm-global (claude, opencode)
+        join(home, ".kimi-code", "bin"), // kimi-code installer
+        join(home, ".grok", "bin"), // x.ai installer
+        join(home, ".opencode", "bin"), // opencode installer
+        join(home, ".claude", "local"), // claude "local install"
+        ...(sealedFixture() ? [] : [
+            "/opt/homebrew/bin", // brew, Apple silicon
+            "/usr/local/bin", // brew Intel / classic installs
+        ]),
+        join(home, ".volta", "bin"),
+        join(home, ".bun", "bin"),
+        join(home, ".asdf", "shims"),
+        join(home, ".local", "share", "mise", "shims"), // mise installer
+        join(home, ".deno", "bin"),
+        join(home, "bin"),
+        ...nvmBinDirs(),
+    ];
+}
+/** Windows never pushes PATH changes into a live process, so CLIs installed after launch are found by scanning install dirs. */
+function windowsKnownDirs() {
+    const home = homedir();
+    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
+    const localAppData = process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
+    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
+    return [
+        join(appData, "npm"), // npm -g shims: claude, codex
+        join(home, ".kimi-code", "bin"), // recover Kimi installs after a GUI launch too
+        join(home, ".grok", "bin"), // x.ai installer
+        join(localAppData, "agy", "bin"), // Antigravity installer
+        // Cursor installer: cursor-agent.* and its `agent` copies
+        join(localAppData, "cursor-agent"),
+        join(home, ".local", "bin"), // claude native installer
+        join(home, ".claude", "local"),
+        join(home, "bin"), // Factory droid installer (%USERPROFILE%\bin)
+        join(home, ".bun", "bin"),
+        join(home, ".deno", "bin"),
+        join(home, "go", "bin"),
+        join(programFiles, "Docker", "Docker", "resources", "bin"), // Docker Desktop installer
+        join(programFiles, "RedHat", "Podman"), // Podman installer, also run by Podman Desktop
+    ];
+}
+let cached = null;
+let probed = false;
+let loginShellPath = null;
+// App-managed dirs (its own npm prefix) go first, so an engine installed there wins over an older copy.
+const registeredDirs = [];
+export function registerPathDir(dir) {
+    if (registeredDirs.includes(dir))
+        return;
+    registeredDirs.unshift(dir);
+    resetPathCache();
+}
+/** `probed` resets too, or a rescan would drop rc-file PATH entries and never probe the login shell again. */
+export function resetPathCache() {
+    cached = null;
+    probed = false;
+}
+export function augmentedPath() {
+    if (cached === null) {
+        cached = mergePaths([
+            ...registeredDirs.filter((d) => existsSync(d)),
+            ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
+            ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
+            // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
+            ...(loginShellPath ? loginShellPath.split(delimiter) : []),
+            ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
+        ]);
+    }
+    if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
+        probed = true;
+        probeLoginShellPath();
+    }
+    return cached;
+}
+function mergePaths(parts) {
+    return [...new Set(parts.filter(Boolean))].join(delimiter);
+}
+function probeLoginShellPath() {
+    const shell = process.env.SHELL || "/bin/zsh";
+    // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive shells read; a marker isolates $PATH from rc noise.
+    execFile(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'], { timeout: 5000 }, (err, stdout) => {
+        if (err || !stdout)
+            return;
+        const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
+        if (!m || !m[1])
+            return;
+        loginShellPath = m[1];
+        cached = mergePaths([...(cached ?? "").split(delimiter), ...m[1].split(delimiter)]);
+    });
+}
+export function resetPathCacheForTests() {
+    cached = null;
+    probed = false;
+    loginShellPath = null;
+    registeredDirs.length = 0;
+}
+/** Windows CLIs keep state under USERPROFILE; a HOME leaking in from a POSIX-flavoured shell is not it. */
+export function userHome(env = process.env) {
+    return process.platform === "win32"
+        ? env.USERPROFILE || env.HOME || homedir()
+        : env.HOME || env.USERPROFILE || homedir();
+}
+export function harnessHome(name, env = process.env) {
+    return join(userHome(env), `.${name}`);
+}
+export function findCliCandidates(name) {
+    if (!name || /[\n\r]/.test(name))
+        return [];
+    if (/[/\\]/.test(name) || /^[a-zA-Z]:/.test(name))
+        return [name];
+    const exts = process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
+    const out = [];
+    for (const dir of augmentedPath().split(delimiter)) {
+        if (!dir)
+            continue;
+        for (const ext of exts) {
+            const p = join(dir, name + ext);
+            if (existsSync(p)) {
+                out.push(p);
+                break;
+            }
+        }
+    }
+    return out;
+}
+/** A mini tokenizer, never a shell: quotes group segments; no escapes, no substitution, nothing evaluated. */
+export function splitCliString(cli) {
+    const out = [];
+    let cur = "";
+    let quote = null;
+    for (const ch of cli.trim()) {
+        if (quote) {
+            if (ch === quote)
+                quote = null;
+            else
+                cur += ch;
+        }
+        else if (ch === '"' || ch === "'") {
+            quote = ch;
+        }
+        else if (/\s/.test(ch)) {
+            if (cur)
+                out.push(cur);
+            cur = "";
+        }
+        else {
+            cur += ch;
+        }
+    }
+    if (cur)
+        out.push(cur);
+    return out;
+}
+function isFile(p) {
+    try {
+        return statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
+    }
+    catch {
+        return false;
+    }
+}
+function whichWin(cli, env) {
+    const exts = ((env ?? process.env).PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+    // npm installs both `claude` (a sh script) and `claude.cmd`; an extensionless name is not runnable on Windows.
+    const probe = (base) => {
+        const order = extname(base) ? [base, ...exts.map((e) => base + e)] : [...exts.map((e) => base + e), base];
+        return order.find(isFile) ?? null;
+    };
+    if (/[\\/]/.test(cli) || /^[a-zA-Z]:/.test(cli))
+        return probe(cli);
+    const path = env ? (env.PATH ?? env.Path ?? "") : augmentedPath();
+    for (const dir of path.split(delimiter)) {
+        if (!dir)
+            continue;
+        const hit = probe(join(dir, cli));
+        if (hit)
+            return hit;
+    }
+    return null;
+}
+/** In a packaged app process.execPath is Electron and must never be mistaken for node.exe. */
+function nodeExe(near, env) {
+    const local = join(near, "node.exe");
+    if (isFile(local))
+        return local;
+    const onPath = whichWin("node.exe", env);
+    if (onPath && extname(onPath).toLowerCase() === ".exe")
+        return onPath;
+    return process.versions.electron ? null : process.execPath;
+}
+/** npm/pnpm .cmd shims spell their target as "%dp0%\..." (or "%~dp0\..."). */
+function parseCmdShim(shim, env) {
+    let text;
+    try {
+        text = readFileSync(shim, "utf8");
+    }
+    catch {
+        return null;
+    }
+    const dir = dirname(shim);
+    // npm's own npm.cmd/npx.cmd name their entry as SET "NPX_CLI_JS=%~dp0\…"; a launcher switch to a global npm is not followed.
+    const npmEntry = /^SET "NP[MX]_CLI_JS=%~dp0\\([^"]+)"/im.exec(text);
+    const targets = [...(npmEntry ? [npmEntry] : []), ...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
+        .map((m) => join(dir, m[1]))
+        .filter((p) => isFile(p) && basename(p).toLowerCase() !== "node.exe");
+    const script = targets.find((p) => /\.[cm]?js$/i.test(p));
+    if (script) {
+        const node = nodeExe(dir, env);
+        if (node)
+            return { command: node, args: [script] };
+    }
+    const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
+    return exe ? { command: exe, args: [] } : null;
+}
+function parseNodeShebang(file, env) {
+    let head = "";
+    let fd = null;
+    try {
+        fd = openSync(file, "r");
+        const buf = Buffer.alloc(128);
+        const n = readSync(fd, buf, 0, buf.length, 0);
+        head = buf.subarray(0, n).toString("utf8").split("\n", 1)[0];
+    }
+    catch {
+        return null;
+    }
+    finally {
+        if (fd !== null) {
+            try {
+                closeSync(fd);
+            }
+            catch {
+            }
+        }
+    }
+    if (!/^#!.*\bnode(\.exe)?\b/.test(head))
+        return null;
+    const node = nodeExe(dirname(file), env);
+    return node ? { command: node, args: [file] } : null;
+}
+/** One command word's platform spawn rules: identity except on win32, since POSIX resolves PATH and #! itself. */
+function resolveWord(cli, args, env) {
+    if (process.platform !== "win32")
+        return { command: cli, args };
+    const file = whichWin(cli, env);
+    if (!file)
+        return { command: cli, args };
+    const ext = extname(file).toLowerCase();
+    if (ext === ".cmd" || ext === ".bat") {
+        const direct = parseCmdShim(file, env);
+        return direct ? { command: direct.command, args: [...direct.args, ...args] } : { command: file, args };
+    }
+    if (ext === ".exe" || ext === ".com")
+        return { command: file, args };
+    const viaNode = parseNodeShebang(file, env);
+    return viaNode ? { command: viaNode.command, args: [...viaNode.args, ...args] } : { command: file, args };
+}
+export function resolveCliSpawn(cli, args, env) {
+    // An existing file wins over the tokenizer: candidate paths with spaces arrive unquoted.
+    const trimmed = cli.trim();
+    if (trimmed.includes(" ") && existsSync(trimmed))
+        return resolveWord(trimmed, args, env);
+    // One tokenizer pass; the head is never re-split, and fixed args go first so a wrapper's subcommand leads.
+    const split = splitCliString(cli);
+    if (split.length > 1 || split[0] !== trimmed) {
+        const [head, ...fixed] = split;
+        if (!head)
+            return { command: cli, args };
+        return resolveWord(head, [...fixed, ...args], env);
+    }
+    return resolveWord(cli, args, env);
+}
