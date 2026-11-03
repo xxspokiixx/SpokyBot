@@ -22,7 +22,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
-import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
+import { DATA_DIR, isValidVpsSshTarget, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
 import { prepareVpsSsh } from "./vps-ssh.ts";
@@ -180,15 +180,15 @@ export function vpsContainerName(botId: string): string {
 }
 
 export function vpsDockerArgs(alias: string, args: string[]): string[] {
-  if (!isValidSshAlias(alias)) {
-    throw new Error("invalid VPS SSH config alias");
+  if (!isValidVpsSshTarget(alias)) {
+    throw new Error("invalid VPS SSH target (must be SSH config alias or user@host)");
   }
   return ["-H", `ssh://${alias}`, ...args];
 }
 
 /** Never published by Docker: SSH forwards one loopback port to noVNC, and every caller-controlled part is validated before argv. */
 export function vpsSshTunnelArgs(alias: string, localPort: number, privateIp: string, configPath: string | null = null): string[] {
-  if (!isValidSshAlias(alias)) throw new Error("invalid VPS SSH config alias");
+  if (!isValidVpsSshTarget(alias)) throw new Error("invalid VPS SSH target (must be SSH config alias or user@host)");
   if (!Number.isInteger(localPort) || localPort < 1024 || localPort > 65535) {
     throw new Error("invalid VPS viewer port");
   }
@@ -1239,7 +1239,7 @@ export async function vpsComputerJoin(
 }
 
 export function vpsContainerMcpArgs(alias: string, containerName: string): string[] {
-  if (!isValidSshAlias(alias) || (!CONTAINER_NAME.test(containerName) && !CONTAINER_ID.test(containerName))) {
+  if (!isValidVpsSshTarget(alias) || (!CONTAINER_NAME.test(containerName) && !CONTAINER_ID.test(containerName))) {
     throw new Error("invalid VPS MCP connection");
   }
   return vpsDockerArgs(

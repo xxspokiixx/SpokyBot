@@ -1,7 +1,7 @@
 import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import { isValidSshAlias, localVmMaxInstances, localVmMode, type AppConfig } from "../config.ts";
+import { isValidVpsSshTarget, localVmMaxInstances, localVmMode, type AppConfig } from "../config.ts";
 import {
   containerComputerAction,
   containerComputerExists,
@@ -256,8 +256,8 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
         return json(res, 400, { error: "confirmName must be the VPS computer name shown in Settings" });
       }
       const alias = body?.alias;
-      if (alias !== undefined && !isValidSshAlias(alias)) {
-        return json(res, 400, { error: "alias must be a simple SSH config alias" });
+      if (alias !== undefined && !isValidVpsSshTarget(alias)) {
+        return json(res, 400, { error: "alias must be an SSH config alias or user@host format" });
       }
       // An explicit alias may only name a server the inventory scans: anything else would open
       // docker-over-SSH to an arbitrary host from the user's SSH config.

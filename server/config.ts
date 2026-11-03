@@ -31,6 +31,7 @@ export * from "./local-vm-settings.ts";
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const SSH_USER_HOST = /^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9.-]{0,253}$/;
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
@@ -54,21 +55,29 @@ export function isValidSshAlias(value: unknown): value is string {
   return typeof value === "string" && SSH_ALIAS.test(value);
 }
 
+export function isValidSshUserHost(value: unknown): value is string {
+  return typeof value === "string" && SSH_USER_HOST.test(value);
+}
+
+export function isValidVpsSshTarget(value: unknown): value is string {
+  return isValidSshAlias(value) || isValidSshUserHost(value);
+}
+
 export function normalizeVpsConfig(raw: unknown): { sshAlias?: string } {
   if (raw === undefined || raw === null) return {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("vps must be an object containing an SSH config alias");
+    throw new Error("vps must be an object containing an SSH config alias or user@host");
   }
   const alias = (raw as Record<string, unknown>).sshAlias;
   if (alias === undefined || alias === "") return {};
-  if (!isValidSshAlias(alias)) {
-    throw new Error("vps.sshAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore)");
+  if (!isValidVpsSshTarget(alias)) {
+    throw new Error("vps.sshAlias must be an SSH config alias or user@host (e.g., user@192.168.1.100)");
   }
   return { sshAlias: alias };
 }
 
 const vpsConfigSchema = z.object({
-  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), { message: "must be a simple SSH config alias" }).optional(),
+  sshAlias: z.string().refine((value) => value === "" || isValidVpsSshTarget(value), { message: "must be an SSH config alias or user@host" }).optional(),
 });
 const roomConfigSchema = z.object({
   turnTimeoutMinutes: z

@@ -21,6 +21,8 @@ declare global {
   }
 /** The package.json version, inlined by Vite's define at build time. */
 const __APP_VERSION__: string;
+/** The build version (package version + git commit), inlined by Vite's define at build time. */
+const __APP_BUILD_VERSION__: string;
 
   type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;

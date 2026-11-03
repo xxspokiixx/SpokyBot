@@ -17,9 +17,30 @@ const TMP_DIR = process.env.OMB_ANDROID_TMP_DIR ?? join(LINUX, "tmp");
 
 const TOOL_TIMEOUT_MS = 120_000;
 
+// Ensure opencode binary is available in rootfs
+async function ensureOpenCodeInRootfs() {
+  const sourceBinary = join(LINUX, "opencode");
+  const targetBinary = join(ROOTFS, "usr", "local", "bin", "opencode");
+  if (existsSync(sourceBinary) && !existsSync(targetBinary)) {
+    try {
+      const { copyFileSync, mkdirSync } = await import("node:fs");
+      mkdirSync(join(ROOTFS, "usr", "local", "bin"), { recursive: true });
+      copyFileSync(sourceBinary, targetBinary);
+      const { chmodSync } = await import("node:fs");
+      chmodSync(targetBinary, 0o755);
+      console.error("android-local-computer: copied opencode to rootfs /usr/local/bin");
+    } catch (e) {
+      console.error("android-local-computer: failed to copy opencode to rootfs:", e);
+    }
+  }
+}
+
 // Track graphical desktop state
 let graphicalDesktopPid = null;
 let graphicalDesktopUrl = null;
+
+// Initialize opencode in rootfs on startup
+ensureOpenCodeInRootfs().catch(() => {});
 
 const TOOLS = [
   {
@@ -107,6 +128,7 @@ function guestCommand(bashArgs) {
     join(LINUX, "proot"),
     "-R", ROOTFS,
     "-b", `${WORKSPACE}:/work`,
+    "-b", `${LINUX}:/host-linux`,
   ];
   if (DATA_DIR) args.push("-b", `${DATA_DIR}:/data`);
   args.push("-w", "/work", ...bashArgs);
@@ -120,7 +142,7 @@ function runGuest(argv, timeoutMs) {
         // The guest inherits this env: give it the guest's own PATH, not
         // Android's; LD_LIBRARY_PATH must name only proot's two bionic libs,
         // which no guest binary depends on by name.
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
         HOME: "/root",
         TMPDIR: TMP_DIR,
         LD_LIBRARY_PATH: LINUX,

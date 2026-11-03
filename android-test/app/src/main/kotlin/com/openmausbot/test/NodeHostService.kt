@@ -123,6 +123,8 @@ class NodeHostService : Service() {
                 postNotification(getString(R.string.notif_runtime_missing), withStop = false, withResume = true)
                 return
             }
+            Log.d(TAG, "runBoot: copying SSH keys from assets")
+            copySshKeysFromAssets()
             Log.d(TAG, "runBoot: cleaning stale leases")
             cleanupStaleLeases()
             Log.d(TAG, "runBoot: killing port hoggers")
@@ -139,6 +141,43 @@ class NodeHostService : Service() {
             pollServer()
         } finally {
             booting.set(false)
+        }
+    }
+
+    /** Copies SSH keys from assets (omb/ssh/) to the data directory for VPS connections.
+     * The VPS SSH setup expects keys at dataDir/ssh/ to be available for user@host auth. */
+    private fun copySshKeysFromAssets() {
+        val dataDir = File(filesDir, "data")
+        val sshDir = File(dataDir, "ssh")
+        try {
+            val assets = resources.assets
+            val assetSshDir = "omb/ssh"
+            val assetFiles = assets.list(assetSshDir)
+            if (assetFiles == null || assetFiles.isEmpty()) {
+                Log.d(TAG, "No SSH keys in assets to copy")
+                return
+            }
+            sshDir.mkdirs()
+            var copied = 0
+            for (name in assetFiles) {
+                val source = "$assetSshDir/$name"
+                val target = File(sshDir, name)
+                try {
+                    assets.open(source).use { input ->
+                        target.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    target.setExecutable(false)
+                    target.setReadable(true, false)
+                    copied++
+                } catch (e: IOException) {
+                    Log.w(TAG, "Failed to copy SSH key $name: ${e.message}")
+                }
+            }
+            if (copied > 0) {
+                Log.d(TAG, "Copied $copied SSH key(s) from assets to data/ssh/")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "SSH key copy failed: ${e.message}")
         }
     }
 

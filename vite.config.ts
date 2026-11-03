@@ -14,6 +14,14 @@ const { version } = JSON.parse(
   readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
 ) as { version: string };
 
+// Build version: package version + short git commit (if available)
+let buildVersion = version;
+try {
+  const { execSync } = await import("node:child_process");
+  const commit = execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  if (commit) buildVersion = `${version}+${commit}`;
+} catch {}
+
 const root = fileURLToPath(new URL(".", import.meta.url));
 const page = (file: string) => fileURLToPath(new URL(file, import.meta.url));
 
@@ -50,6 +58,7 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(version),
+    __APP_BUILD_VERSION__: JSON.stringify(buildVersion),
   },
   test: {
     environment: "node",

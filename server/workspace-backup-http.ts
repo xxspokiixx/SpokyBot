@@ -185,11 +185,11 @@ export function createWorkspaceBackupRoutes(options: {
         return true;
       }
       if (method === "POST" && path === `${PREFIX}/restore`) {
-        const body = z.object({ id: z.string().uuid(), confirmation: z.literal("REPLACE") }).parse(await options.readBody(req));
+        const body = z.object({ id: z.string().uuid(), confirmation: z.literal("REPLACE"), categories: z.array(z.string()).optional() }).parse(await options.readBody(req));
         get(body.id, auth, "staged");
         const result = await operate(() => options.exclusive(async () => {
           check(req, auth);
-          return commitPendingWorkspaceRestore(options.dataDir, body.id);
+          return commitPendingWorkspaceRestore(options.dataDir, body.id, body.categories);
         }, true));
         artifacts.delete(body.id);
         json(res, 200, { ...result, restoreId: body.id });

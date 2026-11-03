@@ -10,8 +10,11 @@
 // Rebuilds the target from scratch each run.
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   copyFileSync,
   cpSync,
+  createReadStream,
+  createWriteStream,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -20,7 +23,11 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { createGunzip } from "node:zlib";
+import { pipeline } from "node:stream/promises";
+import { extract } from "tar";
 
 const ROOT = join(import.meta.dirname, "..");
 const distServer = join(ROOT, "dist-server");
@@ -108,6 +115,62 @@ if (existsSync(join(linuxRuntime, "rootfs.tar.gz"))) {
   }
   copyFileSync(linuxMcp, join(linuxTarget, "android-local-computer.mjs"));
   copyFileSync(join(ROOT, "android-test", "linux", "android-device-phone.mjs"), join(linuxTarget, "android-device-phone.mjs"));
+}
+
+// Stage OpenCode standalone binary for linux-arm64 (pre-installed in rootfs)
+const opencodeUrl = "https://github.com/anomalyco/opencode/releases/download/v1.19.4/opencode-linux-arm64.tar.gz";
+const opencodeTarget = join(omb, "linux", "opencode");
+if (!existsSync(opencodeTarget)) {
+  try {
+    const response = await fetch(opencodeUrl);
+    if (response.ok) {
+      const { createGunzip } = await import("node:zlib");
+      const { createWriteStream } = await import("node:fs");
+      const { pipeline } = await import("node:stream/promises");
+      const { extract } = await import("tar");
+      const tmpDir = join(ROOT, ".tmp-opencode");
+      mkdirSync(tmpDir, { recursive: true });
+      const tmpFile = join(tmpDir, "opencode.tar.gz");
+      await pipeline(response.body, createWriteStream(tmpFile));
+      await pipeline(
+        createReadStream(tmpFile),
+        createGunzip(),
+        extract({ cwd: tmpDir })
+      );
+      const binary = join(tmpDir, "opencode");
+      if (existsSync(binary)) {
+        copyFileSync(binary, opencodeTarget);
+        chmodSync(opencodeTarget, 0o755);
+        console.error("prepare: staged OpenCode standalone binary");
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  } catch (e) {
+    console.warn("prepare: failed to stage OpenCode binary:", e instanceof Error ? e.message : String(e));
+  }
+}
+
+// Stage SSH key from ~/.ssh for VPS connections (user@host format)
+const sshDir = join(homedir(), ".ssh");
+const sshKeyTarget = join(omb, "ssh");
+if (existsSync(sshDir)) {
+  mkdirSync(sshKeyTarget, { recursive: true });
+  const keyFiles = readdirSync(sshDir).filter(name =>
+    name === "id_rsa" || name === "id_ed25519" || name === "id_ecdsa" || name === "id_dsa" || name.endsWith(".pub")
+  );
+  for (const keyFile of keyFiles) {
+    const source = join(sshDir, keyFile);
+    const target = join(sshKeyTarget, keyFile);
+    try {
+      copyFileSync(source, target);
+      chmodSync(target, 0o600);
+    } catch (e) {
+      console.warn(`prepare: failed to copy SSH key ${keyFile}:`, e instanceof Error ? e.message : String(e));
+    }
+  }
+  if (keyFiles.length > 0) {
+    console.error(`prepare: staged ${keyFiles.length} SSH key(s) for VPS connections`);
+  }
 }
 
 const serverHash = hash8(join(distServer, "index.js"));

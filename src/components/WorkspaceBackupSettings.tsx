@@ -11,6 +11,24 @@ const inputClass = "w-full rounded-lg border border-hairline/50 bg-inset px-3 py
 const buttonClass = "cursor-pointer inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
 const validPassword = (value: string) => value.length >= 12 && value.length <= 1024;
 
+const RESTORE_CATEGORIES = [
+  { id: "bots", labelKey: "backup.restore.bots", summaryKey: "bots" },
+  { id: "groups", labelKey: "backup.restore.groups", summaryKey: "groups" },
+  { id: "threads", labelKey: "backup.restore.threads", summaryKey: "threads" },
+  { id: "messages", labelKey: "backup.restore.messages", summaryKey: "messages" },
+  { id: "files", labelKey: "backup.restore.files", summaryKey: "files" },
+  { id: "config", labelKey: "backup.restore.config", summaryKey: null },
+  { id: "routines", labelKey: "backup.restore.routines", summaryKey: null },
+  { id: "webhooks", labelKey: "backup.restore.webhooks", summaryKey: null },
+] as const;
+
+type RestoreCategoryId = typeof RESTORE_CATEGORIES[number]["id"];
+
+function getCategoryCount(summary: WorkspaceBackupSummary, category: RestoreCategoryId): number | null {
+  const cat = RESTORE_CATEGORIES.find(c => c.id === category);
+  return cat?.summaryKey ? summary[cat.summaryKey as keyof WorkspaceBackupSummary] as number : null;
+}
+
 /** A renderer reload cannot apply a restore; the owning server must restart. */
 export function WorkspaceBackupRestartNotice({ onRetry }: { onRetry?: () => void } = {}) {
   const [restarting, setRestarting] = useState(false);
@@ -64,8 +82,8 @@ export function WorkspaceBackupSettings() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadedId, setUploadedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ id: string; summary: WorkspaceBackupSummary } | null>(null);
-  const [confirmation, setConfirmation] = useState("");
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<Set<RestoreCategoryId>>(new Set(RESTORE_CATEGORIES.map(c => c.id)));
 
   const refresh = async () => {
     try {
@@ -111,7 +129,6 @@ export function WorkspaceBackupSettings() {
   const previewBackup = () => perform("preview", async () => {
     if (!file || !importPassword) return;
     setPreview(null);
-    setConfirmation("");
     let id = uploadedId;
     if (!id) {
       const result: { id: string } = await api("/api/workspace-backup/upload", {
@@ -130,21 +147,21 @@ export function WorkspaceBackupSettings() {
   });
 
   const restoreBackup = () => perform("restore", async () => {
-    if (!preview || confirmation !== "REPLACE") return;
+    if (!preview || selectedCategories.size === 0) return;
     // The stage ID is the restore ID: persist it before the request so a lost response still lets this browser recover
     // its drafts at boot.
     localStorage.setItem(WORKSPACE_RESTORE_MARKER, preview.id);
     try {
       await api("/api/workspace-backup/restore", {
-        method: "POST", body: JSON.stringify({ id: preview.id, confirmation: "REPLACE" }),
+        method: "POST", body: JSON.stringify({ id: preview.id, confirmation: "REPLACE", categories: [...selectedCategories] }),
       });
     } catch (cause) {
       if (cause instanceof Error && "status" in cause && cause.status === 404 && alive.current) {
-        setPreview(null); setUploadedId(null); setConfirmation("");
+        setPreview(null); setUploadedId(null);
       }
       throw cause;
     }
-    if (alive.current) { setStatus({ busy: false, pendingRestore: true }); setPreview(null); setConfirmation(""); }
+    if (alive.current) { setStatus({ busy: false, pendingRestore: true }); setPreview(null); setSelectedCategories(new Set(RESTORE_CATEGORIES.map(c => c.id))); }
   });
 
   const disabled = busy !== null || !status || status.busy || Boolean(status.pendingRestore);
@@ -168,15 +185,38 @@ export function WorkspaceBackupSettings() {
             </Card>
             <Card title={t("backup.import")} subtitle={t("backup.importHint")}>
                 <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void previewBackup(); }}>
-                <label className="text-[13px] text-ink">{t("backup.file")}<input type="file" accept=".ombbackup" disabled={disabled} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setUploadedId(null); setPreview(null); setConfirmation(""); setImportPassword(""); setError(null); }} className="mt-1 block w-full min-w-0 rounded-lg border border-hairline/50 bg-inset p-2 text-[13px] text-ink file:mr-3 file:rounded file:border-0 file:bg-control file:px-2 file:py-1 file:text-ink disabled:opacity-50" /></label>
+                <label className="text-[13px] text-ink">{t("backup.file")}<input type="file" accept=".ombbackup" disabled={disabled} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setUploadedId(null); setPreview(null); setImportPassword(""); setError(null); }} className="mt-1 block w-full min-w-0 rounded-lg border border-hairline/50 bg-inset p-2 text-[13px] text-ink file:mr-3 file:rounded file:border-0 file:bg-control file:px-2 file:py-1 file:text-ink disabled:opacity-50" /></label>
                 {!preview && <><label className="text-[13px] text-ink">{t("backup.importPassword")}<input type="password" autoComplete="off" maxLength={1024} required disabled={disabled || !file} value={importPassword} onChange={(event) => setImportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label><button type="submit" disabled={disabled || !file || !importPassword} className={buttonClass}>{busy === "preview" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Upload aria-hidden="true" size={15} />}{busy === "preview" ? t("backup.validating") : t("backup.validate")}</button></>}
                 </form>
                 {preview && <div className="mt-4 flex flex-col gap-3">
                 <WorkspaceBackupSummaryView summary={preview.summary} />
                 <p className="text-[13px] leading-relaxed text-danger">{t("backup.replaceWarning")}</p>
                 <p className="text-[13px] leading-relaxed text-danger">{t("backup.trustWarning")}</p>
-                <label className="text-[13px] text-ink">{t("backup.confirmReplace")}<input value={confirmation} autoComplete="off" spellCheck={false} disabled={disabled} onChange={(event) => setConfirmation(event.target.value)} className={`${inputClass} mt-1`} /></label>
-                <button type="button" disabled={disabled || confirmation !== "REPLACE"} onClick={() => void restoreBackup()} className="cursor-pointer rounded-lg bg-danger px-3 py-2 text-[13px] font-medium text-danger-ink disabled:opacity-40">{busy === "restore" ? t("backup.restoring") : t("backup.replace")}</button>
+                <div className="space-y-2">
+                  <p className="text-[13px] font-medium text-ink">{t("backup.selectCategories")}</p>
+                  {RESTORE_CATEGORIES.map((cat) => {
+                    const count = getCategoryCount(preview.summary, cat.id);
+                    const isSelected = selectedCategories.has(cat.id);
+                    return (
+                      <label key={cat.id} className="flex items-center gap-3 cursor-pointer text-[13px] text-ink">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => setSelectedCategories(prev => {
+                            const next = new Set(prev);
+                            if (isSelected) next.delete(cat.id); else next.add(cat.id);
+                            return next;
+                          })}
+                          disabled={disabled}
+                          className="size-4 rounded border-hairline/50 bg-inset text-accent focus:ring-2 focus:ring-focus/60"
+                        />
+                        <span>{t(cat.labelKey)}</span>
+                        {count !== null && <span className="text-ink-secondary text-[12px]">({count.toLocaleString()})</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+                <button type="button" disabled={disabled || selectedCategories.size === 0} onClick={() => void restoreBackup()} className="cursor-pointer rounded-lg bg-danger px-3 py-2 text-[13px] font-medium text-danger-ink disabled:opacity-40">{busy === "restore" ? t("backup.restoring") : t("backup.replace")}</button>
                 </div>}
             </Card>
             </>

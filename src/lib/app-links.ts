@@ -20,6 +20,12 @@ export function appVersion(): string {
   return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 }
 
+export function appBuildVersion(): string {
+  const version = appVersion();
+  const build = typeof __APP_BUILD_VERSION__ === "string" ? __APP_BUILD_VERSION__ : "";
+  return build ? `${version} (${build})` : version;
+}
+
 const PLATFORM_NAMES: Record<string, string> = {
   darwin: "macOS",
   win32: "Windows",

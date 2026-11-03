@@ -626,7 +626,7 @@ export function stagedWorkspaceData(dataDir: string, id: string): { data: string
   return { data: join(staged, "data"), sourceDataDir: validateManifest(privateJson(join(staged, "manifest.json"))).sourceDataDir };
 }
 
-export function commitPendingWorkspaceRestore(dataDir: string, id: string) {
+export function commitPendingWorkspaceRestore(dataDir: string, id: string, categories?: string[]) {
   const root = backupRoot(dataDir);
   if (existsSync(join(root, "pending-restore.json"))) throw new Error("A workspace restore is already waiting for restart.");
   if (existsSync(join(root, `safety-${id}`))) throw new Error("This restore was already attempted. Preview the backup again to create a fresh restore attempt.");
@@ -634,17 +634,19 @@ export function commitPendingWorkspaceRestore(dataDir: string, id: string) {
   const manifest = validateStaged(join(jobPath(dataDir, id), "staged"));
   // Adapt before persisting a restart request: a broken legacy file must not trap later boots.
   prepareRestore(dataDir, id, manifest);
-  writeJson(join(root, "pending-restore.json"), { id });
+  writeJson(join(root, "pending-restore.json"), { id, categories });
   return { id, restartRequired: true as const, summary: metadata.summary };
 }
 
-export function readPendingWorkspaceRestoreMetadata(dataDir: string): (WorkspaceBackupPrivateMetadata & { id: string }) | null {
+export function readPendingWorkspaceRestoreMetadata(dataDir: string): (WorkspaceBackupPrivateMetadata & { id: string; categories?: string[] }) | null {
   const root = backupRoot(dataDir);
   const path = join(root, "pending-restore.json");
   if (!existsSync(path)) return null;
   const pending = privateJson(path);
   if (!record(pending) || typeof pending.id !== "string") throw new Error("Invalid pending workspace restore.");
-  return readStagedWorkspaceBackup(dataDir, pending.id);
+  const result = readStagedWorkspaceBackup(dataDir, pending.id);
+  if (Array.isArray(pending.categories)) (result as any).categories = pending.categories;
+  return result;
 }
 
 function readJournal(path: string): RestoreJournal {
@@ -875,6 +877,25 @@ function finishRestore(dataDir: string, id: string, consumePending = true): Last
   return result;
 }
 
+function categoryMatches(category: string, name: string): boolean {
+  switch (category) {
+    case "bots": return name === "bots.json";
+    case "groups": return name === "groups.json";
+    case "threads":
+    case "messages": return name === "messages.db" || name.startsWith("messages-") && name.endsWith(".json");
+    case "files": return name.startsWith("workspaces/") || name.startsWith("task-workspaces/");
+    case "config": return name === "config.json" || name === "webhooks.json" || name === "routines.json" || name === "calendar-calls.json" || name === "app-triggers.json";
+    case "routines": return name === "routines.json";
+    case "webhooks": return name === "webhooks.json";
+    default: return true;
+  }
+}
+
+function filterIncomingByCategories(incoming: string[], categories?: string[]): string[] {
+  if (!categories || categories.length === 0) return incoming;
+  return incoming.filter(name => categories.some(cat => categoryMatches(cat, name)));
+}
+
 /** Call after the data-directory lease, before anything reads app state; the old tree stays under .backups/safety-ID. */
 export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreResult {
   const root = backupRoot(dataDir);
@@ -903,10 +924,12 @@ export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreR
   const safetyCopyPath = join(root, `safety-${pending.id}`);
   if (existsSync(safetyCopyPath)) throw new Error("A safety copy already exists for this restore. Original files have not been changed.");
   folder(join(safetyCopyPath, "data"));
+  const allIncoming = readdirSync(prepared).sort();
+  const incoming = filterIncomingByCategories(allIncoming, (pending as any).categories);
   const journal: RestoreJournal = {
     id: pending.id, phase: "applying",
     existing: readdirSync(dataDir).filter((name) => !keptInPlace(name)).sort(),
-    incoming: readdirSync(prepared).sort(),
+    incoming,
   };
   // Names are checked before any move is recorded; a restored root never traverses an archive-controlled directory.
   for (const name of [...journal.existing, ...journal.incoming]) {

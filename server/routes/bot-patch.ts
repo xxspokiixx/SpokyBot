@@ -15,7 +15,7 @@ import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { CacheKeepWarm } from "../cache-keepwarm.ts";
 import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
-import { isValidSshAlias, type AppConfig } from "../config.ts";
+import { isValidVpsSshTarget, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
@@ -370,11 +370,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.vpsAlias !== undefined) {
         if (body.vpsAlias === null || body.vpsAlias === "") {
           patch.vpsAlias = undefined;
-        } else if (isValidSshAlias(body.vpsAlias)) {
+        } else if (isValidVpsSshTarget(body.vpsAlias)) {
           patch.vpsAlias = body.vpsAlias;
         } else {
           return json(res, 400, {
-            error: "vpsAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore), or null to use the default server",
+            error: "vpsAlias must be an SSH config alias or user@host format, or null to use the default server",
           });
         }
       }

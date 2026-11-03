@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { AppSettingsSection } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { appVersion } from "@/lib/app-links";
+import { appVersion, appBuildVersion } from "@/lib/app-links";
 import type { LocaleKey } from "@/locales";
 import { productName } from "../lib/brand";
 import { AnalyticsRow } from "./AnalyticsRow";
@@ -87,6 +87,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <DefaultBotSidebarRow simple />
             <TalkShortcutRow />
             <AnalyticsRow simple />
+            <SettingRow title={t("settings.simple.buildVersion")} subtitle={appBuildVersion()} children={<span />} />
           </SettingsRows>
         </SettingsGroup>
       )}
