@@ -91,7 +91,7 @@ jobs:
         run: pnpm build:server
 
       - name: Build Android APK
-        run: pnpm build:android
+        run: pnpm build:android-tools
         env:
           # Brand the APK as SpokyBot (as used in prepare-android-assets.mjs)
           OMB_TEST_BRAND: SpokyBot
