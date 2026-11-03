@@ -1,0 +1,4 @@
+total 240904
+drwxr-xr-x 1 xxspokiixx xxspokiixx      4096 Oct 23 11:35 build-evidence
+-rw-r--r-- 1 xxspokiixx xxspokiixx 123342736 Oct 23 11:35 libnodeexec.so
+-rwxr-xr-x 1 xxspokiixx xxspokiixx 123342736 Oct 23 11:35 node-nonpackaged

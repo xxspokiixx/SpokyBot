@@ -1,0 +1,176 @@
+import { createServer } from "node:http";
+import { z } from "zod";
+import { parseJson } from "./schema.js";
+export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
+const statusErrorSchema = z.object({ status: z.number().int().optional() });
+const serverAddressSchema = z.object({ port: z.number().int().min(1).max(65_535) });
+function json(res, status, body) {
+    res.writeHead(status, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+    });
+    res.end(JSON.stringify(body));
+}
+async function readRawBody(req) {
+    const chunks = [];
+    let bytes = 0;
+    try {
+        for await (const chunk of req) {
+            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            bytes += buffer.length;
+            if (bytes > MAX_WEBHOOK_BODY_BYTES) {
+                throw Object.assign(new Error("Webhook body is too large"), { status: 413 });
+            }
+            chunks.push(buffer);
+        }
+    }
+    catch (error) {
+        const parsed = statusErrorSchema.safeParse(error);
+        if (parsed.success && parsed.data.status === 413)
+            throw error;
+        throw Object.assign(new Error("Could not read webhook body"), { status: 400 });
+    }
+    return Buffer.concat(chunks, bytes).toString("utf8");
+}
+function parsePayload(raw, contentType) {
+    if (!raw)
+        return {};
+    if (contentType.includes("application/json") || contentType.includes("+json")) {
+        try {
+            return parseJson(raw);
+        }
+        catch {
+            throw Object.assign(new Error("Invalid JSON webhook body"), { status: 400 });
+        }
+    }
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+        return Object.fromEntries(new URLSearchParams(raw));
+    }
+    return raw;
+}
+function header(req, name) {
+    const value = req.headers[name];
+    return Array.isArray(value) ? value[0] : value;
+}
+function bearerSecret(req) {
+    const authorization = header(req, "authorization") ?? "";
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    return match?.[1]?.trim() || header(req, "x-openmaus-secret")?.trim() || "";
+}
+function deliveryId(req) {
+    return (header(req, "idempotency-key") ??
+        header(req, "x-webhook-id") ??
+        header(req, "x-github-delivery") ??
+        header(req, "webhook-id"))?.trim() || undefined;
+}
+function eventName(req) {
+    return (header(req, "x-github-event") ??
+        header(req, "x-webhook-event") ??
+        header(req, "x-event-type") ??
+        header(req, "ce-type"))?.trim() || undefined;
+}
+export function createWebhookIngressHandler(manager, claimRequest) {
+    return async (req, res) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        if (req.method === "GET" && url.pathname === "/health") {
+            return json(res, 200, { app: "openmausbot-webhooks", ready: true });
+        }
+        const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
+        if (!match)
+            return json(res, 404, { error: "Unknown webhook endpoint" });
+        if (req.method !== "POST")
+            return json(res, 405, { error: "Webhooks accept POST requests" });
+        let release;
+        try {
+            release = claimRequest?.();
+            let secret = "";
+            try {
+                secret = (match[2] ? decodeURIComponent(match[2]) : "") || bearerSecret(req);
+            }
+            catch {
+            }
+            // Reject bad capability URLs before buffering or parsing attacker input.
+            if (!manager.authorize(match[1], secret)) {
+                manager.recordUnauthorized(match[1], {
+                    contentType: header(req, "content-type"),
+                    eventName: eventName(req),
+                    deliveryId: deliveryId(req),
+                });
+                return json(res, 401, { error: "Invalid webhook URL or secret" });
+            }
+            const raw = await readRawBody(req);
+            const contentType = header(req, "content-type")?.split(";")[0]?.trim().toLowerCase() ?? "text/plain";
+            const payload = parsePayload(raw, contentType);
+            const result = await manager.receive(match[1], secret, {
+                payload,
+                contentType,
+                eventName: eventName(req),
+                userAgent: header(req, "user-agent"),
+                deliveryId: deliveryId(req),
+            });
+            return json(res, 202, { accepted: true, ...result });
+        }
+        catch (error) {
+            const parsedError = statusErrorSchema.safeParse(error);
+            const status = parsedError.success ? parsedError.data.status ?? 500 : 500;
+            const message = error instanceof Error ? error.message : String(error);
+            if (status === 400 || status === 413) {
+                manager.recordRejected(match[1], status, message, {
+                    contentType: header(req, "content-type"),
+                    eventName: eventName(req),
+                    deliveryId: deliveryId(req),
+                });
+            }
+            return json(res, status, { error: message });
+        }
+        finally {
+            release?.();
+        }
+    };
+}
+export function advertisedWebhookBase(raw) {
+    let parsed;
+    try {
+        parsed = new URL(raw);
+    }
+    catch {
+        parsed = undefined;
+    }
+    if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
+        throw new Error(`webhook public base URL must be an absolute http(s) URL such as https://bots.example.com, got "${raw}"`);
+    }
+    return raw.replace(/\/+$/, "");
+}
+export async function listenWebhookIngress(manager, options) {
+    const host = options.host ?? "127.0.0.1";
+    const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
+    const server = createServer(createWebhookIngressHandler(manager, options.claimRequest));
+    await new Promise((resolve, reject) => {
+        const onError = (error) => reject(error);
+        server.once("error", onError);
+        server.listen(options.port, host, () => {
+            server.off("error", onError);
+            resolve();
+        });
+    });
+    const address = serverAddressSchema.safeParse(server.address());
+    if (!address.success) {
+        server.close();
+        throw new Error("Webhook receiver did not get a TCP address");
+    }
+    return {
+        server,
+        host,
+        port: address.data.port,
+        baseUrl: advertised ?? `http://${host}:${address.data.port}`,
+    };
+}
+export function webhookCredential(baseUrl, endpointId, secret) {
+    const endpointUrl = `${baseUrl.replace(/\/$/, "")}/hooks/${endpointId}`;
+    return {
+        endpointUrl,
+        secret,
+        url: `${endpointUrl}/${encodeURIComponent(secret)}`,
+    };
+}

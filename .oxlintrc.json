@@ -1,23 +1,23 @@
 {
+  "$schema": "https://oxc-project.github.io/schemas/oxlint.json",
   "ignorePatterns": [
-    ".agent/**",
-    ".agents/**",
-    ".claude/**",
-    ".codex/**",
-    ".continue/**",
-    ".cursor/**",
-    ".gemini/**",
-    ".opencode/**",
-    ".pi/**",
-    ".roo/**",
-    ".windsurf/**",
+    "android-test/app/src/main/assets/**",
+    "android-test/app/build/**",
+    "android-test/.gradle/**",
+    "android-test/build/**",
+    "android-test/smoke-bundle.mjs",
     "dist/**",
+    "dist-server/**",
+    "dist-companion/**",
     "dist-electron/**",
     "dist-native/**",
-    "dist-server/**",
-    "electron/vendor/**",
-    "release/**",
     "third_party/**",
-    "electron/resources/**"
-  ]
+    "electron/vendor/**",
+    "*.tsbuildinfo",
+    "node_modules/**"
+  ],
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-unused-expressions": "warn"
+  }
 }

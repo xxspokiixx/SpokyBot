@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_label">SpokyBot</string>
+    <string name="apps_service_label">SpokyBot app control</string>
+    <string name="apps_service_desc">Lets your SpokyBot bot list and open this device\'s apps, read the screen, tap, type and swipe. Nothing leaves the device.</string>
+    <string name="boot_title">SpokyBot</string>
+    <string name="boot_starting">Starting…</string>
+    <string name="boot_retry">Retry</string>
+    <string name="boot_idle">Idle</string>
+    <string name="status_extracting">Extracting the server bundle…</string>
+    <string name="status_bundle_missing">Bundle missing: apk assets contain no omb/VERSION.</string>
+    <string name="status_runtime_missing">Runtime binary pending: libnodeexec.so is not in this APK yet.</string>
+    <string name="status_starting">Starting the harness…</string>
+    <string name="status_running">Harness answering — checking environment…</string>
+    <string name="status_pairing">Pairing the WebView…</string>
+    <string name="status_ready">Opening the app…</string>
+    <string name="status_failed">Failed.</string>
+    <string name="status_stopped">Server stopped.</string>
+    <string name="notif_title">SpokyBot</string>
+    <string name="notif_channel">SpokyBot server</string>
+    <string name="notif_starting">Server starting…</string>
+    <string name="notif_ready">SpokyBot server running</string>
+    <string name="notif_stopped">SpokyBot server stopped</string>
+    <string name="notif_paused">Server paused — tap Resume</string>
+    <string name="notif_failed">The SpokyBot server is not running</string>
+    <string name="notif_bundle_missing">Server bundle missing from APK</string>
+    <string name="notif_runtime_missing">Runtime binary pending</string>
+    <string name="notif_stop">Stop</string>
+    <string name="notif_resume">Resume</string>
+</resources>
