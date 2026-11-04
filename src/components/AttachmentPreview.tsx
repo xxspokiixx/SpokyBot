@@ -30,6 +30,7 @@ import {
   type TranscriptFileAttachment,
   type TranscriptImageAttachment,
 } from "@/lib/composer-attachments";
+import { androidSaveAvailable, tryAndroidSave } from "@/lib/save-file";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FilePreviewButton } from "./FilePreviewButton";
@@ -304,27 +305,29 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
       }
       const blob = await response.blob();
       if (!mounted.current || controller.signal.aborted) return;
-      const url = URL.createObjectURL(blob);
       const saved = canonicalDownloadFilename({
         contentDisposition: response.headers.get("content-disposition"),
         fallback: name || entry || attachmentBasename(filePath),
         source: filePath,
         mime: blob.type || response.headers.get("content-type"),
       });
-      try {
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = saved;
-        link.style.display = "none";
-        document.body.append(link);
+      if (!(await tryAndroidSave(blob, saved))) {
+        const url = URL.createObjectURL(blob);
         try {
-          link.click();
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = saved;
+          link.style.display = "none";
+          document.body.append(link);
+          try {
+            link.click();
+          } finally {
+            link.remove();
+          }
         } finally {
-          link.remove();
+          // Chromium may not consume a blob URL until after the click task ends.
+          revokeObjectUrlLater(url);
         }
-      } finally {
-        // Chromium may not consume a blob URL until after the click task ends.
-        revokeObjectUrlLater(url);
       }
       if (!mounted.current || controller.signal.aborted) return;
       setSavedTo(saved);
@@ -564,6 +567,12 @@ export function AttachmentPreviewDialog({
                   fallback: current.name,
                   source: current.downloadUrl,
                 })}
+                onClick={(event) => {
+                  if (!androidSaveAvailable()) return;
+                  event.preventDefault();
+                  const url = current.downloadUrl;
+                  if (url) void tryAndroidSave(url, current.downloadName ?? url.split("/").pop() ?? "download");
+                }}
                 className="flex size-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
                 aria-label={t("attach.downloadAria", { name: current.name })}
                 title={t("attach.download")}

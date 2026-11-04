@@ -1,5 +1,6 @@
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+import { androidSaveAvailable, tryAndroidSave } from "./save-file";
 import type { PackageDocument, PackageSummary } from "../../shared/package-format";
 import { skillChoicesFrom, startingTicks } from "./team-share-skills";
 
@@ -213,6 +214,10 @@ export function describeSkip(skip: ShareSkip, document?: PackageDocument, botNam
 
 export function saveShareFile(filename: string, document: PackageDocument): void {
   const blob = new Blob([`${JSON.stringify(document, null, 2)}\n`], { type: "application/json" });
+  if (androidSaveAvailable()) {
+    void tryAndroidSave(blob, filename);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const link = window.document.createElement("a");
   link.href = url;

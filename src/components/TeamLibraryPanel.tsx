@@ -1,4 +1,5 @@
 import { track } from "@/lib/analytics";
+import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { teamImportPreview, type PendingTeamImport } from "@/lib/team-import";
@@ -57,15 +58,6 @@ interface DirectoryCandidate {
 }
 
 const DIRECTORY_COLORS = ["cyan", "red", "purple", "green", "orange"] as const;
-
-async function openExternal(url: string): Promise<void> {
-  if (window.ogb?.openExternal) {
-    await window.ogb.openExternal(url);
-    return;
-  }
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  if (opened) opened.opener = null;
-}
 
 export function shareableTeamList(sections: readonly string[], bots: ReadonlyArray<Pick<Bot, "section" | "hidden">>): Array<{ name: string; bots: number }> {
   const counts = new Map<string, number>();
@@ -497,7 +489,7 @@ export function TeamLibraryPanel({
           <div className="flex shrink-0 items-center gap-1">
             {!pending && (
               <button
-                onClick={() => void openExternal(catalog?.repositoryUrl ?? COMMUNITY_TEAMS_REPOSITORY)}
+                onClick={() => void openExternalLink(catalog?.repositoryUrl ?? COMMUNITY_TEAMS_REPOSITORY)}
                 className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
                 title={t("templates.openRepository")}
               >
@@ -926,7 +918,7 @@ export function TeamLibraryPanel({
                                   </div>
                                 </label>
                                 <button
-                                  onClick={() => void openExternal(candidate.detailUrl)}
+                                  onClick={() => void openExternalLink(candidate.detailUrl)}
                                   aria-label={t("templates.openDirectory", { name: candidate.name })}
                                   title={t("templates.readBeforeAdding")}
                                   className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"

@@ -59,4 +59,22 @@ describe("OAuth tab reservation", () => {
     expect(await launch.open("https://auth.example.test/flow")).toBe(true);
     expect(openExternal).toHaveBeenCalledWith("https://auth.example.test/flow");
   });
+
+  it("hands the phone shell's system browser the link instead of a tab the WebView would block", async () => {
+    const openExternal = vi.fn();
+    const open = vi.fn();
+    vi.stubGlobal("window", { ombAndroidCaps: { capabilitiesJson: () => "{}", openExternal }, open });
+    const launch = reserveConnectionPage();
+    expect(open).not.toHaveBeenCalled();
+    expect(await launch.open("https://auth.example.test/flow")).toBe(true);
+    expect(openExternal).toHaveBeenCalledWith("https://auth.example.test/flow");
+  });
+
+  it("refuses a non-http authorization url rather than asking the system to open it", async () => {
+    const openExternal = vi.fn();
+    vi.stubGlobal("window", { ombAndroidCaps: { capabilitiesJson: () => "{}", openExternal }, open: vi.fn() });
+    const launch = reserveConnectionPage();
+    expect(await launch.open("javascript:void(0)")).toBe(false);
+    expect(openExternal).not.toHaveBeenCalled();
+  });
 });

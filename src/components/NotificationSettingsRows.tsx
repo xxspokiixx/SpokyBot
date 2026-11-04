@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { androidBridge } from "@/lib/android-bridge";
 import { t } from "@/lib/i18n";
 import {
   setFinishedNotifications,
@@ -25,6 +26,7 @@ const currentPermission = (): NotificationPermission => (typeof Notification !==
 
 /** A browser shows nothing until it is asked from a click; the person may also change the site permission elsewhere. */
 export function DeviceNotificationsRow({ simple = false }: { simple?: boolean }) {
+  const bridge = androidBridge();
   const [permission, setPermission] = useState(currentPermission);
   const enabled = useFinishedNotifications();
   useEffect(() => {
@@ -38,6 +40,21 @@ export function DeviceNotificationsRow({ simple = false }: { simple?: boolean })
       document.removeEventListener("visibilitychange", refresh);
     };
   }, []);
+
+  // The phone shell posts through its bridge, so no web Notification permission gates it;
+  // the switch alone decides, and its state is the stored preference.
+  if (bridge) {
+    return (
+      <SettingRow title={t("settings.deviceNotifications.title")} subtitle={t("settings.deviceNotifications.subtitle")}>
+        <Switch
+          checked={enabled}
+          aria-label={t("settings.deviceNotifications.show")}
+          onClick={() => setFinishedNotifications(!enabled)}
+        />
+      </SettingRow>
+    );
+  }
+
   if (typeof Notification === "undefined") return null;
 
   const blocked = permission === "denied";

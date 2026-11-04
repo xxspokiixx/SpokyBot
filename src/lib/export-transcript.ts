@@ -1,6 +1,7 @@
 import type { Message } from "@/state/store";
 import { splitTranscriptAttachments } from "./composer-attachments";
 import { copyText } from "./copy-text";
+import { androidSaveAvailable, tryAndroidSave } from "./save-file";
 
 export interface ExportTranscriptOptions {
   title: string;
@@ -150,6 +151,10 @@ export function slugifyTranscriptFilename(title: string, date = new Date()): str
 
 export function downloadMarkdownTranscript(filename: string, content: string): void {
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  if (androidSaveAvailable()) {
+    void tryAndroidSave(blob, filename);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

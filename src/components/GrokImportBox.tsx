@@ -1,6 +1,7 @@
 import { Check, Copy, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback, type CopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
@@ -15,15 +16,6 @@ const CURSOR_POLL_MS = 2_000;
 /** What POST /api/team-library/grok answers: the public card, plus the full setup when signed in to Cursor. */
 export type GrokCardAnswer = GrokTemplateCard & { export?: GrokExport; exportNote?: string };
 export interface CursorStatus { signedIn: boolean; waiting: boolean; error?: string }
-
-async function openInBrowser(url: string): Promise<void> {
-  if (window.ogb?.openExternal) {
-    await window.ogb.openExternal(url);
-    return;
-  }
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  if (opened) opened.opener = null;
-}
 
 export interface GrokImportViewProps {
   /** No frame or heading of its own: the host (Settings, the welcome import step) gives both. */
@@ -213,7 +205,7 @@ export function GrokImportBox({ link, onPreview, bare }: { link: string | null; 
       // SAFETY: this endpoint is owned by the app and returns the sign-in address.
       const started = (await api("/api/team-library/cursor/sign-in", { method: "POST", body: "{}" })) as { url: string };
       setCursor({ signedIn: false, waiting: true });
-      await openInBrowser(started.url);
+      await openExternalLink(started.url);
     } catch (cause) {
       setError(errorText(cause));
     }

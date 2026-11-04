@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { androidSaveAvailable, tryAndroidSave } from "./save-file";
 const KNOWN_LANGUAGES: Record<string, string> = {
   js: "JavaScript",
   javascript: "JavaScript",
@@ -200,6 +201,10 @@ export function downloadSnippetFile(filename: string, code: string): void {
   }
 
   const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+  if (androidSaveAvailable()) {
+    void tryAndroidSave(blob, filename);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

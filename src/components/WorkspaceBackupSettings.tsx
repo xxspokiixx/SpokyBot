@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Loader2, Upload } from "lucide-react";
 import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
+import { androidBridge } from "@/lib/android-bridge";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { applyWorkspaceClientState, collectWorkspaceClientState, WORKSPACE_RESTORE_MARKER } from "@/lib/workspace-backup-client";
@@ -118,12 +119,17 @@ export function WorkspaceBackupSettings() {
     if (!alive.current) return;
     const url = `/api/workspace-backup/download/${encodeURIComponent(result.id)}`;
     setDownload({ url, filename: result.filename });
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = result.filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
+    const bridge = androidBridge();
+    if (bridge) {
+      bridge.saveBackup(url, result.filename);
+    } else {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }
   });
 
   const previewBackup = () => perform("preview", async () => {

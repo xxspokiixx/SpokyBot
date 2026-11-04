@@ -4,6 +4,7 @@ import { ChevronRight, Download, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { androidSaveAvailable, tryAndroidSave } from "@/lib/save-file";
 import { ACTIVITY_WHATS, activityQuery, describeEntry, formatValue, whoLabel, type ActivityEntry, type ActivityFilters, type ActivityWhat } from "@/lib/activity";
 import type { LocaleKey } from "@/locales";
 import { Select } from "./Select";
@@ -104,7 +105,16 @@ export function ActivitySection() {
         <button type="button" onClick={() => void load()} disabled={loading} aria-label={t("activity.refresh")} title={t("activity.refresh")} className="cursor-pointer rounded-md p-2 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
         </button>
-        <a href={`/api/admin-activity.csv${query}`} download className="ui-button hover:bg-raised-hover">
+        <a
+          href={`/api/admin-activity.csv${query}`}
+          download
+          onClick={(event) => {
+            if (!androidSaveAvailable()) return;
+            event.preventDefault();
+            void tryAndroidSave(`/api/admin-activity.csv${query}`, "admin-activity.csv", "text/csv");
+          }}
+          className="ui-button hover:bg-raised-hover"
+        >
           <Download size={13} aria-hidden="true" />{t("activity.export")}
         </a>
       </div>

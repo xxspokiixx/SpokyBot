@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, Check, Copy, Download, Maximize2, Search, WrapText, X } from "lucide-react";
 import { isTableNumber, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
+import { androidSaveAvailable, tryAndroidSave } from "@/lib/save-file";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { columnMinimums, fitsColumns } from "@/lib/table-fit";
@@ -74,10 +75,16 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
     if (result !== "empty") setCopyState(result);
   };
   const download = () => {
-    const url = URL.createObjectURL(new Blob(["\uFEFF", csv()], { type: "text/csv;charset=utf-8" }));
+    const blob = new Blob(["\uFEFF", csv()], { type: "text/csv;charset=utf-8" });
+    const name2 = `${name.replace(/\.(csv|tsv)$/i, "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 150) || "table"}.csv`;
+    if (androidSaveAvailable()) {
+      void tryAndroidSave(blob, name2);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${name.replace(/\.(csv|tsv)$/i, "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 150) || "table"}.csv`;
+    link.download = name2;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };

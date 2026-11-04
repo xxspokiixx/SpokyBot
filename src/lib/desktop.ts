@@ -1,3 +1,15 @@
+import { androidBridge } from "./android-bridge";
+
+function androidCapabilities(): DesktopCapabilities | null {
+  const bridge = androidBridge();
+  if (!bridge) return null;
+  try {
+    return JSON.parse(bridge.capabilitiesJson()) as DesktopCapabilities;
+  } catch {
+    return null;
+  }
+}
+
 const browserCapabilities: DesktopCapabilities = {
   host: {
     platform: "other",
@@ -30,6 +42,8 @@ let cached: DesktopCapabilities | null = null;
 let cacheRevision = 0;
 
 export function initialDesktopCapabilities(): DesktopCapabilities {
+  const android = androidCapabilities();
+  if (android) return android;
   const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
@@ -53,6 +67,11 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
 
 export async function loadDesktopCapabilities(): Promise<DesktopCapabilities> {
   if (cached) return cached;
+  const android = androidCapabilities();
+  if (android) {
+    cached = android;
+    return cached;
+  }
   if (!window.ogb?.getCapabilities) return browserCapabilities;
   const revisionAtStart = cacheRevision;
   let loaded: DesktopCapabilities;

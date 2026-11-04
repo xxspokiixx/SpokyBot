@@ -34,6 +34,7 @@ import {
   type PreviewStreamViewport,
 } from "@/lib/browser-stream-client";
 import { copyText } from "@/lib/copy-text";
+import { androidSaveAvailable, tryAndroidSave } from "@/lib/save-file";
 import { AgentCursor } from "./AgentCursor";
 import { AuthPrompt } from "./AuthPrompt";
 import { SelectPopup, type SelectPopupOption } from "./SelectPopup";
@@ -160,6 +161,16 @@ export function mapToSurface(
 
 /** The download happened on the bot's computer; this hands the finished file to this device. */
 function save(download: PreviewStreamDownload) {
+  if (androidSaveAvailable()) {
+    // download.url is a blob: URL minted in this WebView; the shell takes the
+    // bytes through the bridge because a plain WebView never reaches a
+    // DownloadListener for blob: URLs.
+    void (async () => {
+      const blob = await fetch(download.url).then((response) => response.blob());
+      await tryAndroidSave(blob, download.fileName);
+    })();
+    return;
+  }
   const anchor = document.createElement("a");
   anchor.href = download.url;
   anchor.download = download.fileName;

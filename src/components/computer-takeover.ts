@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { androidBridge } from "@/lib/android-bridge";
 import { LocalizedPanelError } from "@/lib/computer-messages";
 import { productName } from "@/lib/brand";
 
@@ -40,7 +41,8 @@ export async function openProviderDesktop({ botId, title, held, request, join, c
   let lease: string | null = null;
   // Plain web opens its blank tab synchronously, inside the user gesture; the packaged app uses the Electron viewer window.
   let fallbackTab: Window | null = null;
-  if (!window.ogb?.desktopViewer && !window.ogb?.openExternal) {
+  const openViaBridge = window.ogb?.desktopViewer || window.ogb?.openExternal ? undefined : androidBridge()?.openExternal;
+  if (!window.ogb?.desktopViewer && !window.ogb?.openExternal && !openViaBridge) {
     fallbackTab = window.open("", "_blank");
     if (fallbackTab) fallbackTab.opener = null;
   }
@@ -63,6 +65,11 @@ export async function openProviderDesktop({ botId, title, held, request, join, c
       if (taken) releaseWhenClosed(fallbackTab, () => void request("release", taken).catch(() => {}));
     } else if (window.ogb?.openExternal) {
       if (!(await window.ogb.openExternal(viewerUrl))) throw new LocalizedPanelError("computer.err.openDesktopLink");
+    } else if (openViaBridge) {
+      // The phone's system browser owns the viewer tab; nothing here can watch it close,
+      // so the lease ends with the panel (leave/pagehide), like the Electron viewer.
+      if (!/^https?:/i.test(viewerUrl)) throw new LocalizedPanelError("computer.err.openDesktopLink");
+      openViaBridge(viewerUrl);
     } else if (!window.open(viewerUrl, "_blank", "noopener")) {
       throw new LocalizedPanelError("computer.err.popupBlocked");
     }

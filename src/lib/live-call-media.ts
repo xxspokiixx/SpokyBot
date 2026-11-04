@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from "react";
 import type { LiveCallState, LiveEndReason } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
+import { androidBridge } from "./android-bridge";
 import { openExternalLink } from "./app-links";
 import { endCall, startCall } from "./call";
 import { desktopCapabilitiesNow } from "./desktop";
@@ -169,6 +170,9 @@ function micBlocked(capabilities: DesktopCapabilities, pageMic: "allowed" | "ref
   if (pageMic === "refused" || (pageMic === undefined && capabilities.dictation.reasonCode === "remote-server")) {
     return { notice: t("call.live.micAppRefused"), action: "open-in-browser" };
   }
+  // The phone shell asks for the microphone as an app permission: its blocked copy
+  // must neither point at browser site settings nor at the desktop mic settings pane.
+  if (androidBridge()) return { notice: t("call.live.micBlocked"), action: "retry" };
   return inWebBrowser(capabilities) ? { notice: t("call.live.micBlockedBrowser"), action: "retry" }
     : { notice: t("call.live.micBlocked"), action: "retry", micSettings: true };
 }

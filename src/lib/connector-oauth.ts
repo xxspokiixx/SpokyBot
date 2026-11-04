@@ -10,13 +10,16 @@ export function reusableConnectionUrl(page: PendingAuthorization | null | undefi
   return page && now >= page.createdAt && now - page.createdAt < AUTHORIZATION_LINK_MS ? page.url : null;
 }
 
+import { androidBridge } from "./android-bridge";
+
 /** Reserve the tab during the click, before an authorization request consumes the browser's user activation. */
 export function reserveConnectionPage() {
   const openExternal = window.ogb?.openExternal;
+  const openViaBridge = openExternal ? undefined : androidBridge()?.openExternal;
   let page: Window | null = null;
   let navigated = false;
   let cancelled = false;
-  if (!openExternal) {
+  if (!openExternal && !openViaBridge) {
     try {
       page = window.open("", "_blank");
       if (page) page.opener = null;
@@ -30,6 +33,12 @@ export function reserveConnectionPage() {
       if (cancelled) return false;
       if (openExternal) {
         await openExternal(url);
+        return !cancelled;
+      }
+      if (openViaBridge) {
+        // WebView popups are blocked; the system browser owns the authorization tab.
+        if (!/^https?:/i.test(url)) return false;
+        openViaBridge(url);
         return !cancelled;
       }
       if (!page || page.closed) return false;

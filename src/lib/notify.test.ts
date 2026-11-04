@@ -183,3 +183,39 @@ describe("buildNotificationOptions", () => {
     });
   });
 });
+
+describe("phone shell bridge", () => {
+  function installBridge() {
+    const notify = vi.fn();
+    class DeniedNotification {
+      static permission: NotificationPermission = "denied";
+      static requestPermission = vi.fn();
+      constructor(_title: string, _options?: NotificationOptions) {}
+    }
+    vi.stubGlobal("Notification", DeniedNotification);
+    vi.stubGlobal("document", { hasFocus: () => false });
+    vi.stubGlobal("window", { focus: vi.fn(), ombAndroidCaps: { capabilitiesJson: () => "{}", notify } });
+    return notify;
+  }
+
+  it("posts finished-work notices through the bridge when the WebView never grants the web API", () => {
+    const notify = installBridge();
+    showNotification(frame, vi.fn());
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith(frame.title, frame.body, false);
+  });
+
+  it("marks the bridge notification silent while sounds are muted", () => {
+    const notify = installBridge();
+    sounds.enabled = false;
+    showNotification(frame, vi.fn());
+    expect(notify).toHaveBeenCalledWith(frame.title, frame.body, true);
+  });
+
+  it("never posts a finished notice through the bridge once the switch mutes it", () => {
+    const notify = installBridge();
+    sounds.finished = false;
+    showNotification(frame, vi.fn());
+    expect(notify).not.toHaveBeenCalled();
+  });
+});
