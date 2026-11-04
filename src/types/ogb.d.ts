@@ -117,6 +117,10 @@ const __APP_BUILD_VERSION__: string;
   }
 
   interface Window {
+    /** The phone shell asks the page before its back gesture; true means the page consumed it (closed the drawer). */
+    ombAndroidCloseOverlay?: () => boolean;
+    /** Deep links the phone shell injected before this page mounted its listeners; onDeepLinkEvent drains them on subscribe. */
+    ombDeepLinkQueue?: [string, string][];
     ogb?: {
       platform: NodeJS.Platform;
       /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,

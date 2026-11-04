@@ -1,3 +1,4 @@
+import { onDeepLinkEvent } from "@/lib/deep-link-events";
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
@@ -1033,10 +1034,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
   useEffect(() => {
     if (remoteClient) return;
-    return window.ogb?.onPackageInstall?.((url) => {
+    const handle = (url: string) => {
       setTeamInstallUrl(url);
       setTeamLibraryOpen(true);
-    });
+    };
+    const viaElectron = window.ogb?.onPackageInstall?.(handle);
+    const viaShell = onDeepLinkEvent("omb:package-install", handle);
+    return () => {
+      viaElectron?.();
+      viaShell();
+    };
   }, [remoteClient]);
 
   useEffect(() => {

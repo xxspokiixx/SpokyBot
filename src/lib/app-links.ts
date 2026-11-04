@@ -36,9 +36,17 @@ export function platformLabel(platform?: string): string | null {
   return (platform && PLATFORM_NAMES[platform]) ?? null;
 }
 
+import { androidBridge } from "./android-bridge";
+
 export async function openExternalLink(url: string): Promise<void> {
   if (window.ogb?.openExternal) {
     await window.ogb.openExternal(url);
+    return;
+  }
+  const bridge = androidBridge();
+  if (bridge?.openExternal && /^https?:/i.test(url)) {
+    // WebView blocks window.open; hand http(s) links to the system browser.
+    bridge.openExternal(url);
     return;
   }
   window.open(url, "_blank", "noopener,noreferrer");

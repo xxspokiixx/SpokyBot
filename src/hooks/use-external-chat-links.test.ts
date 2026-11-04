@@ -29,15 +29,37 @@ function render(state: AppState, dispatch: (action: Action) => void) {
 
 afterEach(() => { vi.unstubAllGlobals(); fixture.effects = []; fixture.link = null; fixture.showThreads = true; });
 
+/** A window with only the DOM plumbing the hook listens on, for shell-event delivery.
+ * `queued` is the shell's before-mount deep link queue (window.ombDeepLinkQueue). */
+function stubShellWindow(queued: [string, string][] = []): {
+  fire: (name: string, detail: unknown) => void;
+  removed: string[];
+  remainingQueue: () => [string, string][] | undefined;
+} {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const removed: string[] = [];
+  const shellWindow: { addEventListener: (name: string, cb: (event: unknown) => void) => void; removeEventListener: (name: string) => void; ombDeepLinkQueue?: [string, string][] } = {
+    addEventListener: (name, cb) => { listeners.set(name, cb); },
+    removeEventListener: (name) => { listeners.delete(name); removed.push(name); },
+    ombDeepLinkQueue: queued,
+  };
+  vi.stubGlobal("window", shellWindow);
+  return { fire: (name, detail) => { listeners.get(name)?.({ detail }); }, removed, remainingQueue: () => shellWindow.ombDeepLinkQueue };
+}
+
 describe("useExternalChatLinks", () => {
   it("holds a link that arrives at launch until the bots have loaded, then opens it once", () => {
     let deliver: ((link: string) => void) | undefined;
     const unsubscribe = vi.fn();
-    vi.stubGlobal("window", { ogb: { onChatLink: (cb: (link: string) => void) => { deliver = cb; return unsubscribe; } } });
+    vi.stubGlobal("window", {
+      ogb: { onChatLink: (cb: (link: string) => void) => { deliver = cb; return unsubscribe; } },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
     const dispatch = vi.fn();
 
     const [cleanup] = render(loading, dispatch);
-    expect(cleanup).toBe(unsubscribe);
+    expect(typeof cleanup).toBe("function");
     deliver!("openmausbot://bot/scout");
     render(loading, dispatch);
     expect(dispatch).not.toHaveBeenCalled();
@@ -54,8 +76,38 @@ describe("useExternalChatLinks", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("opens the chat link the phone shell delivers as a DOM event", () => {
+    const shell = stubShellWindow();
+    const dispatch = vi.fn();
+
+    const [cleanup] = render(loaded, dispatch);
+    shell.fire("omb:chat-link", "openmausbot://bot/scout");
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
+
+    cleanup!();
+    expect(shell.removed).toContain("omb:chat-link");
+  });
+
+  it("opens a link the shell queued before the page mounted its listeners", () => {
+    const shell = stubShellWindow([["omb:chat-link", "openmausbot://bot/scout"]]);
+    const dispatch = vi.fn();
+
+    render(loading, dispatch);
+    expect(dispatch).not.toHaveBeenCalled();
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
+    expect(shell.remainingQueue()).toEqual([]);
+  });
+
   it("closes Settings and the shortcuts list so the linked chat is not left behind them", () => {
-    vi.stubGlobal("window", {});
+    stubShellWindow();
     fixture.link = "openmausbot://bot/scout";
     const dispatch = vi.fn();
     render({ ...loaded, appSettingsOpen: true, shortcutsOpen: true }, dispatch);
@@ -68,7 +120,7 @@ describe("useExternalChatLinks", () => {
   });
 
   it("opens a bot's link as its row would: at its main thread while threads are hidden", () => {
-    vi.stubGlobal("window", {});
+    stubShellWindow();
     fixture.link = "openmausbot://bot/scout";
     fixture.showThreads = false;
     const dispatch = vi.fn();
@@ -81,10 +133,15 @@ describe("useExternalChatLinks", () => {
     ]);
   });
 
-  it("does nothing without the desktop bridge", () => {
-    vi.stubGlobal("window", {});
+  it("does nothing without a link or the desktop bridge", () => {
+    const shell = stubShellWindow();
     const dispatch = vi.fn();
-    expect(render(loaded, dispatch)).toEqual([undefined, undefined]);
+    const [cleanup, follow] = render(loaded, dispatch);
+    expect(typeof cleanup).toBe("function");
+    expect(follow).toBeUndefined();
     expect(dispatch).not.toHaveBeenCalled();
+
+    cleanup!();
+    expect(shell.removed).toContain("omb:chat-link");
   });
 });

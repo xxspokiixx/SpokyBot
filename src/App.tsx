@@ -25,6 +25,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { useRoomPanelShown } from "@/lib/room-panel";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
+import { onDeepLinkEvent } from "@/lib/deep-link-events";
 import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
@@ -129,6 +130,17 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useExternalChatLinks(state, dispatch);
   usePresence(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    const close = () => {
+      if (!drawerOpen) return false;
+      setDrawerOpen(false);
+      return true;
+    };
+    window.ombAndroidCloseOverlay = close;
+    return () => {
+      if (window.ombAndroidCloseOverlay === close) Reflect.deleteProperty(window, "ombAndroidCloseOverlay");
+    };
+  }, [drawerOpen]);
   usePageLanguage(effectiveLanguage(useLanguageChoice(), state.config?.language));
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Stays mounted once opened: a Cloud bought in it can arrive after the sheet is closed.
@@ -270,13 +282,19 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     state.pluginsOpen;
 
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(section => dispatch((section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
+    const handle = (section?: string) => dispatch((section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
       ? { type: "openCloudAdd", source: section === "cloud-add" ? "app_menu" : "app_howto" }
       : section === "cloud" && window.ogb?.cloudAccount && !remoteClient
         ? CLOUD_LINK_SETTINGS
         : section === "cloud-settings" && (window.ogb?.cloudAccount || window.ogb?.cloudPlan) && !remoteClient
           ? { type: "toggleAppSettings", open: true, section: "cloudAccount" }
-          : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
+          : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) });
+    const viaElectron = window.ogb?.onOpenAppSettings?.(handle);
+    const viaShell = onDeepLinkEvent("omb:open-settings", (section) => handle(section as "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | undefined));
+    return () => {
+      viaElectron?.();
+      viaShell();
+    };
   }, [dispatch]);
 
   useEffect(() => {
