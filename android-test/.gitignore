@@ -1,3 +1,11 @@
 .gradle/
 build/
 local.properties
+
+# Dead kotlinx.serialization proto stubs parked outside the source set: kept on
+# disk for their owner, referenced by nothing, so they stay out of git too.
+proto-backup/
+
+# prepare-android-assets.mjs stages the developer's ~/.ssh private keys into the
+# APK payload for VPS auth. Never let them reach a commit.
+app/src/main/assets/omb/ssh/

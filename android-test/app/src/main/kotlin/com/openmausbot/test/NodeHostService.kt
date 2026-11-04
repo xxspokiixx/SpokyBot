@@ -42,7 +42,6 @@ class NodeHostService : Service() {
      * the server itself only mirrors config → env on a settings patch, so a
      * restarted server would otherwise lose it until the next save. */
     private var openCodeApiKey: String? = null
-    private var watcher: kotlinx.coroutines.Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -103,8 +102,6 @@ class NodeHostService : Service() {
         try {
             if (nodeProcess?.isAlive == true) stopNode()
             stopping = false
-            watcher?.cancel()
-            watcher = null
             Log.d(TAG, "runBoot: extracting if needed")
             NodeState.update(NodeState.Phase.Extracting, detail = getString(R.string.status_extracting))
             val installError = extractIfNeeded()
@@ -134,7 +131,11 @@ class NodeHostService : Service() {
             Log.d(TAG, "runBoot: ensuring server config")
             ensureServerConfig(node.absolutePath)
             Log.d(TAG, "runBoot: ensuring local computer")
-            ensureLocalComputer(node.absolutePath)
+            ensureLocalComputer(node.absolutePath)?.let { failure ->
+                NodeState.update(NodeState.Phase.Failed, detail = failure)
+                postNotification(getString(R.string.notif_failed), withStop = false, withResume = true)
+                return
+            }
             Log.d(TAG, "runBoot: starting node")
             startNode(node.absolutePath)
             Log.d(TAG, "runBoot: polling server")
@@ -253,8 +254,10 @@ class NodeHostService : Service() {
 
     /** Stages the phone's "this computer" (see android-test/linux/): a proot'ed
      * Alpine rootfs plus the MCP server the harness gate launches for a bot that
-     * picks "this computer" as its working destination. */
-    private fun ensureLocalComputer(nodePath: String) {
+     * picks "this computer" as its working destination. Returns an error only for a
+     * payload that exists but is broken (a corrupt rootfs); a build without the
+     * linux assets stays on the graceful shell-only path. */
+    private fun ensureLocalComputer(nodePath: String): String? {
         val linux = File(filesDir, LINUX_DIR)
         val mcp = File(linux, "android-local-computer.mjs")
         try {
@@ -276,10 +279,21 @@ class NodeHostService : Service() {
                 val tar = ProcessBuilder(listOf("/system/bin/tar") + tarFlags + listOf(tarball.absolutePath, "-C", rootfs.absolutePath))
                     .redirectErrorStream(true)
                     .start()
-                val tarOutput = tar.inputStream.bufferedReader().use { it.readText() }
-                if (tar.waitFor() != 0) {
-                    NodeState.update(detail = "linux environment extraction failed: ${tarOutput.takeLast(300)}")
-                    return
+                val tarOutput = StringBuffer()
+                val drain = Thread {
+                    runCatching { tar.inputStream.bufferedReader().forEachLine { line -> tarOutput.appendLine(line) } }
+                }
+                drain.start()
+                // A damaged archive can leave tar spinning with the pipe open: cap the
+                // wait so one bad release asset surfaces as Failed, not a wedged boot.
+                if (!tar.waitFor(15, java.util.concurrent.TimeUnit.MINUTES)) {
+                    tar.destroyForcibly()
+                    drain.join(5_000)
+                    return "linux environment extraction timed out after 15 minutes: ${tarOutput.toString().takeLast(300)}"
+                }
+                drain.join(5_000)
+                if (tar.exitValue() != 0) {
+                    return "linux environment extraction failed: ${tarOutput.toString().takeLast(300)}"
                 }
                 tarball.delete()
                 // copyAssetDir streams bytes only: every exec-able file in the
@@ -333,9 +347,18 @@ class NodeHostService : Service() {
                             }
                             .redirectErrorStream(true)
                             .start()
-                        val output = proc.inputStream.bufferedReader().use { it.readText() }
-                        proc.waitFor()
-                        "[$label] exit=${proc.exitValue()}: ${output.trim().take(400)}\n"
+                        val output = StringBuffer()
+                        val drain = Thread {
+                            runCatching { proc.inputStream.bufferedReader().forEachLine { line -> output.appendLine(line) } }
+                        }
+                        drain.start()
+                        if (!proc.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                            proc.destroyForcibly()
+                            drain.join(2_000)
+                            return "[$label] timed out after 60 s\n"
+                        }
+                        drain.join(2_000)
+                        "[$label] exit=${proc.exitValue()}: ${output.toString().trim().take(400)}\n"
                     } catch (e: Exception) {
                         "[$label] threw: ${e.message}\n"
                     }
@@ -358,8 +381,10 @@ class NodeHostService : Service() {
                 )
                 File(linux, "SELFTEST").writeText(report.toString())
             }
+            return null
         } catch (e: IOException) {
             NodeState.update(detail = "linux environment setup failed: ${e.message}")
+            return null
         }
     }
 
@@ -729,21 +754,6 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
             delay(300)
         }
         return false
-    }
-
-    private fun watchHealthForever() {
-        watcher?.cancel()
-        watcher = scope.launch {
-            while (!stopping) {
-                delay(2_000)
-                val response = http("GET", URL("$BASE_URL/api/health"), timeoutMs = 1_500)
-                if (response != null) {
-                    NodeState.status.update {
-                        it.copy(healthJson = "GET /api/health -> ${response.status} ${response.body.take(200)}")
-                    }
-                }
-            }
-        }
     }
 
     private fun pairWebView() {

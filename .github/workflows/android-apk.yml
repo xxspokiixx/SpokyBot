@@ -53,6 +53,10 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+          # The runtime binaries (libnodeexec.so, rootfs) are LFS objects;
+          # without smudge they arrive as 3-line pointer text and the APK boots
+          # to "Runtime binary pending".
+          lfs: true
 
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
