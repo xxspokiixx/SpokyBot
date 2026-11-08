@@ -78,7 +78,7 @@ describe("Settings full backups", () => {
     expect(render().html).not.toContain('value="correct horse battery"');
   });
 
-  it("uploads a raw file, validates it, and requires exact REPLACE with the staged ID", async () => {
+  it("uploads a raw file, validates it, and restores the selected categories with the staged ID", async () => {
     await ready();
     const file = new File(["encrypted fixture"], "fixture.ombbackup");
     render().nodes.find((node) => node.props.type === "file")!.props.onChange!({ target: { files: [file] } });
@@ -90,13 +90,16 @@ describe("Settings full backups", () => {
     expect(JSON.parse(fixture.api.mock.calls[2][1].body)).toEqual({ id: "upload-id", password: "correct horse battery" });
     view = render();
     const replace = () => render().nodes.find((node) => node.type === "button" && node.props.children === "Replace installation")!;
+    const checkboxes = () => render().nodes.filter((node) => node.type === "input" && node.props.type === "checkbox");
+    expect(checkboxes()).toHaveLength(8);
+    expect(replace().props.disabled).toBe(false);
+    for (const box of checkboxes()) change(box, "");
     expect(replace().props.disabled).toBe(true);
-    const confirm = view.nodes.filter((node) => node.type === "input" && !node.props.type)[0];
-    change(confirm, "replace"); expect(replace().props.disabled).toBe(true);
-    change(confirm, "REPLACE"); expect(replace().props.disabled).toBe(false);
+    change(checkboxes()[0], "");
+    expect(replace().props.disabled).toBe(false);
     fixture.api.mockResolvedValueOnce({ restartRequired: true, restoreId: "stage-id" });
     replace().props.onClick!(); await flush();
-    expect(JSON.parse(fixture.api.mock.calls[3][1].body)).toEqual({ id: "stage-id", confirmation: "REPLACE" });
+    expect(JSON.parse(fixture.api.mock.calls[3][1].body)).toEqual({ id: "stage-id", confirmation: "REPLACE", categories: ["bots"] });
     expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
     expect(render().html).toContain("Fully quit MausBot");
   });
@@ -121,7 +124,6 @@ describe("Settings full backups", () => {
     await validate();
     fixture.api.mockResolvedValueOnce({ id: "upload-new" }).mockResolvedValueOnce({ id: "stage-old", summary });
     await validate();
-    change(render().nodes.find((node) => node.type === "input" && !node.props.type)!, "REPLACE");
     fixture.api.mockRejectedValueOnce(expired);
     render().nodes.find((node) => node.type === "button" && node.props.children === "Replace installation")!.props.onClick!(); await flush();
     expect(render().html).not.toContain("Validated backup");

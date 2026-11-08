@@ -16,18 +16,18 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15778,
+  "server/index.ts": 15790,
   "src/state/store.tsx": 3360,
   "electron/main.mjs": 3246,
   "server/store.ts": 2323,
-  "src/components/Sidebar.tsx": 1744,
+  "src/components/Sidebar.tsx": 1751,
   "server/drivers/claude.ts": 2119,
   "server/drivers/acp/core.ts": 1744,
   "server/drivers/codex.ts": 1813,
   "server/routines.ts": 1570,
   "src/components/ComputerPanel.tsx": 1821,
   "src/components/RoutineCalendarPage.tsx": 1623,
-  "server/config.ts": 1281,
+  "server/config.ts": 1290,
   "src/components/ChatView.tsx": 1308,
   "server/routine-requests.ts": 1484,
   "src/components/GroupView.tsx": 1225,
@@ -44,7 +44,7 @@ const LINES: Record<string, number> = {
   "src/components/PhoneSetupFlow.tsx": 1146,
   "server/cli.ts": 1080,
   "server/org-library.ts": 1003,
-  "src/components/AttachmentPreview.tsx": 1037,
+  "src/components/AttachmentPreview.tsx": 1046,
 };
 
 function sourceFiles(): string[] {

@@ -147,7 +147,7 @@ it("keeps a validated stage after rejecting a malformed or oversized upload", as
     expect(existsSync(join(dataDir, ".backups", preview.id))).toBe(true);
   }
   expect((await post("/api/workspace-backup/restore", { id: preview.id, confirmation: "REPLACE" })).status).toBe(200);
-  expect(archive.commit).toHaveBeenCalledWith(dataDir, preview.id);
+  expect(archive.commit).toHaveBeenCalledWith(dataDir, preview.id, undefined);
 });
 
 it("accepts drafts between 1 and 2 MiB and enforces the preference cap in UTF-8 bytes", async () => {

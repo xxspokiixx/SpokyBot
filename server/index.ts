@@ -640,12 +640,16 @@ import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorRequestItems } from "./connector-request-items.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
-// Crash diagnostics: log unhandled rejections/exceptions instead of silently exiting
+// Crash diagnostics: log, then exit non-zero so a supervisor (Electron, the Android shell, systemd)
+// sees the failure. A synchronous throw during boot aborts module evaluation; without an explicit
+// exit the empty event loop would drain to code 0 and hide a fatal start (e.g. a held data-dir lease).
 process.on("unhandledRejection", (reason, promise) => {
   console.error("[FATAL] Unhandled rejection at:", promise, "reason:", reason);
+  process.exit(1);
 });
 process.on("uncaughtException", (error) => {
   console.error("[FATAL] Uncaught exception:", error);
+  process.exit(1);
 });
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
