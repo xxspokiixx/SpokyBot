@@ -22,7 +22,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
-import { DATA_DIR, isValidVpsSshTarget, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
+import { DATA_DIR, isValidVpsSshTarget, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
 import { prepareVpsSsh } from "./vps-ssh.ts";
@@ -803,7 +803,7 @@ export async function listManagedVpsComputers(
   vpsAliases?: string[],
 ): Promise<ManagedVpsInventory> {
   const defaultAlias = vpsSshAlias(snapshotVpsConfig(cfg));
-  const scanning = [...new Set((vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : []).filter(isValidSshAlias))];
+  const scanning = [...new Set((vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : []).filter(isValidVpsSshTarget))];
   if (scanning.length === 0) {
     return { configured: false, available: false, vpsAliases: [], problem: null, instances: [] };
   }

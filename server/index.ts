@@ -414,7 +414,7 @@ import {
 } from "./system-prompt.ts";
 import { shellTimeoutHookResult } from "./shell-timeout-hint.ts";
 import { spillToolResult } from "./tool-result-spill.ts";
-import { gatedLocalComputer } from "./local-computer.ts";
+import { gatedLocalComputer, androidLocalComputerConnection, type LocalComputerConnection } from "./local-computer.ts";
 import { desktopComputer, thisComputerNotReady } from "./desktop-computer.ts";
 import { askToUseYourComputer, cancelYourComputerAsks, dismissStaleYourComputerCards, yourComputerCallFrom, yourComputerWaiting } from "./your-computer-consent.ts"; import { createComputerAsksHost } from "./host/computer-asks-host.ts";
 import { discoverExistingPerBotLocalVms, localVmInventoryEntry } from "./local-vm-inventory.ts";
@@ -639,6 +639,15 @@ import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorRequestItems } from "./connector-request-items.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
+
+/** Returns the host computer connection for the current platform. On Android it reads from the app's userData directory. */
+function hostComputerConnection(): LocalComputerConnection | null {
+  if (process.platform === "android") {
+    const userData = process.env.OMB_USER_DATA;
+    return userData ? androidLocalComputerConnection(userData) : null;
+  }
+  return desktopComputer.connection();
+}
 
 // Crash diagnostics: log, then exit non-zero so a supervisor (Electron, the Android shell, systemd)
 // sees the failure. A synchronous throw during boot aborts module evaluation; without an explicit
@@ -5914,7 +5923,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
       ? "bots can't use this computer on this system — choose another place for this bot to work"
       : "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work");
   }
-  const cua = desktopComputer.connection();
+  const cua = hostComputerConnection();
   if (!cua) throw new Error(thisComputerNotReady());
   await bindTurnComputer(owner, "computer:host");
   autoVmClaims.set(owner.threadId, {
@@ -6112,7 +6121,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
     if (vm && (autoLocalVmAttachable(vm) || localVmUpdates.observe(target, vm))) return "vm";
   }
   if (!CLOUD_HOME && shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
-    providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && desktopComputer.connection()) return "local";
+    providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && hostComputerConnection()) return "local";
   if (bot.cloudBackend === "vps") return "cloud";
   return plan.browser ? "browser" : "off";
 }
@@ -6165,7 +6174,7 @@ async function selectableComputers(bot: BotRecord) {
         reason = (updating ? LOCAL_VM_UPDATING_PROBLEM : status.problem) ?? reason;
       } else if (surface === "local") {
         ready = shouldMountLocalComputer({ requested: "local", hostPlatform: process.platform,
-          providerSupportsLocal: caps?.localComputerMcp === true }) && Boolean(desktopComputer.connection());
+          providerSupportsLocal: caps?.localComputerMcp === true }) && Boolean(hostComputerConnection());
       } else if (surface === "browser") {
         ready = browserSelectable(bot);
         reason = "The built-in browser is disabled, not installed, or unsupported by this model.";
@@ -8372,7 +8381,7 @@ async function beginTurn(
           providerSupportsLocal: mountsLocalComputer,
         })
       ) {
-        const cua = desktopComputer.connection();
+        const cua = hostComputerConnection();
         if (cua) {
           autoVmClaims.set(threadId, {
             owner: resourceOwner,

@@ -30,7 +30,7 @@ const __APP_BUILD_VERSION__: string;
 
   type DesktopCapabilities = {
     host: {
-      platform: "darwin" | "linux" | "win32" | "other";
+      platform: "darwin" | "linux" | "win32" | "android" | "other";
       /** The user's home folder, for showing paths as ~/… */
       homeDir?: string;
       label: string;

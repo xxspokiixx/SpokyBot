@@ -154,7 +154,7 @@ export function ComputerPanel({
   const canManageVm = profileBot.computer === "vm" && livePlace === "vm";
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
-  const isLinux = capabilities.host.platform === "linux";
+  const isLinux = capabilities.host.platform === "linux" || capabilities.host.platform === "android";
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = placeOffered("local", state.config) && localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarningTarget, setLocalAutoWarningTarget] = useState<string | null>(null);

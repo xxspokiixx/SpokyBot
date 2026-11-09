@@ -628,7 +628,7 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
 }
 
 export function vpsSshAlias(cfg: AppConfig): string | null {
-  return isValidSshAlias(cfg.vps?.sshAlias) ? cfg.vps.sshAlias : null;
+  return isValidVpsSshTarget(cfg.vps?.sshAlias) ? cfg.vps.sshAlias : null;
 }
 
 /** Revalidated because the value is forwarded into a child process environment. */

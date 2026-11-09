@@ -474,6 +474,14 @@ describe("configuration boundaries", () => {
     expect(vpsSshAlias({ vps: { sshAlias: "-bad" } })).toBeNull();
   });
 
+  it("keeps a user@host VPS target through the save/status round-trip", () => {
+    for (const target of ["deploy@203.0.113.7", "root@vps.example.com", "user@192.168.1.100"]) {
+      expect(parseConfigPatch({ vps: { sshAlias: target } })).toEqual({ vps: { sshAlias: target } });
+      expect(vpsSshAlias({ vps: { sshAlias: target } })).toBe(target);
+    }
+    expect(vpsSshAlias({ vps: { sshAlias: "user@host; reboot" } })).toBeNull();
+  });
+
   it("validates browserEngine.attachCdpUrl as a bare CDP port or an http(s)/ws(s) URL, and forwards it only when configured", () => {
     expect(parseStoredConfig({})).toEqual({});
     expect(browserEngineAttachCdpUrl({})).toBeNull();

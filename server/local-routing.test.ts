@@ -29,6 +29,18 @@ describe("local computer routing", () => {
     ).toBe(false);
   });
 
+  it("mounts the phone's local computer only on an explicit pick, never on Auto", () => {
+    expect(
+      shouldMountLocalComputer({ requested: "local", hostPlatform: "android", providerSupportsLocal: true }),
+    ).toBe(true);
+    expect(
+      shouldMountLocalComputer({ requested: "local", hostPlatform: "android", providerSupportsLocal: false }),
+    ).toBe(false);
+    expect(
+      shouldMountLocalComputer({ requested: undefined, hostPlatform: "android", providerSupportsLocal: true }),
+    ).toBe(false);
+  });
+
   it("preserves the established macOS Auto fallback", () => {
     expect(
       shouldMountLocalComputer({
