@@ -45,7 +45,7 @@ export const DISPLAY = ":1";
 export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
 export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
 
-const RUNTIMES = ["docker", "podman", "container"] as const;
+const RUNTIMES = ["docker", "podman", "container", "proot"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
 export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove";
 
@@ -1150,6 +1150,182 @@ export async function containerExec(
   );
   const timedOut = result.code === 124 || result.code === 137;
   return { exitCode: result.code, stdout: clipExecOutput(result.stdout), stderr: clipExecOutput(result.stderr), timedOut };
+}
+
+/** Check status of the Android proot environment (for "this computer" on Android). */
+export async function androidProotStatus(): Promise<ContainerComputerStatus> {
+  const linuxDir = process.env.OMB_ANDROID_LINUX_DIR;
+  const rootfs = process.env.OMB_ANDROID_ROOTFS;
+  const workspace = process.env.OMB_ANDROID_WORKSPACE;
+  const dataDir = process.env.OMB_ANDROID_DATA_DIR;
+  const tmpDir = process.env.OMB_ANDROID_TMP_DIR;
+
+  const baseStatus = emptyStatus("linux", SHARED_LOCAL_VM_TARGET);
+
+  if (!linuxDir || !rootfs || !workspace) {
+    return {
+      ...baseStatus,
+      problem: "Android proot environment is not configured",
+    };
+  }
+
+  // Check if proot binary exists
+  const { existsSync } = await import("node:fs");
+  const prootPath = join(linuxDir, "proot");
+  const loaderPath = join(linuxDir, "loader");
+  if (!existsSync(prootPath) || !existsSync(loaderPath)) {
+    return {
+      ...baseStatus,
+      problem: "Android proot binaries not found",
+    };
+  }
+
+  // Check if rootfs exists
+  if (!existsSync(rootfs)) {
+    return {
+      ...baseStatus,
+      problem: "Android rootfs not found",
+    };
+  }
+
+  // Check if graphical desktop setup script exists in rootfs
+  const setupScriptPath = join(rootfs, "usr", "local", "bin", "start-graphical-desktop");
+  const setupScriptExists = existsSync(setupScriptPath);
+
+  // Check if graphical desktop is running (Xvfb on :1)
+  let desktopRunning = false;
+  let desktopError: string | null = null;
+  let viewerUrl: string | null = null;
+
+  if (setupScriptExists) {
+    try {
+      const { spawn } = await import("node:child_process");
+      const checkResult = await new Promise<{ running: boolean; error?: string }>((resolve) => {
+        const child = spawn(prootPath, [
+          "-R", rootfs,
+          "-b", `${workspace}:/work`,
+          "-b", `${linuxDir}:/host-linux`,
+          ...(dataDir ? ["-b", `${dataDir}:/data`] : []),
+          "-w", "/work", "/bin/bash", "-lc",
+          "pgrep -f 'Xvfb :1' >/dev/null && pgrep -f 'x11vnc.*:1' >/dev/null && pgrep -f 'websockify.*56080' >/dev/null && echo RUNNING || echo NOT_RUNNING"
+        ], {
+          env: {
+            PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
+            HOME: "/root",
+            TMPDIR: tmpDir ?? join(linuxDir, "tmp"),
+            LD_LIBRARY_PATH: linuxDir,
+            PROOT_TMP_DIR: tmpDir ?? join(linuxDir, "tmp"),
+            PROOT_NO_SECCOMP: "1",
+            PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+            PROOT_LOADER: loaderPath,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        child.stdout?.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+        child.on("close", (code) => {
+          resolve({ running: stdout.includes("RUNNING"), error: code !== 0 ? "check failed" : undefined });
+        });
+        child.on("error", (err) => resolve({ running: false, error: err.message }));
+        setTimeout(() => { child.kill("SIGKILL"); resolve({ running: false, error: "timeout" }); }, 10_000);
+      });
+      desktopRunning = checkResult.running;
+      if (checkResult.error) desktopError = checkResult.error;
+    } catch (e) {
+      desktopError = e instanceof Error ? e.message : "check failed";
+    }
+  }
+
+  if (desktopRunning) {
+    viewerUrl = "http://localhost:56080/vnc.html";
+  }
+
+  return {
+    ...baseStatus,
+    runtime: "proot",
+    available: ["proot"],
+    daemonUp: true,
+    image: setupScriptExists,
+    imageMatches: setupScriptExists,
+    managed: setupScriptExists,
+    container: desktopRunning ? "running" : "missing",
+    network: "loopback",
+    security: "hardened",
+    persistence: "durable",
+    desktopReady: desktopRunning,
+    desktop_error: desktopError,
+    create_supported: true,
+    ready: desktopRunning,
+    problem: setupScriptExists ? (desktopRunning ? null : "Graphical desktop not running") : "Graphical desktop not set up. Run setup_graphical_desktop first.",
+    viewer_port: desktopRunning ? 56081 : null,
+    viewer_url: viewerUrl ?? "",
+  };
+}
+
+/** Execute a command in the Android proot environment. */
+export async function androidProotExec(
+  command: string,
+  options: { timeoutSeconds?: number } = {},
+): Promise<ContainerExecResult> {
+  if (!command.trim()) throw Object.assign(new Error("command is required"), { status: 400 });
+  if (command.length > 20_000) throw Object.assign(new Error("command is too long"), { status: 400 });
+  const linuxDir = process.env.OMB_ANDROID_LINUX_DIR;
+  const rootfs = process.env.OMB_ANDROID_ROOTFS;
+  const workspace = process.env.OMB_ANDROID_WORKSPACE;
+  const dataDir = process.env.OMB_ANDROID_DATA_DIR;
+  const tmpDir = process.env.OMB_ANDROID_TMP_DIR;
+  if (!linuxDir || !rootfs || !workspace) {
+    throw Object.assign(new Error("Android proot environment is not configured"), { status: 409 });
+  }
+  const seconds = Math.min(Math.max(Math.floor(options.timeoutSeconds ?? EXEC_DEFAULT_SECONDS), 1), EXEC_MAX_SECONDS);
+  const { spawn } = await import("node:child_process");
+  const { join } = await import("node:path");
+  const prootPath = join(linuxDir, "proot");
+  const loaderPath = join(linuxDir, "loader");
+  const args = [
+    "-R", rootfs,
+    "-b", `${workspace}:/work`,
+    "-b", `${linuxDir}:/host-linux`,
+  ];
+  if (dataDir) args.push("-b", `${dataDir}:/data`);
+  args.push("-w", "/work", "/bin/bash", "-lc", command);
+  return new Promise((resolve) => {
+    const child = spawn(prootPath, args, {
+      env: {
+        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
+        HOME: "/root",
+        TMPDIR: tmpDir ?? join(linuxDir, "tmp"),
+        LD_LIBRARY_PATH: linuxDir,
+        PROOT_TMP_DIR: tmpDir ?? join(linuxDir, "tmp"),
+        PROOT_NO_SECCOMP: "1",
+        PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+        PROOT_LOADER: loaderPath,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let done = false;
+    const finish = (code: number | null, signal: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const exitCode = code ?? (signal === "SIGKILL" ? 137 : 1);
+      const timedOut = exitCode === 124 || exitCode === 137;
+      resolve({ exitCode, stdout: clipExecOutput(stdout), stderr: clipExecOutput(stderr), timedOut });
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(null, "SIGKILL");
+    }, (seconds + 5) * 1000);
+    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr?.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", (error) => {
+      stderr += `\n${error.message}`;
+      finish(1, null);
+    });
+    child.on("close", finish);
+  });
 }
 
 type ContainerMcpLaunch = {
