@@ -1207,7 +1207,7 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
           "-b", `${linuxDir}:/host-linux`,
           ...(dataDir ? ["-b", `${dataDir}:/data`] : []),
           "-w", "/work", "/bin/bash", "-lc",
-          "pgrep -f 'Xvfb :1' >/dev/null && pgrep -f 'x11vnc.*:1' >/dev/null && pgrep -f 'websockify.*56080' >/dev/null && echo RUNNING || echo NOT_RUNNING"
+          "pgrep -f 'Xvfb :3' >/dev/null && pgrep -f 'x11vnc.*:3' >/dev/null && pgrep -f 'websockify.*56082' >/dev/null && echo RUNNING || echo NOT_RUNNING"
         ], {
           env: {
             PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
@@ -1237,7 +1237,7 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
   }
 
   if (desktopRunning) {
-    viewerUrl = "http://localhost:56080/vnc.html";
+    viewerUrl = "http://localhost:56082/vnc.html";
   }
 
   return {
@@ -1257,7 +1257,7 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
     create_supported: true,
     ready: desktopRunning,
     problem: setupScriptExists ? (desktopRunning ? null : "Graphical desktop not running") : "Graphical desktop not set up. Run setup_graphical_desktop first.",
-    viewer_port: desktopRunning ? 56081 : null,
+    viewer_port: desktopRunning ? 56082 : null,
     viewer_url: viewerUrl ?? "",
   };
 }

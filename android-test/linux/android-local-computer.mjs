@@ -373,9 +373,9 @@ async function callTool(name, input) {
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), 30000); // 30 second timeout for startup
 
     // The script runs in background, so we need to capture the noVNC URL
-    // noVNC runs on port 56081 inside the proot environment
+    // noVNC runs on port 56082 inside the proot environment
     // We'll use a fixed URL since the port is known
-    graphicalDesktopUrl = `http://localhost:56081/vnc.html`;
+    graphicalDesktopUrl = `http://localhost:56082/vnc.html`;
 
     // Extract PID from output if available
     const pidMatch = run.out.match(/XVFB_PID=(\d+)/);
@@ -408,7 +408,7 @@ async function callTool(name, input) {
     const outputPath = `/tmp/screenshot.${format}`;
 
     // Use xwd to capture screenshot from Xvfb
-    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:2 xwd -root -out ${shellQuote(outputPath)} && ls -la ${shellQuote(outputPath)}`];
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xwd -root -out ${shellQuote(outputPath)} && ls -la ${shellQuote(outputPath)}`];
     const run = await runGuest(guestCommand(bashArgs), TOOL_TIMEOUT_MS);
 
     if (run.code !== 0) {
@@ -425,7 +425,7 @@ async function callTool(name, input) {
     }
     const x = input?.x ?? 0;
     const y = input?.y ?? 0;
-    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:2 xdotool mousemove ${x} ${y}`];
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool mousemove ${x} ${y}`];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out || `Mouse moved to ${x},${y}` }], isError: run.code !== 0 };
   }
@@ -440,7 +440,7 @@ async function callTool(name, input) {
     const count = input?.count ?? 1;
     const buttonMap = { left: 1, right: 3, middle: 2 };
     const btn = buttonMap[button] ?? 1;
-    let cmd = `DISPLAY=:2 xdotool`;
+    let cmd = `DISPLAY=:3 xdotool`;
     if (x !== undefined && y !== undefined) {
       cmd += ` mousemove ${x} ${y}`;
     }
@@ -461,7 +461,7 @@ async function callTool(name, input) {
     const button = input?.button ?? "left";
     const buttonMap = { left: 1, right: 3, middle: 2 };
     const btn = buttonMap[button] ?? 1;
-    const cmd = `DISPLAY=:2 xdotool mousemove ${start_x} ${start_y} mousedown ${btn} mousemove ${end_x} ${end_y} mouseup ${btn}`;
+    const cmd = `DISPLAY=:3 xdotool mousemove ${start_x} ${start_y} mousedown ${btn} mousemove ${end_x} ${end_y} mouseup ${btn}`;
     bashArgs = ["/bin/bash", "-lc", cmd];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out || `Dragged from ${start_x},${start_y} to ${end_x},${end_y}` }], isError: run.code !== 0 };
@@ -476,7 +476,7 @@ async function callTool(name, input) {
     const delay = input?.delay ?? 50;
     // Escape special characters for xdotool
     const escaped = text.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:2 xdotool type --delay ${delay} -- "${escaped}"`];
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool type --delay ${delay} -- "${escaped}"`];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out || `Typed ${text.length} characters` }], isError: run.code !== 0 };
   }
@@ -486,7 +486,7 @@ async function callTool(name, input) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const key = String(input?.key ?? "");
-    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:2 xdotool key -- "${key}"`];
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool key -- "${key}"`];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out || `Pressed key: ${key}` }], isError: run.code !== 0 };
   }
@@ -500,7 +500,7 @@ async function callTool(name, input) {
       return { content: [{ type: "text", text: "No keys provided" }], isError: true };
     }
     const keyCombo = keys.join("+");
-    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:2 xdotool key -- "${keyCombo}"`];
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool key -- "${keyCombo}"`];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out || `Pressed hotkey: ${keyCombo}` }], isError: run.code !== 0 };
   }
@@ -511,7 +511,7 @@ async function callTool(name, input) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     // Try xclip first, then xsel
-    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:2 xclip -o -selection clipboard 2>/dev/null || DISPLAY=:2 xsel -b 2>/dev/null || echo "Clipboard empty or unavailable"`];
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xclip -o -selection clipboard 2>/dev/null || DISPLAY=:3 xsel -b 2>/dev/null || echo "Clipboard empty or unavailable"`];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out.trim() }], isError: run.code !== 0 };
   }
@@ -523,7 +523,7 @@ async function callTool(name, input) {
     const text = String(input?.text ?? "");
     // Escape for shell
     const escaped = text.replace(/'/g, "'\\''");
-    bashArgs = ["/bin/bash", "-lc", `printf %s '${escaped}' | DISPLAY=:2 xclip -i -selection clipboard 2>/dev/null || printf %s '${escaped}' | DISPLAY=:2 xsel -i -b 2>/dev/null`];
+    bashArgs = ["/bin/bash", "-lc", `printf %s '${escaped}' | DISPLAY=:3 xclip -i -selection clipboard 2>/dev/null || printf %s '${escaped}' | DISPLAY=:3 xsel -i -b 2>/dev/null`];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out || `Clipboard set (${text.length} chars)` }], isError: run.code !== 0 };
   }
