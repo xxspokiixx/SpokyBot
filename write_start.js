@@ -1,4 +1,5 @@
 const fs = require("fs");
+/* eslint-disable no-useless-escape */
 const script = `#!/bin/bash
 # Start the graphical desktop (Xvfb + openbox + x11vnc + noVNC)
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -47,6 +48,7 @@ echo "To stop: pkill -f 'Xvfb :1'; pkill -f x11vnc; pkill -f websockify"
 # Keep running
 wait
 `;
+/* eslint-enable no-useless-escape */
 fs.mkdirSync("/data/user/0/com.openmausbot.test/files/linux/rootfs/usr/local/bin", { recursive: true });
 fs.writeFileSync("/data/user/0/com.openmausbot.test/files/linux/rootfs/usr/local/bin/start-graphical-desktop", script);
 fs.chmodSync("/data/user/0/com.openmausbot.test/files/linux/rootfs/usr/local/bin/start-graphical-desktop", 0o755);
