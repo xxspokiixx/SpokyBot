@@ -369,7 +369,7 @@ async function callTool(name, input) {
     }
 
     // Start the graphical desktop in background
-    const bashArgs = ["/usr/local/bin/start-graphical-desktop"];
+    const bashArgs = ["/usr/local/bin/start-graphical-desktop", String(_width), String(_height), String(_depth)];
     const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), 30000); // 30 second timeout for startup
 
     // The script runs in background, so we need to capture the noVNC URL
