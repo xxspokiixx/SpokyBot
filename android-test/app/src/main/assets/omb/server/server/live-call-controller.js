@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spokenConsent } from "../shared/call-consent.js";
 import { LIVE_COPY, liveCardKind, liveStepLabel, spokenApprovalPrompt, spokenConnectorPrompt, spokenQuestionPrompt, spokenReviewPrompt, spokenSecretPrompt, spokenSignInPrompt, } from "../shared/live-approval.js";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.js";
+import { signInWaits } from "../shared/sign-in-request.js";
 import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.js";
 export const DELEGATION_SETTLE_MS = 700;
 export const CONSENT_SETTLE_MS = 1_200;
@@ -678,7 +679,7 @@ export class LiveCallController {
         const waiting = message.kind === "connector"
             ? Boolean(connector && connector.status !== "connected" && !connector.dismissed && !connector.resumed)
             : message.kind === "signin"
-                ? Boolean(signIn && !signIn.done && !signIn.cancelled && !signIn.superseded)
+                ? Boolean(signIn && signInWaits(signIn))
                 : Boolean(secret && !secret.provided && !secret.dismissed && !secret.superseded && !secret.resumed);
         const key = `${message.kind}:${message.id}`;
         if (!waiting || call.announced.has(key))

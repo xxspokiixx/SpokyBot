@@ -1,6 +1,7 @@
 import { chiefTidies } from "../chief-of-staff.js";
 import { reachablePeers } from "../peer-roster.js";
 import { PASS } from "./table.js";
+import { conversationLanguage, serverLine } from "../server-lines.js";
 /** Only dispatch inside the internal capability gate: `from` and `fromThreadId` come from the caller's capability. */
 export function createInternalThreadRoutes(deps) {
     const { store, coordinator, from, fromThreadId } = deps;
@@ -41,7 +42,7 @@ export function createInternalThreadRoutes(deps) {
                     if (!opener || !deps.shown(task.threadId))
                         continue;
                     const mine = opener.botId === from.id;
-                    if (!mine && !chiefTidies(from, task, store.bot(opener.botId)))
+                    if (!mine && !chiefTidies(from, task, store.bot(opener.botId), peer))
                         continue;
                     rows.push({
                         threadId: task.threadId, botId: peer.id, botName: peer.name, title: task.title,
@@ -66,7 +67,7 @@ export function createInternalThreadRoutes(deps) {
         const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
         if (!owner || !task || !deps.shown(threadId))
             return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
-        if (owner.id !== from.id && task.openedBy?.botId !== from.id && !chiefTidies(from, task, task.openedBy ? store.bot(task.openedBy.botId) : undefined)) {
+        if (owner.id !== from.id && task.openedBy?.botId !== from.id && !chiefTidies(from, task, task.openedBy ? store.bot(task.openedBy.botId) : undefined, owner)) {
             return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, its own bot, or (for a thread a bot opened) a Chief of Staff can" });
         }
         if (threadId === fromThreadId)
@@ -84,7 +85,7 @@ export function createInternalThreadRoutes(deps) {
             role: "bot",
             kind: "activity",
             from: { botId: from.id, name: from.name, color: from.color },
-            tool: { name: `Closed by @${from.name}`, ok: true },
+            tool: { name: serverLine(conversationLanguage(threadId), "server.teammates.closedBy", { bot: from.name }), ok: true },
         });
         if (task.unread)
             store.patchTask(owner.id, threadId, { unread: false });

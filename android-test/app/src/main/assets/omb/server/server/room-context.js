@@ -1,5 +1,6 @@
 import { contextWindowFor } from "./context-budget.js";
 import { sessionIdlePolicy } from "./drivers/session-idle.js";
+import { serverLine } from "./server-lines.js";
 export const DEFAULT_ROOM_COMPACT_AT = 0.9;
 export function roomCompactTokens(window, settings) {
     if (settings?.autoCompact === false)
@@ -8,10 +9,8 @@ export function roomCompactTokens(window, settings) {
     const value = typeof at === "number" && Number.isFinite(at) && at > 0 ? at : DEFAULT_ROOM_COMPACT_AT;
     return value < 1 ? Math.floor(window * value) : Math.floor(value);
 }
-export function roomResetNote(name, reset) {
-    return reset.reason === "requested"
-        ? `compacted ${name}'s context (${reset.percent}% full): fresh session with the room's recent messages`
-        : `${name}'s context was ${reset.percent}% full: compacted to a fresh session with the room's recent messages`;
+export function roomResetNote(name, reset, language) {
+    return serverLine(language, reset.reason === "requested" ? "server.rooms.compactedRequested" : "server.rooms.compactedThreshold", { bot: name, percent: reset.percent });
 }
 export class RoomContextTracker {
     threads = new Map();

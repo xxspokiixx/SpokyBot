@@ -6,14 +6,18 @@
 //     /opt (the bots' browser) and the server's own code folder, so the engine CLIs and the proxies they start run;
 //   - its HOME read-write (the engine's own login and settings live there), with the server's data folder replaced by an
 //     empty private folder, so messages.db, config.json, logins, other bots' folders and the server's sockets are not there;
+//     on a Team Cloud that HOME is the audience's engine home instead (server/engine-homes), with only the team's engine
+//     sign-ins bound into it, so no other audience's transcripts are there;
 //   - put back inside that empty folder: this turn's working folder, the bot's own folder (workspaces/<bot>) and what the
-//     caller names (the turn's permission socket, a read-only file the command line points at);
+//     caller names (the turn's permission socket, a read-only file the command line points at); and, read-only, the
+//     bot's own SOUL.md (bots/<bot>/SOUL.md, which it may read but never write) and the engines SpokyBot installed
+//     there, whole, since npm's bin links point into the prefix by relative paths;
 //   - a private /proc (its own PID namespace: other turns' processes do not exist for it), /dev, /tmp and /run;
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
 //     routes of this server). Nothing else on the server's loopback is reachable.
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-export const BOX_MUTATIONS = ["bind-data", "bind-otherws", "share-pid", "share-net", "env-all", "tmp-shared", "no-seccomp"];
+export const BOX_MUTATIONS = ["bind-data", "bind-otherws", "share-pid", "share-net", "env-all", "tmp-shared", "no-seccomp", "engines-rw"];
 export const IN_BOX_SOCKET_DIR = "/run/omb";
 export const BOX_HOSTNAME = "omb-box";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -40,7 +44,7 @@ export function argvPaths(args) {
     return paths;
 }
 /** Environment values that name folders the engine writes: its own config and caches. */
-export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "TMPDIR"];
+export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "GEMINI_HOME", "TMPDIR"];
 /** Folders the box always has its own copy of, so no setting may put the host's back. */
 const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
 export function planBox(setup, request) {
@@ -76,7 +80,10 @@ export function planBox(setup, request) {
             writable.push(path);
     };
     // HOME first; the data folder is replaced by an empty one right after, so the lines below put back only what is named.
-    rw(home);
+    // An engine home lives in the data folder, so it goes back after that.
+    const ownHome = request.home ? resolve(request.home) : null;
+    if (!ownHome)
+        rw(home);
     const dataInsideHome = under(dataDir, home);
     if (!mutate.has("bind-data")) {
         if (dataInsideHome)
@@ -85,9 +92,11 @@ export function planBox(setup, request) {
     else {
         rw(dataDir);
     }
+    if (ownHome)
+        rw(ownHome);
     const dataHidden = !mutate.has("bind-data");
     /** A path is already readable and writable through an earlier line (and not hidden by the data folder's tmpfs). */
-    const covered = (path) => writable.some((root) => under(path, root)) && !(dataHidden && under(path, dataDir));
+    const covered = (path) => (ownHome !== null && under(path, ownHome)) || (writable.some((root) => under(path, root)) && !(dataHidden && under(path, dataDir)));
     const cwd = request.cwd ? resolve(request.cwd) : null;
     const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
     const botId = request.botId ?? ids?.botId ?? null;
@@ -111,13 +120,24 @@ export function planBox(setup, request) {
     for (const path of request.rw ?? [])
         if (!covered(resolve(path)))
             rw(resolve(path));
+    if (ownHome) {
+        for (const file of request.shared ?? []) {
+            if (under(resolve(file.target), ownHome))
+                mounts.push({ kind: "bind", source: resolve(file.source), target: resolve(file.target), optional: true });
+        }
+    }
+    // After every read-write line, so none of them can make an engine another conversation also runs writable.
+    for (const root of setup.engineRoots) {
+        const engines = resolve(root);
+        mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
+    }
     const readOnly = new Set();
-    for (const path of [...(request.ro ?? []), ...argvPaths(request.args)]) {
+    for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
         const full = resolve(path);
         // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
         if (covered(full) || readOnly.has(full))
             continue;
-        if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots].some((base) => under(full, resolve(base))))
+        if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base))))
             continue;
         readOnly.add(full);
         mounts.push({ kind: "ro", source: full, target: full, optional: true });

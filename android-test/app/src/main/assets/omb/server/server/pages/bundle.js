@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, join, relative, resolve, sep } from "nod
 import { PAGE_FILE_EXTENSIONS, PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../../shared/published-page.js";
 import { guestWorkspaceToHost } from "../bot-attachment.js";
 import { VM_WORKSPACE_GUEST } from "../container-computer.js";
+import { inSecretFolder, SECRET_FILE_REFUSAL } from "../secret-folder.js";
 const SKIPPED_FOLDERS = new Set(["node_modules", "__pycache__"]);
 const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._ ()+@-]{0,99}$/;
 export class PageBundleError extends Error {
@@ -49,6 +50,8 @@ async function locate(requested, roots) {
             continue;
         }
         const root = allowed.find((each) => containedBy(each, target));
+        if (root && inSecretFolder(target))
+            throw new PageBundleError(SECRET_FILE_REFUSAL, 403);
         if (root)
             return { target, root };
         outside = true;
@@ -83,7 +86,7 @@ export async function readPageBundle(requested, roots, limits = { bytes: PAGE_MA
                 continue;
             const full = join(folder, name), own = await lstat(full);
             const real = own.isSymbolicLink() ? await realpath(full).catch(() => null) : full;
-            if (!real || !containedBy(root, real))
+            if (!real || !containedBy(root, real) || inSecretFolder(real))
                 continue;
             const entry = own.isSymbolicLink() ? await stat(real) : own;
             const path = relative(target, full).split(sep).join("/");
@@ -120,4 +123,10 @@ export async function readBotPageBundle(requested, folders) {
     const { roots, vmWorkspace } = await folders();
     const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
     return readPageBundle(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
+}
+/** A file inside a bot's own folders (or its Local VM's workspace), by the same rules as a page: the `extract` tool's. */
+export async function botFileSource(requested, folders) {
+    const { roots, vmWorkspace } = await folders();
+    const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
+    return pageSource(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
 }

@@ -7,13 +7,18 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.js";
 export const MOVED_REFUSAL = "This bot lives on My Cloud now.";
+/** Why a frozen copy refuses, naming the server of the person's own its bots moved to (`place`), else My Cloud. */
+export const movedRefusal = (place) => (place ? `This bot lives on ${place} now.` : MOVED_REFUSAL);
 /** The one page a frozen copy serves: the desktop app's screen while My Cloud can't be opened (electron/home-window.mjs). */
 export const HOME_SCREEN = "/home";
+/** The desktop window's own rail of places (electron/chrome-rail.mjs): this app's page, beside whichever place is open. */
+export const RAIL_PAGE = "/rail";
 /** A path whose last part has an extension is a file of the page (a script, a picture), never a page. */
 const FILE = /\.[A-Za-z0-9]+$/u;
 export const ENDED_REFUSAL = "My Cloud has ended. It is open only so you can take your things home.";
 /** What a frozen server still changes: the freeze itself, the move's reads and lets-go, signing in and out, the backup
- * that takes things home, the Admin's signed routes, Files and the computers lent to it. */
+ * that takes things home, the Admin's signed routes, Files and the computers lent to it. (The lent screen lease has its
+ * own exact exemption in refuses().) */
 const STILL_CHANGES = /^\/api\/(?:move\/|cloud-send\/|auth\/|workspace-backup\/|cloud\/|sync\/|shared-computers\/)/u;
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** What a frozen copy keeps once its workspace is deleted: the marker, this server's identity, Files, downloaded tools
@@ -22,8 +27,9 @@ const DEVICE_STATE = new Set(["moved.json", "environment-id", "sync", "tools", "
     ".openmausbot-server-child", "openmausbot-server.lease"]);
 const kept = (name) => DEVICE_STATE.has(name) || name.startsWith("openmausbot-server.lease.");
 /** Switches off every automation that is on, or only those named by key ("routine:<id>", "call:<id>", "webhook:<id>",
- * "app-event:<id>"); the person can switch each on again by hand. Done while frozen, so none of them runs once the freeze
- * lifts. One that can't be switched off is logged, never a reason to stay frozen. The keys of those switched off. */
+ * "app-event:<id>", "wait:<id>"); the person can switch each on again by hand, and a wait is cancelled. Done while frozen,
+ * so none of them runs once the freeze lifts. One that can't be switched off is logged, never a reason to stay frozen.
+ * The keys of those switched off. */
 export async function switchAutomationsOff(automations, only) {
     const done = [];
     const off = async (kind, id, work) => {
@@ -38,7 +44,7 @@ export async function switchAutomationsOff(automations, only) {
             console.warn(`move freeze: could not switch ${kind} ${id} off (${error.message})`);
         }
     };
-    const routines = automations.routines(), calls = automations.calls(), webhooks = automations.webhooks(), appEvents = automations.appEvents();
+    const routines = automations.routines(), calls = automations.calls(), webhooks = automations.webhooks(), appEvents = automations.appEvents(), waits = automations.waits();
     for (const routine of routines?.listRoutines() ?? [])
         if (routine.enabled)
             await off("routine", routine.id, () => routines.update(routine.id, { enabled: false }));
@@ -51,24 +57,28 @@ export async function switchAutomationsOff(automations, only) {
     for (const trigger of appEvents?.list() ?? [])
         if (trigger.enabled)
             await off("app-event", trigger.id, () => appEvents.update(trigger.id, { enabled: false }));
+    for (const wait of waits?.all() ?? [])
+        await off("wait", wait.id, () => { if (!waits.cancel(wait.id, wait.botId))
+            throw new Error("it already ended"); });
     return done;
 }
 export function createMoveFreeze({ dataDir, exportOnly = false }) {
     const file = join(dataDir, "moved.json");
     let frozen = exportOnly || existsSync(file);
-    const named = () => {
+    const named = (field) => {
         try {
             const value = JSON.parse(readFileSync(file, "utf8"));
-            const cloud = Reflect.get(Object(value), "cloud");
-            return typeof cloud === "string" ? cloud : null;
+            const named = Reflect.get(Object(value), field);
+            return typeof named === "string" ? named : null;
         }
         catch {
             return null;
         }
     };
-    let movedTo = frozen && !exportOnly ? named() : null;
+    let movedTo = frozen && !exportOnly ? named("cloud") : null;
+    let place = frozen && !exportOnly ? named("place") : null;
     const held = [];
-    const refusal = () => (frozen ? (exportOnly ? ENDED_REFUSAL : MOVED_REFUSAL) : null);
+    const refusal = () => (frozen ? (exportOnly ? ENDED_REFUSAL : movedRefusal(place)) : null);
     const each = (step) => {
         for (const work of held) {
             try {
@@ -83,10 +93,13 @@ export function createMoveFreeze({ dataDir, exportOnly = false }) {
         frozen: () => frozen,
         /** The Cloud this computer's bots moved to, as the freeze named it. */
         cloud: () => movedTo,
+        /** The server of the person's own this computer's bots moved to, by the name they know it by; null for My Cloud. */
+        place: () => place,
         refusal,
-        /** Where a page of this computer's frozen copy goes instead: its home screen, never the frozen workspace. */
+        /** Where a page of this computer's frozen copy goes instead: its home screen, never the frozen workspace. The
+         * window's rail stays the rail: it shows no workspace, only the places main lists. */
         screen(path) {
-            if (!frozen || exportOnly || path === HOME_SCREEN || FILE.test(path))
+            if (!frozen || exportOnly || path === HOME_SCREEN || path === RAIL_PAGE || FILE.test(path))
                 return null;
             return HOME_SCREEN;
         },
@@ -103,14 +116,20 @@ export function createMoveFreeze({ dataDir, exportOnly = false }) {
         },
         /** Why a frozen server refuses this request, or null when it takes it. */
         refuses(method, path) {
+            // A lent computer keeps taking its own screen lease while frozen by a move: without it, every screen
+            // call from the home the bots moved to dies on this 409 while files and the terminal work. Only that one POST,
+            // and never on an ended Cloud's copy — that Cloud runs no bots, so nothing should be asking for a lease.
+            if (frozen && !exportOnly && method.toUpperCase() === "POST" && path === "/api/desktop/shared-computer-control")
+                return null;
             return frozen && !READS.has(method.toUpperCase()) && !STILL_CHANGES.test(path) ? refusal() : null;
         },
-        freeze(cloud) {
+        freeze(cloud, named = null) {
             if (frozen)
                 return;
-            writeFileAtomic(file, JSON.stringify({ v: 1, at: Date.now(), ...(cloud ? { cloud } : {}) }), { mode: 0o600 });
+            writeFileAtomic(file, JSON.stringify({ v: 1, at: Date.now(), ...(cloud ? { cloud } : {}), ...(named ? { place: named } : {}) }), { mode: 0o600 });
             frozen = true;
             movedTo = cloud;
+            place = named;
             each("stop");
         },
         /** Deletes this computer's copy of the workspace, credentials included, once the move is long done; only a computer
@@ -134,6 +153,7 @@ export function createMoveFreeze({ dataDir, exportOnly = false }) {
             rmSync(file, { force: true });
             frozen = false;
             movedTo = null;
+            place = null;
             each("start");
             return true;
         },

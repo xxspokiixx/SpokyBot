@@ -6,6 +6,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { refusesModel } from "../quick-model-fallback.js";
 import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER } from "./codex-catalog.js";
 import { codexToolSurfaceArgs } from "./codex-tool-surface.js";
 export const CODEX_BACKGROUND_TIMEOUT_MS = 120_000;
@@ -15,16 +16,35 @@ const MAX_STDOUT_BYTES = 4_000_000;
 export const CODEX_BACKGROUND_MODELS = ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.4-mini"];
 export const CODEX_BACKGROUND_EFFORT = "low";
 const SMALL_MODEL = /(?:^|[-.])(?:luna|mini|nano)(?:$|[-.])/i;
-export function codexBackgroundModel(catalog) {
-    const listed = catalog.options.filter((option) => !option.custom);
-    const official = listed.filter((option) => decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER);
+export function codexBackgroundModel(catalog, refused = new Set()) {
+    const official = catalog.options.filter((option) => !option.custom && !refused.has(option.id) &&
+        decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER);
     for (const id of CODEX_BACKGROUND_MODELS)
         if (official.some((option) => option.id === id))
             return id;
-    const small = official.find((option) => SMALL_MODEL.test(option.id));
-    if (small)
-        return small.id;
-    return catalog.default || listed[0]?.id || catalog.options[0]?.id || null;
+    return official.find((option) => SMALL_MODEL.test(option.id))?.id ?? accountDefault(catalog);
+}
+function accountDefault(catalog) {
+    return catalog.default || catalog.options.find((option) => !option.custom)?.id || catalog.options[0]?.id || null;
+}
+/** A sign-in that cannot use small models writes on the bot's own model, or the account's default without one. */
+export function codexBackgroundRoute(catalog, smallModelsUsable, fallback) {
+    const own = fallback?.model || accountDefault(catalog);
+    const model = smallModelsUsable ? codexBackgroundModel(catalog, fallback?.refused) : own;
+    if (!model)
+        return null;
+    return own && own !== model ? { model, retry: own } : { model };
+}
+export async function runCodexBackgroundRoute(route, run, options = {}) {
+    try {
+        return await run(route.model);
+    }
+    catch (error) {
+        if (!route.retry || !refusesModel(error instanceof Error ? error.message : String(error), route.model))
+            throw error;
+        options.fallback?.onRefused(route.model);
+        return run(route.retry);
+    }
 }
 /** Features off (codex-cli 0.160.1 `codex features list`); an older Codex ignores unknown names. */
 const BACKGROUND_FEATURES_OFF = [
@@ -61,7 +81,7 @@ export async function runCodexOneShot(input) {
     try {
         return await new Promise((resolve, reject) => {
             const argv = codexBackgroundArgs({ model: input.model, modelProvider: input.modelProvider, providerArgs: input.providerArgs, cwd });
-            const child = input.spawn(input.cli, argv, { cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"] });
+            const child = input.spawn(input.cli, argv, { cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"], botWork: true });
             const describe = input.describeError ?? ((message) => message.slice(0, 400));
             let settled = false;
             let closed = false;

@@ -28,9 +28,15 @@ export function createBotMoves(deps) {
             await deps.appEvents()?.update(id, { enabled: on });
     }
     const movedOf = (bot) => bot?.movedTo;
+    const cancelWaits = (botId) => {
+        const waits = deps.waits();
+        for (const wait of waits?.all() ?? [])
+            if (wait.botId === botId)
+                waits.cancel(wait.id, botId);
+    };
     return {
-        /** The bot stops here for the move: no turns, its automations off. Busy while it answers; a bot already moved stays
-         * moved. Holding it again keeps what the first hold switched off. */
+        /** The bot stops here for the move: no turns, its automations off and its waits cancelled. Busy while it answers; a
+         * bot already moved stays moved. Holding it again keeps what the first hold switched off. */
         async hold(botId, team) {
             const bot = deps.store.bot(botId);
             if (!bot)
@@ -56,6 +62,7 @@ export function createBotMoves(deps) {
                 deps.store.patchBot(botId, { movedTo: { ...next, held: [...off] } });
                 await switchTo(automation.key, false);
             }
+            cancelWaits(botId);
             return { movedTo: movedOf(deps.store.bot(botId)) };
         },
         /** The move stopped before the bot arrived: it is here again as it was, its automations back on. */
@@ -71,7 +78,7 @@ export function createBotMoves(deps) {
             deps.store.patchBot(botId, { movedTo: undefined });
             return { released: true };
         },
-        /** The bot lives in the team now: archived here as the line that opens it there, its routines gone from here. */
+        /** The bot lives in the team now: archived here as the line that opens it there, its routines and waits gone from here. */
         moved(botId, team) {
             const bot = deps.store.bot(botId);
             const held = movedOf(bot);
@@ -79,6 +86,7 @@ export function createBotMoves(deps) {
                 return { refused: "This bot is not moving to that team." };
             if (held.state !== "moved") {
                 deps.routines()?.removeForBot(botId);
+                cancelWaits(botId);
                 deps.store.patchBot(botId, { movedTo: { ...held, state: "moved", at: now() }, hidden: true });
             }
             return { movedTo: movedOf(deps.store.bot(botId)) };

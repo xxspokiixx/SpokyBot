@@ -1,4 +1,20 @@
-const claudeFirst = (instances) => instances.find((instance) => instance.driverKind === "claudeAgent") ?? instances[0];
+import { freeFallback, rankAis } from "../shared/ai-ranking.js";
+/** The shared ranking (shared/ai-ranking.ts), with an AI that answered its test ahead of one that didn't or wasn't tested.
+ * OpenCode's free backup comes in only once every other AI didn't answer. */
+const best = (instances, context) => {
+    const ranked = rankAis(instances);
+    const usable = (list) => list.find((instance) => context.answered?.(instance) === true)
+        ?? list.find((instance) => context.answered?.(instance) !== false);
+    return usable(ranked.filter((instance) => !freeFallback(instance))) ?? usable(ranked) ?? ranked[0];
+};
+/** The saved config's enabled switch and picker group win over what the driver reports. */
+export function withInstanceConfig(instances, configs) {
+    return instances.map((instance) => ({
+        ...instance,
+        enabled: configs[instance.instanceId]?.enabled ?? instance.enabled,
+        ...(configs[instance.instanceId]?.access ? { access: configs[instance.instanceId].access } : {}),
+    }));
+}
 /** A custom endpoint brings its own credential, so its sign-in state does not count. */
 export function signedOut(instance) {
     return instance.snapshot.state === "available" && instance.access !== "custom" && instance.snapshot.authenticated === false;
@@ -34,9 +50,9 @@ export function selectDefaultModelSelection(instances, preferred, context = {}) 
     const ready = available.filter((instance) => readyToRun(instance, context));
     const company = context.company;
     const personal = company && instances.some((instance) => company(instance.instanceId))
-        ? claudeFirst(ready.filter((instance) => !company(instance.instanceId)))
+        ? best(ready.filter((instance) => !company(instance.instanceId)), context)
         : undefined;
-    const pick = personal ?? claudeFirst(ready) ?? claudeFirst(available);
+    const pick = personal ?? best(ready, context) ?? best(available, context);
     return { instanceId: pick?.instanceId ?? "", model: pick ? defaultModel(pick) : "" };
 }
 /** An explicit effort or variant wins; an engine without the level sends none rather than failing turn 1. */

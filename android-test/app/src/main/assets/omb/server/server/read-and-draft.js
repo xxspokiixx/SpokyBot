@@ -7,6 +7,8 @@
 //   checks handed it, to that thread's sender, once;
 // - what those reads return reaches it only as records;
 // - no browser, computer, phone or other tools are mounted, and nothing it says is captured into memory.
+// A new Cloud's first look is the Chief's own turn in its chat: through the relay it too may only read Gmail and Google
+// Calendar and write a few reply drafts, so nothing it reads can make it send, accept or delete anything.
 import { connectorCallsIn, isReadOnlyTool, KNOWN_READ_SLUGS } from "../shared/outbound.js";
 import { recordsText } from "./records-block.js";
 /** The system prompt a read-and-draft run keeps: who the person is, where its files are, its connected apps and what a
@@ -15,7 +17,7 @@ export const READ_AND_DRAFT_PARTS = new Set(["user-profile", "files", "composio"
 /** The integrations a read-and-draft run keeps: SpokyBot's own tools (fenced by route), the connected apps (fenced
  * by call) and the engine's hooks. */
 export const READ_AND_DRAFT_TOOLS = new Set(["agents", "composio", "hooks"]);
-export const READ_AND_DRAFT_REFUSAL = "This routine reads and drafts only: SpokyBot refused this. Do not try another way.";
+export const READ_AND_DRAFT_REFUSAL = "This work reads and drafts only: SpokyBot refused this. Do not try another way.";
 const RULE = "read-and-draft";
 /** SpokyBot's own routes a read-and-draft run may reach. */
 const ROUTES = new Set([
@@ -134,19 +136,25 @@ export function createReadAndDraft(deps) {
     /** True when the frame was refused; an allowed draft is counted, so a retry of the run never writes it twice. */
     function refusesConnectorCall(bot, threadId, frame) {
         const run = runOf(threadId);
-        if (!run)
+        const looking = run ? null : deps.look?.(threadId) ?? null;
+        if (!run && !looking)
             return false;
         const drafts = [];
         const refused = refusedConnectorCall(frame, (reply) => {
-            const ok = run.checkKey !== undefined && deps.mayDraft(run.checkKey, reply.threadId, reply.to) && !drafts.some((one) => one.threadId === reply.threadId);
+            if (drafts.some((one) => one.threadId === reply.threadId))
+                return false;
+            const ok = run ? run.checkKey !== undefined && deps.mayDraft(run.checkKey, reply.threadId, reply.to) : looking.draft(reply);
             if (ok)
                 drafts.push(reply);
             return ok;
         });
         if (refused !== null)
             return refuse(bot, threadId, refused);
-        for (const reply of drafts)
-            deps.drafted(run.checkKey, reply.threadId);
+        if (run)
+            for (const reply of drafts)
+                deps.drafted(run.checkKey, reply.threadId);
+        if (drafts.length)
+            deps.wroteDrafts?.(bot.id, drafts.length);
         return false;
     }
     return { confines, answers, refusesRoute, refusesConnectorCall };

@@ -1,6 +1,12 @@
 import { z } from "zod";
+import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.js";
+export { importedMcpServerName } from "../shared/mcp-name.js";
 export function isRemoteMcpServer(server) {
     return "url" in server;
+}
+/** Whether `botId` may start this server: every bot may start one that is no bot's own. */
+export function mcpServerServes(server, botId) {
+    return !server.bot || server.bot === botId;
 }
 export const MAX_MCP_SERVERS = 20;
 const MAX_ARGS = 64;
@@ -58,18 +64,7 @@ function urlError(value) {
         return "Put credentials in a header, not in the address.";
     return null;
 }
-const RESERVED_MCP_NAMES = new Set([
-    "ogb",
-    "computer",
-    "agents",
-    "composio",
-    "data",
-    "browser",
-    "phone",
-    "dweb",
-    "openmausbot_connectors",
-    "openmausbot_phone",
-]);
+const BOT_ID = /^[A-Za-z0-9_-]{1,128}$/u;
 const runsOnSchema = z.object({
     environmentId: z.string().regex(/^[\w-]{1,128}$/u),
     label: z.string().trim().min(1).max(120),
@@ -82,8 +77,9 @@ const stdioEntrySchema = z.object({
     resultBudget: resultBudgetSchema.optional(),
     runsOn: runsOnSchema.optional(),
     apps: z.boolean().optional(),
+    bot: z.string().regex(BOT_ID).optional(),
 }).strict();
-/** `runsOn: null` says it runs here after all; left out, an edit keeps the computer it runs on. */
+/** `runsOn: null` says it runs here after all; left out, an edit keeps the computer it runs on and the bot it is for. */
 const stdioMutationSchema = stdioEntrySchema.extend({
     env: z.record(z.string(), z.union([z.string().max(16_384), z.literal(true)])).optional(),
     runsOn: runsOnSchema.nullable().optional(),
@@ -191,8 +187,13 @@ function parseStdio(raw, mutation, existing) {
             ...(parsed.data.resultBudget !== undefined ? { resultBudget: parsed.data.resultBudget } : {}),
             ...runsOnFor(parsed.data.runsOn, mutation, existing),
             ...appsFor(parsed.data.apps, mutation, existing),
+            ...botFor(parsed.data.bot, mutation, existing),
         },
     };
+}
+function botFor(value, mutation, existing) {
+    const bot = value ?? (mutation && existing && !isRemoteMcpServer(existing) ? existing.bot : undefined);
+    return bot ? { bot } : {};
 }
 function parseRemote(raw, mutation, existing) {
     const parsed = (mutation ? remoteMutationSchema : remoteEntrySchema).safeParse(raw);
@@ -328,6 +329,7 @@ export function listMcpServers(raw) {
                 ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
                 ...(server.runsOn ? { runsOn: server.runsOn } : {}),
                 apps: server.apps !== false,
+                ...(server.bot ? { bot: server.bot } : {}),
             }];
     });
 }
@@ -382,34 +384,12 @@ export function parseMcpServersImport(text) {
         if (Object.hasOwn(servers, name))
             return { ok: false, error: `"${rawName}" appears twice.` };
         // `enabled` from the paste is dropped so nothing runs before it was tested.
-        const importedEntry = looksRemote(record)
-            ? pickEntry(record, ["type", "url", "headers", "oauth", "resultBudget"])
-            : pickEntry(record, ["command", "args", "env", "resultBudget"]);
-        if (looksRemote(record) && !Object.hasOwn(importedEntry, "oauth") && Object.hasOwn(record, "auth")) {
-            const auth = record.auth && typeof record.auth === "object" && !Array.isArray(record.auth)
-                ? record.auth
-                : {};
-            importedEntry.oauth = {
-                clientId: auth.CLIENT_ID ?? auth.clientId,
-                ...(auth.CLIENT_SECRET !== undefined || auth.clientSecret !== undefined
-                    ? { clientSecret: auth.CLIENT_SECRET ?? auth.clientSecret }
-                    : {}),
-                ...(auth.scopes !== undefined ? { scopes: auth.scopes } : {}),
-            };
-        }
-        const result = parseMcpServerMutation(name, importedEntry);
+        const result = parseMcpServerMutation(name, looksRemote(record)
+            ? pickEntry(record, ["type", "url", "headers", "resultBudget"])
+            : pickEntry(record, ["command", "args", "env", "resultBudget"]));
         if (!result.ok)
             return { ok: false, error: `"${rawName}": ${result.error}` };
         servers[name] = result.server;
     }
     return { ok: true, servers };
-}
-/** What Paste config names a server another tool calls `raw`; a name SpokyBot keeps for itself gets an mcp- prefix. */
-export function importedMcpServerName(raw) {
-    const slug = slugMcpName(raw);
-    return RESERVED_MCP_NAMES.has(slug) ? `mcp-${slug}`.slice(0, 32) : slug;
-}
-function slugMcpName(raw) {
-    const slug = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
-    return /^[a-z]/.test(slug) ? slug : slug ? `mcp-${slug}`.slice(0, 32) : "";
 }

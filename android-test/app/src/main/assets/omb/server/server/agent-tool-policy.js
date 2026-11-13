@@ -8,11 +8,12 @@ export const READ_ONLY_AGENT_TOOL_NAMES = new Set([
     "list_threads",
     "assignment_status",
     "session_search",
-    "session_read",
     "tool_result_read",
-    "list_triggers",
-    "list_trigger_events",
+    "trigger_info",
+    "list_waits",
     "skills_list",
+    "list_unread_notifications",
+    "usage_limits",
 ]);
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
     readOnlyHint: true,

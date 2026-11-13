@@ -1,4 +1,10 @@
 import { z } from "zod";
+export const MASCOT_FACE_COLORS = ["white", "black"];
+export const mascotFaceColorSchema = z.enum(MASCOT_FACE_COLORS);
+export function mascotFaceInk(value) {
+    const color = mascotFaceColorSchema.safeParse(value).data;
+    return color === "white" ? "#ffffff" : color === "black" ? "#000000" : undefined;
+}
 /**
  * `mascot` draws the animated mascot body, filled with the bot's colour
  * gradient. `circle`, `rounded`, and `square` crop the bot's own image

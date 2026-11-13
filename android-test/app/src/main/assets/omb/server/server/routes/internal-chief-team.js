@@ -1,4 +1,4 @@
-import { canAccessTeam, peerAllowed } from "../peer-roster.js";
+import { hasTeamAuthority, peerAllowed } from "../peer-roster.js";
 import { chiefLevel } from "../chief-level.js";
 import { libraryTeamRoles } from "../team-library.js";
 import { PASS } from "./table.js";
@@ -31,8 +31,8 @@ export function createInternalChiefTeamRoutes(deps) {
         if (!current)
             return json(res, 403, { error: NOT_CHIEF });
         return json(res, 200, {
-            teams: deps.teams().filter((name) => canAccessTeam(current, name)),
-            bots: deps.bots().filter((bot) => !bot.hidden && canAccessTeam(current, bot.section) && (bot.id === current.id || peerAllowed(current, bot)))
+            teams: deps.teams().filter((name) => hasTeamAuthority(current, name)),
+            bots: deps.bots().filter((bot) => !bot.hidden && hasTeamAuthority(current, bot.section) && (bot.id === current.id || peerAllowed(current, bot)))
                 .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection, chiefOfStaff: Boolean(bot.chiefOfStaff) })),
             instances: instances.map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName,
                 state: instance.snapshot.state, models: instance.models, effortLevels: instance.capabilities?.effortLevels ?? [] })),

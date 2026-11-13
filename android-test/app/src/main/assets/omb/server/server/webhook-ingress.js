@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { z } from "zod";
 import { parseJson } from "./schema.js";
+import { IDLE_HTTP_SERVER } from "./due-timer.js";
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 const statusErrorSchema = z.object({ status: z.number().int().optional() });
 const serverAddressSchema = z.object({ port: z.number().int().min(1).max(65_535) });
@@ -72,7 +73,13 @@ function eventName(req) {
 }
 export function createWebhookIngressHandler(manager, claimRequest) {
     return async (req, res) => {
-        const url = new URL(req.url ?? "/", "http://localhost");
+        let url;
+        try {
+            url = new URL(req.url ?? "/", "http://localhost");
+        }
+        catch {
+            return json(res, 400, { error: "Invalid request URL" });
+        }
         if (req.method === "GET" && url.pathname === "/health") {
             return json(res, 200, { app: "openmausbot-webhooks", ready: true });
         }
@@ -145,7 +152,16 @@ export function advertisedWebhookBase(raw) {
 export async function listenWebhookIngress(manager, options) {
     const host = options.host ?? "127.0.0.1";
     const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
-    const server = createServer(createWebhookIngressHandler(manager, options.claimRequest));
+    const handle = createWebhookIngressHandler(manager, options.claimRequest);
+    const server = createServer(IDLE_HTTP_SERVER, (req, res) => {
+        handle(req, res).catch((error) => {
+            console.error("webhooks: receiver failed", error);
+            if (res.headersSent)
+                res.destroy();
+            else
+                json(res, 500, { error: "Webhook receiver failed" });
+        });
+    });
     await new Promise((resolve, reject) => {
         const onError = (error) => reject(error);
         server.once("error", onError);

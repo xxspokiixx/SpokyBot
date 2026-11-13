@@ -2,14 +2,10 @@ import { None, logger, parse, View } from "vega";
 import { compile } from "vega-lite";
 import { vegaConfig, vegaSurface } from "../../shared/vega-config.js";
 import { columnClass } from "./chart-compiler.js";
-import { mobileRefusal, nativeRequire } from "./engine.js";
-import { DataFailure } from "./types.js";
+import { nativeRequire } from "./engine.js";
 /** Required at first use from the staged tree: a static import would make esbuild bundle its .node file, which it cannot. */
 let resvgModule = null;
 function loadResvg() {
-    const refusal = mobileRefusal();
-    if (refusal)
-        throw new DataFailure({ code: "engine_unavailable", message: refusal });
     resvgModule ??= nativeRequire()("@resvg/resvg-js");
     return resvgModule.Resvg;
 }

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.js";
 import { DATA_DIR } from "./config.js";
+import { startDueTimer } from "./due-timer.js";
 import { nextOccurrence } from "./routines.js";
 const MAX_BOTS = 100;
 const MAX_ATTACHMENTS = 50;
@@ -269,13 +270,15 @@ export class CalendarCallManager {
     start() {
         if (this.timer)
             return;
-        void this.tick();
-        this.timer = setInterval(() => void this.tick(), 10_000);
-        this.timer.unref?.();
+        this.timer = startDueTimer({
+            run: () => this.tick(),
+            next: () => this.calls.reduce((at, call) => call.nextRunAt == null ? at : Math.min(at ?? Infinity, call.nextRunAt), null),
+            now: this.now,
+            onError: (error) => console.error("calendar calls: a scheduler pass failed", error),
+        });
     }
     stop() {
-        if (this.timer)
-            clearInterval(this.timer);
+        this.timer?.stop();
         this.timer = null;
     }
     async tick() {
@@ -327,6 +330,7 @@ export class CalendarCallManager {
             this.calls = before;
             throw error;
         }
+        this.timer?.poke();
     }
     save() {
         mkdirSync(dirname(this.file), { recursive: true });

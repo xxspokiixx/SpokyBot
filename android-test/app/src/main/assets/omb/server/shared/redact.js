@@ -20,7 +20,9 @@ const KEY_PREFIXES = [
     /\bhf_[A-Za-z0-9]{30,}/g, // hugging face
     /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, // github classic
     /\bgithub_pat_[A-Za-z0-9_]{20,}/g, // github fine-grained
+    /\bgl(?:pat|dt|rtr?)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g, // gitlab personal, deploy and runner tokens (routable ones carry .-parts)
     /\bxox[abposr]-[A-Za-z0-9-]{20,}/g, // slack
+    /\bxapp-\d-[A-Za-z0-9-]{20,}/g, // slack app-level (socket mode) tokens
     /\bAKIA[0-9A-Z]{16}\b/g, // aws access key id
     /\bAIza[0-9A-Za-z_-]{30,}/g, // google api key
     /\bnpm_[A-Za-z0-9]{20,}/g, // npm
@@ -35,6 +37,9 @@ export function holdsCredential(text) {
     return PRIVATE_KEY_BLOCK.test(text) || KEY_PREFIX_TESTS.some((re) => re.test(text));
 }
 const BEARER = /(\bBearer\s+)([A-Za-z0-9._~+/=-]{12,})/g;
+/** `Authorization: Basic dXNlcjpwYXNz`: the base64 is `user:password` in the clear. Only after an
+ * Authorization header, so prose like "Basic configuration" stays. */
+const BASIC_AUTH = /(\bAuthorization["']?\s*[:=]\s*["']?Basic\s+)([A-Za-z0-9+/]{4,}={0,2})(?![A-Za-z0-9._~+/=-])/gi;
 const PEM_BLOCK = /(-----BEGIN [A-Z ]*PRIVATE KEY-----)([\s\S]*?)(-----END [A-Z ]*PRIVATE KEY-----)/g;
 /** key=value / key: value / key="value" where the key is secret-shaped.
  * The value must be a single token of some length; prose after a colon
@@ -80,6 +85,7 @@ export function redactSecretsInText(text) {
     for (const re of KEY_PREFIXES)
         out = out.replace(re, (m) => mask(m));
     out = out.replace(BEARER, (_m, lead, tok) => `${lead}${mask(tok)}`);
+    out = out.replace(BASIC_AUTH, (_m, lead, creds) => `${lead}${mask(creds)}`);
     out = out.replace(KEY_VALUE, (_m, key, sep, quote, value) => `${key}${sep}${quote}${mask(value)}${quote}`);
     out = out.replace(KEY_SUFFIX_ASSIGNMENT, (_m, key, sep, quote, value) => `${key}${sep}${quote}${mask(value)}${quote}`);
     out = out.replace(SECRET_FLAG, (_m, flag, quote, value) => `${flag}${quote}${mask(value)}${quote}`);

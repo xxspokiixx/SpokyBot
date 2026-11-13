@@ -369,7 +369,16 @@ function parseNodeShebang(file: string, env?: NodeJS.ProcessEnv): ResolvedSpawn 
 
 /** One command word's platform spawn rules: identity except on win32, since POSIX resolves PATH and #! itself. */
 function resolveWord(cli: string, args: string[], env?: NodeJS.ProcessEnv): ResolvedSpawn {
-  if (process.platform !== "win32") return { command: cli, args };
+  if (process.platform !== "win32") {
+    // Resolve the command on PATH to avoid EACCES when a directory with the same name exists in PATH.
+    const path = env ? (env.PATH ?? env.Path ?? "") : augmentedPath();
+    for (const dir of path.split(delimiter)) {
+      if (!dir) continue;
+      const candidate = join(dir, cli);
+      if (isFile(candidate)) return { command: candidate, args };
+    }
+    return { command: cli, args };
+  }
   const file = whichWin(cli, env);
   if (!file) return { command: cli, args };
   const ext = extname(file).toLowerCase();

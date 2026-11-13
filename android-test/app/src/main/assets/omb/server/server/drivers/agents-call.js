@@ -1,15 +1,24 @@
 // Runs one agents tool: check arguments, call the harness, render the model's text. Stateless;
 // per-turn limits are the harness's, since one proxy can serve many turns of a warm engine.
+import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.js";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.js";
 import { peerName } from "../peer-roster.js";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.js";
 import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.js";
-import { catalogProfileFromEnv, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.js";
+import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.js";
 import { harnessClientFromEnv } from "./agents-client.js";
 import { memorySearchText } from "./memory-search-text.js";
 import { boundedAgentResult } from "./agents-result.js";
+import { outOfBounds } from "./agents-schema.js";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.js";
+import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.js";
+import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.js";
+import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.js";
+import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.js";
+import { callSpokyBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.js";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.js";
+import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.js";
+import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.js";
 export function toolCallContextFromEnv(env) {
     const profile = catalogProfileFromEnv(env);
     return {
@@ -71,6 +80,26 @@ function handoffIds(r) {
     return receipts.map((receipt) => receipt.requestId).filter((id) => typeof id === "string" && id.trim().length > 0);
 }
 const MOVED_ENTRIES_SHOWN = 5;
+const FORGOTTEN_SHOWN = 8;
+/** A preference saved once in the person's About me, which every bot reads in their work. */
+function preferText(r) {
+    const whose = typeof r.person === "string" && r.person ? `${r.person}'s` : "the person's";
+    return r.preference === "saved"
+        ? `Saved in ${whose} About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too.`
+        : `Already in ${whose} About me, or they removed it before: nothing to save or pass on.`;
+}
+function forgetText(passage, r) {
+    const list = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+    const notes = list(r.forgotten);
+    const aboutMe = list(r.aboutMe);
+    if (!notes.length && !aboutMe.length) {
+        return `Nothing saved mentions ${JSON.stringify(passage)}: not in your notes, not in About me. Try other words for it once; if nothing matches, tell the person it was not saved.`;
+    }
+    const facts = [...new Set([...notes, ...aboutMe])];
+    const shown = facts.slice(0, FORGOTTEN_SHOWN).map((fact) => JSON.stringify(fact)).join(", ");
+    const more = facts.length > FORGOTTEN_SHOWN ? ` and ${facts.length - FORGOTTEN_SHOWN} more` : "";
+    return `Forgotten everywhere it was saved${aboutMe.length ? ", About me included, which all their bots read" : ""}: ${shown}${more}. Confirm to the person in one plain line what you forgot.`;
+}
 export const capResult = (text, context) => boundedAgentResult(text, (retained, truncated) => {
     if (context.externalRuntime)
         throw new Error("External runtime results are not cached");
@@ -129,7 +158,12 @@ function recallWhen(at, dateOnly) {
     const day = `${said.getFullYear()}-${pad(said.getMonth() + 1)}-${pad(said.getDate())}`;
     return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
 }
-export async function callTool(name, args, context) {
+export async function callTool(called, input, context) {
+    const { name, arguments: args } = resolveAgentsCall(called, input);
+    const refused = outOfBounds(name, fullInputSchema(name), args);
+    if (refused)
+        return { text: refused, isError: true };
+    const member = agentsCallMember(name, args);
     const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
     const { api, apiResponse } = context.client;
     if (name === "vm_exec") {
@@ -164,10 +198,24 @@ export async function callTool(name, args, context) {
         return callCardTool(name, args, context);
     if (RESEARCH_TOOL_NAMES.has(name))
         return callResearchTool(name, args, context);
+    if (HELPER_TOOL_NAMES.has(name))
+        return callHelperTool(name, args, context);
+    if (MAUSBOT_TOOL_NAMES.has(name))
+        return callSpokyBotTool(name, args, context);
     if (PAGE_TOOL_NAMES.has(name))
         return callPageTool(name, args, context);
+    if (PERSON_TOOL_NAMES.has(name))
+        return callPersonTool(name, args, context);
+    if (DEVS_TOOL_NAMES.has(name))
+        return callDevsTool(name, args, context);
     if (TRIGGER_TOOL_NAMES.has(name))
         return callTriggerTool(name, args, context);
+    if (WAIT_TOOL_NAMES.has(name))
+        return callWaitTool(name, args, context);
+    if (name === USAGE_LIMITS_TOOL)
+        return callUsageLimitsTool(context);
+    if (COMPUTER_ASK_TOOL_NAMES.has(name))
+        return callComputerAskTool(args, context);
     // Second lock: with sharing off the catalog already omits these tools.
     if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
         return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };
@@ -212,13 +260,13 @@ export async function callTool(name, args, context) {
         const optional = (key, type) => canonical[key] === undefined || typeof canonical[key] === type;
         const usable = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === "string")
             && typeof canonical.message === "string" && canonical.message.trim().length > 0
-            && (canonical.thread === undefined || canonical.thread === "standing" || canonical.thread === "new")
+            && (canonical.thread === undefined || (typeof canonical.thread === "string" && /^[\w-]{1,128}$/.test(canonical.thread)))
             && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
             && optional("consult", "boolean") && optional("in_my_folder", "boolean")
-            && optional("done_when", "string") && optional("reason", "string");
+            && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string");
         if (!usable) {
             return {
-                text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+                text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
                 isError: true,
             };
         }
@@ -226,8 +274,10 @@ export async function callTool(name, args, context) {
                 groupId: canonical.group_id, botIds: ids, message: canonical.message,
                 reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
                 rework: canonical.rework,
-                thread: canonical.thread, reply: canonical.reply, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
+                thread: canonical.thread, reply: canonical.reply,
+                title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
                 done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
+                answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined,
             }) });
         return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
     }
@@ -265,18 +315,18 @@ export async function callTool(name, args, context) {
         const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
         const bots = r.bots ?? [];
         if (!bots.length)
-            return { text: "No other reachable bots yet." };
+            return { text: "No other bots you can reach yet." };
         const lines = bots.map((b) => {
             const role = b.title ? ` — ${b.title}` : "";
             const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
             const state = typeof b.statusText === "string"
                 ? (b.status === "available" ? "" : b.statusText)
                 : (b.busy ? "busy" : "");
-            const team = typeof b.section === "string" ? `, team: ${peerName(b.section) || "General"}` : "";
+            const team = typeof b.section === "string" ? `, department: ${peerName(b.section) || "General"}` : "";
             return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${team}${state ? `, ${state}` : ""}]`;
         });
         return {
-            text: `Reachable teammates:\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.`,
+            text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.`,
         };
     }
     if (name === "list_rooms") {
@@ -439,19 +489,19 @@ export async function callTool(name, args, context) {
             text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.`,
         };
     }
-    if (name === "create_room") {
+    if (member === "create_room") {
         if (args.section !== undefined)
-            return { text: "Room sections are fixed to your own section; ask the user to move rooms.", isError: true };
+            return { text: "A room you create stays in your own department; ask the user to move it.", isError: true };
         const roomName = String(args.name ?? "").trim();
         const memberIds = Array.isArray(args.member_bot_ids)
             ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
             : [];
         const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
         if (!roomName) {
-            return { text: "create_room needs a room name.", isError: true };
+            return { text: "manage_room action=create needs a room name.", isError: true };
         }
         if (!memberIds.length) {
-            return { text: "create_room needs at least one bot ID in member_bot_ids.", isError: true };
+            return { text: "manage_room action=create needs at least one bot ID in member_bot_ids.", isError: true };
         }
         const r = await api(`/api/internal/create-room`, {
             method: "POST",
@@ -469,13 +519,13 @@ export async function callTool(name, args, context) {
             text: `Created room “${r.name ?? roomName}” in section “${r.section ?? "General"}” [id: ${r.id}] with ${r.memberCount ?? memberIds.length} members.`,
         };
     }
-    if (name === "manage_room") {
+    if (member === "manage_room") {
         if (args.section !== undefined || args.action === "set_section")
             return { text: "Moving rooms between sections is user-only.", isError: true };
         const roomId = String(args.room_id ?? "").trim();
         const action = String(args.action ?? "").trim();
         if (!roomId || !action) {
-            return { text: "manage_room needs room_id and action.", isError: true };
+            return { text: "manage_room needs action and, for any action but create, the room_id from list_rooms.", isError: true };
         }
         const memberIds = Array.isArray(args.member_bot_ids)
             ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
@@ -501,6 +551,8 @@ export async function callTool(name, args, context) {
     }
     if (name === "request_credential") {
         const credentialId = args.credential_id;
+        if (credentialId === undefined || credentialId === "")
+            return requestCustomSecret(args, context);
         if (!isCredentialTargetId(credentialId)) {
             return { text: "request_credential needs a supported credential_id.", isError: true };
         }
@@ -628,11 +680,12 @@ export async function callTool(name, args, context) {
         });
         return confirmationResult(r, "the default model change", "model");
     }
-    if (name === "memory_update") {
-        if (!["append", "replace", "remove", "supersede"].includes(String(args.action))
-            || (args.action !== "remove" && (typeof args.text !== "string" || !args.text.trim()))
-            || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
-            return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, or remove with old_text.", isError: true };
+    if (member === "memory_update") {
+        const passageOnly = args.action === "remove" || args.action === "forget";
+        if (!["append", "replace", "remove", "supersede", "forget", "prefer"].includes(String(args.action))
+            || (!passageOnly && (typeof args.text !== "string" || !args.text.trim()))
+            || (args.action !== "append" && args.action !== "prefer" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
+            return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, forget with old_text naming what to forget, or prefer with text: one standing preference of the person.", isError: true };
         }
         const { body: r } = await apiResponse("/api/internal/memory", {
             method: "POST",
@@ -647,15 +700,19 @@ export async function callTool(name, args, context) {
         });
         if (r.error || r.ok !== true)
             return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
+        if (args.action === "forget")
+            return { text: forgetText(String(args.old_text), r) };
+        if (args.action === "prefer")
+            return { text: preferText(r) };
         const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
         const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
         const full = r.truncated
-            ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Ask the person to trim MEMORY.md in Settings."
+            ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Tell the person their saved notes are full, and that they can remove ones they no longer need under What it remembers in your panel."
             : "";
         const shown = moved.slice(0, MOVED_ENTRIES_SHOWN).map((text) => text.split("\n")[0]);
         const more = moved.length > shown.length ? `\n…and ${moved.length - shown.length} more` : "";
         const movedNote = moved.length
-            ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to memory/archive.md (session_search finds them):\n${shown.join("\n")}${more}`
+            ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to your archive (session_search finds them):\n${shown.join("\n")}${more}`
             : "";
         return { text: `Memory updated.${entry}${full}${movedNote}` };
     }
@@ -673,7 +730,7 @@ export async function callTool(name, args, context) {
             return { text: `Couldn't retry that thread: ${String(r.error)}`, isError: true };
         return { text: typeof r.message === "string" ? r.message : "The thread is running again. Its result stays in that thread; you are not woken for it — check it later with session_search or list_threads if you need to." };
     }
-    if (name === "memory_log") {
+    if (member === "memory_log") {
         if (typeof args.text !== "string" || !args.text.trim()) {
             return { text: "memory_log needs text: one line about what happened.", isError: true };
         }
@@ -704,7 +761,7 @@ export async function callTool(name, args, context) {
         });
         return confirmationResult(r, `the team memory entry for ${entryName}`, "entry");
     }
-    if (name === "session_search") {
+    if (member === "session_search") {
         const q = String(args.query ?? "").trim();
         const since = typeof args.since === "string" ? args.since.trim() : "";
         const until = typeof args.until === "string" ? args.until.trim() : "";
@@ -749,17 +806,17 @@ export async function callTool(name, args, context) {
         const crossed = hits.some((hit) => hit.crossed === true);
         return {
             text: `${memoryBlock}${hits.length} ${q ? "matching " : ""}message${hits.length === 1 ? "" : "s"} from your earlier conversations (${q ? "best match first" : "newest first"}):\n${lines.join("\n")}\n\n` +
-                "These are your own past notes. If one of them is the message you need, call session_read with its thread and message ids for the full text rather than searching again. Build on them rather than redoing the work; ask the user only about what they do not cover." +
+                "These are your own past notes. If one of them is the message you need, call session_search with its thread_id and message_id for the full text rather than searching again. Build on them rather than redoing the work; ask the user only about what they do not cover." +
                 (crossed
                     ? " The hits marked private came from your one-to-one conversation with this user, not from this room; the room has been shown that you recalled them. Use them, and say where something came from if anyone asks."
                     : ""),
         };
     }
-    if (name === "session_read") {
+    if (member === "session_read") {
         const threadId = String(args.thread_id ?? "").trim();
         const messageId = String(args.message_id ?? "").trim();
         if (!threadId || !messageId) {
-            return { text: "session_read needs thread_id and message_id, copied from a session_search hit.", isError: true };
+            return { text: "Reading a message needs both thread_id and message_id, copied from a session_search hit.", isError: true };
         }
         const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, threadId, messageId });
         let r;
@@ -844,32 +901,29 @@ export async function callTool(name, args, context) {
             text: `A confirmation card is now visible to the user for ${proposal}.${warningText}\n\n${status} End this turn and wait for the decision.`,
         };
     }
-    if (name === "add_mcp_server") {
-        let saved;
-        try {
-            saved = await api("/api/internal/mcp-servers", {
-                method: "POST",
-                body: JSON.stringify(args),
-            });
-        }
-        catch (error) {
-            return { text: error instanceof Error ? error.message : String(error), isError: true };
-        }
-        const serverName = typeof saved.name === "string" && saved.name ? saved.name : "the MCP server";
-        const transport = saved.transport === "command" || saved.transport === "http" || saved.transport === "sse" ? saved.transport : "";
-        const target = typeof saved.target === "string" ? saved.target : "";
-        const keyNames = (value) => Array.isArray(value) && value.every((key) => typeof key === "string") ? value.join(", ") : "";
-        const envKeys = keyNames(saved.envKeys);
-        const headerKeys = keyNames(saved.headerKeys);
-        const where = transport && target ? ` (${transport} ${target})` : "";
-        const named = [
-            envKeys ? `Environment names on file: ${envKeys}.` : "",
-            headerKeys ? `Header names on file: ${headerKeys}.` : "",
-        ].filter(Boolean).join(" ");
-        const local = transport === "command" ? " Enabling a local command runs that command on their computer." : "";
-        return {
-            text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${named ? ` ${named}` : ""}`,
-        };
+    if (name === "mcp_server") {
+        const r = await apiResponse("/api/internal/mcp-servers", { method: "POST", body: JSON.stringify(args) });
+        if (!r.ok)
+            return { text: String(r.body.error ?? `mcp_server failed (HTTP ${r.status}).`), isError: true };
+        return { text: String(r.body.text ?? "") };
     }
     return { text: `Unknown tool: ${name}`, isError: true };
+}
+/** A secret SpokyBot does not keep: the person agrees to one use, and the bot gets a secretRef or a file path back. */
+async function requestCustomSecret(args, context) {
+    const r = await context.client.apiResponse("/api/internal/request-credential", {
+        method: "POST",
+        body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, label: args.label, reason: args.reason, placeholder: args.placeholder, delivery: args.delivery }),
+    });
+    const label = typeof r.body.label === "string" ? r.body.label : "the secret";
+    if (!r.ok)
+        return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
+    if (typeof r.body.text === "string")
+        return { text: `${r.body.text} Continue the task.` };
+    const asked = r.body.savedAs === "ref"
+        ? ` ${label} was saved earlier for SpokyBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.`
+        : r.body.savedAs === "file" ? ` ${label} was saved earlier as a file for your commands, not as a secretRef, so this card asks for it again.` : "";
+    return {
+        text: `A secure card for ${label} is ready in SpokyBot, on the computer and on a freshly QR-paired phone.${asked} End this turn now and say in one line that you are waiting for it; SpokyBot resumes you when the person saves or declines, and tells you how to use it. Never ask for it in chat.`,
+    };
 }

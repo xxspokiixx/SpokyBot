@@ -39,7 +39,11 @@ export class ProfileState {
     shown = new WeakMap();
     run = null;
     starting = null;
+    /** The Chrome the pending start is opening; a stop waits for it. */
+    opening = null;
     stopping = null;
+    /** Bumped by every stop: a start begun before it closes what it opened. */
+    epoch = 0;
     lastUsed = Date.now();
     calls = 0;
     reopened = null;
@@ -121,17 +125,34 @@ export class BrowserService {
             return Promise.resolve(profile.run);
         if (profile.starting)
             return profile.starting;
+        const epoch = profile.epoch;
         const starting = (async () => {
             for (let stopping = profile.stopping; stopping; stopping = profile.stopping)
                 await stopping;
-            return this.#start(profile);
+            return this.#start(profile, epoch);
         })().finally(() => { if (profile.starting === starting)
             profile.starting = null; });
         profile.starting = starting;
         return starting;
     }
-    async #start(profile) {
+    async #start(profile, epoch) {
         await this.#capacity(profile);
+        this.#stillWanted(profile, epoch);
+        const opening = this.#open(profile, epoch);
+        profile.opening = opening;
+        try {
+            return await opening;
+        }
+        finally {
+            if (profile.opening === opening)
+                profile.opening = null;
+        }
+    }
+    #stillWanted(profile, epoch) {
+        if (profile.epoch !== epoch || this.#profiles.get(profile.key) !== profile)
+            throw new Error("The browser was closed while it was starting.");
+    }
+    async #open(profile, epoch) {
         const fresh = profile.fresh;
         profile.fresh = false;
         mkdirSync(profile.downloadDir, { recursive: true, mode: 0o700 });
@@ -177,11 +198,13 @@ export class BrowserService {
         if (browser.downloads)
             run.offs.push(browser.downloads.onChange((download) => profile.hub.downloaded(download)));
         try {
+            this.#stillWanted(profile, epoch);
             await browser.waitForPage(() => true, 15_000);
             for (const page of browser.pages())
                 await page.ready.then(() => adopt(page, "restored"), () => undefined);
             if (fresh)
                 await this.#onlyBlankTab(profile, browser);
+            this.#stillWanted(profile, epoch);
         }
         catch (error) {
             run.closing = true;
@@ -227,7 +250,9 @@ export class BrowserService {
     async #stop(profile, reopened, { erase = false } = {}) {
         if (profile.stopping)
             return profile.stopping;
+        profile.epoch++;
         const run = profile.run;
+        const opening = profile.opening;
         const stopping = (async () => {
             profile.control.closing = true;
             profile.control.changed();
@@ -239,6 +264,7 @@ export class BrowserService {
                     profile.hub.stopped(reopened?.kind === "idle" ? "asleep" : "closed");
                     await run.opened.close().catch(() => undefined);
                 }
+                await opening?.catch(() => undefined);
             }
             finally {
                 if (profile.run === run)
@@ -606,9 +632,6 @@ export class BrowserService {
         const download = this.#bySession(session)?.run?.browser.downloads?.list().find((candidate) => candidate.id === id);
         return download?.state === "completed" && download.path ? download : undefined;
     }
-    canControl(session, owner) {
-        return this.#bySession(session)?.control.canControl(owner) ?? false;
-    }
     interrupted(session) {
         return this.#bySession(session)?.control.uncertain === true;
     }
@@ -617,13 +640,7 @@ export class BrowserService {
     }
     /** Done on a sign-in card, from any window or device: whoever holds this browser hands it back. */
     async handBack(session) {
-        const profile = this.#bySession(session);
-        const owner = profile?.control.owner;
-        if (!profile || !owner)
-            return;
-        const viewer = [...profile.hub.viewers].find((candidate) => candidate.id === owner);
-        await profile.control.release(owner, () => viewer?.releaseInput() ?? Promise.resolve(true));
-        profile.hub.broadcastControl();
+        await this.#bySession(session)?.hub.handBack();
     }
     /** A person's restart: every tab closes and the browser comes back on one blank tab. */
     async restart(session, owner) {
@@ -646,6 +663,7 @@ export class BrowserService {
     #hubHost(profile) {
         return {
             control: profile.control,
+            ...(this.#options.holdLimits ? { holdLimits: this.#options.holdLimits } : {}),
             browser: () => (profile.run && !profile.run.closing ? profile.run.browser : null),
             active: () => profile.active(),
             tabs: () => profile.tabs.list(),

@@ -2,6 +2,7 @@
 // Model Context Protocol (MCP) server for SpokyBot over JSON-RPC 2.0 stdio,
 // for external agents (Hermes, Claude Desktop, Cursor, etc.).
 import readline from "node:readline";
+import { isRecord, projectMessage } from "./mcp-message-projection.js";
 export function validateBaseUrl(url) {
     const trimmed = url.replace(/\/+$/, "");
     let parsed;
@@ -443,9 +444,6 @@ function parsePositiveLimit(raw, fallback = 30, maximum = 200) {
     const parsed = Math.floor(Number(raw));
     return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
 }
-function isRecord(value) {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 function valueHasType(value, type) {
     if (type === "null")
         return value === null;
@@ -618,76 +616,6 @@ function projectChannel(channel) {
         tasks: records(channel.tasks).map((task) => projectTask(task, channel.threadId)),
     };
 }
-function projectMessage(message) {
-    const card = isRecord(message.card)
-        ? {
-            title: message.card.title,
-            subtitle: message.card.subtitle,
-            options: message.card.options,
-            answered: message.card.answered,
-            dismissed: message.card.dismissed,
-            expired: message.card.expired,
-        }
-        : undefined;
-    const tool = isRecord(message.tool)
-        ? { name: message.tool.name, ok: message.tool.ok, spoken: message.tool.spoken, setup: message.tool.setup,
-            ...(message.tool.terminal === true ? { terminal: true } : {}),
-        }
-        : undefined;
-    const connector = isRecord(message.connector)
-        ? {
-            slug: message.connector.slug,
-            label: message.connector.label,
-            description: message.connector.description,
-            status: message.connector.status,
-            dismissed: message.connector.dismissed,
-            resumed: message.connector.resumed,
-        }
-        : undefined;
-    const secret = isRecord(message.secret)
-        ? {
-            target: message.secret.target,
-            label: message.secret.label,
-            description: message.secret.description,
-            placeholder: message.secret.placeholder,
-            helpUrl: message.secret.helpUrl,
-            provided: message.secret.provided,
-            dismissed: message.secret.dismissed,
-            superseded: message.secret.superseded,
-            resumed: message.secret.resumed,
-        }
-        : undefined;
-    const signIn = isRecord(message.signIn)
-        ? {
-            site: message.signIn.site,
-            url: message.signIn.url,
-            place: message.signIn.place,
-            reason: message.signIn.reason,
-            done: message.signIn.done,
-            cancelled: message.signIn.cancelled,
-            superseded: message.signIn.superseded,
-            resumed: message.signIn.resumed,
-        }
-        : undefined;
-    return {
-        id: message.id,
-        at: message.at,
-        role: message.role,
-        kind: message.kind,
-        text: message.text,
-        from: message.from,
-        replyToId: message.replyToId,
-        reactions: message.reactions,
-        steered: message.steered,
-        queued: message.queued,
-        ...(tool ? { tool } : {}),
-        ...(card ? { card } : {}),
-        ...(connector ? { connector } : {}),
-        ...(secret ? { secret } : {}),
-        ...(signIn ? { signIn } : {}), ...(message.widget ? { widget: message.widget } : {}), ...(message.app ? { app: message.app } : {}), ...(message.fromApp ? { fromApp: message.fromApp } : {}),
-        ...(message.kind === "screen" ? { hasImage: Boolean(message.hasImage || message.png) } : {}),
-    };
-}
 async function fleet(fetcher) {
     return fetcher("/api/bots?messages=0");
 }
@@ -701,7 +629,7 @@ function messageNeedsInput(message) {
         !message.connector.resumed &&
         message.connector.status !== "connected";
     const secret = isRecord(message.secret) && !message.secret.provided && !message.secret.dismissed && !message.secret.superseded;
-    const signIn = isRecord(message.signIn) && !message.signIn.done && !message.signIn.cancelled && !message.signIn.superseded;
+    const signIn = isRecord(message.signIn) && !message.signIn.done && !message.signIn.cancelled && !message.signIn.superseded && !message.signIn.answeredInChat;
     return Boolean(card || connector || secret || signIn);
 }
 function dispatchFailedAfterLatestUser(messages) {

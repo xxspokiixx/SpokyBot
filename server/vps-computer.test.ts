@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
+import { defaultRunner, vpsIdentityArgsFor, vpsRemoteDockerArgs } from "./vps-computer.ts";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { createServer, type Server } from "node:net";
+
+/** The guest is Linux, so a path the guest must open is written POSIX-style. */
+function posix(value: string): string {
+  return sep === "/" ? value : value.split(sep).join("/");
+}
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", async () => ({
@@ -279,6 +285,86 @@ function mockTransport(runner: VpsCommandRunner): void {
   });
 }
 
+
+describe("VPS SSH transport on the phone", () => {
+  it("drives docker from the VPS side where no docker CLI exists", () => {
+    Object.defineProperty(process, "platform", { value: "android", configurable: true });
+    try {
+      const alias = "debian@149.56.209.10";
+      const args = vpsRemoteDockerArgs(alias, ["ps"]);
+      // The docker CLI runs on the VPS, so the app never spawns one: argv is an ssh command.
+      expect(args.slice(0, 2)).toEqual(["ssh", "-F"]);
+      expect(args.slice(3)).toEqual([alias, "docker", "ps"]);
+    } finally {
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    }
+  });
+
+  it("keeps docker's own SSH transport everywhere a docker CLI exists", () => {
+    expect(vpsRemoteDockerArgs("my-vps", ["ps"])).toEqual(["-H", "ssh://my-vps", "ps"]);
+  });
+
+  it("names the staged identity so the guest's ssh finds it outside the rootfs", () => {
+    const sshDir = mkdtempSync(join(tmpdir(), "omb-vps-identity-"));
+    try {
+      expect(vpsIdentityArgsFor(sshDir)).toEqual([]);
+      writeFileSync(join(sshDir, "id_ed25519"), "private");
+      writeFileSync(join(sshDir, "id_rsa"), "private");
+      writeFileSync(join(sshDir, "id_ed25519.pub"), "public");
+      writeFileSync(join(sshDir, "config"), "Host *");
+      const args = vpsIdentityArgsFor(sshDir);
+      // The .pub, the config and the bin dir are not identities, and the order is fixed.
+      expect(args).toEqual([
+        "-o", `IdentityFile=${posix(join(sshDir, "id_ed25519"))}`,
+        "-o", `IdentityFile=${posix(join(sshDir, "id_rsa"))}`,
+      ]);
+    } finally { rmSync(sshDir, { recursive: true, force: true }); }
+  });
+
+  it("hands proot one complete ssh argv: the prefix is not added twice", async () => {
+    const linuxDir = mkdtempSync(join(tmpdir(), "omb-vps-linux-"));
+    const sshDir = mkdtempSync(join(tmpdir(), "omb-vps-sshkeys-"));
+    const earlier = { linux: process.env.OMB_ANDROID_LINUX_DIR, rootfs: process.env.OMB_ANDROID_ROOTFS };
+    writeFileSync(join(linuxDir, "proot"), "");
+    writeFileSync(join(linuxDir, "loader"), "");
+    mkdirSync(join(linuxDir, "tmp"), { recursive: true });
+    mkdirSync(join(sshDir, "bin"), { recursive: true });
+    writeFileSync(join(sshDir, "id_ed25519"), "private");
+    process.env.OMB_ANDROID_LINUX_DIR = linuxDir;
+    process.env.OMB_ANDROID_ROOTFS = join(linuxDir, "rootfs");
+    Object.defineProperty(process, "platform", { value: "android", configurable: true });
+    try {
+      spawnMock.mockImplementation((_command: string, _argv: string[]) => {
+        const child = Object.assign(new EventEmitter(), {
+          stdin: new Writable({ write: (_c: unknown, _e: unknown, cb: () => void) => cb() }),
+          stdout: new PassThrough(), stderr: new PassThrough(),
+          kill: () => true,
+        });
+        queueMicrotask(() => {
+          child.stdout.end("ok\n");
+          child.emit("close", 0, null);
+        });
+        return child;
+      });
+      const output = await defaultRunner(vpsRemoteDockerArgs("debian@149.56.209.10", ["ps"]));
+      expect(output.stdout).toBe("ok\n");
+      const prootArgv = spawnMock.mock.calls.at(-1)![1] as string[];
+      const bash = prootArgv.at(-1)!;
+      // Exactly one ssh starts the guest command: the target is a host, never a second ssh.
+      expect(bash.match(/'ssh'/g) ?? []).toHaveLength(1);
+      expect(bash).toContain("'debian@149.56.209.10'");
+      expect(bash).toContain("'docker' 'ps'");
+    } finally {
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+      if (earlier.linux === undefined) delete process.env.OMB_ANDROID_LINUX_DIR;
+      else process.env.OMB_ANDROID_LINUX_DIR = earlier.linux;
+      if (earlier.rootfs === undefined) delete process.env.OMB_ANDROID_ROOTFS;
+      else process.env.OMB_ANDROID_ROOTFS = earlier.rootfs;
+      rmSync(linuxDir, { recursive: true, force: true });
+      rmSync(sshDir, { recursive: true, force: true });
+    }
+  });
+});
 describe("VPS computer", () => {
   it("uses a deterministic, bot-id-derived managed container name", () => {
     expect(vpsContainerName(BOT_ID)).toBe(vpsContainerName(BOT_ID));

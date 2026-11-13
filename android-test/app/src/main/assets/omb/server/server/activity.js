@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { AGENTS_ACTION_TOOLS, agentsCallMember } from "../shared/agents-tool-names.js";
 import { bridgedCallName } from "./agents-bridge-names.js";
 import { readDecisions } from "./decision-log.js";
 import { isRuntimeEvent, readRecentLines } from "./thread-events.js";
@@ -72,7 +73,8 @@ const RESEARCH_CATEGORIES = [
     [/^(?:seo|backlinks?|keywords?|domains?|rankings?)$/, "Looked up SEO data"],
     [/^(?:images?|video|voice|tts|speech|generate|generation)$/, "Generated media"],
 ];
-function researchCallLabel(input) {
+/** A call's own arguments from its recorded input, which may be a JSON preview. */
+function callArguments(input) {
     let args = input;
     if (typeof input === "string") {
         try {
@@ -83,7 +85,10 @@ function researchCallLabel(input) {
         }
     }
     // A bridged call (use_tool) carries the tool's own arguments under `arguments`.
-    const own = args && typeof args === "object" && "arguments" in args ? args.arguments : args;
+    return args && typeof args === "object" && "arguments" in args ? args.arguments : args;
+}
+function researchCallLabel(input) {
+    const own = callArguments(input);
     const id = own && typeof own === "object" && typeof own.id === "string" ? own.id : "";
     const words = id.toLowerCase().split(/[._@-]+/).slice(1);
     for (const [pattern, label] of RESEARCH_CATEGORIES)
@@ -107,10 +112,14 @@ export function describeTool(name, input) {
                 const label = researchCallLabel(input);
                 return { app: label === "Searched X" ? "X" : "Research", label };
             }
-            return Object.hasOwn(RESEARCH_TOOL_LABELS, action) ? RESEARCH_TOOL_LABELS[action] : { app: "Team", label: humanize(action) };
+            // An action tool's call reads as what it did: trigger with action=create as "Create trigger".
+            const member = (AGENTS_ACTION_TOOLS[action]?.members.length ?? 0) > 1 ? agentsCallMember(action, callArguments(input)) : action;
+            return Object.hasOwn(RESEARCH_TOOL_LABELS, member) ? RESEARCH_TOOL_LABELS[member] : { app: "Team", label: humanize(member) };
         }
         if (server === "highlevel")
             return { app: "HighLevel", label: humanize(action.replace(/^HIGHLEVEL_/, "")) };
+        if (server === "device")
+            return { app: "Phone", label: humanize(action.replace(/^PHONE_/, "")) };
         if (server.startsWith("claude_ai_")) {
             return { app: server.slice("claude_ai_".length).replace(/_/g, " "), label: humanize(action) };
         }
@@ -180,6 +189,7 @@ function readToolRuns(eventsDir, threadId) {
                 ...(event.turnId ? { turnId: event.turnId } : {}),
                 // A bridged call reads as the tool it ran, only where the title itself names the agents server.
                 tool: bridgedCallName(event.title ?? "unknown", event.input, { serverNamed: true }),
+                ...(event.step ? { summary: event.step.detail ?? event.step.target } : {}),
                 outcome: "running",
             }, event.input));
         }

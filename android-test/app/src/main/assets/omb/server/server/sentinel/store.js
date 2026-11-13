@@ -5,7 +5,7 @@ import { writeFileAtomic } from "../atomic.js";
 export const ISSUES_FILE = "issues.jsonl";
 export const STATE_FILE = "state.json";
 /** Bump when state.json changes shape: another version's state is dropped and the next scan starts over. */
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 export function emptyState() {
     return { version: STATE_VERSION, lastScanAt: null, fingerprint: null, queueDueAt: null, logs: {}, seen: {} };
 }
@@ -55,14 +55,22 @@ export function readIssues(out) {
     }
     return issues;
 }
+function recordSeen(state, observation) {
+    const key = `${observation.kind}:${observation.occurrence}`;
+    const previous = state.seen[key];
+    state.seen[key] = Math.max(previous ?? 0, observation.at);
+    return previous;
+}
+export function markCounted(state, observations) {
+    for (const observation of observations)
+        recordSeen(state, observation);
+}
 /** Idempotent: running the same observations twice changes nothing the second time. */
 export function upsertIssues(issues, state, observations) {
     const touched = new Set();
     let added = 0;
     for (const observation of observations) {
-        const counted = state.seen[observation.occurrence];
-        state.seen[observation.occurrence] = Math.max(counted ?? 0, observation.at);
-        if (counted !== undefined)
+        if (recordSeen(state, observation) !== undefined)
             continue;
         added += 1;
         const issue = issues.get(observation.signature) ?? {

@@ -3,7 +3,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DETECTORS } from "./detectors/index.js";
 import { readQueueRecords, readThreadOwners, readToolRecords, readTurnRecords } from "./sources.js";
-import { pruneSeen, readIssues, readState, upsertIssues, writeSentinelFiles } from "./store.js";
+import { markCounted, pruneSeen, readIssues, readState, upsertIssues, writeSentinelFiles } from "./store.js";
 export const DEFAULT_QUEUE_WAIT_MS = 300_000;
 export const DEFAULT_COST_USD = 5;
 /** Activity rows are rewritten when their tool finishes; reread this much. */
@@ -31,8 +31,9 @@ export function runScan(options) {
     const issues = readIssues(options.out);
     // A fresh state beside existing issues restarts its cursors: only what follows the newest counted occurrence is new.
     const counted = state.lastScanAt === null && issues.size ? Math.max(...[...issues.values()].map((issue) => issue.lastAt)) : -Infinity;
-    const observations = DETECTORS.flatMap((detector) => detector.detect(records, config)).filter((o) => o.at > counted);
-    const { touched, added } = upsertIssues(issues, state, observations);
+    const detected = DETECTORS.flatMap((detector) => detector.detect(records, config));
+    markCounted(state, detected.filter((o) => o.at <= counted));
+    const { touched, added } = upsertIssues(issues, state, detected.filter((o) => o.at > counted));
     state.logs = turns.offsets;
     state.lastScanAt = now;
     state.fingerprint = fingerprint;

@@ -95,12 +95,12 @@ const TOOLS = [
   },
   {
     name: "start_graphical_desktop",
-    description: "Start the graphical desktop (Xvfb + openbox + x11vnc + noVNC) in the Linux environment. Returns the noVNC URL for browser access.",
+    description: "Start the graphical desktop (Xvfb + XFCE + x11vnc + noVNC) in the Linux environment. Returns the noVNC URL for browser access.",
     inputSchema: {
       type: "object",
       properties: {
-        width: { type: "integer", description: "Screen width (default: 1920)", default: 1920 },
-        height: { type: "integer", description: "Screen height (default: 1080)", default: 1080 },
+        width: { type: "integer", description: "Screen width (default: 1600)", default: 1600 },
+        height: { type: "integer", description: "Screen height (default: 1000)", default: 1000 },
         depth: { type: "integer", description: "Color depth (default: 24)", default: 24 },
       },
     },
@@ -353,8 +353,8 @@ async function callTool(name, input) {
     return { content: [{ type: "text", text: run.out || (run.code === 0 ? "Setup complete" : "Setup failed") }], isError: run.code !== 0 };
   }
   if (name === "start_graphical_desktop") {
-    const _width = input?.width ?? 1920;
-    const _height = input?.height ?? 1080;
+    const _width = input?.width ?? 1600;
+    const _height = input?.height ?? 1000;
     const _depth = input?.depth ?? 24;
 
     // Check if graphical desktop is already running
@@ -368,27 +368,30 @@ async function callTool(name, input) {
       return { content: [{ type: "text", text: "Graphical desktop not set up. Run setup_graphical_desktop first to install X11/VNC packages (~100MB download), then start_graphical_desktop to launch it." }], isError: true };
     }
 
-    // Start the graphical desktop in background
-    const bashArgs = ["/usr/local/bin/start-graphical-desktop", String(_width), String(_height), String(_depth)];
-    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), 30000); // 30 second timeout for startup
+    // The supervisor backgrounds Xvfb/XFCE/x11vnc/websockify and then waits, so a
+    // kill on timeout is the expected outcome: the desktop outlives this call.
+    await runGuest(guestCommand(
+      ["/usr/local/bin/start-graphical-desktop", String(_width), String(_height), String(_depth)],
+      { bindTmp: true },
+    ), 8000);
 
-    // The script runs in background, so we need to capture the noVNC URL
-    // noVNC runs on port 56082 inside the proot environment
-    // We'll use a fixed URL since the port is known
     graphicalDesktopUrl = `http://localhost:56082/vnc.html`;
-
-    // Extract PID from output if available
-    const pidMatch = run.out.match(/XVFB_PID=(\d+)/);
-    if (pidMatch) {
-      graphicalDesktopPid = pidMatch[1];
-    }
+    // Ask the X display's socket and the viewer port, not a process name list: this command's
+    // own line carries the daemons' words, so pgrep would always find itself. Bash builtins
+    // only, and bindTmp is what makes the guest see the socket Xvfb created under the host tmp.
+    const probe = await runGuest(guestCommand(["/bin/bash", "-lc",
+      "[ -S /tmp/.X11-unix/X3 ] && (exec 3<>/dev/tcp/127.0.0.1/56082) 2>/dev/null && echo UP || echo DOWN"], { bindTmp: true }), 20000);
+    const up = probe.out.includes("UP");
+    graphicalDesktopPid = up ? "running" : null;
 
     return {
       content: [{
         type: "text",
-        text: `Graphical desktop started!\nnoVNC URL: ${graphicalDesktopUrl}\nXvfb PID: ${graphicalDesktopPid || "unknown"}\n\nConnect via browser or use the noVNC client.`
+        text: up
+          ? `Graphical desktop started!\nnoVNC URL: ${graphicalDesktopUrl}\nDisplay: :3 (${_width}x${_height})\n\nThe Screen panel in SpokyBot now shows this desktop.`
+          : "Graphical desktop did not start. Its log is at /tmp/gdesktop.log; the usual cause is a missing X11/VNC package (run setup_graphical_desktop first).",
       }],
-      isError: run.code !== 0
+      isError: !up,
     };
   }
 

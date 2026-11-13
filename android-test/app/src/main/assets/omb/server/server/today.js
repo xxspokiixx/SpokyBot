@@ -76,8 +76,12 @@ function runEnd(run, now) {
         return run.finishedAt ?? run.scheduledFor;
     return run.status === "cancelled" ? null : now;
 }
+function approvalText(card) {
+    return plainTitle(`Approve: ${card.subtitle || card.tool || card.title || ""}`);
+}
+/** A question card the harness made carries the question as its subtitle, under a generic title. */
 function questionText(card) {
-    return plainTitle(card.questionRequest?.questions?.[0]?.question || card.title || card.subtitle || "");
+    return plainTitle(card.questionRequest?.questions?.[0]?.question || (card.requestType === "question" && card.subtitle) || card.title || card.subtitle || "");
 }
 export function todayReport(sources, viewer, requestedSince, now = Date.now()) {
     const since = Math.min(now, Math.max(requestedSince, now - TODAY_MAX_WINDOW_MS));
@@ -243,14 +247,17 @@ function needsYou(sources, viewer, owners, seen, now) {
         if (row.kind === "options") {
             const card = parse(row.card);
             const botId = botOf(row);
-            if (!card || !botId || !isPersistentQuestionCard(card) || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied)
+            if (!card || !botId || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied)
+                continue;
+            const approval = viewer.asks !== undefined && (card.requestType === "permission" || Boolean(card.tool));
+            if (!(approval || isPersistentQuestionCard(card)) || (viewer.asks && !viewer.asks(botId, row.threadId)))
                 continue;
             const earlier = card.requestId ? askedIn.get(card.requestId) : undefined;
             if (earlier && earlier !== `question:${row.threadId}`)
                 items.delete(earlier);
             if (card.requestId)
                 askedIn.set(card.requestId, `question:${row.threadId}`);
-            keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, text: questionText(card) });
+            keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, text: approval ? approvalText(card) : questionText(card) });
             continue;
         }
         if (!viewer.admin || row.kind !== "activity" || !row.name)
@@ -309,7 +316,7 @@ function needsYou(sources, viewer, owners, seen, now) {
         }
     }
     for (const work of sources.parked) {
-        if (!work.question || items.has(`question:${work.threadId}`) || !seen(work.threadId))
+        if (!work.question || work.decide || items.has(`question:${work.threadId}`) || !seen(work.threadId) || (viewer.asks && !viewer.asks(work.botId, work.threadId)))
             continue;
         keep(`question:${work.threadId}`, { kind: "question", id: work.id, at: work.createdAt, botId: work.botId, threadId: work.threadId, text: plainTitle(work.question) });
     }

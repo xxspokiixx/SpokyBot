@@ -1,4 +1,4 @@
-import { canAccessTeam, peerAllowed, peerName } from "./peer-roster.js";
+import { hasAuthority, peerAllowed, peerName } from "./peer-roster.js";
 export const ESCALATIONS_THREAD_TITLE = "Team escalations";
 export function chiefEscalationsEnabled(cfg) {
     return cfg.features?.chiefEscalations === true;
@@ -7,9 +7,9 @@ const fold = (text, max) => {
     const line = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
     return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 };
-// The same reach retry_thread demands, so an escalation never widens what a Chief sees.
+// The same authority retry_thread demands, so an escalation never widens what a Chief sees.
 export function escalationDeliverable(chief, bot) {
-    return canAccessTeam(chief, bot.section) && peerAllowed(chief, bot);
+    return hasAuthority(chief, bot) && peerAllowed(chief, bot);
 }
 export const ESCALATION_HARD_LIMIT = 3;
 export const ESCALATION_WINDOW_MS = 60 * 60_000;

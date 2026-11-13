@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as boat from "../boat.js";
-import { isValidSshAlias, localVmMaxInstances, localVmMode } from "../config.js";
-import { containerComputerAction, containerComputerExists, containerComputerScreenshot, containerComputerStatus, SHARED_LOCAL_VM_TARGET, setupCommands, } from "../container-computer.js";
+import { isValidVpsSshTarget, localVmMaxInstances, localVmMode } from "../config.js";
+import { androidProotStatus, containerComputerAction, containerComputerExists, containerComputerScreenshot, containerComputerStatus, SHARED_LOCAL_VM_TARGET, setupCommands, } from "../container-computer.js";
 import { viewerTargetId } from "../../shared/desktop-viewer.js";
 import { localVmViewerStatus } from "../desktop-viewer-targets.js";
 import { keepFirefoxProfileBeforeRemove } from "../local-vm-profiles.js";
@@ -209,8 +209,8 @@ export function createComputerRoutes(deps) {
                 return json(res, 400, { error: "confirmName must be the VPS computer name shown in Settings" });
             }
             const alias = body?.alias;
-            if (alias !== undefined && !isValidSshAlias(alias)) {
-                return json(res, 400, { error: "alias must be a simple SSH config alias" });
+            if (alias !== undefined && !isValidVpsSshTarget(alias)) {
+                return json(res, 400, { error: "alias must be an SSH config alias or user@host format" });
             }
             // An explicit alias may only name a server the inventory scans: anything else would open
             // docker-over-SSH to an arbitrary host from the user's SSH config.
@@ -226,6 +226,17 @@ export function createComputerRoutes(deps) {
             }
         }
         if (method === "GET" && path === "/api/local-computer") {
+            // On Android, "this computer" uses proot, not Docker/Podman
+            if (process.platform === "android") {
+                const status = await androidProotStatus();
+                return json(res, 200, {
+                    ...localVmViewerStatus(status, auth),
+                    commands: setupCommands(status.runtime, process.platform, SHARED_LOCAL_VM_TARGET),
+                    idle_timeout_ms: localVmIdleMs(),
+                    mode: localVmMode(cfg),
+                    max_instances: localVmMaxInstances(cfg),
+                });
+            }
             return json(res, 200, await localVmPayload(SHARED_LOCAL_VM_TARGET, auth));
         }
         if (method === "GET" && path === "/api/local-computer/instances") {

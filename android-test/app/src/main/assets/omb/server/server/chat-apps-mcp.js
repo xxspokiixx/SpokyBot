@@ -354,7 +354,7 @@ export function createChatAppsMcp(deps) {
         queued.add(name);
         probing = probing.then(async () => {
             queued.delete(name);
-            if (closed)
+            if (closed || deps.personMcp?.().includes(name))
                 return;
             const stored = storedServer(name, deps.storedServers()[name]);
             if (!stored?.enabled || stored.apps === false)

@@ -42,6 +42,8 @@ const EXCLUDED = new Set([
   // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
   // folder, which no admin reads.
   "engine-homes",
+  // The Android local-computer rootfs (several hundred MB) is reinstalled by the app, not user data.
+  "linux",
   WAITS_FILE,
 ]);
 const EXCLUSION_NOTES = [
@@ -70,6 +72,7 @@ export interface CreateWorkspaceBackupOptions {
   password: string;
   clientState?: WorkspaceBackupClientState;
   appVersion?: string;
+  categories?: string[];
 }
 type CreatedWorkspaceBackup = { id: string; path: string; summary: WorkspaceBackupSummary };
 export interface WorkspaceRestoreResult {
@@ -182,8 +185,8 @@ function assertLocalAuthOutsideSnapshot(dataDir: string): void {
   }
 }
 function passwordKey(password: string, salt: Buffer): Promise<Buffer> {
-  if (typeof password !== "string" || password.length < 12 || Buffer.byteLength(password) > 1024) {
-    throw new Error("Use a backup password of at least 12 characters (at most 1024 bytes).");
+  if (typeof password !== "string" || password.length < 1 || Buffer.byteLength(password) > 1024) {
+    throw new Error("Use a backup password of at least 1 character (at most 1024 bytes).");
   }
   return new Promise((resolveKey, reject) => {
     scrypt(password, salt, 32, { N: 131_072, r: 8, p: 1, maxmem: 256 * 1024 ** 2 }, (error, key) => {
@@ -595,13 +598,7 @@ export async function stageWorkspaceBackup(dataDir: string, archivePath: string,
     const tar = await import("tar");
     await tar.x({ file: plaintext, cwd: staged, strict: true, preservePaths: false, umask: 0o077, noChmod: true, brotli: false, zstd: false });
     const manifest = validateStaged(staged, expected);
-    const versions = [manifest.summary.appVersion, options.currentAppVersion ?? ""].map((version) => /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)?.slice(1).map(Number));
-    if (versions[0] && versions[1]) {
-      for (let i = 0; i < 3; i++) {
-        if (versions[0][i] > versions[1][i]) throw new Error("This backup was made by a newer OpenMausBot version. Update the app before restoring it.");
-        if (versions[0][i] < versions[1][i]) break;
-      }
-    }
+    // No version check: backups can be imported from any build version
     rmSync(plaintext);
     writeJson(join(job.directory, "ready.json"), { id: job.id, summary: manifest.summary });
     return { id: job.id, summary: manifest.summary };

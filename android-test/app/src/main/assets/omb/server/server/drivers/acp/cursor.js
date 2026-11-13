@@ -1,6 +1,7 @@
 import { titleCaseModelId } from "../../contracts.js";
 import { execCli } from "../../procs.js";
 import { createAcpDriver } from "./core.js";
+import { discoverAcpModels } from "./custom-model-catalog.js";
 import { capAnswerEcho, formatQuestionAnswers, MAX_QUESTIONS, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById, repeatsQuestionText, } from "../../../shared/ask-question.js";
 /** Cursor keeps two model namespaces: `cursor-agent models` and `--model` use flat slugs (`auto`,
  * `gpt-5.3-codex`), while the ACP session advertises parameterised ids (`default[]`,
@@ -83,6 +84,9 @@ export const STATIC_CURSOR_MODELS = {
         { id: "claude-sonnet-5-thinking-high", label: "Claude Sonnet 5 1M Thinking" },
     ],
 };
+/** Without parameterizedModelPicker Cursor (CLI 2026.10.19) offers only `composer-2.5[fast=true]`, so a
+ * `composer-2.5` bot bills as Fast; with it, Fast is a separate `fast` config option. */
+const CURSOR_CLIENT_META = { parameterizedModelPicker: true };
 const SLUG = /^[a-z0-9][a-z0-9._:+-]*$/i;
 const EXEC_TIMEOUT_MS = 8_000;
 const nonBlank = (value) => Boolean(value?.trim());
@@ -123,6 +127,17 @@ function pushModel(options, seen, id, label, custom = false) {
     seen.add(id);
     options.push({ id, label: labelFor(id, label), ...(custom ? { custom: true } : {}) });
 }
+function withUnseen(first, rest) {
+    const merged = first.map((option) => ({ ...option }));
+    const seen = new Set(merged.map((option) => option.id));
+    for (const option of rest) {
+        if (seen.has(option.id))
+            continue;
+        seen.add(option.id);
+        merged.push(option);
+    }
+    return merged;
+}
 export function decodeCursorModelCatalog(payload) {
     const records = Array.isArray(payload)
         ? payload
@@ -159,15 +174,7 @@ export function decodeCursorModelCatalog(payload) {
         ? asRecord(payload).default
         : undefined) ??
         (seen.has(STATIC_CURSOR_MODELS.default) ? STATIC_CURSOR_MODELS.default : options[0].id);
-    const merged = STATIC_CURSOR_MODELS.options.map((option) => ({ ...option }));
-    const mergedSeen = new Set(merged.map((option) => option.id));
-    for (const option of options) {
-        if (mergedSeen.has(option.id))
-            continue;
-        mergedSeen.add(option.id);
-        merged.push(option);
-    }
-    return { default: defaultId, options: merged };
+    return { default: defaultId, options: withUnseen(STATIC_CURSOR_MODELS.options, options) };
 }
 function stripModelMarkers(label) {
     let cleaned = label.trim();
@@ -208,18 +215,10 @@ export function decodeCursorModelText(text) {
     }
     if (!options.length)
         return null;
-    const merged = STATIC_CURSOR_MODELS.options.map((option) => ({ ...option }));
-    const mergedSeen = new Set(merged.map((option) => option.id));
-    for (const option of options) {
-        if (mergedSeen.has(option.id))
-            continue;
-        mergedSeen.add(option.id);
-        merged.push(option);
-    }
     const defaultId = (markedDefault && seen.has(markedDefault) ? markedDefault : undefined) ??
         (markedCurrent && seen.has(markedCurrent) ? markedCurrent : undefined) ??
         (seen.has(STATIC_CURSOR_MODELS.default) ? STATIC_CURSOR_MODELS.default : options[0].id);
-    return { default: defaultId, options: merged };
+    return { default: defaultId, options: withUnseen(STATIC_CURSOR_MODELS.options, options) };
 }
 function truthyAuthFlag(value) {
     if (value === true)
@@ -289,7 +288,27 @@ export async function probeCursorAuth(cli, env, run = execCli) {
     }
     return false;
 }
+export function cursorCatalogFromSession(advertised) {
+    const discovered = [];
+    const bases = new Set();
+    for (const model of advertised) {
+        const raw = model.id.split("[")[0].trim();
+        const id = raw.toLowerCase() === "default" ? STATIC_CURSOR_MODELS.default : raw;
+        pushModel(discovered, bases, id, model.label.trim().toLowerCase() === id.toLowerCase() ? titleCaseModelId(id, /[-_]+/) : model.label);
+    }
+    if (!discovered.length)
+        return null;
+    const offered = STATIC_CURSOR_MODELS.options
+        .filter((option) => option.id === STATIC_CURSOR_MODELS.default || bases.has(option.id.replace(/-fast$/, "")));
+    return { default: STATIC_CURSOR_MODELS.default, options: withUnseen(offered, discovered) };
+}
+/** `cursor-agent models` (2026.10.22) lists only `auto` while session/new lists every model the account can use, so the
+ * session answers first; the text list stands in for a CLI that cannot open one. */
 export async function fetchCursorModels(cli, env, run = execCli) {
+    const fromSession = await discoverAcpModels(env, cli, ["acp"], { variants: false, clientCapabilitiesMeta: CURSOR_CLIENT_META })
+        .then((catalog) => cursorCatalogFromSession(catalog.options), () => null);
+    if (fromSession)
+        return fromSession;
     // Live CLI prints plain text (`slug - Label`); `--format json` is not supported yet.
     for (const args of [["models"], ["--list-models"]]) {
         const stdout = await execText(run, cli, [...args], env);
@@ -385,7 +404,7 @@ async function setCursorFast(request, sessionId, fast) {
 }
 const support = (run) => ({
     driverKind: "cursorAgent",
-    questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION },
+    questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION }, askTool: "AskQuestion",
     displayName: "Cursor",
     models: STATIC_CURSOR_MODELS,
     // Other coding agents can install a generic `agent` shim; `cursor-agent` is unambiguous.
@@ -416,9 +435,7 @@ const support = (run) => ({
     authFailure: "continue",
     isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
     classifyError: classifyCursorError,
-    // Without parameterizedModelPicker Cursor (CLI 2026.10.19) offers only `composer-2.5[fast=true]`, so a
-    // `composer-2.5` bot bills as Fast; with it, Fast is a separate `fast` config option.
-    clientCapabilitiesMeta: { parameterizedModelPicker: true },
+    clientCapabilitiesMeta: CURSOR_CLIENT_META,
     async configureSession({ request, sessionId, turn, sessionModels, currentModelId, configOptions, notice }) {
         if (!turn.model)
             return;

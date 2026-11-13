@@ -8,6 +8,7 @@ export const ENGINE_KINDS = {
     "openai-compatible": { config: "openaiCompat", instance: "openaiCompat", baseUrl: "required" },
     xai: { config: "xai", instance: "xaiApi", baseUrl: "allowed" },
     groq: { config: "groq", instance: "groq", baseUrl: "allowed" },
+    greenference: { config: "greenference", instance: "greenference", baseUrl: "no" },
     mistral: { config: "mistral", instance: "mistral", baseUrl: "no" },
     cerebras: { config: "cerebras", instance: "cerebras", baseUrl: "no" },
 };
@@ -33,7 +34,9 @@ export function readSecret(source, env, what) {
     }
     throw usageError(`${what}: put the key in an environment variable or a file`);
 }
-export const INSTALL_TIMEOUT_MS = 15 * 60_000;
+// The server stops a standalone download after 20 minutes; the extra minute covers unpacking and its checks, so the
+// server's own plain message arrives before this client gives up.
+export const INSTALL_TIMEOUT_MS = 21 * 60_000;
 async function installEngine(client, instanceId) {
     const response = await client.raw(`/api/instances/${encodeURIComponent(instanceId)}/install`, {
         method: "POST", headers: { "content-type": "application/json" }, body: "{}", stream: true, signal: AbortSignal.timeout(INSTALL_TIMEOUT_MS),

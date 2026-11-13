@@ -1,13 +1,21 @@
 // The "agents" MCP server's answers (JSON-RPC 2.0, no MCP SDK), every tool routed through the harness. `env` is what the
 // harness sets for it (see agents-proxy.ts): the stdio proxy an engine starts and the HTTP endpoint an engine reaches
 // both answer through it.
+import { resolveAgentsCall } from "../../shared/agents-tool-names.js";
 import { TOOL_BRIDGE_ENV, createToolBridge } from "./agents-bridge.js";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.js";
 import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.js";
 import { sendToolReceipt } from "./agents-timing.js";
-export function agentsMcp(env) {
+import { capToolListResult, toolLimitFromEnv } from "../tool-count-limit.js";
+/** What the agents server lists for `env`, before any tool limit. */
+export function agentsToolList(env) {
     const available = availableTools(catalogProfileFromEnv(env));
     const bridge = env[TOOL_BRIDGE_ENV] === "1" ? createToolBridge(available) : undefined;
+    return { available, bridge, listed: bridge ? bridge.listed : available };
+}
+export function agentsMcp(env) {
+    const { available, bridge, listed } = agentsToolList(env);
+    const limit = toolLimitFromEnv(env);
     const context = toolCallContextFromEnv(env);
     const ok = (id, result) => ({ jsonrpc: "2.0", id, result });
     const rpcErr = (id, code, message) => ({ jsonrpc: "2.0", id, error: { code, message } });
@@ -31,7 +39,7 @@ export function agentsMcp(env) {
             case "ping":
                 return ok(id, {});
             case "tools/list":
-                return ok(id, { tools: bridge ? bridge.listed : available });
+                return ok(id, capToolListResult({ tools: listed }, limit, (line) => console.warn(`[agents] ${line}`)));
             case "tools/call": {
                 const called = { name: params.name, arguments: (params.arguments ?? {}) };
                 // Security: past the bridge a use_tool call is a direct call: same unknown-tool check, callTool and result bounds.
@@ -39,7 +47,9 @@ export function agentsMcp(env) {
                 if (bridged && "answer" in bridged)
                     return textResult(id, bridged.answer.text, bridged.answer.isError);
                 const { name, arguments: args } = bridged ?? called;
-                if (!available.some((t) => t.name === name)) {
+                // An alias runs only where the tool it names is listed: never a way to a tool this turn was not given.
+                const runs = resolveAgentsCall(name, args).name;
+                if (!available.some((t) => t.name === runs)) {
                     // A name written into use_tool fails the call, not the protocol: the chat runtime ends a turn on a protocol error.
                     const unknown = `Unknown tool: ${name}`;
                     return bridged ? textResult(id, unknown, true) : rpcErr(id, -32602, unknown);

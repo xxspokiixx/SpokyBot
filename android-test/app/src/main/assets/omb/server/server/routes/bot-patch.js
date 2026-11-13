@@ -2,18 +2,21 @@ import { z } from "zod";
 import { approvalModeFor, isApprovalMode } from "../../shared/approval-mode.js";
 import { normalizeConnectorScopes } from "../../shared/connector-scopes.js";
 import { normalizeOutboundPolicy } from "../../shared/outbound.js";
+import { normalizePhoneApps } from "../../shared/phone-apps.js";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.js";
 import { isMausColor, MAUS_COLOR_NAMES } from "../../shared/wire.js";
 import { validateBotCwd } from "../bot-cwd.js";
 import { parseBotProfilePatch } from "../bot-profile.js";
+import { accessFromVisibility } from "../../shared/bot-access.js";
 import { parseVisibility } from "../bot-visibility.js";
 import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.js";
 import * as composio from "../composio.js";
-import { isValidSshAlias } from "../config.js";
+import { isValidVpsSshTarget } from "../config.js";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.js";
+import { phoneAppsFor } from "../phones/access.js";
 import { profileSnapshot } from "../profile-revision.js";
 import { recordProfileChange } from "../profile-versions.js";
-import { clientBotPatchViolation, requestSource } from "../request-auth.js";
+import { memberBotPatchViolation, requestSource } from "../request-auth.js";
 import { defaultBotPatchRefusal, ownsDefaultBot } from "../default-bot.js";
 import { parseConnectorTools } from "../connector-tools.js";
 import { sectionKey } from "../store.js";
@@ -36,12 +39,16 @@ export function createBotPatchRoutes(deps) {
             }
             const pairedDevice = req.headers["x-openmausbot-companion"] === "1";
             if ((auth.kind === "session" && !auth.scopes.includes("admin")) || pairedDevice) {
-                const field = clientBotPatchViolation(body, ownsDefaultBot(store.bot(m[1]), auth.kind === "session" ? auth.session.email : undefined));
+                const session = auth.kind === "session" ? auth.session : undefined;
+                const level = pairedDevice ? "chat" : deps.levelOf(auth, m[1]);
+                const field = memberBotPatchViolation(body, level === "none" ? "chat" : level, ownsDefaultBot(store.bot(m[1]), session?.email), session?.membershipAuthority === "team");
                 if (field) {
                     return json(res, 403, {
                         error: pairedDevice
                             ? `forbidden: a paired device may change how a bot looks, not "${field}"; change it on the host computer`
-                            : `forbidden: this session may change how a bot looks, not "${field}" (needs the admin scope)`,
+                            : level === "edit" ? `forbidden: "${field}" is an admin's to change`
+                                : level === "view" ? `forbidden: you can view this bot, not change "${field}"`
+                                    : `forbidden: this session may change how a bot looks, not "${field}" (needs the admin scope)`,
                     });
                 }
             }
@@ -192,6 +199,16 @@ export function createBotPatchRoutes(deps) {
                     patch.connectorScopes = scopes;
                 }
             }
+            if (body.phoneApps !== undefined) {
+                if (body.phoneApps === null)
+                    patch.phoneApps = undefined;
+                else {
+                    const apps = normalizePhoneApps(body.phoneApps);
+                    if (!apps)
+                        return json(res, 400, { error: "phoneApps must be { <calendar|reminders|contacts|location|home|messages>: read | write } or null" });
+                    patch.phoneApps = apps;
+                }
+            }
             if (body.outbound !== undefined) {
                 const policy = normalizeOutboundPolicy(body.outbound);
                 if (!policy)
@@ -333,12 +350,12 @@ export function createBotPatchRoutes(deps) {
                 if (body.vpsAlias === null || body.vpsAlias === "") {
                     patch.vpsAlias = undefined;
                 }
-                else if (isValidSshAlias(body.vpsAlias)) {
+                else if (isValidVpsSshTarget(body.vpsAlias)) {
                     patch.vpsAlias = body.vpsAlias;
                 }
                 else {
                     return json(res, 400, {
-                        error: "vpsAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore), or null to use the default server",
+                        error: "vpsAlias must be an SSH config alias or user@host format, or null to use the default server",
                     });
                 }
             }
@@ -429,12 +446,6 @@ export function createBotPatchRoutes(deps) {
                 requestedApprovalMode = approvalModeFor(existingBot ?? {});
             }
             const currentApprovalMode = approvalModeFor(existingBot ?? {});
-            const approvalChangeRequested = body.approvalMode !== undefined || body.autoApprove !== undefined;
-            if (existingBot?.busy && approvalChangeRequested && requestedApprovalMode !== currentApprovalMode) {
-                return json(res, 409, {
-                    error: "stop this bot's turn before changing its approval level",
-                });
-            }
             if (body.approvalMode !== undefined || body.autoApprove !== undefined) {
                 patch.approvalMode = requestedApprovalMode;
                 // Older paired apps read autoApprove as exactly Auto.
@@ -478,9 +489,6 @@ export function createBotPatchRoutes(deps) {
             }
             if (body.applyToAllThreads === true && existingBot) {
                 const threads = store.tasks(existingBot.id);
-                if (threads.some((task) => threadBusy(existingBot.id, task.threadId))) {
-                    return json(res, 409, { error: "stop this bot's turns before changing its approval level" });
-                }
                 if (threads.some((task) => approvalModeFor(store.projectBotForTask(existingBot.id, task.threadId) ?? {}) === "custom")) {
                     return json(res, 403, { error: "A thread on Custom approval can only leave it from the packaged desktop app" });
                 }
@@ -505,7 +513,7 @@ export function createBotPatchRoutes(deps) {
                 }
                 patch.approvePeerComms = body.approvePeerComms;
             }
-            // null: everyone visible in the section; an array (even empty) is the explicit wiring. Narrowing is free;
+            // null: every visible bot; an array (even empty) is the explicit wiring. Narrowing is free;
             // widening needs acknowledgePeerScope, since any loopback caller (a bot with Bash) gets admin.
             if (body.peers !== undefined) {
                 let nextPeers;
@@ -513,7 +521,7 @@ export function createBotPatchRoutes(deps) {
                     nextPeers = undefined;
                 else if (!Array.isArray(body.peers) ||
                     body.peers.some((peerId) => typeof peerId !== "string")) {
-                    return json(res, 400, { error: "peers must be a list of bot ids, or null for every bot in this section" });
+                    return json(res, 400, { error: "peers must be a list of bot ids, or null for every bot" });
                 }
                 else {
                     nextPeers = [...new Set(body.peers)].slice(0, MAX_WORKSPACE_BOTS);
@@ -523,7 +531,7 @@ export function createBotPatchRoutes(deps) {
                     (nextPeers === undefined || nextPeers.some((peerId) => !currentPeers.includes(peerId)));
                 if (widensReach && body.acknowledgePeerScope !== true) {
                     return json(res, 400, {
-                        error: "Widening a bot's allowed peers requires confirming it first (acknowledgePeerScope)",
+                        error: "Letting a bot talk to more bots requires confirming it first (acknowledgePeerScope)",
                     });
                 }
                 patch.peers = nextPeers;
@@ -535,13 +543,13 @@ export function createBotPatchRoutes(deps) {
                 const sections = [...new Set(parsed.data)];
                 const newSections = sections.filter(section => !(existingBot?.managedSections ?? []).includes(section));
                 if (newSections.some(section => section !== "" && !store.sections.includes(section))) {
-                    return json(res, 400, { error: "Create the named department before giving a Chief access to it" });
+                    return json(res, 400, { error: "Create the named department before making a Chief responsible for it" });
                 }
                 if (sections.length && !(body.chiefOfStaff === true || (existingBot?.chiefOfStaff && body.chiefOfStaff !== false))) {
-                    return json(res, 400, { error: "Only a Chief of Staff can be given access to additional teams" });
+                    return json(res, 400, { error: "Only a Chief of Staff can be made responsible for additional departments" });
                 }
                 if (newSections.length && body.acknowledgePeerScope !== true) {
-                    return json(res, 400, { error: "Confirm which additional teams this Chief may work with (acknowledgePeerScope)" });
+                    return json(res, 400, { error: "Confirm which additional departments this Chief is responsible for (acknowledgePeerScope)" });
                 }
                 patch.managedSections = sections;
             }
@@ -554,6 +562,8 @@ export function createBotPatchRoutes(deps) {
                 if (!parsed.ok)
                     return json(res, 400, { error: parsed.error });
                 patch.visibility = parsed.visibility;
+                if (deps.team)
+                    patch.access = accessFromVisibility(parsed.visibility);
             }
             if (body.alwaysAllow !== undefined) {
                 if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t) => typeof t !== "string")) {
@@ -571,6 +581,13 @@ export function createBotPatchRoutes(deps) {
             if (body.connectorScopes !== undefined && existingBot?.connectorScopes &&
                 (!trustPatch.connectorScopes || Object.entries(trustPatch.connectorScopes.apps).some(([slug, scope]) => !existingBot.connectorScopes.apps[slug] || (scope === "write" && existingBot.connectorScopes.apps[slug] === "read"))))
                 loosened.push("connectorScopes");
+            if (body.phoneApps !== undefined && existingBot) {
+                // Compare effective grants: clearing falls back to every app.
+                const before = phoneAppsFor(existingBot);
+                const after = phoneAppsFor({ ...existingBot, phoneApps: patch.phoneApps });
+                if (Object.entries(after).some(([cap, grant]) => !before[cap] || (grant === "write" && before[cap] === "read")))
+                    loosened.push("phoneApps");
+            }
             if (body.fallback !== undefined && trustPatch.fallback?.some(candidate => !existingBot?.fallback?.some(previous => previous.instanceId === candidate.instanceId && previous.model === candidate.model)))
                 loosened.push("fallback");
             if (Array.isArray(patch.managedSections) && patch.managedSections.some(section => !(existingBot?.managedSections ?? []).includes(section))) {

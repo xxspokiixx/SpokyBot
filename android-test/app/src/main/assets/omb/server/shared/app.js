@@ -5,7 +5,7 @@ export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_PROTOCOL_VERSION = "2026-01-26";
 export const APP_EXTENSION_KEY = "io.modelcontextprotocol/ui";
 export const APP_LIMITS = {
-    /** show_html / update_html `html` or `jsx`, UTF-8 bytes after trimming. */
+    /** show_html `html` or `jsx`, UTF-8 bytes after trimming. */
     htmlBytes: 256 * 1024,
     title: 80,
     fallback: 1_500,
@@ -141,7 +141,7 @@ export function parseShowHtmlInput(input) {
 }
 export function parseUpdateHtmlInput(input) {
     if (!isRecord(input))
-        return { ok: false, error: "update_html needs {app_id, html, jsx or path, title?}." };
+        return { ok: false, error: "Replacing a page needs {app_id, html, jsx or path, title?}." };
     if (typeof input.app_id !== "string" || !/^[\w-]{1,128}$/.test(input.app_id.trim())) {
         return { ok: false, error: "app_id: is required, the id show_html returned." };
     }

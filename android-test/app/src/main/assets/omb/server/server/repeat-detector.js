@@ -6,10 +6,14 @@ export function callKey(tool, args) {
         return null;
     return `${tool}:${a}`;
 }
+/** Cursor's ACP adapter titles every MCP call "MCP: tool" and sends an empty input: like a bare tool name, it names no call. */
+const NAMELESS_TITLE = /^MCP:\s*tool$/i;
 /** Antigravity's ACP adapter titles every call alike ("Running list_directory") and carries what differs only in the input. */
 export function toolItemKey(title, input) {
     const t = (title ?? "").trim();
     if (!/\s|\//.test(t))
+        return null;
+    if (!input && NAMELESS_TITLE.test(t))
         return null;
     return input ? `tool:${JSON.stringify([t, input])}` : callKey("tool", t);
 }

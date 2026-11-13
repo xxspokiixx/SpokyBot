@@ -7,7 +7,7 @@ import { join, relative, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { writeFileAtomic } from "./atomic.js";
 import { TRASH_DAYS, foldKey, safeFolderName, skipped, validWirePath } from "../electron/cloud-sync-rules.mjs";
-import { syncRoot } from "./cloud-sync-paths.js";
+import { lentRoot, syncRoot } from "./cloud-sync-paths.js";
 export function sha256File(path) {
     return new Promise((resolve, reject) => {
         const hash = createHash("sha256");
@@ -64,7 +64,7 @@ export function* walk(root, prefix = "") {
         yield { path, size: stat.size, mtimeMs: stat.mtimeMs };
     }
 }
-function readFolders(dataDir) {
+export function readFolders(dataDir) {
     try {
         const value = JSON.parse(readFileSync(join(dataDir, "sync", "folders.json"), "utf8"));
         return Array.isArray(value)
@@ -75,9 +75,11 @@ function readFolders(dataDir) {
         return [];
     }
 }
-/** For the Cloud prompt: each synced PC folder and where it is here. */
+/** For the Cloud prompt: each synced PC folder bots read where it is, and where that is here. A lent folder's copy is not
+ * one: bots reach it through shared_computer. */
 export function syncedFolders(dataDir) {
-    return readFolders(dataDir).map((folder) => ({ computerName: folder.computerName ?? "", pcPath: folder.pcPath ?? "", cloudPath: folder.cloudPath }));
+    return readFolders(dataDir).filter((folder) => folder.lent !== true)
+        .map((folder) => ({ computerName: folder.computerName ?? "", pcPath: folder.pcPath ?? "", cloudPath: folder.cloudPath }));
 }
 export class CloudSyncStore {
     dataDir;
@@ -88,7 +90,7 @@ export class CloudSyncStore {
         this.dataDir = options.dataDir;
         this.root = options.root ?? syncRoot(options.dataDir);
         this.now = options.now ?? Date.now;
-        for (const dir of [this.syncDir(), join(this.syncDir(), "uploads"), join(this.syncDir(), "trash"), this.root])
+        for (const dir of [this.syncDir(), join(this.syncDir(), "uploads"), join(this.syncDir(), "trash"), this.root, this.lentRoot()])
             mkdirSync(dir, { recursive: true, mode: 0o700 });
         this.db = new DatabaseSync(join(this.syncDir(), "index.db"));
         this.db.exec(`CREATE TABLE IF NOT EXISTS files(folder TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime REAL NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(folder, path));
@@ -98,6 +100,7 @@ export class CloudSyncStore {
             this.db.exec("ALTER TABLE trash ADD COLUMN cloud_path TEXT");
     }
     syncDir() { return join(this.dataDir, "sync"); }
+    lentRoot() { return lentRoot(this.dataDir); }
     close() { this.db.close(); }
     pcFolders() { return readFolders(this.dataDir); }
     botFolders() {
@@ -140,14 +143,17 @@ export class CloudSyncStore {
             folders = folders.filter((folder) => folder.id !== existing.id);
             this.db.prepare("DELETE FROM files WHERE folder = ?").run(existing.id);
         }
-        const sibling = existing ?? folders.find((folder) => folder.computerId === input.computerId);
+        // A copy kept already (shared from the Files page before it was lent) stayed where it is, above: nothing is sent again.
+        const lent = input.lent === true;
+        const root = lent ? this.lentRoot() : this.root;
+        const sibling = [existing, ...folders].find((folder) => folder?.computerId === input.computerId && folder.cloudPath.startsWith(root + sep));
         const computerDir = sibling
-            ? relative(this.root, sibling.cloudPath).split(sep)[0]
-            : safeFolderName(input.computerName, new Set(names(this.root).map(foldKey)));
-        const name = safeFolderName(input.name, new Set(names(join(this.root, computerDir)).map(foldKey)));
+            ? relative(root, sibling.cloudPath).split(sep)[0]
+            : safeFolderName(input.computerName, new Set(names(root).map(foldKey)));
+        const name = safeFolderName(input.name, new Set(names(join(root, computerDir)).map(foldKey)));
         const folder = {
             id: randomUUID(), kind: "pc", computerId: input.computerId, computerName: input.computerName, pcPath: input.pcPath,
-            cloudPath: join(this.root, computerDir, name), createdAt: this.now(),
+            cloudPath: join(root, computerDir, name), createdAt: this.now(), ...(lent ? { lent: true } : {}),
         };
         mkdirSync(folder.cloudPath, { recursive: true, mode: 0o700 });
         this.saveFolders([...folders, folder]);

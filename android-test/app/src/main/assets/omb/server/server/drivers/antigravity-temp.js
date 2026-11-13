@@ -179,7 +179,7 @@ async function systemLeftovers(systemTemp, isAlive, now) {
     }
     return found;
 }
-async function folderBytes(directory, deadline = Infinity) {
+export async function folderBytes(directory, deadline = Infinity) {
     let bytes = 0;
     const pending = [directory];
     while (pending.length) {

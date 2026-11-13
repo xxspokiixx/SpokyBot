@@ -60,7 +60,7 @@ export function createBotSettingsRoutes(deps) {
             }
             const existingBot = store.bot(m[1]);
             // On a Cloud home these fields ride every owner turn: only the owner's own devices change them.
-            if (CLOUD_HOME && existingBot && !cloudOwnerSession(auth)) {
+            if (CLOUD_HOME && existingBot && !cloudOwnerSession(auth) && deps.levelOf?.(auth, existingBot.id) !== "edit") {
                 const changed = CLOUD_OWNER_PROFILE_FIELDS.find((field) => parsed.patch[field] !== undefined && (field === "notifications"
                     ? (parsed.patch.notifications !== false) !== (existingBot.notifications !== false)
                     : parsed.patch[field] !== (existingBot[field] ?? "")));
@@ -123,11 +123,15 @@ export function createBotSettingsRoutes(deps) {
             requirePinnedClientThread(m[1], body?.threadId);
             const current = requestedTaskBot(m[1], body?.threadId);
             sawThread(current.threadId);
-            store.patchTask(current.id, current.threadId, { unread: false, ...readCursor(current.threadId) });
-            readThreadNotifications(current.threadId, broadcast);
-            const bot = store.bot(current.id);
-            const visible = wireBot(bot);
-            broadcast({ kind: "bot", bot: visible });
+            deps.threadRead?.(auth, current.threadId);
+            const task = store.taskByThread(current.id, current.threadId), cursor = readCursor(current.threadId);
+            const changed = Boolean(task?.unread) || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
+            if (changed)
+                store.patchTask(current.id, current.threadId, { unread: false, ...cursor });
+            readThreadNotifications(current.threadId, broadcast, auth);
+            const visible = wireBot(store.bot(current.id));
+            if (changed)
+                broadcast({ kind: "bot", bot: visible });
             return json(res, 200, { bot: visible });
         }
         m = path.match(/^\/api\/bots\/([\w-]+)\/command-allowlist(?:\/([\w-]+))?$/);

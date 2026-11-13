@@ -1,27 +1,28 @@
 import { codexToolSurfaceArgs } from "./codex-tool-surface.js";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.js";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.js";
+import { reportUnsupportedCalls, rolloutMark } from "./codex-unsupported-calls.js";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { codexConfigMcp, codexConfigRunsServer, mountedMcpServerName } from "./codex-mcp-names.js";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.js";
-import { laterStartup, openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.js";
+import { laterStartup, openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.js";
 import { hostedWorkspaceConfigured } from "../enterprise.js";
 import { cloudHomeConfigured } from "../cloud-home.js";
 import { serverVersion } from "../environment.js";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.js";
-import { describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.js";
-import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.js";
+import { captureCliTree, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.js";
+import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tomlInlineTable, tryCodexLaunchSlot } from "./codex-process.js";
 import { isReservedMcpEnvEntry } from "../mcp-registry.js";
 import { newEventId, newId } from "../contracts.js";
 import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.js";
 import { codexLocalProviderArgs } from "./local-inject.js";
-import { codexBackgroundModel, runCodexOneShot } from "./codex-background-text.js";
-import { augmentedPath, splitCliString } from "../env-path.js";
+import { codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.js";
+import { augmentedPath } from "../env-path.js";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.js";
 import { appendNative } from "./native.js";
 import { answersAlone, permissionLaunchCwd, shellRequest } from "./permission-command.js";
@@ -30,61 +31,26 @@ import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instr
 import { volatileContextNote, withContextNote } from "./prompt-split.js";
 import { CodexDeviceAuthController } from "./codex-device-auth.js";
 import { codexAccountEmail, codexHome } from "./codex-identity.js";
-import { CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, codexSignInExpired, codexSignInRefused, codexUserError } from "./codex-errors.js";
+import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexSignInRefused, codexUserError, missingNativeCodexThread } from "./codex-errors.js";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.js";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.js";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.js";
 import { extractMcpImages } from "../mcp-tool-images.js";
+import { codexImageInputs, withoutInlineImages } from "./codex-images.js";
 import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-question.js";
 import { codexQuestionReply, openAsyncQuestion } from "./codex-questions.js";
-import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.js";
+import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.js";
+export { codexUpdateCommand };
 import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.js";
+import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.js";
 import { canUseMcpServer } from "../../shared/tool-scope.js";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.js";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.js";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.js";
 import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.js";
-import { codexPatchProgress } from "./tool-progress.js";
+import { codexCommandOutput, codexPatchProgress } from "./tool-progress.js";
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.js";
 const DRIVER_KIND = "codex";
-class CodexRpcError extends Error {
-    code;
-    constructor(error) {
-        super(error.message ?? JSON.stringify(error));
-        this.code = error.code;
-    }
-}
-function missingNativeCodexThread(error, cursor) {
-    // Codex's local thread/resume rejection, verified with an empty native home; unknown versions fail closed.
-    return error instanceof CodexRpcError && error.code === -32600 &&
-        error.message === `no rollout found for thread id ${cursor}`;
-}
-/** Codex refuses to resume an archived session: "session <id> is archived. Run `codex unarchive <id>` to unarchive it first." */
-const archivedNativeCodexThread = (error, cursor) => error instanceof CodexRpcError && error.message.includes(cursor) && /\bis archived\b/.test(error.message);
-/** Ask the configured executable to update itself, so a non-PATH Codex is the one updated. */
-export function codexUpdateCommand(cli, platform = process.platform) {
-    if (cli === "codex")
-        return "codex update";
-    const trimmed = cli.trim();
-    const tokens = trimmed.includes(" ") && existsSync(trimmed)
-        ? [trimmed]
-        : splitCliString(trimmed);
-    const quote = platform === "win32"
-        ? (token) => `'${token.replaceAll("'", "''")}'`
-        : (token) => `'${token.replaceAll("'", `'\\''`)}'`;
-    const command = (tokens.length > 0 ? tokens : [trimmed]).map(quote).join(" ");
-    return platform === "win32" ? `& ${command} update` : `${command} update`;
-}
-async function codexReleaseUpdate(version, cli) {
-    const latest = await readLatestCodexRelease();
-    if (!latest || !codexVersionBehind(version, latest))
-        return undefined;
-    return {
-        title: `Update Codex to ${latest}`,
-        message: `A newer stable Codex CLI is available (installed: ${version}). Update it, then refresh models. Model availability also depends on your signed-in account.`,
-        command: codexUpdateCommand(cli),
-    };
-}
 function decodeConfig(raw) {
     const o = (raw ?? {});
     if (o.authMode !== undefined && o.authMode !== "chatgpt-plan")
@@ -151,10 +117,6 @@ function noteRenamedMcpServer(name, mountName) {
         return;
     renamedMcpServers.add(name);
     console.error(`codex: MCP server ${JSON.stringify(name)} is also declared in Codex's own config.toml — mounted as ${JSON.stringify(mountName)} for this bot so the two do not merge`);
-}
-/** JSON string quoting is valid TOML basic-string quoting. */
-function tomlInlineTable(entries) {
-    return `{ ${Object.entries(entries).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(", ")} }`;
 }
 /** RequestPermissionProfile uses null for permission families that were not
  * requested; GrantedPermissionProfile requires those keys to be absent. */
@@ -375,7 +337,7 @@ function permissionProfileUnsupported(error) {
     const message = error instanceof Error ? error.message : String(error);
     return /(?:experimental api|invalid params|unknown field|unknown.*permissions|permissions.*(?:unsupported|sandbox)|cannot.*permissions)/i.test(message);
 }
-/** Native instructions and private host paths stay out of diagnostics; the provider still gets the unmodified request. */
+/** Native instructions and image bytes stay out of diagnostics; the provider still gets the unmodified request. */
 function codexNativeLogMessage(message) {
     if (!message || typeof message !== "object" || Array.isArray(message))
         return message;
@@ -389,25 +351,7 @@ function codexNativeLogMessage(message) {
     if (record.method === "thread/inject_items") {
         return { ...record, params: { ...params, items: "[developer instruction update omitted]" } };
     }
-    if (record.method !== "turn/start")
-        return message;
-    const input = params.input;
-    if (!Array.isArray(input))
-        return message;
-    return {
-        ...record,
-        params: {
-            ...params,
-            input: input.map((item) => {
-                if (!item || typeof item !== "object" || Array.isArray(item))
-                    return item;
-                const entry = item;
-                return entry.type === "localImage"
-                    ? { ...entry, path: "[private attachment path omitted]" }
-                    : item;
-            }),
-        },
-    };
+    return record.method === "turn/start" ? withoutInlineImages(message) : message;
 }
 /** A response arriving after its request timed out is still sanitized, never a secret-bearing orphan. */
 export function codexNativeIncomingLogMessage(message, sensitiveResponseIds) {
@@ -433,7 +377,7 @@ export function codexNativeIncomingLogMessage(message, sensitiveResponseIds) {
             },
         };
     }
-    return message;
+    return withoutInlineImages(message);
 }
 function mountMcpServer(appServerArgs, env, name, server, approval = "auto", 
 /** Written into the mount's own `env` table: its process gets them, Codex's command shell does not. */
@@ -513,6 +457,7 @@ export const CodexDriver = {
                 catch (error) {
                     if (!kept)
                         throw error;
+                    unconfirmedModelCatalog(kept);
                 }
             }
             else {
@@ -520,8 +465,12 @@ export const CodexDriver = {
                     const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
                     if (resolved.options.length)
                         models = resolved;
+                    else
+                        unconfirmedModelCatalog(models);
                 }
-                catch { }
+                catch {
+                    unconfirmedModelCatalog(models);
+                }
             }
             try {
                 writeStartupModelCache(instanceId, models);
@@ -572,6 +521,7 @@ export const CodexDriver = {
             }
             return [`codex-login:${home}`, stored];
         };
+        const smallModelsUsable = () => !plan && loginMark() === null;
         const loginRefused = () => { const mark = loginMark(); if (mark)
             noteKeyRejected(...mark); };
         const loginAccepted = (mark = loginMark()) => { if (mark)
@@ -748,6 +698,8 @@ export const CodexDriver = {
                 if (turn.integrations?.agents) {
                     // SpokyBot's own coordination tools never ask: "auto" quiets only read-only tools.
                     mountSelected("agents", "agents", turn.integrations.agents, "approve");
+                    if (selectedMcp.has("agents"))
+                        appServerArgs.push("-c", `mcp_servers.agents.tool_timeout_sec=${AGENTS_TOOL_TIMEOUT_SECONDS}`);
                 }
                 if (turn.integrations?.localComputer) {
                     mountSelected("computer", "computer", turn.integrations.localComputer);
@@ -755,7 +707,7 @@ export const CodexDriver = {
                 if (turn.integrations?.browser) {
                     mountSelected("browser", "browser", turn.integrations.browser);
                 }
-                for (const name of ["data", "highlevel"])
+                for (const name of ["data", "highlevel", "device"])
                     if (turn.integrations?.[name])
                         mountSelected(name, name, turn.integrations[name]);
                 // A `-c` override merges with a same-named server in config.toml, and stdio over url is
@@ -901,6 +853,7 @@ export const CodexDriver = {
                 // "codex exited null (signal SIGTERM) before turn/completed".
                 let interruptRequested = false;
                 const stop = async () => {
+                    captureCliTree(child);
                     stopRequested = true;
                     stopSignal.abort();
                     if (!state.settled && !interruptRequested && codexThreadId && codexTurnId &&
@@ -1096,8 +1049,8 @@ export const CodexDriver = {
                         }
                         emit({ ...base(threadId, turnId), type: "request.resolved", requestId, behavior, source });
                     };
-                    const timer = setTimeout(() => finish("deny", isQuestion ? undefined : DENY_TIMEOUT_NOTE, "timeout"), 15 * 60_000);
-                    timer.unref?.();
+                    const timer = isQuestion ? undefined : setTimeout(() => finish("deny", DENY_TIMEOUT_NOTE, "timeout"), 15 * 60_000);
+                    timer?.unref?.();
                     asks.set(requestId, finish);
                     emit({
                         ...base(threadId, turnId),
@@ -1117,6 +1070,7 @@ export const CodexDriver = {
                 const seenReviews = new Set();
                 let reviewWarning = false;
                 let teamToolsNoticed = false;
+                let rolloutAt = null; // where the native rollout ended when this turn began: a refused call's only trace
                 let timedOutReview = false;
                 const retryMode = approvalMode[0].toUpperCase() + approvalMode.slice(1);
                 const reviewNotice = (status, action) => {
@@ -1159,7 +1113,7 @@ export const CodexDriver = {
                         return;
                     state.lastError = message;
                     state.lastErrorSetup ||= setup;
-                    emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route) });
+                    emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route, error.codexErrorInfo) });
                 };
                 const handleNotification = (msg) => {
                     const p = msg.params ?? {};
@@ -1241,6 +1195,12 @@ export const CodexDriver = {
                             const draft = codexPatchProgress(p);
                             if (draft)
                                 emit({ ...base(threadId, turnId), ...draft });
+                            break;
+                        }
+                        case "item/commandExecution/outputDelta": {
+                            const output = codexCommandOutput(p);
+                            if (output)
+                                emit({ ...base(threadId, turnId), ...output });
                             break;
                         }
                         case "item/started": {
@@ -1366,6 +1326,7 @@ export const CodexDriver = {
                             }
                             if (abandoned)
                                 break;
+                            reportUnsupportedCalls(rolloutAt, (message) => emit({ ...base(threadId, turnId), type: "runtime.notice", message }));
                             void settle(t.status === "completed", t.status === "completed" ? null :
                                 (classifyError({ text: state.lastError }).reason === "provider_safety" ? "provider_safety" : (state.lastError || t.status || "failed")));
                             break;
@@ -1474,7 +1435,7 @@ export const CodexDriver = {
                     emit({ ...base(threadId, turnId), type: "runtime.error", message: exitMessage });
                     void settle(false, "exit_before_result");
                 });
-                active.set(threadId, { stop, turnId, asks, steer: steerActiveTurn });
+                active.set(threadId, { stop, turnId, asks, steer: steerActiveTurn, pid: child.pid });
                 if (attempt === 0 && !announced)
                     emit({ ...base(threadId, turnId), type: "turn.started" });
                 try {
@@ -1588,6 +1549,7 @@ export const CodexDriver = {
                             }
                             approvalParams = withResolvedSandbox(approvalParams, resumed);
                             codexThreadId = resumed?.thread?.id ?? cursor;
+                            rolloutAt = rolloutMark(resumed?.thread?.path);
                             resumedNativeThread = true;
                         }
                         catch (error) {
@@ -1630,6 +1592,7 @@ export const CodexDriver = {
                         }
                         approvalParams = withResolvedSandbox(approvalParams, started);
                         codexThreadId = started?.thread?.id ?? null;
+                        rolloutAt = rolloutMark(started?.thread?.path);
                         startedModel = started?.model ?? null;
                     }
                     if (!codexThreadId)
@@ -1643,7 +1606,7 @@ export const CodexDriver = {
                         emit({ ...base(threadId, turnId), type: "runtime.notice", message: rebuiltSessionNotice("Codex") });
                     const turnInput = [
                         ...(promptText ? [{ type: "text", text: promptText }] : []),
-                        ...(turn.images ?? []).map((image) => ({ type: "localImage", path: image.path })),
+                        ...await codexImageInputs(turn.images),
                     ];
                     const startTurn = () => {
                         promptSubmitted = true;
@@ -1681,16 +1644,16 @@ export const CodexDriver = {
                     const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route);
                     const needsAuth = refused || /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(raw);
                     const verdict = classifyError(failure);
-                    if (!state.settled && !abandoned && !recoveredMissingSession && !stopRequested && !needsAuth && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
+                    if (!state.settled && !abandoned && !recoveredMissingSession && !stopRequested && !needsAuth && codexTurnId === null && earlyNotifications.length === 0 && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
                         return relaunch(verdict.reason, message, "rpc_error");
                     }
                     if (!state.settled && !abandoned) {
                         if (refused)
                             loginRefused();
                         emit({
-                            ...base(threadId, turnId),
-                            type: "runtime.error",
-                            message,
+                            ...base(threadId, turnId), type: "runtime.error",
+                            message: earlyNotifications.some((event) => ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(event.params?.item?.type))
+                                ? `${message} A tool action may have run. Check its effects before trying again.` : message,
                             ...(needsAuth ? { setup: true } : codexLimitFacts(raw, route)),
                         });
                         await settle(false, needsAuth ? "auth_required" : verdict.reason === "provider_safety" ? "provider_safety" : "rpc_error");
@@ -1700,15 +1663,17 @@ export const CodexDriver = {
             void launchAttempt(0).catch(() => { });
             return { turnId };
         };
+        const versionOf = cliVersionReader(config.cli);
         const snapshot = async () => {
             if (planUnavailable)
                 return { state: "unavailable", authenticated: false, chatgptPlan: true, reason: planUnavailable, authenticationUnavailableReason: planUnavailable };
             const env = childEnv();
-            const version = await new Promise((resolve) => {
-                execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout.trim()));
+            const probe = await new Promise((resolve) => {
+                execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) => resolve(versionOf(err, stdout)));
             });
-            if (!version)
-                return { state: "unavailable", reason: `\`${config.cli}\` CLI not found`, ...(plan ? { chatgptPlan: true } : {}) };
+            if (!("version" in probe))
+                return { state: "unavailable", reason: probe.reason, ...(plan ? { chatgptPlan: true } : {}) };
+            const { version } = probe;
             if (planAuth)
                 return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
                     ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}) };
@@ -1761,24 +1726,19 @@ export const CodexDriver = {
                 }
                 providerArgs = managedCodexArgs(config.managed);
             }
-            const id = codexBackgroundModel(models);
-            if (!id)
+            const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback);
+            if (!route)
                 throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex.");
-            const selection = planAuth || config.managed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
-            if (!planAuth && !config.managed)
-                providerArgs = codexLocalProviderArgs(env, id);
-            return runCodexOneShot({
-                spawn: spawnCli,
-                kill: killCliTree,
-                cli: config.cli,
-                env,
-                prompt,
-                model: selection.model ?? id,
-                modelProvider: selection.modelProvider,
-                providerArgs,
-                options,
-                describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
-            });
+            return runCodexBackgroundRoute(route, (id) => {
+                const selection = planAuth || config.managed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
+                return runCodexOneShot({
+                    spawn: spawnCli, kill: killCliTree, cli: config.cli, env, prompt, options,
+                    model: selection.model ?? id,
+                    modelProvider: selection.modelProvider,
+                    providerArgs: planAuth || config.managed ? providerArgs : codexLocalProviderArgs(env, id),
+                    describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
+                });
+            }, options);
         };
         return {
             instanceId,
@@ -1788,6 +1748,7 @@ export const CodexDriver = {
             get models() {
                 return models;
             },
+            quickModelsUsable: smallModelsUsable,
             refreshModels,
             ...(startupModelRefresh ? { startupModelRefresh } : {}),
             generateMemoryText,
@@ -1848,7 +1809,7 @@ export const CodexDriver = {
                     customMcp: true,
                     phoneMcp: true,
                     browserMcp: true,
-                    dataMcp: true, highlevelMcp: true,
+                    dataMcp: true, highlevelMcp: true, deviceMcp: true,
                     images: true,
                     nativeImageInput: true,
                     effortLevels: ["low", "medium", "high", "xhigh", "max"],
@@ -1871,6 +1832,7 @@ export const CodexDriver = {
                         ?? (decision.behavior === "allow" ? "allowed-once" : decision.behavior === "answer" ? "answered" : "rejected");
                 },
                 hasSession: (threadId) => active.has(threadId),
+                enginePid: (threadId) => active.get(threadId)?.pid,
                 stopAll: async () => {
                     await Promise.all([...active.values()].map(({ stop }) => stop()));
                 },

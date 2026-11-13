@@ -1,7 +1,10 @@
 import { BOT_PACKAGE_MAX_SKILLS } from "./bot-package.js";
 import { isSkillName } from "./skills.js";
 /** The skill side of bot and team package export: which names may be exported, and each bot's exportable copies. */
-export function skillExport({ listBotSkills, readBotSkillFile }) {
+export function skillExport(host) {
+    const { readBotSkillFile } = host;
+    // A skill the engine loads by itself from its own folder (the person's ~/.claude/skills, a project's) is never packed.
+    const listBotSkills = (bot) => host.listBotSkills(bot).filter((skill) => skill.origin !== "native");
     function checkedExportSkillNames(value, bots) {
         if (value === undefined)
             return { ok: true, names: [] };

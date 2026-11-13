@@ -11,16 +11,17 @@ function shellQuote(value: string): string {
 }
 
 /** macOS caps Unix socket paths at 104 bytes and OpenSSH appends a temporary suffix, so a long data path cannot host the socket. */
-function controlDirectory(sshDir: string): string {
+function controlDirectory(sshDir: string, fallbackDir?: string): string {
   if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= 80) return sshDir;
-  const uid = process.getuid!();
+  const uid = typeof process.getuid === "function" ? process.getuid() : 0;
   const id = createHash("sha256").update(resolve(sshDir)).digest("hex").slice(0, 12);
-  // /tmp, not tmpdir(): macOS TMPDIR is often too long for a control socket. Validated first so a symlink or another user's dir cannot redirect it.
-  const dir = `/tmp/omb-ssh-${uid}-${id}`;
-  try { mkdirSync(dir, { mode: 0o700 }); }
+  // Android apps cannot write to /tmp; use the app's data directory instead.
+  const baseDir = process.platform === "android" && fallbackDir ? fallbackDir : "/tmp";
+  const dir = join(baseDir, `omb-ssh-${uid}-${id}`);
+  try { mkdirSync(dir, { recursive: true, mode: 0o700 }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
   const stat = lstatSync(dir);
-  if (!stat.isDirectory() || stat.uid !== uid) throw new Error("The VPS SSH control directory is not private to this user");
+  if (!stat.isDirectory() || (uid !== 0 && stat.uid !== uid)) throw new Error("The VPS SSH control directory is not private to this user");
   chmodSync(dir, 0o700);
   return dir;
 }
@@ -75,7 +76,7 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   mkdirSync(binDir, { recursive: true, mode: 0o700 });
   chmodSync(sshDir, 0o700);
   const configPath = join(sshDir, "config");
-  writeIfChanged(configPath, vpsSshConfigText(controlDirectory(sshDir)), 0o600);
+  writeIfChanged(configPath, vpsSshConfigText(controlDirectory(sshDir, dataDir)), 0o600);
   const realSsh = findExecutable("ssh", pathValue, binDir);
   if (!realSsh) return { configPath, path: pathValue };
   const shim = [

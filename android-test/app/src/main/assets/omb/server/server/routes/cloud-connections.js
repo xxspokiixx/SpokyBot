@@ -17,7 +17,7 @@ const connectSchema = z.union([
     z.object({ apiKey: z.string().trim().min(1).max(500), userId: z.string().min(1).max(200), apps: z.array(z.string().regex(SLUG)).max(500).optional() }).strict(),
 ]);
 export function createCloudConnectionRoutes(deps) {
-    return async ({ req, res, url, path, method, json, readBody }) => {
+    return async ({ req, res, url, path, method, auth, json, readBody }) => {
         if (path !== "/api/cloud-connections" && !path.startsWith("/api/cloud-connections/"))
             return PASS;
         res.setHeader("cache-control", "no-store");
@@ -26,7 +26,7 @@ export function createCloudConnectionRoutes(deps) {
                 return json(res, 405, { error: "method not allowed" });
             return json(res, 200, await deps.list());
         }
-        if (!deps.cloudHome)
+        if (!deps.cloudHome && deps.ownHome?.(auth) !== true)
             return json(res, 404, { error: "not found" });
         if (path === "/api/cloud-connections/held-keys") {
             if (method !== "PUT")

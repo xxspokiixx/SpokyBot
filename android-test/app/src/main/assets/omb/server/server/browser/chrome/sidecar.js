@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { inRunningBrowser } from "../../browser-engine.js";
 import { browserRuntimeEnv } from "../../browser-runtime.js";
+import { spawnBotWork } from "../../oom-score.js";
 import { connectCdp } from "../../browser-sites.js";
 import { NO_PASSKEY_COMMANDS } from "../cdp/passkeys.js";
 /** The pages and workers the browser session attaches to itself; frames and dedicated workers come through their page. */
@@ -93,7 +94,7 @@ async function runningBrowserCdpUrl(session, spec) {
     let answer = await inRunningBrowser(spec.command, env, ["get", "cdp-url"]);
     if (!answer) {
         await new Promise((resolve, reject) => {
-            execFile(spec.command, ["open", "--json", "--no-webmcp"], { env, timeout: 60_000, windowsHide: true }, (error) => error ? reject(error) : resolve());
+            spawnBotWork(() => execFile(spec.command, ["open", "--json", "--no-webmcp"], { env, timeout: 60_000, windowsHide: true }, (error) => error ? reject(error) : resolve()));
         });
         answer = await inRunningBrowser(spec.command, env, ["get", "cdp-url"]);
     }

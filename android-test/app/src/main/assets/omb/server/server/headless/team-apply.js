@@ -292,7 +292,7 @@ export async function reconcile(client, file, options) {
         if (bot?.chiefOfStaff === true && sameSet(bot.managedSections ?? [], managed))
             continue;
         if (!created.has(key(desired.name)))
-            note(`bot "${desired.name}": Chief of Staff of ${desired.team ?? "General"}${managed.length ? `, also working with ${managed.join(", ")}` : ""}`, "changed");
+            note(`bot "${desired.name}": Chief of Staff of ${desired.team ?? "General"}${managed.length ? `, also in charge of ${managed.join(", ")}` : ""}`, "changed");
         if (options.apply)
             await write(`/api/bots/${enc(bot.id)}`, { method: "PATCH", body: JSON.stringify({ chiefOfStaff: true, managedSections: managed, acknowledgePeerScope: true }) });
     }
@@ -419,7 +419,18 @@ export async function teamApplyVerb(ctx) {
     };
 }
 const countsOf = (tally) => ({ created: tally.created, changed: tally.changed, unchanged: tally.unchanged, deleted: tally.deleted });
-export const skillFilePath = (botName, skillName) => posix.join("skills", botName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "bot", skillName, "SKILL.md");
+export const skillFilePath = (botDir, skillName) => posix.join("skills", botDir, skillName, "SKILL.md");
+export function botSkillDirs(botNames) {
+    const taken = new Set();
+    return botNames.map((name) => {
+        const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "bot";
+        let dir = base;
+        for (let n = 2; taken.has(dir); n += 1)
+            dir = `${base}-${n}`;
+        taken.add(dir);
+        return dir;
+    });
+}
 /** Keys never leave the server. */
 export async function teamExportVerb(ctx) {
     const out = flag(ctx.flags, "out")?.trim();
@@ -457,7 +468,8 @@ export async function teamExportVerb(ctx) {
     const skipped = [];
     let skills = 0;
     const botEntries = [];
-    for (const bot of bots) {
+    const skillDirs = botSkillDirs(bots.map((bot) => bot.name));
+    for (const [index, bot] of bots.entries()) {
         const entry = { name: bot.name, ...(bot.section ? { team: bot.section } : {}), ...(bot.title ? { title: bot.title } : {}),
             ...(bot.description ? { description: clean(bot.description, `bot "${bot.name}" description`) } : {}) };
         if (bot.chiefOfStaff)
@@ -487,7 +499,7 @@ export async function teamExportVerb(ctx) {
             entry.skills = [];
         for (const skill of listing) {
             const text = clean(String((await client.json(`/api/bots/${enc(bot.id)}/skills/${enc(skill.name)}`)).text ?? ""), `bot "${bot.name}" skill ${skill.name}`);
-            const relativePath = skillFilePath(bot.name, skill.name);
+            const relativePath = skillFilePath(skillDirs[index], skill.name);
             mkdirSync(dirname(join(dir, relativePath)), { recursive: true });
             writeFileSync(join(dir, relativePath), text);
             entry.skills.push({ file: relativePath, ...(skill.enabled ? {} : { enabled: false }) });

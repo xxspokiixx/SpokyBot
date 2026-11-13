@@ -1,7 +1,7 @@
-// A webhook automation's private address, given to the bot that owns it (or a Chief of Staff that reaches that bot) so
+// A webhook automation's private address, given to the bot that owns it (or a Chief of Staff that manages that bot) so
 // it can set up the app that sends to it. Never in a turn a guest or an outside event drives: event data must not be able
 // to fetch the address and send it on. It travels only in that tool result; transcripts and logs mask it (shared/redact.ts).
-import { canReachPeer } from "./peer-roster.js";
+import { canManage } from "./peer-roster.js";
 import { chiefLevel } from "./chief-level.js";
 import { webhookCredential } from "./webhook-ingress.js";
 const LOOPBACK = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//u;
@@ -10,7 +10,7 @@ export function addressRefusal(ask) {
         return "Only the Cloud's owner gets an automation's address. Tell the person to ask from their own conversation.";
     if (ask.outsideDriven)
         return "A run that an outside event started never gets an automation's address. If it is needed, the person can ask in their own chat.";
-    if (ask.from.id === ask.owner.id || (chiefLevel(ask.from) && canReachPeer(ask.from, ask.owner)))
+    if (ask.from.id === ask.owner.id || (chiefLevel(ask.from) && canManage(ask.from, ask.owner)))
         return null;
     return `Only ${ask.owner.name}, which owns this automation, or a Chief of Staff gets its address.`;
 }
@@ -31,7 +31,7 @@ export function webhookAddress(webhooks, id, baseUrl) {
         note: `Paste url into the setup of the app that sends to this automation, and nowhere else: never repeat it in chat, notes, files or messages to other bots. An app that can't take the full address sends to endpoint with the header "Authorization: Bearer <bearer>".${local}`,
     };
 }
-/** The address for a create_trigger result or a list_triggers request: the address, or why this turn does not get it. */
+/** The address for a trigger create result or a trigger_info request: the address, or why this turn does not get it. */
 export function addressFor(ask, webhooks, id, baseUrl) {
     const refused = addressRefusal(ask);
     if (refused)

@@ -1,6 +1,6 @@
 import { boatCapableEngine, cloudEngineOf } from "@/lib/remote-desktop";
 import { canWorkOnCloud } from "../../shared/cloud-computer";
-import { viewerTargetId } from "../../shared/desktop-viewer";
+import { viewerTargetId, DESKTOP_VIEWER_TARGET } from "../../shared/desktop-viewer";
 import { Switch } from "./SettingsPrimitives";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
@@ -9,7 +9,7 @@ import { CalendarClock, ChevronRight, Columns2, Box, Check, Cloud, Sparkles, Glo
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerFilesPane } from "./ComputerFilesPane";
-import { effectivePlace, isComputerPlace, placeLabelKey, placeOffered } from "@/lib/place";
+import { effectivePlace, isComputerPlace, localVmOffered, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
 import { KeyRow } from "./keys/KeyRow"; import { openKeySettings } from "./keys/key-focus";
 import { cn } from "@/lib/cn";
@@ -28,6 +28,8 @@ import { usePanelPage, type PanelPage } from "@/lib/page-open";
 const DataPanel = lazy(() => import("./data/DataPanel").then((module) => ({ default: module.DataPanel })));
 const loadLiveDesktop = () => import("./LiveDesktop").then((module) => ({ default: module.LiveDesktop }));
 const LiveDesktop = lazy(loadLiveDesktop);
+const loadLocalDesktopPreview = () => import("./LocalDesktopPreview").then((module) => ({ default: module.LocalDesktopPreview }));
+const LocalDesktopPreview = lazy(loadLocalDesktopPreview);
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { parseComputerHelp, transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { openProviderDesktop, useComputerTakeover } from "./computer-takeover";
@@ -244,6 +246,7 @@ export function ComputerPanel({
   const [previewRetry, setPreviewRetry] = useState(0);
   const [vmFrame, setVmFrame] = useState<string | null>(null);
   const [vmStatus, setVmStatus] = useState<LocalVmStatus | null>(null);
+  const [localDesktop, setLocalDesktop] = useState<LocalVmStatus | null>(null);
   const [vpsStatus, setVpsStatus] = useState<VpsComputerStatus | null>(null);
   const [localFrame, setLocalFrame] = useState<string | null>(null);
   const [pending, setPending] = useState<
@@ -795,6 +798,35 @@ export function ComputerPanel({
     };
   }, [panelView, phase, computerStatusCurrent, isLinux, pageVisible, bot.busy, bot.id, bot.threadId]);
 
+  // The phone's "this computer" has no desktop bridge to capture a frame from: its desktop is the proot'ed
+  // Linux one, whose readiness and viewer the server reports.
+  const localDesktopHost = capabilities.host.platform === "android";
+  useEffect(() => {
+    if (panelView !== "computer" || phase !== "local" || !computerStatusCurrent || !localDesktopHost) return;
+    let alive = true;
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const status: LocalVmStatus = await api("/api/local-computer", { signal: controller.signal });
+        if (alive) setLocalDesktop(status);
+      } catch {
+        if (alive) setLocalDesktop(null);
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, 10_000);
+    return () => {
+      alive = false;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [panelView, phase, computerStatusCurrent, localDesktopHost]);
+
+  const localDesktopViewer = localDesktopHost && localDesktop?.desktopReady === true
+    && DESKTOP_VIEWER_TARGET.test(viewerTargetId({ key: localDesktop.target_key }))
+    ? viewerTargetId({ key: localDesktop.target_key })
+    : null;
+
   const frameSrc = !computerStatusCurrent ? null :
     phase === "vm"
       ? vmFrame
@@ -1118,7 +1150,9 @@ export function ComputerPanel({
     ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
     ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
     ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && capabilities.localComputer.reasonCode === "remote-server"))).map(([mode, labelKey, descriptionKey, Icon]) => {
+  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config)
+    && !(mode === "local" && capabilities.localComputer.reasonCode === "remote-server")
+    && !(mode === "vm" && !localVmOffered(capabilities.host.platform)))).map(([mode, labelKey, descriptionKey, Icon]) => {
     const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
     const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
     const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
@@ -1318,7 +1352,11 @@ export function ComputerPanel({
             {computerStatusCurrent && bot.computer === "cloud" && cloudBackend === "vps" && (phase === "ready" || phase === "starting") && !liveHere && <span className="text-[11px]">{t("computer.badge.vps")}</span>}
         </div>
         <div className={cn("relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card", liveHere && "ring-2 ring-accent")}>
-          {liveHere && liveTarget ? (
+          {localDesktopViewer ? (
+            <Suspense fallback={<Loader2 size={18} className="animate-spin text-ink-secondary" />}>
+              <LocalDesktopPreview target={localDesktopViewer} name={bot.name} />
+            </Suspense>
+          ) : liveHere && liveTarget ? (
             <Suspense fallback={<Loader2 size={18} className="animate-spin text-ink-secondary" />}>
               <LiveDesktop
                 target={liveTarget} threadId={bot.threadId} name={bot.name} poster={frameSrc}
@@ -1392,7 +1430,9 @@ export function ComputerPanel({
                   : phase === "vm"
                     ? t("computer.capturingVm")
                   : phase === "local"
-                    ? isLinux
+                    ? localDesktopHost
+                      ? localDesktop?.problem ?? t("computer.linuxReady")
+                      : isLinux
                       ? t("computer.linuxReady")
                       : localMisses >= 3
                       ? t("computer.needsScreenPerm")

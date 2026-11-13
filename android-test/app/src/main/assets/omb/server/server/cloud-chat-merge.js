@@ -359,7 +359,8 @@ function openRoom(store, conversation) {
  * Adds each sent conversation's rows the way a copy's are added (planChatMerge), one conversation at a time, so rows
  * one conversation shares never make another look deleted. Attachments arrived before, under their own names. Only the
  * sender knows what it sent before, so only its `sent` makes a conversation this server lacks one removed here. `owner`:
- * the owner's own session sent them, so a bot conversation's lines and answers its owner wrote arrive as the owner's.
+ * the owner's own session sent them, so the lines and answers its owner wrote, in a bot conversation or a room, arrive as
+ * the owner's.
  */
 export function addSentChats(store, dataDir, sourceDataDir, sent, { busy, owner = null }) {
     const result = { conversations: 0, messages: 0, accepted: [], waiting: [], removed: [] };
@@ -368,8 +369,8 @@ export function addSentChats(store, dataDir, sourceDataDir, sent, { busy, owner 
             result.waiting.push(conversation.threadId);
             continue;
         }
-        const from = conversation.room === undefined ? botSide(store, owner ? { ...conversation, rows: stampOwner(conversation.rows, owner) } : conversation)
-            : roomSide(store, conversation);
+        const arriving = owner ? { ...conversation, rows: stampOwner(conversation.rows, owner) } : conversation;
+        const from = conversation.room === undefined ? botSide(store, arriving) : roomSide(store, arriving);
         if (from === "waiting" || from === "removed") {
             result[from].push(conversation.threadId);
             continue;

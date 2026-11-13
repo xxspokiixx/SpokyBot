@@ -17,9 +17,30 @@ const TMP_DIR = process.env.OMB_ANDROID_TMP_DIR ?? join(LINUX, "tmp");
 
 const TOOL_TIMEOUT_MS = 120_000;
 
+// Ensure opencode binary is available in rootfs
+async function ensureOpenCodeInRootfs() {
+  const sourceBinary = join(LINUX, "opencode");
+  const targetBinary = join(ROOTFS, "usr", "local", "bin", "opencode");
+  if (existsSync(sourceBinary) && !existsSync(targetBinary)) {
+    try {
+      const { copyFileSync, mkdirSync } = await import("node:fs");
+      mkdirSync(join(ROOTFS, "usr", "local", "bin"), { recursive: true });
+      copyFileSync(sourceBinary, targetBinary);
+      const { chmodSync } = await import("node:fs");
+      chmodSync(targetBinary, 0o755);
+      console.error("android-local-computer: copied opencode to rootfs /usr/local/bin");
+    } catch (e) {
+      console.error("android-local-computer: failed to copy opencode to rootfs:", e);
+    }
+  }
+}
+
 // Track graphical desktop state
 let graphicalDesktopPid = null;
 let graphicalDesktopUrl = null;
+
+// Initialize opencode in rootfs on startup
+ensureOpenCodeInRootfs().catch(() => {});
 
 const TOOLS = [
   {
@@ -65,13 +86,21 @@ const TOOLS = [
   },
   // Graphical desktop tools (available when rootfs has X11/VNC stack)
   {
+    name: "setup_graphical_desktop",
+    description: "Install X11/VNC packages to enable a graphical desktop. Run this once before using start_graphical_desktop. Downloads ~100MB of packages.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
     name: "start_graphical_desktop",
-    description: "Start the graphical desktop (Xvfb + openbox + x11vnc + noVNC) in the Linux environment. Returns the noVNC URL for browser access.",
+    description: "Start the graphical desktop (Xvfb + XFCE + x11vnc + noVNC) in the Linux environment. Returns the noVNC URL for browser access.",
     inputSchema: {
       type: "object",
       properties: {
-        width: { type: "integer", description: "Screen width (default: 1920)", default: 1920 },
-        height: { type: "integer", description: "Screen height (default: 1080)", default: 1080 },
+        width: { type: "integer", description: "Screen width (default: 1600)", default: 1600 },
+        height: { type: "integer", description: "Screen height (default: 1000)", default: 1000 },
         depth: { type: "integer", description: "Color depth (default: 24)", default: 24 },
       },
     },
@@ -94,6 +123,102 @@ const TOOLS = [
       },
     },
   },
+  // Mouse interaction tools
+  {
+    name: "mouse_move",
+    description: "Move the mouse cursor to specific coordinates on the graphical desktop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        x: { type: "integer", description: "X coordinate (0-1919)" },
+        y: { type: "integer", description: "Y coordinate (0-1079)" },
+      },
+      required: ["x", "y"],
+    },
+  },
+  {
+    name: "mouse_click",
+    description: "Click the mouse at the current position or specified coordinates.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        x: { type: "integer", description: "Optional X coordinate" },
+        y: { type: "integer", description: "Optional Y coordinate" },
+        button: { type: "string", enum: ["left", "right", "middle"], description: "Mouse button (default: left)", default: "left" },
+        count: { type: "integer", description: "Click count (default: 1)", default: 1 },
+      },
+    },
+  },
+  {
+    name: "mouse_drag",
+    description: "Drag the mouse from one position to another.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        start_x: { type: "integer", description: "Starting X coordinate" },
+        start_y: { type: "integer", description: "Starting Y coordinate" },
+        end_x: { type: "integer", description: "Ending X coordinate" },
+        end_y: { type: "integer", description: "Ending Y coordinate" },
+        button: { type: "string", enum: ["left", "right", "middle"], description: "Mouse button to hold (default: left)", default: "left" },
+      },
+      required: ["start_x", "start_y", "end_x", "end_y"],
+    },
+  },
+  // Keyboard interaction tools
+  {
+    name: "keyboard_type",
+    description: "Type text on the graphical desktop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Text to type" },
+        delay: { type: "integer", description: "Delay between keystrokes in ms (default: 50)", default: 50 },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "keyboard_key",
+    description: "Press a single key on the graphical desktop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Key to press (e.g., Return, Escape, Tab, BackSpace, Delete, Up, Down, Left, Right, F1-F12)" },
+      },
+      required: ["key"],
+    },
+  },
+  {
+    name: "keyboard_hotkey",
+    description: "Press a key combination (hotkey) on the graphical desktop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        keys: { type: "array", items: { type: "string" }, description: "Keys to press simultaneously (e.g., ['ctrl', 'c'], ['alt', 'tab'], ['super', 'd'])" },
+      },
+      required: ["keys"],
+    },
+  },
+  // Clipboard tools
+  {
+    name: "clipboard_get",
+    description: "Get the current clipboard content from the graphical desktop.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "clipboard_set",
+    description: "Set the clipboard content on the graphical desktop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Text to put in clipboard" },
+      },
+      required: ["text"],
+    },
+  },
 ];
 
 // Android's kernel resolves a guest binary's PT_INTERP at the host root, where
@@ -102,13 +227,16 @@ const TOOLS = [
 // apps): it maps the binary and its interpreter itself, from the rootfs.
 // copyAssetDir strips modes, so the app restores the loader's exec bit before
 // any of this can run.
-function guestCommand(bashArgs) {
+function guestCommand(bashArgs, { fakeRoot = false, bindTmp = false } = {}) {
   const args = [
     join(LINUX, "proot"),
     "-R", ROOTFS,
     "-b", `${WORKSPACE}:/work`,
+    "-b", `${LINUX}:/host-linux`,
   ];
+  if (bindTmp) args.push("-b", `${LINUX}/tmp:/tmp`);
   if (DATA_DIR) args.push("-b", `${DATA_DIR}:/data`);
+  if (fakeRoot) args.push("-0");
   args.push("-w", "/work", ...bashArgs);
   return args;
 }
@@ -120,7 +248,7 @@ function runGuest(argv, timeoutMs) {
         // The guest inherits this env: give it the guest's own PATH, not
         // Android's; LD_LIBRARY_PATH must name only proot's two bionic libs,
         // which no guest binary depends on by name.
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
         HOME: "/root",
         TMPDIR: TMP_DIR,
         LD_LIBRARY_PATH: LINUX,
@@ -209,10 +337,25 @@ async function callTool(name, input) {
   }
 
   // Graphical desktop tools
+  if (name === "setup_graphical_desktop") {
+    // Check if already set up
+    const scriptPath = join(ROOTFS, "usr", "local", "bin", "start-graphical-desktop");
+    if (existsSync(scriptPath)) {
+      return { content: [{ type: "text", text: "Graphical desktop already set up. Use start_graphical_desktop to launch it." }], isError: false };
+    }
+    // Run the setup script (long timeout for package download)
+    const setupScript = join(LINUX, "setup-graphical-desktop.sh");
+    if (!existsSync(setupScript)) {
+      return { content: [{ type: "text", text: "Setup script not found. The graphical desktop requires X11/VNC packages to be installed in the rootfs." }], isError: true };
+    }
+    const bashArgs = ["/bin/bash", "/host-linux/setup-graphical-desktop.sh"];
+    const run = await runGuest(guestCommand(bashArgs, { fakeRoot: true }), 600000); // 10 minute timeout for apt install
+    return { content: [{ type: "text", text: run.out || (run.code === 0 ? "Setup complete" : "Setup failed") }], isError: run.code !== 0 };
+  }
   if (name === "start_graphical_desktop") {
-    const width = input?.width ?? 1920;
-    const height = input?.height ?? 1080;
-    const depth = input?.depth ?? 24;
+    const _width = input?.width ?? 1600;
+    const _height = input?.height ?? 1000;
+    const _depth = input?.depth ?? 24;
 
     // Check if graphical desktop is already running
     if (graphicalDesktopPid) {
@@ -222,30 +365,33 @@ async function callTool(name, input) {
     // Check if start-graphical-desktop script exists in rootfs
     const scriptPath = join(ROOTFS, "usr", "local", "bin", "start-graphical-desktop");
     if (!existsSync(scriptPath)) {
-      return { content: [{ type: "text", text: "Graphical desktop not available: start-graphical-desktop script not found in rootfs. Build the arm64 rootfs with X11/VNC stack first." }], isError: true };
+      return { content: [{ type: "text", text: "Graphical desktop not set up. Run setup_graphical_desktop first to install X11/VNC packages (~100MB download), then start_graphical_desktop to launch it." }], isError: true };
     }
 
-    // Start the graphical desktop in background
-    const bashArgs = ["/usr/local/bin/start-graphical-desktop"];
-    const run = await runGuest(guestCommand(bashArgs), 30000); // 30 second timeout for startup
+    // The supervisor backgrounds Xvfb/XFCE/x11vnc/websockify and then waits, so a
+    // kill on timeout is the expected outcome: the desktop outlives this call.
+    await runGuest(guestCommand(
+      ["/usr/local/bin/start-graphical-desktop", String(_width), String(_height), String(_depth)],
+      { bindTmp: true },
+    ), 8000);
 
-    // The script runs in background, so we need to capture the noVNC URL
-    // noVNC runs on port 6080 inside the proot environment
-    // We'll use a fixed URL since the port is known
-    graphicalDesktopUrl = `http://localhost:6080/vnc.html`;
-
-    // Extract PID from output if available
-    const pidMatch = run.out.match(/XVFB_PID=(\d+)/);
-    if (pidMatch) {
-      graphicalDesktopPid = pidMatch[1];
-    }
+    graphicalDesktopUrl = `http://localhost:56082/vnc.html`;
+    // Ask the X display's socket and the viewer port, not a process name list: this command's
+    // own line carries the daemons' words, so pgrep would always find itself. Bash builtins
+    // only, and bindTmp is what makes the guest see the socket Xvfb created under the host tmp.
+    const probe = await runGuest(guestCommand(["/bin/bash", "-lc",
+      "[ -S /tmp/.X11-unix/X3 ] && (exec 3<>/dev/tcp/127.0.0.1/56082) 2>/dev/null && echo UP || echo DOWN"], { bindTmp: true }), 20000);
+    const up = probe.out.includes("UP");
+    graphicalDesktopPid = up ? "running" : null;
 
     return {
       content: [{
         type: "text",
-        text: `Graphical desktop started!\nnoVNC URL: ${graphicalDesktopUrl}\nXvfb PID: ${graphicalDesktopPid || "unknown"}\n\nConnect via browser or use the noVNC client.`
+        text: up
+          ? `Graphical desktop started!\nnoVNC URL: ${graphicalDesktopUrl}\nDisplay: :3 (${_width}x${_height})\n\nThe Screen panel in SpokyBot now shows this desktop.`
+          : "Graphical desktop did not start. Its log is at /tmp/gdesktop.log; the usual cause is a missing X11/VNC package (run setup_graphical_desktop first).",
       }],
-      isError: run.code !== 0
+      isError: !up,
     };
   }
 
@@ -265,7 +411,7 @@ async function callTool(name, input) {
     const outputPath = `/tmp/screenshot.${format}`;
 
     // Use xwd to capture screenshot from Xvfb
-    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:1 xwd -root -out ${shellQuote(outputPath)} && ls -la ${shellQuote(outputPath)}`];
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xwd -root -out ${shellQuote(outputPath)} && ls -la ${shellQuote(outputPath)}`];
     const run = await runGuest(guestCommand(bashArgs), TOOL_TIMEOUT_MS);
 
     if (run.code !== 0) {
@@ -273,6 +419,116 @@ async function callTool(name, input) {
     }
 
     return { content: [{ type: "text", text: `Screenshot saved to ${outputPath}\n${run.out}` }], isError: false };
+  }
+
+  // Mouse interaction tools
+  if (name === "mouse_move") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    const x = input?.x ?? 0;
+    const y = input?.y ?? 0;
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool mousemove ${x} ${y}`];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out || `Mouse moved to ${x},${y}` }], isError: run.code !== 0 };
+  }
+
+  if (name === "mouse_click") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    const x = input?.x;
+    const y = input?.y;
+    const button = input?.button ?? "left";
+    const count = input?.count ?? 1;
+    const buttonMap = { left: 1, right: 3, middle: 2 };
+    const btn = buttonMap[button] ?? 1;
+    let cmd = `DISPLAY=:3 xdotool`;
+    if (x !== undefined && y !== undefined) {
+      cmd += ` mousemove ${x} ${y}`;
+    }
+    cmd += ` click --repeat ${count} ${btn}`;
+    bashArgs = ["/bin/bash", "-lc", cmd];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out || `Mouse ${button} clicked ${count}x` }], isError: run.code !== 0 };
+  }
+
+  if (name === "mouse_drag") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    const start_x = input?.start_x ?? 0;
+    const start_y = input?.start_y ?? 0;
+    const end_x = input?.end_x ?? 0;
+    const end_y = input?.end_y ?? 0;
+    const button = input?.button ?? "left";
+    const buttonMap = { left: 1, right: 3, middle: 2 };
+    const btn = buttonMap[button] ?? 1;
+    const cmd = `DISPLAY=:3 xdotool mousemove ${start_x} ${start_y} mousedown ${btn} mousemove ${end_x} ${end_y} mouseup ${btn}`;
+    bashArgs = ["/bin/bash", "-lc", cmd];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out || `Dragged from ${start_x},${start_y} to ${end_x},${end_y}` }], isError: run.code !== 0 };
+  }
+
+  // Keyboard interaction tools
+  if (name === "keyboard_type") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    const text = String(input?.text ?? "");
+    const delay = input?.delay ?? 50;
+    // Escape special characters for xdotool
+    const escaped = text.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool type --delay ${delay} -- "${escaped}"`];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out || `Typed ${text.length} characters` }], isError: run.code !== 0 };
+  }
+
+  if (name === "keyboard_key") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    const key = String(input?.key ?? "");
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool key -- "${key}"`];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out || `Pressed key: ${key}` }], isError: run.code !== 0 };
+  }
+
+  if (name === "keyboard_hotkey") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    const keys = Array.isArray(input?.keys) ? input.keys : [];
+    if (keys.length === 0) {
+      return { content: [{ type: "text", text: "No keys provided" }], isError: true };
+    }
+    const keyCombo = keys.join("+");
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xdotool key -- "${keyCombo}"`];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out || `Pressed hotkey: ${keyCombo}` }], isError: run.code !== 0 };
+  }
+
+  // Clipboard tools
+  if (name === "clipboard_get") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    // Try xclip first, then xsel
+    bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xclip -o -selection clipboard 2>/dev/null || DISPLAY=:3 xsel -b 2>/dev/null || echo "Clipboard empty or unavailable"`];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out.trim() }], isError: run.code !== 0 };
+  }
+
+  if (name === "clipboard_set") {
+    if (!graphicalDesktopPid) {
+      return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
+    }
+    const text = String(input?.text ?? "");
+    // Escape for shell
+    const escaped = text.replace(/'/g, "'\\''");
+    bashArgs = ["/bin/bash", "-lc", `printf %s '${escaped}' | DISPLAY=:3 xclip -i -selection clipboard 2>/dev/null || printf %s '${escaped}' | DISPLAY=:3 xsel -i -b 2>/dev/null`];
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
+    return { content: [{ type: "text", text: run.out || `Clipboard set (${text.length} chars)` }], isError: run.code !== 0 };
   }
 
   return { content: [{ type: "text", text: `unknown tool: ${name}` }], isError: true };

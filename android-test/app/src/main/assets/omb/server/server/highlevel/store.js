@@ -31,6 +31,7 @@ export function parseHighLevelConnection(value) {
     return parsed.success ? parsed.data : null;
 }
 const EMPTY = { version: 1 };
+export const sameTokens = (a, b) => a.accessToken === b.accessToken && a.refreshToken === b.refreshToken;
 export class HighLevelStore {
     file;
     keyFile;
@@ -94,10 +95,11 @@ export class HighLevelStore {
         this.write({ version: 1, connection: stored });
         return stored;
     }
-    /** A refresh rotates both tokens: the new pair replaces the old one at once, so a retry never reuses a spent refresh token. */
-    rotate(tokens) {
+    /** A refresh rotates both tokens: the new pair replaces the old one at once, so a retry never reuses a spent refresh token.
+     * It lands only on the token version it was started from; null when a newer sign-in, rotation or disconnect came first. */
+    rotate(tokens, from) {
         const current = this.get();
-        if (!current)
+        if (!current || !sameTokens(current, from))
             return null;
         const { problem: _problem, ...rest } = current;
         const next = {
@@ -111,9 +113,10 @@ export class HighLevelStore {
         this.write({ version: 1, connection: next });
         return next;
     }
-    markNeedsSignIn(problem) {
+    /** Only for the token version HighLevel rejected: a newer sign-in or rotation stays signed in. */
+    markNeedsSignIn(problem, rejected) {
         const current = this.get();
-        if (!current)
+        if (!current || !sameTokens(current, rejected))
             return;
         this.write({ version: 1, connection: { ...current, state: "needs-sign-in", problem } });
     }

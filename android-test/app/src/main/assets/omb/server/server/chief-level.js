@@ -21,3 +21,11 @@ export function chiefLevel(bot) {
     const role = roleOf(person);
     return role === "owner" || role === "admin";
 }
+/** The person's SpokyBot holding a Chief's powers: the only bot shown its notification tools. */
+export function holdsSpokyBotTools(bot) {
+    return Boolean(bot?.defaultBot) && chiefLevel(bot);
+}
+/** The role switches a bot's agents tools are listed under: the Chief-only tools, and SpokyBot's notification pair. */
+export function roleToolEnv(bot) {
+    return { OMB_CHIEF_OF_STAFF: chiefLevel(bot) ? "1" : "0", OMB_MAUSBOT: holdsSpokyBotTools(bot) ? "1" : "0" };
+}

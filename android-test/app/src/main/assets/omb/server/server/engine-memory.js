@@ -18,9 +18,13 @@ export const BROWSER_BYTES = 400 * MB;
 /** A new engine's share is held back this long while it starts and grows; it is measured once it has run this long. */
 const RESERVE_MS = 90_000, SETTLED_MS = 30_000;
 const TICK_MS = 2_000, RELIEF_COOLDOWN_MS = 15_000, NOTICE_REPEAT_MS = 10 * 60_000, STOP_GRACE_MS = 5_000;
+/** A minute counts as stalled on memory when every task that could run waited on memory this much of ten seconds (the
+ * kernel's `full avg10`, in percent). */
+const STALL_PERCENT = 20;
+const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 /** Engines that run each thread's turns in processes of their own. */
 export const ENGINE_PROCESS_KINDS = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
-    "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "customAcp", "piAgent", "antigravityAgent"]);
+    "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "customAcp", "piAgent", "antigravityAgent"]);
 const procText = (path) => readFileSync(path, "utf8");
 /** /proc/meminfo, the kernel's OOM kill count and memory stall; null where there is no /proc (not Linux). */
 export function readHostMemory(read = procText) {
@@ -45,8 +49,20 @@ export function readHostMemory(read = procText) {
     return { totalBytes, availableBytes, swapFreeBytes: field("SwapFree") ?? 0,
         oomKills: number("/proc/vmstat", /^oom_kill (\d+)$/m), fullStall10: number("/proc/pressure/memory", /^full avg10=([\d.]+)/m) };
 }
-/** Resident bytes per process group (an engine and the MCP servers it started). Shared pages count once per process, so it
- * errs high. */
+/** A process's proportional set size: each page it shares counts as its share among the processes sharing it. Null where
+ * /proc/<pid>/smaps_rollup can't be read (a kernel before 4.14, another user's process). */
+function pssBytes(pid, read) {
+    try {
+        const found = /^Pss:\s+(\d+) kB$/m.exec(read(`/proc/${pid}/smaps_rollup`));
+        return found ? Number(found[1]) * 1024 : null;
+    }
+    catch {
+        return null;
+    }
+}
+/** What each process group takes (an engine and the MCP servers it started): the sum of its processes' proportional set
+ * sizes, so engines of one kind, or MCP servers on one runtime, count the code they share once between them rather than
+ * once each, as resident pages would. A process whose share can't be read counts its resident pages, which err high. */
 export function processGroupBytes(list = () => readdirSync("/proc"), read = procText) {
     const groups = new Map();
     let pids;
@@ -69,18 +85,50 @@ export function processGroupBytes(list = () => readdirSync("/proc"), read = proc
         // pid (comm) state ppid pgrp …, rss the 24th: comm may hold spaces and parentheses.
         const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
         const group = Number(fields[2]);
-        groups.set(group, (groups.get(group) ?? 0) + (Number(fields[21]) * PAGE_BYTES || 0));
+        groups.set(group, (groups.get(group) ?? 0) + (pssBytes(pid, read) ?? (Number(fields[21]) * PAGE_BYTES || 0)));
     }
     return groups;
 }
 const tasks = (count) => `${count} ${count === 1 ? "task" : "tasks"}`;
 const running = (count) => `${tasks(count)} ${count === 1 ? "is" : "are"} running on this Cloud`;
-export const memoryStopText = (count) => `This Cloud ran out of memory while ${tasks(count)} ran at once, so this one was stopped. `
-    + "It was not a problem with the AI provider. New tasks now wait until there is memory for them.";
+/** The one line a turn stopped for memory ends with: what was closed to keep everything else running. */
+export const memoryStopText = (browser) => `Ran out of room, so I ${browser ? "closed the browser" : "stopped this task"} to keep everything else running.`;
+/** Whether a failed turn's cause is `memoryStopText`'s: such a run is started again once there is room. */
+export const memoryStopped = (cause) => /^Ran out of room, so I (closed the browser|stopped this task) to keep everything else running\./.test(cause);
 export const memoryWaitText = (count) => `Waiting for memory: ${running(count)}, and one more could run it out of memory. `
     + "This one starts by itself when there is room.";
 export const memoryStillWaitingText = (count) => `Still waiting for memory: ${running(count)}.`;
 export const memoryStallText = (cause, count) => `${cause}. This Cloud ran out of memory while ${tasks(count)} ran at once (not a problem with the AI provider)`;
+/** Counts by minute over the last day. */
+export class PressureLedger {
+    minutes = new Map();
+    note(at, kind, amount = 1) {
+        const minute = Math.floor(at / MINUTE_MS);
+        const slot = this.minutes.get(minute) ?? { waits: 0, waitMs: 0, stopped: 0, killed: 0, stalled: 0 };
+        slot[kind] = kind === "stalled" ? 1 : slot[kind] + amount;
+        this.minutes.set(minute, slot);
+        for (const key of this.minutes.keys())
+            if (key <= minute - DAY_MINUTES)
+                this.minutes.delete(key);
+    }
+    /** `waiting`: when each task still waiting began to. */
+    read(at, waiting = []) {
+        const report = { waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 };
+        const since = Math.floor(at / MINUTE_MS) - DAY_MINUTES;
+        for (const [minute, slot] of this.minutes) {
+            if (minute <= since)
+                continue;
+            report.waits += slot.waits;
+            report.waitMs += slot.waitMs;
+            report.stopped += slot.stopped;
+            report.killed += slot.killed;
+            report.stallMinutes += slot.stalled;
+        }
+        for (const start of waiting)
+            report.waitMs += Math.max(0, at - start);
+        return report;
+    }
+}
 export class EngineMemory {
     enabled;
     read;
@@ -95,11 +143,14 @@ export class EngineMemory {
     /** Threads admitted in the last RESERVE_MS: when, and what they were let in for. */
     reserved = new Map();
     queue = [];
-    /** Threads whose engine was stopped for memory: how many tasks ran then. */
+    /** Threads whose engine was stopped for memory: how many tasks ran then, and whether their browser was running. */
     stops = new Map();
     /** Threads that ran while memory was short: the most tasks running then. */
     pressure = new Map();
     oomKills = null;
+    ledger = new PressureLedger();
+    /** Tasks waiting for memory now, and since when. */
+    waitingSince = new Map();
     lastRelief = -Infinity;
     timer = null;
     browsers = null;
@@ -204,6 +255,10 @@ export class EngineMemory {
                 }
                 if (announced === null || this.now() - announced >= NOTICE_REPEAT_MS) {
                     const others = this.othersBusy(threadId);
+                    if (announced === null) {
+                        this.waitingSince.set(waiter, this.now());
+                        this.ledger.note(this.now(), "waits");
+                    }
                     notify(announced === null ? memoryWaitText(others) : memoryStillWaitingText(others));
                     announced = this.now();
                 }
@@ -218,29 +273,36 @@ export class EngineMemory {
         }
         finally {
             this.queue.splice(this.queue.indexOf(waiter), 1);
+            const since = this.waitingSince.get(waiter);
+            if (since !== undefined) {
+                this.waitingSince.delete(waiter);
+                this.ledger.note(this.now(), "waitMs", this.now() - since);
+            }
             this.wake();
         }
     }
     /** The sentence for a turn of this thread whose engine was stopped for memory; null when it was not. */
     stopText(threadId) {
-        const count = this.stops.get(threadId);
-        return count === undefined ? null : memoryStopText(count);
+        const stop = this.stops.get(threadId);
+        return stop === undefined ? null : memoryStopText(stop.browser);
     }
     /** A stalled turn's cause, saying so when memory ran short while it ran. */
     stallCause(threadId, cause) {
-        const count = this.stops.get(threadId) ?? this.pressure.get(threadId);
+        const count = this.stops.get(threadId)?.count ?? this.pressure.get(threadId);
         return count === undefined ? cause : memoryStallText(cause, count);
     }
+    /** The last day's memory pressure, for the Admin's health check (cloud-health.ts): times only, never what ran. */
+    dayPressure() { return this.ledger.read(this.now(), this.waitingSince.values()); }
     /** Every couple of seconds while engines run: notes short memory against the running turns, and stops an engine before
      * the machine runs out: an idle one first, else the newest of two or more busy ones. */
     tick() {
         const memory = this.read();
         if (!memory)
             return;
-        // The kernel's OOM killer just stopped something (an engine first: oom-score.ts): its memory comes back first.
-        const killed = memory.oomKills !== null && this.oomKills !== null && memory.oomKills > this.oomKills;
-        this.oomKills = memory.oomKills ?? this.oomKills;
-        if (killed)
+        if ((memory.fullStall10 ?? 0) >= STALL_PERCENT)
+            this.ledger.note(this.now(), "stalled");
+        // The kernel's OOM killer just stopped something (a bot's process: oom-score.ts): its memory comes back first.
+        if (this.kernelKilled(memory.oomKills))
             return;
         const free = this.free(memory), count = this.busy();
         if (free < this.floor(memory))
@@ -260,8 +322,7 @@ export class EngineMemory {
             return;
         }
         const stopped = this.working(victim);
-        for (const threadId of stopped)
-            this.stops.set(threadId, count);
+        this.noteStops(stopped, () => count);
         void this.stop(victim, "relief").then(() => this.closeBrowsers(stopped));
     }
     /** How much of an idle engine's keep-alive memory allows: 1 with half the machine free above the floor, down to a tenth
@@ -345,21 +406,32 @@ export class EngineMemory {
         if (this.engines.get(pid) === engine)
             this.engines.delete(pid);
         const working = this.working(engine);
-        if (signal === "SIGKILL" && !engine.stopping && working.length) {
-            const kills = this.read()?.oomKills ?? null;
-            if (kills !== null && this.oomKills !== null && kills > this.oomKills) {
-                for (const threadId of working)
-                    this.stops.set(threadId, this.busy(threadId));
-                this.log(`the kernel stopped an engine (pid ${pid}) for memory`);
-                this.closeBrowsers(working);
-            }
-            this.oomKills = kills ?? this.oomKills;
+        if (signal === "SIGKILL" && !engine.stopping && working.length && this.kernelKilled(this.read()?.oomKills ?? null)) {
+            this.noteStops(working, (threadId) => this.busy(threadId));
+            this.log(`the kernel stopped an engine (pid ${pid}) for memory`);
+            this.closeBrowsers(working);
         }
         if (!this.engines.size && this.timer) {
             clearInterval(this.timer);
             this.timer = null;
         }
         this.wake();
+    }
+    /** Whether the kernel stopped processes since the last read of its count, each counted for the day's pressure. */
+    kernelKilled(kills) {
+        const killed = kills !== null && this.oomKills !== null && kills > this.oomKills ? kills - this.oomKills : 0;
+        this.oomKills = kills ?? this.oomKills;
+        if (killed)
+            this.ledger.note(this.now(), "killed", killed);
+        return killed > 0;
+    }
+    /** These threads' turns were stopped for memory, with how many tasks ran then: each says whether its browser was closed. */
+    noteStops(threadIds, count) {
+        for (const threadId of threadIds) {
+            if (!this.stops.has(threadId))
+                this.ledger.note(this.now(), "stopped");
+            this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true });
+        }
     }
     wake() { for (const waiter of this.queue)
         waiter.wake(); }

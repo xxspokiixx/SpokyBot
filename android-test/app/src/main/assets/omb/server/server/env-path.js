@@ -76,6 +76,14 @@ export function registerPathDir(dir) {
     registeredDirs.unshift(dir);
     resetPathCache();
 }
+// App-installed standalone builds go last: a copy the person installs themselves, anywhere, takes over.
+const fallbackDirs = [];
+export function registerFallbackPathDir(dir) {
+    if (fallbackDirs.includes(dir))
+        return;
+    fallbackDirs.push(dir);
+    resetPathCache();
+}
 /** `probed` resets too, or a rescan would drop rc-file PATH entries and never probe the login shell again. */
 export function resetPathCache() {
     cached = null;
@@ -83,6 +91,7 @@ export function resetPathCache() {
 }
 export function augmentedPath() {
     if (cached === null) {
+        const fallback = fallbackDirs.filter((d) => existsSync(d));
         cached = mergePaths([
             ...registeredDirs.filter((d) => existsSync(d)),
             ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
@@ -90,7 +99,7 @@ export function augmentedPath() {
             // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
             ...(loginShellPath ? loginShellPath.split(delimiter) : []),
             ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
-        ]);
+        ].filter((d) => !fallback.includes(d)).concat(fallback));
     }
     if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
         probed = true;
@@ -111,7 +120,9 @@ function probeLoginShellPath() {
         if (!m || !m[1])
             return;
         loginShellPath = m[1];
-        cached = mergePaths([...(cached ?? "").split(delimiter), ...m[1].split(delimiter)]);
+        // Fallback dirs stay last, behind what the person's shell adds.
+        const fallback = fallbackDirs.filter((d) => existsSync(d));
+        cached = mergePaths([...(cached ?? "").split(delimiter).filter((d) => !fallback.includes(d)), ...m[1].split(delimiter), ...fallback]);
     });
 }
 export function resetPathCacheForTests() {
@@ -119,6 +130,7 @@ export function resetPathCacheForTests() {
     probed = false;
     loginShellPath = null;
     registeredDirs.length = 0;
+    fallbackDirs.length = 0;
 }
 /** Windows CLIs keep state under USERPROFILE; a HOME leaking in from a POSIX-flavoured shell is not it. */
 export function userHome(env = process.env) {
@@ -129,14 +141,15 @@ export function userHome(env = process.env) {
 export function harnessHome(name, env = process.env) {
     return join(userHome(env), `.${name}`);
 }
-export function findCliCandidates(name) {
+/** Every copy of `name` on `path` (the app's PATH unless given), in the order a lookup would find them. */
+export function findCliCandidates(name, path = augmentedPath()) {
     if (!name || /[\n\r]/.test(name))
         return [];
     if (/[/\\]/.test(name) || /^[a-zA-Z]:/.test(name))
         return [name];
     const exts = process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
     const out = [];
-    for (const dir of augmentedPath().split(delimiter)) {
+    for (const dir of path.split(delimiter)) {
         if (!dir)
             continue;
         for (const ext of exts) {
@@ -214,7 +227,86 @@ function nodeExe(near, env) {
         return onPath;
     return process.versions.electron ? null : process.execPath;
 }
-/** npm/pnpm .cmd shims spell their target as "%dp0%\..." (or "%~dp0\..."). */
+const POWERSHELL_NAMES = new Set(["powershell.exe", "pwsh.exe"]);
+const POWERSHELL_COMMAND_SWITCHES = new Set(["c", "command", "e", "ec", "enc", "encodedcommand"]);
+/** `-Command` / `-c` / `-EncodedCommand` (and `/c`) run before `-File`, so that line is not a script launch. */
+function isPowerShellCommandSwitch(token) {
+    let name = token.startsWith("-") || token.startsWith("/") ? token.slice(1) : token;
+    const colon = name.indexOf(":");
+    if (colon >= 0)
+        name = name.slice(0, colon);
+    return POWERSHELL_COMMAND_SWITCHES.has(name.toLowerCase());
+}
+function windowsSystemRoot(env) {
+    const source = env ?? process.env;
+    return source.SystemRoot || source.WINDIR || process.env.SystemRoot || process.env.WINDIR || "";
+}
+/** Only `%SystemRoot%` and `%WINDIR%` expand, and only in the executable token. */
+function expandWindowsRoot(token, env) {
+    const root = windowsSystemRoot(env);
+    return token.replace(/%SystemRoot%/gi, () => root).replace(/%WINDIR%/gi, () => root);
+}
+function powerShellExecutable(token, env) {
+    const expanded = expandWindowsRoot(token, env);
+    if (!POWERSHELL_NAMES.has(basename(expanded).toLowerCase()))
+        return null;
+    if (/[\\/]/.test(expanded) || /^[a-zA-Z]:/.test(expanded)) {
+        return extname(expanded).toLowerCase() === ".exe" && isFile(expanded) ? expanded : null;
+    }
+    const hit = whichWin(expanded, env);
+    return hit && extname(hit).toLowerCase() === ".exe" ? hit : null;
+}
+/** `%SCRIPT_DIR%` and `%~dp0` are the shim directory. A remaining `%VAR%`, `..`, or another directory does not count. */
+function siblingPowerShellScript(operand, shimDir) {
+    const prefix = /^(?:%SCRIPT_DIR%|%~dp0)\\?/i.exec(operand);
+    if (!prefix && /%[^%]+%/.test(operand))
+        return null;
+    const rest = prefix ? operand.slice(prefix[0].length) : operand;
+    if (/%[^%]+%/.test(rest))
+        return null;
+    const absolute = /^[a-zA-Z]:[\\/]/.test(rest) || rest.startsWith("\\\\");
+    if (!prefix && !absolute)
+        return null;
+    const script = prefix ? join(shimDir, rest) : rest;
+    if (extname(script).toLowerCase() !== ".ps1" || !isFile(script))
+        return null;
+    if (dirname(script).toLowerCase() !== shimDir.toLowerCase())
+        return null;
+    return script;
+}
+/** `-Command` is not a spawn. The first `-File` whose `.ps1` sits beside the shim is. */
+function parsePowerShellFileShim(shim, text, env) {
+    const shimDir = dirname(shim);
+    for (const line of text.split(/\r?\n/)) {
+        const tokens = splitCliString(line);
+        const head = tokens[0];
+        if (!head || tokens.length < 3)
+            continue;
+        const command = powerShellExecutable(head, env);
+        if (!command)
+            continue;
+        const rest = tokens.slice(1);
+        if (rest.some(isPowerShellCommandSwitch))
+            continue;
+        const fileAt = rest.findIndex((token) => token.toLowerCase() === "-file");
+        const operand = fileAt >= 0 ? rest[fileAt + 1] : undefined;
+        if (!operand)
+            continue;
+        const script = siblingPowerShellScript(operand, shimDir);
+        if (!script)
+            continue;
+        const args = [];
+        for (let index = 0; index < rest.length; index++) {
+            const token = rest[index];
+            if (!token || token === "%*")
+                continue;
+            args.push(index === fileAt + 1 ? script : token);
+        }
+        return { command, args };
+    }
+    return null;
+}
+/** npm/pnpm .cmd shims spell their target as "%dp0%\..." (or "%~dp0\..."). A PowerShell `-File` launcher is spawnable only for a sibling `.ps1`. */
 function parseCmdShim(shim, env) {
     let text;
     try {
@@ -236,7 +328,14 @@ function parseCmdShim(shim, env) {
             return { command: node, args: [script] };
     }
     const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
-    return exe ? { command: exe, args: [] } : null;
+    if (exe)
+        return { command: exe, args: [] };
+    for (const target of targets) {
+        const viaNode = parseNodeShebang(target, env);
+        if (viaNode)
+            return viaNode;
+    }
+    return parsePowerShellFileShim(shim, text, env);
 }
 function parseNodeShebang(file, env) {
     let head = "";
@@ -266,8 +365,18 @@ function parseNodeShebang(file, env) {
 }
 /** One command word's platform spawn rules: identity except on win32, since POSIX resolves PATH and #! itself. */
 function resolveWord(cli, args, env) {
-    if (process.platform !== "win32")
+    if (process.platform !== "win32") {
+        // Resolve the command on PATH to avoid EACCES when a directory with the same name exists in PATH.
+        const path = env ? (env.PATH ?? env.Path ?? "") : augmentedPath();
+        for (const dir of path.split(delimiter)) {
+            if (!dir)
+                continue;
+            const candidate = join(dir, cli);
+            if (isFile(candidate))
+                return { command: candidate, args };
+        }
         return { command: cli, args };
+    }
     const file = whichWin(cli, env);
     if (!file)
         return { command: cli, args };

@@ -1,19 +1,38 @@
-/** Leases expire if Electron crashes; human takeover always wins renewal. */
+/** Leases expire if Electron crashes. */
 const LEASE_EXPIRY_MS = 40_000;
+const HOST = "computer:host";
+const SHARED = "shared:";
+/** Said when another bot's turn on this computer holds its screen. Never a person: a person at this computer is noticed by
+ * the desktop itself, from its own keyboard and mouse. */
+export function hostScreenBusyText(holder) {
+    return `${holder ? `Another bot on this computer, ${holder},` : "Another bot on this computer"} is using its screen right now, so this call was not performed. ` +
+        "It is not a person. Work on something that does not need the screen, then try again in a minute.";
+}
+/** Keeps this desktop's own bot turns and a lent screen call from the person's Cloud from using the screen at once. */
 export class SharedComputerControl {
     leases = new Map();
     resources;
-    held;
-    constructor(resources, held) { this.resources = resources; this.held = held; }
+    holderName;
+    constructor(resources, holderName = () => undefined) {
+        this.resources = resources;
+        this.holderName = holderName;
+    }
+    /** Undefined when the screen is now this call's; otherwise the plain reason it is not. */
     acquire(id) {
-        const owner = { threadId: `shared:${id}`, generation: id };
-        if (this.held() || !this.resources.claim("computer:host", owner)) {
+        const owner = { threadId: `${SHARED}${id}`, generation: id };
+        // The desktop runs one lent call at a time, so an older lent call's lease is always stale: a newer call frees it.
+        const holder = this.resources.holder(HOST);
+        if (holder?.threadId.startsWith(SHARED) && holder.generation !== id)
+            this.release(holder.generation);
+        if (!this.resources.claim(HOST, owner)) {
+            const blocker = this.resources.blocker(HOST, owner);
             this.release(id);
-            throw Object.assign(new Error("This computer is in use locally or held by a person. Wait, then observe it again before acting."), { status: 409 });
+            return hostScreenBusyText(blocker && this.holderName(blocker));
         }
         this.arm(id);
+        return undefined;
     }
-    /** Skips the takeover checks: a heartbeat for a pending operation must not lose its own screen. */
+    /** A heartbeat for a pending operation: never loses its own screen. */
     renew(id) {
         if (this.leases.has(id))
             this.arm(id);
@@ -39,7 +58,7 @@ export class SharedComputerControl {
             clearTimeout(lease.timer);
             this.leases.delete(id);
         }
-        this.resources.release({ threadId: `shared:${id}`, generation: id });
+        this.resources.release({ threadId: `${SHARED}${id}`, generation: id });
     }
     close() { for (const id of this.leases.keys())
         this.release(id); }

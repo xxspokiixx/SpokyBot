@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { botOwner, chiefScope } from "../shared/bot-owner.js";
 import { z } from "zod";
 import { soulDiffLines } from "../shared/line-diff.js";
 import { newId } from "./contracts.js";
@@ -125,9 +126,9 @@ export class TeamSetupRequestService {
         for (const name of request.newTeams)
             if (existingTeams.has(name))
                 throw new TeamSetupError(`Team ${JSON.stringify(name)} now exists. Review a new proposal.`, 409);
-        const allowed = (name) => request.newTeams.includes(section(name)) || this.options.canAccessTeam(chief, name);
+        const allowed = (name) => request.newTeams.includes(section(name)) || this.options.hasTeamAuthority(chief, name);
         const targets = new Set();
-        const projected = this.options.store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: section(bot.section), chiefOfStaff: bot.chiefOfStaff, hidden: bot.hidden }));
+        const projected = this.options.store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: section(bot.section), chiefOfStaff: bot.chiefOfStaff, hidden: bot.hidden, createdBy: bot.createdBy, reportsTo: bot.reportsTo }));
         for (const operation of request.operations) {
             if (targets.has(operation.botId))
                 throw new TeamSetupError("A bot appears twice in the prepared setup");
@@ -140,7 +141,7 @@ export class TeamSetupRequestService {
                     throw new TeamSetupError("Each new bot needs a name, title, soul instructions, and exact model selection");
             }
             else {
-                if (!target || target.hidden || !this.options.canAccessTeam(chief, target.section) || (target.id !== chief.id && Array.isArray(chief.peers) && !chief.peers.includes(target.id)))
+                if (!target || target.hidden || !this.options.hasTeamAuthority(chief, target.section) || (target.id !== chief.id && Array.isArray(chief.peers) && !chief.peers.includes(target.id)))
                     throw new TeamSetupError("A target bot is outside this Chief's authorized team and peer scope", 403);
                 if (teamSetupRevision(target, operation.fields) !== operation.expectedRevision)
                     throw new TeamSetupError(`@${target.name} changed. This setup was cancelled; review a new proposal.`, 409);
@@ -158,7 +159,8 @@ export class TeamSetupRequestService {
                 throw new TeamSetupError("The destination team is outside this Chief's authorized scope", 403);
             if (!request.newTeams.includes(section(destination)) && !existingTeams.has(section(destination)))
                 throw new TeamSetupError("The destination team no longer exists", 409);
-            const next = { id: operation.botId, name: fields.name ?? target.name, section: section(destination), chiefOfStaff: fields.chiefOfStaff ?? target?.chiefOfStaff, hidden: false };
+            const next = { id: operation.botId, name: fields.name ?? target.name, section: section(destination), chiefOfStaff: fields.chiefOfStaff ?? target?.chiefOfStaff, hidden: false,
+                createdBy: target ? target.createdBy : botOwner(chief) ?? undefined, reportsTo: target?.reportsTo };
             const at = projected.findIndex((bot) => bot.id === operation.botId);
             if (at < 0)
                 projected.push(next);
@@ -174,12 +176,12 @@ export class TeamSetupRequestService {
             const candidate = projected.find((bot) => bot.id === operation.botId);
             if (projected.some((bot) => bot.id !== candidate.id && !bot.hidden && bot.section === candidate.section && bot.name.trim().toLowerCase() === candidate.name.trim().toLowerCase()))
                 throw new TeamSetupError(`@${candidate.name} already exists in that team`, 409);
-            if (candidate.chiefOfStaff && projected.some((bot) => bot.id !== candidate.id && bot.chiefOfStaff && bot.section === candidate.section))
+            if (candidate.chiefOfStaff && projected.some((bot) => bot.id !== candidate.id && bot.chiefOfStaff && chiefScope(bot) === chiefScope(candidate)))
                 throw new TeamSetupError("Each team can have one Chief. Include the current Chief's demotion in this plan.", 409);
         }
         if (request.deletion) {
             const target = this.options.store.bot(request.deletion.botId);
-            if (!target || target.hidden || target.id === chief.id || !this.options.canAccessTeam(chief, target.section) || (Array.isArray(chief.peers) && !chief.peers.includes(target.id)))
+            if (!target || target.hidden || target.id === chief.id || !this.options.hasTeamAuthority(chief, target.section) || (Array.isArray(chief.peers) && !chief.peers.includes(target.id)))
                 throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
             if (target.defaultBot)
                 throw new TeamSetupError(defaultBotRefusal(target.name), 409);
@@ -288,7 +290,7 @@ export class TeamSetupRequestService {
         if (!request.deletion) {
             lines.push("\nDefault models apply to groups and new threads. Every existing thread keeps its current model and permissions.");
             if (request.operations.some((operation) => operation.action === "create")) {
-                lines.push("New bots stay owner-owned after creation: connected apps off, the workspace's default access level, a private workspace by default, avatar untouched.");
+                lines.push(`New bots stay owner-owned after creation: the same connected apps as @${chief.name}, the workspace's default access level, a private workspace by default, avatar untouched.`);
             }
             lines.push("Existing execution permissions are unchanged.");
         }

@@ -115,18 +115,13 @@ export class ProfileControl {
         this.releasing = true;
         this.changed();
         let clean = true;
-        let timer;
         try {
-            const drained = Promise.all(this.#tabs().map((tab) => tab.control.disconnect(owner, async () => {
-                if (!await releaseInput(tab).catch(() => false))
-                    clean = false;
-            }).catch(() => undefined))).then(() => true);
-            const late = new Promise((resolve) => { timer = setTimeout(() => resolve(false), this.#takeoverMs); timer.unref?.(); });
-            if (!await Promise.race([drained, late]))
-                clean = false;
+            clean = await this.#drain((tab) => {
+                let released = true;
+                return tab.control.disconnect(owner, async () => { released = await releaseInput(tab).catch(() => false); }).then(() => released, () => true);
+            });
         }
         finally {
-            clearTimeout(timer);
             if (this.owner === owner) {
                 this.owner = null;
                 this.stale = false;
@@ -137,6 +132,32 @@ export class ProfileControl {
             }
             this.releasing = false;
             this.changed();
+        }
+    }
+    /**
+     * One of the person's views went while they keep the browser: what it pressed is let go once the input queued on each
+     * tab has run, as on a hand-back. A page that never takes it leaves the browser uncertain.
+     */
+    async letGo(owner, releaseInput) {
+        if (!owner || this.owner !== owner)
+            return;
+        const clean = await this.#drain((tab) => tab.control.system(() => releaseInput(tab)).catch(() => true));
+        if (clean || this.uncertain)
+            return;
+        this.uncertain = true;
+        this.lostCall = null;
+        this.changed();
+    }
+    /** `work` on every tab, false when one failed or outlasted the drain. */
+    async #drain(work) {
+        let timer;
+        try {
+            const drained = Promise.all(this.#tabs().map(work)).then((results) => results.every(Boolean));
+            const late = new Promise((resolve) => { timer = setTimeout(() => resolve(false), this.#takeoverMs); timer.unref?.(); });
+            return await Promise.race([drained, late]);
+        }
+        finally {
+            clearTimeout(timer);
         }
     }
     async human(owner, tab, run) {

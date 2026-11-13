@@ -6,3 +6,13 @@ export function teamToolsFailed(server) {
     const record = server && typeof server === "object" ? server : null;
     return record?.name === "agents" && record.status === "failed";
 }
+/** The servers of `custom` that Claude Code's `system/init` `mcp_servers` lists as failed, for `session.started`. */
+export function failedCustomMcp(servers, custom) {
+    if (!Array.isArray(servers) || !custom)
+        return {};
+    const failed = servers.flatMap((server) => {
+        const record = server && typeof server === "object" ? server : null;
+        return typeof record?.name === "string" && record.status === "failed" && Object.hasOwn(custom, record.name) ? [record.name] : [];
+    });
+    return failed.length ? { mcpFailed: failed } : {};
+}

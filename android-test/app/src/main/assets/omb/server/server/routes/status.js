@@ -5,6 +5,7 @@ import { loadBrand } from "../brand.js";
 import { browserEngineStatus, ensureChrome, installAgentBrowserBinary, resolveAgentBrowserBinary } from "../browser-engine.js";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs } from "../config.js";
 import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions } from "../decision-log.js";
+import { flushNativeLog } from "../drivers/native.js";
 import { editionForMembers, editionStatus, entitled } from "../enterprise.js";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.js";
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.js";
@@ -106,6 +107,7 @@ export function createStatusRoutes(deps) {
                 return json(res, 400, { error: "limit must be a positive whole number" });
             }
             const limit = parsedLimit;
+            flushNativeLog(threadId);
             return json(res, 200, readThreadEvents({ eventsDir: EVENTS_DIR, nativeDir: NATIVE_DIR, threadId, limit }));
         }
         // Subscription windows (5-hour and weekly). Unlisted, so it stays admin.
@@ -136,7 +138,7 @@ export function createStatusRoutes(deps) {
                 return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
             }
             const kind = provider;
-            const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, cerebras: cfg.cerebras, groq: cfg.groq, meta: cfg.meta, xai: cfg.xai, nvidiaNim: cfg.nvidiaNim }[kind];
+            const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, cerebras: cfg.cerebras, groq: cfg.groq, greenference: cfg.greenference, meta: cfg.meta, xai: cfg.xai }[kind];
             if (body?.key !== undefined && typeof body.key !== "string") {
                 return json(res, 400, { error: "key must be a string" });
             }
@@ -145,8 +147,7 @@ export function createStatusRoutes(deps) {
                 return json(res, 400, { error: "No key to test. Paste one or save one first." });
             if (key.length > 512)
                 return json(res, 400, { error: "That does not look like an API key." });
-            const savedUrl = saved && ("url" in saved ? saved.url : "baseUrl" in saved ? saved.baseUrl : undefined);
-            const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : savedUrl;
+            const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : (saved && "url" in saved ? saved.url : undefined);
             res.setHeader("cache-control", "no-store");
             const verdict = await checkProviderKey({ provider: kind, key, url });
             if (kind !== "anthropic") {

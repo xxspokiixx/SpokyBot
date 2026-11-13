@@ -1,9 +1,14 @@
 import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.js";
-import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.js";
+import { isDeepStrictEqual } from "node:util";
+import { OwnedFile, writeFileAtomic } from "./atomic.js";
+import { saveSoon } from "./save-batch.js";
+import { discardNativeLog } from "./drivers/native.js";
+import { commitRegistryChange, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.js";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.js";
+import { grantScopedApps } from "../shared/connector-scopes.js";
 import { reorderStable } from "../shared/bot-order.js";
+import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.js";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.js";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.js";
 import { peerAllowKey } from "./peer-approval-key.js";
@@ -14,6 +19,7 @@ import { runCommand } from "./commands.js";
 import { workspaceDir } from "./workspace.js";
 import { newId } from "./contracts.js";
 import { pickBotName } from "./names.js";
+import { rotationColor } from "./bot-look.js";
 import { redactBotAuthored } from "./message-redaction.js";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.js";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval } from "../shared/approval-mode.js";
@@ -25,6 +31,7 @@ import { parseConnectorTools } from "./connector-tools.js";
 import { sameModelSelection } from "../shared/thread-model.js";
 import { initialGreetingMessage } from "./initial-greeting.js";
 import { createDefaultBot, defaultBotRefusal } from "./default-bot.js";
+import { appsFromCreator } from "./inherited-apps.js";
 import { ThreadCache } from "./thread-cache.js";
 export const groupWireProjectionIsExact = true;
 // Unicode counts a lone digit, skin tone or regional indicator as an emoji component, not an emoji.
@@ -42,7 +49,7 @@ const ASK_NOW = { approvalMode: "ask", autoApprove: false, alwaysAllow: [] };
 const TASK_PATCH_FIELDS = [
     "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
     "unread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
-    "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel",
+    "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel", "setupRequest",
 ];
 function mirrorActiveGroupTask(group, task) {
     Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
@@ -98,18 +105,6 @@ function tightenRegistryFile(file) {
     }
 }
 const messagesFile = (threadId) => join(DATA_DIR, `messages-${threadId}.json`);
-const COLORS = [
-    "green",
-    "blue",
-    "red",
-    "orange",
-    "purple",
-    "cyan",
-    "pink",
-    "yellow",
-    "teal",
-    "coral",
-];
 export const sectionKey = (section) => section?.trim() || "";
 export function mentionedBots(text, peers) {
     const candidates = peers
@@ -205,31 +200,42 @@ export class Store {
     completeNewBotSelection;
     driverKindOf;
     initialLanguage;
+    personName;
     listeners = new Set();
     registeringInitialSections = true;
+    botsFile = new OwnedFile(BOTS_FILE, { mode: 0o600 });
+    groupsFile = new OwnedFile(GROUPS_FILE, { mode: 0o600 });
     /** Clearing this slot must not clear a concurrently running task's activity. */
     legacyActivities = new Map();
     constructor(defaultSelection, completeNewBotSelection = (selection) => selection, 
     /** Unknown counts as another driver, so Full and Custom fall back to Ask. */
-    driverKindOf = () => undefined, initialLanguage = Intl.DateTimeFormat().resolvedOptions().locale) {
+    driverKindOf = () => undefined, initialLanguage = Intl.DateTimeFormat().resolvedOptions().locale, 
+    /** The person a new bot's greeting names, read as each bot is created; undefined where no one person owns the
+     * server. */
+    personName = () => undefined) {
         this.defaultSelection = defaultSelection;
         this.completeNewBotSelection = completeNewBotSelection;
         this.driverKindOf = driverKindOf;
         this.initialLanguage = initialLanguage;
+        this.personName = personName;
         mkdirSync(DATA_DIR, { recursive: true });
         for (const file of [BOTS_FILE, GROUPS_FILE])
             tightenRegistryFile(file);
         // An unreadable bots.json must never read as "every member was deleted".
         let botsLoaded = false;
         try {
-            this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
+            const text = readFileSync(BOTS_FILE, "utf8");
+            this.bots = JSON.parse(text);
+            this.botsFile.loaded(text);
             botsLoaded = Array.isArray(this.bots);
         }
         catch {
             this.bots = [];
         }
         try {
-            this.groups = JSON.parse(readFileSync(GROUPS_FILE, "utf8"));
+            const text = readFileSync(GROUPS_FILE, "utf8");
+            this.groups = JSON.parse(text);
+            this.groupsFile.loaded(text);
         }
         catch {
             this.groups = [];
@@ -244,6 +250,8 @@ export class Store {
                 botsMigrated = true;
             b.busy = false;
             b.activity = "idle";
+            if (grantScopedApps(b))
+                botsMigrated = true;
             if (typeof b.soul !== "string") {
                 b.soul = "";
                 botsMigrated = true;
@@ -344,7 +352,7 @@ export class Store {
         for (const b of this.bots) {
             if (!b.chiefOfStaff)
                 continue;
-            const key = sectionKey(b.section);
+            const key = chiefScope(b);
             if (!chiefSectionsSeen.has(key)) {
                 chiefSectionsSeen.add(key);
                 if (b.hidden) {
@@ -621,27 +629,27 @@ export class Store {
         if (botsDirty)
             this.saveBots();
     }
-    commitBotChange(bot, action, change, onRollback) {
-        commitRegistryChange(bot, "bots.json", action, () => this.saveBots(), change, onRollback);
+    commitBotChange(bot, action, change, onRollback, bookkeeping = false) {
+        commitRegistryChange(bot, "bots.json", action, bookkeeping ? () => this.saveBotsSoon() : () => this.saveBots(), change, onRollback);
     }
     commitGroupChange(group, action, change) {
         commitRegistryChange(group, "groups.json", action, () => this.saveGroups(), change);
     }
+    saveBotsSoon() { saveSoon(this.botsFile, () => this.saveBots()); }
     saveBots(bots = this.bots, registerSections = true) {
         if (registerSections)
             this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
-        writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
-            ...bot,
+        this.botsFile.write(JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({ ...bot,
             tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
-        })), null, 2), { mode: 0o600 });
+        }))));
     }
     saveGroups(groups = this.groups, registerSections = true) {
         if (registerSections)
             this.rememberSections(groups.map((group) => group.section));
-        writeFileAtomicIfChanged(GROUPS_FILE, JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
+        this.groupsFile.write(JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
             ...g,
             ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
-        })), null, 2), { mode: 0o600 });
+        }))));
     }
     get sections() { return readSections(); }
     rememberSections(names) {
@@ -664,12 +672,12 @@ export class Store {
         if (name === nextName)
             return undefined;
         if (this.sections.includes(nextName) || computers?.forSection(nextName))
-            return "A team with that name already exists";
+            return "A department with that name already exists";
         const members = this.bots.filter(bot => sectionKey(bot.section) === name);
         const rooms = this.groups.filter(group => sectionKey(group.section) === name);
         const affected = this.bots.filter(bot => members.includes(bot) || bot.managedSections?.some(section => sectionKey(section) === name));
         if (affected.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-            return "Stop this team's active work before renaming the team";
+            return "Stop this department's active work before renaming it";
         }
         // Removing an empty identity revokes its old grants, so recreating it cannot restore access.
         if (!members.length && !rooms.length && !computers?.forSection(name))
@@ -710,10 +718,10 @@ export class Store {
         if (!this.sections.includes(name))
             return "No such department";
         if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
-            return "Move all bots (including archived bots) and group chats out of this team first";
+            return "Move all bots (including archived bots) and group chats out of this department first";
         }
         if (nextName !== null && nextName !== name && this.sections.includes(nextName)) {
-            return "A team with that name already exists";
+            return "A department with that name already exists";
         }
         if (nextName === name)
             return undefined;
@@ -737,15 +745,15 @@ export class Store {
         const members = this.bots.filter(bot => sectionKey(bot.section) === name);
         const rooms = this.groups.filter(group => sectionKey(group.section) === name);
         if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-            return "Stop this team's active work before deleting the team";
-        }
-        if (this.bots.filter(bot => bot.chiefOfStaff && (!sectionKey(bot.section) || sectionKey(bot.section) === name)).length > 1) {
-            return "General already has a Chief of Staff. Move or change this team's Chief before deleting the team";
+            return "Stop this department's active work before deleting it";
         }
         const nextBots = this.bots.map(bot => ({ ...bot,
             ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
             ...(bot.managedSections ? { managedSections: bot.managedSections.filter(section => sectionKey(section) !== name) } : {}),
         }));
+        if (chiefConflict(nextBots)) {
+            return "General already has a Chief of Staff. Move or change this department's Chief before deleting it";
+        }
         const nextGroups = this.groups.map(group => sectionKey(group.section) === name ? { ...group, section: undefined } : group);
         try {
             this.saveBots(nextBots);
@@ -854,6 +862,7 @@ export class Store {
     }
     deleteThreadRecord(threadId, dbAlreadyDeleted = false) {
         this.threads.delete(threadId);
+        discardNativeLog(threadId);
         if (!dbAlreadyDeleted)
             mdb.deleteThread(threadId);
         for (const file of [
@@ -883,7 +892,7 @@ export class Store {
         return true;
     }
     reconcileInterruptedGroupGoals(resolve, fallbackDetail = "SpokyBot restarted before this goal finished.", fallbackFinishedAt = Date.now()) {
-        const ownedThreadIds = new Set();
+        const ownedThreadIds = new Set(this.bots.flatMap((bot) => (bot.tasks ?? []).map((task) => task.threadId)));
         for (const group of this.groups) {
             ownedThreadIds.add(group.threadId);
             for (const task of group.tasks ?? [])
@@ -1261,7 +1270,7 @@ export class Store {
             soul: profile.soul ?? "",
             soulHash: soulHash(profile.soul ?? ""),
             notifications: true,
-            color: profile.color ?? COLORS[this.bots.length % COLORS.length],
+            color: profile.color ?? rotationColor(this.bots.length), mascotFaceColor: profile.mascotFaceColor ?? undefined,
             ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
             ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
             // Restricted from its first frame: no one else is ever told it exists.
@@ -1274,6 +1283,10 @@ export class Store {
         };
         if (section)
             bot.section = section;
+        if (profile.createdBy?.trim())
+            bot.createdBy = ownerEmail(profile.createdBy);
+        if (profile.reportsTo?.trim())
+            bot.reportsTo = ownerEmail(profile.reportsTo);
         if (profile.cwd)
             bot.cwd = profile.cwd;
         bot.tasks = [{
@@ -1298,7 +1311,7 @@ export class Store {
         // Before its transcript: clients need the bot/thread mapping to place either message.
         this.emit({ type: "bot", botId: bot.id });
         if (opts.seedMessages !== false) {
-            this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage));
+            this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()));
         }
         return bot;
     }
@@ -1323,16 +1336,16 @@ export class Store {
                 const createdAt = Date.now();
                 const modelSelection = this.newBotSelection(operation.fields.modelSelection);
                 next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
-                    title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
+                    title: "", description: "", soul: "", notifications: true, color: rotationColor(nextBots.length), unread: false,
                     resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
-                    autoApprove: false, composio: false, approvePeerComms: false,
-                    // Absent would mean every tool once connected apps are turned on.
-                    connectorTools: {},
+                    autoApprove: false, approvePeerComms: false,
                     // A restricted Chief never creates a bot everyone sees.
                     ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
+                    // A Chief's new specialist reports to the Chief's own person.
+                    ...(botOwner(chief) ? { createdBy: botOwner(chief) } : {}),
                     tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
-                            unread: false, activity: "idle", busy: false }],
-                };
+                            unread: false, activity: "idle", busy: false }], };
+                Object.assign(next, appsFromCreator(chief, next));
                 if (!next.cwd)
                     delete next.cwd;
                 nextBots.unshift(next);
@@ -1491,6 +1504,8 @@ export class Store {
             this.switchNeedsAsk(id, task.threadId, bot.modelSelection, patch.modelSelection)) : [];
         // Revocations take effect in memory even when the disk write fails.
         Object.assign(bot, patch);
+        if (patch.connectorScopes !== undefined)
+            grantScopedApps(bot);
         for (const task of toAsk)
             Object.assign(task, structuredClone(ASK_NOW));
         const task = this.activeTask(id);
@@ -1556,18 +1571,12 @@ export class Store {
             return { ok: false, reason: "unavailable" };
         const targetSection = sectionKey(section);
         const selected = targets;
-        const destinationChiefIds = new Set([
-            ...selected.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id),
-            ...this.bots
-                .filter((bot) => bot.chiefOfStaff && sectionKey(bot.section) === targetSection)
-                .map((bot) => bot.id),
-        ]);
-        if (destinationChiefIds.size > 1)
-            return { ok: false, reason: "chief-conflict" };
         const patches = new Map();
         for (const bot of selected) {
             patches.set(bot.id, { section: targetSection || undefined });
         }
+        if (chiefConflict(this.bots.map((bot) => ({ ...bot, ...patches.get(bot.id) }))))
+            return { ok: false, reason: "chief-conflict" };
         const changedIds = new Set();
         const nextBots = this.bots.map((bot) => {
             const patch = patches.get(bot.id);
@@ -1608,11 +1617,8 @@ export class Store {
         }
         const next = this.bots.map(bot => ids.has(bot.id)
             ? { ...bot, section: adds.has(bot.id) ? key : undefined } : bot);
-        for (const destination of [key, ""]) {
-            if (next.filter(bot => bot.chiefOfStaff && sectionKey(bot.section) === destination).length > 1) {
-                return { ok: false, reason: "chief-conflict" };
-            }
-        }
+        if (chiefConflict(next))
+            return { ok: false, reason: "chief-conflict" };
         if (ids.size) {
             this.saveBots(next);
             for (let i = 0; i < next.length; i++)
@@ -1663,14 +1669,16 @@ export class Store {
             .find((activity) => activities.includes(activity)) ?? "idle";
         bot.busy = ACTIVITY_BUSY.has(bot.activity);
     }
+    /** Makes `id` its scope's one Chief (its owner's on a Team Cloud, else its department's), or with no `id` leaves
+     * `section` without one. */
     setChiefOfStaff(id, section) {
         const selected = id ? this.bot(id) : null;
         if (id && !selected)
             return null;
-        const targetSection = sectionKey(selected?.section ?? section);
+        const scope = selected ? chiefScope(selected) : chiefScope({ section: section ?? undefined });
         const changed = [];
         for (const bot of this.bots) {
-            if (sectionKey(bot.section) !== targetSection)
+            if (chiefScope(bot) !== scope)
                 continue;
             const next = bot.id === id;
             if (Boolean(bot.chiefOfStaff) === next && !(next && bot.hidden))
@@ -1840,12 +1848,14 @@ export class Store {
         const bot = this.bot(botId);
         if (!bot)
             return;
-        const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
+        const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId), mirrored = !threadId || bot.threadId === threadId;
+        if (isDeepStrictEqual(task?.resumeCursors[instanceId], cursor) && (!mirrored || isDeepStrictEqual(bot.resumeCursors[instanceId], cursor)))
+            return;
         if (task)
             task.resumeCursors[instanceId] = cursor;
-        if (!threadId || bot.threadId === threadId)
+        if (mirrored)
             bot.resumeCursors[instanceId] = cursor;
-        saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBots());
+        saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBotsSoon());
         this.emit({ type: "bot", botId });
     }
     markTaskDispatched(botId, threadId, instanceId) {
@@ -1853,7 +1863,7 @@ export class Store {
         if (!task || task.lastInstanceId === instanceId)
             return;
         task.lastInstanceId = instanceId;
-        saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBots());
+        saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBotsSoon());
     }
     setHandedMessages(botId, threadId, instanceId, state) {
         const task = this.taskByThread(botId, threadId);
@@ -1862,7 +1872,7 @@ export class Store {
         const live = Object.entries(task.handedMessages ?? {})
             .filter(([id, record]) => id !== instanceId && record.session !== undefined && record.session === task.resumeCursors[id]);
         task.handedMessages = { ...Object.fromEntries(live), [instanceId]: state };
-        saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBots());
+        saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBotsSoon());
     }
     addTaskUsage(botId, threadId, turn) {
         const task = this.taskByThread(botId, threadId);
@@ -1895,7 +1905,7 @@ export class Store {
                 ? { context: { tokens: contextTokens, ...(contextWindow > 0 ? { window: contextWindow } : {}) } }
                 : prev.context ? { context: prev.context } : {}),
         };
-        saveRegistryFor("bots.json", "the thread's usage", () => this.saveBots());
+        saveRegistryFor("bots.json", "the thread's usage", () => this.saveBotsSoon());
         this.emit({ type: "bot", botId });
         return task.usage;
     }
@@ -2045,9 +2055,9 @@ export class Store {
     taskByThread(botId, threadId) {
         return this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
     }
-    workThread(botId, fromBotId, fromThreadId, roomLane = false) {
+    workThread(botId, fromBotId, fromThreadId, roomLane = false, also = () => true) {
         return this.tasks(botId).find((t) => t.openedBy?.kind === "work" && t.openedBy.botId === fromBotId &&
-            t.openedBy.threadId === fromThreadId && Boolean(t.openedBy.roomLane) === roomLane && t.archivedAt === undefined);
+            t.openedBy.threadId === fromThreadId && Boolean(t.openedBy.roomLane) === roomLane && t.archivedAt === undefined && also(t));
     }
     projectBotForTask(botId, threadId) {
         const bot = this.bot(botId);
@@ -2093,7 +2103,7 @@ export class Store {
             if (bot.threadId === threadId)
                 this.mirrorActiveTask(bot, task);
             bot.unread = bot.tasks.some(taskCountsAsBotUnread);
-        }, revocation && (() => Object.assign(task, revocation)));
+        }, revocation && (() => Object.assign(task, revocation)), !touchesPermissions(patch));
         this.emit({ type: "bot", botId });
         return task;
     }
@@ -2242,7 +2252,7 @@ export class Store {
         if (!task || !Number.isFinite(at) || (task.askedAt ?? -1) >= at)
             return task ?? null;
         task.askedAt = at;
-        saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBots());
+        saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBotsSoon());
         this.emit({ type: "bot", botId });
         return task;
     }
@@ -2282,7 +2292,7 @@ export class Store {
         this.commitBotChange(bot, "the thread's title", () => {
             task.title = titleFromMessage(text);
             task.titleFromFirstMessage = true;
-        });
+        }, undefined, true);
         this.emit({ type: "bot", botId });
         return task;
     }
@@ -2324,11 +2334,11 @@ export class Store {
     }
     needsSeed() { return this.bots.length === 0; }
     /** A new place's first bot is its SpokyBot and its Chief; a Team Cloud's (`defaultBot: false`) is the team's Chief only. */
-    seedIfEmpty({ defaultBot = true } = {}) {
+    seedIfEmpty({ defaultBot = true, intro } = {}) {
         if (!this.needsSeed())
             return;
         if (defaultBot)
-            createDefaultBot(this, { chief: (id) => this.setChiefOfStaff(id) });
+            createDefaultBot(this, { chief: (id) => this.setChiefOfStaff(id), ...(intro ? { intro } : {}) });
         else
             this.setChiefOfStaff(this.createBot().id);
     }

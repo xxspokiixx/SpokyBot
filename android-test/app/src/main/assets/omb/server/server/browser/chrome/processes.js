@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 /** `<browser root>/processes.json`: every Chrome this data directory's servers launched and have not seen exit. */
 export class ProcessRegistry {
     file;
+    #reserved = new Map();
     constructor(browserRootDir) {
         this.file = join(browserRootDir, "processes.json");
     }
@@ -31,6 +32,25 @@ export class ProcessRegistry {
         const entries = this.list();
         if (entries.some((entry) => entry.pid === pid))
             this.#write(entries.filter((entry) => entry.pid !== pid));
+    }
+    /** Holds a profile folder that a launch is preparing, before its Chrome is registered; the sweep leaves it alone. */
+    reserve(userDataDir) {
+        const dir = resolve(userDataDir);
+        this.#reserved.set(dir, (this.#reserved.get(dir) ?? 0) + 1);
+        let released = false;
+        return () => {
+            if (released)
+                return;
+            released = true;
+            const count = this.#reserved.get(dir) ?? 0;
+            if (count > 1)
+                this.#reserved.set(dir, count - 1);
+            else
+                this.#reserved.delete(dir);
+        };
+    }
+    reserved(userDataDir) {
+        return this.#reserved.has(resolve(userDataDir));
     }
 }
 function execText(file, args) {
@@ -198,16 +218,17 @@ export async function sweep({ root, registry, list = listProcesses, kill = killP
     for (const entry of registered)
         if (!alive(entry.pid) || report.killed.includes(entry.pid))
             registry.remove(entry.pid);
-    const inUse = new Set(processes
-        .filter((listed) => isBrowserProcess(listed) && !report.killed.includes(listed.pid))
-        .map((listed) => resolve(userDataDirOf(listed))));
+    const inUse = new Set([
+        ...processes.filter((listed) => isBrowserProcess(listed) && !report.killed.includes(listed.pid)).map((listed) => resolve(userDataDirOf(listed))),
+        ...registry.list().map((entry) => resolve(entry.userDataDir)),
+    ]);
     for (const folder of ["profiles", "temp"]) {
         const parent = join(root, folder);
         if (!existsSync(parent))
             continue;
         for (const name of readdirSync(parent)) {
             const dir = join(parent, name);
-            if (inUse.has(resolve(dir)))
+            if (inUse.has(resolve(dir)) || registry.reserved(dir))
                 continue;
             if (folder === "temp") {
                 rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

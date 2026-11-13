@@ -2,32 +2,29 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { descriptorUid } from "./local-computer.js";
 import { delimiter, join, resolve } from "node:path";
 export const VPS_SSH_DIR = "ssh";
 function shellQuote(value) {
     return `'${value.replace(/'/g, "'\\''")}'`;
 }
 /** macOS caps Unix socket paths at 104 bytes and OpenSSH appends a temporary suffix, so a long data path cannot host the socket. */
-function controlDirectory(sshDir) {
-    // macOS caps Unix socket paths at 104 bytes and OpenSSH appends a temporary suffix; Linux (including Android's
-    // app sandbox, where /tmp is not writable) can host the socket in sshDir when it fits.
-    const limit = process.platform === "darwin" ? 80 : 100;
-    if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= limit)
+function controlDirectory(sshDir, fallbackDir) {
+    if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= 80)
         return sshDir;
-    const uid = descriptorUid();
+    const uid = typeof process.getuid === "function" ? process.getuid() : 0;
     const id = createHash("sha256").update(resolve(sshDir)).digest("hex").slice(0, 12);
-    // /tmp, not tmpdir(): macOS TMPDIR is often too long for a control socket. Validated first so a symlink or another user's dir cannot redirect it.
-    const dir = `/tmp/omb-ssh-${uid}-${id}`;
+    // Android apps cannot write to /tmp; use the app's data directory instead.
+    const baseDir = process.platform === "android" && fallbackDir ? fallbackDir : "/tmp";
+    const dir = join(baseDir, `omb-ssh-${uid}-${id}`);
     try {
-        mkdirSync(dir, { mode: 0o700 });
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
     catch (error) {
         if (error.code !== "EEXIST")
             throw error;
     }
     const stat = lstatSync(dir);
-    if (!stat.isDirectory() || stat.uid !== uid)
+    if (!stat.isDirectory() || (uid !== 0 && stat.uid !== uid))
         throw new Error("The VPS SSH control directory is not private to this user");
     chmodSync(dir, 0o700);
     return dir;
@@ -84,7 +81,7 @@ export function prepareVpsSsh(dataDir, pathValue, platform = process.platform) {
     mkdirSync(binDir, { recursive: true, mode: 0o700 });
     chmodSync(sshDir, 0o700);
     const configPath = join(sshDir, "config");
-    writeIfChanged(configPath, vpsSshConfigText(controlDirectory(sshDir)), 0o600);
+    writeIfChanged(configPath, vpsSshConfigText(controlDirectory(sshDir, dataDir)), 0o600);
     const realSsh = findExecutable("ssh", pathValue, binDir);
     if (!realSsh)
         return { configPath, path: pathValue };

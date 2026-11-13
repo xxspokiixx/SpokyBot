@@ -6,7 +6,7 @@
 // new Muse model reaches the picker without an app release.
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { Connection, MspError, type DuplexTransport } from "@muse-code/sdk";
 import { z } from "zod";
@@ -330,7 +330,8 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
     };
 
     const refreshModels = async () => {
-      const cwd = mkdtempSync(join(tmpdir(), "omb-muse-models-"));
+      const tmpBase = process.env.TMPDIR ?? process.env.TMP ?? "/tmp";
+      const cwd = mkdtempSync(join(tmpBase, "omb-muse-models-"));
       let host: Host | undefined;
       try {
         host = await startHost(["serve", "--disable-shell", "--disable-write", "--no-session-log"], cwd, "models", false, "openmausbot");

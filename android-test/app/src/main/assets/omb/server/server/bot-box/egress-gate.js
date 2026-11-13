@@ -66,6 +66,8 @@ export function openBoxEgressGate(options) {
         }
         const target = { host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80) };
         const verdict = await check(target);
+        if (req.socket.destroyed)
+            return;
         if ("refused" in verdict) {
             res.writeHead(403, { "content-type": "text/plain" }).end(`Blocked by the box's network gate: ${verdict.refused}.\n`);
             return;
@@ -78,13 +80,15 @@ export function openBoxEgressGate(options) {
         for (const [name, value] of Object.entries(req.headers))
             if (value !== undefined && !HOP_BY_HOP.has(name))
                 headers[name] = value;
-        const upstream = httpRequest({
+        const upstream = track(httpRequest({
             host: target.host, port: target.port, method: req.method, path: `${url.pathname}${url.search}`, headers,
             lookup: pinnedLookup(verdict.addresses),
         }, (answer) => {
             res.writeHead(answer.statusCode ?? 502, answer.headers);
             answer.pipe(res);
-        });
+        }));
+        res.on("close", () => { if (!res.writableFinished)
+            upstream.destroy(); });
         upstream.on("error", () => { if (!res.headersSent)
             res.writeHead(502, { "content-type": "text/plain" }).end("The connection failed.\n");
         else

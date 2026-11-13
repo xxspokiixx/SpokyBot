@@ -13,17 +13,17 @@ import { CustomAcpDriver } from "./acp/custom.js";
 import { HermesAgentDriver } from "./acp/hermes.js";
 import { DeepSeekAgentDriver } from "./acp/deepseek.js";
 import { ClineAgentDriver } from "./acp/cline.js";
+import { CopilotAgentDriver } from "./acp/copilot.js";
 import { OpenAICompatDriver } from "./openai-compat.js";
 import { PiDriver } from "./pi.js";
 import { MistralDriver } from "./mistral.js";
 import { CerebrasDriver } from "./cerebras.js";
 import { GroqDriver } from "./groq.js";
+import { GreenferenceDriver } from "./greenference.js";
 import { MetaDriver } from "./meta.js";
 import { MuseCodeDriver } from "./muse-code.js";
 import { MinimaxDriver } from "./minimax.js";
-import { NvidiaNimDriver } from "./nvidia-nim.js";
 export const BUILT_IN_DRIVERS = [
-    NvidiaNimDriver,
     GrokDriver,
     GrokAgentDriver,
     GeminiAgentDriver,
@@ -34,6 +34,7 @@ export const BUILT_IN_DRIVERS = [
     QwenAgentDriver,
     HermesAgentDriver,
     ClineAgentDriver,
+    CopilotAgentDriver,
     CustomAcpDriver,
     PiDriver,
     OpenAICompatDriver,
@@ -44,6 +45,7 @@ export const BUILT_IN_DRIVERS = [
     MistralDriver,
     CerebrasDriver,
     GroqDriver,
+    GreenferenceDriver,
     MetaDriver,
     MuseCodeDriver,
     DeepSeekAgentDriver,

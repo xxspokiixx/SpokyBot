@@ -36,9 +36,16 @@ export function createControlClient(options) {
     const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
     let cachedAt = 0;
     let cached = DISENGAGED;
-    async function read() {
+    async function read(call) {
         try {
-            const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+            let target = url;
+            if (call && Object.keys(call).length) {
+                const withCall = new URL(url);
+                for (const [key, value] of Object.entries(call))
+                    withCall.searchParams.set(key, value);
+                target = withCall.href;
+            }
+            const res = await fetchImpl(target, { headers, signal: AbortSignal.timeout(timeoutMs) });
             if (!res.ok)
                 return UNCONFIRMED;
             const body = await res.json().catch(() => null);
@@ -57,13 +64,13 @@ export function createControlClient(options) {
     }
     return {
         configured,
-        async state(fresh = false) {
+        async state(fresh = false, call) {
             if (!configured)
                 return DISENGAGED;
             const now = Date.now();
-            if (!fresh && now - cachedAt < cacheMs)
+            if (!fresh && !call && now - cachedAt < cacheMs)
                 return cached;
-            cached = await read();
+            cached = await read(call);
             cachedAt = Date.now();
             return cached;
         },

@@ -16,8 +16,9 @@ export const botDefaultModelSchema = z.object({
 }).strict().refine(value => value.effort === undefined || value.variant === undefined, "choose either a model variant or an effort level");
 // Preferences only: consent flags, live grants, bot IDs and execution state can never be replayed as permission grants.
 export const botDefaultsProfileSchema = profilePatchSchema.extend({
-    name: z.string().max(100).refine(fitsOnOneLine, "name must fit on one line").optional(),
-    section: z.string().trim().max(60).optional(),
+    name: z.string({ error: "name must be a string" }).max(100, { error: "name must be at most 100 characters" })
+        .refine(fitsOnOneLine, "name must fit on one line").optional(),
+    section: z.string({ error: "section must be a string" }).trim().max(60, { error: "section must be at most 60 characters" }).optional(),
     color: z.enum(MAUS_COLOR_NAMES).optional(),
     mascotExpression: z.string().max(60).nullable().optional(),
     modelSelection: botDefaultModelSchema.optional(),
@@ -94,6 +95,16 @@ export const newBotDefaultsSchema = z.object({
     skills: z.array(botSkillTemplateSchema).max(100).default([]),
     routines: z.array(botRoutineTemplateSchema).max(100).default([]),
 }).strict().refine(value => Buffer.byteLength(JSON.stringify(value), "utf8") <= 900_000, "Bot defaults must fit within 900 KB");
+/** The first thing wrong, as one sentence: a field's own message, else which field is not valid. */
+function settingsError(error) {
+    const issue = error.issues[0];
+    if (!issue)
+        return "These bot settings are not valid.";
+    if (issue.code === "unrecognized_keys")
+        return `unsupported bot field: ${issue.keys[0] ?? "unknown"}`;
+    const field = issue.path.join(".");
+    return field && issue.message.startsWith(String(issue.path[0])) ? issue.message : `${field || "the bot"} is not valid`;
+}
 export function resolveBotCreationDefaults(saved, body) {
     if (body.useDefaults !== undefined && typeof body.useDefaults !== "boolean") {
         throw Object.assign(new Error("useDefaults must be true or false"), { status: 400 });
@@ -101,7 +112,7 @@ export function resolveBotCreationDefaults(saved, body) {
     const template = newBotDefaultsSchema.parse(body.useDefaults === false ? {} : saved ?? {});
     const checked = botDefaultsProfileSchema.safeParse(body.settings === undefined ? {} : body.settings);
     if (!checked.success)
-        throw Object.assign(new Error(checked.error.message), { status: 400 });
+        throw Object.assign(new Error(settingsError(checked.error)), { status: 400 });
     const explicit = checked.data;
     const profile = { ...template.profile, ...explicit };
     for (const key of ["name", "title", "description", "modelSelection", "section"]) {
@@ -110,7 +121,7 @@ export function resolveBotCreationDefaults(saved, body) {
     }
     const resolved = botDefaultsProfileSchema.safeParse(profile);
     if (!resolved.success)
-        throw Object.assign(new Error(resolved.error.message), { status: 400 });
+        throw Object.assign(new Error(settingsError(resolved.error)), { status: 400 });
     if (!resolved.data.name?.trim())
         delete resolved.data.name;
     return { ...template, profile: resolved.data };

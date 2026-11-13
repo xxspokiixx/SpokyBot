@@ -6,7 +6,7 @@ import { identityOverride } from "./identity.js";
 import { CdpPage } from "./page.js";
 import { RefCounter } from "./refs.js";
 import { applyPermissions, releaseSession, setUpWorkerSession } from "./targets.js";
-/** Every headless page is this size, so pictures, boxes and clicks agree. */
+/** The page size a headless browser connected without one is fitted to; setViewport changes it. */
 export const VIEWPORT = { width: 1280, height: 720 };
 const FIT_ROUNDS = 3;
 /** One Chrome over one CDP connection: its tabs, downloads and permissions. */

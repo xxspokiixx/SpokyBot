@@ -385,6 +385,7 @@ const support = {
         "_x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
         "x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
     },
+    askTool: "ask_user_question",
     displayName: "Grok",
     images: true,
     acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
@@ -438,7 +439,7 @@ const support = {
             const available = new Set([
                 ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
                 ...(turn.integrations?.browser ? ["browser"] : []), ...(turn.integrations?.localComputer ? ["computer"] : []),
-                ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.highlevel ? ["highlevel"] : []),
+                ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.highlevel ? ["highlevel"] : []), ...(turn.integrations?.device ? ["device"] : []),
                 ...Object.keys(turn.integrations?.custom ?? {}),
             ].filter((name) => canUseMcpServer(turn.toolScope, name)));
             const deadline = Date.now() + 10_000;
@@ -467,14 +468,11 @@ const support = {
                 await delay(50);
             }
         }
-        if (!turn.model)
+        // Repeating set_model can rebuild the harness, dropping its MCP catalog, or reject a valid resumed profile.
+        if (!turn.model || currentModelId === turn.model)
             return;
         if (narrowsNativeTools(turn.toolScope)) {
-            if (currentModelId !== turn.model) {
-                throw new Error("Grok could not confirm the selected model without replacing its tool profile. Start a new conversation or choose a model with a supported Grok profile. No prompt was sent.");
-            }
-            // Repeating set_model can rebuild the harness or reject a valid resumed profile.
-            return;
+            throw new Error("Grok could not confirm the selected model without replacing its tool profile. Start a new conversation or choose a model with a supported Grok profile. No prompt was sent.");
         }
         try {
             await request("session/set_model", { sessionId, modelId: turn.model });
@@ -502,7 +500,7 @@ const support = {
             }
         }
     },
-    pickAuthMethod: (methods) => (methods.some((m) => m.id === "cached_token") ? "cached_token" : null),
+    pickAuthMethod: (methods) => ["cached_token", "grok.com"].find((id) => methods.some((m) => m.id === id)) ?? null,
     authFailure: "fail",
     isAuthenticated: (env) => grokSignedIn(env),
     // `--append-system-prompt`/`--rules` do not reach the agent-stdio system prompt (1.0.0).

@@ -46,12 +46,89 @@ export const CREDENTIAL_TARGETS = {
         placeholder: "ops_…",
         helpUrl: "https://developer.1password.com/docs/service-accounts/get-started/",
     },
+    composioApiKey: {
+        label: "Composio API key",
+        description: "Connects apps such as Gmail, Slack and GitHub through your own Composio project.",
+        placeholder: "ak_…",
+        helpUrl: "https://dashboard.composio.dev",
+    },
+    openaiApiKey: {
+        label: "OpenAI API key",
+        description: "Runs OpenAI models with your own key.",
+        placeholder: "sk-…",
+        helpUrl: "https://platform.openai.com/api-keys",
+    },
+    anthropicApiKey: {
+        label: "Anthropic API key",
+        description: "Runs Claude models with your own key. Bots signed in to Claude keep using their sign-in.",
+        placeholder: "sk-ant-…",
+        helpUrl: "https://console.anthropic.com/settings/keys",
+    },
+    openrouterApiKey: {
+        label: "OpenRouter API key",
+        description: "Runs models from many providers through OpenRouter.",
+        placeholder: "sk-or-v1-…",
+        helpUrl: "https://openrouter.ai/keys",
+    },
+    mistralApiKey: {
+        label: "Mistral API key",
+        description: "Runs Mistral models with your own key.",
+        placeholder: "Paste your Mistral API key",
+        helpUrl: "https://console.mistral.ai/api-keys",
+    },
+    cerebrasApiKey: {
+        label: "Cerebras API key",
+        description: "Runs Cerebras models with your own key.",
+        placeholder: "csk-…",
+        helpUrl: "https://cloud.cerebras.ai/",
+    },
+    groqApiKey: {
+        label: "Groq API key",
+        description: "Runs Groq models with your own key.",
+        placeholder: "gsk_…",
+        helpUrl: "https://console.groq.com/keys",
+    },
+    greenferenceApiKey: {
+        label: "Greenference API key",
+        description: "Runs Greenference models with your own key.",
+        placeholder: "Paste your Greenference API key",
+        helpUrl: "https://greenference.com/dashboard/tokens",
+    },
+    metaApiKey: {
+        label: "Meta API key",
+        description: "Runs Meta's models with your own key.",
+        placeholder: "LLM|…",
+        helpUrl: "https://dev.meta.ai/docs/authentication",
+    },
+    deepseekApiKey: {
+        label: "DeepSeek API key",
+        description: "Runs DeepSeek models with your own key.",
+        placeholder: "sk-…",
+        helpUrl: "https://platform.deepseek.com/api_keys",
+    },
 };
+/** AI provider keys: the server's config only, like Settings → Keys, and refused where Admin manages the models. */
+export const PROVIDER_CREDENTIAL_TARGETS = [
+    "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
+];
+/** A secret SpokyBot does not keep itself: the bot names it, and gets a one-use reference or a private file. */
+export const CUSTOM_SECRET_TARGET = "customSecret";
+export const SECRET_DELIVERIES = ["ref", "file"];
+export const CUSTOM_SECRET_LABEL_MAX = 80;
+export const CUSTOM_SECRET_REASON_MAX = 240;
 export function isCredentialTargetId(value) {
     return typeof value === "string" && Object.prototype.hasOwnProperty.call(CREDENTIAL_TARGETS, value);
 }
 export function isConfigCredentialTarget(id) {
     return id !== "onePasswordToken";
+}
+export function isProviderCredentialTarget(id) {
+    return PROVIDER_CREDENTIAL_TARGETS.includes(id);
+}
+/** The desktop's encrypted-store slot that holds this key, where Settings saves it; null for a key Settings keeps in the
+ * server's config. A paired phone can save only a key with a slot. */
+export function desktopCredentialSlot(id) {
+    return isConfigCredentialTarget(id) && !isProviderCredentialTarget(id) ? id : null;
 }
 /** Where a card saves what the person typed: the 1Password token goes to Logins, which checks it reaches 1Password. */
 export function credentialSaveRequest(id, value) {
@@ -73,6 +150,27 @@ export function credentialConfigPatch(id, value) {
             return { tts: { fishKey: value } };
         case "openaiImageApiKey":
             return { imageGen: { key: value } };
+        case "composioApiKey":
+            return { composio: { apiKey: value } };
+        case "openaiApiKey":
+            return { openai: { key: value } };
+        // Settings' first Anthropic key leaves every bot signed in to Claude on its sign-in; a card appears only while none is set.
+        case "anthropicApiKey":
+            return { anthropic: { key: value, everyClaudeBot: false } };
+        case "openrouterApiKey":
+            return { openrouter: { key: value } };
+        case "mistralApiKey":
+            return { mistral: { key: value } };
+        case "cerebrasApiKey":
+            return { cerebras: { key: value } };
+        case "groqApiKey":
+            return { groq: { key: value } };
+        case "greenferenceApiKey":
+            return { greenference: { key: value } };
+        case "metaApiKey":
+            return { meta: { key: value } };
+        case "deepseekApiKey":
+            return { deepseek: { key: value } };
     }
 }
 export function credentialIsConfigured(config, id) {
@@ -91,6 +189,26 @@ export function credentialIsConfigured(config, id) {
             return Boolean(config.imageGen?.key);
         case "onePasswordToken":
             return Boolean(config.onePassword?.connected);
+        case "composioApiKey":
+            return Boolean(config.composio?.apiKey);
+        case "openaiApiKey":
+            return Boolean(config.openai?.key);
+        case "anthropicApiKey":
+            return Boolean(config.anthropic?.key);
+        case "openrouterApiKey":
+            return Boolean(config.openrouter?.key);
+        case "mistralApiKey":
+            return Boolean(config.mistral?.key);
+        case "cerebrasApiKey":
+            return Boolean(config.cerebras?.key);
+        case "groqApiKey":
+            return Boolean(config.groq?.key);
+        case "greenferenceApiKey":
+            return Boolean(config.greenference?.key);
+        case "metaApiKey":
+            return Boolean(config.meta?.key);
+        case "deepseekApiKey":
+            return Boolean(config.deepseek?.key);
     }
 }
 /** A still-pending credential card for this target — the set a newer
@@ -99,6 +217,17 @@ export function credentialIsConfigured(config, id) {
 export function isPendingCredentialRequest(message, target, requestingBotId, roomThread) {
     return (message.kind === "secret" &&
         message.secret?.target === target &&
+        message.secret.provided !== true &&
+        message.secret.dismissed !== true &&
+        message.secret.superseded !== true &&
+        (!roomThread || message.from?.botId === requestingBotId));
+}
+/** A still-pending card from this bot for a custom secret with the same name, which a newer request supersedes. */
+export function isPendingCustomSecretRequest(message, label, requestingBotId, roomThread) {
+    return (message.kind === "secret" &&
+        message.secret?.target === CUSTOM_SECRET_TARGET &&
+        typeof message.secret.label === "string" &&
+        message.secret.label.toLowerCase() === label.toLowerCase() &&
         message.secret.provided !== true &&
         message.secret.dismissed !== true &&
         message.secret.superseded !== true &&

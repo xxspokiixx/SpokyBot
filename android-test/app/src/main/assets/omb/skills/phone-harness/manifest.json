@@ -2,7 +2,7 @@
   "id": "phone-harness",
   "name": "Phone Harness",
   "version": "0.1.0",
-  "description": "Control an Android device: routes web-capable apps to the bot's own browser, drives the rest on the real screen.",
+  "description": "Control a physical Android phone connected over authorized USB debugging.",
   "defaultEnabled": true,
   "triggerTerms": [
     "android",
@@ -11,18 +11,7 @@
     "adb",
     "my phone",
     "mobile app",
-    "on the phone",
-    "whatsapp",
-    "telegram",
-    "my device",
-    "on my device",
-    "device app",
-    "open the app",
-    "settings",
-    "system settings",
-    "open settings",
-    "open any app",
-    "any app"
+    "on the phone"
   ],
   "requiredCapabilities": ["phoneMcp"]
 }

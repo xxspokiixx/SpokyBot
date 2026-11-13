@@ -1,7 +1,9 @@
 // The descriptor and turn token travel in environment variables, never argv or logs.
 import { runMcpBridge } from "./mcp-bridge.js";
 import { augmentedPath } from "./env-path.js";
-const { OMB_CUA_COMMAND: command, OMB_CUA_ARGS: encodedArgs, OMB_CONTROL_URL: url, OMB_CONTROL_TOKEN: token, ...childEnv } = process.env;
+import { localComputerCallQuery, localComputerRelay, localComputerResultLine } from "./local-computer-guidance.js";
+import { journalUrl } from "./saved-steps/journal-tap.js";
+const { OMB_CUA_COMMAND: command, OMB_CUA_ARGS: encodedArgs, OMB_CUA_PLATFORM: platform, OMB_CONTROL_URL: url, OMB_CONTROL_TOKEN: token, OMB_COMPUTER_JOURNAL: journal, ...childEnv } = process.env;
 let args;
 try {
     const parsed = JSON.parse(encodedArgs ?? "");
@@ -23,5 +25,8 @@ runMcpBridge({
     args,
     env: { ...childEnv, PATH: augmentedPath() },
     label: "Local Cua Driver",
-    gate: { url: url, token: token },
+    gate: { url: url, token: token, describe: localComputerCallQuery },
+    ...(journal === "1" ? { journal: { url: journalUrl(url), token: token } } : {}),
+    rewriteResponse: localComputerResultLine,
+    relay: localComputerRelay(platform ?? process.platform),
 });

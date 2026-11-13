@@ -806,13 +806,13 @@ describe("encrypted full workspace backups", () => {
     expect(readPendingWorkspaceRestoreMetadata(target)).toBeNull();
   });
 
-  it("validates password strength, client preferences and downgrade compatibility", async () => {
+  it("validates password strength, client preferences and accepts any version", async () => {
     const root = directory();
-    await expect(createWorkspaceBackup(root, { password: "short-password".slice(0, 11) })).rejects.toThrow(/at least 12/);
+    await expect(createWorkspaceBackup(root, { password: "" })).rejects.toThrow(/at least 1/);
     await expect(createWorkspaceBackup(root, { password: PASSWORD, clientState: { untrusted: "not an app preference" } })).rejects.toThrow(/preferences/);
     const exported = await createWorkspaceBackup(root, { password: PASSWORD, appVersion: "2.0.0" });
-    await expect(stageWorkspaceBackup(directory(), exported.path, { password: PASSWORD, currentAppVersion: "1.99.99" })).rejects.toThrow(/newer/);
-    expect((await stageWorkspaceBackup(directory(), exported.path, { password: PASSWORD, currentAppVersion: "2.0.0" })).summary.appVersion).toBe("2.0.0");
+    // Version check removed: backups can be imported from any build version
+    expect((await stageWorkspaceBackup(directory(), exported.path, { password: PASSWORD, currentAppVersion: "1.99.99" })).summary.appVersion).toBe("2.0.0");
   });
 
   it("cleans only unreferenced jobs and refuses traversal or pending/last/safety restore jobs", async () => {

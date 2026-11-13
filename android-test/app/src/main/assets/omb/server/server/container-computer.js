@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { augmentedPath, resolveCliSpawn } from "./env-path.js";
+import { workspacePreparationDockerfile } from "./container-workspace.js";
 import { DATA_DIR } from "./config.js";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.js";
 import { SPAWNED_PROXIES } from "./proxy-paths.js";
@@ -20,7 +21,7 @@ export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // localhost/ is explicit: Podman prepends it to unqualified build tags and may then resolve the name on Docker Hub.
 // Image and container labels, not this mutable tag, decide compatibility.
 export const IMAGE_REPOSITORY = "localhost/openmausbot/cua-local-vm";
-export const IMAGE_LAYER_VERSION = "6";
+export const IMAGE_LAYER_VERSION = "7";
 export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
 export const CONTAINER = "openmausbot-computer";
@@ -34,7 +35,7 @@ export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
 export const DISPLAY = ":1";
 export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
 export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
-const RUNTIMES = ["docker", "podman", "container"];
+const RUNTIMES = ["docker", "podman", "container", "proot"];
 const INTERNAL_VIEWER_PORT = 6901;
 const HOST_VIEWER_PORT = 6080;
 const MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
@@ -124,32 +125,7 @@ RUN set -eux; \\
     curl -fsSL 'https://raw.githubusercontent.com/notofonts/noto-cjk/165c01b46ea533872e002e0785ff17e44f6d97d8/LICENSE' -o /usr/local/share/licenses/noto-cjk/OFL.txt; \\
     echo '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2  /usr/local/share/licenses/noto-cjk/OFL.txt' | sha256sum -c -; \\
     fc-cache -f
-RUN printf '%s\\n' \\
-      '#!/bin/sh' \\
-      'set -eu' \\
-      'workspace=${VM_WORKSPACE_GUEST}' \\
-      'profiles="$workspace/.browser-profiles"' \\
-      'mkdir -p "$profiles/google-chrome" "$profiles/chromium" "$profiles/mozilla" "$HOME/.config"' \\
-      'if ! chmod 0700 "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" "$profiles/mozilla" 2>/dev/null; then' \\
-      '  for directory in "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" "$profiles/mozilla"; do' \\
-      '    test -r "$directory" && test -w "$directory" && test -x "$directory"' \\
-      '  done' \\
-      'fi' \\
-      'migrate_profile() {' \\
-      '  source="$1"' \\
-      '  target="$profiles/$2"' \\
-      '  if [ -d "$source" ] && [ ! -L "$source" ] && [ -z "$(find "$target" -mindepth 1 -print -quit)" ]; then' \\
-      '    cp -a "$source"/. "$target"/' \\
-      '  fi' \\
-      '  rm -rf "$source"' \\
-      '  ln -s "$target" "$source"' \\
-      '}' \\
-      'migrate_profile "$HOME/.config/google-chrome" google-chrome' \\
-      'migrate_profile "$HOME/.config/chromium" chromium' \\
-      'migrate_profile "$HOME/.mozilla" mozilla' \\
-      'find "$profiles" \\( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie -o -name .parentlock -o -name lock -type l \\) -delete' \\
-      > /usr/local/bin/prepare-openmausbot-workspace.sh \\
-    && chmod 0755 /usr/local/bin/prepare-openmausbot-workspace.sh
+${workspacePreparationDockerfile(VM_WORKSPACE_GUEST)}
 # A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs.
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
@@ -831,6 +807,181 @@ export async function containerExec(target, command, options = {}) {
     ], { timeout: (seconds + 20) * 1000 });
     const timedOut = result.code === 124 || result.code === 137;
     return { exitCode: result.code, stdout: clipExecOutput(result.stdout), stderr: clipExecOutput(result.stderr), timedOut };
+}
+/** Check status of the Android proot environment (for "this computer" on Android). */
+export async function androidProotStatus() {
+    const linuxDir = process.env.OMB_ANDROID_LINUX_DIR;
+    const rootfs = process.env.OMB_ANDROID_ROOTFS;
+    const workspace = process.env.OMB_ANDROID_WORKSPACE;
+    const dataDir = process.env.OMB_ANDROID_DATA_DIR;
+    const tmpDir = process.env.OMB_ANDROID_TMP_DIR;
+    const baseStatus = emptyStatus("linux", SHARED_LOCAL_VM_TARGET);
+    if (!linuxDir || !rootfs || !workspace) {
+        return {
+            ...baseStatus,
+            problem: "Android proot environment is not configured",
+        };
+    }
+    // Check if proot binary exists
+    const { existsSync } = await import("node:fs");
+    const prootPath = join(linuxDir, "proot");
+    const loaderPath = join(linuxDir, "loader");
+    if (!existsSync(prootPath) || !existsSync(loaderPath)) {
+        return {
+            ...baseStatus,
+            problem: "Android proot binaries not found",
+        };
+    }
+    // Check if rootfs exists
+    if (!existsSync(rootfs)) {
+        return {
+            ...baseStatus,
+            problem: "Android rootfs not found",
+        };
+    }
+    // Check if graphical desktop setup script exists in rootfs
+    const setupScriptPath = join(rootfs, "usr", "local", "bin", "start-graphical-desktop");
+    const setupScriptExists = existsSync(setupScriptPath);
+    // Answer the two things the viewer needs, not a list of process names: a checker's own
+    // command line carries the daemons' words, so pgrep would always find itself.
+    let desktopRunning = false;
+    let desktopError = null;
+    let viewerUrl = null;
+    if (setupScriptExists) {
+        try {
+            const { spawn } = await import("node:child_process");
+            const checkResult = await new Promise((resolve) => {
+                const child = spawn(prootPath, [
+                    "-R", rootfs,
+                    "-b", `${workspace}:/work`,
+                    "-b", `${linuxDir}:/host-linux`,
+                    // Xvfb and x11vnc put their socket and lock under the host tmp dir: without
+                    // this bind the guest's /tmp is the rootfs's own, and the display looks dead.
+                    "-b", `${linuxDir}/tmp:/tmp`,
+                    ...(dataDir ? ["-b", `${dataDir}:/data`] : []),
+                    "-w", "/work", "/bin/bash", "-lc",
+                    // Bash builtins only: X client binaries cannot always load their libraries here, and a
+                    // display that answers on its socket plus a viewer port that accepts is the whole contract.
+                    "[ -S /tmp/.X11-unix/X3 ] && (exec 3<>/dev/tcp/127.0.0.1/56082) 2>/dev/null && echo RUNNING || echo NOT_RUNNING"
+                ], {
+                    env: {
+                        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
+                        HOME: "/root",
+                        TMPDIR: tmpDir ?? join(linuxDir, "tmp"),
+                        LD_LIBRARY_PATH: linuxDir,
+                        PROOT_TMP_DIR: tmpDir ?? join(linuxDir, "tmp"),
+                        PROOT_NO_SECCOMP: "1",
+                        PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+                        PROOT_LOADER: loaderPath,
+                    },
+                    stdio: ["ignore", "pipe", "pipe"],
+                });
+                let stdout = "";
+                child.stdout?.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+                child.on("close", (code) => {
+                    // "NOT_RUNNING" also contains "RUNNING": compare the whole answer.
+                    resolve({ running: stdout.trim() === "RUNNING", error: code !== 0 ? "check failed" : undefined });
+                });
+                child.on("error", (err) => resolve({ running: false, error: err.message }));
+                setTimeout(() => { child.kill("SIGKILL"); resolve({ running: false, error: "timeout" }); }, 10_000);
+            });
+            desktopRunning = checkResult.running;
+            if (checkResult.error)
+                desktopError = checkResult.error;
+        }
+        catch (e) {
+            desktopError = e instanceof Error ? e.message : "check failed";
+        }
+    }
+    if (desktopRunning) {
+        viewerUrl = "http://localhost:56082/vnc.html";
+    }
+    return {
+        ...baseStatus,
+        runtime: "proot",
+        available: ["proot"],
+        daemonUp: true,
+        image: setupScriptExists,
+        imageMatches: setupScriptExists,
+        managed: setupScriptExists,
+        container: desktopRunning ? "running" : "missing",
+        network: "loopback",
+        security: "hardened",
+        persistence: "durable",
+        desktopReady: desktopRunning,
+        desktop_error: desktopError,
+        create_supported: true,
+        ready: desktopRunning,
+        problem: setupScriptExists ? (desktopRunning ? null : "Graphical desktop not running") : "Graphical desktop not set up. Run setup_graphical_desktop first.",
+        viewer_port: desktopRunning ? 56082 : null,
+        viewer_url: viewerUrl ?? "",
+    };
+}
+/** Execute a command in the Android proot environment. */
+export async function androidProotExec(command, options = {}) {
+    if (!command.trim())
+        throw Object.assign(new Error("command is required"), { status: 400 });
+    if (command.length > 20_000)
+        throw Object.assign(new Error("command is too long"), { status: 400 });
+    const linuxDir = process.env.OMB_ANDROID_LINUX_DIR;
+    const rootfs = process.env.OMB_ANDROID_ROOTFS;
+    const workspace = process.env.OMB_ANDROID_WORKSPACE;
+    const dataDir = process.env.OMB_ANDROID_DATA_DIR;
+    const tmpDir = process.env.OMB_ANDROID_TMP_DIR;
+    if (!linuxDir || !rootfs || !workspace) {
+        throw Object.assign(new Error("Android proot environment is not configured"), { status: 409 });
+    }
+    const seconds = Math.min(Math.max(Math.floor(options.timeoutSeconds ?? EXEC_DEFAULT_SECONDS), 1), EXEC_MAX_SECONDS);
+    const { spawn } = await import("node:child_process");
+    const { join } = await import("node:path");
+    const prootPath = join(linuxDir, "proot");
+    const loaderPath = join(linuxDir, "loader");
+    const args = [
+        "-R", rootfs,
+        "-b", `${workspace}:/work`,
+        "-b", `${linuxDir}:/host-linux`,
+    ];
+    if (dataDir)
+        args.push("-b", `${dataDir}:/data`);
+    args.push("-w", "/work", "/bin/bash", "-lc", command);
+    return new Promise((resolve) => {
+        const child = spawn(prootPath, args, {
+            env: {
+                PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
+                HOME: "/root",
+                TMPDIR: tmpDir ?? join(linuxDir, "tmp"),
+                LD_LIBRARY_PATH: linuxDir,
+                PROOT_TMP_DIR: tmpDir ?? join(linuxDir, "tmp"),
+                PROOT_NO_SECCOMP: "1",
+                PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+                PROOT_LOADER: loaderPath,
+            },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        let done = false;
+        const finish = (code, signal) => {
+            if (done)
+                return;
+            done = true;
+            clearTimeout(timer);
+            const exitCode = code ?? (signal === "SIGKILL" ? 137 : 1);
+            const timedOut = exitCode === 124 || exitCode === 137;
+            resolve({ exitCode, stdout: clipExecOutput(stdout), stderr: clipExecOutput(stderr), timedOut });
+        };
+        const timer = setTimeout(() => {
+            child.kill("SIGKILL");
+            finish(null, "SIGKILL");
+        }, (seconds + 5) * 1000);
+        child.stdout?.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+        child.stderr?.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+        child.on("error", (error) => {
+            stderr += `\n${error.message}`;
+            finish(1, null);
+        });
+        child.on("close", finish);
+    });
 }
 export function containerComputerMcp(runtime, control, target = SHARED_LOCAL_VM_TARGET) {
     return {

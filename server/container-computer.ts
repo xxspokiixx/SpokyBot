@@ -1192,7 +1192,8 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
   const setupScriptPath = join(rootfs, "usr", "local", "bin", "start-graphical-desktop");
   const setupScriptExists = existsSync(setupScriptPath);
 
-  // Check if graphical desktop is running (Xvfb on :1)
+  // Answer the two things the viewer needs, not a list of process names: a checker's own
+  // command line carries the daemons' words, so pgrep would always find itself.
   let desktopRunning = false;
   let desktopError: string | null = null;
   let viewerUrl: string | null = null;
@@ -1205,9 +1206,14 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
           "-R", rootfs,
           "-b", `${workspace}:/work`,
           "-b", `${linuxDir}:/host-linux`,
+          // Xvfb and x11vnc put their socket and lock under the host tmp dir: without
+          // this bind the guest's /tmp is the rootfs's own, and the display looks dead.
+          "-b", `${linuxDir}/tmp:/tmp`,
           ...(dataDir ? ["-b", `${dataDir}:/data`] : []),
           "-w", "/work", "/bin/bash", "-lc",
-          "pgrep -f 'Xvfb :3' >/dev/null && pgrep -f 'x11vnc.*:3' >/dev/null && pgrep -f 'websockify.*56082' >/dev/null && echo RUNNING || echo NOT_RUNNING"
+          // Bash builtins only: X client binaries cannot always load their libraries here, and a
+          // display that answers on its socket plus a viewer port that accepts is the whole contract.
+          "[ -S /tmp/.X11-unix/X3 ] && (exec 3<>/dev/tcp/127.0.0.1/56082) 2>/dev/null && echo RUNNING || echo NOT_RUNNING"
         ], {
           env: {
             PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
@@ -1224,7 +1230,8 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
         let stdout = "";
         child.stdout?.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
         child.on("close", (code) => {
-          resolve({ running: stdout.includes("RUNNING"), error: code !== 0 ? "check failed" : undefined });
+          // "NOT_RUNNING" also contains "RUNNING": compare the whole answer.
+          resolve({ running: stdout.trim() === "RUNNING", error: code !== 0 ? "check failed" : undefined });
         });
         child.on("error", (err) => resolve({ running: false, error: err.message }));
         setTimeout(() => { child.kill("SIGKILL"); resolve({ running: false, error: "timeout" }); }, 10_000);

@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { composeEnvelope } from "./envelope.js";
 import { assignmentLevel } from "./level.js";
-import { asking, awaited, childrenSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.js";
+import { answersSender, asking, awaited, childrenSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.js";
 import { DEFAULT_LIMITS } from "./types.js";
 const BRIEF_MAX = 12_000;
 const RESULT_MAX = 12_000;
@@ -55,6 +55,7 @@ export class Runtime {
                 }
                 if (n.status !== "running")
                     continue;
+                const carried = n.carrying ?? [];
                 const handedOut = childrenSince(this.store, n).length > 0;
                 const outward = handedOut ? [] : this.outwardOf(n);
                 if (handedOut) {
@@ -80,6 +81,8 @@ export class Runtime {
                     this.store.update(n, { kind: "restart_reconciled", at: now, detail: `${n.status}: rerun ${n.restarts}` });
                     this.touch(n);
                 }
+                if (n.restart !== "rerun")
+                    this.decideCarried(carried);
                 const parent = n.parentId ? this.store.get(n.parentId) : undefined;
                 if (parent && !isTerminal(parent) && !parent.restart) {
                     parent.restart = "teammates";
@@ -164,7 +167,7 @@ export class Runtime {
         const lineage = parent ? path(this.store, parent) : [];
         const root = lineage[0];
         const target = req.assignee;
-        if (lineage.some(a => a.assignee.botId === target.botId &&
+        if (!answersSender(parent, mode, { botId: target.botId, ...target.destination }) && lineage.some(a => a.assignee.botId === target.botId &&
             (!a.assignee.destination.groupId || !target.destination.groupId || a.assignee.destination.groupId === target.destination.groupId))) {
             return refuse("Cannot assign work back to an ancestor; results return automatically");
         }
@@ -209,6 +212,18 @@ export class Runtime {
         });
         this.touch(node, ...root ? [root] : []);
         return { ok: true, assignment: node, duplicate: false };
+    }
+    /** How soon the next tick() matters: "busy" while work may move without a call in here (a turn, a queued or resumable
+     * assignment, a report to send); "parked" while live assignments only wait on a person, a teammate or a time limit. */
+    pace() {
+        if (!this.opened)
+            this.open();
+        if (this.turns.size > 0 || this.reportDue.size > 0)
+            return "busy";
+        const live = this.store.all({ nonTerminal: true });
+        if (live.some(n => n.status === "queued" || n.status === "resume" || n.status === "running"))
+            return "busy";
+        return live.length > 0 ? "parked" : "idle";
     }
     /** Never overlaps itself; does nothing after close(). */
     tick() {
@@ -456,12 +471,19 @@ export class Runtime {
             this.log(`settling ${id} failed: ${String(error)}`);
         }
     }
-    /** `live`: the handle of the dispatched turn ending; a host turn begun with begin() has none. */
+    /** `live`: the handle of the dispatched turn ending; a host turn begun with begin() has none. A question this turn
+     * carried for its requester to decide, and left unanswered, goes on with its default. */
     finishTurn(n, result, live) {
+        const carried = n.carrying ?? [];
+        this.settleTurn(n, result, live);
+        this.decideCarried(carried);
+    }
+    settleTurn(n, result, live) {
         const now = this.clock.now();
         if (!live?.interruption)
             delete n.restart;
         delete n.answer;
+        delete n.answeredBy;
         delete n.carrying;
         // Access is rechecked as the turn ends: a reply that lands after the route closed is never retained.
         const parentRow = n.parentId ? this.store.get(n.parentId) : undefined;
@@ -505,9 +527,18 @@ export class Runtime {
                 n.cards = result.cards;
             else
                 delete n.cards;
-            this.store.update(n, { kind: "parked", at: now, detail: `needs_input: ${clip(result.question, DETAIL_MAX)}` });
+            const choice = result.decide?.default?.trim();
+            if (result.decide && n.parentId && !n.cards)
+                n.decide = choice ? { default: clip(choice, BRIEF_MAX) } : {};
+            else
+                delete n.decide;
+            this.store.update(n, { kind: "parked", at: now, detail: `needs_input${n.decide ? " (its requester decides)" : ""}: ${clip(result.question, DETAIL_MAX)}` });
             this.touch(n);
             this.safe("park", () => this.runner.park(n, n.question ?? ""));
+            if (n.decide && !this.decidable(n)) {
+                this.decideDefault(n);
+                return;
+            }
             if (n.parentId && this.wake(n, "needs_input") && root && !isTerminal(root)) {
                 this.cancelTree(root, `${this.limits.wakes} wakes without progress`, "failed", "budget");
             }
@@ -548,19 +579,24 @@ export class Runtime {
         if (n?.status === "running")
             this.rootActivity.set(n.rootId, this.clock.now());
     }
-    /** The person answered a parked question; the next turn carries it. */
-    answer(id, text) {
+    /** A parked question is answered, by the person unless `by` says otherwise; the next turn carries it. */
+    answer(id, text, by) {
         const n = this.store.get(id);
         if (!n || n.status !== "needs_input")
             return false;
         const now = this.clock.now();
         n.answer = clip(text, BRIEF_MAX);
         delete n.question;
+        delete n.decide;
         n.status = "queued";
         n.lastActivityAt = now;
+        if (by)
+            n.answeredBy = by;
+        else
+            delete n.answeredBy;
         const root = n.parentId ? this.store.get(n.rootId) : undefined;
         this.store.transaction(() => {
-            this.store.update(n, { kind: "answered", at: now, detail: "queued: answered" });
+            this.store.update(n, { kind: "answered", at: now, detail: `queued: answered${by ? by.kind === "bot" ? ` by ${by.botId}` : " with its default" : ""}` });
             if (root && !isTerminal(root)) {
                 root.lastActivityAt = now;
                 this.store.update(root);
@@ -684,7 +720,9 @@ export class Runtime {
             delete n.evidence;
         }
         delete n.question;
+        delete n.decide;
         delete n.answer;
+        delete n.answeredBy;
         delete n.restart;
         delete n.carrying;
         const kind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
@@ -778,6 +816,22 @@ export class Runtime {
     }
     inputExpires(n) {
         return Number.isFinite(this.limits.inputWaitMs) && !(n.cards && n.cards.length > 0);
+    }
+    /** Whether its requester takes a turn for its question: a one-way notice's never does, nor a `poll` root. */
+    decidable(n) {
+        const parent = n.parentId ? this.store.get(n.parentId) : undefined;
+        return n.reply !== "none" && parent !== undefined && !isTerminal(parent) && !(!parent.parentId && parent.reply === "poll");
+    }
+    decideDefault(n) {
+        if (n.status === "needs_input" && n.decide)
+            this.answer(n.id, n.decide.default ?? "", { kind: "default" });
+    }
+    decideCarried(ids) {
+        for (const id of ids) {
+            const child = this.store.get(id);
+            if (child)
+                this.decideDefault(child);
+        }
     }
     outwardOf(n) {
         const port = this.runner.outward;

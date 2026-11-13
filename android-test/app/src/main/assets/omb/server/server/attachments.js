@@ -1,13 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, } from "node:fs";
-import { open, unlink } from "node:fs/promises";
+import { createReadStream, linkSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, } from "node:fs";
+import { link, open, unlink } from "node:fs/promises";
 import { join, extname } from "node:path";
-import { publishCandidate } from "../electron/atomic-publish.mjs";
+import { FILE_MAX_BYTES } from "../shared/upload-limits.js";
 import { DATA_DIR } from "./config.js";
+export { FILE_MAX_BYTES } from "../shared/upload-limits.js";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-/** Below Cloudflare's transport ceiling; a local inbox, not unbounded storage. */
-export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
 /** A person's own Cloud is the only home of everything their computers held, on a volume a move grows to fit. */
 export const CLOUD_HOME_ATTACHMENTS_MAX_BYTES = 8 * 1024 * 1024 * 1024;
@@ -90,24 +89,6 @@ export function extensionForMime(mime) {
 }
 export function ensureAttachmentsDir() {
     mkdirSync(ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
-}
-function unlinkPartialSync(path) {
-    try {
-        unlinkSync(path);
-    }
-    catch (error) {
-        if (error.code !== "ENOENT")
-            throw error;
-    }
-}
-async function unlinkPartial(path) {
-    try {
-        await unlink(path);
-    }
-    catch (error) {
-        if (error.code !== "ENOENT")
-            throw error;
-    }
 }
 export function validateAttachmentUploadId(value) {
     if (value === undefined)
@@ -211,8 +192,12 @@ class AttachmentReservation {
         this.reserveAtLeast(bytes, bytes);
     }
     reserveAtLeast(required, preferred) {
-        const used = committedBytes();
-        const available = ATTACHMENTS_MAX_BYTES - used - reservedAttachmentBytes;
+        let available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+        if (available < required) {
+            // People free space by deleting attachments outside the app, which the cache never sees.
+            invalidateAttachmentAccounting();
+            available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+        }
         if (available < required) {
             throw statusError(507, `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)`);
         }
@@ -405,20 +390,26 @@ export async function saveFile(chunks, originalName, mime, options = {}) {
                 throw statusError(400, "empty file");
             await file.close();
             closed = true;
-            const accountingVersion = attachmentAccountingVersion;
-            if (publishCandidate(partialPath, path)) {
+            try {
+                const accountingVersion = attachmentAccountingVersion;
+                await link(partialPath, path);
                 addCommittedBytes(bytes, accountingVersion);
+                await unlink(partialPath);
             }
-            else if (statSync(path).size !== bytes || await digestFile(path) !== await digestFile(partialPath)) {
-                throw statusError(409, "uploadId was already used for different file bytes");
+            catch (error) {
+                if (error.code !== "EEXIST")
+                    throw error;
+                if (statSync(path).size !== bytes || await digestFile(path) !== await digestFile(partialPath)) {
+                    throw statusError(409, "uploadId was already used for different file bytes");
+                }
+                await unlink(partialPath);
             }
-            await unlinkPartial(partialPath);
             return { path, name, mime: normalized, bytes };
         }
         catch (error) {
             if (file && !closed)
                 await file.close().catch(() => undefined);
-            await unlinkPartial(partialPath).catch(() => { partialCleanupFailed = true; });
+            await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
             throw error;
         }
         finally {
@@ -459,15 +450,21 @@ export async function saveNamedAttachment(name, chunks, expectedBytes) {
         await file.close();
         file = undefined;
         const accountingVersion = attachmentAccountingVersion;
-        if (!publishCandidate(partialPath, path))
-            return { stored: false };
+        try {
+            await link(partialPath, path);
+        }
+        catch (error) {
+            if (error.code === "EEXIST")
+                return { stored: false };
+            throw error;
+        }
         addCommittedBytes(bytes, accountingVersion);
         return { stored: true };
     }
     finally {
         if (file)
             await file.close().catch(() => undefined);
-        await unlinkPartial(partialPath).catch(() => { partialCleanupFailed = true; });
+        await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
         activePartials.delete(partialPath);
         if (partialCleanupFailed)
             invalidateAttachmentAccounting();
@@ -504,21 +501,24 @@ export function saveImage(bytes, mime, requestedUploadId) {
     let partialCleanupFailed = false;
     try {
         writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
-        if (publishCandidate(partialPath, path)) {
+        try {
+            linkSync(partialPath, path);
             addCommittedBytes(bytes.byteLength);
         }
-        else {
+        catch (error) {
+            if (error.code !== "EEXIST")
+                throw error;
             const saved = readFileSync(path);
             if (!saved.equals(bytes)) {
                 throw statusError(409, "uploadId was already used for different image bytes");
             }
         }
-        unlinkPartialSync(partialPath);
+        unlinkSync(partialPath);
         return { path, mime: mime.split(";")[0].trim().toLowerCase(), bytes: bytes.byteLength };
     }
     catch (error) {
         try {
-            unlinkPartialSync(partialPath);
+            unlinkSync(partialPath);
         }
         catch {
             partialCleanupFailed = true;
@@ -560,21 +560,24 @@ export function saveAudio(bytes, mime) {
     let partialCleanupFailed = false;
     try {
         writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
-        if (publishCandidate(partialPath, path)) {
+        try {
+            linkSync(partialPath, path);
             addCommittedBytes(bytes.byteLength);
         }
-        else {
+        catch (error) {
+            if (error.code !== "EEXIST")
+                throw error;
             const saved = readFileSync(path);
             if (!saved.equals(bytes)) {
                 throw Object.assign(new Error("audio destination already exists with different bytes"), { status: 409 });
             }
         }
-        unlinkPartialSync(partialPath);
+        unlinkSync(partialPath);
         return { path, mime: format.mime, bytes: bytes.byteLength };
     }
     catch (error) {
         try {
-            unlinkPartialSync(partialPath);
+            unlinkSync(partialPath);
         }
         catch {
             partialCleanupFailed = true;

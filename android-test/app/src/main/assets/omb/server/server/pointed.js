@@ -15,7 +15,7 @@ const part = z.object({
 }).strict();
 const parts = z.array(part).min(1).max(POINT_LIMITS.perMessage);
 const BAD = `pointed must list 1 to ${POINT_LIMITS.perMessage} parts of a page in this conversation.`;
-const NOTE = "While writing this message the person pointed at parts of your page. To change them, call update_html with that page's app_id.";
+const NOTE = "While writing this message the person pointed at parts of your page. To change them, call show_html with that page's app_id.";
 /** Security invariant: a pick's words reach the model only through recordsBlock. null when nothing was pointed at. */
 export function preparePointed(store, threadId, value) {
     if (value === undefined || value === null)

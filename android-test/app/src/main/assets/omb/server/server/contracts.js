@@ -16,24 +16,43 @@ export class TurnNotStartedError extends Error {
         this.turnId = turnId;
     }
 }
-/** The CLI refused sign-in before any model or tool activity, and its process stopped. */
+/** The CLI refused sign-in before any model or tool activity, and its process stopped. `known`: refused here because the
+ * engine is already known to be signed out, so it is no new refusal. */
 export class TurnAuthenticationRefusedError extends TurnNotStartedError {
     name = "TurnAuthenticationRefusedError";
+    known;
+    constructor(turnId, message, known = false) {
+        super(turnId, message);
+        this.known = known;
+    }
 }
 /** The engine's usage limit refused the turn before any model or tool activity (or is known to be refusing until
- * `resetsAt`), and no process of it is running the turn. */
+ * `resetsAt`), and no process of it is running the turn. `scope`: the limit is the account's on that engine, or one
+ * model's own window ("model") or extra usage credits ("credits"), which leave the engine's other models working.
+ * `known`: refused here by a limit already noted, so it is no new refusal. */
 export class TurnUsageLimitRefusedError extends TurnNotStartedError {
     name = "TurnUsageLimitRefusedError";
     resetsAt;
-    constructor(turnId, message, resetsAt) {
+    scope;
+    known;
+    constructor(turnId, message, resetsAt, scope = "engine", known = false) {
         super(turnId, message);
         this.resetsAt = resetsAt;
+        this.scope = scope;
+        this.known = known;
     }
 }
 /** Variants are opaque provider IDs, not the cross-engine effort enum. */
 export function isModelVariant(value) {
     return typeof value === "string" && value.length > 0 && value.length <= 256 &&
         value.trim() === value && !/\p{Cc}/u.test(value);
+}
+/** What a client may see of an install descriptor: the standalone pins (URLs, hashes) stay on the server. */
+export function clientInstall(install) {
+    if (!install)
+        return undefined;
+    const { standalone: _pins, ...shown } = install;
+    return shown;
 }
 /** "gpt-5.4-mini" → "Gpt 5.4 Mini", splitting on the caller's word breaks. */
 export function titleCaseModelId(id, wordBreaks) {

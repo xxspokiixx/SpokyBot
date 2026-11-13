@@ -2,6 +2,7 @@ import { boxSummary } from "../cloud-health.js";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, createCloudPairing, createCloudRequestVerifier, readSignedBody } from "../cloud-home.js";
 import { teamMemberEmail } from "../cloud-team.js";
 import { CLOUD_TEAM_ADMIN_PATH } from "../cloud-team-admin.js";
+import { CLOUD_TEAM_POLICY_CHANGED_PATH } from "../cloud-team-policy.js";
 import { CLOUD_IDLE_ACTIVITY_MS, CLOUD_POWER_PATH, CLOUD_POWER_SLEEP_PATH } from "../cloud-power.js";
 import { json } from "../harness/http.js";
 import { requestSource } from "../request-auth.js";
@@ -10,6 +11,9 @@ export const CLOUD_BOX_PATH = "/api/cloud/box";
 /** A Team Cloud's member left (removed, or they left): `{ email }`, signed with the body like the sleep request. What was
  * theirs alone is deleted here (host/team-member-left.ts). */
 export const CLOUD_TEAM_MEMBER_LEFT_PATH = "/api/cloud/team/member-left";
+/** The plan was cancelled, or renews again: `{"v":1,"cancelled":true|false}`, signed with the body like the sleep request.
+ * While it is cancelled the home's routines wait (host/routine-holds-host.ts). */
+export const CLOUD_PLAN_PATH = "/api/cloud/plan";
 export function createCloudSignedRoutes(deps) {
     const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, now: deps.now });
     const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
@@ -18,12 +22,16 @@ export function createCloudSignedRoutes(deps) {
     const boxReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
     const teamAdminReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
     const memberLeftRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
+    const planRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
+    const policyNudges = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
     /** True when the request was one of these and has been answered. */
     return async ({ req, res, url, path, method }) => {
         const power = path === CLOUD_POWER_PATH || path === CLOUD_POWER_SLEEP_PATH ? deps.power?.() ?? null : null;
         const teamAdmin = path === CLOUD_TEAM_ADMIN_PATH && deps.team ? deps.teamAdmin ?? null : null;
         const memberLeft = path === CLOUD_TEAM_MEMBER_LEFT_PATH && deps.team ? deps.memberLeft ?? null : null;
-        if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft)
+        const plan = path === CLOUD_PLAN_PATH ? deps.plan ?? null : null;
+        const policyChanged = path === CLOUD_TEAM_POLICY_CHANGED_PATH && deps.team ? deps.policyChanged ?? null : null;
+        if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft && !plan && !policyChanged)
             return false;
         res.setHeader("cache-control", "no-store");
         const source = requestSource(req);
@@ -122,6 +130,54 @@ export function createCloudSignedRoutes(deps) {
                 return true;
             }
             json(res, 200, { ok: true, ...(await memberLeft(email)) });
+            return true;
+        }
+        if (policyChanged) {
+            if (method !== "POST") {
+                json(res, 405, { error: "method_not_allowed" });
+                return true;
+            }
+            const verdict = policyNudges.verify({ ...signed, method, target: `${path}${url.search}`, body: await readSignedBody(req) });
+            if (!verdict.ok) {
+                console.warn(`team rules nudge refused from ${source}: ${verdict.error}`);
+                json(res, verdict.status, { error: verdict.error });
+                return true;
+            }
+            policyChanged();
+            json(res, 200, { ok: true });
+            return true;
+        }
+        if (plan) {
+            if (method !== "POST") {
+                json(res, 405, { error: "method_not_allowed" });
+                return true;
+            }
+            if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
+                json(res, 415, { error: "send the request as JSON (content-type: application/json)" });
+                return true;
+            }
+            const body = await readSignedBody(req);
+            const verdict = planRequests.verify({ ...signed, method, target: `${path}${url.search}`, body });
+            if (!verdict.ok) {
+                console.warn(`cloud plan request refused from ${source}: ${verdict.error}`);
+                json(res, verdict.status, { error: verdict.error });
+                return true;
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(body.toString("utf8"));
+            }
+            catch {
+                json(res, 400, { error: "invalid_body" });
+                return true;
+            }
+            const cancelled = parsed?.cancelled;
+            if (typeof cancelled !== "boolean") {
+                json(res, 400, { error: "invalid_plan" });
+                return true;
+            }
+            plan(cancelled);
+            json(res, 200, { ok: true });
             return true;
         }
         if (path === CLOUD_BOX_PATH) {

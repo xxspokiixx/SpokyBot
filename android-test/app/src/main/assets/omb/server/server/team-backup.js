@@ -44,7 +44,7 @@ function messageText(message) {
     if (message.routineRun)
         parts.push(`[Routine: ${message.routineRun.routineName} — ${message.routineRun.status}]`, message.routineRun.summary ?? "", message.routineRun.error ?? "");
     if (message.goalRun)
-        parts.push(`[Room goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
+        parts.push(`[Goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
     if (message.kind === "screen" || message.attachments?.length)
         parts.push("[Image or attachment — file not included in this backup]");
     return parts.filter(Boolean).join("\n");
@@ -96,7 +96,7 @@ export function createTeamBackup(store, routines, name, shown = () => true) {
     });
     const validRoutines = routines.filter((routine) => {
         const room = groups.find((group) => group.key === routine.groupId);
-        const valid = botIds.has(routine.botId) && (routine.target !== "room-goal" || (room && !room.dm && room.memberIds.includes(routine.botId)));
+        const valid = botIds.has(routine.botId) && (routine.target !== "room-goal" || !routine.groupId || (room && !room.dm && room.memberIds.includes(routine.botId)));
         if (!valid)
             warnings.push(`Routine “${routine.name}” is not included because its bot, room or coordinator was deleted.`);
         return valid;
@@ -108,6 +108,7 @@ export function createTeamBackup(store, routines, name, shown = () => true) {
             key: bot.id, name: bot.name, title: bot.title, description: bot.description, soul: bot.soul,
             section: bot.section, color: bot.color,
             mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
+            mascotFaceColor: bot.mascotFaceColor ?? undefined,
             chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
             // Grants travel so the team's shape survives, but the import still lands every bot grant-less.
             ...(bot.connectorTools ? { connectorTools: structuredClone(bot.connectorTools) } : {}),
@@ -176,6 +177,7 @@ export function importTeamBackup(store, routines, input, selection, options = {}
                 name: takeImportName(source.name, takenNames), title: source.title, description: source.description, soul: source.soul,
                 color: source.color, mascotExpression: source.mascotExpression,
                 mascotBody: botBodyId(source.mascotBody),
+                mascotFaceColor: source.mascotFaceColor,
                 modelSelection: selection, section: sectionFor(source.section),
                 // who may see the imported team is the importing admin's choice
                 ...(options.visibility ? { visibility: options.visibility } : {}),
@@ -249,7 +251,7 @@ export function importTeamBackup(store, routines, input, selection, options = {}
         }
         for (const source of backup.routines) {
             createdRoutines.push(routines.create({ ...source, botId: botIds.get(source.botId),
-                groupId: source.target === "room-goal" ? groupIds.get(source.groupId) : undefined, enabled: false }));
+                groupId: source.target === "room-goal" && source.groupId ? groupIds.get(source.groupId) : undefined, enabled: false }));
         }
         return { name: backup.name, bots, groups, routines: createdRoutines };
     }

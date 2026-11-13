@@ -3,6 +3,7 @@ import * as boat from "../boat.ts";
 import type { ComputerControl } from "../computer-control.ts";
 import { isValidVpsSshTarget, localVmMaxInstances, localVmMode, type AppConfig } from "../config.ts";
 import {
+  androidProotStatus,
   containerComputerAction,
   containerComputerExists,
   containerComputerScreenshot,
@@ -278,6 +279,17 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
     }
 
     if (method === "GET" && path === "/api/local-computer") {
+      // On Android, "this computer" uses proot, not Docker/Podman
+      if (process.platform === "android") {
+        const status = await androidProotStatus();
+        return json(res, 200, {
+          ...localVmViewerStatus(status, auth),
+          commands: setupCommands(status.runtime, process.platform, SHARED_LOCAL_VM_TARGET),
+          idle_timeout_ms: localVmIdleMs(),
+          mode: localVmMode(cfg),
+          max_instances: localVmMaxInstances(cfg),
+        });
+      }
       return json(res, 200, await localVmPayload(SHARED_LOCAL_VM_TARGET, auth));
     }
     if (method === "GET" && path === "/api/local-computer/instances") {

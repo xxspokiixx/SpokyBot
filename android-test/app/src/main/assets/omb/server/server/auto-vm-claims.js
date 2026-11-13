@@ -15,14 +15,14 @@ export function keepTransient(original, shown) {
 }
 /** Once per dispatch generation, or again after a network failure, at most MAX_CLAIM_ATTEMPTS times. Any other rejection keeps
  * its slot marked failed, and a rejection mutates only the slot it fired from, so a stale claim never touches a newer generation's. */
-export function startAutoVmClaim(table, threadId, generation) {
+export function startAutoVmClaim(table, threadId, generation, call) {
     const slot = table.get(threadId);
     if (!slot || slot.owner.threadId !== threadId || slot.owner.generation !== generation || slot.begin || slot.failed)
         return;
     const attempt = (slot.attempts ?? 0) + 1;
     slot.attempts = attempt;
     slot.retryReason = undefined;
-    const begin = slot.claim().then(() => { slot.claimed = true; }, (error) => {
+    const begin = slot.claim(call).then(() => { slot.claimed = true; }, (error) => {
         const failure = error instanceof Error ? error.message : String(error);
         if (transientClaimFailure(error) && attempt < MAX_CLAIM_ATTEMPTS) {
             slot.retryReason = failure;
@@ -32,7 +32,9 @@ export function startAutoVmClaim(table, threadId, generation) {
         }
         slot.failed = true;
         slot.failure = failure;
-        slot.onRejected?.(slot.failure, error);
+        // A person's No is an answer, not a failure: the screen calls say so, and nothing reports a broken turn.
+        if (error?.declined !== true)
+            slot.onRejected?.(slot.failure, error);
     });
     slot.begin = begin;
 }

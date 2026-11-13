@@ -2,20 +2,25 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { EVENTS_DIR } from "../config.js";
+import { flushNativeLog } from "../drivers/native.js";
 import { redactSecrets } from "../redact.js";
+import { batchSaves } from "../save-batch.js";
 import { capThreadLog, currentThreadLogCap } from "../thread-log-rotation.js";
 import { newId } from "../contracts.js";
+import { LiveSteps } from "./live-steps.js";
 import { ProgressGate } from "./progress-gate.js";
 const INCOMPLETE_LOG_MESSAGE = "Canonical event history is incomplete: SpokyBot could not write one or more events to disk. Live updates will continue.";
 const DELTA_MERGE_MS = 50;
 const MAX_BATCH_LINES = 64;
-const MAX_QUEUED_EVENTS = 256;
-const MAX_QUEUED_BYTES = 1024 * 1024;
+const MAX_QUEUED_EVENTS = 4096;
+const MAX_QUEUED_BYTES = 32 * 1024 * 1024;
 const defaultAppend = (path, data, options) => appendFile(path, data, options);
 function sameStream(a, b) {
     return a.provider === b.provider && a.providerInstanceId === b.providerInstanceId && a.turnId === b.turnId &&
         a.itemId === b.itemId && a.streamKind === b.streamKind && a.synthetic === b.synthetic;
 }
+/** What changes the chat's status line, and so makes a waiting status report stale; a heartbeat or a token count does not. */
+const STATUS_LINE_EVENTS = new Set(["turn.started", "content.delta", "item.started", "item.completed", "request.opened"]);
 function isTerminalEvent(event) {
     if (event.type === "turn.completed" || event.type === "cap.exhausted" || event.type === "session.exited") {
         return true;
@@ -40,29 +45,46 @@ export class EventBus {
             this.flushThread(event.threadId);
         this.deliver(event);
     });
-    constructor(appendLog = defaultAppend) {
+    adapters = new Map();
+    steps = new LiveSteps({
+        offer: (event) => this.progress.offer(event),
+        enginePid: (event) => this.adapters.get(event.providerInstanceId ?? "")?.enginePid?.(event.threadId),
+    });
+    gate;
+    /** `gate` sees each adapter event first; true means it took the event and publishes what it chooses. */
+    constructor(appendLog = defaultAppend, gate) {
         this.appendLog = appendLog;
+        this.gate = gate;
     }
     attach(instances) {
         for (const instance of instances) {
             this.detach(instance.instanceId);
+            this.adapters.set(instance.instanceId, instance.adapter);
             const unsub = instance.adapter.onEvent((event) => {
                 // An adapter may only emit events for its own driver kind.
                 if (event.provider !== instance.driverKind) {
                     console.error(`bus: dropped cross-driver event from ${instance.instanceId}`);
                     return;
                 }
-                this.publish({ ...event, providerInstanceId: instance.instanceId });
+                const stamped = { ...event, providerInstanceId: instance.instanceId };
+                if (!this.gate?.(stamped))
+                    this.publish(stamped);
             });
             this.unsubscribes.set(instance.instanceId, unsub);
         }
     }
-    publish(event) {
-        if (event.type === "turn.progress") {
-            this.progress.offer(event);
+    publish(raw) {
+        if (raw.type === "turn.progress") {
+            this.progress.offer(this.steps.progress(raw));
             return;
         }
-        this.progress.supersede(event.threadId, isTerminalEvent(event));
+        if (raw.type === "item.output") {
+            this.steps.output(raw);
+            return;
+        }
+        const event = this.steps.observe(raw, isTerminalEvent(raw));
+        if (STATUS_LINE_EVENTS.has(event.type) || isTerminalEvent(event))
+            this.progress.supersede(event.threadId, isTerminalEvent(event));
         const pending = this.pendingText.get(event.threadId);
         if (event.type === "content.delta") {
             if (pending && sameStream(pending.event, event)) {
@@ -79,6 +101,7 @@ export class EventBus {
         if (pending)
             this.flushThread(event.threadId);
         this.write(event);
+        this.steps.announce(event);
     }
     flush() {
         for (const threadId of Array.from(this.pendingText.keys()))
@@ -111,8 +134,10 @@ export class EventBus {
         // Queue first, then deliver: a listener publishing during delivery queues after this, so the log keeps publication order.
         this.enqueue(event);
         this.deliver(event);
-        if (isTerminalEvent(event))
-            void this.flushDisk();
+        if (!isTerminalEvent(event))
+            return;
+        flushNativeLog(event.threadId);
+        void this.flushDisk();
     }
     enqueue(event) {
         // People paste this log into bug reports: scrub credential-shaped content as the native tee does.
@@ -241,14 +266,16 @@ export class EventBus {
         this.deliver(warning);
     }
     deliver(event) {
-        for (const listener of Array.from(this.listeners)) {
-            try {
-                listener(event);
+        batchSaves(() => {
+            for (const listener of Array.from(this.listeners)) {
+                try {
+                    listener(event);
+                }
+                catch (e) {
+                    console.error("bus: listener threw", e);
+                }
             }
-            catch (e) {
-                console.error("bus: listener threw", e);
-            }
-        }
+        });
     }
     subscribe(listener) {
         this.listeners.add(listener);
@@ -261,6 +288,7 @@ export class EventBus {
     detach(instanceId) {
         this.unsubscribes.get(instanceId)?.();
         this.unsubscribes.delete(instanceId);
+        this.adapters.delete(instanceId);
         void this.flush();
     }
 }

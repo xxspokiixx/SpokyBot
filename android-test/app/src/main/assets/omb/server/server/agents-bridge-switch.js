@@ -8,6 +8,8 @@ import { dirname, join } from "node:path";
 import { parseToolScope } from "../shared/tool-scope.js";
 import { bridgedCallName } from "./agents-bridge-names.js";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.js";
+import { decodeInjectId } from "./drivers/local-inject.js";
+import { onThisNetwork } from "./drivers/openai-compat.js";
 import { claudeCliSupports, parseClaudeCliVersion } from "./drivers/claude.js";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.js";
 export { TOOL_BRIDGE_ENV };
@@ -26,6 +28,15 @@ export function agentsToolBridgeEnabled(cfg, env = process.env) {
         return false;
     return cfg.features?.agentsToolBridge === true;
 }
+/** A model on this machine or network reads the whole list on every turn, out of a small window and at laptop speed:
+ * about 15,000 tokens before the person has said anything. OMB_AGENTS_TOOL_BRIDGE=0 still wins. */
+function runsLocalModel(bot, engine) {
+    const model = bot?.modelSelection?.model;
+    if (typeof model === "string" && decodeInjectId(model))
+        return true;
+    const url = engine?.config?.url;
+    return engine?.driverKind === "openai-compat" && typeof url === "string" && onThisNetwork(url);
+}
 /** A turn's engine from its live instance, the instance configs, its last snapshot and its folder. */
 export function turnEngine(instance, configs, snapshot, cwd) {
     const { config, environment } = configs[instance.instanceId] ?? {};
@@ -38,7 +49,7 @@ export function turnEngine(instance, configs, snapshot, cwd) {
         ...(cwd !== undefined ? { cwd } : {}),
     };
 }
-const CHAT_RUNTIME_DRIVERS = new Set(["cerebras", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
+const CHAT_RUNTIME_DRIVERS = new Set(["cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
 /** Whether text may name the agents server: it contains `mcp__agents` (a server merely starting so counts
  * too) or `mcp__` then a wildcard. Security: plain substring tests; no pattern is ever built from config text. */
 function namesAgentsServer(text) {
@@ -250,7 +261,7 @@ export function engineBridgeRefusal(cfg, engine, env = process.env, host = { hom
  * path or file content). */
 export function agentsToolBridgeRefusal(cfg, bot, engine, env = process.env, host) {
     try {
-        if (!agentsToolBridgeEnabled(cfg, env))
+        if (!agentsToolBridgeEnabled(cfg, env) && (env[TOOL_BRIDGE_ENV] === "0" || !runsLocalModel(bot, engine)))
             return "the switch is off";
         // Security: selection gates match the name in the call, so any selection, even one that permits
         // everything or cannot be read, means no bridge.

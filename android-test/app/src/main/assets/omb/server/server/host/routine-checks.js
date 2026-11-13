@@ -101,6 +101,8 @@ export function createRoutineChecks(deps) {
             return;
         const [routineId, pending] = owner;
         const entry = of(routineId);
+        if (pending.replies.length)
+            deps.sorted?.(routineId, pending.replies.length);
         if (pending.mailCursor !== undefined)
             entry.mailCursor = Math.max(entry.mailCursor ?? 0, pending.mailCursor);
         if (pending.runsCursor !== undefined)
@@ -212,7 +214,28 @@ export function createRoutineChecks(deps) {
                 const plan = planMail({ now: at, emails, judged });
                 const waiting = plan.waiting.length;
                 const advanced = waiting || more ? undefined : at;
-                if (plan.batch.length && aiAllowed) {
+                const helpers = brief && deps.inbox?.ready() === true;
+                if (helpers)
+                    report.helpersSort = true;
+                const picked = helpers && plan.batch.length ? await deps.inbox.triage(plan.batch, deps.dismissedFrom()) : null;
+                if (picked) {
+                    // Sorted with no AI turn: every email of the batch is judged, and the picks become brief rows.
+                    report.picked = picked.flatMap((pick) => {
+                        const email = plan.batch.find((one) => one.id === pick.id);
+                        return email ? [{ email, why: pick.why, needsReply: pick.needsReply }] : [];
+                    });
+                    entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
+                    if (plan.batch.length)
+                        deps.sorted?.(routine.id, plan.batch.length);
+                    // Mail an earlier run still holds keeps the cursor back, so a failed run's mail is read again.
+                    const heldMail = Object.values(entry.pending ?? {}).some((one) => one.mail.length > 0);
+                    if (advanced !== undefined && !heldMail)
+                        entry.mailCursor = advanced;
+                }
+                else if (helpers && plan.batch.length && !aiAllowed) {
+                    // The helper models did not answer this time and no fenced AI may sort: the mail waits for the next check.
+                }
+                else if (plan.batch.length && aiAllowed) {
                     items.mail = plan.batch;
                     pending.mail = [...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)];
                     pending.replies = plan.batch.map((email) => ({ threadId: email.threadId, to: addressOf(email.from) }));
@@ -248,6 +271,8 @@ export function createRoutineChecks(deps) {
             else if (!finished.length)
                 entry.runsCursor = at;
         }
+        if (apps)
+            report.gmail = { connected: apps.gmail === true, ...(entry.address ? { address: entry.address } : {}) };
         if (trouble.length)
             report.trouble = trouble;
         let run;

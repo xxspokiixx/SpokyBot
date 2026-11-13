@@ -6,15 +6,17 @@ import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname, isAbsolute, normalize } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.js";
-import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.js";
+import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.js";
 import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.js";
 import { augmentedPath } from "../env-path.js";
-import { brokerSocketPath, CLI_PROBE_TIMEOUT_MS, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.js";
+import { brokerSocketPath, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.js";
 import { claudeAuthStatus } from "./claude-auth-status.js";
 import { projectMcpServers } from "./claude-project-mcp.js";
+import { botSettingsFor, withBotSettings } from "./claude-bot-settings.js";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.js";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.js";
 import { claudeModelExtras } from "./claude-model-extras.js";
+import { claudeToolSearchSetting } from "./claude-tool-search.js";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.js";
 import { ClaudeLoginController } from "./claude-login-auth.js";
 import { appMountFor, customServerGate, gateQueryTools, gateServer } from "../mcp-gate-config.js";
@@ -23,16 +25,19 @@ import { assertToolScopeSupported } from "../../shared/tool-scope-support.js";
 import { newEventId, newId } from "../contracts.js";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.js";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS, USAGE_LIMIT } from "./retry.js";
-import { claudeApiErrorMessage, claudeEngineReset, claudeLimitRefusal, claudeUsageLimit, claudeLimitMessage } from "./claude-limits.js";
-import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.js";
-import { engineIdleMs, sessionIdlePolicy } from "./session-idle.js";
+import { claudeApiErrorMessage, claudeLimitFacts, claudeLimitRefusal, claudeUsageLimit, claudeLimitMessage, claudeVersionTooOld } from "./claude-limits.js";
+import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.js";
+import { engineHomes } from "../engine-homes/engine-homes.js";
+import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.js";
+import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.js";
 import { promptHalves, withVolatileNote } from "./prompt-split.js";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.js";
 import { applyClaudeInject, decodeInjectId, mergeLocalInject, probeLocalInjects, resolveInjectId, } from "./local-inject.js";
 import { appendNative } from "./native.js";
-import { runKeepWarmPing } from "./claude-keepwarm.js";
+import { claudeForks } from "./claude-warm-summary.js";
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.js";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.js";
+import { readToolPaths } from "../own-file-reads.js";
 import { SPAWNED_PROXIES } from "../proxy-paths.js";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.js";
 import { extractMcpImages } from "../mcp-tool-images.js";
@@ -61,13 +66,6 @@ export function resolveClaudeConfigDir(configDir, env = process.env) {
         throw new Error("claude: configDir must be an absolute path or start with ~/");
     }
     return normalize(expanded);
-}
-/** The API refusing a model newer than the installed CLI, relayed as an api-error frame ("Claude
- * Code 2.1.268 does not support this model; version 2.1.280 or newer is required…"); it names no model. */
-export function claudeVersionTooOld(frame, text) {
-    if (frame.is_api_error_message !== true && typeof frame.error !== "string")
-        return false;
-    return /\bClaude Code v?\d+(?:\.\d+)+ does not support this model\b/i.test(text);
 }
 /** What an error `result` says failed: its `errors` (2.1.295: "No conversation found with session ID: …"), else its
  * text in plain words, else its kind; never its synthetic message's "stop_sequence", nor the subtype "success". */
@@ -277,7 +275,6 @@ function removePrivateTempDir(filePath) {
     }
 }
 const DENY_TIMEOUT_NOTE = "SpokyBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
-const QUESTION_TIMEOUT_NOTE = "SpokyBot: nobody answered in time. Use your best judgment and continue.";
 const DUPLICATE_ASK_ID_NOTE = "SpokyBot: duplicate ask id — skipping this request.";
 function systemEndedReply(kind) {
     return kind === "question"
@@ -324,9 +321,11 @@ export const STEERED_CONTINUATION_SILENCE_MS = 30_000;
 const fakeTimerScale = (name) => Number(process.env[name] ?? "1") || 1;
 const steerGraceScale = () => fakeTimerScale("FAKE_CLAUDE_STEER_GRACE_SCALE");
 const steerSilenceScale = () => fakeTimerScale("FAKE_CLAUDE_STEER_SILENCE_SCALE");
+/** In a folder of its own, which the bot box puts back read-only: a bind of the file alone would keep showing the box the
+ * copy it was started with after a turn renames a new token over it. */
 export function hookTokenFile(threadId, botId) {
     const digest = createHash("sha256").update(`${botId ?? ""}\0${threadId}`).digest("hex").slice(0, 24);
-    return join(DATA_DIR, "hook-tokens", `${digest}.token`);
+    return join(DATA_DIR, "hook-tokens", digest, "token");
 }
 /** Hooks for the private --settings file. Claude Code runs each command as a shell line with the
  * event JSON on stdin and applies any hookSpecificOutput it prints. */
@@ -430,10 +429,8 @@ export async function createPermissionBroker(opts) {
                     catch { }
                     opts.onResolve({ ...ask, behavior, source });
                 };
-                const timer = setTimeout(() => kind === "question"
-                    ? finish("answer", QUESTION_TIMEOUT_NOTE, "timeout")
-                    : finish("deny", DENY_TIMEOUT_NOTE, "timeout"), timeoutMs);
-                timer.unref?.();
+                const timer = kind === "question" ? undefined : setTimeout(() => finish("deny", DENY_TIMEOUT_NOTE, "timeout"), timeoutMs);
+                timer?.unref?.();
                 pending.set(askId, { ask, finish });
                 opts.onAsk(ask);
             }
@@ -573,13 +570,7 @@ function decodeConfig(raw) {
 function firstText(content) {
     if (typeof content === "string")
         return content;
-    if (Array.isArray(content)) {
-        return content
-            .filter((b) => b?.type === "text" && b.text)
-            .map((b) => b.text)
-            .join("");
-    }
-    return "";
+    return Array.isArray(content) ? content.filter((b) => b?.type === "text" && b.text).map((b) => b.text).join("") : "";
 }
 /** A turn's cost from total_cost_usd, which is the process's running total (2.1.282): the growth
  * since `previous`, or the whole figure when the start is unknown or the total went down. */
@@ -718,6 +709,7 @@ export const ClaudeDriver = {
             console.error(`claude (${instanceId}): OMB_CLAUDE_INHERIT_USER_CONFIG=1 — bots inherit this machine's Claude Code MCP servers, skills, hooks and CLAUDE.md on every turn; remove it unless a bot needs a user-scope server`);
         }
         let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) } : STATIC_CLAUDE_MODELS;
+        const orgBlocks = createOrgModelBlocks(() => engineHomes.everyHome(catalogEnv), (blocked) => { models = withOrgBlocks(models, blocked); });
         const refreshModels = async () => {
             if (config.managed)
                 return;
@@ -725,8 +717,13 @@ export const ClaudeDriver = {
                 const resolved = await mergeLocalInject(readClaudeModelCatalog(catalogEnv), catalogEnv);
                 if (resolved.options.length)
                     models = resolved;
+                else
+                    unconfirmedModelCatalog(models);
+                await orgBlocks.refresh(true);
             }
-            catch { }
+            catch {
+                unconfirmedModelCatalog(models);
+            }
             try {
                 writeStartupModelCache(instanceId, models);
             }
@@ -743,15 +740,16 @@ export const ClaudeDriver = {
         // Whether `claude --help` lists --autocompact: 2.1.129 rejects it despite the floor.
         let cliHasAutocompact = null;
         let cliHelpVersion = null;
+        const versionOf = cliVersionReader(config.cli);
         const readCliVersion = (env) => new Promise((resolve) => {
-            execCli(config.cli, ["--version"], { timeout: CLI_PROBE_TIMEOUT_MS, env }, (err, stdout) => resolve(err ? null : stdout.trim() || null));
+            execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) => resolve(versionOf(err, stdout)));
         });
         const ensureCliVersion = async (env) => {
             if (cliVersionChecked)
                 return;
-            const version = await readCliVersion(env);
-            if (version)
-                [cliVersion, cliVersionChecked] = [parseClaudeCliVersion(version), true];
+            const probe = await readCliVersion(env);
+            if ("version" in probe)
+                [cliVersion, cliVersionChecked] = [parseClaudeCliVersion(probe.version), true];
         };
         let helpRead = null;
         const readCliHelp = (version, env) => {
@@ -760,7 +758,7 @@ export const ClaudeDriver = {
             const read = {
                 version,
                 done: new Promise((resolve) => {
-                    execCli(config.cli, ["--help"], { timeout: CLI_PROBE_TIMEOUT_MS, env }, (err, stdout) => resolve(err ? null : stdout));
+                    execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
                 }).then((help) => {
                     cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
                     cliHelpVersion = version;
@@ -788,10 +786,8 @@ export const ClaudeDriver = {
             if (!s || s.closing)
                 return;
             s.closing = true;
-            warmContracts.delete(threadId);
-            warmHolds.delete(threadId);
-            if (s.idleTimer)
-                clearTimeout(s.idleTimer);
+            forks.closed(threadId, why, s.sessionId);
+            stopIdleClose(`${instanceId}\0${threadId}`, s.idleTimer);
             // Close the broker before a replacement binds the same socket; a late close must not unlink it.
             const broker = s.broker;
             s.broker = undefined;
@@ -814,9 +810,14 @@ export const ClaudeDriver = {
             if (s.idleTimer)
                 clearTimeout(s.idleTimer);
             const held = (warmHolds.get(threadId) ?? 0) - Date.now();
-            s.idleTimer = setTimeout(() => closeSession(threadId, "idle"), Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)));
-            s.idleTimer.unref?.();
+            s.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)), { close: () => closeSession(threadId, "idle"),
+                idle: () => sessions.get(threadId) === s && !s.closing && !s.turn && !active.has(threadId) && (warmHolds.get(threadId) ?? 0) <= Date.now() });
         };
+        // Keep-warm pings and warm summaries fork a thread's session with its live launch contract (claude-warm-summary.ts).
+        const forks = claudeForks({ cli: config.cli, contracts: warmContracts, holds: warmHolds, armIdle, supports: (flag) => cliVersion === null || claudeCliSupports(cliVersion, flag),
+            live: (threadId) => { const s = sessions.get(threadId); return s && !s.closing && s.child.exitCode === null ? { sessionId: s.sessionId, turn: Boolean(s.turn), busy: Boolean(s.turn) || active.has(threadId) } : null; },
+            summarized: (threadId, run) => { const cost = claudeCostSnapshot(run.costTotal, run.modelUsage); if (cost)
+                recordCostState(run.session, cost); closeSession(threadId, "summarized while idle"); } });
         const writeUser = (s, threadId, promptMsg) => {
             if (!s.child.stdin.writable || s.child.stdin.destroyed)
                 return Promise.resolve(false);
@@ -994,7 +995,7 @@ export const ClaudeDriver = {
                     : { ...turn.integrations.browser };
                 allowed.push("mcp__browser");
             }
-            for (const name of ["data", "highlevel"]) {
+            for (const name of ["data", "highlevel", "device"]) {
                 if (turn.integrations?.[name]) {
                     mcpServers[name] = { ...turn.integrations[name] };
                     allowed.push(`mcp__${name}`);
@@ -1079,21 +1080,26 @@ export const ClaudeDriver = {
                 if (process.versions.electron)
                     env.ELECTRON_RUN_AS_NODE = "1";
             }
-            const settings = { ...authSettings };
+            const cwd = turn.cwd ?? homedir();
+            // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
+            const toolSearch = claudeToolSearchSetting(cwd, env);
+            const own = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch } };
             // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
             if (isolated)
-                settings.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
+                own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
             if (hooks)
-                settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
+                own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
             if (turn.guestConfined)
-                settings.permissions = GUEST_CLAUDE_PERMISSIONS;
+                own.permissions = GUEST_CLAUDE_PERMISSIONS;
+            // Approvals and browser credentials expire at the turn boundary; native background workers must not outlive it.
+            env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
+            // Never for a guest: --restricted leaves project settings out, and a hook is a command.
+            const botSettings = turn.guestConfined ? {} : botSettingsFor(turn.botSettingsFile, cwd, env);
+            const settings = withBotSettings(botSettings, own);
             const authSettingsPath = mcpConfigPath && Object.keys(settings).length
                 ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
             if (authSettingsPath)
                 args.push("--settings", authSettingsPath);
-            // Approvals and browser credentials expire at the turn boundary; native background workers must not outlive it.
-            env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
-            const cwd = turn.cwd ?? homedir();
             const commandCwd = permissionLaunchCwd(cwd);
             const privateFileFlags = new Set(["--mcp-config", "--settings"]);
             const keyArgs = args.filter((a, i) => !privateFileFlags.has(a) && !privateFileFlags.has(args[i - 1] ?? ""));
@@ -1106,6 +1112,8 @@ export const ClaudeDriver = {
                 base: env.ANTHROPIC_BASE_URL ?? null,
                 configDir: env.CLAUDE_CONFIG_DIR ?? null,
                 hooks: Boolean(hooks),
+                toolSearch,
+                botSettings: createHash("sha256").update(JSON.stringify(botSettings)).digest("hex"),
                 // Rotating an account's key/helper must not reuse the old process.
                 auth: createHash("sha256").update(JSON.stringify({
                     settings: authSettings,
@@ -1192,7 +1200,7 @@ export const ClaudeDriver = {
                                 tool: ask.tool,
                                 summary: askSummary(ask),
                                 // The Bash command, for exact-command grants and for the safety floor.
-                                ...shellRequest(ask.kind === "permission" && ask.tool === "Bash" ? ask.input.command : undefined, commandCwd),
+                                ...shellRequest(ask.kind === "permission" && ask.tool === "Bash" ? ask.input.command : undefined, commandCwd), ...(ask.kind === "permission" && readToolPaths(ask.tool, ask.input) ? { reads: readToolPaths(ask.tool, ask.input) } : {}),
                                 requiresExplicitApproval: ask.kind === "permission" && ask.tool === "Bash" && ask.input.dangerouslyDisableSandbox === true || undefined,
                                 nativeReview,
                                 allowSession: ask.kind === "permission" && !(controlsHost && typeof ask.tool === "string" && ask.tool.startsWith("mcp__computer")) ? true : undefined,
@@ -1245,11 +1253,7 @@ export const ClaudeDriver = {
             }
             let child;
             try {
-                child = spawnCli(config.cli, args, {
-                    cwd,
-                    env,
-                    stdio: ["pipe", "pipe", "pipe"],
-                }, "bot");
+                child = spawnCli(config.cli, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { ...(broker ? { rw: [broker.socketPath] } : {}), ...(hookTokenPath ? { ro: [dirname(hookTokenPath)] } : {}) } }, "bot");
             }
             catch (error) {
                 cleanupUnownedLaunch();
@@ -1334,7 +1338,7 @@ export const ClaudeDriver = {
                 t.limitReached = t.explained = true;
                 t.limit = claudeLimitRefusal(frame.api_error_params?.rate_limit_info) ?? t.limit;
                 const said = typeof words === "string" && USAGE_LIMIT.test(words) ? words : undefined;
-                emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeLimitMessage(t.limit ?? null, said), ...claudeEngineReset(t.limit) });
+                emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeLimitMessage(t.limit ?? null, said), ...claudeLimitFacts(t.limit) });
             };
             const noteCostState = (total, modelUsage, usage) => {
                 const state = claudeCostSnapshot(total, modelUsage);
@@ -1407,7 +1411,7 @@ export const ClaudeDriver = {
                                 }, STEERED_CONTINUATION_SILENCE_MS * steerSilenceScale());
                                 held.continuationSilence.unref?.();
                             }
-                            emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(retry.rebuilt ? { rebuilt: true } : {}) });
+                            emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(retry.rebuilt ? { rebuilt: true } : {}), ...failedCustomMcp(o.mcp_servers, session.turn?.input.integrations?.custom) });
                             if (retry.rebuilt)
                                 emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
                             retry.rebuilt = false;
@@ -1445,6 +1449,9 @@ export const ClaudeDriver = {
                     case "assistant": {
                         const msg = o.message ?? {};
                         const text = firstText(msg.content);
+                        const swap = modelSwapNotice(session, threadId, session.turn?.input.model, o, models);
+                        if (swap)
+                            emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: swap });
                         // Signed out, the CLI answers with an api-error frame whose only content is "run /login".
                         if (claudeAuthFailure(o, text)) {
                             if (session.turn)
@@ -1547,6 +1554,8 @@ export const ClaudeDriver = {
                             session.turn.explained = true;
                             emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeResultError(o) });
                         }
+                        if (!config.managed)
+                            void orgBlocks.refresh();
                         // result.usage is per turn "in streaming-input sessions" (2.1.282) even on a retained
                         // process; total_cost_usd is the process's running total.
                         noteCostState(o.total_cost_usd, o.modelUsage, {
@@ -1871,9 +1880,10 @@ export const ClaudeDriver = {
         let lastAuth = {};
         const snapshot = async () => {
             const env = environment();
-            const version = await readCliVersion(env);
-            if (!version)
-                return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+            const probe = await readCliVersion(env);
+            if (!("version" in probe))
+                return { state: "unavailable", reason: probe.reason };
+            const { version } = probe;
             cliVersion = parseClaudeCliVersion(version);
             cliVersionChecked = true;
             if (version !== cliHelpVersion)
@@ -1894,7 +1904,7 @@ export const ClaudeDriver = {
                     reject(new Error(NO_ANTHROPIC_KEY));
                     return;
                 }
-                const model = named ?? config.managedModels?.[0] ?? "claude-haiku-4-5";
+                const model = named ?? config.managedModels?.[0] ?? "claude-haiku-5-5";
                 const env = environment(model);
                 const args = backgroundCallArgs({ model, outputFormat: onUsage ? "json" : "text", supports: (flag) => cliVersion !== null && claudeCliSupports(cliVersion, flag), isolated: !inheritsUserConfig(env) });
                 const { child, removeCwd } = spawnBackgroundCall(config.cli, args, env);
@@ -2004,10 +2014,10 @@ export const ClaudeDriver = {
                     agentsMcp: true,
                     customMcp: true,
                     computerMcp: true,
-                    composioMcp: true,
+                    composioMcp: true, mcpToolsFoundByName: true,
                     phoneMcp: true,
                     browserMcp: true,
-                    dataMcp: true, highlevelMcp: true,
+                    dataMcp: true, highlevelMcp: true, deviceMcp: true,
                     images: true,
                     nativeImageInput: true,
                     effortLevels: ["low", "medium", "high", "xhigh", "max"],
@@ -2019,7 +2029,7 @@ export const ClaudeDriver = {
                         return cliVersionChecked && cliVersion !== null && claudeCliSupports(cliVersion, "--system-prompt-snapshot");
                     },
                     localComputerMcp: true,
-                    hooks: true,
+                    hooks: true, askTool: { kind: "mcp", server: "ogb", name: "ask_user" },
                 },
                 sendTurn: (turn) => authRecovery.send(turn, sendTurn),
                 steer,
@@ -2034,33 +2044,8 @@ export const ClaudeDriver = {
                     return behavior === "allow" ? "allowed-once" : behavior === "answer" ? "answered" : "rejected";
                 },
                 hasSession: (threadId) => active.has(threadId),
-                cacheKeepWarm: {
-                    ping: async (threadId, options) => {
-                        const live = sessions.get(threadId);
-                        const contract = warmContracts.get(threadId);
-                        if (!live || live.closing || live.child.exitCode !== null || !contract || !live.sessionId) {
-                            return { ok: false, reason: "the conversation's Claude session has closed" };
-                        }
-                        if (live.turn || active.has(threadId))
-                            return { ok: false, reason: "a turn is running", busy: true };
-                        if (cliVersion !== null && !(claudeCliSupports(cliVersion, "--fork-session") && claudeCliSupports(cliVersion, "--no-session-persistence"))) {
-                            return { ok: false, reason: "this Claude Code is too old to fork a session; update Claude Code" };
-                        }
-                        return runKeepWarmPing({ cli: config.cli, contract, sessionId: live.sessionId, signal: options?.signal });
-                    },
-                    hold: (threadId, until) => {
-                        if (until === null)
-                            warmHolds.delete(threadId);
-                        else
-                            warmHolds.set(threadId, until);
-                        const live = sessions.get(threadId);
-                        if (!live || live.closing || live.child.exitCode !== null)
-                            return false;
-                        if (!live.turn)
-                            armIdle(threadId);
-                        return true;
-                    },
-                },
+                enginePid: (threadId) => (active.has(threadId) ? sessions.get(threadId)?.child.pid : undefined),
+                cacheKeepWarm: forks.adapter,
                 stopAll: async () => {
                     for (const { stop } of active.values())
                         stop();

@@ -1,3 +1,4 @@
+import { plainTimeZone } from "./plain-time-zone.js";
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 /** Describe familiar presets; retain the exact expression for everything else.
@@ -6,7 +7,7 @@ export function cronScheduleLabel(schedule) {
     const [minute, hour, day, month, weekday] = schedule.expression.trim().split(/\s+/);
     let label = `Cron ${schedule.expression}`;
     if (/^\d+$/.test(minute ?? "") && /^\d+$/.test(hour ?? "")) {
-        const time = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+        const time = `${Number(hour)}:${minute.padStart(2, "0")}`;
         const monthDay = /^\d+$/.test(day ?? "") ? Number(day) : null;
         if (weekday === "*" && month === "*") {
             if (day === "*")
@@ -35,5 +36,5 @@ export function cronScheduleLabel(schedule) {
             }
         }
     }
-    return `${label} · ${schedule.timeZone}`;
+    return `${label} ${plainTimeZone(schedule.timeZone)}`;
 }

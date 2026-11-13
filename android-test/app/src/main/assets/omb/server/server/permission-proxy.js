@@ -2,8 +2,10 @@
 // stdout is the MCP channel: never console.log here.
 import { connect } from "node:net";
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { parseAskQuestions, questionAnswersByQuestion } from "../shared/ask-question.js";
 import { allowsTool, parseToolScope } from "../shared/tool-scope.js";
+import { REFUSED_NEXT_STEP } from "./reply-habits.js";
 const selection = parseToolScope(process.env.OMB_PERMISSION_TOOL_SCOPE === undefined
     ? undefined : (() => { try {
     return JSON.parse(process.env.OMB_PERMISSION_TOOL_SCOPE);
@@ -15,50 +17,95 @@ if (!selection.ok)
     throw new Error(selection.error);
 const allowQuestion = allowsTool(selection.scope, { kind: "mcp", server: "ogb", name: "ask_user" });
 const socketPath = process.argv[2] ?? "";
-const waiting = new Map();
-const conn = connect(socketPath);
-// JSON lines can span reads; a stream decoder keeps a split character whole.
-conn.setEncoding("utf8");
-const dead = () => {
-    for (const resolve of waiting.values()) {
-        resolve({ behavior: "deny", message: "SpokyBot: permission broker unavailable — skip this action" });
-    }
-    waiting.clear();
+/** What the bot is told when the person cannot be asked at all: what to do instead, so it never just skips. */
+const UNREACHABLE_NOTE = {
+    question: "SpokyBot could not show this question to the person: its question service did not answer. Do not retry this tool. Ask in your reply instead: end it with the exact question and stop there until they answer.",
+    permission: "SpokyBot could not ask the person to approve this step: its approval service did not answer. Skip this step, and say in your reply what you wanted to do and why, so the person can decide.",
 };
-conn.on("error", dead);
-conn.on("close", dead);
-let connBuf = "";
-conn.on("data", (chunk) => {
-    connBuf += chunk;
-    let nl;
-    while ((nl = connBuf.indexOf("\n")) !== -1) {
-        const line = connBuf.slice(0, nl);
-        connBuf = connBuf.slice(nl + 1);
-        let msg;
-        try {
-            msg = JSON.parse(line);
-        }
-        catch {
-            continue;
-        }
-        if (msg.t === "answer") {
-            waiting.get(msg.id)?.(msg);
-            waiting.delete(msg.id);
-        }
-    }
-});
-const send = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
-function askBroker(ask) {
+const unreachable = (kind) => ({ behavior: "deny", message: UNREACHABLE_NOTE[kind], source: "system" });
+/** Asks waiting for the broker, by id; an answer only ever comes back on the connection its ask went out on. */
+const waiting = new Map();
+let live = null;
+let opening = null;
+function open() {
     return new Promise((resolve) => {
-        waiting.set(String(ask.id), resolve);
-        if (conn.destroyed)
-            return dead();
-        try {
-            conn.write(JSON.stringify(ask) + "\n");
+        const conn = connect(socketPath);
+        // JSON lines can span reads; a stream decoder keeps a split character whole.
+        conn.setEncoding("utf8");
+        let connected = false;
+        let buf = "";
+        conn.on("data", (chunk) => {
+            buf += chunk;
+            let nl;
+            while ((nl = buf.indexOf("\n")) !== -1) {
+                const line = buf.slice(0, nl);
+                buf = buf.slice(nl + 1);
+                let msg;
+                try {
+                    msg = JSON.parse(line);
+                }
+                catch {
+                    continue;
+                }
+                const entry = msg?.t === "answer" ? waiting.get(String(msg.id)) : undefined;
+                if (entry?.conn !== conn)
+                    continue;
+                waiting.delete(String(msg.id));
+                entry.resolve(msg);
+            }
+        });
+        conn.once("connect", () => {
+            connected = true;
+            resolve(conn);
+        });
+        conn.on("error", () => { });
+        conn.once("close", () => {
+            if (!connected)
+                resolve(null);
+            if (live === conn)
+                live = null;
+            for (const [id, entry] of waiting) {
+                if (entry.conn !== conn)
+                    continue;
+                waiting.delete(id);
+                entry.resolve(unreachable(entry.kind));
+            }
+        });
+    });
+}
+/** The connection to the broker, opened again after a drop; a few quick tries ride out a broker that is still binding. */
+function brokerConnection() {
+    if (live && !live.destroyed)
+        return Promise.resolve(live);
+    opening ??= (async () => {
+        for (const pause of [0, 200, 800]) {
+            if (pause)
+                await sleep(pause);
+            const conn = await open();
+            if (conn)
+                return (live = conn);
         }
-        catch {
-            dead();
-        }
+        return null;
+    })().finally(() => {
+        opening = null;
+    });
+    return opening;
+}
+// Connected at start, so a process that outlives its session never reaches a newer broker bound at the same path.
+void brokerConnection();
+const send = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
+async function askBroker(ask, kind) {
+    const conn = await brokerConnection();
+    if (!conn || conn.destroyed)
+        return unreachable(kind);
+    return new Promise((resolve) => {
+        waiting.set(ask.id, { conn, kind, resolve });
+        conn.write(JSON.stringify(ask) + "\n", (error) => {
+            if (!error || waiting.get(ask.id)?.conn !== conn)
+                return;
+            waiting.delete(ask.id);
+            resolve(unreachable(kind));
+        });
     });
 }
 function multiSelectQuestion(args) {
@@ -79,13 +126,7 @@ async function answerNativeQuestions(input) {
             message: "SpokyBot: this AskUserQuestion call had no answerable question (each one needs question text), so nobody was shown it. Ask again with a well-formed call, or continue without it.",
         });
     }
-    const answer = await askBroker({
-        t: "ask",
-        id: randomUUID(),
-        kind: "question",
-        tool: ASK_USER_QUESTION,
-        input: { questions },
-    });
+    const answer = await askBroker({ t: "ask", id: randomUUID(), kind: "question", tool: ASK_USER_QUESTION, input: { questions } }, "question");
     if (answer.behavior === "deny") {
         return JSON.stringify({ behavior: "deny", message: answer.message || "Denied from SpokyBot" });
     }
@@ -148,7 +189,7 @@ async function handle(msg) {
     if (msg.method === "tools/call") {
         const name = msg.params?.name;
         const args = msg.params?.arguments ?? {};
-        const reply = (text) => send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }] } });
+        const reply = (text, isError = false) => send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }], ...(isError ? { isError } : {}) } });
         if (name === "ask_user" && !allowQuestion)
             return reply("SpokyBot: this question tool is excluded by the bot's tool selection.");
         if (name === "approve" && args.tool_name === ASK_USER_QUESTION) {
@@ -165,7 +206,7 @@ async function handle(msg) {
                 : null;
         const answer = await askBroker(isQuestion
             ? { t: "ask", id: askId, kind: "question", tool: "ask_user", input: { question: args.question, choices: args.choices, ...(picksSeveral ? { questions: picksSeveral } : {}) } }
-            : { t: "ask", id: askId, tool: args.tool_name, input: args.input });
+            : { t: "ask", id: askId, tool: args.tool_name, input: args.input }, isQuestion ? "question" : "permission");
         let text = answer.message || "No answer was given — use your best judgment.";
         if (picksSeveral && answer.source === "user" && typeof answer.message === "string") {
             text = questionAnswersByQuestion(answer.message, picksSeveral)[picksSeveral[0].question] ?? text;
@@ -178,10 +219,10 @@ async function handle(msg) {
                 text = JSON.stringify(result);
             }
             else {
-                text = JSON.stringify({ behavior: "deny", message: answer.message || "Denied from SpokyBot" });
+                text = JSON.stringify({ behavior: "deny", message: (answer.message || "Denied from SpokyBot") + (answer.source === "user" ? REFUSED_NEXT_STEP : "") });
             }
         }
-        return reply(text);
+        return reply(text, isQuestion && answer.behavior === "deny");
     }
     if (String(msg.method ?? "").startsWith("notifications/"))
         return;

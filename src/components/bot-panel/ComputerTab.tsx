@@ -3,7 +3,7 @@ import { KeyRound, Monitor } from "lucide-react";
 
 import { writeComputerPanelView, type ComputerPanelView } from "@/lib/computer-panel-view";
 import { t } from "@/lib/i18n";
-import type { Place } from "@/lib/place";
+import { localVmOffered, type Place } from "@/lib/place";
 import { placeHasIssue, worksOnSimpleLabel } from "@/lib/place-view";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { api, useStore, type Bot } from "@/state/store";
@@ -72,12 +72,12 @@ function usePlaceChoices(bot: Bot) {
     ...(placeViews.local.policy ? [choice("local")] : []),
     ...(placeViews.browser.policy || current === "browser" ? [choice("browser")] : []),
     ...(placeViews.cloud.policy ? [choice("cloud")] : []),
-    ...(current === "vm" || current === "off" ? [{ value: current, label: EXTRA_PLACE_LABEL[current](), disabled: true }] : []),
+    ...(localVmOffered(platform) && (current === "vm" || current === "off") ? [{ value: current, label: EXTRA_PLACE_LABEL[current](), disabled: true }] : []),
   ];
   const liveSurface = bot.tasks?.find((task) => task.threadId === bot.threadId)?.surface;
   const usingNow = liveSurface && liveSurface !== current ? placeLabel(liveSurface) : null;
   const currentLabel = options.find((option) => option.value === current)?.label
-    ?? (current === "auto" || current === "vm" || current === "off" ? undefined : placeLabel(current));
+    ?? (current === "auto" || (current === "vm" && !localVmOffered(platform)) || current === "off" ? undefined : placeLabel(current));
   return { options, current, currentLabel, usingNow };
 }
 

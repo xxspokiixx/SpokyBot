@@ -9,6 +9,7 @@ import { PublishedPagesStore } from "./store.js";
 export function createPublishedPages(options) {
     const store = new PublishedPagesStore(join(options.dataDir, "published-pages.json"));
     const client = createPagesClient({ access: () => pagesAccess(options.cloudHome), notOffered: () => pagesNotOffered(options.cloudHome),
+        selfHosted: options.selfHosted === true,
         ...(options.fetch ? { fetch: options.fetch } : {}) });
     const apps = options.apps;
     const pageRow = (threadId, messageId) => apps?.store.messagesFor(threadId).find((message) => message.id === messageId && message.kind === "app");

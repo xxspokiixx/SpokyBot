@@ -1,10 +1,10 @@
 import { APP_LIMITS } from "../../shared/app.js";
+import { APP_RPC_METHODS } from "../../shared/app-frame/bridge.js";
 import { webOrigin } from "../../shared/app-frame/csp.js";
 import { appRow, createChatApps, rowRate } from "../chat-apps.js";
 import { PASS } from "./table.js";
 export { createChatApps };
 export { createChatAppsMcp } from "../chat-apps-mcp.js";
-export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"];
 const DOCUMENT = /^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/app$/;
 const APP_ACTION = /^\/api\/bots\/([\w-]+)\/apps\/([\w-]+)\/(rpc|context)$/;
 function isRecord(value) {

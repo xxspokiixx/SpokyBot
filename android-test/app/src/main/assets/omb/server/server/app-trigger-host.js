@@ -117,7 +117,7 @@ export function createAppTriggerHost(deps) {
             return json(res, status(error), { error: error instanceof Error ? error.message : String(error) });
         }
     };
-    /** The bot's side: list_triggers and list_trigger_events, for the bot whose turn holds the capability. */
+    /** The bot's side: trigger_info list and events, for the bot whose turn holds the capability. */
     const internalRoutes = (context) => async ({ res, url, path, method, json }) => {
         if (method !== "GET" || (path !== "/api/internal/triggers" && path !== "/api/internal/trigger-events"))
             return PASS;
@@ -150,7 +150,7 @@ export function createAppTriggerHost(deps) {
         const address = owner ? addressFor({ from: context.from, owner, guestDriven: context.guestDriven, outsideDriven: context.outsideDriven() }, deps.webhooks, shown.id, deps.webhookBase()) : {};
         return json(res, 200, { ...listing, trigger: { ...shown, ...address } });
     };
-    /** create_trigger (when=app_event) and manage_trigger on one: applies at once and leaves the receipt card. */
+    /** trigger create (when=app_event) and every change to one: applies at once and leaves the receipt card. */
     async function submit(res, json, input) {
         // Its events would stream the owner's app data into a conversation someone else drives.
         if (input.guestDriven)

@@ -1,6 +1,7 @@
 import { engineFailureKind } from "./drivers/engine-errors.js";
 import { classifyError } from "./drivers/retry.js";
 import { hostTimeZone } from "./turn-clock.js";
+import { classifyContinuable } from "./turn-continuation.js";
 const RETRY_MS = 15_000;
 const RATE_LIMIT_RETRY_MS = 60_000;
 export const ROUTINE_BUSY_RECHECK_MS = 30_000;
@@ -11,30 +12,45 @@ const AFTER_RESET_MS = 60_000;
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 /** startTurn's codes for a bot or thread that is busy for now. */
 const BUSY_CODES = new Set(["thread_busy", "thread_limit", "workspace_busy", "settling"]);
+/** Stop reasons of a turn someone ended on purpose (Stop, a typed "stop", a settings change that cut it short), the AI
+ * declined, or a tool call the person denied or that failed after its corrective rounds: a second start would undo or
+ * repeat it. */
+const NOT_RETRIED_STOPS = new Set(["cancelled", "interrupted", "refusal", "tool_error"]);
+/** What the provider answered for a reason a second start would meet again. */
+const REFUSED_KINDS = new Set(["refused", "tool_schema", "tool_count"]);
 const OWNER_CAUSES = new Set(["signed_out", "credits", "usage_limit", "setup"]);
 const OWNER_ACTION = {
-    signed_out: "This bot's AI is signed out. Sign in again in Settings → Model providers.",
+    signed_out: "This bot's AI is signed out. Sign in again in Settings → AI.",
     credits: "This bot's AI account is out of credit. Add credit with the provider, or choose another AI for this bot.",
     usage_limit: "This bot's AI reached its usage limit. Its routines work again once it resets, or choose another AI for this bot now.",
 };
 const TRIAL_ACTION = "The trial Claude credit can't run this. Sign in with your own Claude or ChatGPT account, or add an API key.";
 const RETRY_WHY = {
     stalled: "the AI stalled", restarted: "SpokyBot restarted while it ran", rate_limited: "a rate limit", provider: "a temporary error",
+    failed: "a failure",
 };
 const FIRST_START = {
     stalled: "stopped when its AI stalled", restarted: "was cut off when SpokyBot restarted", rate_limited: "was stopped by a rate limit",
-    provider: "failed on a temporary AI error", usage_limit: "was refused by the AI's usage limit",
+    provider: "failed on a temporary AI error", usage_limit: "was refused by the AI's usage limit", failed: "failed",
 };
+/** Any failure gets one automatic retry, except a stall the turn watchdog stopped (its Chief hears instead), a
+ * stop someone pressed or typed, a refusal, and a spent cap. Routine runs and teammate threads both judge by this. */
 export function classifyRoutineFailure(failure, facts = {}) {
     if (facts.cause === "busy")
         return { kind: "busy" };
-    if (facts.cause === "stalled" || facts.stalled)
+    if (facts.cause === "stalled" || facts.cause === "cap")
+        return { kind: "final" };
+    if (facts.stopReason && NOT_RETRIED_STOPS.has(facts.stopReason))
+        return { kind: "final" };
+    if (classifyContinuable(facts.stopReason, failure) === "cap")
+        return { kind: "final" };
+    if (facts.stalled)
         return { kind: "retry", cause: "stalled" };
     const engine = engineFailureKind(failure);
     const { reason, transient } = classifyError({ text: failure });
-    if (facts.trialCredit || engine === "credits")
+    if (facts.trialCredit || (engine === "credits" && !facts.limit))
         return { kind: "owner", cause: "credits" };
-    if (facts.limitResetsAt || facts.stopReason === "quota" || engine === "usage_limit") {
+    if (facts.limit || facts.limitResetsAt || facts.stopReason === "quota" || engine === "usage_limit") {
         return { kind: "owner", cause: "usage_limit", ...(facts.limitResetsAt ? { resetsAt: facts.limitResetsAt } : {}) };
     }
     if (facts.stopReason === "auth_required" || reason === "auth")
@@ -47,14 +63,25 @@ export function classifyRoutineFailure(failure, facts = {}) {
         return { kind: "retry", cause: "rate_limited" };
     if (engine === "overloaded" || engine === "server" || transient)
         return { kind: "retry", cause: "provider" };
-    return { kind: "final" };
+    // A failure nothing above names (a crash, an exit before the result): one more start. A refused start or a named refusal never.
+    return reason === "unknown" && facts.cause !== "refused" && !(engine && REFUSED_KINDS.has(engine)) ? { kind: "retry", cause: "failed" } : { kind: "final" };
 }
+/** Why startTurn would not start a run: busy for now, the workspace spend cap, or any other refusal. A start that threw
+ * without a status or code (an engine that would not spawn) is a failure like any other. */
 export function dispatchRefusal(error) {
-    const code = error?.code;
-    return typeof code === "string" && BUSY_CODES.has(code) ? { cause: "busy" } : {};
+    const { code, status } = (error ?? {});
+    if (typeof code === "string" && BUSY_CODES.has(code))
+        return { cause: "busy" };
+    if (code === "spend_cap")
+        return { cause: "cap" };
+    return typeof code === "string" || (typeof status === "number" && status >= 400 && status < 500) ? { cause: "refused" } : {};
 }
-export function engineFacts({ setup, stalled, trialCredit, limitResetsAt }) {
-    return { setup, stalled, trialCredit, limitResetsAt };
+/** Whether SpokyBot runs a failed teammate thread once more by itself before its Chief hears of it. */
+export function retriesTeammateThread(failure, facts = {}) {
+    return classifyRoutineFailure(failure, facts).kind === "retry";
+}
+export function engineFacts({ setup, stalled, trialCredit, limitResetsAt, limit }) {
+    return { setup, stalled, trialCredit, limitResetsAt, limit };
 }
 /** Host-local, with its zone: on a Cloud home the host's zone need not be the reader's. */
 function when(at) {
@@ -111,6 +138,11 @@ export function recoverRun(run, failure, facts, now, notices) {
         return { queued: false, error: again };
     if (verdict.cause === "usage_limit" && facts.backupReady && requeueOnce(run, "usage_limit", failure, now, now + RETRY_MS)) {
         run.attention = "Starting again on the backup AI: this bot's AI reached its usage limit";
+        return { queued: true };
+    }
+    // A signed-out AI's run starts again on the backup the person chose; its start there says once that it needs signing in.
+    if (verdict.cause === "signed_out" && facts.backupReady && requeueOnce(run, "failed", failure, now, now + RETRY_MS)) {
+        run.attention = "Starting again on the backup AI: this bot's AI is signed out";
         return { queued: true };
     }
     const first = firstNotice(notices, run.botId, verdict.cause, now);

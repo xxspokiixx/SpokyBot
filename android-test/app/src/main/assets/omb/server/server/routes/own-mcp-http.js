@@ -1,6 +1,7 @@
 import { agentsMcp } from "../drivers/agents-mcp.js";
 import { AGENTS_MCP_ENV } from "../drivers/agents-mcp-env.js";
 import { harnessMcpRequest, MAX_INPUT_BYTES, parseHarnessMcpKind } from "../harness-mcp-request.js";
+import { parseToolLimit, TOOL_LIMIT_HEADER } from "../tool-count-limit.js";
 import { PASS } from "./table.js";
 import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "./own-mcp-http-path.js";
 function agentsEnv(headers, token, harness) {
@@ -38,7 +39,7 @@ export async function ownMcpHttpRoutes({ req, res, path, method, json, readBody 
     const harness = `http://127.0.0.1:${req.socket.localPort}/`;
     const answer = kind === "agents"
         ? agentsMcp(agentsEnv(req.headers, token, harness.slice(0, -1)))
-        : (frame) => harnessMcpRequest(frame, { url: harness, token, kind });
+        : (frame) => harnessMcpRequest(frame, { url: harness, token, kind, toolLimit: parseToolLimit(req.headers[TOOL_LIMIT_HEADER]) });
     const frames = Array.isArray(body) ? body : [body];
     const replies = (await Promise.all(frames.map(async (frame) => {
         const reply = await answer(frame);

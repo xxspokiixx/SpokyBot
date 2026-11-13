@@ -38,8 +38,9 @@ export class SseRecorder extends EventEmitter {
     get response() { return this; }
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-/** Runs every step, acking each frame as a phone does, and returns the events each step brought. */
-export async function runV1Session(driver, origin, { settleMs = 1_200 } = {}) {
+/** Runs every step, acking each frame as a phone does, and returns the events each step brought. Each step waits
+ * `settleMs`, then while `shown` says its events are still incomplete, at most `maxSettleMs` more. */
+export async function runV1Session(driver, origin, { settleMs = 1_200, shown, maxSettleMs = 10_000 } = {}) {
     const sse = new SseRecorder();
     let viewerId = "";
     sse.on("event", (event) => {
@@ -52,8 +53,11 @@ export async function runV1Session(driver, origin, { settleMs = 1_200 } = {}) {
     let mark = 0;
     const step = async (name, run) => {
         const answer = await run().catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+        const record = () => ({ step: name, answer, events: sse.events.slice(mark) });
         await sleep(settleMs);
-        records.push({ step: name, answer, events: sse.events.slice(mark) });
+        for (const until = Date.now() + maxSettleMs; shown && !shown(record()) && Date.now() < until;)
+            await sleep(50);
+        records.push(record());
         mark = sse.events.length;
     };
     const act = (body) => driver.action(viewerId, body);

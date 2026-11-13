@@ -3,6 +3,7 @@ import { admit } from "../admission.js";
 import { cancelChannelMessage, headChannelGroup, holdChannelQueue, queueChannelMessage, queuedChannelMessage, resolveHeldReplyTarget, restoreHeldChannelQueue, settleHeldChannelQueueHead, } from "../channel-queue.js";
 import { DATA_DIR } from "../config.js";
 import { cancelledChatFollowup } from "../message-db.js";
+import { messageTextRefusal } from "../message-text.js";
 import { promptWithReply } from "../replies.js";
 import { clientGroupPatchViolation, requestSource } from "../request-auth.js";
 import { parseConversationTurnTimeout } from "../room-turn-timeout.js";
@@ -41,6 +42,7 @@ export function createChannelRoutes(deps) {
         return result;
     };
     return async ({ req, res, url, path, method, auth, json, readBody }) => {
+        const own = (group) => deps.groupFor?.(auth, group) ?? group;
         let m = null;
         const routines = deps.routines();
         m = path.match(/^\/api\/groups\/([\w-]+)\/tasks$/);
@@ -66,7 +68,7 @@ export function createChannelRoutes(deps) {
             // Who opened it decides who may answer its cards on a shared workspace.
             if (auth.kind === "session")
                 threadStarters.set(task.threadId, actorKey(auth));
-            return json(res, 201, { group: groupWithThread(store.group(group.id)), task });
+            return json(res, 201, { group: own(groupWithThread(store.group(group.id))), task });
         }
         m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/delete$/);
         if (m && method === "POST") {
@@ -92,7 +94,7 @@ export function createChannelRoutes(deps) {
             const result = deleteGroupTasks(group.id, allowed);
             if (!result)
                 return json(res, 400, { error: "a channel keeps at least one task" });
-            return json(res, 200, { group: groupWithThread(result.group), deleted: result.deleted, refused });
+            return json(res, 200, { group: own(groupWithThread(result.group)), deleted: result.deleted, refused });
         }
         m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/([\w-]+)$/);
         if (m && method === "POST") {
@@ -112,8 +114,9 @@ export function createChannelRoutes(deps) {
             const switched = store.switchGroupTask(group.id, m[2]);
             if (!switched)
                 return json(res, 404, { error: "no such channel task" });
-            readThreadNotifications(switched.threadId, broadcast);
-            const switchedSettings = publicGroupState(switched);
+            deps.threadRead?.(auth, switched.threadId);
+            readThreadNotifications(switched.threadId, broadcast, auth);
+            const switchedSettings = own(publicGroupState(switched));
             // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
             const responseGroup = requestedMessages === "0"
                 ? switchedSettings
@@ -178,7 +181,7 @@ export function createChannelRoutes(deps) {
             const updated = deleteGroupTasks(group.id, [m[2]]);
             if (!updated?.deleted.length)
                 return json(res, 400, { error: "a channel keeps at least one task" });
-            return json(res, 200, { group: groupWithThread(updated.group) });
+            return json(res, 200, { group: own(groupWithThread(updated.group)) });
         }
         m = path.match(/^\/api\/groups\/([\w-]+)$/);
         if (m && method === "PATCH") {
@@ -195,8 +198,13 @@ export function createChannelRoutes(deps) {
                 if (notYours)
                     return json(res, 403, { error: notYours });
             }
+            if (deps.personMarkRoom && auth.kind === "session" && renamed && typeof body?.unread === "boolean") {
+                const { unread, ...shared } = body;
+                const group = Object.keys(shared).length ? updateChannel(m[1], shared) : renamed;
+                return json(res, 200, { group: deps.personMarkRoom(auth, group, unread) ?? own(publicGroupState(group)) });
+            }
             const group = updateChannel(m[1], body);
-            return json(res, 200, { group: publicGroupState(group) });
+            return json(res, 200, { group: own(publicGroupState(group)) });
         }
         m = path.match(/^\/api\/groups\/([\w-]+)\/read$/);
         if (m && method === "POST") {
@@ -204,10 +212,16 @@ export function createChannelRoutes(deps) {
             if (!room)
                 return json(res, 404, { error: "no such room" });
             sawThread(room.threadId);
+            deps.threadRead?.(auth, room.threadId);
+            const personal = deps.personMarkRoom?.(auth, room, false);
+            if (personal) {
+                readThreadNotifications(room.threadId, broadcast, auth);
+                return json(res, 200, { group: personal });
+            }
             const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) });
-            readThreadNotifications(room.threadId, broadcast);
+            readThreadNotifications(room.threadId, broadcast, auth);
             broadcast({ kind: "group", group: publicGroupState(group) });
-            return json(res, 200, { group: publicGroupState(group) });
+            return json(res, 200, { group: own(publicGroupState(group)) });
         }
         m = path.match(/^\/api\/groups\/([\w-]+)$/);
         if (m && method === "DELETE") {
@@ -238,6 +252,9 @@ export function createChannelRoutes(deps) {
             if (!body || typeof body !== "object" || Array.isArray(body)) {
                 return json(res, 400, { error: "body must be a JSON object" });
             }
+            const textRefused = messageTextRefusal(body.text);
+            if (textRefused)
+                return json(res, 400, { error: textRefused });
             const text = String(body.text ?? "").trim();
             if (!text)
                 return json(res, 400, { error: "text required" });
@@ -470,7 +487,7 @@ export function createChannelRoutes(deps) {
             }
             const visible = publicGroupState(store.group(group.id) ?? group);
             broadcast({ kind: "group", group: visible });
-            return json(res, 202, { ok: true, threadId: group.threadId, group: visible });
+            return json(res, 202, { ok: true, threadId: group.threadId, group: own(visible) });
         }
         m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
         if (m && method === "POST") {

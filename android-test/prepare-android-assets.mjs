@@ -78,25 +78,45 @@ if (existsSync(join(ROOT, "skills"))) cpSync(join(ROOT, "skills"), join(omb, "sk
 // Source maps are skipped: they are dev-only and never rendered.
 const BRAND_NAME = process.env.OMB_TEST_BRAND || "SpokyBot";
 const REBRAND_EXTENSIONS = /\.(js|mjs|cjs|ts|html|css|json|md|txt)$/i;
-function rebrandTree(dir) {
+async function writeWithRetry(file, data, retries = 5, delay = 100) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      writeFileSync(file, data);
+      return;
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      // Windows file locking (ERROR_LOCK_VIOLATION = -4094, ERROR_SHARING_VIOLATION = -4091)
+      // Also catch EPERM, EACCES, EBUSY
+      const isLockError = e.code === 'EPERM' || e.code === 'EACCES' || e.code === 'EBUSY' ||
+        e.errno === -4094 || e.errno === -4091 || e.message?.includes('UNKNOWN');
+      if (isLockError) {
+        const { setTimeout } = await import("node:timers/promises");
+        await setTimeout(delay * (i + 1)); // exponential backoff
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+async function rebrandTree(dir) {
   let touched = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      touched += rebrandTree(full);
+      touched += await rebrandTree(full);
       continue;
     }
     if (!REBRAND_EXTENSIONS.test(entry.name)) continue;
     const text = readFileSync(full, "utf8");
     const renamed = text.replaceAll("OpenMausBot", BRAND_NAME).replaceAll("MausBot", BRAND_NAME);
     if (renamed !== text) {
-      writeFileSync(full, renamed);
+      await writeWithRetry(full, renamed);
       touched += 1;
     }
   }
   return touched;
 }
-const rebrandedFiles = rebrandTree(omb);
+const rebrandedFiles = await rebrandTree(omb);
 console.error(`prepare: rebranded ${rebrandedFiles} staged files to ${BRAND_NAME}`);
 
 // The phone's local desktop: proot + Alpine rootfs + qemu (runtime/android-arm64/linux/)
@@ -108,10 +128,18 @@ if (existsSync(join(linuxRuntime, "rootfs.tar.gz"))) {
   mkdirSync(linuxTarget, { recursive: true });
   // aapt transparently decompresses *.gz assets (a 450 MB tarball became a
   // 1.25 GB APK entry); an opaque extension keeps the compressed bytes.
-  for (const name of ["rootfs.tar.gz", "proot", "loader", "libtalloc.so.2", "libandroid-shmem.so", "omb-guest-chromium"]) {
+  for (const name of ["rootfs.tar.gz", "proot", "loader", "libtalloc.so.2", "libandroid-shmem.so", "omb-guest-chromium", "setup-graphical-desktop.sh"]) {
     const source = join(linuxRuntime, name);
     const target = name === "rootfs.tar.gz" ? join(linuxTarget, "rootfs.blob") : join(linuxTarget, name);
-    copyFileSync(source, target);
+    if (existsSync(source)) {
+      copyFileSync(source, target);
+    }
+  }
+  // Copy debs folder for graphical desktop (no network required on device)
+  const debsSource = join(linuxRuntime, "debs");
+  const debsTarget = join(linuxTarget, "debs");
+  if (existsSync(debsSource)) {
+    cpSync(debsSource, debsTarget, { recursive: true });
   }
   copyFileSync(linuxMcp, join(linuxTarget, "android-local-computer.mjs"));
   copyFileSync(join(ROOT, "android-test", "linux", "android-device-phone.mjs"), join(linuxTarget, "android-device-phone.mjs"));

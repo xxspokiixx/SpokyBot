@@ -127,6 +127,7 @@ function createCompanionOriginGateway({
     incoming.pipe(upstream);
   });
   server.on("upgrade", (incoming, socket, head) => {
+    socket.on("error", () => socket.destroy());
     if (!accepting || !isTargetAlive(target)) return socket.destroy();
     const headers = upgradeHeaders(incoming.headers);
     if (!headers || incoming.method !== "GET") return socket.destroy();
@@ -156,6 +157,12 @@ function createCompanionOriginGateway({
       writeUpgrade(socket, response);
       remoteSocket = remote;
       upgradedSockets.add(remote);
+      const teardown = () => {
+        socket.destroy();
+        remote.destroy();
+      };
+      socket.on("error", teardown);
+      remote.on("error", teardown);
       remote.once("close", release);
       if (head.length) remote.write(head);
       if (remoteHead.length) socket.write(remoteHead);

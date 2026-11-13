@@ -2,10 +2,13 @@ import { baseBotId, layerAudience, layerId, mayRead, memberAudience, audienceMem
 import { createPeopleAbout } from "../people-about.js";
 import { personKey } from "../person-key.js";
 import { ensureWorkspace, loadMemory, workspaceDir } from "../workspace.js";
+import { storeThreads } from "../engine-homes/migrate.js";
 export function createCloudTeamHost(deps) {
     const team = deps.team;
     const people = createPeopleAbout(deps.dataDir);
     const audienceOf = (threadId) => threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter: deps.starters.get(threadId), markers: deps.markers });
+    if (team)
+        deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
     /** The layer a turn in this conversation writes into: the bot's own folder off a team or for the team's conversations,
      * a sibling folder for a room's or a member's. The folder exists before the turn starts, so the box can bind it. */
     const layer = (botId, threadId) => {

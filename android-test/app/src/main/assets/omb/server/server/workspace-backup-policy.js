@@ -1,6 +1,7 @@
 import { readlinkSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseStoredConfig } from "./config.js";
+import { inSecretFolder } from "./secret-folder.js";
 // Connection sections stay on the destination whole: a restored URL must never redirect an API key kept from that device.
 const PORTABLE_CONFIG_KEYS = [
     "profile", "language", "budgets", "billing", "rooms", "threads",
@@ -35,6 +36,8 @@ export function restoredWorkspaceConfig(portable, destination) {
     return restored;
 }
 export function excludedWorkspaceAuthPath(path) {
+    if (inSecretFolder(path))
+        return true;
     if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path))
         return true;
     if (/^mcp-oauth\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path))
@@ -47,6 +50,9 @@ export function excludedWorkspaceAuthPath(path) {
         return true;
     // A Cloud home's connected-apps installation: its connected accounts belong to it, so a copy would share them.
     if (/^connected-apps-installation\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path))
+        return true;
+    // A Team Cloud's kept rules: a restored Cloud asks the Admin for the ones in force now.
+    if (/^team-policy\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path))
         return true;
     // A Team Cloud member's own installation, keys and sign-ins: theirs, never in the team's backup.
     if (/^people-connections(?:\/|$)/.test(path))

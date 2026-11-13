@@ -2,6 +2,8 @@ import { pagesAuthHeaders } from "./access.js";
 export const SIGN_IN_MESSAGE = "Publishing a page needs a SpokyBot account. Sign in to SpokyBot in the app's Settings, then ask again.";
 const UNAVAILABLE = "Publishing isn't available right now. Try again in a few minutes.";
 const NOT_TURNED_ON = "Publishing pages isn't turned on for this account yet.";
+/** A server with no desktop app to sign in through and no Cloud home (`openmausbot serve`): no Settings sign-in can help. */
+export const SELF_HOSTED_MESSAGE = "Publishing pages isn't available on self-hosted servers yet.";
 const TOKEN_TIMEOUT_MS = 15_000, UPLOAD_TIMEOUT_MS = 60_000;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const fail = (reason, message, extra = {}) => ({ ok: false, reason, message, ...extra });
@@ -30,17 +32,22 @@ const readJson = async (response) => {
         return {};
     }
 };
+const callSignal = (call, ms) => call.signal ? AbortSignal.any([call.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
 const said = (body, fallback) => typeof body.message === "string" && body.message.trim() ? body.message.trim().slice(0, 500) : fallback;
 export function createPagesClient(options) {
     const http = options.fetch ?? fetch, now = options.now ?? Date.now;
-    const mint = async (action, pageId) => {
+    const mint = async (action, call, pageId) => {
         const access = options.access();
-        if (!access)
-            return options.notOffered?.() ? fail("unavailable", NOT_TURNED_ON) : fail("sign_in", SIGN_IN_MESSAGE);
+        if (!access) {
+            if (options.notOffered?.())
+                return fail("unavailable", NOT_TURNED_ON);
+            return options.selfHosted ? fail("unavailable", SELF_HOSTED_MESSAGE) : fail("sign_in", SIGN_IN_MESSAGE);
+        }
         const body = JSON.stringify(pageId ? { action, pageId } : { action });
         let response;
+        call.assertActive?.();
         try {
-            response = await http(access.url, { method: "POST", redirect: "error", signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS), body,
+            response = await http(access.url, { method: "POST", redirect: "error", signal: callSignal(call, TOKEN_TIMEOUT_MS), body,
                 headers: { "content-type": "application/json", accept: "application/json", ...pagesAuthHeaders(access, body, now()) } });
         }
         catch {
@@ -80,8 +87,8 @@ export function createPagesClient(options) {
     };
     return {
         /** A new page (no `pageId`), or new files at an existing page's same link. */
-        async publish(input) {
-            const minted = await mint(input.pageId ? "update" : "create", input.pageId);
+        async publish(input, call = {}) {
+            const minted = await mint(input.pageId ? "update" : "create", call, input.pageId);
             if ("ok" in minted)
                 return minted;
             const bytes = input.files.reduce((sum, file) => sum + file.data.byteLength, 0);
@@ -93,8 +100,9 @@ export function createPagesClient(options) {
             form.set("manifest", JSON.stringify({ title: input.title, files: input.files.map((file) => ({ path: file.path, size: file.data.byteLength })) }));
             input.files.forEach((file, index) => form.set(`f${index}`, new Blob([new Uint8Array(file.data)])));
             let response;
+            call.assertActive?.();
             try {
-                response = await http(`${minted.uploadUrl}/v1/pages/${minted.pageId}`, { method: "PUT", redirect: "error", signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+                response = await http(`${minted.uploadUrl}/v1/pages/${minted.pageId}`, { method: "PUT", redirect: "error", signal: callSignal(call, UPLOAD_TIMEOUT_MS),
                     headers: { authorization: `Bearer ${minted.token}`, accept: "application/json" }, body: form });
             }
             catch {
@@ -106,13 +114,14 @@ export function createPagesClient(options) {
             const usage = usageOf(body.usage);
             return { ok: true, pageId: minted.pageId, url: minted.pageUrl, usage: usage ?? { pages: 0, limit: minted.limits.pages }, badge: body.badge === true };
         },
-        async unpublish(pageId) {
-            const minted = await mint("delete", pageId);
+        async unpublish(pageId, call = {}) {
+            const minted = await mint("delete", call, pageId);
             if ("ok" in minted)
                 return minted;
             let response;
+            call.assertActive?.();
             try {
-                response = await http(`${minted.uploadUrl}/v1/pages/${pageId}`, { method: "DELETE", redirect: "error", signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+                response = await http(`${minted.uploadUrl}/v1/pages/${pageId}`, { method: "DELETE", redirect: "error", signal: callSignal(call, TOKEN_TIMEOUT_MS),
                     headers: { authorization: `Bearer ${minted.token}`, accept: "application/json" } });
             }
             catch {

@@ -1,9 +1,8 @@
 // Served without auth at /.well-known/openmausbot/environment, so a saved connection can check it still reaches the same server.
 import { randomUUID } from "node:crypto";
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync, } from "node:fs";
+import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { publishCandidate } from "../electron/atomic-publish.mjs";
 import { SERVER_ROOT } from "./proxy-paths.js";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function hasCode(error, code) {
@@ -44,12 +43,34 @@ export function loadEnvironmentId(dataDir) {
         fsyncSync(descriptor);
         closeSync(descriptor);
         descriptor = undefined;
-        if (publishCandidate(temporaryFile, file))
+        try {
+            // A hard link publishes atomically without replacing; on Android / some filesystems
+            // hard links are not supported, so fall back to rename which is also atomic on POSIX.
+            // If rename also fails (e.g., cross-device), fall back to copy+unlink.
+            try {
+                linkSync(temporaryFile, file);
+            }
+            catch {
+                try {
+                    renameSync(temporaryFile, file);
+                }
+                catch {
+                    // Last resort: copy then unlink
+                    const content = readFileSync(temporaryFile, "utf8");
+                    writeFileSync(file, content, { mode: 0o600 });
+                    unlinkSync(temporaryFile);
+                }
+            }
             return id;
-        const winner = readEnvironmentId(file);
-        if (winner)
-            return winner;
-        throw new Error(`The environment identity at ${file} disappeared while it was being created.`);
+        }
+        catch (error) {
+            if (!hasCode(error, "EEXIST"))
+                throw error;
+            const winner = readEnvironmentId(file);
+            if (winner)
+                return winner;
+            throw new Error(`The environment identity at ${file} disappeared while it was being created.`);
+        }
     }
     finally {
         if (descriptor !== undefined)
@@ -60,6 +81,12 @@ export function loadEnvironmentId(dataDir) {
         catch {
         }
     }
+}
+let stamp;
+/** This server's release and, on a Cloud, its image: what it runs changes with either, the engines' CLIs included. */
+export function buildStamp() {
+    stamp ??= [serverVersion(), process.env.OMB_CLOUD_IMAGE?.trim()].filter(Boolean).join(" ");
+    return stamp;
 }
 /** The desktop's own version, else the bundle's package.json (scripts/bundle-server.mjs), else the checkout's. */
 export function serverVersion(root = SERVER_ROOT) {
@@ -87,9 +114,12 @@ export function environmentDescriptor(input) {
             remoteSessions: true,
             // Never advertise a protocol this server would refuse.
             // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
-            ...(input.sharedComputers === true ? { sharedComputers: true, lendingDetails: true } : {}),
+            ...(input.sharedComputers === true ? { sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true } : {}),
             ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true } : {}),
+            ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true, computerAsks: true } : {}),
             ...(input.cloudHome === true ? { cloudHome: true, move: 1 } : {}),
+            ...(input.ownHome === true && input.cloudHome !== true ? { move: 1 } : {}),
+            ...(input.cloudHome === true && input.cloudTeam === true ? { cloudTeam: true } : {}),
             selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
             emailSignIn: input.emailSignIn === true,
             jobs: true,

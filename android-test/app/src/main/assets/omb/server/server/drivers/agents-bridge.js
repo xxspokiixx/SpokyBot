@@ -5,6 +5,7 @@
 import { isOutboundTool } from "../../shared/outbound.js";
 import { READ_ONLY_ANNOTATIONS } from "../agent-tool-policy.js";
 import { bm25Ranker } from "../mcp-directory.js";
+import { AGENTS_TOOL_ALIASES } from "../../shared/agents-tool-names.js";
 /** The proxy's switch: "1" lists through the bridge, anything else lists the whole catalog. */
 export const TOOL_BRIDGE_ENV = "OMB_AGENTS_TOOL_BRIDGE";
 export const FIND_TOOL = "find_tool";
@@ -41,7 +42,7 @@ function record(value) {
 }
 /** The agents server's prefix on its tools, per engine: Claude `mcp__agents__`, ACP `agents__`, the chat
  * runtime and Pi `agents_`, Codex none. */
-const SERVER_PREFIXES = ["", "mcp__agents__", "agents__", "agents_"];
+export const SERVER_PREFIXES = ["", "mcp__agents__", "agents__", "agents_"];
 /** Security: a tool the host classifies as outbound under any engine's spelling is always listed and never
  * run through use_tool. Derived from the classifier, so a new outbound tool cannot be hidden by omission. */
 function calledByItsOwnName(name) {
@@ -143,9 +144,10 @@ export function createToolBridge(tools) {
         const query = record(args) && typeof args.query === "string" ? args.query.trim() : "";
         if (!query || query.length > QUERY_CHARS)
             return { text: FIND_USAGE, isError: true };
-        if (listedNames.has(query))
-            return { text: `${query} is in your tool list: call it directly.` };
-        const ranked = await bm25Ranker(query, hidden, FIND_MATCHES_MAX);
+        const named = Object.hasOwn(AGENTS_TOOL_ALIASES, query) ? AGENTS_TOOL_ALIASES[query].tools[0] : query;
+        if (listedNames.has(named))
+            return { text: `${named} is in your tool list: call it directly.` };
+        const ranked = await bm25Ranker(named, hidden, FIND_MATCHES_MAX);
         const matches = [];
         let chars = 0;
         for (const candidate of ranked.slice(0, FIND_MATCHES_MAX)) {

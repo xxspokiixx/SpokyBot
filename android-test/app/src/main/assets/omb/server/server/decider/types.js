@@ -1,1 +1,1 @@
-export const DECIDER_JOBS = ["roomRouting"];
+export const DECIDER_JOBS = ["roomRouting", "inboxTriage"];

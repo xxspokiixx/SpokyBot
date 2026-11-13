@@ -586,11 +586,13 @@ class MainActivity : Activity() {
 
         /** What src/lib/desktop.ts reads through the `ombAndroidCaps` WebView bridge:
          * the phone shell reports the local computer (its own Linux environment) as
-         * ready, everything desktop-only (screen preview, dictation) as absent. */
+         * ready, everything desktop-only (screen preview, dictation) as absent.
+         * Screen capture needs getDisplayMedia, which a WebView never has, so the
+         * Screen panel shows the proot desktop directly instead. */
         private const val CAPABILITIES_JSON =
-            "{\"host\":{\"platform\":\"other\",\"label\":\"Tablet\",\"session\":\"headless\",\"packaged\":true}," +
+            "{\"host\":{\"platform\":\"android\",\"label\":\"Android\",\"session\":\"headless\",\"packaged\":true}," +
                 "\"windowChrome\":\"native\"," +
-                "\"screenPreview\":{\"available\":false,\"interaction\":\"none\",\"reasonCode\":\"desktop-app-required\"}," +
+                "\"screenPreview\":{\"available\":false,\"interaction\":\"none\",\"reasonCode\":\"headless-environment\"}," +
                 "\"dictation\":{\"available\":false,\"engine\":\"none\",\"onDevice\":false,\"reasonCode\":\"desktop-app-required\"}," +
                 "\"localComputer\":{\"available\":true,\"support\":\"supported\",\"enabled\":true,\"status\":\"ready\"}}"
     }

@@ -133,6 +133,7 @@ import {
   containerComputerStatus,
   containerExec,
   containerRuntimeStatus,
+  androidProotExec,
   localVmWakeAction,
   perBotLocalVmTarget,
   poolLocalVmTarget,
@@ -500,7 +501,7 @@ import {
   presetFromDefaults,
 } from "./presets.ts";
 import { OrgLibrary } from "./org-library.ts";
-import { shouldMountLocalComputer } from "./local-routing.ts";
+import { localVmOffered, shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { keepTransient, lazyClaimRetryText, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "./control-client.ts";
@@ -6132,7 +6133,8 @@ async function selectableComputers(bot: BotRecord) {
   const caps = instance?.adapter.capabilities;
   const off = bot.computer === "off";
   const toolsLeaveOut = computerToolsRefusal(bot.toolScope, "works-on", bot.name)?.message;
-  const surfaces = (["cloud", "vm", "local", "browser"] as const).filter(surface => !CLOUD_HOME || cloudHomeOffersPlace(surface));
+  const surfaces = (["cloud", "vm", "local", "browser"] as const).filter(surface => (!CLOUD_HOME || cloudHomeOffersPlace(surface))
+    && (surface !== "vm" || localVmOffered()));
   let ownDesktopAwaitsUpdate = false;
   return withoutHostWhileUpdating(await Promise.all(surfaces.map(async surface => {
     let ready = false;
@@ -13487,6 +13489,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const body = await readInternalBody();
         try {
+          const command = typeof body.command === "string" ? body.command : "";
+          const timeoutSeconds = typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined;
+          // Android uses proot, not Docker/Podman
+          if (process.platform === "android") {
+            requireActiveInternalCapability();
+            const result = await androidProotExec(command, { timeoutSeconds });
+            return json(res, 200, result);
+          }
           const vm = await attachmentVmForTurn(internalCapability);
           if (!vm) return json(res, 409, { error: "You have no Local VM desktop in this turn, so there is nowhere to run a command." });
           const runtime = (await containerRuntimeStatus()).runtime;
@@ -13495,10 +13505,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               botComputerControlSnapshot(internalSender.id).held) {
             return json(res, 409, { error: "The Local VM is no longer available to this turn." });
           }
-          const result = await containerExec(vm, typeof body.command === "string" ? body.command : "", {
-            runtime,
-            timeoutSeconds: typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined,
-          });
+          const result = await containerExec(vm, command, { runtime, timeoutSeconds });
           localVmIdleFor(vm).touch();
           return json(res, 200, result);
         } catch (error) {

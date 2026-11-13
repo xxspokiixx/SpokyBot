@@ -1,3 +1,4 @@
+import { serverLine } from "./server-lines.js";
 export function isPassText(text) {
     const trimmed = (text ?? "").trim();
     return !trimmed || /^\(?\s*pass\s*\)?\.?$/i.test(trimmed);
@@ -25,8 +26,6 @@ export function roomTurnNarrationIds(messages) {
     return narration;
 }
 export const ROOM_SUMMARY_REASK = "Your last turn in this room ended without a final message to the room. Reply now with one short message (1–3 lines): your result, or that you could not finish and why. Do not start new work.";
-export function finishedWithoutSummaryLine(name, reasking) {
-    return reasking
-        ? `${name} finished without a summary — asking for a short result`
-        : `${name} finished without a summary`;
+export function finishedWithoutSummaryLine(name, reasking, language) {
+    return serverLine(language, reasking ? "server.rooms.finishedNoSummaryAsking" : "server.rooms.finishedNoSummary", { bot: name });
 }

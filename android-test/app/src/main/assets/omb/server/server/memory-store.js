@@ -160,7 +160,9 @@ export function readMemoryDoc(botId, path) {
         const text = readFileSync(absolute, "utf8");
         return { path, text, hash: hashMemoryText(text), exists: true };
     }
-    catch {
+    catch (error) {
+        if (error.code !== "ENOENT")
+            throw error;
         return { path, text: "", hash: hashMemoryText(""), exists: false };
     }
 }

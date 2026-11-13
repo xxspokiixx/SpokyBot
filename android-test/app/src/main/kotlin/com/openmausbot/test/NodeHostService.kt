@@ -276,7 +276,13 @@ class NodeHostService : Service() {
                     ?: File(linux, "rootfs.tar.gz").takeIf { it.exists() }
                     ?: File(linux, "rootfs.tar")
                 val tarFlags = if (tarball.name == "rootfs.blob" || tarball.name.endsWith(".gz")) listOf("-xzf") else listOf("-xf")
-                val tar = ProcessBuilder(listOf("/system/bin/tar") + tarFlags + listOf(tarball.absolutePath, "-C", rootfs.absolutePath))
+                // The archive's /dev holds device nodes (ptmx, console, random, …) whose creation
+                // needs CAP_MKNOD — a capability neither the app nor ADB/Shizuku's shell user has on
+                // Android, so extracting them fails with EPERM. proot -R bind-mounts the host /dev
+                // into the guest, making the archive's nodes redundant; skip them and recreate the
+                // empty mountpoint below.
+                val exclude = File(linux, "tar-exclude.txt").apply { writeText("./dev/*\n") }
+                val tar = ProcessBuilder(listOf("/system/bin/tar", "-C", rootfs.absolutePath, "-X", exclude.absolutePath) + tarFlags + listOf(tarball.absolutePath))
                     .redirectErrorStream(true)
                     .start()
                 val tarOutput = StringBuffer()
@@ -296,6 +302,9 @@ class NodeHostService : Service() {
                     return "linux environment extraction failed: ${tarOutput.toString().takeLast(300)}"
                 }
                 tarball.delete()
+                // --exclude skips the archive's /dev directory too; proot -R needs an empty guest
+                // mountpoint to bind the host /dev onto.
+                File(rootfs, "dev").mkdirs()
                 // copyAssetDir streams bytes only: every exec-able file in the
                 // payload needs its mode restored, or execve answers EACCES.
                 File(linux, "proot").setExecutable(true, false)
@@ -637,21 +646,26 @@ class NodeHostService : Service() {
         // any phone-lane consumer derives the proot chain from it, and proot
         // itself needs its bionic companions on the loader path wherever the
         // server spawns it.
-        put("OMB_ANDROID_LINUX_DIR", File(filesDir, LINUX_DIR).absolutePath)
-put("OMB_ANDROID_DATA_DIR", File(filesDir, DATA_DIR_NAME).absolutePath)
-put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
-        put("LD_LIBRARY_PATH", File(filesDir, LINUX_DIR).absolutePath)
+        val linuxDir = File(filesDir, LINUX_DIR)
+        val rootfs = File(linuxDir, "rootfs")
+        val workspace = File(filesDir, WORKSPACE_DIR)
+        put("OMB_ANDROID_LINUX_DIR", linuxDir.absolutePath)
+        put("OMB_ANDROID_ROOTFS", rootfs.absolutePath)
+        put("OMB_ANDROID_WORKSPACE", workspace.absolutePath)
+        put("OMB_ANDROID_DATA_DIR", File(filesDir, DATA_DIR_NAME).absolutePath)
+        put("OMB_EXTRA_PATH", File(linuxDir, "bin").absolutePath)
+        put("LD_LIBRARY_PATH", linuxDir.absolutePath)
         // The proot chains the server itself spawns (the OpenCode engine) need
         // the same loader contract the MCP scripts set explicitly.
-        put("PROOT_TMP_DIR", File(File(filesDir, LINUX_DIR), "tmp").absolutePath)
+        put("PROOT_TMP_DIR", File(linuxDir, "tmp").absolutePath)
         put("PROOT_NO_SECCOMP", "1")
         put("PROOT_ASSUME_MEMFD_UNSUPPORTED", "1")
-        put("PROOT_LOADER", File(File(filesDir, LINUX_DIR), "loader").absolutePath)
+        put("PROOT_LOADER", File(linuxDir, "loader").absolutePath)
         openCodeApiKey?.let { put("OPENCODE_API_KEY", it) }
         // The phone's browser: the guest's chromium, reached through the
         // omb-guest-chromium wrapper, and Chrome's own sandbox off (the guest
         // runs under proot, without user namespaces).
-        put("OMB_CHROME_PATH", File(File(filesDir, LINUX_DIR), "omb-guest-chromium").absolutePath)
+        put("OMB_CHROME_PATH", File(linuxDir, "omb-guest-chromium").absolutePath)
         put("OMB_BROWSER_SANDBOX", "0")
         // Android standalone: trust local WebView without pairing
         put("OMB_ANDROID_STANDALONE", "1")

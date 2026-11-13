@@ -3,11 +3,13 @@
 // loopback trust. Secrets never ride a child's environment (/proc/<pid>/environ stays readable by the same user): the
 // server reads them from an inherited pipe. Root runs and trusts only the image's code, never the volume's.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, chownSync, existsSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, chownSync, closeSync, existsSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CLOUD_SECRETS_FD_ENV, cloudHomeConfiguration, cloudHomeHost, cloudHomeSecrets, prepareCloudHomeVolume, withoutCloudSecrets, withoutIgnoredCloudKeys, } from "./cloud-home.js";
-import { OOM_SCORE, spawnWithOomScore } from "./oom-score.js";
+import { boxMemory, heapSizeArgs } from "./box-memory.js";
+import { clearRecordsFromOtherMachines } from "./data-dir-lease.js";
+import { OOM_SCORE, protectSupervisor, spawnWithOomScore } from "./oom-score.js";
 import { restartPolicy } from "./restart.js";
 const SERVICE_USER = "maus";
 const SECRETS_FD = 3;
@@ -42,12 +44,70 @@ export function edgeHold(raw) {
     const match = /^(\d{1,3})s$/.exec(raw?.trim() ?? "");
     return match && Number(match[1]) <= 120 ? `${Number(match[1])}s` : "0s";
 }
+/**
+ * Who may name the client to the edge, and in which header (deploy/fly/Caddyfile). On Fly only Fly's proxy reaches the
+ * edge, from its private ranges, and it overwrites Fly-Client-IP. On an own server any local process reaches the published
+ * port, so only the Cloudflare tunnel, running in this home's own network namespace, may name a client, in
+ * Cf-Connecting-IP; a header from any other peer is ignored. The address feeds the pairing lockout, never authorization.
+ */
+export function edgeClientAddress(env) {
+    return env.FLY_APP_NAME?.trim()
+        ? { OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "Fly-Client-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "private_ranges" }
+        : { OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "Cf-Connecting-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "127.0.0.1/32 ::1/128" };
+}
+/** The server's data directory on the volume. */
+export function cloudHomeDataDir(env, home) {
+    return env.OMB_DATA_DIR || posix.join(home, ".openmausbot");
+}
+/** flock(1)'s exit status when another process holds the lock (its --conflict-exit-code). */
+const VOLUME_HELD = 75;
+const heldVolumes = new Set();
+const flockVolume = (fd) => spawnSync("/usr/bin/flock", ["--exclusive", "--nonblock", "--conflict-exit-code", String(VOLUME_HELD), "3"], { stdio: ["ignore", "ignore", "pipe", fd], encoding: "utf8", timeout: 10_000 });
+/**
+ * Locks the volume for as long as this process lives, or refuses: a second home on the same volume must never start.
+ * Docker lets any number of containers mount one volume, each in its own pid namespace, so no pid or lease record can
+ * tell a live home from a dead one; a kernel lock on the volume can, and the kernel drops it when this process dies.
+ * The lock is flock(2) on the volume's root, an inode `maus` cannot replace. flock(1) takes it on this process's own
+ * open descriptor, which keeps it after flock exits.
+ */
+export function holdVolume(home, lock = flockVolume) {
+    const root = realpathSync(home);
+    if (heldVolumes.has(root))
+        return;
+    const fd = openSync(root, "r");
+    const result = lock(fd);
+    if (result.status === 0) {
+        heldVolumes.add(root);
+        return;
+    }
+    closeSync(fd);
+    if (result.status === VOLUME_HELD)
+        throw new Error("Another SpokyBot home is already running on this volume. No data was changed.");
+    const why = result.error?.message ?? (String(result.stderr ?? "").trim().split("\n")[0] || `exit ${result.status}`);
+    throw new Error(`This home could not lock its volume (${why}), so it will not start: another home might be using it. No data was changed.`);
+}
+/**
+ * Locks the volume (`holdVolume`), confirms it is this Cloud's (`prepareCloudHomeVolume`), then clears the data-directory
+ * records another machine or container left on it. With the volume locked no other home is running on it, and every
+ * home the Admin makes on a kept volume (a resume, a restore, an export; a new container on an own server) is another
+ * machine or container, so its records are always stale here: one a home destroyed mid-boot left (seen live Oct 23
+ * 2026) made every later home exit at once refusing it. A lease from this one is the server's own to refuse or recover.
+ * Returns what was cleared, for the log.
+ */
+export function prepareCloudHomeData(home, dataDir, machineId, lock = holdVolume) {
+    lock(home);
+    const volume = prepareCloudHomeVolume(home, machineId);
+    return { volume, cleared: clearRecordsFromOtherMachines(dataDir) };
+}
 export function cloudHomeChildEnvironments(config, env, home) {
     const offered = withoutCloudSecrets(withoutIgnoredCloudKeys(env));
     const allowed = Object.fromEntries(Object.entries(offered).filter(([name, value]) => value !== undefined && serverEnvironmentAllowed(name)));
     const dropped = Object.keys(offered).filter((name) => !serverEnvironmentAllowed(name) && name !== "HOME").sort();
+    const dataDir = cloudHomeDataDir(env, home);
     const server = {
-        ...allowed, HOME: home, OMB_DATA_DIR: env.OMB_DATA_DIR || posix.join(home, ".openmausbot"),
+        ...allowed, HOME: home, OMB_DATA_DIR: dataDir,
+        // Node keys the entries by its own version and the file's hash, so a stale entry is never used after an image upgrade.
+        NODE_COMPILE_CACHE: posix.join(dataDir, "cache", "node-compile"),
         OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800", OMB_PUBLIC_URL: config.publicOrigin,
         OMB_WEBHOOK_PUBLIC_URL: env.OMB_WEBHOOK_PUBLIC_URL || config.publicOrigin,
         [CLOUD_SECRETS_FD_ENV]: String(SECRETS_FD),
@@ -58,6 +118,7 @@ export function cloudHomeChildEnvironments(config, env, home) {
         OMB_CLOUD_PUBLIC_HOST: cloudHomeHost(config),
         // A plan whose home sleeps: requests wait this long for the server while it starts (deploy/fly/Caddyfile). Unset: 0s.
         OMB_CLOUD_EDGE_HOLD: edgeHold(env.OMB_CLOUD_EDGE_HOLD),
+        ...edgeClientAddress(env),
     };
     return { server, edge, secrets: cloudHomeSecrets(env), dropped };
 }
@@ -128,6 +189,8 @@ export function startCloudHome(env = process.env) {
     for (const warning of config.warnings)
         console.warn(`cloud home: ${warning}`);
     const home = env.HOME || "/data";
+    const prepare = () => prepareCloudHomeData(home, cloudHomeDataDir(env, home), config.machineId);
+    let prepared;
     let ids = null;
     if (process.getuid?.() === 0) {
         ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
@@ -136,6 +199,8 @@ export function startCloudHome(env = process.env) {
         if (process.platform === "linux")
             for (const note of hardenHost(env))
                 console.log(`cloud home: ${note}`);
+        if (protectSupervisor())
+            console.log("cloud home: the supervisor is never stopped for memory");
         // Only the mount point changes owner; anything inside keeps its owner.
         const stat = statSync(home);
         if (stat.uid !== ids.uid || stat.gid !== ids.gid)
@@ -145,7 +210,7 @@ export function startCloudHome(env = process.env) {
         process.setegid(ids.gid);
         process.seteuid(ids.uid);
         try {
-            prepareCloudHomeVolume(home, config.machineId);
+            prepared = prepare();
         }
         finally {
             process.seteuid(0);
@@ -153,8 +218,10 @@ export function startCloudHome(env = process.env) {
         }
     }
     else {
-        prepareCloudHomeVolume(home, config.machineId);
+        prepared = prepare();
     }
+    for (const record of prepared.cleared)
+        console.log(`cloud home: cleared a stale data-directory record machine ${record.host} (process ${record.pid}) left on this volume: ${record.path}`);
     const here = dirname(fileURLToPath(import.meta.url));
     const edgeBin = env.OMB_CLOUD_EDGE_BIN || "/usr/local/bin/caddy";
     const edgeConfig = env.OMB_CLOUD_EDGE_CONFIG || "/app/cloud/Caddyfile";
@@ -193,7 +260,7 @@ export function startCloudHome(env = process.env) {
     };
     const policy = restartPolicy();
     const runServer = () => {
-        watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [join(here, "index.js")], server, secrets, ids)), (code) => {
+        watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code) => {
             if (!policy.again(code, stopping))
                 return false;
             runServer();

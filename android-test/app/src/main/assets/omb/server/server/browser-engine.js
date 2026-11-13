@@ -8,7 +8,9 @@ import { writeFileAtomic } from "./atomic.js";
 import { DATA_DIR } from "./config.js";
 import { browserBundlePaths } from "./browser-bundle-release.js";
 import { browserProcessesRunning, browserProcessTree, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.js";
-import { BROWSER_VIEWPORT_ARGS, browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.js";
+import { BROWSER_VIEWPORT, viewportArgs } from "./browser-page-size.js";
+import { browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.js";
+import { spawnBotWork } from "./oom-score.js";
 import { SIGN_IN_PROMPT } from "./system-prompt.js";
 import { gateChromeSettings } from "./browser/egress/gate.js";
 import { AGENT_BROWSER_VERSION, agentBrowserReleaseUrl, agentBrowserReleaseVersion, resolveAgentBrowserReleaseAsset, } from "./browser-engine-release.js";
@@ -82,7 +84,7 @@ function runBrowserCommand(binaryPath, env, args, deadline, capture = false) {
         } };
         let child;
         try {
-            child = spawn(binaryPath, args, { env, stdio: capture ? ["ignore", "pipe", "ignore"] : "ignore", windowsHide: true });
+            child = spawnBotWork(() => spawn(binaryPath, args, { env, stdio: capture ? ["ignore", "pipe", "ignore"] : "ignore", windowsHide: true }));
         }
         catch {
             return finish(false);
@@ -505,7 +507,7 @@ export function ensureChrome(binaryPath, options = {}) {
     }
     const args = ["install", ...(options.withDeps ? ["--with-deps"] : [])];
     return new Promise((done, fail) => {
-        const child = spawn(binaryPath, args, { env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+        const child = spawnBotWork(() => spawn(binaryPath, args, { env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true }));
         let output = "";
         const record = (chunk) => {
             output += String(chunk);
@@ -649,13 +651,13 @@ export function agentBrowserIntegration(input) {
     }
     return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
 }
-export function setBrowserViewport(binaryPath, env, timeoutMs = 30_000) {
+export function setBrowserViewport(binaryPath, env, size = BROWSER_VIEWPORT, timeoutMs = 30_000) {
     if (!ownsBrowserViewport(env))
         return Promise.resolve(true);
     return new Promise((settle) => {
         let child;
         try {
-            child = spawn(binaryPath, [...BROWSER_VIEWPORT_ARGS, "--json", "--no-webmcp"], { env: browserRuntimeEnv(env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+            child = spawnBotWork(() => spawn(binaryPath, [...viewportArgs(size), "--json", "--no-webmcp"], { env: browserRuntimeEnv(env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true }));
         }
         catch {
             settle(false);

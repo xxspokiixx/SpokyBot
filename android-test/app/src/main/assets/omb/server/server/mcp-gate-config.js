@@ -106,13 +106,13 @@ export function mcpStdioServer(server, options = {}) {
 }
 /** The upstream spec travels in the gate's env, inside the 0600 MCP config: credentials must never reach argv, where `ps` shows them. */
 export function gateServer(input) {
-    const { name, server, budget, apps, schemaProfile } = input;
+    const { name, server, budget, apps, schemaProfile, limitsTools } = input;
     const parsed = parseToolScope(input.toolScope);
     if (!parsed.ok)
         throw new Error(parsed.error);
     const scoped = parsed.scope !== undefined;
     const remote = remoteMcpSpec(server) !== undefined;
-    if (budget <= 0 && !scoped && !apps && !schemaProfile)
+    if (budget <= 0 && !scoped && !apps && !schemaProfile && !limitsTools)
         return null;
     const directory = input.directory === true && remote;
     const proxyOptions = {
@@ -123,7 +123,7 @@ export function gateServer(input) {
         ...(apps && remote ? { apps } : {}),
     };
     if (!scoped && remote && !(input.gateRemote === true && budget > 0)) {
-        if (!apps)
+        if (!apps && !limitsTools)
             return null;
         const proxy = mcpStdioServer(server, proxyOptions);
         return proxy ? { command: proxy.command, args: proxy.args ?? [], env: proxy.env ?? {} } : null;

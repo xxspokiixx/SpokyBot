@@ -2,8 +2,10 @@ import { killCliTree, spawnCli } from "./procs.js";
 import { scrubHeldSecrets } from "../shared/redact.js";
 import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments } from "./browser-tool-shape.js";
 import { BrowserLanes } from "./browser-lane.js";
+import { PageSizes } from "./browser-page-size.js";
 import { SECRET_ON_PAGE, SecretHolds } from "./browser-secret-hold.js";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.js";
+import { launchSettingsKey } from "./browser-launch-key.js";
 export const BROWSER_CONTROL_REFUSAL = "Browser tools are paused while a person controls this browser. Wait for them to hand control back; do not try another browser or execution tool.";
 export const BROWSER_RESTART_TOOL = "restart_browser";
 const BROWSER_RESTART_TOOL_SPEC = {
@@ -51,16 +53,12 @@ const PAGE_ACTIONS = new Set([
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
 const HANDSHAKE_TIMEOUT_MS = 1_000;
-const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "OMB_ANDROID_LINUX_DIR"];
+const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"];
 /** One env for MCP, viewer and cleanup so they share HOME/socket paths: OS plumbing, never provider credentials. */
 export function browserRuntimeEnv(overrides) {
     const env = Object.fromEntries(HOST_ENV.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
     return { ...env, ...overrides };
 }
-/** Page size in CSS pixels. agent-browser sizes the Chrome window, and headless full Chrome (Chrome for Testing) takes its
- * emulated UI out of it (page 1280×577, screencast 1280×720); `set viewport` is agent-browser's only page-size control. */
-export const BROWSER_VIEWPORT = { width: 1280, height: 720 };
-export const BROWSER_VIEWPORT_ARGS = ["set", "viewport", String(BROWSER_VIEWPORT.width), String(BROWSER_VIEWPORT.height)];
 export function attachesToChrome(env) {
     return Boolean(env.AGENT_BROWSER_CDP || env.AGENT_BROWSER_AUTO_CONNECT);
 }
@@ -121,7 +119,7 @@ class BrowserClient {
         this.onClose = onClose;
         this.onRequestTimeout = onRequestTimeout;
         this.child = spawnCli(spec.command, spec.args, {
-            env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false,
+            env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false, botWork: true,
         });
         this.child.stderr.resume();
         this.child.stdout.on("data", (chunk) => this.read(chunk));
@@ -287,6 +285,12 @@ export class BrowserRuntime {
     relayCommand;
     steps;
     lanes = new BrowserLanes();
+    /** The page size people's views want; the agent-browser live view sets it, and every bot call applies it first. */
+    pageSizes = new PageSizes({
+        apply: (session, size) => { const spec = this.gates.get(session)?.spec; return spec && this.applyViewport ? this.applyViewport(spec, size) : Promise.resolve(); },
+        lane: (session, work) => this.lanes.run(session, work, this.options.laneWaitMs),
+        watched: (session) => { const gate = this.gates.get(session); return Boolean(gate && gate.watchers > 0 && !gate.closing); },
+    });
     holds = new SecretHolds((session, clear) => this.lanes.run(session, () => this.agentAction(session, clear, false), this.options.laneWaitMs).then((ran) => ran !== null));
     /** Strips held secrets (a filled password, a one-time code) from every tool result before the bot reads it. */
     scrub;
@@ -482,9 +486,7 @@ export class BrowserRuntime {
             beforeDispatch?.();
             if (method === "tools/call" && this.gate(session).owner !== null)
                 throw new Error(BROWSER_CONTROL_REFUSAL);
-            if (method === "tools/call" && this.applyViewport) {
-                entry.viewport ??= this.applyViewport(spec).catch(() => undefined);
-                await entry.viewport;
+            if (method === "tools/call" && await this.pageSizes.beforeCall(session)) {
                 beforeDispatch?.();
                 if (this.gate(session).owner !== null)
                     throw new Error(BROWSER_CONTROL_REFUSAL);
@@ -503,7 +505,7 @@ export class BrowserRuntime {
                 if (toolName === "agent_browser_eval" && await this.holds.refuses(session, pageUrl))
                     return { isError: true, content: [{ type: "text", text: SECRET_ON_PAGE }] };
                 // Launch and session parameters OMB owns never reach the engine from a call.
-                const request = method === "tools/call" ? stripHarnessOwnedArguments(params) : params;
+                const request = method === "tools/call" ? this.pageSizes.callArguments(session, stripHarnessOwnedArguments(params)) : params;
                 const args = request?.arguments;
                 const call = this.steps && method === "tools/call" && toolName !== undefined ? {
                     session, spec, tool: toolName, args: args && typeof args === "object" ? args : {}, ctx,
@@ -515,8 +517,7 @@ export class BrowserRuntime {
                     catch {
                         return false;
                     } },
-                    resize: async () => { if (this.applyViewport)
-                        await (entry.viewport = this.applyViewport(spec).catch(() => undefined)); },
+                    resize: () => this.pageSizes.again(session),
                 } : null;
                 const stepsStarted = performance.now();
                 const stepState = call ? await this.steps.before(call) : null;
@@ -667,7 +668,7 @@ export class BrowserRuntime {
         }
     }
     connect(session, spec) {
-        const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
+        const key = launchSettingsKey(spec);
         const existing = this.clients.get(session);
         if (existing && existing.key !== key)
             throw new Error("Browser launch settings changed. Close the browser before reconnecting.");
@@ -679,6 +680,7 @@ export class BrowserRuntime {
         }, (params) => this.latchLostCall(session, toolNameOf(params) ?? "browser"));
         const entry = { key, client };
         this.clients.set(session, entry);
+        this.pageSizes.forget(session);
         return entry;
     }
     latchLostCall(session, call) {
@@ -791,15 +793,6 @@ export class BrowserRuntime {
         gate.ready = false;
         this.changed(gate);
     }
-    /** The same person's hold, moved to their view that replaced one whose stream dropped; agents stay paused throughout. */
-    transfer(session, from, to) {
-        const gate = this.gates.get(session);
-        if (!from || !to || !gate || gate.owner !== from || gate.releasing || gate.closing)
-            return false;
-        gate.owner = to;
-        this.changed(gate);
-        return true;
-    }
     release(session, owner) {
         const gate = this.gates.get(session);
         if (!owner || !gate || gate.owner !== owner)
@@ -847,6 +840,11 @@ export class BrowserRuntime {
         };
     }
     async settled(session) { await this.gates.get(session)?.idleClose; }
+    /** A bot call, a person's action or hold, or a close is under way in this session's browser. */
+    working(session) {
+        const gate = this.gates.get(session);
+        return Boolean(gate && (gate.calls || gate.agents || gate.humans || gate.owner !== null || gate.closing || gate.releasing || this.lanes.held(session)));
+    }
     /** Told just before an idle close stops a session's browser. */
     onIdleClose(listener) { this.idleCloseListeners.add(listener); }
     launchReady(spec) { return this.launch?.ready(spec) ?? Promise.resolve(); }
@@ -860,7 +858,7 @@ export class BrowserRuntime {
         const launch = gate?.spec;
         if (!gate || !launch || attachesToChrome(launch.env) || !(idleMs > 0) || Date.now() - gate.lastUsed < idleMs)
             return false;
-        if (gate.calls || gate.agents || gate.humans || gate.owner !== null || gate.closing || gate.releasing || this.lanes.held(session))
+        if (this.working(session))
             return false;
         gate.closing = true;
         gate.ready = false;
