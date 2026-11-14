@@ -1378,7 +1378,13 @@ export async function androidProotAction(action: LifecycleAction): Promise<Conta
     await mkdir(config.workspace, { recursive: true });
 
     const startScriptPath = join(config.rootfs, "usr", "local", "bin", "start-graphical-desktop");
-    if (action === "pull" || !existsSync(startScriptPath)) {
+    // A freshly extracted rootfs already carries the launcher scripts from an earlier build,
+    // so their presence says nothing about the packages. Setup runs whenever the desktop's own
+    // binaries are absent: without them the start script falls back to a bare openbox with no
+    // terminal and no wallpaper, and the .deb payload is never unpacked.
+    const desktopPacked = existsSync(join(config.rootfs, "usr", "bin", "xfce4-panel"))
+      || existsSync(join(config.rootfs, "usr", "bin", "jwm"));
+    if (action === "pull" || !existsSync(startScriptPath) || !desktopPacked) {
       const setupScript = join(config.linuxDir, "setup-graphical-desktop.sh");
       if (!existsSync(setupScript)) {
         throw Object.assign(new Error("setup-graphical-desktop.sh not found in Android linux payload"), { status: 409 });

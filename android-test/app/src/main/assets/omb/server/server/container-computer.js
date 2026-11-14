@@ -287,7 +287,7 @@ function existingContainerProblem(status) {
     if (!status.imageMatches)
         return "The existing Local VM uses an older desktop or Cua Driver; recreate it";
     if (!status.managed)
-        return "The existing container was not created by SpokyBot; recreate it";
+        return "The existing container was not created by OpenMausBot; recreate it";
     if (status.network === "unsafe")
         return "The existing Local VM exposes its viewer publicly; recreate it";
     if (status.security === "unsafe")
@@ -669,7 +669,7 @@ export async function containerComputerAction(action, runner = sh, platform = pr
     if (action === "remove" && before.container === "missing")
         return before;
     if (action === "remove" && !before.managed) {
-        throw Object.assign(new Error(`The existing container named ${target.containerName} was not created by SpokyBot; remove it manually in ${runtime}`), { status: 409 });
+        throw Object.assign(new Error(`The existing container named ${target.containerName} was not created by OpenMausBot; remove it manually in ${runtime}`), { status: 409 });
     }
     if (action === "pull") {
         await prepareManagedImage(runtime, runner);
@@ -1019,7 +1019,13 @@ export async function androidProotAction(action) {
         await mkdir(join(config.linuxDir, "tmp"), { recursive: true });
         await mkdir(config.workspace, { recursive: true });
         const startScriptPath = join(config.rootfs, "usr", "local", "bin", "start-graphical-desktop");
-        if (action === "pull" || !existsSync(startScriptPath)) {
+        // A freshly extracted rootfs already carries the launcher scripts from an earlier build,
+        // so their presence says nothing about the packages. Setup runs whenever the desktop's own
+        // binaries are absent: without them the start script falls back to a bare openbox with no
+        // terminal and no wallpaper, and the .deb payload is never unpacked.
+        const desktopPacked = existsSync(join(config.rootfs, "usr", "bin", "xfce4-panel"))
+            || existsSync(join(config.rootfs, "usr", "bin", "jwm"));
+        if (action === "pull" || !existsSync(startScriptPath) || !desktopPacked) {
             const setupScript = join(config.linuxDir, "setup-graphical-desktop.sh");
             if (!existsSync(setupScript)) {
                 throw Object.assign(new Error("setup-graphical-desktop.sh not found in Android linux payload"), { status: 409 });
