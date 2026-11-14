@@ -82,11 +82,13 @@ describe("connecting to a desktop", () => {
       .rejects.toBeInstanceOf(DesktopUnreachable);
   });
 
-  it("a desktop that never answers is given up after 15 seconds, and says so once", async () => {
+  it("a desktop that never answers is given up after 25 seconds, and says so once", async () => {
     vi.useFakeTimers();
     const on = events();
     await connectDesktop(document.createElement("div"), "local/shared", { signal: new AbortController().signal, events: on });
     await vi.advanceTimersByTimeAsync(15_000);
+    expect(clients[0]!.disconnected).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(clients[0]!.disconnected).toBe(1);
     expect(on.disconnected).toHaveBeenCalledTimes(1);
   });

@@ -252,6 +252,70 @@ class NodeHostService : Service() {
         }
     }
 
+    /**
+     * The desktop stack is launched detached, so nothing owns it: when the payload is replaced it
+     * survives with deleted binaries and still answers on the X display and the viewer ports.
+     * An app cannot enumerate other processes, but /proc is readable and every guest command
+     * names the rootfs, so the stack is found by its own argv and stopped.
+     */
+    private fun stopRunningGuest() {
+        val marker = File(filesDir, LINUX_DIR).absolutePath
+        val self = android.os.Process.myPid()
+        val killed = mutableListOf<Int>()
+        for (entry in File("/proc").listFiles() ?: return) {
+            val pid = entry.name.toIntOrNull() ?: continue
+            if (pid == self) continue
+            val cmdline = runCatching {
+                File(entry, "cmdline").readText().replace('\u0000', ' ')
+            }.getOrNull() ?: continue
+            if (!cmdline.contains(marker)) continue
+            if (runCatching { android.os.Process.sendSignal(pid, android.os.Process.SIGNAL_KILL) }.isSuccess) {
+                killed.add(pid)
+            }
+        }
+        if (killed.isNotEmpty()) {
+            val deadline = System.currentTimeMillis() + 3_000
+            while (System.currentTimeMillis() < deadline && killed.any { File("/proc/$it").exists() }) {
+                runCatching { Thread.sleep(100) }
+            }
+        }
+        // The X server holds its display lock in a file the extraction is about to remove; without
+        // clearing it the next Xvfb refuses to start on :3.
+        val linux = File(filesDir, LINUX_DIR)
+        runCatching { File(linux, "rootfs/tmp/.X3-lock").delete() }
+        runCatching { File(linux, "tmp/.X3-lock").delete() }
+        runCatching { File(linux, "tmp/.X11-unix/X3").delete() }
+    }
+
+    private fun wipeDirectory(dir: File) {
+        if (!dir.exists()) return
+        runCatching {
+            java.nio.file.Files.walkFileTree(
+                dir.toPath(),
+                object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                    override fun visitFile(file: java.nio.file.Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
+                        runCatching { java.nio.file.Files.deleteIfExists(file) }
+                        return java.nio.file.FileVisitResult.CONTINUE
+                    }
+
+                    override fun postVisitDirectory(d: java.nio.file.Path, exc: java.io.IOException?): java.nio.file.FileVisitResult {
+                        runCatching { java.nio.file.Files.deleteIfExists(d) }
+                        return java.nio.file.FileVisitResult.CONTINUE
+                    }
+                },
+            )
+        }
+        if (dir.exists()) {
+            runCatching {
+                val proc = ProcessBuilder("/system/bin/rm", "-rf", dir.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+                proc.inputStream.bufferedReader().use { it.readText() }
+                proc.waitFor(3, java.util.concurrent.TimeUnit.MINUTES)
+            }
+        }
+    }
+
     /** Stages the phone's "this computer" (see android-test/linux/): a proot'ed
      * Alpine rootfs plus the MCP server the harness gate launches for a bot that
      * picks "this computer" as its working destination. Returns an error only for a
@@ -262,14 +326,19 @@ class NodeHostService : Service() {
         val mcp = File(linux, "android-local-computer.mjs")
         try {
             val version = assets.open("$OMB_ASSET_DIR/VERSION").bufferedReader().use { it.readText().trim() }
+            val linuxVersion = version.substringAfterLast("-linux", version)
             val stamp = File(linux, "STAMP")
             val stampText = runCatching { stamp.readText().trim() }.getOrDefault("")
-            if (!mcp.exists() || stampText != version) {
-                linux.deleteRecursively()
+            if (!mcp.exists() || (stampText != version && stampText != linuxVersion)) {
+                stopRunningGuest()
+                wipeDirectory(linux)
                 linux.mkdirs()
                 copyAssetDir(assets, "$OMB_ASSET_DIR/linux", linux)
                 val rootfs = File(linux, "rootfs")
-                rootfs.mkdirs()
+                wipeDirectory(rootfs)
+                val rootfsStaging = File(linux, "rootfs-staging")
+                wipeDirectory(rootfsStaging)
+                rootfsStaging.mkdirs()
                 // aapt decompresses *.gz assets, so the tarball ships as rootfs.blob —
                 // still a gzip stream either way; plain tars arrive from older builds.
                 val tarball = File(linux, "rootfs.blob").takeIf { it.exists() }
@@ -282,7 +351,7 @@ class NodeHostService : Service() {
                 // into the guest, making the archive's nodes redundant; skip them and recreate the
                 // empty mountpoint below.
                 val exclude = File(linux, "tar-exclude.txt").apply { writeText("./dev/*\n") }
-                val tar = ProcessBuilder(listOf("/system/bin/tar", "-C", rootfs.absolutePath, "-X", exclude.absolutePath) + tarFlags + listOf(tarball.absolutePath))
+                val tar = ProcessBuilder(listOf("/system/bin/tar", "-C", rootfsStaging.absolutePath, "-X", exclude.absolutePath) + tarFlags + listOf(tarball.absolutePath))
                     .redirectErrorStream(true)
                     .start()
                 val tarOutput = StringBuffer()
@@ -301,6 +370,16 @@ class NodeHostService : Service() {
                 if (tar.exitValue() != 0) {
                     return "linux environment extraction failed: ${tarOutput.toString().takeLast(300)}"
                 }
+                if (rootfs.exists()) {
+                    val stale = File(linux, "rootfs-old-${System.currentTimeMillis()}")
+                    if (!rootfs.renameTo(stale)) {
+                        return "linux environment extraction failed: could not clear previous rootfs"
+                    }
+                    Thread { wipeDirectory(stale) }.start()
+                }
+                if (!rootfsStaging.renameTo(rootfs)) {
+                    return "linux environment extraction failed: could not move staging rootfs into place"
+                }
                 tarball.delete()
                 // --exclude skips the archive's /dev directory too; proot -R needs an empty guest
                 // mountpoint to bind the host /dev onto.
@@ -310,7 +389,7 @@ class NodeHostService : Service() {
                 File(linux, "proot").setExecutable(true, false)
                 File(linux, "loader").setExecutable(true, false)
                 File(linux, "omb-guest-chromium").setExecutable(true, false)
-                stamp.writeText(version)
+                stamp.writeText(linuxVersion)
             }
             val workspace = File(filesDir, WORKSPACE_DIR).apply { mkdirs() }
             val dataDir = File(filesDir, DATA_DIR_NAME).apply { mkdirs() }

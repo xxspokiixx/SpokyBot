@@ -23,7 +23,7 @@ export function LinuxLocalControl() {
   const [pending, setPending] = useState<"enable" | "disable" | "retry" | null>(null);
   const [error, setError] = useState<string | { key: "computer.linux.stopFailed" } | null>(null);
 
-  if (capabilities.host.platform !== "linux" && capabilities.host.platform !== "android") return null;
+  if (capabilities.host.platform !== "linux") return null;
   const busy = pending !== null || local.status === "checking" || local.status === "starting";
   const ready = local.available;
   const waylandSafetyBlocked = local.reasonCode === "linux-wayland-seat-safety-blocked";

@@ -255,6 +255,9 @@ export function ComputerPanel({
   const [controlPending, setControlPending] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [error, setError] = useState<Error | string | null>(null);
+  const [localDesktopPending, setLocalDesktopPending] = useState(false);
+  const [localDesktopError, setLocalDesktopError] = useState<string | null>(null);
+  const localDesktopAutoStarted = useRef(false);
   const errorText = panelErrorText(error);
   const advanced = useAdvancedMode();
   const [storedPanelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
@@ -801,6 +804,30 @@ export function ComputerPanel({
   // The phone's "this computer" has no desktop bridge to capture a frame from: its desktop is the proot'ed
   // Linux one, whose readiness and viewer the server reports.
   const localDesktopHost = capabilities.host.platform === "android";
+  const localDesktopMounted = useRef(true);
+  useEffect(() => {
+    localDesktopMounted.current = true;
+    return () => { localDesktopMounted.current = false; };
+  }, []);
+
+  const startLocalDesktop = useCallback(async () => {
+    setLocalDesktopPending(true);
+    setLocalDesktopError(null);
+    try {
+      const started: LocalVmStatus = await api("/api/local-computer/start", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (localDesktopMounted.current) setLocalDesktop(started);
+    } catch (cause) {
+      if (localDesktopMounted.current) {
+        setLocalDesktopError(cause instanceof Error ? cause.message : String(cause));
+      }
+    } finally {
+      if (localDesktopMounted.current) setLocalDesktopPending(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (panelView !== "computer" || phase !== "local" || !computerStatusCurrent || !localDesktopHost) return;
     let alive = true;
@@ -808,7 +835,14 @@ export function ComputerPanel({
     const load = async () => {
       try {
         const status: LocalVmStatus = await api("/api/local-computer", { signal: controller.signal });
-        if (alive) setLocalDesktop(status);
+        if (!alive) return;
+        setLocalDesktop(status);
+        if (status.desktopReady) {
+          setLocalDesktopError(null);
+        } else if (!localDesktopAutoStarted.current) {
+          localDesktopAutoStarted.current = true;
+          void startLocalDesktop();
+        }
       } catch {
         if (alive) setLocalDesktop(null);
       }
@@ -820,7 +854,7 @@ export function ComputerPanel({
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [panelView, phase, computerStatusCurrent, localDesktopHost]);
+  }, [panelView, phase, computerStatusCurrent, localDesktopHost, startLocalDesktop]);
 
   const localDesktopViewer = localDesktopHost && localDesktop?.desktopReady === true
     && DESKTOP_VIEWER_TARGET.test(viewerTargetId({ key: localDesktop.target_key }))
@@ -1413,7 +1447,7 @@ export function ComputerPanel({
             />
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
-              {phase === "checking" || phase === "starting" || (phase === "busy-boat" && busyBoat.spinner) || phase === "vm" || (phase === "local" && !isLinux) ? (
+              {phase === "checking" || phase === "starting" || (phase === "busy-boat" && busyBoat.spinner) || phase === "vm" || (phase === "local" && (!isLinux || (localDesktopHost && (localDesktopPending || localDesktop === null)))) ? (
                 <Loader2 size={18} className="animate-spin" />
               ) : phase === "off" ? (
                 <Power size={22} />
@@ -1431,7 +1465,9 @@ export function ComputerPanel({
                     ? t("computer.capturingVm")
                   : phase === "local"
                     ? localDesktopHost
-                      ? localDesktop?.problem ?? t("computer.linuxReady")
+                      ? localDesktopPending
+                        ? t(localDesktop?.image ? "vm.setup.starting" : "vm.setup.waiting")
+                        : (localDesktopError ?? localDesktop?.problem ?? t("desktopViewer.connecting"))
                       : isLinux
                       ? t("computer.linuxReady")
                       : localMisses >= 3
@@ -1441,6 +1477,15 @@ export function ComputerPanel({
                       ? t(pending === "vm-start" ? "vm.setup.starting" : "computer.phase.vmStopped")
                       : emptyState[phase]}
               </span>
+              {phase === "local" && localDesktopHost && !localDesktopPending && localDesktop !== null && !localDesktop.desktopReady && (
+                <button
+                  type="button"
+                  onClick={() => void startLocalDesktop()}
+                  className="mt-1 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"
+                >
+                  {localDesktopError ? t("computer.linux.tryAgain") : t("vm.setup.start")}
+                </button>
+              )}
               {currentTeamComputer && placeActionButton(autoView)}
               {bot.computer === "cloud" && (phase === "unconfigured" || phase === "error") && cloudView.action?.id !== "add-boat-key" && placeActionButton(cloudView)}
               {phase === "local" && !isLinux && localMisses >= 3 && (

@@ -6,7 +6,8 @@
 // Supports both headless mode (bash, read_file, write_file, list_files) and
 // graphical mode (start_graphical_desktop, get_desktop_url, screenshot).
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, openSync, closeSync } from "node:fs";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 
 const LINUX = process.env.OMB_ANDROID_LINUX_DIR ?? "";
@@ -231,14 +232,49 @@ function guestCommand(bashArgs, { fakeRoot = false, bindTmp = false } = {}) {
   const args = [
     join(LINUX, "proot"),
     "-R", ROOTFS,
+  ];
+  if (fakeRoot) {
+    for (const file of ["passwd", "group", "shadow", "gshadow"]) {
+      const hostEtc = join(ROOTFS, "etc", file);
+      if (existsSync(hostEtc)) args.push("-b", `${hostEtc}:/etc/${file}`);
+    }
+  }
+  args.push(
     "-b", `${WORKSPACE}:/work`,
     "-b", `${LINUX}:/host-linux`,
-  ];
+  );
   if (bindTmp) args.push("-b", `${LINUX}/tmp:/tmp`);
   if (DATA_DIR) args.push("-b", `${DATA_DIR}:/data`);
   if (fakeRoot) args.push("-0");
   args.push("-w", "/work", ...bashArgs);
   return args;
+}
+
+async function isDesktopUp() {
+  if (!existsSync(join(LINUX, "tmp", ".X11-unix", "X3"))) return false;
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port: 56082 });
+    const done = (up) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(up);
+    };
+    socket.setTimeout(1000);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
+}
+
+async function ensureDesktopTracked() {
+  if (await isDesktopUp()) {
+    graphicalDesktopPid = "running";
+    graphicalDesktopUrl = "http://localhost:56082/vnc.html";
+    return true;
+  }
+  graphicalDesktopPid = null;
+  graphicalDesktopUrl = null;
+  return false;
 }
 
 function runGuest(argv, timeoutMs) {
@@ -348,8 +384,9 @@ async function callTool(name, input) {
     if (!existsSync(setupScript)) {
       return { content: [{ type: "text", text: "Setup script not found. The graphical desktop requires X11/VNC packages to be installed in the rootfs." }], isError: true };
     }
+    mkdirSync(join(LINUX, "tmp"), { recursive: true });
     const bashArgs = ["/bin/bash", "/host-linux/setup-graphical-desktop.sh"];
-    const run = await runGuest(guestCommand(bashArgs, { fakeRoot: true }), 600000); // 10 minute timeout for apt install
+    const run = await runGuest(guestCommand(bashArgs, { fakeRoot: true, bindTmp: true }), 600000); // 10 minute timeout for apt install
     return { content: [{ type: "text", text: run.out || (run.code === 0 ? "Setup complete" : "Setup failed") }], isError: run.code !== 0 };
   }
   if (name === "start_graphical_desktop") {
@@ -357,8 +394,7 @@ async function callTool(name, input) {
     const _height = input?.height ?? 1000;
     const _depth = input?.depth ?? 24;
 
-    // Check if graphical desktop is already running
-    if (graphicalDesktopPid) {
+    if (await ensureDesktopTracked()) {
       return { content: [{ type: "text", text: `Graphical desktop already running at ${graphicalDesktopUrl}` }], isError: false };
     }
 
@@ -368,21 +404,42 @@ async function callTool(name, input) {
       return { content: [{ type: "text", text: "Graphical desktop not set up. Run setup_graphical_desktop first to install X11/VNC packages (~100MB download), then start_graphical_desktop to launch it." }], isError: true };
     }
 
-    // The supervisor backgrounds Xvfb/XFCE/x11vnc/websockify and then waits, so a
-    // kill on timeout is the expected outcome: the desktop outlives this call.
-    await runGuest(guestCommand(
-      ["/usr/local/bin/start-graphical-desktop", String(_width), String(_height), String(_depth)],
-      { bindTmp: true },
-    ), 8000);
+    mkdirSync(join(LINUX, "tmp"), { recursive: true });
+    const logPath = join(LINUX, "tmp", "gdesktop.log");
+    const logFd = openSync(logPath, "w");
+    try {
+      const argv = guestCommand(
+        ["/usr/local/bin/start-graphical-desktop", String(_width), String(_height), String(_depth)],
+        { fakeRoot: true, bindTmp: true },
+      );
+      const child = spawn(argv[0], argv.slice(1), {
+        env: {
+          PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
+          HOME: "/root",
+          TMPDIR: TMP_DIR,
+          LD_LIBRARY_PATH: LINUX,
+          PROOT_TMP_DIR: TMP_DIR,
+          PROOT_NO_SECCOMP: "1",
+          PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+          PROOT_LOADER: join(LINUX, "loader"),
+        },
+        detached: true,
+        stdio: ["ignore", logFd, logFd],
+      });
+      child.unref();
+    } finally {
+      closeSync(logFd);
+    }
 
-    graphicalDesktopUrl = `http://localhost:56082/vnc.html`;
-    // Ask the X display's socket and the viewer port, not a process name list: this command's
-    // own line carries the daemons' words, so pgrep would always find itself. Bash builtins
-    // only, and bindTmp is what makes the guest see the socket Xvfb created under the host tmp.
-    const probe = await runGuest(guestCommand(["/bin/bash", "-lc",
-      "[ -S /tmp/.X11-unix/X3 ] && (exec 3<>/dev/tcp/127.0.0.1/56082) 2>/dev/null && echo UP || echo DOWN"], { bindTmp: true }), 20000);
-    const up = probe.out.includes("UP");
-    graphicalDesktopPid = up ? "running" : null;
+    let up = false;
+    const deadline = Date.now() + 25_000;
+    while (Date.now() < deadline) {
+      if (await ensureDesktopTracked()) {
+        up = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
 
     return {
       content: [{
@@ -396,14 +453,14 @@ async function callTool(name, input) {
   }
 
   if (name === "get_desktop_url") {
-    if (!graphicalDesktopUrl) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     return { content: [{ type: "text", text: graphicalDesktopUrl }], isError: false };
   }
 
   if (name === "screenshot") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
 
@@ -412,7 +469,7 @@ async function callTool(name, input) {
 
     // Use xwd to capture screenshot from Xvfb
     bashArgs = ["/bin/bash", "-lc", `DISPLAY=:3 xwd -root -out ${shellQuote(outputPath)} && ls -la ${shellQuote(outputPath)}`];
-    const run = await runGuest(guestCommand(bashArgs), TOOL_TIMEOUT_MS);
+    const run = await runGuest(guestCommand(bashArgs, { bindTmp: true }), TOOL_TIMEOUT_MS);
 
     if (run.code !== 0) {
       return { content: [{ type: "text", text: `Screenshot failed: ${run.out}` }], isError: true };
@@ -423,7 +480,7 @@ async function callTool(name, input) {
 
   // Mouse interaction tools
   if (name === "mouse_move") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const x = input?.x ?? 0;
@@ -434,7 +491,7 @@ async function callTool(name, input) {
   }
 
   if (name === "mouse_click") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const x = input?.x;
@@ -454,7 +511,7 @@ async function callTool(name, input) {
   }
 
   if (name === "mouse_drag") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const start_x = input?.start_x ?? 0;
@@ -472,7 +529,7 @@ async function callTool(name, input) {
 
   // Keyboard interaction tools
   if (name === "keyboard_type") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const text = String(input?.text ?? "");
@@ -485,7 +542,7 @@ async function callTool(name, input) {
   }
 
   if (name === "keyboard_key") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const key = String(input?.key ?? "");
@@ -495,7 +552,7 @@ async function callTool(name, input) {
   }
 
   if (name === "keyboard_hotkey") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const keys = Array.isArray(input?.keys) ? input.keys : [];
@@ -510,7 +567,7 @@ async function callTool(name, input) {
 
   // Clipboard tools
   if (name === "clipboard_get") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     // Try xclip first, then xsel
@@ -520,7 +577,7 @@ async function callTool(name, input) {
   }
 
   if (name === "clipboard_set") {
-    if (!graphicalDesktopPid) {
+    if (!(await ensureDesktopTracked())) {
       return { content: [{ type: "text", text: "Graphical desktop not running. Call start_graphical_desktop first." }], isError: true };
     }
     const text = String(input?.text ?? "");

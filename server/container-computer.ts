@@ -936,6 +936,9 @@ export async function containerComputerAction(
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ): Promise<ContainerComputerStatus> {
   if (runner === sh && platform === process.platform) screenshotStatusCache.delete(target.key);
+  if (platform === "android" && target.key === SHARED_LOCAL_VM_TARGET.key && runner === sh) {
+    return androidProotAction(action);
+  }
   const before = await containerComputerStatus(runner, platform, target);
   const runtime = before.runtime;
   if (!runtime) throw Object.assign(new Error(before.problem ?? "No container runtime is installed"), { status: 409 });
@@ -1152,100 +1155,173 @@ export async function containerExec(
   return { exitCode: result.code, stdout: clipExecOutput(result.stdout), stderr: clipExecOutput(result.stderr), timedOut };
 }
 
-/** Check status of the Android proot environment (for "this computer" on Android). */
-export async function androidProotStatus(): Promise<ContainerComputerStatus> {
+type AndroidProotEnvConfig = {
+  linuxDir: string;
+  rootfs: string;
+  workspace: string;
+  dataDir?: string;
+  tmpDir: string;
+  prootPath: string;
+  loaderPath: string;
+};
+
+function resolveAndroidProotConfig(): { ok: true; config: AndroidProotEnvConfig } | { ok: false; problem: string } {
   const linuxDir = process.env.OMB_ANDROID_LINUX_DIR;
   const rootfs = process.env.OMB_ANDROID_ROOTFS;
   const workspace = process.env.OMB_ANDROID_WORKSPACE;
   const dataDir = process.env.OMB_ANDROID_DATA_DIR;
   const tmpDir = process.env.OMB_ANDROID_TMP_DIR;
-
-  const baseStatus = emptyStatus("linux", SHARED_LOCAL_VM_TARGET);
-
   if (!linuxDir || !rootfs || !workspace) {
-    return {
-      ...baseStatus,
-      problem: "Android proot environment is not configured",
-    };
+    return { ok: false, problem: "Android proot environment is not configured" };
   }
-
-  // Check if proot binary exists
-  const { existsSync } = await import("node:fs");
   const prootPath = join(linuxDir, "proot");
   const loaderPath = join(linuxDir, "loader");
-  if (!existsSync(prootPath) || !existsSync(loaderPath)) {
-    return {
-      ...baseStatus,
-      problem: "Android proot binaries not found",
-    };
+  if (!lstatOrNull(prootPath) || !lstatOrNull(loaderPath)) {
+    return { ok: false, problem: "Android proot binaries not found" };
   }
-
-  // Check if rootfs exists
-  if (!existsSync(rootfs)) {
-    return {
-      ...baseStatus,
-      problem: "Android rootfs not found",
-    };
+  if (!lstatOrNull(rootfs)) {
+    return { ok: false, problem: "Android rootfs not found" };
   }
+  return {
+    ok: true,
+    config: {
+      linuxDir,
+      rootfs,
+      workspace,
+      dataDir,
+      tmpDir: tmpDir ?? join(linuxDir, "tmp"),
+      prootPath,
+      loaderPath,
+    },
+  };
+}
 
-  // Check if graphical desktop setup script exists in rootfs
-  const setupScriptPath = join(rootfs, "usr", "local", "bin", "start-graphical-desktop");
-  const setupScriptExists = existsSync(setupScriptPath);
+function lstatOrNull(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  // Answer the two things the viewer needs, not a list of process names: a checker's own
-  // command line carries the daemons' words, so pgrep would always find itself.
-  let desktopRunning = false;
-  let desktopError: string | null = null;
-  let viewerUrl: string | null = null;
+function androidProotEnv(config: AndroidProotEnvConfig): NodeJS.ProcessEnv {
+  return {
+    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
+    HOME: "/root",
+    TMPDIR: config.tmpDir,
+    LD_LIBRARY_PATH: config.linuxDir,
+    PROOT_TMP_DIR: config.tmpDir,
+    PROOT_NO_SECCOMP: "1",
+    PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+    PROOT_LOADER: config.loaderPath,
+  };
+}
 
-  if (setupScriptExists) {
-    try {
-      const { spawn } = await import("node:child_process");
-      const checkResult = await new Promise<{ running: boolean; error?: string }>((resolve) => {
-        const child = spawn(prootPath, [
-          "-R", rootfs,
-          "-b", `${workspace}:/work`,
-          "-b", `${linuxDir}:/host-linux`,
-          // Xvfb and x11vnc put their socket and lock under the host tmp dir: without
-          // this bind the guest's /tmp is the rootfs's own, and the display looks dead.
-          "-b", `${linuxDir}/tmp:/tmp`,
-          ...(dataDir ? ["-b", `${dataDir}:/data`] : []),
-          "-w", "/work", "/bin/bash", "-lc",
-          // Bash builtins only: X client binaries cannot always load their libraries here, and a
-          // display that answers on its socket plus a viewer port that accepts is the whole contract.
-          "[ -S /tmp/.X11-unix/X3 ] && (exec 3<>/dev/tcp/127.0.0.1/56082) 2>/dev/null && echo RUNNING || echo NOT_RUNNING"
-        ], {
-          env: {
-            PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
-            HOME: "/root",
-            TMPDIR: tmpDir ?? join(linuxDir, "tmp"),
-            LD_LIBRARY_PATH: linuxDir,
-            PROOT_TMP_DIR: tmpDir ?? join(linuxDir, "tmp"),
-            PROOT_NO_SECCOMP: "1",
-            PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
-            PROOT_LOADER: loaderPath,
-          },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        let stdout = "";
-        child.stdout?.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
-        child.on("close", (code) => {
-          // "NOT_RUNNING" also contains "RUNNING": compare the whole answer.
-          resolve({ running: stdout.trim() === "RUNNING", error: code !== 0 ? "check failed" : undefined });
-        });
-        child.on("error", (err) => resolve({ running: false, error: err.message }));
-        setTimeout(() => { child.kill("SIGKILL"); resolve({ running: false, error: "timeout" }); }, 10_000);
-      });
-      desktopRunning = checkResult.running;
-      if (checkResult.error) desktopError = checkResult.error;
-    } catch (e) {
-      desktopError = e instanceof Error ? e.message : "check failed";
+function androidProotArgs(
+  config: AndroidProotEnvConfig,
+  command: string[],
+  { fakeRoot = false, workDir = "/work" }: { fakeRoot?: boolean; workDir?: string } = {},
+): string[] {
+  const args = ["-R", config.rootfs];
+  for (const name of ["passwd", "group", "shadow", "gshadow"]) {
+    const file = join(config.rootfs, "etc", name);
+    if (lstatOrNull(file)) args.push("-b", `${file}:/etc/${name}`);
+  }
+  args.push(
+    "-b", `${config.workspace}:/work`,
+    "-b", `${config.linuxDir}:/host-linux`,
+    // Xvfb and x11vnc put their socket and lock under the host tmp dir: without
+    // this bind the guest's /tmp is the rootfs's own, and the display looks dead.
+    "-b", `${config.linuxDir}/tmp:/tmp`,
+  );
+  if (config.dataDir) args.push("-b", `${config.dataDir}:/data`);
+  if (fakeRoot) args.push("-0");
+  args.push("-w", workDir, ...command);
+  return args;
+}
+
+/** A TCP accept on the noVNC port only means websockify bound it: x11vnc still reads the whole
+ * framebuffer through proot, where every call is emulated, so it can answer the RFB handshake
+ * seconds later. Asking for the banner is what makes the answer true. */
+/** The supervisor writes this file once x11vnc reports its framebuffer is readable, which under
+ * proot takes seconds. Accepting a TCP connection on the noVNC port is not enough: it only means
+ * websockify bound it, and an abandoned RFB handshake would poison x11vnc's shared client list,
+ * so the viewer's own connection then fails. */
+const ANDROID_DESKTOP_READY = "desktop-ready";
+
+/** Exported for the readiness contract test: the desktop's own files and ports, not a fixed pair. */
+export async function isAndroidDesktopUp(
+  linuxDir: string,
+  files: { ready?: string; viewerPort?: number } = {},
+): Promise<boolean> {
+  const { existsSync, readFileSync } = await import("node:fs");
+  if (!existsSync(join(linuxDir, "tmp", ".X11-unix", "X3"))) return false;
+  const ready = files.ready ?? join(linuxDir, "tmp", ANDROID_DESKTOP_READY);
+  try {
+    const marker = readFileSync(ready, "utf8").trim();
+    if (!/^\d+ \d+$/.test(marker)) return false;
+  } catch {
+    return false;
+  }
+  const net = await import("node:net");
+  const viewerPort = files.viewerPort ?? 56082;
+  return new Promise<boolean>((resolvePort) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port: viewerPort });
+    const done = (up: boolean) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolvePort(up);
+    };
+    socket.setTimeout(1000);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
+}
+
+async function stopAndroidDesktopProcesses(linuxDir: string): Promise<void> {
+  const { readdirSync, readFileSync, unlinkSync } = await import("node:fs");
+  const desktopBinaries = /(?:Xvfb\s+:3|x11vnc|websockify.*56082|xfwm4|xfce4-panel|xfconfd|picom|dbus-daemon|jwm|openbox)/;
+  try {
+    for (const entry of readdirSync("/proc")) {
+      const pid = Number(entry);
+      if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) continue;
+      try {
+        const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+        if (!cmdline.includes(linuxDir) && !desktopBinaries.test(cmdline)) continue;
+        if (desktopBinaries.test(cmdline)) process.kill(pid, "SIGKILL");
+      } catch {
+        // Process exited or belongs to another UID.
+      }
     }
+  } catch {
+    // /proc unavailable outside Linux/Android.
   }
+  for (const stale of [
+    join(linuxDir, "tmp", ".X3-lock"),
+    join(linuxDir, "tmp", ".X11-unix", "X3"),
+    join(linuxDir, "tmp", ANDROID_DESKTOP_READY),
+  ]) {
+    try { unlinkSync(stale); } catch { /* ignore */ }
+  }
+}
 
-  if (desktopRunning) {
-    viewerUrl = "http://localhost:56082/vnc.html";
+let androidSetupOrStartInFlight: Promise<ContainerComputerStatus> | null = null;
+
+/** Check status of the Android proot environment (for "this computer" on Android). */
+export async function androidProotStatus(): Promise<ContainerComputerStatus> {
+  const baseStatus = emptyStatus("linux", SHARED_LOCAL_VM_TARGET);
+  const resolved = resolveAndroidProotConfig();
+  if (!resolved.ok) {
+    return { ...baseStatus, problem: resolved.problem };
   }
+  const { config } = resolved;
+  const { existsSync } = await import("node:fs");
+  const setupScriptPath = join(config.rootfs, "usr", "local", "bin", "start-graphical-desktop");
+  const setupScriptExists = existsSync(setupScriptPath);
+  const desktopRunning = setupScriptExists ? await isAndroidDesktopUp(config.linuxDir) : false;
+  const viewerUrl = desktopRunning ? "http://localhost:56082/vnc.html" : "";
 
   return {
     ...baseStatus,
@@ -1260,13 +1336,135 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
     security: "hardened",
     persistence: "durable",
     desktopReady: desktopRunning,
-    desktop_error: desktopError,
+    desktop_error: null,
     create_supported: true,
+    resumable: setupScriptExists && !desktopRunning,
     ready: desktopRunning,
     problem: setupScriptExists ? (desktopRunning ? null : "Graphical desktop not running") : "Graphical desktop not set up. Run setup_graphical_desktop first.",
     viewer_port: desktopRunning ? 56082 : null,
-    viewer_url: viewerUrl ?? "",
+    viewer_url: viewerUrl,
   };
+}
+
+/** Run setup/start/stop lifecycle actions for Android's proot graphical desktop. */
+export async function androidProotAction(action: LifecycleAction): Promise<ContainerComputerStatus> {
+  const resolved = resolveAndroidProotConfig();
+  if (!resolved.ok) {
+    throw Object.assign(new Error(resolved.problem), { status: 409 });
+  }
+  const { config } = resolved;
+
+  if (action === "stop" || action === "remove") {
+    await stopAndroidDesktopProcesses(config.linuxDir);
+    if (action === "remove") {
+      const { unlinkSync } = await import("node:fs");
+      for (const script of [
+        join(config.rootfs, "usr", "local", "bin", "start-graphical-desktop"),
+        join(config.rootfs, "usr", "local", "bin", "xfce-supervisor"),
+      ]) {
+        try { unlinkSync(script); } catch { /* ignore */ }
+      }
+    }
+    return androidProotStatus();
+  }
+
+  if (androidSetupOrStartInFlight) return androidSetupOrStartInFlight;
+
+  const runTask = async (): Promise<ContainerComputerStatus> => {
+    const { existsSync, openSync, closeSync, readFileSync } = await import("node:fs");
+    const { spawn } = await import("node:child_process");
+    await mkdir(config.tmpDir, { recursive: true });
+    await mkdir(join(config.linuxDir, "tmp"), { recursive: true });
+    await mkdir(config.workspace, { recursive: true });
+
+    const startScriptPath = join(config.rootfs, "usr", "local", "bin", "start-graphical-desktop");
+    if (action === "pull" || !existsSync(startScriptPath)) {
+      const setupScript = join(config.linuxDir, "setup-graphical-desktop.sh");
+      if (!existsSync(setupScript)) {
+        throw Object.assign(new Error("setup-graphical-desktop.sh not found in Android linux payload"), { status: 409 });
+      }
+      const setupResult = await new Promise<{ code: number | null; out: string }>((resolveSetup) => {
+        const child = spawn(
+          config.prootPath,
+          androidProotArgs(config, ["/bin/bash", "/host-linux/setup-graphical-desktop.sh"], { fakeRoot: true }),
+          { env: androidProotEnv(config), stdio: ["ignore", "pipe", "pipe"] },
+        );
+        let out = "";
+        child.stdout?.setEncoding("utf8").on("data", (chunk: string) => { out = (out + chunk).slice(-8000); });
+        child.stderr?.setEncoding("utf8").on("data", (chunk: string) => { out = (out + chunk).slice(-8000); });
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolveSetup({ code: 124, out: `${out}\nsetup timed out` });
+        }, 10 * 60_000);
+        child.on("error", (err) => {
+          clearTimeout(timer);
+          resolveSetup({ code: 1, out: `${out}\n${err.message}` });
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          resolveSetup({ code, out });
+        });
+      });
+      if (setupResult.code !== 0 || !existsSync(startScriptPath)) {
+        throw Object.assign(
+          new Error(`Graphical desktop setup failed: ${setupResult.out.trim().slice(-400) || "unknown error"}`),
+          { status: 500 },
+        );
+      }
+      if (action === "pull") return androidProotStatus();
+    }
+
+    if (await isAndroidDesktopUp(config.linuxDir)) {
+      return androidProotStatus();
+    }
+
+    await stopAndroidDesktopProcesses(config.linuxDir);
+    const logPath = join(config.linuxDir, "tmp", "gdesktop.log");
+    const logFd = openSync(logPath, "w");
+    try {
+      const child = spawn(
+        config.prootPath,
+        androidProotArgs(config, ["/usr/local/bin/start-graphical-desktop", "1600", "1000", "24"], {
+          fakeRoot: true,
+          workDir: "/root",
+        }),
+        {
+          env: androidProotEnv(config),
+          detached: true,
+          stdio: ["ignore", logFd, logFd],
+        },
+      );
+      child.unref();
+    } finally {
+      closeSync(logFd);
+    }
+
+    // The guest's own boot takes about twenty seconds under proot: Xvfb, the window manager, the
+    // panel, the wallpaper and x11vnc, and only then the readiness marker. Waiting the real
+    // signal costs nothing: it returns the moment the marker appears, and only a desktop that
+    // genuinely failed pays the full wait.
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      if (await isAndroidDesktopUp(config.linuxDir)) {
+        return androidProotStatus();
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    let logTail = "";
+    try {
+      logTail = readFileSync(logPath, "utf8").trim().slice(-400);
+    } catch { /* ignore */ }
+    throw Object.assign(
+      new Error(`Graphical desktop did not start in time${logTail ? `: ${logTail}` : ""}`),
+      { status: 500 },
+    );
+  };
+
+  androidSetupOrStartInFlight = runTask().finally(() => {
+    androidSetupOrStartInFlight = null;
+  });
+  return androidSetupOrStartInFlight;
 }
 
 /** Execute a command in the Android proot environment. */

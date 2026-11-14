@@ -35,6 +35,9 @@ import {
   perBotLocalVmTarget,
   podmanSecurityIsHardened,
   SHARED_LOCAL_VM_TARGET,
+  androidProotAction,
+  androidProotStatus,
+  isAndroidDesktopUp,
   setupCommands,
   type CommandRunner,
   type LocalVmTarget,
@@ -1223,5 +1226,90 @@ describe("Local VM resume safety", () => {
     expect((await containerComputerStatus(fake.run, "linux")).resumable).toBe(false);
     await expect(containerComputerAction("start", fake.run, "linux")).rejects.toThrow();
     expect(fake.calls).not.toContain(`docker start ${CONTAINER}`);
+  });
+});
+
+describe("Android proot desktop status and actions", () => {
+  it("reports missing setup script as not ready and supports stop cleanly", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-android-proot-"));
+    const linuxDir = join(dir, "linux");
+    const rootfs = join(linuxDir, "rootfs");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(rootfs, "usr", "local", "bin"), { recursive: true });
+    mkdirSync(join(linuxDir, "tmp"), { recursive: true });
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(linuxDir, "proot"), "");
+    writeFileSync(join(linuxDir, "loader"), "");
+
+    const prev = {
+      OMB_ANDROID_LINUX_DIR: process.env.OMB_ANDROID_LINUX_DIR,
+      OMB_ANDROID_ROOTFS: process.env.OMB_ANDROID_ROOTFS,
+      OMB_ANDROID_WORKSPACE: process.env.OMB_ANDROID_WORKSPACE,
+    };
+    process.env.OMB_ANDROID_LINUX_DIR = linuxDir;
+    process.env.OMB_ANDROID_ROOTFS = rootfs;
+    process.env.OMB_ANDROID_WORKSPACE = workspace;
+    try {
+      const missingSetup = await androidProotStatus();
+      expect(missingSetup.runtime).toBe("proot");
+      expect(missingSetup.image).toBe(false);
+      expect(missingSetup.desktopReady).toBe(false);
+      expect(missingSetup.resumable).toBe(false);
+
+      writeFileSync(join(rootfs, "usr", "local", "bin", "start-graphical-desktop"), "#!/bin/sh\n");
+      const notRunning = await androidProotStatus();
+      expect(notRunning.image).toBe(true);
+      expect(notRunning.desktopReady).toBe(false);
+      expect(notRunning.resumable).toBe(true);
+
+      const stopped = await androidProotAction("stop");
+      expect(stopped.desktopReady).toBe(false);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for the supervisor's readiness marker: a listening noVNC port alone is not a ready desktop", async () => {
+    const { createServer } = await import("node:net");
+    const dir = mkdtempSync(join(tmpdir(), "omb-android-desktop-up-"));
+    const linuxDir = join(dir, "linux");
+    mkdirSync(join(linuxDir, "tmp", ".X11-unix"), { recursive: true });
+    writeFileSync(join(linuxDir, "tmp", ".X11-unix", "X3"), "");
+    const ready = join(linuxDir, "tmp", "desktop-ready");
+    const listen = () =>
+      new Promise<{ port: number; close: () => void }>((resolve, reject) => {
+        const server = createServer();
+        server.on("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+          const address = server.address();
+          resolve({
+            port: typeof address === "object" && address ? address.port : 0,
+            close: () => server.close(),
+          });
+        });
+      });
+
+    try {
+      const viewer = await listen();
+      // The port answers, but the supervisor has not marked the desktop ready.
+      expect(await isAndroidDesktopUp(linuxDir, { ready, viewerPort: viewer.port })).toBe(false);
+
+      writeFileSync(ready, "garbage\n");
+      expect(await isAndroidDesktopUp(linuxDir, { ready, viewerPort: viewer.port })).toBe(false);
+
+      writeFileSync(ready, "1794623516 27414\n");
+      expect(await isAndroidDesktopUp(linuxDir, { ready, viewerPort: viewer.port })).toBe(true);
+
+      rmSync(join(linuxDir, "tmp", ".X11-unix", "X3"));
+      expect(await isAndroidDesktopUp(linuxDir, { ready, viewerPort: viewer.port })).toBe(false);
+
+      viewer.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

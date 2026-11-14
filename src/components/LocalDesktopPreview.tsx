@@ -14,6 +14,9 @@ export function LocalDesktopPreview({ target, name }: { target: string; name: st
   const rfb = useRef<RFB | null>(null);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [attempt, setAttempt] = useState(0);
+  const retried = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   const [panel, setPanel] = useState<Panel>(null);
   const [zoomed, setZoomed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -37,7 +40,16 @@ export function LocalDesktopPreview({ target, name }: { target: string; name: st
       signal: controller.signal,
       events: {
         connected: () => setConnection("connected"),
-        disconnected: () => { if (!controller.signal.aborted) setConnection("disconnected"); },
+        disconnected: () => {
+          if (controller.signal.aborted) return;
+          setConnection("disconnected");
+          // The phone's own desktop answers its first RFB connection slowly, because websockify
+          // and x11vnc both run under proot; the retry lands on a warm desktop. One silent retry
+          // replaces the "reconnect" the person would otherwise have to find and press.
+          if (retried.current) return;
+          retried.current = true;
+          window.setTimeout(() => { if (mounted.current) setAttempt((value) => value + 1); }, 750);
+        },
         clipboard: (value) => setClipboard(value),
       },
     }).then((connected) => {

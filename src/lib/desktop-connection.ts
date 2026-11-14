@@ -45,8 +45,11 @@ export async function connectDesktop(screen: HTMLElement, target: string, option
   });
   client.scaleViewport = true;
   client.background = "var(--color-inset)";
+  // The phone's own proxy chain (WebView -> server -> websockify -> x11vnc) can take over ten
+  // seconds to serve its first handshake, because python and x11vnc run under proot. Fifteen
+  // seconds cut that handshake off after the version banner had already arrived.
   let ended = false;
-  const deadline = setTimeout(() => { client.disconnect(); end(); }, 15_000);
+  const deadline = setTimeout(() => { client.disconnect(); end(); }, 25_000);
   function end() {
     clearTimeout(deadline);
     if (ended || cancelled.aborted) return;
