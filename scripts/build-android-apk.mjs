@@ -91,8 +91,11 @@ async function main() {
   console.log("\n=== Building APK ===");
   // `sh gradlew` on POSIX runners: git on Windows records no exec bit for the
   // wrapper script, so a direct ./gradlew would fail with permission denied.
+  // On Windows the wrapper is run by its absolute path, never through `cmd /c`:
+  // a child process's current-directory search does not find the wrapper, and cmd
+  // then answers "'gradlew.bat' is not recognized".
   const gradlew =
-    process.platform === "win32" ? 'cmd /c "gradlew.bat"' : "sh gradlew";
+    process.platform === "win32" ? JSON.stringify(join(ANDROID_DIR, "gradlew.bat")) : "sh gradlew";
   run(`${gradlew} :app:assembleDebug`, ANDROID_DIR);
 
   // Step 5: Show output location
