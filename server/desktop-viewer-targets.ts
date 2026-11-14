@@ -30,6 +30,10 @@ export function localDesktopTarget(target: LocalVmTarget, deps: {
       }
       return {
         port: status.viewer_port ?? 0,
+        // The RFB port, when the desktop serves one: the app then speaks RFB itself and the
+        // WebSocket bridge in between (python under proot, which drops whole framebuffer
+        // updates) is not in the path at all.
+        rfbPort: status.rfb_port ?? null,
         password: new URLSearchParams(new URL(status.viewer_url).hash.slice(1)).get("password"),
         touch: () => deps.touch(target),
       };

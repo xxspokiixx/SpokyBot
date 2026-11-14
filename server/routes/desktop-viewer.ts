@@ -1,7 +1,7 @@
 // Only the RFB WebSocket crosses the container boundary: container-controlled JavaScript on the app's origin would reach the person's workspace.
 import { createHash } from "node:crypto";
 import { request, type IncomingMessage } from "node:http";
-import type { Socket } from "node:net";
+import { createConnection, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import { isSameOrigin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -17,6 +17,9 @@ const CONTROL_LEASE = /^[A-Za-z0-9_-]{16,120}$/;
 /** Providers resolve a managed loopback endpoint, never a browser-supplied URL. */
 export interface DesktopConnection {
   port: number;
+  /** The RFB port behind the viewer, when the desktop serves one directly: the app bridges
+   * WebSocket to raw RFB itself instead of relaying to a WebSocket bridge it does not control. */
+  rfbPort?: number | null;
   password: string | null;
   live?: () => boolean;
   touch?: () => void;
@@ -34,6 +37,76 @@ export function desktopViewerUrl(target: string, threadId?: string): string {
 }
 
 interface Viewer { socket: Socket; close: () => void; owner?: string; botId?: string }
+
+/** WebSocket framing in one place: client frames are masked and answered, server frames are not.
+ * Opcode 2 is binary, which is the only RFB needs: the RFB protocol messages ride inside them. */
+function speakWebSocket(client: Socket, rfb: Duplex) {
+  let pending = Buffer.alloc(0);
+  let fragment: Buffer | null = null;
+  const toRfb = (chunk: Buffer) => { rfb.write(chunk); };
+  const answer = (payload: Buffer, opcode = 0x82) => {
+    const head = payload.length < 126
+      ? Buffer.from([opcode, payload.length])
+      : payload.length < 65536
+        ? (() => { const b = Buffer.alloc(4); b[0] = opcode; b[1] = 126; b.writeUInt16BE(payload.length, 2); return b; })()
+        : (() => { const b = Buffer.alloc(10); b[0] = opcode; b[1] = 127; b.writeBigUInt64BE(BigInt(payload.length), 2); return b; })();
+    client.write(Buffer.concat([head, payload]));
+  };
+  const onClientData = (data: Buffer) => {
+    pending = Buffer.concat([pending, data]);
+    while (true) {
+      if (pending.length < 2) return;
+      const first = pending[0];
+      const second = pending[1];
+      const fin = (first & 0x80) !== 0;
+      const opcode = first & 0x0f;
+      const masked = (second & 0x80) !== 0;
+      let length = second & 0x7f;
+      let offset = 2;
+      if (length === 126) {
+        if (pending.length < 4) return;
+        length = pending.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (pending.length < 10) return;
+        length = Number(pending.readBigUInt64BE(2));
+        offset = 10;
+      }
+      const maskOffset = offset;
+      if (masked && pending.length < offset + 4) return;
+      offset += masked ? 4 : 0;
+      if (pending.length < offset + length) return;
+      const mask = masked ? pending.subarray(maskOffset, maskOffset + 4) : null;
+      let payload = pending.subarray(offset, offset + length);
+      if (mask) {
+        const out = Buffer.alloc(length);
+        for (let i = 0; i < length; i++) out[i] = payload[i] ^ mask[i % 4];
+        payload = out;
+      }
+      pending = pending.subarray(offset + length);
+      const body = fragment === null ? payload : Buffer.concat([fragment, payload]);
+      if (opcode === 0x00 || opcode === 0x02) {
+        if (fin) { toRfb(body); fragment = null; }
+        else fragment = body;
+      } else if (opcode === 0x01) { /* text: the desktop protocol is binary only */ }
+      else if (opcode === 0x08) { rfb.destroy(); return; }
+      else if (opcode === 0x09) answer(payload, 0x8a);
+    }
+  };
+  // Every read from the desktop is one frame: RFB messages are small and the framing is cheap,
+  // and a large framebuffer update splits across reads into several frames the client joins.
+  const onRfbData = (data: Buffer) => { answer(data); };
+  const onClose = () => { try { client.destroy(); rfb.destroy(); } catch { /* already gone */ } };
+  client.on("data", onClientData);
+  rfb.on("data", onRfbData);
+  client.once("close", onClose);
+  rfb.once("close", onClose);
+  rfb.once("error", onClose);
+  return () => {
+    client.off("data", onClientData);
+    rfb.off("data", onRfbData);
+  };
+}
 
 export function createDesktopViewer(deps: {
   target: (id: string) => DesktopTarget | undefined;
@@ -111,35 +184,61 @@ export function createDesktopViewer(deps: {
       || typeof key !== "string" || !/^[A-Za-z0-9+/]{22}==$/.test(key)) {
       return json(res, 400, { error: "Invalid WebSocket handshake" });
     }
-    // Fixed host and path, port from an inspected managed container. Never forward cookies, bearer tokens, query parameters or forwarded headers.
-    const upstream = request({
-      hostname: "127.0.0.1", port: connection.port, path: "/websockify",
-      headers: { Upgrade: "websocket", Connection: "Upgrade", "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13" },
-    });
     const { socket } = upgrade;
     let peer: Duplex | undefined;
     let recheck: ReturnType<typeof setInterval> | undefined;
     const release = connection.retain?.();
     let closed = false;
-    const timeout = setTimeout(() => fail(), HANDSHAKE_MS);
-    timeout.unref();
-    upgrade.close = () => {
+    const close = () => {
       if (closed) return;
       closed = true;
       release?.();
       clearTimeout(timeout);
       clearInterval(recheck);
-      upstream.destroy();
       peer?.destroy();
       socket.destroy();
     };
+    upgrade.close = close;
     const fail = () => {
       if (closed) return;
-      if (peer || socket.destroyed) { upgrade.close(); return; }
+      if (peer || socket.destroyed) { close(); return; }
       if (!res.headersSent && !socket.destroyed) json(res, 502, { error: "Could not connect to the desktop viewer" });
-      upstream.destroy();
+      socket.destroy();
     };
-    socket.once("close", upgrade.close);
+    socket.once("close", close);
+    // The RFB port, when there is one: the bridge is this server's own, so a dropped framebuffer
+    // update is not a python bridge's buffering under proot. The protocol is RFB end to end:
+    // WebSocket frames carry RFB messages, and the RFB bytes go straight to the desktop.
+    if (typeof connection.rfbPort === "number" && connection.rfbPort >= 1) {
+      const timeout = setTimeout(fail, HANDSHAKE_MS);
+      timeout.unref();
+      const rfb = createConnection({ host: "127.0.0.1", port: connection.rfbPort });
+      peer = rfb;
+      rfb.once("error", fail);
+      rfb.once("connect", () => {
+        if (closed || socket.destroyed) { rfb.destroy(); return; }
+        if (!live() || !holds()) { fail(); return; }
+        clearTimeout(timeout);
+        pending.release();
+        res.detachSocket(socket);
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${createHash("sha1").update(key + WS_GUID).digest("base64")}\r\n\r\n`);
+        speakWebSocket(socket, rfb);
+        connection.touch?.();
+        recheck = setInterval(() => {
+          if (!live() || !holds()) close();
+          else connection.touch?.();
+        }, RECHECK_MS);
+        recheck.unref();
+      });
+      return;
+    }
+    // Fixed host and path, port from an inspected managed container. Never forward cookies, bearer tokens, query parameters or forwarded headers.
+    const upstream = request({
+      hostname: "127.0.0.1", port: connection.port, path: "/websockify",
+      headers: { Upgrade: "websocket", Connection: "Upgrade", "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13" },
+    });
+    const timeout = setTimeout(() => fail(), HANDSHAKE_MS);
+    timeout.unref();
     upstream.once("error", fail);
     upstream.once("response", (answer) => { answer.resume(); fail(); });
     upstream.once("upgrade", (answer, remote, remoteHead) => {
@@ -150,8 +249,8 @@ export function createDesktopViewer(deps: {
       }
       clearTimeout(timeout);
       peer = remote;
-      remote.once("error", upgrade.close);
-      remote.once("close", upgrade.close);
+      remote.once("error", close);
+      remote.once("close", close);
       pending.release();
       res.detachSocket(socket);
       socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
@@ -161,7 +260,7 @@ export function createDesktopViewer(deps: {
       socket.pipe(remote).pipe(socket);
       connection.touch?.();
       recheck = setInterval(() => {
-        if (!live() || !holds()) upgrade.close();
+        if (!live() || !holds()) close();
         else connection.touch?.();
       }, RECHECK_MS);
       recheck.unref();

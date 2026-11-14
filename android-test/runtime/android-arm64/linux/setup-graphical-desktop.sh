@@ -437,10 +437,11 @@ xsetroot -solid "#16202e" >/tmp/wall.log 2>&1 || true
 
 # -noshm: Android's app sepolicy denies shmget(2), which MIT-SHM needs. DAMAGE stays enabled:
 # Xvfb provides it, and with it x11vnc learns about a changed screen from the server instead of
-# reading the whole framebuffer over and over, which under proot never notices the change and
-# leaves the viewer with a frozen image. -snapfb makes every read a fresh fetch of the current
-# framebuffer, for the same reason.
-x11vnc -display :3 -forever -shared -rfbport 5900 -nopw -noshm -snapfb \
+# reading the whole framebuffer over and over. -snapfb makes every read a fresh fetch of the
+# current framebuffer, and -nonap keeps the polling loop awake: with naps, x11vnc sleeps between
+# polls, that sleep never ends under proot, and the viewer keeps a frozen image while the
+# desktop is really changing.
+x11vnc -display :3 -forever -shared -rfbport 5900 -nopw -noshm -snapfb -nonap \
   -noxfixes -noxkb -nowf >/tmp/vnc.log 2>&1 &
 
 # One window, so the desktop is not an empty rectangle the moment it opens.

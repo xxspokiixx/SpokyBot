@@ -233,6 +233,7 @@ function emptyStatus(platform, target) {
         workspace_path: target.workspaceDir,
         workspace_guest_path: VM_WORKSPACE_GUEST,
         viewer_port: target.viewerPort,
+        rfb_port: null,
         viewer_url: target.viewerPort ? `http://127.0.0.1:${target.viewerPort}/vnc.html` : "",
     };
 }
@@ -984,6 +985,7 @@ export async function androidProotStatus() {
         ready: desktopRunning,
         problem: setupScriptExists ? (desktopRunning ? null : "Graphical desktop not running") : "Graphical desktop not set up. Run setup_graphical_desktop first.",
         viewer_port: desktopRunning ? 56082 : null,
+        rfb_port: desktopRunning ? 5900 : null,
         viewer_url: viewerUrl,
     };
 }

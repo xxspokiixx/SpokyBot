@@ -281,6 +281,9 @@ export interface ContainerComputerStatus {
   workspace_path: string;
   workspace_guest_path: string;
   viewer_port: number | null;
+  /** The RFB port behind the viewer: the phone's desktop is reached directly on it, and through
+   * it the app speaks RFB itself instead of relaying a WebSocket bridge it does not control. */
+  rfb_port: number | null;
   viewer_url: string;
 }
 
@@ -312,6 +315,7 @@ function emptyStatus(platform: NodeJS.Platform, target: LocalVmTarget): Containe
     workspace_path: target.workspaceDir,
     workspace_guest_path: VM_WORKSPACE_GUEST,
     viewer_port: target.viewerPort,
+    rfb_port: null,
     viewer_url: target.viewerPort ? `http://127.0.0.1:${target.viewerPort}/vnc.html` : "",
   };
 }
@@ -1342,6 +1346,7 @@ export async function androidProotStatus(): Promise<ContainerComputerStatus> {
     ready: desktopRunning,
     problem: setupScriptExists ? (desktopRunning ? null : "Graphical desktop not running") : "Graphical desktop not set up. Run setup_graphical_desktop first.",
     viewer_port: desktopRunning ? 56082 : null,
+    rfb_port: desktopRunning ? 5900 : null,
     viewer_url: viewerUrl,
   };
 }
