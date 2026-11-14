@@ -24,7 +24,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
-import { DATA_DIR, isValidVpsSshTarget, vpsSshAlias, type AppConfig } from "./config.ts";
+import { DATA_DIR, isValidSshUserHost, isValidVpsSshTarget, vpsSshAlias, vpsSshPort, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
 import { prepareVpsSsh, VPS_SSH_DIR } from "./vps-ssh.ts";
@@ -199,7 +199,19 @@ export function vpsRemoteDockerArgs(alias: string, args: string[]): string[] {
     throw new Error("invalid VPS SSH target (must be SSH config alias or user@host)");
   }
   const { configPath } = prepareVpsSsh(DATA_DIR, augmentedPath());
-  return ["ssh", ...(configPath ? ["-F", configPath] : []), ...vpsIdentityArgs(), alias, "docker", ...args];
+  // ssh has no port syntax inside the target: it is a -p flag, and the target carries only
+  // the user and the host.
+  const port = isValidSshUserHost(alias) ? vpsSshPort(alias) : null;
+  const target = port === null ? alias : alias.slice(0, alias.lastIndexOf(":"));
+  return [
+    "ssh",
+    ...(configPath ? ["-F", configPath] : []),
+    ...vpsIdentityArgs(),
+    ...(port === null ? [] : ["-p", String(port)]),
+    target,
+    "docker",
+    ...args,
+  ];
 }
 
 /** The staged keys, named so the guest's ssh does not have to find them itself. It reads

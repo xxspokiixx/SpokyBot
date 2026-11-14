@@ -435,9 +435,13 @@ if [ -f /root/fondo.png ]; then
 fi
 xsetroot -solid "#16202e" >/tmp/wall.log 2>&1 || true
 
-# -noshm: Android's app sepolicy denies shmget(2), which MIT-SHM needs.
-x11vnc -display :3 -forever -shared -rfbport 5900 -nopw -noshm \
-  -noxdamage -noxfixes -noxkb -nowf >/tmp/vnc.log 2>&1 &
+# -noshm: Android's app sepolicy denies shmget(2), which MIT-SHM needs. DAMAGE stays enabled:
+# Xvfb provides it, and with it x11vnc learns about a changed screen from the server instead of
+# reading the whole framebuffer over and over, which under proot never notices the change and
+# leaves the viewer with a frozen image. -snapfb makes every read a fresh fetch of the current
+# framebuffer, for the same reason.
+x11vnc -display :3 -forever -shared -rfbport 5900 -nopw -noshm -snapfb \
+  -noxfixes -noxkb -nowf >/tmp/vnc.log 2>&1 &
 
 # One window, so the desktop is not an empty rectangle the moment it opens.
 [ -x /usr/bin/xterm ] && xterm -geometry 100x28+40+40 >/tmp/xterm.log 2>&1 &

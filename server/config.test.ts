@@ -12,6 +12,7 @@ import { cacheUntilConfigChanges,
   ensureDirs,
   instanceConfigs,
   isValidSshAlias,
+isValidSshUserHost,
   loadBrowserProfileIdAliases,
   loadConfig,
   localVmIdleTimeoutMinutes,
@@ -38,6 +39,7 @@ import { cacheUntilConfigChanges,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
+vpsSshPort,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
@@ -480,6 +482,20 @@ describe("configuration boundaries", () => {
       expect(vpsSshAlias({ vps: { sshAlias: target } })).toBe(target);
     }
     expect(vpsSshAlias({ vps: { sshAlias: "user@host; reboot" } })).toBeNull();
+  });
+
+  it("takes a port on a user@host VPS target, and rejects one it cannot dial", () => {
+    expect(vpsSshPort("deploy@203.0.113.7")).toBeNull();
+    expect(vpsSshPort("deploy@203.0.113.7:2222")).toBe(2222);
+    expect(parseConfigPatch({ vps: { sshAlias: "deploy@203.0.113.7:2222" } })).toEqual({
+      vps: { sshAlias: "deploy@203.0.113.7:2222" },
+    });
+    expect(isValidSshUserHost("deploy@203.0.113.7:2222")).toBe(true);
+    // 0 and above the TCP range are typos: the person learns now, not when ssh refuses.
+    for (const bad of ["deploy@203.0.113.7:0", "deploy@203.0.113.7:99999", "deploy@203.0.113.7:22 ", "deploy@203.0.113.7:-1"]) {
+      expect(isValidSshUserHost(bad)).toBe(false);
+      expect(() => parseConfigPatch({ vps: { sshAlias: bad } })).toThrow("vps.sshAlias");
+    }
   });
 
   it("validates browserEngine.attachCdpUrl as a bare CDP port or an http(s)/ws(s) URL, and forwards it only when configured", () => {

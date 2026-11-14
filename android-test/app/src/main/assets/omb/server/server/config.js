@@ -31,7 +31,8 @@ import { MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MAX_LOCAL_VM_MAX_INSTANCES, MIN_LOCA
 export * from "./local-vm-settings.js";
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
-const SSH_USER_HOST = /^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9.-]{0,253}$/;
+/** A VPS named directly: `user@host`, with the port when the daemon does not listen on 22. */
+const SSH_USER_HOST = /^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9.-]{0,253}(?::\d{1,5})?$/;
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 /** Fish Audio speech models (`tts.fishModel`); unset means `s2.1-pro`, and `s2.1-pro-free` is Fish's free tier. */
@@ -51,7 +52,20 @@ export function isValidSshAlias(value) {
     return typeof value === "string" && SSH_ALIAS.test(value);
 }
 export function isValidSshUserHost(value) {
-    return typeof value === "string" && SSH_USER_HOST.test(value);
+    return typeof value === "string" && SSH_USER_HOST.test(value) && validSshPort(value);
+}
+/** The port a `user@host` names, or null when it names none. */
+export function vpsSshPort(value) {
+    const at = value.lastIndexOf(":");
+    if (at < 0)
+        return null;
+    const port = Number.parseInt(value.slice(at + 1), 10);
+    return Number.isInteger(port) ? port : null;
+}
+/** A port outside the TCP range is a typo, not a VPS: reject it rather than let ssh fail late. */
+function validSshPort(value) {
+    const port = vpsSshPort(value);
+    return port === null || (port >= 1 && port <= 65535);
 }
 export function isValidVpsSshTarget(value) {
     return isValidSshAlias(value) || isValidSshUserHost(value);

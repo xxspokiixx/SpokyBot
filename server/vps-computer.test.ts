@@ -304,6 +304,23 @@ describe("VPS SSH transport on the phone", () => {
     expect(vpsRemoteDockerArgs("my-vps", ["ps"])).toEqual(["-H", "ssh://my-vps", "ps"]);
   });
 
+  it("carries a user@host port as ssh's -p, not inside the target", () => {
+    Object.defineProperty(process, "platform", { value: "android", configurable: true });
+    try {
+      const args = vpsRemoteDockerArgs("deploy@203.0.113.7:2222", ["ps"]);
+      // The target ssh receives has no port left in it: ssh reads -p, not user@host:port.
+      const at = args.indexOf("deploy@203.0.113.7");
+      expect(at).toBeGreaterThan(0);
+      expect(args[at - 2]).toBe("-p");
+      expect(args[at - 1]).toBe("2222");
+      expect(args[at]).not.toContain(":");
+      // Docker's own transport keeps the port in the URL it is given.
+      expect(vpsDockerArgs("deploy@203.0.113.7:2222", ["ps"])).toEqual(["-H", "ssh://deploy@203.0.113.7:2222", "ps"]);
+    } finally {
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    }
+  });
+
   it("names the staged identity so the guest's ssh finds it outside the rootfs", () => {
     const sshDir = mkdtempSync(join(tmpdir(), "omb-vps-identity-"));
     try {

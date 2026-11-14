@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { join, sep } from "node:path";
 import { BASE_IMAGE, CUA_DRIVER_VERSION, CUA_SOCKET, IMAGE as CUA_IMAGE, cuaExecArgs, dockerSecurityIsHardened, imageLabelsMatch, managedImageDockerfile, wholeScreenshot, BASE_IMAGE_DIGEST, BASE_IMAGE_LABEL, DRIVER_LABEL, IMAGE_LAYER_LABEL, IMAGE_LAYER_VERSION, MANAGED_LABEL, } from "./container-computer.js";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.js";
-import { DATA_DIR, isValidVpsSshTarget, vpsSshAlias } from "./config.js";
+import { DATA_DIR, isValidSshUserHost, isValidVpsSshTarget, vpsSshAlias, vpsSshPort } from "./config.js";
 import { augmentedPath } from "./env-path.js";
 import { killCliTree, spawnCli } from "./procs.js";
 import { prepareVpsSsh, VPS_SSH_DIR } from "./vps-ssh.js";
@@ -111,7 +111,19 @@ export function vpsRemoteDockerArgs(alias, args) {
         throw new Error("invalid VPS SSH target (must be SSH config alias or user@host)");
     }
     const { configPath } = prepareVpsSsh(DATA_DIR, augmentedPath());
-    return ["ssh", ...(configPath ? ["-F", configPath] : []), ...vpsIdentityArgs(), alias, "docker", ...args];
+    // ssh has no port syntax inside the target: it is a -p flag, and the target carries only
+    // the user and the host.
+    const port = isValidSshUserHost(alias) ? vpsSshPort(alias) : null;
+    const target = port === null ? alias : alias.slice(0, alias.lastIndexOf(":"));
+    return [
+        "ssh",
+        ...(configPath ? ["-F", configPath] : []),
+        ...vpsIdentityArgs(),
+        ...(port === null ? [] : ["-p", String(port)]),
+        target,
+        "docker",
+        ...args,
+    ];
 }
 /** The staged keys, named so the guest's ssh does not have to find them itself. It reads
  *  /root/.ssh inside the rootfs, which a fresh extract leaves empty, while the key files the app
