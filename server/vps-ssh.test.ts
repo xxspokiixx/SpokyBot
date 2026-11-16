@@ -19,6 +19,30 @@ function prepareVpsSsh(...args: Parameters<typeof prepare>) {
 }
 
 describe("VPS SSH connection sharing supplied by the app", () => {
+  it("puts Android's control socket on the guest's short /tmp, not a sandbox path", () => {
+    // A Unix socket path is capped near 104 bytes and every path in the app's sandbox is over a
+    // hundred, so OpenSSH refuses to share the connection with "ControlPath too long".
+    const data = join(scratch(), "data", "user", "0", "com.openmausbot.test", "files");
+    const linuxDir = scratch();
+    const previous = process.env.OMB_ANDROID_LINUX_DIR;
+    process.env.OMB_ANDROID_LINUX_DIR = linuxDir;
+    try {
+      const setup = prepareVpsSsh(data, "/usr/bin", "android");
+      const config = readFileSync(setup.configPath!, "utf8");
+      const socket = JSON.parse(config.match(/^  ControlPath (.+)$/m)![1]!);
+      expect(socket.startsWith("/tmp/omb-ssh-")).toBe(true);
+      expect(Buffer.byteLength(socket)).toBeLessThan(64);
+      // The directory the host has to create for it lives under the guest's own /tmp.
+      expect(existsSync(socket.slice(0, socket.lastIndexOf("/")))).toBe(false);
+      mkdirSync(dirname(join(linuxDir, "tmp")), { recursive: true });
+      const hostDir = join(linuxDir, "tmp", socket.split("/")[2]);
+      expect(existsSync(hostDir)).toBe(true);
+      if (process.platform !== "win32") expect(statSync(hostDir).mode & 0o777).toBe(0o700);
+    } finally {
+      if (previous === undefined) delete process.env.OMB_ANDROID_LINUX_DIR;
+      else process.env.OMB_ANDROID_LINUX_DIR = previous;
+    }
+  });
   it("does nothing on Windows, where OpenSSH has no connection sharing", () => {
     const data = scratch();
     expect(prepareVpsSsh(data, "C:\\Windows\\System32", "win32")).toEqual({ configPath: null, path: "C:\\Windows\\System32" });

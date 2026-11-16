@@ -10,20 +10,32 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-/** macOS caps Unix socket paths at 104 bytes and OpenSSH appends a temporary suffix, so a long data path cannot host the socket. */
-function controlDirectory(sshDir: string, fallbackDir?: string): string {
-  if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= 80) return sshDir;
+/** A Unix socket path is capped near 104 bytes, and OpenSSH appends a temporary suffix, so the
+ * directory that hosts the connection-sharing socket has to be short. It is not always the same
+ * path for both sides: on Android the ssh that runs is the guest's, and it sees the app's
+ * linux/tmp as `/tmp`, while the host creates the directory at its own path. */
+function controlPaths(sshDir: string, dataDir: string | undefined, platform: NodeJS.Platform): { host: string; client: string } {
+  const short = Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= 80;
+  if (short) return { host: sshDir, client: sshDir };
   const uid = typeof process.getuid === "function" ? process.getuid() : 0;
   const id = createHash("sha256").update(resolve(sshDir)).digest("hex").slice(0, 12);
-  // Android apps cannot write to /tmp; use the app's data directory instead.
-  const baseDir = process.platform === "android" && fallbackDir ? fallbackDir : "/tmp";
-  const dir = join(baseDir, `omb-ssh-${uid}-${id}`);
-  try { mkdirSync(dir, { recursive: true, mode: 0o700 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  const stat = lstatSync(dir);
-  if (!stat.isDirectory() || (uid !== 0 && stat.uid !== uid)) throw new Error("The VPS SSH control directory is not private to this user");
-  chmodSync(dir, 0o700);
-  return dir;
+  // The guest's /tmp is the app's linux dir tmp, and it is four characters long: well inside
+  // the socket path limit, unlike every path in the app's sandbox.
+  const linuxDir = platform === "android" ? process.env.OMB_ANDROID_LINUX_DIR : undefined;
+  if (platform === "android" && linuxDir) {
+    // The client path is built by hand: the ssh that reads this config is the guest's, and it
+    // wants POSIX separators even when the host that writes the file runs Windows.
+    return {
+      host: join(linuxDir, "tmp", `omb-ssh-${id}`),
+      client: `/tmp/omb-ssh-${id}`,
+    };
+  }
+  // Android apps cannot write to the host /tmp, so the socket lands in the data dir; the client
+  // sees the same path there, and a desktop sees /tmp for both.
+  const host = platform === "android" && dataDir
+    ? join(dataDir, `omb-ssh-${uid}-${id}`)
+    : join("/tmp", `omb-ssh-${uid}-${id}`);
+  return { host, client: host };
 }
 
 function findExecutable(name: string, pathValue: string, exclude: string): string | null {
@@ -46,14 +58,19 @@ function writeIfChanged(path: string, content: string, mode: number): void {
 }
 
 /** ssh keeps the first value it sees, so the person's file goes first; -F skips the system file, so it goes last. */
-export function vpsSshConfigText(sshDir: string, userConfig = join(homedir(), ".ssh", "config"), systemConfig = "/etc/ssh/ssh_config"): string {
+export function vpsSshConfigText(
+  controlSocket: string,
+  userConfig = join(homedir(), ".ssh", "config"),
+  systemConfig = "/etc/ssh/ssh_config",
+): string {
+  const controlPath = `${controlSocket.replace(/%/g, "%%").replace(/\/+$/, "")}/cm-%C`;
   return [
     "# Written by OpenMausBot for its VPS computer connections. Do not edit;",
     "# it is regenerated. Your own ~/.ssh/config is included first and wins.",
     ...(existsSync(userConfig) ? [`Include ${JSON.stringify(userConfig)}`] : []),
     "Host *",
     "  ControlMaster auto",
-    `  ControlPath ${JSON.stringify(join(sshDir.replace(/%/g, "%%"), "cm-%C"))}`,
+    `  ControlPath ${JSON.stringify(controlPath)}`,
     "  ControlPersist 10m",
     "  ServerAliveInterval 15",
     "  ServerAliveCountMax 3",
@@ -76,7 +93,19 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   mkdirSync(binDir, { recursive: true, mode: 0o700 });
   chmodSync(sshDir, 0o700);
   const configPath = join(sshDir, "config");
-  writeIfChanged(configPath, vpsSshConfigText(controlDirectory(sshDir, dataDir)), 0o600);
+  const control = controlPaths(sshDir, dataDir, platform);
+  try {
+    mkdirSync(control.host, { recursive: true, mode: 0o700 });
+    const stat = lstatSync(control.host);
+    const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+    if (!stat.isDirectory() || (uid !== 0 && stat.uid !== uid)) {
+      throw new Error("The VPS SSH control directory is not private to this user");
+    }
+    chmodSync(control.host, 0o700);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  writeIfChanged(configPath, vpsSshConfigText(control.client), 0o600);
   const realSsh = findExecutable("ssh", pathValue, binDir);
   if (!realSsh) return { configPath, path: pathValue };
   const shim = [

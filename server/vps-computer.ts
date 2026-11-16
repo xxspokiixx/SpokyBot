@@ -245,11 +245,12 @@ async function ensureAndroidSshClient(linuxDir: string, rootfs: string): Promise
   const { spawn } = await import("node:child_process");
   const { join } = await import("node:path");
   const { existsSync } = await import("node:fs");
-  // The binary alone is not enough: OpenSSH resolves GSSAPI on every connection, so a rootfs
-  // that already had the client still needs the libraries beside it.
-  const present = ["usr/bin/ssh", "usr/lib/aarch64-linux-gnu/libgssapi_krb5.so.2", "lib/aarch64-linux-gnu/libgssapi_krb5.so.2"]
-    .some((relative) => existsSync(join(rootfs, relative)));
-  if (present) return;
+  // The client itself decides. The GSSAPI library can already be there (xfce and libcurl pull
+  // it) while ssh is absent, which used to pass the "any of these exists" test and left the
+  // guest without the binary: docker then answered "ssh: command not found".
+  const client = join(rootfs, "usr/bin/ssh");
+  const krb5 = join(rootfs, "usr/lib/aarch64-linux-gnu/libgssapi_krb5.so.2");
+  if (existsSync(client) && existsSync(krb5)) return;
   await new Promise<void>((resolve) => {
     const child = spawn(join(linuxDir, "proot"), [
       "-0", "-R", rootfs,
@@ -258,7 +259,9 @@ async function ensureAndroidSshClient(linuxDir: string, rootfs: string): Promise
       "-b", `${rootfs}/etc/shadow:/etc/shadow`,
       "-b", `${linuxDir}:/host-linux`,
       "-w", "/root", "/bin/bash", "-lc",
-      `export DEBIAN_FRONTEND=noninteractive TMPDIR=/tmp; apt-get install -y --no-install-recommends ${VPS_SSH_CLIENT}`,
+      // apt-get update first: a freshly extracted rootfs carries no package lists, so the
+      // install would fail with "Unable to locate package" and the client would stay missing.
+      `export DEBIAN_FRONTEND=noninteractive TMPDIR=/tmp; apt-get update -qq; apt-get install -y --no-install-recommends ${VPS_SSH_CLIENT}`,
     ], {
       env: {
         PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
