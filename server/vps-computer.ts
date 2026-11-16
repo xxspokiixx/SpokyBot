@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createConnection, createServer, type AddressInfo } from "node:net";
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync } from "node:fs";
 import { join, sep } from "node:path";
 
 import {
@@ -221,7 +221,13 @@ export function vpsRemoteDockerArgs(alias: string, args: string[]): string[] {
 export function vpsIdentityArgsFor(sshDir: string): string[] {
   return ["id_ed25519", "id_ecdsa", "id_rsa", "id_dsa"]
     .filter((name) => existsSync(join(sshDir, name)))
-    .flatMap((name) => ["-o", `IdentityFile=${posixPath(join(sshDir, name))}`]);
+    .flatMap((name) => {
+      // The asset extractor restores only exec bits, so a private key lands world-readable and
+      // OpenSSH refuses it before it ever authenticates. These files are the app's own, copied
+      // from its assets, so tightening them is ours to do.
+      try { chmodSync(join(sshDir, name), 0o600); } catch { /* a key the app does not own */ }
+      return ["-o", `IdentityFile=${posixPath(join(sshDir, name))}`];
+    });
 }
 
 function vpsIdentityArgs(): string[] {
