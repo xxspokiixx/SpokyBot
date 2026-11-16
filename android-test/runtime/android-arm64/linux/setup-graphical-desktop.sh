@@ -526,7 +526,10 @@ sleep 1
 # One window, so the desktop is not an empty rectangle the moment it opens.
 [ -x /usr/bin/xterm ] && xterm -geometry 100x28+40+40 &
 
-x11vnc -display :3 -forever -shared -rfbport 5900 -localhost -nopw -noshm -noxdamage -noxfixes -noxkb -nowf &
+# Same flags as the supervised desktop: -snapfb makes every read a fresh fetch of the current
+# framebuffer and -nonap keeps the polling loop awake, because under proot the nap never ends
+# and the viewer keeps a frozen image while the desktop is really changing.
+x11vnc -display :3 -forever -shared -rfbport 5900 -localhost -nopw -noshm -snapfb -nonap -noxfixes -noxkb -nowf >/tmp/vnc.log 2>&1 &
 X11VNC_PID=\$!
 echo "X11VNC_PID=\$X11VNC_PID"
 sleep 1
@@ -534,6 +537,13 @@ sleep 1
 websockify --web=/usr/share/novnc 127.0.0.1:56082 127.0.0.1:5900 &
 NOVNC_PID=\$!
 echo "NOVNC_PID=\$NOVNC_PID"
+
+# The app's readiness marker, published exactly like the supervisor's: x11vnc prints this line
+# only after its framebuffer is readable, and without the marker the app answers that the
+# desktop is down and the Screen panel refuses a working desktop.
+rm -f /tmp/desktop-ready
+for _ in \$(seq 60); do grep -q "screen setup finished" /tmp/vnc.log 2>/dev/null && break; sleep 0.5; done
+echo "\$(date -u +%s) \$(pgrep -f 'x11vnc -display :3' | head -1)" > /tmp/desktop-ready
 
 echo ""
 echo "=== Graphical desktop started ==="
