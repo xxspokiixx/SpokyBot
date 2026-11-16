@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
+import { createServer as createTcpServer, type Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -302,6 +303,28 @@ it("times out an upstream that never answers the handshake", async () => {
   desktop.on("upgrade", (_req, socket) => { peers.add(socket); });
   expect((await open()).status).toBe(502);
 }, 13_000);
+
+// The desktop's own RFB port is served by a branch that returns before the handshake timer is set:
+// closing such a viewer must not throw out of the socket's close event.
+it("serves other requests after a viewer on the desktop's own RFB port closes", async () => {
+  const accepted: Socket[] = [];
+  const upstream = createTcpServer(socket => { accepted.push(socket); socket.on("error", () => {}); });
+  await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    statusOverrides = { rfb_port: (upstream.address() as { port: number }).port };
+    const answer = await open();
+    expect(answer.status).toBe(101);
+    expect(accepted).toHaveLength(1);
+    const socket = answer.socket!;
+    socket.destroy();
+    await expect.poll(() => accepted[0]!.destroyed, { timeout: 2000 }).toBe(true);
+    expect((await get(base)).body).toEqual({ password: "fixture-secret" });
+    expect((await open()).status).toBe(101);
+  } finally {
+    for (const socket of accepted) socket.destroy();
+    await new Promise<void>(resolve => upstream.close(() => resolve()));
+  }
+});
 
 it("preserves local desktop URLs and removes passwords from paired viewer links", () => {
   const original = { target_key: targets[1].key, viewer_url: "http://127.0.0.1:49152/vnc.html#password=secret" };

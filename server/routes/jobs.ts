@@ -90,6 +90,9 @@ export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
 
     const held = await new Promise<{ view: JobView | null } | { error: unknown }>((answer) => {
       let settleTimer: ReturnType<typeof setTimeout> | undefined;
+      // finish() clears these, and it is declared before either is assigned.
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      let recheck: ReturnType<typeof setInterval> | undefined;
       let done = false;
       const finish = (next: { view: JobView | null } | { error: unknown }) => {
         if (done) return;
@@ -112,8 +115,8 @@ export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
         clearTimeout(settleTimer);
         settleTimer = setTimeout(() => look(false), SETTLE_MS);
       });
-      const recheck = setInterval(() => look(false), deps.recheckMs ?? RECHECK_MS);
-      const deadline = setTimeout(() => look(true), wait);
+      recheck = setInterval(() => look(false), deps.recheckMs ?? RECHECK_MS);
+      deadline = setTimeout(() => look(true), wait);
       res.on("close", abandoned);
     });
     if (res.writableEnded || res.destroyed) return;

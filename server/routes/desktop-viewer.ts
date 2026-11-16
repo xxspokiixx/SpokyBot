@@ -43,14 +43,14 @@ interface Viewer { socket: Socket; close: () => void; owner?: string; botId?: st
 function speakWebSocket(client: Socket, rfb: Duplex) {
   let pending = Buffer.alloc(0);
   let fragment: Buffer | null = null;
-  const toRfb = (chunk: Buffer) => { rfb.write(chunk); };
+  const toRfb = (chunk: Buffer) => { if (!rfb.write(chunk)) client.pause(); };
   const answer = (payload: Buffer, opcode = 0x82) => {
     const head = payload.length < 126
       ? Buffer.from([opcode, payload.length])
       : payload.length < 65536
         ? (() => { const b = Buffer.alloc(4); b[0] = opcode; b[1] = 126; b.writeUInt16BE(payload.length, 2); return b; })()
         : (() => { const b = Buffer.alloc(10); b[0] = opcode; b[1] = 127; b.writeBigUInt64BE(BigInt(payload.length), 2); return b; })();
-    client.write(Buffer.concat([head, payload]));
+    if (!client.write(Buffer.concat([head, payload]))) rfb.pause();
   };
   const onClientData = (data: Buffer) => {
     pending = Buffer.concat([pending, data]);
@@ -97,14 +97,20 @@ function speakWebSocket(client: Socket, rfb: Duplex) {
   // and a large framebuffer update splits across reads into several frames the client joins.
   const onRfbData = (data: Buffer) => { answer(data); };
   const onClose = () => { try { client.destroy(); rfb.destroy(); } catch { /* already gone */ } };
+  const resumeClient = () => client.resume();
+  const resumeRfb = () => rfb.resume();
   client.on("data", onClientData);
   rfb.on("data", onRfbData);
+  rfb.on("drain", resumeClient);
+  client.on("drain", resumeRfb);
   client.once("close", onClose);
   rfb.once("close", onClose);
   rfb.once("error", onClose);
   return () => {
     client.off("data", onClientData);
     rfb.off("data", onRfbData);
+    rfb.off("drain", resumeClient);
+    client.off("drain", resumeRfb);
   };
 }
 
@@ -187,13 +193,16 @@ export function createDesktopViewer(deps: {
     const { socket } = upgrade;
     let peer: Duplex | undefined;
     let recheck: ReturnType<typeof setInterval> | undefined;
+    // Declared here, not in a branch: close() is reachable before the rfb path's early return, and a
+    // branch-scoped timer would leave this binding uninitialized in its temporal dead zone.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     const release = connection.retain?.();
     let closed = false;
     const close = () => {
       if (closed) return;
       closed = true;
       release?.();
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       clearInterval(recheck);
       peer?.destroy();
       socket.destroy();
@@ -210,7 +219,7 @@ export function createDesktopViewer(deps: {
     // update is not a python bridge's buffering under proot. The protocol is RFB end to end:
     // WebSocket frames carry RFB messages, and the RFB bytes go straight to the desktop.
     if (typeof connection.rfbPort === "number" && connection.rfbPort >= 1) {
-      const timeout = setTimeout(fail, HANDSHAKE_MS);
+      timeout = setTimeout(fail, HANDSHAKE_MS);
       timeout.unref();
       const rfb = createConnection({ host: "127.0.0.1", port: connection.rfbPort });
       peer = rfb;
@@ -237,7 +246,7 @@ export function createDesktopViewer(deps: {
       hostname: "127.0.0.1", port: connection.port, path: "/websockify",
       headers: { Upgrade: "websocket", Connection: "Upgrade", "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13" },
     });
-    const timeout = setTimeout(() => fail(), HANDSHAKE_MS);
+    timeout = setTimeout(() => fail(), HANDSHAKE_MS);
     timeout.unref();
     upstream.once("error", fail);
     upstream.once("response", (answer) => { answer.resume(); fail(); });
