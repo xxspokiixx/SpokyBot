@@ -55,7 +55,7 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
   it("writes a config that includes the person's own file first and fills in sharing and timeouts", () => {
     const home = scratch();
     const userConfig = join(home, "config"); writeFileSync(userConfig, "Host my-vps\n  ControlMaster no\n");
-    const text = vpsSshConfigText("/data/ssh", userConfig, join(home, "missing-system-config"));
+    const text = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", userConfig, join(home, "missing-system-config"));
     const lines = text.split("\n");
     expect(lines.findIndex((line) => line === `Include ${JSON.stringify(userConfig)}`)).toBeLessThan(lines.indexOf("Host *"));
     expect(text).toContain("  ControlMaster auto");
@@ -63,8 +63,12 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     expect(text).toContain("  ControlPersist 10m");
     expect(text).toContain("  ServerAliveInterval 15");
     expect(text).toContain("  ConnectTimeout 10");
+    // No terminal can answer an interactive prompt, so an unseen host key must be recorded, and
+    // the app's own file must be the one written, never the person's.
+    expect(text).toContain("  StrictHostKeyChecking accept-new");
+    expect(text).toContain('  UserKnownHostsFile "/data/ssh/known_hosts"');
     expect(text).not.toContain("missing-system-config");
-    expect(vpsSshConfigText("/data/ssh", join(home, "absent"), join(home, "absent2"))).not.toContain("Include");
+    expect(vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", join(home, "absent"), join(home, "absent2"))).not.toContain("Include");
   });
 
   it("installs a shim docker finds ahead of the real ssh, pointing at that config, with private modes", () => {
@@ -78,7 +82,12 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     expect(statSync(join(data, "ssh", "bin", "ssh")).mode & 0o777).toBe(0o700);
     expect(statSync(setup.configPath!).mode & 0o777).toBe(0o600);
     expect(statSync(join(data, "ssh")).mode & 0o777).toBe(0o700);
+    const knownHosts = join(data, "ssh", "known_hosts");
+    expect(statSync(knownHosts).mode & 0o777).toBe(0o600);
+    // A second run must not truncate the host keys the first one already recorded.
+    writeFileSync(knownHosts, "vps.example ssh-ed25519 AAAA\n");
     expect(prepareVpsSsh(data, `${fakeBin}:/usr/bin`, "darwin")).toEqual(setup);
+    expect(readFileSync(knownHosts, "utf8")).toBe("vps.example ssh-ed25519 AAAA\n");
   });
 
   it("never picks its own shim as the real ssh, and leaves PATH alone when no ssh exists", () => {
@@ -95,7 +104,7 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     const home = scratch();
     const userConfig = join(home, "my config");
     writeFileSync(userConfig, "Host fixture-vps\n  HostName 192.0.2.1\n");
-    const config = vpsSshConfigText("/isolated/space path/100%", userConfig, join(home, "absent"));
+    const config = vpsSshConfigText("/isolated/space path/100%", "/isolated/space path/100%/known_hosts", userConfig, join(home, "absent"));
     // A real file, not /dev/stdin: spawnSync feeds stdin through a socketpair, which Linux refuses to reopen (ENXIO).
     const generatedConfig = join(home, "generated config");
     writeFileSync(generatedConfig, config);

@@ -60,6 +60,7 @@ function writeIfChanged(path: string, content: string, mode: number): void {
 /** ssh keeps the first value it sees, so the person's file goes first; -F skips the system file, so it goes last. */
 export function vpsSshConfigText(
   controlSocket: string,
+  knownHosts: string,
   userConfig = join(homedir(), ".ssh", "config"),
   systemConfig = "/etc/ssh/ssh_config",
 ): string {
@@ -75,6 +76,11 @@ export function vpsSshConfigText(
     "  ServerAliveInterval 15",
     "  ServerAliveCountMax 3",
     "  ConnectTimeout 10",
+    // OpenSSH asks about a host key it has not seen and nothing can answer: these commands run
+    // without a terminal, so the first connection to a newly configured VPS stopped dead with
+    // "Host key verification failed". accept-new records the key and still refuses one that changed.
+    "  StrictHostKeyChecking accept-new",
+    `  UserKnownHostsFile ${JSON.stringify(knownHosts)}`,
     ...(existsSync(systemConfig) ? [`Include ${JSON.stringify(systemConfig)}`] : []),
     "",
   ].join("\n");
@@ -105,7 +111,11 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
-  writeIfChanged(configPath, vpsSshConfigText(control.client), 0o600);
+  // Created empty rather than left absent: ssh refuses a UserKnownHostsFile it cannot open,
+  // and the app owns this file, so it never writes into the person's own one.
+  const knownHosts = join(sshDir, "known_hosts");
+  if (!existsSync(knownHosts)) writeIfChanged(knownHosts, "", 0o600);
+  writeIfChanged(configPath, vpsSshConfigText(control.client, knownHosts), 0o600);
   const realSsh = findExecutable("ssh", pathValue, binDir);
   if (!realSsh) return { configPath, path: pathValue };
   const shim = [
