@@ -58,15 +58,18 @@ rm -rf "$DEB_DIR"
 # with no font and no icon theme renders every plugin as the generic gear placeholder.
 # Naming dbus + dbus-x11 satisfies the session bus dependency without pulling in systemd.
 XFCE_PACKAGES="dbus dbus-x11 xfce4-panel xfwm4 xfconf picom xfce4-terminal thunar xdotool feh fontconfig fonts-dejavu-core adwaita-icon-theme hicolor-icon-theme gnome-icon-theme"
+# The VPS path runs docker over ssh from inside this same rootfs, so the client belongs here
+# and not in an apt call that only fires when something already broke.
+VPS_SSH_PACKAGES="openssh-client libgssapi-krb5-2"
 echo "Installing XFCE stack..."
 # An apt interrupted mid-install refuses every later install until this repair runs.
 dpkg --configure -a >/dev/null 2>&1 || true
 apt-get update -qq >/dev/null 2>&1 || true
-if DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $XFCE_PACKAGES >/dev/null 2>&1; then
+if DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $XFCE_PACKAGES $VPS_SSH_PACKAGES >/dev/null 2>&1; then
     echo "  XFCE stack: installed"
 else
     echo "  XFCE bulk install failed; retrying per-package..."
-    for pkg in $XFCE_PACKAGES; do
+    for pkg in $XFCE_PACKAGES $VPS_SSH_PACKAGES; do
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" >/dev/null 2>&1 \
             && echo "  $pkg: installed" || echo "  $pkg: MISSING (no network?)"
     done
@@ -77,6 +80,8 @@ if [ ! -x /usr/bin/xfce4-panel ]; then
     echo "XFCE unavailable, falling back to jwm..."
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jwm xterm mc libutempter0 >/dev/null 2>&1 || true
 fi
+# The VPS client is not optional even on the fallback path: the desktop still has to reach it.
+[ -x /usr/bin/ssh ] || DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $VPS_SSH_PACKAGES >/dev/null 2>&1 || true
 
 # Chromium is the browser; it is a separate install because it is large.
 [ -x /usr/bin/chromium ] || \
@@ -416,7 +421,10 @@ Xvfb :3 -screen 0 "${1:-1600}x${2:-1000}x${3:-24}" -nolock >/tmp/xvfb.log 2>&1 &
 # readiness marker below still waits for x11vnc, so no viewer opens against a dead RFB server.
 # The address is 127.0.0.1, never localhost: resolving localhost tries ::1 first, x11vnc answers
 # only on IPv4, and the refused IPv6 connect hangs for its full timeout before the fallback.
-websockify --web=/usr/share/novnc 56082 127.0.0.1:5900 >/tmp/ws.log 2>&1 &
+# websockify's first positional is [host:]port: a bare port binds 0.0.0.0 and publishes the
+# unauthenticated desktop to the Wi-Fi. The target must be 127.0.0.1 too: localhost resolves
+# ::1 first, x11vnc answers only on IPv4, and the refused IPv6 connect burns the full timeout.
+websockify --web=/usr/share/novnc 127.0.0.1:56082 127.0.0.1:5900 >/tmp/ws.log 2>&1 &
 for _ in $(seq 30); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.2; done
 
 # The window manager must publish _NET_* before the panel reads it, or the panel starts with
@@ -441,7 +449,7 @@ xsetroot -solid "#16202e" >/tmp/wall.log 2>&1 || true
 # current framebuffer, and -nonap keeps the polling loop awake: with naps, x11vnc sleeps between
 # polls, that sleep never ends under proot, and the viewer keeps a frozen image while the
 # desktop is really changing.
-x11vnc -display :3 -forever -shared -rfbport 5900 -nopw -noshm -snapfb -nonap \
+x11vnc -display :3 -forever -shared -rfbport 5900 -localhost -nopw -noshm -snapfb -nonap \
   -noxfixes -noxkb -nowf >/tmp/vnc.log 2>&1 &
 
 # One window, so the desktop is not an empty rectangle the moment it opens.
@@ -518,12 +526,12 @@ sleep 1
 # One window, so the desktop is not an empty rectangle the moment it opens.
 [ -x /usr/bin/xterm ] && xterm -geometry 100x28+40+40 &
 
-x11vnc -display :3 -forever -shared -rfbport 5900 -nopw -noshm -noxdamage -noxfixes -noxkb -nowf &
+x11vnc -display :3 -forever -shared -rfbport 5900 -localhost -nopw -noshm -noxdamage -noxfixes -noxkb -nowf &
 X11VNC_PID=\$!
 echo "X11VNC_PID=\$X11VNC_PID"
 sleep 1
 
-websockify --web=/usr/share/novnc 56082 localhost:5900 &
+websockify --web=/usr/share/novnc 127.0.0.1:56082 127.0.0.1:5900 &
 NOVNC_PID=\$!
 echo "NOVNC_PID=\$NOVNC_PID"
 

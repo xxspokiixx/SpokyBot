@@ -94,7 +94,10 @@ echo "X11VNC_PID=$X11VNC_PID"
 sleep 1
 
 # Start noVNC (web-based VNC client)
-websockify --web=/usr/share/novnc 56082 localhost:5900 &
+# websockify's first positional is [host:]port: a bare port binds 0.0.0.0 and publishes the
+# unauthenticated desktop to the local network. The target must be 127.0.0.1 too: localhost
+# resolves ::1 first, x11vnc answers only on IPv4, and the refused connect burns the timeout.
+websockify --web=/usr/share/novnc 127.0.0.1:56082 127.0.0.1:5900 &
 NOVNC_PID=$!
 echo "NOVNC_PID=$NOVNC_PID"
 
