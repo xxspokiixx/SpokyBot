@@ -12,35 +12,25 @@ const scratch = () => { const dir = mkdtempSync(join(tmpdir(), "omb-vps-ssh-"));
 function prepareVpsSsh(...args: Parameters<typeof prepare>) {
   const result = prepare(...args);
   if (result.configPath) {
-    const dir = dirname(JSON.parse(readFileSync(result.configPath, "utf8").match(/^  ControlPath (.+)$/m)![1]!));
-    if (dir.startsWith("/tmp/omb-ssh-") && !dirs.includes(dir)) dirs.push(dir);
+    const control = readFileSync(result.configPath, "utf8").match(/^  ControlPath (.+)$/m);
+    const dir = control ? dirname(JSON.parse(control[1]!)) : null;
+    if (dir && dir.startsWith("/tmp/omb-ssh-") && !dirs.includes(dir)) dirs.push(dir);
   }
   return result;
 }
 
 describe("VPS SSH connection sharing supplied by the app", () => {
-  it("puts Android's control socket on the guest's short /tmp, not a sandbox path", () => {
-    // A Unix socket path is capped near 104 bytes and every path in the app's sandbox is over a
-    // hundred, so OpenSSH refuses to share the connection with "ControlPath too long".
+  it("drops connection sharing on Android, where link(2) is denied in app storage", () => {
+    // OpenSSH installs its control listener with link(2), and Android's app storage refuses it, so
+    // the phone's guest could never open the socket and every VPS command died on it.
     const data = join(scratch(), "data", "user", "0", "com.openmausbot.test", "files");
-    const linuxDir = scratch();
-    const previous = process.env.OMB_ANDROID_LINUX_DIR;
-    process.env.OMB_ANDROID_LINUX_DIR = linuxDir;
-    try {
-      const setup = prepareVpsSsh(data, "/usr/bin", "android");
-      const config = readFileSync(setup.configPath!, "utf8");
-      const socket = JSON.parse(config.match(/^  ControlPath (.+)$/m)![1]!);
-      expect(socket.startsWith("/tmp/omb-ssh-")).toBe(true);
-      expect(Buffer.byteLength(socket)).toBeLessThan(64);
-      // The directory the host has to create for it lives under the guest's own /tmp.
-      expect(existsSync(socket.slice(0, socket.lastIndexOf("/")))).toBe(false);
-      mkdirSync(dirname(join(linuxDir, "tmp")), { recursive: true });
-      const hostDir = join(linuxDir, "tmp", socket.split("/")[2]);
-      expect(existsSync(hostDir)).toBe(true);
-      if (process.platform !== "win32") expect(statSync(hostDir).mode & 0o777).toBe(0o700);
-    } finally {
-      if (previous === undefined) delete process.env.OMB_ANDROID_LINUX_DIR;
-      else process.env.OMB_ANDROID_LINUX_DIR = previous;
+    const setup = prepareVpsSsh(data, "/usr/bin", "android");
+    const config = readFileSync(setup.configPath!, "utf8");
+    expect(config).toContain("  ControlMaster no");
+    expect(config).not.toContain("ControlPath");
+    // The settings a lone connection still needs stay put.
+    for (const line of ["  StrictHostKeyChecking accept-new", "  ConnectTimeout 10"]) {
+      expect(config).toContain(line);
     }
   });
   it("does nothing on Windows, where OpenSSH has no connection sharing", () => {
@@ -55,7 +45,7 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
   it("writes a config that includes the person's own file first and fills in sharing and timeouts", () => {
     const home = scratch();
     const userConfig = join(home, "config"); writeFileSync(userConfig, "Host my-vps\n  ControlMaster no\n");
-    const text = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", userConfig, join(home, "missing-system-config"));
+    const text = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", true, userConfig, join(home, "missing-system-config"));
     const lines = text.split("\n");
     expect(lines.findIndex((line) => line === `Include ${JSON.stringify(userConfig)}`)).toBeLessThan(lines.indexOf("Host *"));
     expect(text).toContain("  ControlMaster auto");
@@ -68,7 +58,20 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     expect(text).toContain("  StrictHostKeyChecking accept-new");
     expect(text).toContain('  UserKnownHostsFile "/data/ssh/known_hosts"');
     expect(text).not.toContain("missing-system-config");
-    expect(vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", join(home, "absent"), join(home, "absent2"))).not.toContain("Include");
+    expect(vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", true, join(home, "absent"), join(home, "absent2"))).not.toContain("Include");
+  });
+
+  it("drops connection sharing on Android, where link(2) is denied in app storage", () => {
+    const home = scratch();
+    const shared = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", true, join(home, "absent"), join(home, "absent"));
+    const alone = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", false, join(home, "absent"), join(home, "absent"));
+    expect(shared).toContain("  ControlMaster auto");
+    expect(alone).toContain("  ControlMaster no");
+    expect(alone).not.toContain("ControlPath");
+    // The host-key and timeout settings a single connection still needs stay put.
+    for (const line of ["  StrictHostKeyChecking accept-new", "  ConnectTimeout 10", "  ServerAliveInterval 15"]) {
+      expect(alone).toContain(line);
+    }
   });
 
   it("installs a shim docker finds ahead of the real ssh, pointing at that config, with private modes", () => {
@@ -104,7 +107,7 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     const home = scratch();
     const userConfig = join(home, "my config");
     writeFileSync(userConfig, "Host fixture-vps\n  HostName 192.0.2.1\n");
-    const config = vpsSshConfigText("/isolated/space path/100%", "/isolated/space path/100%/known_hosts", userConfig, join(home, "absent"));
+    const config = vpsSshConfigText("/isolated/space path/100%", "/isolated/space path/100%/known_hosts", true, userConfig, join(home, "absent"));
     // A real file, not /dev/stdin: spawnSync feeds stdin through a socketpair, which Linux refuses to reopen (ENXIO).
     const generatedConfig = join(home, "generated config");
     writeFileSync(generatedConfig, config);
