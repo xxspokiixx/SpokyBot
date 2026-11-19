@@ -3,6 +3,7 @@ import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar.ts";
 import type { CommandAllowlistResponse } from "../../shared/command-allowlist.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { deleteAttachment, saveImage } from "../attachments.ts";
+import { MAX_ALWAYS_ALLOW, withAlwaysAllowKey } from "../always-allow.ts";
 import { avatarGenerationRequestSchema, avatarGenerationStateMatches, generateAvatarImage, snapshotAvatarGenerationState } from "../avatar-image.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { commandAllowlistCandidate, type CommandAllowlistStore } from "../command-allowlist.ts";
@@ -214,14 +215,15 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const refusal = cardAnswerRefusal(auth, bot.threadId, pending.card!.requestId!, "allow");
       if (refusal) return json(res, 403, { error: refusal });
       const savedBot = store.bot(bot.id)!;
-      store.patchBot(bot.id, {
-        alwaysAllow: [...new Set([...(savedBot.alwaysAllow ?? []), allowKey])].slice(0, 200),
-      });
-      store.patchTask(bot.id, bot.threadId, {
-        alwaysAllow: [...new Set([...(bot.alwaysAllow ?? []), allowKey])].slice(0, 200),
-      });
+      const botList = withAlwaysAllowKey(savedBot.alwaysAllow, allowKey);
+      const threadList = withAlwaysAllowKey(bot.alwaysAllow, allowKey);
+      if (!botList || !threadList) {
+        return json(res, 409, { error: `This bot already remembers ${MAX_ALWAYS_ALLOW} standing grants, the most one bot holds. The card is still waiting: remove a grant in its settings, then allow it again.` });
+      }
+      store.patchBot(bot.id, { alwaysAllow: botList });
+      store.patchTask(bot.id, bot.threadId, { alwaysAllow: threadList });
       const live = directTurnBots.get(bot.threadId);
-      if (live) live.alwaysAllow = [...new Set([...(live.alwaysAllow ?? []), allowKey])].slice(0, 200);
+      if (live) live.alwaysAllow = threadList;
       const updated = store.bot(bot.id)!;
       const visible = wireBot(updated);
       broadcast({ kind: "bot", bot: visible });

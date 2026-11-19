@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utime
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultBotThreads } from "./bot-thread-limits.ts";
 import type { JsonValue } from "./schema.ts";
 
 import { cacheUntilConfigChanges,
@@ -129,8 +130,11 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
-  it("defaults to three parallel threads and validates a configurable maximum of sixteen", () => {
-    expect(maxConcurrentBotThreads({})).toBe(3);
+  it("defaults to a thread count that follows the machine, and validates a configurable maximum of sixteen", () => {
+    // The default is not a constant: a 3.8 GB phone runs two, a 32 GB desktop eight (server/bot-thread-limits.ts).
+    expect(maxConcurrentBotThreads({})).toBe(defaultBotThreads());
+    expect(maxConcurrentBotThreads({})).toBeGreaterThanOrEqual(2);
+    expect(maxConcurrentBotThreads({})).toBeLessThanOrEqual(16);
     expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 16 } })).toEqual({ threads: { maxConcurrentPerBot: 16 } });
     expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
     for (const value of [0, -1, 17, 1.5, "10", null]) {
@@ -803,8 +807,8 @@ describe("saving the newer sections", () => {
     try {
       saveConfig({ threads: { eventLogRetentionDays: 30 } });
       const disk = JSON.parse(readFileSync(path, "utf8"));
-      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
-      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
     } finally {
       rmSync(path, { force: true });
     }

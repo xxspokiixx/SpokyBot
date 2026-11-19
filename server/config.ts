@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
+import { defaultBotThreads } from "./bot-thread-limits.ts";
 import { replaySettings } from "./replay-settings.ts";
 import { EFFORT_LEVELS, type EffortLevel } from "../shared/wire.ts";
 import { isModelVariant, type InstanceConfigMap, type McpServerSpec, type ModelSelection } from "./contracts.ts";
@@ -46,7 +47,7 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
-export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
+/** The most threads one bot may run at once, whatever it saved. */
 export const MAX_CONCURRENT_BOT_THREADS = 16;
 /** The floor keeps a log tail large enough for the event inspector's recent-line window. */
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
@@ -664,7 +665,9 @@ export function cacheKeepWarmSettings(cfg: AppConfig): { enabled: boolean; windo
 }
 
 export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?: number } }): number {
-  return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+  // A saved number wins, and so does the memory gate on a Cloud home. Otherwise the default follows the machine: three
+  // parallel engines on a 3.8 GB phone is what makes the kernel stop one.
+  return cfg.threads?.maxConcurrentPerBot ?? defaultBotThreads();
 }
 
 export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
@@ -976,7 +979,7 @@ export function saveConfig(
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
-    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = defaultBotThreads();
     Object.assign(merged, section);
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];

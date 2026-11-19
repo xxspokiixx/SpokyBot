@@ -233,19 +233,21 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
     const force = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill("SIGKILL"); }, 20_000);
     force.unref();
   };
-  const watch = (child: ChildProcess, again?: (code: number | null) => boolean) => {
+  const watch = (child: ChildProcess, again?: (code: number | null, signal: NodeJS.Signals | null) => boolean) => {
     children.push(child);
     child.once("error", () => stop(true));
-    child.once("exit", (code) => {
+    child.once("exit", (code, signal) => {
       children.splice(children.indexOf(child), 1);
-      if (!again?.(code)) stop(true);
+      if (!again?.(code, signal)) stop(true);
     });
   };
   const policy = restartPolicy();
   const runServer = () => {
-    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code) => {
-      if (!policy.again(code, stopping)) return false;
-      runServer();
+    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code, signal) => {
+      if (!policy.again(code, stopping, signal)) return false;
+      const delay = policy.delayMs();
+      if (delay) setTimeout(runServer, delay);
+      else runServer();
       return true;
     });
   };

@@ -323,14 +323,19 @@ AccessibilityService — no Composio, no cloud, no adb:
   filesystem unix socket proved invisible across this device's mount views
   for legacy-target services) and serves: launchable-app listing, app
   launch by human name, the live window's accessibility tree (250-node cap,
-  the desktop proxy's line format), taps (by coordinates or visible text),
-  typing into the focused field, swipes, and global keys (back/home/recents).
+  the desktop proxy's line format), taps (by coordinates, by visible text, or
+  held for `duration_ms`), typing into the focused field (appending unless
+  `clear` is set, since ACTION_SET_TEXT replaces), swipes (a direction, or a
+  chosen start, distance and duration), and keys: back/home/recents, plus
+  `wakeup` (a short WAKE_LOCK, the only way with no global action for it) and
+  `sleep` (GLOBAL_ACTION_LOCK_SCREEN, API 28+).
   Re-binds are guarded so a second `onServiceConnected` cannot orphan the
   first server (the EADDRINUSE lesson).
 - `android-test/linux/android-device-phone.mjs` — an on-device phone MCP with
   **the same tool names, schemas and result strings as the desktop's adb
   phone proxy** (`server/drivers/phone-proxy.ts`), including the per-turn
-  phone claim protocol; unreachable service answers with precise grant
+  phone claim protocol and `batch` (up to 12 steps, plus a `wait` step, one
+  call); unreachable service answers with precise grant
   steps. `phoneIntegration()` (server/index.ts) swaps the adb proxy for it
   on android when the staged file exists.
 - Verified on-device over stdio: `status` → granted; `list_apps` → finds

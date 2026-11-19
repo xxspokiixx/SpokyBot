@@ -99,17 +99,25 @@ class DeviceAppsService : AccessibilityService() {
             "screen" -> screen()
             "apps" -> apps(command.optString("query"))
             "open" -> open(command.getString("name"))
-            "tap" -> tap(command.getDouble("x"), command.getDouble("y"))
+            "tap" -> tap(
+                command.getDouble("x"), command.getDouble("y"),
+                if (command.has("duration_ms")) command.optInt("duration_ms", 60) else 60,
+            )
             "tap_text" -> tapText(
                 command.getString("text"),
                 command.optBoolean("exact"),
                 command.optInt("index", 0),
             )
-            "type" -> typeText(command.getString("text"))
+            "type" -> typeText(command.getString("text"), command.optBoolean("clear"))
             "press" -> press(command.getString("key"))
-            "swipe" -> swipe(command.getString("direction"))
-            else -> error("unknown action: ${command.optString("action")}")
-        }
+            "swipe" -> swipe(
+                command.getString("direction"),
+                if (command.has("x")) command.getDouble("x") else null,
+                if (command.has("y")) command.getDouble("y") else null,
+                if (command.has("distance")) command.getDouble("distance") else null,
+                command.optInt("duration_ms", 220),
+            )
+            else -> error("unknown action: ${command.optString("action")}")        }
     }
 
     private fun rootNode(): AccessibilityNodeInfo? = rootInActiveWindow
@@ -191,19 +199,22 @@ class DeviceAppsService : AccessibilityService() {
         }
     }
 
-    private fun tap(x: Double, y: Double): JSONObject =
+    private fun tap(x: Double, y: Double, durationMs: Int = 60): JSONObject =
         if (x < 0 || y < 0 || x > 100000 || y > 100000) {
             error("Invalid coordinates")
-        } else if (dispatchTap(x.toInt(), y.toInt())) {
-            JSONObject().put("ok", true).put("tapped", "${x.toInt()},${y.toInt()}")
+        } else if (durationMs < 1 || durationMs > 10000) {
+            error("duration_ms must be a whole number from 1 to 10000")
+        } else if (dispatchTap(x.toInt(), y.toInt(), durationMs)) {
+            JSONObject().put("ok", true)
+                .put("tapped", if (durationMs > 60) "${x.toInt()},${y.toInt()} held ${durationMs} ms" else "${x.toInt()},${y.toInt()}")
         } else {
             error("Android did not accept the tap gesture")
         }
 
-    private fun dispatchTap(x: Int, y: Int): Boolean {
+    private fun dispatchTap(x: Int, y: Int, durationMs: Int = 60): Boolean {
         val path = Path().apply { moveTo(x.toFloat(), y.toFloat()); lineTo(x + 1f, y + 1f) }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 60))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.toLong()))
             .build()
         return dispatchGesture(gesture, null, null)
     }
@@ -232,7 +243,7 @@ class DeviceAppsService : AccessibilityService() {
         }
     }
 
-    private fun typeText(text: String): JSONObject {
+    private fun typeText(text: String, clear: Boolean): JSONObject {
         if (text.length > 5000) return error("Text is too long")
         val root = rootNode() ?: return error("No active window is available to read")
         var focused: AccessibilityNodeInfo? = null
@@ -243,24 +254,43 @@ class DeviceAppsService : AccessibilityService() {
             walk(root) { node -> if (node.isEditable && focused == null) focused = node }
         }
         val target = focused ?: return error("No focused editable field: tap the field first, then type")
-        val arguments = android.os.Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+        // ACTION_SET_TEXT replaces what the field holds, so appending is this plus the text already there: `input text` on
+        // a cabled phone types at the cursor, and a batch that taps a search box and types expects the same.
+        val existing = if (clear) "" else target.text?.toString().orEmpty()
+        val next = existing + text
+        val arguments = android.os.Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, next) }
         return if (target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)) {
-            JSONObject().put("ok", true).put("typed", text.length)
+            JSONObject().put("ok", true).put("typed", text.length).put("cleared", clear)
         } else {
             error("The focused field did not accept text")
         }
     }
 
     private fun press(key: String): JSONObject {
+        // There is no global action that wakes the screen, so a wake lock with ACQUIRE_CAUSES_WAKEUP does it (the
+        // WAKE_LOCK permission is normal: granted at install, no prompt). Sleep does have one, from API 28.
+        if (key == "wakeup") {
+            return try {
+                val manager = getSystemService(POWER_SERVICE) as android.os.PowerManager
+                @Suppress("DEPRECATION")
+                manager.newWakeLock(android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP, "omb:wakeup")
+                    .apply { acquire(3_000L) }
+                JSONObject().put("ok", true).put("pressed", key)
+            } catch (e: Exception) {
+                error("Android refused to wake the screen: ${e.message}")
+            }
+        }
         val action = when (key) {
             "back", "escape" -> GLOBAL_ACTION_BACK
             "home" -> GLOBAL_ACTION_HOME
             "recent" -> GLOBAL_ACTION_RECENTS
             "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
             "quick_settings" -> GLOBAL_ACTION_QUICK_SETTINGS
+            "sleep" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_LOCK_SCREEN else -2
             else -> -1
         }
-        if (action == -1) return error("Key \"$key\" is not available on-device; use back, home, recent, notifications or quick_settings")
+        if (action == -2) return error("sleep needs Android 9 or later on this phone")
+        if (action == -1) return error("Key \"$key\" is not available on-device; use back, home, recent, wakeup, sleep, notifications or quick_settings")
         return if (performGlobalAction(action)) {
             JSONObject().put("ok", true).put("pressed", key)
         } else {
@@ -268,28 +298,53 @@ class DeviceAppsService : AccessibilityService() {
         }
     }
 
-    private fun swipe(direction: String): JSONObject {
+    private fun swipe(direction: String, x: Double?, y: Double?, distance: Double?, durationMs: Int): JSONObject {
+        if (durationMs < 20 || durationMs > 10000) return error("duration_ms must be a whole number from 20 to 10000")
         val metrics: DisplayMetrics = resources.displayMetrics
         val centerX = metrics.widthPixels / 2f
         val centerY = metrics.heightPixels / 2f
         val spanX = metrics.widthPixels * 0.4f
         val spanY = metrics.heightPixels * 0.4f
-        val (fromX, fromY, toX, toY) = when (direction) {
-            "up" -> listOf(centerX, centerY + spanY / 2, centerX, centerY - spanY / 2)
-            "down" -> listOf(centerX, centerY - spanY / 2, centerX, centerY + spanY / 2)
-            "left" -> listOf(centerX + spanX / 2, centerY, centerX - spanX / 2, centerY)
-            "right" -> listOf(centerX - spanX / 2, centerY, centerX + spanX / 2, centerY)
-            else -> return error("direction must be up, down, left or right")
+        val (fromX, fromY, toX, toY) = if (x == null && y == null && distance == null) {
+            when (direction) {
+                "up" -> listOf(centerX, centerY + spanY / 2, centerX, centerY - spanY / 2)
+                "down" -> listOf(centerX, centerY - spanY / 2, centerX, centerY + spanY / 2)
+                "left" -> listOf(centerX + spanX / 2, centerY, centerX - spanX / 2, centerY)
+                "right" -> listOf(centerX - spanX / 2, centerY, centerX + spanX / 2, centerY)
+                else -> return error("direction must be up, down, left or right")
+            }
+        } else {
+            // A chosen start and distance scroll a list, a pane or a picker wheel by an exact amount.
+            val startX = (x ?: centerX.toDouble()).toFloat()
+            val startY = (y ?: centerY.toDouble()).toFloat()
+            val length = (distance ?: (minOf(metrics.widthPixels, metrics.heightPixels) / 2.0)).toFloat()
+            if (startX < 0 || startY < 0 || startX > metrics.widthPixels || startY > metrics.heightPixels) {
+                return error("x and y must fall on the screen: 0 to ${metrics.widthPixels} and 0 to ${metrics.heightPixels}")
+            }
+            if (length <= 0f) return error("distance must be a positive number of pixels on this screen")
+            // A gesture whose finger leaves the screen makes Android's own GestureDescription throw (a null touch point), so
+            // the end is refused here with the length that would fit instead.
+            val (endX, endY) = when (direction) {
+                "up" -> startX to startY - length
+                "down" -> startX to startY + length
+                "left" -> startX - length to startY
+                "right" -> startX + length to startY
+                else -> return error("direction must be up, down, left or right")
+            }
+            if (endX < 0 || endY < 0 || endX > metrics.widthPixels || endY > metrics.heightPixels) {
+                return error("a $direction swipe of ${length.toInt()} px from $startX,$startY ends off the screen; the screen is ${metrics.widthPixels} by ${metrics.heightPixels}")
+            }
+            listOf(startX, startY, endX, endY)
         }
         val path = Path().apply {
             moveTo(fromX, fromY)
             lineTo(toX, toY)
         }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 220))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.toLong()))
             .build()
         return if (dispatchGesture(gesture, null, null)) {
-            JSONObject().put("ok", true).put("swiped", direction)
+            JSONObject().put("ok", true).put("swiped", if (durationMs == 220) direction else "$direction over $durationMs ms")
         } else {
             error("Android did not accept the swipe gesture")
         }

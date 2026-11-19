@@ -776,16 +776,26 @@ class NodeHostService : Service() {
         Log.d(TAG, "tailProcess: process hash=${process.hashCode()} exited with code=$exit")
         if (stopping) return
         val phase = NodeState.status.value.phase
+        // The server asks for a fresh start with exit 70 after an error it could not survive (server/restart.ts); a kill
+        // by the system (the low-memory killer on this phone) arrives as 137 or a signal. Both are a crash, and the
+        // launcher starts it again after a pause — that is the whole point of the server's crash guard.
+        val crashed = exit == CRASH_EXIT_CODE || exit in KILLED_CODES
         when {
             phase == NodeState.Phase.Failed || phase == NodeState.Phase.Stopped || phase == NodeState.Phase.Idle -> return
-            phase == NodeState.Phase.Ready -> {
+            phase == NodeState.Phase.Ready && !crashed -> {
                 NodeState.update(NodeState.Phase.Stopped, detail = "node exited (code $exit)")
                 postNotification(getString(R.string.notif_stopped), withStop = false, withResume = true)
             }
             restarts < MAX_RESTARTS -> {
                 restarts++
-                NodeState.status.update { it.copy(detail = "node exited (code $exit); restarting") }
-                scope.launch { runBoot() }
+                // A crash waits longer each time (the same ladder the CLI and container launchers use), so a loop slows
+                // down instead of burning the phone's battery in a tight start-fail cycle.
+                val delay = RESTART_BACKOFF_MS[(restarts - 1).coerceAtMost(RESTART_BACKOFF_MS.lastIndex)]
+                NodeState.status.update { it.copy(detail = "node exited (code $exit); restarting in ${delay / 1000} s") }
+                scope.launch {
+                    kotlinx.coroutines.delay(delay)
+                    if (!stopping) runBoot()
+                }
             }
             else -> {
                 NodeState.update(
@@ -1091,6 +1101,11 @@ class NodeHostService : Service() {
         private const val LOG_CAP_BYTES = 5_000_000L
         private const val LOG_TAIL_CHARS = 2048
         private const val MAX_RESTARTS = 3
+        /** Mirrors CRASH_BACKOFF_MS in server/restart.ts: a crash in a row waits longer each time. */
+        private val RESTART_BACKOFF_MS = longArrayOf(1_000, 2_000, 5_000)
+        /** Mirrors CRASH_EXIT_CODE and the shell's 128 + signal: a server that asked for this, or that the system killed. */
+        private const val CRASH_EXIT_CODE = 70
+        private val KILLED_CODES = setOf(134, 137, 139)
         private const val TAG = "NodeHostService"
     }
 }

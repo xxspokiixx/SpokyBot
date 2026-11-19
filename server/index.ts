@@ -282,7 +282,7 @@ import { createCloudPower, registerCloudPower, wokeFromSleep, type CloudPower } 
 import { lentCopies, noteSyncBotTurn } from "./routes/cloud-sync.ts"; import { mcpReconnectLine, retryBrokeredMcp } from "./bot-box/broker-mcp.ts";
 import { CLOUD_PERSONAL_REFUSAL, type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost, type MemberProfile } from "./host/cloud-team-host.ts"; import { engineHomes } from "./engine-homes/engine-homes.ts"; import { audienceMember, layerId, memberAudience } from "./audience.ts"; import { createPersonRooms, createRoomReads, type OwnGroupFrames } from "./host/room-reads.ts"; import { createMeRoutes } from "./routes/me.ts"; import { createTeamPhoneRoutes } from "./routes/team-phone.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_OUTSIDE_KEY, outsideDriven } from "./cloud-sharing.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
-import { RESTART_EXIT_CODE } from "./restart.ts";
+import { RESTART_EXIT_CODE } from "./restart.ts"; import { installCrashGuard } from "./crash-guard.ts";
 import { applyIncludedXMessage, holdIncludedServices, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.ts"; import { createResearchAvailability } from "./research.ts";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { createCreditMoves } from "./cloud-credit-moves.ts"; import { createRoutineHoldsHost } from "./host/routine-holds-host.ts";
@@ -650,17 +650,20 @@ function hostComputerConnection(): LocalComputerConnection | null {
   return desktopComputer.connection();
 }
 
-// Crash diagnostics: log, then exit non-zero so a supervisor (Electron, the Android shell, systemd)
-// sees the failure. A synchronous throw during boot aborts module evaluation; without an explicit
-// exit the empty event loop would drain to code 0 and hide a fatal start (e.g. a held data-dir lease).
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("[FATAL] Unhandled rejection at:", promise, "reason:", reason);
-  process.exit(1);
-});
-process.on("uncaughtException", (error) => {
+// Crash diagnostics before the guard exists: a synchronous throw during boot aborts module evaluation, and without an
+// explicit exit the empty event loop would drain to code 0 and hide a fatal start (e.g. a held data-dir lease). The
+// guard (server/crash-guard.ts) replaces these once the shutdown path and the watchdog exist, so every error after
+// boot is judged there instead.
+function onBootException(error: unknown) {
   console.error("[FATAL] Uncaught exception:", error);
   process.exit(1);
-});
+}
+function onBootRejection(reason: unknown, promise: Promise<unknown>) {
+  console.error("[FATAL] Unhandled rejection at:", promise, "reason:", reason);
+  process.exit(1);
+}
+process.on("uncaughtException", onBootException);
+process.on("unhandledRejection", onBootRejection);
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -5091,7 +5094,7 @@ function stoppedTurnText(threadId: string, turnId: string | undefined, cause?: s
 const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS, toolStallMs: TOOL_STALL_MS,
   checkMs: 60_000,
-  onStall: (turn, silentMs) => {
+  onStall: (turn, silentMs, reason) => {
     const stalledResourceOwner = turnResourceOwners.get(turn.threadId);
     const stalledGeneration = directTurnGenerationByThread.get(turn.threadId);
     const stalledProviderTurn = directRequestOwners.get(turn.threadId);
@@ -5102,10 +5105,15 @@ const watchdog = new TurnWatchdog({
     const bot = botForThread(turn.botId, turn.threadId);
     const routineRun = activeRoutineRunForThread(turn.threadId);
     void runningTurnInstance(bot, turn.threadId)?.adapter.interruptTurn(turn.threadId).catch(() => {});
-    const minutes = Math.round(silentMs / 60_000), cause = engineMemory.stallCause(turn.threadId, `no activity for ${minutes} minutes — the turn was stopped`);
+    const minutes = Math.round(silentMs / 60_000);
+    const cause = reason === "server-error"
+      ? engineMemory.stallCause(turn.threadId, "an unexpected error in the server stopped this turn (details in the server log)")
+      : engineMemory.stallCause(turn.threadId, `no activity for ${minutes} minutes — the turn was stopped`);
     const stalled = stoppedTurnText(turn.threadId, liveTurnByThread.get(turn.threadId), cause);
     if (routineRun?.target === "bot") {
-      routines?.failThread(turn.threadId, engineMemory.stallCause(turn.threadId, `No activity for ${minutes} minutes — the routine was stopped`), { cause: "stalled" });
+      routines?.failThread(turn.threadId, engineMemory.stallCause(turn.threadId, reason === "server-error"
+        ? "An unexpected error in the server stopped the routine (details in the server log)"
+        : `No activity for ${minutes} minutes — the routine was stopped`), { cause: "stalled" });
     }
     store.appendMessage(turn.threadId, {
       role: "bot",
@@ -12318,7 +12326,7 @@ ROUTES.push(createBotSettingsRoutes({
 }));
 ROUTES.push(createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), accessRequests.routes);
 ROUTES.push(createBotPatchRoutes({
-  store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
+  store, turnBots: directTurnBots, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
   routines: () => routines, activeVpsThreads,
   hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED, maxWorkspaceBots: MAX_WORKSPACE_BOTS,
   broadcast, wireBot, publicGroupState, audienceChanged, storedAvatarExists, requestedTaskBot, threadBusy, activeGroupTurnForBot,
@@ -15801,6 +15809,25 @@ const gracefulShutdown = createGracefulShutdown({
   },
 });
 
+// From here on every error nothing caught is judged, so a bad callback stops only its own turn instead of ending the
+// server and every turn in flight with it.
+process.off("uncaughtException", onBootException);
+process.off("unhandledRejection", onBootRejection);
+installCrashGuard({
+  failTurn: (turn) => watchdog.fail(turn.threadId),
+  redact: redactSecretsInText,
+  log: (line) => console.error(line),
+  shutdown: (code) => {
+    // Fatal: no flush of what memory holds (ledgers, journals, sessions, bus, registries); running turns stay "running"
+    // in the runtime store, so the next start reruns them. Engines are stopped so none is orphaned.
+    companyShutdown = true;
+    try { noteTurnsCutByShutdown(); } catch { /* best effort */ }
+    void Promise.race([registry.disposeAll(), new Promise((done) => setTimeout(done, 5_000))])
+      .catch(() => {})
+      .finally(() => { releaseDataDirLeaseAtExit(); process.exit(code); });
+  },
+});
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, gracefulShutdown);
+  process.on(signal, () => gracefulShutdown());
 }
