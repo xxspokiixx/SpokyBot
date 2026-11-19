@@ -34,6 +34,8 @@ export interface StatusRouteDeps {
   browserEngineInstallError: { set(error: string | null): void };
   /** On a Team Cloud: false for someone else's private chat, whose words never reach this session's lists. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
+  /** The last start's doctor run, for the health report: check names and counts only, never a path or a file's contents. */
+  doctor?(): unknown;
 }
 
 /** A decision in a conversation the reader may not see keeps its when, which bot, which tool and what was decided (the
@@ -45,7 +47,7 @@ function readable(rows: DecisionRow[], shown: (threadId: string) => boolean): De
 export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
   const {
     store, cfg, outboundCounts, staticDir: STATIC_DIR, sharedWorkspaceFullAccessEnabled, adminActivityRecording,
-    configStatus, broadcast, browserEngineInstall, browserEngineInstallError,
+    configStatus, broadcast, browserEngineInstall, browserEngineInstallError, doctor,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
@@ -55,7 +57,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
         guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
-      } });
+      }, ...(doctor ? { doctor: doctor() } : {}) });
     }
     // JSON-only, so a form posted from another local page cannot start the install. One install at a time.
     if (method === "POST" && path === "/api/browser-engine/install") {

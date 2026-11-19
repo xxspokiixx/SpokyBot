@@ -200,6 +200,30 @@ function readOwner(path) {
   );
 }
 
+/**
+ * Who holds the data folder, for a diagnostic that must not refuse to start (server/doctor): the lease a dead process
+ * left, one that names another machine, or one that cannot be read. `acquireDataDirLease` decides whether to start; this
+ * only says what it found.
+ */
+export function describeDataDirLease(dataDir) {
+  const path = join(validateDataDir(dataDir), LEASE_NAME);
+  let owner;
+  try {
+    owner = readOwner(path);
+  } catch {
+    return { state: "invalid", path };
+  }
+  if (!owner) return { state: "none", path };
+  const holder = { path, pid: owner.pid, host: owner.host, createdAt: owner.createdAt };
+  if (!sameMachine(owner)) return { state: "other-machine", ...holder };
+  try {
+    return { state: ownerIsAlive(owner) ? "alive" : "dead", ...holder };
+  } catch {
+    // Liveness that cannot be told is taken as alive, as acquiring would refuse it.
+    return { state: "alive", ...holder };
+  }
+}
+
 function readReaper(path, targetToken) {
   return parseRecord(
     path,

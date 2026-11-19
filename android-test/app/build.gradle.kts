@@ -13,8 +13,8 @@ android {
         // own data directory, which the proot'ed Linux environment (binaries inside
         // files/linux) needs — the Termux precedent. Test-only, never store-distributed.
         targetSdk = 28
-        versionCode = 4131066
-        versionName = "0.4131.66"
+        versionCode = 4131076
+        versionName = "0.4131.76"
     }
 
     buildTypes {

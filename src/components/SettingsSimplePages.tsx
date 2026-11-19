@@ -10,6 +10,7 @@ import { OpenAtLoginRow } from "./OpenAtLoginRow";
 import { DefaultBotSidebarRow } from "./DefaultBotControls";
 import { TalkShortcutRow } from "./TalkShortcutRow";
 import { DiagnosticsRow } from "./DiagnosticsRow";
+import { DoctorRow } from "./DoctorRow";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { PeopleSection } from "./PeopleSection";
@@ -203,6 +204,7 @@ export function SimpleUpdatesPage({ remoteActive }: { remoteActive: boolean }) {
         <UpdatesConsentRow />
         {!remoteActive && <ReplayTourRow />}
         <DiagnosticsRow simple />
+        <DoctorRow />
       </SettingsRows>
     </SettingsGroup>
   );

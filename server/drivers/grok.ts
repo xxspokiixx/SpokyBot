@@ -14,6 +14,9 @@ const MODELS = {
   ],
 };
 
+/** Read by scripts/generate-model-manifest.mjs, so the bundled manifest carries exactly the lists this build can run. */
+export const STATIC_GROK_MODELS = MODELS;
+
 export interface GrokConfig {
   tools?: boolean;
   url: string;

@@ -519,7 +519,7 @@ import {
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
 import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
-import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
+import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts"; import { doctorAtStart, doctorSummary } from "./doctor/start.ts"; import { ModelManifestStore } from "./model-manifest/manifest.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
@@ -582,6 +582,9 @@ import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts";
 import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
+import { createDoctorRoutes } from "./routes/doctor.ts";
+import { createPhoneHoldRoutes } from "./routes/phone-hold.ts";
+import { createPhoneHold, PHONE_HOLD_WAIT_MS } from "./phone-hold.ts";
 import { createBotPatchRoutes } from "./routes/bot-patch.ts";
 import { createBotOrderRoutes } from "./routes/bot-order.ts";
 import { createBotLifecycleRoutes } from "./routes/bot-lifecycle.ts";
@@ -670,6 +673,7 @@ const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 
+dataFormatAtStart("check", DATA_DIR, serverVersion());
 ensureDirs();
 // Acquire before any durable identity, sessions, config or Store state is loaded.
 const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR);
@@ -692,6 +696,8 @@ if (existsSync(join(DATA_DIR, ".backups"))) {
   if (workspaceRestore.restored) restoredAtStart = workspaceRestore.id;
   if (!workspaceRestore.restored && !workspaceRestore.rolledBack) workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
 }
+dataFormatAtStart("stamp", DATA_DIR, serverVersion());
+doctorAtStart(DATA_DIR, serverVersion()); // the first start of a version: safe repairs, before anything reads the data
 const workspaceMaintenance = new WorkspaceBackupMaintenance(), moveFreeze = createMoveFreeze({ dataDir: DATA_DIR, exportOnly: (process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team") && process.env.OMB_CLOUD_EXPORT_ONLY === "1" });
 // Only after ensureDirs(), whose one-time legacy data-dir rename must not find ~/.openmausbot already there.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
@@ -1478,6 +1484,14 @@ function resyncOpenCodeProviderKeys(): void {
 }
 const firstEngineRead = holdUntilFirstEngineRead();
 await registry.load(providerConfigs(), decorateHostedProvider);
+// The model list that can change without a new APK: it only ever adds or retires a model the drivers already run, and a
+// phone that never reaches the network keeps the copy this build shipped with.
+const modelManifest = new ModelManifestStore({ dataDir: DATA_DIR });
+if (!modelManifest.fetchDisabled) {
+  modelManifest.refreshInBackground();
+  // A list that names a model this build did not ship changes the pickers, so a client hears about it.
+  modelManifest.onChange(() => broadcast({ kind: "config", ...configStatus() }));
+}
 const bundledSkills = loadBundledSkills();
 const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
 /** Every turn the engine can mount it, whatever its words: they pick only the skill's instructions. A Cloud home or a hosted workspace has no USB port. */
@@ -1882,6 +1896,8 @@ function internalCapabilityIsActive(capability: InternalCapability): boolean {
 const MAX_COMMS_DEPTH = 1;
 const MAX_WORKSPACE_BOTS = 100;
 const phoneProxyPath = SPAWNED_PROXIES.phone;
+/** A person's hold on the phone the bots use (features.usbPhoneTakeover): on, every bot's call waits for the hand-back. */
+const phoneHold = createPhoneHold();
 
 const researchAvailability = createResearchAvailability({ credential: () => researchCredential(cfg.treg?.key) }); researchAvailability.available();
 function agentsIntegration(
@@ -12340,6 +12356,8 @@ ROUTES.push(createBotLifecycleRoutes({
 ROUTES.push(createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }));
 ROUTES.push(createHighLevelRoutes({ service: highlevel }));
 ROUTES.push(phones.routes);
+ROUTES.push(createDoctorRoutes({ dataDir: DATA_DIR, version: serverVersion, isAdmin: ownerOrAdmin }));
+ROUTES.push(createPhoneHoldRoutes({ hold: phoneHold, isAdmin: ownerOrAdmin }));
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
   cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
 ROUTES.push(createTeamContextRoutes({ store, teamMemory }));
@@ -12592,6 +12610,7 @@ ROUTES.push(createStatusRoutes({
   sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown,
   browserEngineInstall: { get: () => browserEngineInstall, set: (install) => { browserEngineInstall = install; } },
   browserEngineInstallError: { set: (error) => { browserEngineInstallError = error; } },
+  doctor: doctorSummary,
 }));
 
 ROUTES.push(desktopViewer.route);
@@ -13384,6 +13403,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (method === "POST" && path === "/api/internal/phone/claim") {
         requireActiveInternalCapability();
+        // A person holds the phone: the call is refused with a 423 and words for the bot, then it waits for the hand-back
+        // unless the body says `wait: false` (a call in the middle of a batch, which cannot wait).
+        if (phoneHold.held) {
+          const body = await readInternalBody().catch(() => null) as { wait?: unknown } | null;
+          if (body?.wait === false) return json(res, 423, { error: "a person is holding the phone" });
+          const outcome = await phoneHold.wait(AbortSignal.timeout(PHONE_HOLD_WAIT_MS), PHONE_HOLD_WAIT_MS);
+          if (outcome !== "handed-back") return json(res, 423, { error: "a person is holding the phone" });
+          if (!claimTurnResource(internalCapability, "computer:phone")) return json(res, 409, { error: "another thread is using the phone" });
+          return json(res, 200, { claimed: true, waited: true });
+        }
         if (!claimTurnResource(internalCapability, "computer:phone")) {
           return json(res, 409, { error: "another thread is using the phone" });
         }
@@ -15749,6 +15778,7 @@ const gracefulShutdown = createGracefulShutdown({
       revokeAllInternalCapabilities();
       sharedComputers.close(); deviceLinks.close(); stopCloudTeamPolicy();
       phones.close();
+      phoneHold.stop();
       sharedComputerControl.close();
       browserLive.closeAll();
       desktopViewer.closeAll();

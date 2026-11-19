@@ -10,7 +10,7 @@ import { MAX_STEPS, MAX_WAIT_SECONDS, PHONE_STEP_TOOLS } from "../../shared/phon
 type Json = Record<string, unknown>;
 type Device = { serial: string; state: string; model: string; connection: "usb" | "network" | "emulator" };
 type UiNode = { text: string; description: string; id: string; className: string; bounds: [number, number, number, number] };
-type ClaimOutcome = { ok: true } | { ok: false; message: string };
+type ClaimOutcome = { ok: true; waited?: boolean } | { ok: false; message: string };
 
 const MAX_ADB_OUTPUT = 16 * 1024 * 1024;
 const PHONE_BUSY_TEXT = "Another thread is using the phone. This call was not performed. Pause phone work until that thread finishes, then read the screen again before acting.";
@@ -253,6 +253,12 @@ export function findPackages(name: string, packages: string[]) {
   return [];
 }
 
+const PHONE_PERSON_TEXT = "A person has taken control of the phone, so this call was NOT performed. Do not act until they hand it back. " +
+  "To wait, call read_screen: each phone call waits up to 45 seconds and returns as soon as they hand the phone back. " +
+  "Meanwhile you may work on anything that does not need the phone.";
+const PHONE_WAITED_TEXT = "The phone is free now, but this call had to wait for it, so it was NOT performed. " +
+  "Call again: the next call goes through at once. If you meant to tap or type from an earlier read_screen, call read_screen again first: the screen may have changed while you waited.";
+
 async function launchablePackages(serial: string) {
   const output = await onDevice(serial, [
     "shell", "cmd", "package", "query-activities", "--brief",
@@ -384,8 +390,14 @@ export function createPhoneClaim(
         body: "{}",
         signal: AbortSignal.timeout(10_000),
       });
-      if (response.ok) return { ok: true };
+      if (response.ok) {
+        // `waited`: the phone was held for a moment and this call was let through after it. The call itself still runs.
+        const waited = await response.json().catch(() => null) as { waited?: unknown } | null;
+        return { ok: true, ...(waited?.waited === true ? { waited: true } : {}) };
+      }
       if (response.status === 409) return { ok: false, message: PHONE_BUSY_TEXT };
+      // A person is holding the phone: not an error, and not the AI's, so the text says what to do about it.
+      if (response.status === 423) return { ok: false, message: PHONE_PERSON_TEXT };
       if (response.status === 401 || response.status === 403) {
         return { ok: false, message: "This turn no longer has phone access. Start a new turn to use the phone." };
       }
@@ -522,6 +534,8 @@ async function handle(message: Json, ensureClaim: () => Promise<ClaimOutcome>) {
     if (!TOOLS.some((tool) => tool.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`);
     const claim = await ensureClaim();
     if (!claim.ok) return ok(id, textResult(claim.message, true));
+    // A call let through after a wait still does not run: what the model planned may no longer match the screen.
+    if (claim.waited) return ok(id, textResult(PHONE_WAITED_TEXT, true));
     try {
       return ok(id, await callTool(name, (params.arguments ?? {}) as Json));
     } catch (error) {

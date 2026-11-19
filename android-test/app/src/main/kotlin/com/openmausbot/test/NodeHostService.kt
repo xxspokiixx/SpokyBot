@@ -131,10 +131,11 @@ class NodeHostService : Service() {
             Log.d(TAG, "runBoot: ensuring server config")
             ensureServerConfig(node.absolutePath)
             Log.d(TAG, "runBoot: ensuring local computer")
+            // The rootfs is only the phone's "this computer". A phone whose storage is full, or whose SELinux policy
+            // refuses the links the archive holds, still runs every bot; it loses that one destination, and says why.
             ensureLocalComputer(node.absolutePath)?.let { failure ->
-                NodeState.update(NodeState.Phase.Failed, detail = failure)
-                postNotification(getString(R.string.notif_failed), withStop = false, withResume = true)
-                return
+                Log.w(TAG, "local computer unavailable: $failure")
+                NodeState.status.update { it.copy(detail = "this computer is unavailable: $failure") }
             }
             Log.d(TAG, "runBoot: starting node")
             startNode(node.absolutePath)
@@ -262,11 +263,16 @@ class NodeHostService : Service() {
         val marker = File(filesDir, LINUX_DIR).absolutePath
         val self = android.os.Process.myPid()
         val killed = mutableListOf<Int>()
+        // Bounded: a /proc entry that cannot be read (SELinux denies another uid's cmdline, or the process left between
+        // the listing and the read) must cost nothing, and the whole sweep is over in a second on a phone.
+        val deadline = System.currentTimeMillis() + 5_000
         for (entry in File("/proc").listFiles() ?: return) {
+            if (System.currentTimeMillis() > deadline) break
             val pid = entry.name.toIntOrNull() ?: continue
             if (pid == self) continue
             val cmdline = runCatching {
-                File(entry, "cmdline").readText().replace('\u0000', ' ')
+                // A byte array, not a stream: readText on a foreign cmdline can block on Android, and this runs at boot.
+                java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(entry.path, "cmdline")).toString(Charsets.UTF_8).replace('\u0000', ' ')
             }.getOrNull() ?: continue
             if (!cmdline.contains(marker)) continue
             if (runCatching { android.os.Process.sendSignal(pid, android.os.Process.SIGNAL_KILL) }.isSuccess) {
@@ -274,8 +280,8 @@ class NodeHostService : Service() {
             }
         }
         if (killed.isNotEmpty()) {
-            val deadline = System.currentTimeMillis() + 3_000
-            while (System.currentTimeMillis() < deadline && killed.any { File("/proc/$it").exists() }) {
+            val waitUntil = System.currentTimeMillis() + 3_000
+            while (System.currentTimeMillis() < waitUntil && killed.any { File("/proc/$it").exists() }) {
                 runCatching { Thread.sleep(100) }
             }
         }
@@ -287,32 +293,38 @@ class NodeHostService : Service() {
         runCatching { File(linux, "tmp/.X11-unix/X3").delete() }
     }
 
+    /**
+     * Empties a folder before it is staged again. SELinux denies `unlink` on some staged asset names, and a
+     * `Files.walkFileTree` that meets one keeps visiting the same directory until the app is killed: this deletes what
+     * it can, then lets `/system/bin/rm` do the rest, and never blocks past the cap. Best effort by design: the staging
+     * that follows re-extracts everything, and a file left behind is overwritten.
+     *
+     * A folder an earlier extraction left as root is one this uid cannot empty. That is reported and stepped over: the
+     * extraction writes a new `rootfs-staging` beside it and renames it into place, which needs no delete. Nothing here
+     * asks a root shell for help — `su` waits for a person to approve it, and nothing may wait on that during a boot.
+     */
     private fun wipeDirectory(dir: File) {
         if (!dir.exists()) return
         runCatching {
-            java.nio.file.Files.walkFileTree(
-                dir.toPath(),
-                object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
-                    override fun visitFile(file: java.nio.file.Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
-                        runCatching { java.nio.file.Files.deleteIfExists(file) }
-                        return java.nio.file.FileVisitResult.CONTINUE
-                    }
-
-                    override fun postVisitDirectory(d: java.nio.file.Path, exc: java.io.IOException?): java.nio.file.FileVisitResult {
-                        runCatching { java.nio.file.Files.deleteIfExists(d) }
-                        return java.nio.file.FileVisitResult.CONTINUE
-                    }
-                },
-            )
+            val deadline = System.currentTimeMillis() + 60_000
+            dir.listFiles()?.forEach { entry ->
+                if (System.currentTimeMillis() > deadline) return@forEach
+                runCatching { entry.deleteRecursively() }
+            }
+        }
+        if (!dir.exists()) return
+        runCatching {
+            val proc = ProcessBuilder("/system/bin/rm", "-rf", dir.absolutePath).redirectErrorStream(true).start()
+            // The pipe is drained on its own thread: a full buffer would otherwise wedge rm with the app waiting on it.
+            val drain = Thread { runCatching { proc.inputStream.bufferedReader().forEachLine { } } }
+            drain.isDaemon = true
+            drain.start()
+            if (!proc.waitFor(3, java.util.concurrent.TimeUnit.MINUTES)) proc.destroyForcibly()
+            drain.join(2_000)
         }
         if (dir.exists()) {
-            runCatching {
-                val proc = ProcessBuilder("/system/bin/rm", "-rf", dir.absolutePath)
-                    .redirectErrorStream(true)
-                    .start()
-                proc.inputStream.bufferedReader().use { it.readText() }
-                proc.waitFor(3, java.util.concurrent.TimeUnit.MINUTES)
-            }
+            Log.w(TAG, "wipeDirectory: ${dir.absolutePath} could not be emptied (not this app's files); carrying on beside it")
+            NodeState.update(detail = "keeping past files in ${dir.name}")
         }
     }
 
@@ -326,11 +338,19 @@ class NodeHostService : Service() {
         val mcp = File(linux, "android-local-computer.mjs")
         try {
             val version = assets.open("$OMB_ASSET_DIR/VERSION").bufferedReader().use { it.readText().trim() }
-            val linuxVersion = version.substringAfterLast("-linux", version)
+            // Only the linux part of the build names this payload: `omb-test-<app>-server<sha>-ui<sha>-linux<sha>`. A new
+            // server or UI bundle leaves the rootfs exactly as it is, and re-extracting 471 MB on a phone for a change
+            // that did not touch it costs minutes of the person's time.
+            val linuxVersion = version.substringAfterLast("-linux", "").let { if (it.isEmpty()) version else "linux$it" }
             val stamp = File(linux, "STAMP")
             val stampText = runCatching { stamp.readText().trim() }.getOrDefault("")
-            if (!mcp.exists() || (stampText != version && stampText != linuxVersion)) {
+            // A stamp written by an older build holds the whole version: its linux part is read out of it.
+            val stampLinux = if (stampText.contains("-linux")) stampText.substringAfterLast("-linux", "").let { "linux$it" } else stampText
+            if (!mcp.exists() || stampLinux != linuxVersion) {
                 stopRunningGuest()
+                // Attempts that were killed mid-extraction leave their own whole copies of the rootfs here. They are
+                // this app's own leftovers, and the extraction that follows needs the room.
+                linux.listFiles()?.filter { it.name.startsWith("rootfs-old-") }?.forEach { wipeDirectory(it) }
                 wipeDirectory(linux)
                 linux.mkdirs()
                 copyAssetDir(assets, "$OMB_ASSET_DIR/linux", linux)
@@ -351,7 +371,11 @@ class NodeHostService : Service() {
                 // into the guest, making the archive's nodes redundant; skip them and recreate the
                 // empty mountpoint below.
                 val exclude = File(linux, "tar-exclude.txt").apply { writeText("./dev/*\n") }
-                val tar = ProcessBuilder(listOf("/system/bin/tar", "-C", rootfsStaging.absolutePath, "-X", exclude.absolutePath) + tarFlags + listOf(tarball.absolutePath))
+                // `--no-same-owner`: the archive's ids mean nothing to an app's uid, and chown is refused outright.
+                // Hardlinks in the archive cannot be made either (SELinux denies `link` on newer Android), so tar is
+                // told to keep going past them: a file that loses its hardlink is still extracted whole, which is all
+                // the guest needs, and the exit code alone is not what says whether the tree arrived.
+                val tar = ProcessBuilder(listOf("/system/bin/tar", "-C", rootfsStaging.absolutePath, "-X", exclude.absolutePath, "--no-same-owner") + tarFlags + listOf(tarball.absolutePath))
                     .redirectErrorStream(true)
                     .start()
                 val tarOutput = StringBuffer()
@@ -367,15 +391,24 @@ class NodeHostService : Service() {
                     return "linux environment extraction timed out after 15 minutes: ${tarOutput.toString().takeLast(300)}"
                 }
                 drain.join(5_000)
-                if (tar.exitValue() != 0) {
+                // What says the tree arrived is the tree, not tar's exit code: a hardlink it was refused is reported as
+                // an error while the file itself is written whole, and a phone does not need the link.
+                val stagingRoot = File(rootfsStaging, "usr")
+                val stagingBin = File(rootfsStaging, "bin")
+                if (!stagingRoot.isDirectory && !stagingBin.isDirectory) {
                     return "linux environment extraction failed: ${tarOutput.toString().takeLast(300)}"
+                }
+                if (tar.exitValue() != 0) {
+                    Log.w(TAG, "tar exited ${tar.exitValue()} but the tree is there: ${tarOutput.toString().takeLast(300)}")
                 }
                 if (rootfs.exists()) {
                     val stale = File(linux, "rootfs-old-${System.currentTimeMillis()}")
                     if (!rootfs.renameTo(stale)) {
                         return "linux environment extraction failed: could not clear previous rootfs"
                     }
-                    Thread { wipeDirectory(stale) }.start()
+                    // Cleared right here, not later: a folder left behind is one more copy of the rootfs on a phone, and
+                    // the next extraction has to fit beside it.
+                    wipeDirectory(stale)
                 }
                 if (!rootfsStaging.renameTo(rootfs)) {
                     return "linux environment extraction failed: could not move staging rootfs into place"

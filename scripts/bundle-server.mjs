@@ -151,6 +151,12 @@ const catalogSnapshot = join(root, "dist-server", "model-catalog", "models-dev.s
 mkdirSync(dirname(catalogSnapshot), { recursive: true });
 copyFileSync(join(server, "model-catalog", "models-dev.snapshot.json"), catalogSnapshot);
 
+// The bundled model manifest (server/model-manifest/bundled.ts reads it beside itself): what a server with no network
+// starts on, and the copy a downloaded list has to be newer than. Its absence is tolerated, on the drivers' own lists.
+const manifest = join(root, "dist-server", "server", "model-manifest", "model-manifest.json");
+mkdirSync(dirname(manifest), { recursive: true });
+copyFileSync(join(server, "model-manifest", "model-manifest.json"), manifest);
+
 // Pi loads this through its own jiti and supplies TypeBox. Inline our local
 // policy module so the extension also works without the source checkout;
 // keep the Pi-owned dependency external and retain the .ts loading contract.
