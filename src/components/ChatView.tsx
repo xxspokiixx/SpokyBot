@@ -75,7 +75,7 @@ import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } 
 import { ThreadRefText } from "./ThreadRefs";
 import { optionsCardRow } from "./OptionsCardRow";
 import { MessageBoundary } from "./MessageBoundary";
-import { RichMessageRow, UserLineNote, richRowKind } from "./RichMessageRow"; import { SetupOffer } from "./SetupOffer"; import { SavedStepsChip } from "./SavedStepsChip";
+import { RichMessageRow, UserLineNote, richRowKind } from "./RichMessageRow"; import { SetupOffer } from "./SetupOffer"; import { SavedStepsChip } from "./SavedStepsChip"; import { CheckBackLine } from "./CheckBackLine";
 import { Composer } from "./Composer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { ThreadContextWarning } from "./ContextWarning";
@@ -752,6 +752,8 @@ const MessagesList = memo(function MessagesList({
             case "call":
               return m.call ? <CallRecordRow message={m} transcript={transcript} botName={botName} threadId={threadId} busy={busy} hasMore={hasMore} /> : null;
             case "activity": {
+              // A check-back's line: it rewrites itself in place, and only a pending one carries Cancel.
+              if (m.checkBack) return <CheckBackLine line={m.checkBack} />;
               if (m.dataResult) return <DataResultChip message={m} />;
               if (isStatusActivity(m)) return <StatusActivityRow message={m} />;
               if (m.tool && failedTurnCause(m.tool.name) !== null) {

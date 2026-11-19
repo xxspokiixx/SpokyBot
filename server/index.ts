@@ -583,6 +583,7 @@ import { createBotCreateRoutes } from "./routes/bots-create.ts";
 import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
 import { createDoctorRoutes } from "./routes/doctor.ts";
+import { createCheckBacks } from "./host/check-backs.ts"; import { writeCheckBackLine } from "./host/check-back-host.ts"; import { checkBackRefusal, createCheckBackRoutes, createCheckBackToolRoutes } from "./routes/check-backs.ts";
 import { createPhoneHoldRoutes } from "./routes/phone-hold.ts";
 import { createPhoneHold, PHONE_HOLD_WAIT_MS } from "./phone-hold.ts";
 import { createBotPatchRoutes } from "./routes/bot-patch.ts";
@@ -9110,6 +9111,20 @@ calendarCalls = new CalendarCallManager({
   onDue: deliverCalendarCall,
 });
 const botWaits = new WaitManager(createWaitHost({ store, directChat: directChatOf, threadBusy, wrote: markTaskContextExternallyUpdated, notify, enqueue: (input) => routines!.enqueueWebhook(input), cloudHome: Boolean(CLOUD_HOME) })); store.onChange((change) => { if (change.type === "bot" && store.bot(change.botId)?.busy) botWaits.noteBotBusy(change.botId); });
+// A bot's check_back: it comes back to the same conversation at a time it chose. The turn it starts is an ordinary one,
+// started for whoever's request set it, so on a Team Cloud the asker owns the run and a private chat stays private.
+const checkBacks = createCheckBacks({
+  dataDir: DATA_DIR,
+  alive: (botId, threadId) => Boolean(store.bot(botId) && store.taskByThread(botId, threadId)),
+  busy: (botId, threadId) => threadBusy(botId, threadId),
+  line: (record, line, messageId) => writeCheckBackLine(store, record, line, messageId, threadLanguage(record.threadId)),
+  start: async (record, prompt) => { await beginTurn(record.botId, prompt, { threadId: record.threadId, origin: record.origin, unattended: true }); },
+  paused: (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return /\bpaused\b|\bheld\b/i.test(message);
+  },
+  log: (text) => console.warn(text),
+});
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
   const recoveryThreads = [...new Set(recoveryOwners.map((owner) => owner.threadId))];
@@ -12262,8 +12277,8 @@ const workspaceBackupAccess = {
       teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
       store.groups.every((group) => !groupIsWorking(group)),
-    pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); watchdog.stop(); memoryUpkeep.pause(); },
-    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); botWaits.start(); } watchdog.start(); memoryUpkeep.resume(); },
+    pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); checkBacks.stop(); watchdog.stop(); memoryUpkeep.pause(); },
+    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); botWaits.start(); checkBacks.start(); } watchdog.start(); memoryUpkeep.resume(); },
     flush: async () => {
       await Promise.all([flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR)]);
       // Writers gated and work idle: release the WAL connection for a consistent snapshot; Store reopens it lazily.
@@ -12358,6 +12373,11 @@ ROUTES.push(createHighLevelRoutes({ service: highlevel }));
 ROUTES.push(phones.routes);
 ROUTES.push(createDoctorRoutes({ dataDir: DATA_DIR, version: serverVersion, isAdmin: ownerOrAdmin }));
 ROUTES.push(createPhoneHoldRoutes({ hold: phoneHold, isAdmin: ownerOrAdmin }));
+ROUTES.push(createCheckBackRoutes({
+  checkBacks,
+  sees: (auth: RequestAuth, threadId: string) => threadShown(auth)(threadId),
+  refusal: (auth: RequestAuth, threadId: string, messageId: string) => cardAnswerRefusal(auth, threadId, messageId, "allow"),
+}));
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
   cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
 ROUTES.push(createTeamContextRoutes({ store, teamMemory }));
@@ -13417,6 +13437,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 409, { error: "another thread is using the phone" });
         }
         return json(res, 200, { claimed: true });
+      }
+      // A bot's check_back: set, list or cancel. Who may: the person's own request behind this turn, in their one-to-one
+      // chat, which is the same rule a wait follows.
+      if (method === "POST" && path === "/api/internal/check-backs") {
+        return dispatchRoutes([createCheckBackToolRoutes({
+          checkBacks,
+          requireActive: () => requireActiveInternalCapability(),
+          botId: () => internalCapability.botId,
+          threadId: () => internalCapability.threadId,
+          refusal: () => checkBackRefusal({
+            owned: Boolean(directRequestOwners.get(internalCapability.threadId)),
+            room: Boolean(store.groupByThread(internalCapability.threadId)),
+            depth: internalCapability.depth ?? 0,
+            // No stored mark for a hand-off on a task here: the origin and depth cover every case this fork has.
+            handedOff: false,
+            routineRun: Boolean(store.taskByThread(internalCapability.botId, internalCapability.threadId)?.routineRunId),
+            outsideDriven: directRequestOwners.get(internalCapability.threadId)?.origin?.kind === "outside",
+            personStarted: directRequestOwners.get(internalCapability.threadId)?.origin?.kind === "user",
+            guest: false,
+          }),
+          zone: () => hostTimeZone(),
+          origin: () => directRequestOwners.get(internalCapability.threadId)?.origin ?? OUTSIDE,
+          readBody: () => readInternalBody(),
+        })], { req, res, url, path, method, auth, json, readBody });
       }
       // Off: a 404 like a route that never existed. On: a turn sees only the computers of the person it provably acts for.
       if (method === "GET" && path === "/api/internal/shared-computers" && lendingEnabled()) {
@@ -15725,7 +15769,7 @@ server.listen(PORT, "127.0.0.1", async () => {
     if (companyShutdown) return;
   }
   // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
-  moveFreeze.hold(() => { routines!.start(); botWaits.start(); proactive.start(); }, () => { routines!.stop(); botWaits.stop(); proactive.stop(); });
+  moveFreeze.hold(() => { routines!.start(); botWaits.start(); checkBacks.start(); proactive.start(); }, () => { routines!.stop(); botWaits.stop(); checkBacks.stop(); proactive.stop(); });
   limitClock.start();
   moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
 });
@@ -15779,6 +15823,7 @@ const gracefulShutdown = createGracefulShutdown({
       sharedComputers.close(); deviceLinks.close(); stopCloudTeamPolicy();
       phones.close();
       phoneHold.stop();
+      checkBacks.stop();
       sharedComputerControl.close();
       browserLive.closeAll();
       desktopViewer.closeAll();
