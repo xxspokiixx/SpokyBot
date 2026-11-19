@@ -157,6 +157,12 @@ const manifest = join(root, "dist-server", "server", "model-manifest", "model-ma
 mkdirSync(dirname(manifest), { recursive: true });
 copyFileSync(join(server, "model-manifest", "model-manifest.json"), manifest);
 
+// The announcements feed the build ships (server/announcements/feed.ts imports it from the repository root): esbuild
+// keeps that import as it is, so the copy has to sit at the same relative place from the emitted module.
+const announcementsCopy = join(root, "dist-server", "announcements", "announcements.json");
+mkdirSync(dirname(announcementsCopy), { recursive: true });
+copyFileSync(join(root, "announcements", "announcements.json"), announcementsCopy);
+
 // Pi loads this through its own jiti and supplies TypeBox. Inline our local
 // policy module so the extension also works without the source checkout;
 // keep the Pi-owned dependency external and retain the .ts loading contract.

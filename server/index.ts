@@ -583,6 +583,7 @@ import { createBotCreateRoutes } from "./routes/bots-create.ts";
 import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
 import { createDoctorRoutes } from "./routes/doctor.ts";
+import { announcementRoutes } from "./routes/announcements.ts";
 import { createCheckBacks } from "./host/check-backs.ts"; import { writeCheckBackLine } from "./host/check-back-host.ts"; import { checkBackRefusal, createCheckBackRoutes, createCheckBackToolRoutes } from "./routes/check-backs.ts";
 import { createPhoneHoldRoutes } from "./routes/phone-hold.ts";
 import { createPhoneHold, PHONE_HOLD_WAIT_MS } from "./phone-hold.ts";
@@ -12373,6 +12374,7 @@ ROUTES.push(createHighLevelRoutes({ service: highlevel }));
 ROUTES.push(phones.routes);
 ROUTES.push(createDoctorRoutes({ dataDir: DATA_DIR, version: serverVersion, isAdmin: ownerOrAdmin }));
 ROUTES.push(createPhoneHoldRoutes({ hold: phoneHold, isAdmin: ownerOrAdmin }));
+ROUTES.push(announcementRoutes);
 ROUTES.push(createCheckBackRoutes({
   checkBacks,
   sees: (auth: RequestAuth, threadId: string) => threadShown(auth)(threadId),
