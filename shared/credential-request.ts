@@ -88,6 +88,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "gsk_…",
     helpUrl: "https://console.groq.com/keys",
   },
+  nvidiaApiKey: {
+    label: "NVIDIA API key",
+    description: "Runs NVIDIA NIM models with your own key.",
+    placeholder: "nvapi-…",
+    helpUrl: "https://build.nvidia.com/settings/api-keys",
+  },
   greenferenceApiKey: {
     label: "Greenference API key",
     description: "Runs Greenference models with your own key.",
@@ -114,7 +120,7 @@ export type LoginCredentialTargetId = "onePasswordToken";
 export type ConfigCredentialTargetId = Exclude<CredentialTargetId, LoginCredentialTargetId>;
 /** AI provider keys: the server's config only, like Settings → Keys, and refused where Admin manages the models. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
-  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
+  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "nvidiaApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
 ] as const satisfies readonly ConfigCredentialTargetId[];
 export type DesktopCredentialSlot = Exclude<ConfigCredentialTargetId, (typeof PROVIDER_CREDENTIAL_TARGETS)[number]>;
 export type CredentialConfig = {
@@ -130,6 +136,7 @@ export type CredentialConfig = {
   mistral?: { key?: string };
   cerebras?: { key?: string };
   groq?: { key?: string };
+  nvidia?: { key?: string };
   greenference?: { key?: string };
   meta?: { key?: string };
   deepseek?: { key?: string };
@@ -198,6 +205,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { cerebras: { key: value } };
     case "groqApiKey":
       return { groq: { key: value } };
+    case "nvidiaApiKey":
+      return { nvidia: { key: value } };
     case "greenferenceApiKey":
       return { greenference: { key: value } };
     case "metaApiKey":
@@ -237,6 +246,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.cerebras?.key);
     case "groqApiKey":
       return Boolean(config.groq?.key);
+    case "nvidiaApiKey":
+      return Boolean(config.nvidia?.key);
     case "greenferenceApiKey":
       return Boolean(config.greenference?.key);
     case "metaApiKey":

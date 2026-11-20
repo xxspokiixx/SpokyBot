@@ -16,6 +16,7 @@ export interface ConfigStatus {
   mistral?: SavedKey;
   cerebras?: SavedKey;
   groq?: SavedKey;
+  nvidia?: SavedKey;
   greenference?: SavedKey;
   deepseek?: SavedKey;
   meta?: SavedKey;
